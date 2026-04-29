@@ -14,12 +14,9 @@ export class Game {
         this.keys = {};
         this.lastTime = 0;
         this.state = 'menu';
-
-        this.init();
     }
 
     async init(){
-
         this.canvas = document.getElementById('gameCanvas');
         if (!this.canvas) {
             console.error("Canvas not found!");
@@ -34,17 +31,30 @@ export class Game {
         ]);
 
         //hide loading screen
-        document.getElementById('loadingScreen').classList.remove('active');
-        document.getElementById('mainMenu').classList.add('active');
+        const loadingScreen = document.getElementById('loadingScreen');
+        const mainMenu = document.getElementById('mainMenu');
+        if (loadingScreen) loadingScreen.classList.remove('active');
+        if (mainMenu) mainMenu.classList.add('active');
 
         this.resizeCanvas();
-        window.addEventListener('resize', () => this.resizeCanvas());
+        this._resizeHandler = () => this.resizeCanvas();
+        window.addEventListener('resize', this._resizeHandler);
         this.setupInput();
         this.setupUI();
 
         //start game loop
         this.lastTime = performance.now();
-        requestAnimationFrame((t) => this.gameLoop(t));
+        this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
+    }
+
+    destroy() {
+        if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
+        if (this._keydownHandler) window.removeEventListener('keydown', this._keydownHandler);
+        if (this._keyupHandler) window.removeEventListener('keyup', this._keyupHandler);
+        if (this._contextMenuHandler) window.removeEventListener('contextmenu', this._contextMenuHandler);
+        if (this._blurHandler) window.removeEventListener('blur', this._blurHandler);
+        
+        cancelAnimationFrame(this.animationFrameId);
     }
 
     update(dt){
@@ -70,11 +80,11 @@ export class Game {
 
         this.render();
         
-        requestAnimationFrame((t) => this.gameLoop(t));
+        this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
     }
 
     setupInput(){
-        window.addEventListener('keydown', (e) => {
+        this._keydownHandler = (e) => {
             this.keys[e.key.toLowerCase()] = true;
             //Escape toogle pause/resume
             if(e.key.toLowerCase() === 'escape'){
@@ -84,24 +94,34 @@ export class Game {
                     this.resume();
                 }
             }
-        });
-        window.addEventListener('keyup', (e) => {
+        };
+
+        this._keyupHandler = (e) => {
             this.keys[e.key.toLowerCase()] = false;
-        });
-        //clear all keys when contex menu opens
-        window.addEventListener('contextmenu', () => {
+        };
+
+        this._contextMenuHandler = () => {
             this.keys = {};
-        });
-        //clear all keys when window loses focus
-        window.addEventListener('blur', () => {
+        };
+
+        this._blurHandler = () => {
             this.keys = {};
-        });
+        };
+
+        window.addEventListener('keydown', this._keydownHandler);
+        window.addEventListener('keyup', this._keyupHandler);
+        window.addEventListener('contextmenu', this._contextMenuHandler);
+        window.addEventListener('blur', this._blurHandler);
     }
 
     setupUI(){
-        document.getElementById('playBtn').addEventListener('click', () => this.startGame());
-        document.getElementById('resumeBtn').addEventListener('click', () => this.resume());
-        document.getElementById('quitBtn').addEventListener('click', () => this.quitToMenu());
+        const playBtn = document.getElementById('playBtn');
+        const resumeBtn = document.getElementById('resumeBtn');
+        const quitBtn = document.getElementById('quitBtn');
+
+        if (playBtn) playBtn.addEventListener('click', () => this.startGame());
+        if (resumeBtn) resumeBtn.addEventListener('click', () => this.resume());
+        if (quitBtn) quitBtn.addEventListener('click', () => this.quitToMenu());
     }
 
     hideAllPanels(){
@@ -119,17 +139,18 @@ export class Game {
         this.player.reset();
 
         this.lastTime = performance.now();
-
     }
 
     pause(){
         this.state = 'paused';
-        document.getElementById('pauseMenu').classList.add('active');
+        const pauseMenu = document.getElementById('pauseMenu');
+        if (pauseMenu) pauseMenu.classList.add('active');
     }
 
     resume(){
         this.state = 'playing';
-        document.getElementById('pauseMenu').classList.remove('active');
+        const pauseMenu = document.getElementById('pauseMenu');
+        if (pauseMenu) pauseMenu.classList.remove('active');
     }
 
     quitToMenu(){
@@ -139,10 +160,12 @@ export class Game {
     returnToMenu(){
         this.state = 'menu';
         this.hideAllPanels();
-        document.getElementById('mainMenu').classList.add('active');
+        const mainMenu = document.getElementById('mainMenu');
+        if (mainMenu) mainMenu.classList.add('active');
     }
 
     resizeCanvas(){
+        if (!this.canvas) return;
         const ratio = 16/9;
         let h,w;
         const margin = 15;
@@ -165,6 +188,5 @@ export class Game {
         this.canvas.style.width = `${w}px`;
         this.canvas.style.height = `${h}px`;
         this.canvas.style.margin = `${margin}px`;
-        
     }
 }

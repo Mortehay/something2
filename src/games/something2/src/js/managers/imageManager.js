@@ -1,3 +1,5 @@
+import playerImg from "../../images/player.png";
+
 export class ImageManager{
     constructor(){
         this.images = {};
@@ -31,7 +33,7 @@ export class ImageManager{
 
     async loadAll(){
         await Promise.all([
-            this.load('player', './images/player.png')
+            this.load('player', playerImg)
         ]);
         //testing image loading
         //await new Promise(resolve => setTimeout(resolve, 1000));
