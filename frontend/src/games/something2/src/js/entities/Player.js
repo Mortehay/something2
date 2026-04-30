@@ -34,7 +34,7 @@ export class Player{
         this.weapons = [];
     }
 
-    update(dt,keys){
+    update(dt, keys, map){
         let dx = 0,dy = 0;
 
         if(keys['w'] || keys['arrowup']) dy -= 1;
@@ -43,13 +43,47 @@ export class Player{
         if(keys['d'] || keys['arrowright']) dx += 1;
 
         //normalize diagonal movement
-        if(dx || dy){
+        if(dx !== 0 || dy !== 0){
             const len = Math.sqrt(dx*dx + dy*dy);
             dx /= len;
             dy /= len;
 
-            this.x += dx * this.speed * this.speedMultiplier * dt;
-            this.y += dy * this.speed * this.speedMultiplier * dt;
+            // calculate step size
+            let stepX = dx * this.speed * this.speedMultiplier * dt;
+            let stepY = dy * this.speed * this.speedMultiplier * dt;
+
+            // calculate tile properties under player center
+            const centerX = this.x + this.width / 2;
+            const centerY = this.y + this.height / 2;
+            const currentTile = map ? map.getTileAt(centerX, centerY) : null;
+            
+            let tileSpeed = 1;
+            if (currentTile && map && map.mapTiles) {
+                 const tileDef = map.mapTiles[currentTile] || (Array.isArray(map.mapTiles) ? map.mapTiles.find(t => t.name === currentTile || t.type === currentTile) : null);
+                 if (tileDef && tileDef.speed !== undefined) {
+                     tileSpeed = tileDef.speed;
+                 }
+            }
+
+            stepX *= tileSpeed;
+            stepY *= tileSpeed;
+
+            const isWalkable = (tileType) => {
+                if (!tileType) return true; // outside map bounds or no tile
+                if (!map || !map.mapTiles) return true;
+                const def = map.mapTiles[tileType] || (Array.isArray(map.mapTiles) ? map.mapTiles.find(t => t.name === tileType || t.type === tileType) : null);
+                return def ? def.walkable !== false : true;
+            };
+
+            const nextTileX = map ? map.getTileAt(centerX + stepX, centerY) : null;
+            const nextTileY = map ? map.getTileAt(centerX, centerY + stepY) : null;
+
+            if (isWalkable(nextTileX)) {
+                this.x += stepX;
+            }
+            if (isWalkable(nextTileY)) {
+                this.y += stepY;
+            }
         }
         //keep player in bounds
         this.x = Math.max(0, Math.min(WORLD_WIDTH - this.width, this.x));

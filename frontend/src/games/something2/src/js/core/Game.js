@@ -35,7 +35,7 @@ export class Game {
         }
     }
 
-    async init(mapTiles = null){
+    async init(tiles = null, mapTiles = null){
         this.canvas = document.getElementById('gameCanvas');
         if (!this.canvas) {
             console.error("Canvas not found!");
@@ -47,8 +47,8 @@ export class Game {
 
         const initPromises = [this.imageManager.loadAll()];
         
-        if (mapTiles) {
-            this.map.init(mapTiles);
+        if (tiles) {
+            this.map.init(tiles, mapTiles);
         }
 
         await Promise.all(initPromises);
@@ -65,8 +65,8 @@ export class Game {
         this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
     }
 
-    setMap(tiles) {
-        this.map.init(tiles);
+    setMap(tiles, mapTiles) {
+        this.map.init(tiles, mapTiles);
     }
 
     destroy() {
@@ -81,7 +81,7 @@ export class Game {
 
     update(dt){
         if(this.state !== 'playing') return;
-        this.player.update(dt, this.keys);
+        this.player.update(dt, this.keys, this.map);
         this.camera.update(this.player);
     }
 

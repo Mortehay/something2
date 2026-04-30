@@ -3,7 +3,7 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWFC } = require('./services/mapService');
+const { generateWFC, TILE_TYPES } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -53,6 +53,16 @@ app.get('/api/maps', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch maps' });
+  }
+});
+
+// List all map tiles
+app.get('/api/map/tiles', async (req, res) => {
+  try {
+    res.json(TILE_TYPES);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch map tiles' });
   }
 });
 

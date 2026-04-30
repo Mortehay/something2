@@ -1,14 +1,5 @@
 import { WORLD_WIDTH, WORLD_HEIGHT, MAP_TILE_SIZE } from "./constants.js";
 
-const COLORS = {
-    'grass': '#4ade80',
-    'sand': '#fde047',
-    'rocks': '#71717a',
-    'earth': '#78350f',
-    'snow': '#f8fafc',
-    'ice': '#bae6fd'
-};
-
 export class Map {
     constructor() {
         this.tileSize = MAP_TILE_SIZE;
@@ -21,8 +12,10 @@ export class Map {
     /**
      * Initialize the map with provided tile data
      * @param {Array} tiles 
+     * @param {Array|Object} mapTiles
      */
-    init(tiles) {
+    init(tiles, mapTiles) {
+        this.mapTiles = mapTiles;
         if (tiles && Array.isArray(tiles) && tiles.length > 0) {
             this.tiles = tiles;
             this.rows = tiles.length;
@@ -33,6 +26,15 @@ export class Map {
             // Fallback empty map
             this.tiles = Array(this.rows).fill(null).map(() => Array(this.cols).fill('grass'));
         }
+    }
+
+    getTileAt(x, y) {
+        const c = Math.floor(x / this.tileSize);
+        const r = Math.floor(y / this.tileSize);
+        if (r >= 0 && r < this.rows && c >= 0 && c < this.cols) {
+            return this.tiles[r][c];
+        }
+        return null;
     }
 
     toggleGrid() {
@@ -52,7 +54,8 @@ export class Map {
             for (let c = Math.max(0, startCol); c < Math.min(this.cols, endCol); c++) {
                 const tileType = this.tiles[r][c];
                 if (!tileType) continue;
-                ctx.fillStyle = COLORS[tileType];
+                const tileDef = this.mapTiles ? (this.mapTiles[tileType] || (Array.isArray(this.mapTiles) ? this.mapTiles.find(t => t.name === tileType || t.type === tileType) : null)) : null;
+                ctx.fillStyle = tileDef ? tileDef.color : '#000000';
                 ctx.fillRect(c * this.tileSize, r * this.tileSize, this.tileSize + 0.5, this.tileSize + 0.5);
             }
         }

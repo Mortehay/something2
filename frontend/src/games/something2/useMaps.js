@@ -1,0 +1,57 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import toast from 'react-hot-toast';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13001';
+
+export function useMaps(){
+  const { data: maps, isLoading: isLoadingMaps } = useQuery({
+    queryKey: ['maps'],
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/maps`);
+      if (!res.ok) throw new Error('Failed to fetch maps');
+      return res.json();
+    }
+  });
+  return { maps, isLoadingMaps };
+}
+
+export function useMapTiles(){
+  const { data: mapTiles, isLoading: isLoadingMapTiles } = useQuery({
+    queryKey: ['mapTiles'],
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/map/tiles`);
+      if (!res.ok) throw new Error('Failed to fetch map tiles');
+      return res.json();
+    }
+  });
+  return { mapTiles, isLoadingMapTiles };
+}
+
+export function useGenerateMap(onSuccessCallback) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`${API_URL}/api/maps/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: `World ${new Date().toLocaleTimeString()}` })
+      });
+      if (!res.ok) throw new Error('Failed to generate map');
+      return res.json();
+    },
+    onSuccess: (newMap) => {
+      queryClient.invalidateQueries({ queryKey: ['maps'] });
+      if (onSuccessCallback) {
+        onSuccessCallback(newMap);
+      }
+      toast.success('New map generated!');
+    },
+    onError: (err) => toast.error(`Generation failed: ${err.message}`)
+  });
+}
+
+export async function fetchMap(selectedMapId) {
+  const res = await fetch(`${API_URL}/api/maps/${selectedMapId}`);
+  if (!res.ok) throw new Error("Failed to load map data");
+  return res.json();
+}

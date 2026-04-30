@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Game } from "./src/js/main.js";
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13001';
+import { useMaps, useMapTiles, useGenerateMap, fetchMap } from "./useMaps.js";
 
 const StyledGameContainer = styled.div`
   display: flex;
@@ -109,37 +107,16 @@ const StyledGameContainer = styled.div`
 
 function Something2() {
   const gameRef = useRef(null);
-  const queryClient = useQueryClient();
   const [selectedMapId, setSelectedMapId] = useState(null);
   const [gameState, setGameState] = useState('menu'); // 'menu', 'loading', 'playing', 'paused'
 
   // Queries
-  const { data: maps, isLoading: isLoadingMaps } = useQuery({
-    queryKey: ['maps'],
-    queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/maps`);
-      if (!res.ok) throw new Error('Failed to fetch maps');
-      return res.json();
-    }
-  });
+  const { maps, isLoadingMaps } = useMaps();
+  const { mapTiles, isLoadingMapTiles } = useMapTiles();
 
   // Mutations
-  const generateMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`${API_URL}/api/maps/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: `World ${new Date().toLocaleTimeString()}` })
-      });
-      if (!res.ok) throw new Error('Failed to generate map');
-      return res.json();
-    },
-    onSuccess: (newMap) => {
-      queryClient.invalidateQueries({ queryKey: ['maps'] });
-      setSelectedMapId(newMap.id);
-      toast.success('New map generated!');
-    },
-    onError: (err) => toast.error(`Generation failed: ${err.message}`)
+  const generateMutation = useGenerateMap((newMap) => {
+    setSelectedMapId(newMap.id);
   });
 
   // Effect to generate first map if none exist
@@ -149,6 +126,8 @@ function Something2() {
       generateMutation.mutate();
     }
   }, [maps, isLoadingMaps, generateMutation.isPending]);
+
+
 
   // Effect to pre-select first map
   useEffect(() => {
@@ -178,16 +157,14 @@ function Something2() {
 
     try {
       setGameState('loading');
-      const res = await fetch(`${API_URL}/api/maps/${selectedMapId}`);
-      if (!res.ok) throw new Error("Failed to load map data");
-      const mapData = await res.json();
+      const mapData = await fetchMap(selectedMapId);
       
       const tiles = typeof mapData.data === 'string' ? JSON.parse(mapData.data) : mapData.data;
       
       if (!gameRef.current.canvas) {
-        await gameRef.current.init(tiles);
+        await gameRef.current.init(tiles, mapTiles);
       } else {
-        gameRef.current.setMap(tiles);
+        gameRef.current.setMap(tiles, mapTiles);
       }
       
       gameRef.current.startGame();
