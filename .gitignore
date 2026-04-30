@@ -7,9 +7,20 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Production builds
+dist/
+dist-ssr/
+frontend/dist/
+
+# Environment files
+.env
+.env.local
+.env.*.local
 *.local
 
 # Editor directories and files
@@ -22,3 +33,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Vite
+.vite/
+frontend/.vite/
+
+# Docker/Compose Data (if volumes are mapped to local dirs)
+# postgres_data/
+# minio_data/
