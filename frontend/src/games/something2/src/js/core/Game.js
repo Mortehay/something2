@@ -19,9 +19,23 @@ export class Game {
         this.keys = {};
         this.lastTime = 0;
         this.state = 'menu';
+        this.onStateChange = null;
     }
 
-    async init(){
+    setOnStateChange(callback) {
+        this.onStateChange = callback;
+    }
+
+    setState(newState) {
+        if (this.state !== newState) {
+            this.state = newState;
+            if (this.onStateChange) {
+                this.onStateChange(newState);
+            }
+        }
+    }
+
+    async init(mapTiles = null){
         this.canvas = document.getElementById('gameCanvas');
         if (!this.canvas) {
             console.error("Canvas not found!");
@@ -31,26 +45,28 @@ export class Game {
 
         this.renderSystem = new RenderSystem(this.canvas, this.imageManager);
 
-        await Promise.all([
-            this.imageManager.loadAll(),
-            this.map.init(),
-        ]);
+        const initPromises = [this.imageManager.loadAll()];
+        
+        if (mapTiles) {
+            this.map.init(mapTiles);
+        }
 
-        //hide loading screen
-        const loadingScreen = document.getElementById('loadingScreen');
-        const mainMenu = document.getElementById('mainMenu');
-        if (loadingScreen) loadingScreen.classList.remove('active');
-        if (mainMenu) mainMenu.classList.add('active');
+        await Promise.all(initPromises);
+
+        await Promise.all(initPromises);
 
         this.resizeCanvas();
         this._resizeHandler = () => this.resizeCanvas();
         window.addEventListener('resize', this._resizeHandler);
         this.setupInput();
-        this.setupUI();
 
         //start game loop
         this.lastTime = performance.now();
         this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
+    }
+
+    setMap(tiles) {
+        this.map.init(tiles);
     }
 
     destroy() {
@@ -82,9 +98,8 @@ export class Game {
         if(this.lastTime === 0) this.lastTime = timestamp;
         const dt = Math.min((timestamp - this.lastTime) / 1000, 0.1);
         this.lastTime = timestamp;
-        //console.log(dt);
+        
         this.update(dt);
-
         this.render();
         
         this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
@@ -95,7 +110,6 @@ export class Game {
             const key = e.key.toLowerCase();
             this.keys[key] = true;
             
-            //Escape toogle pause/resume
             if(key === 'escape'){
                 if(this.state === 'playing'){
                     this.pause();
@@ -104,7 +118,6 @@ export class Game {
                 }
             }
 
-            // G - toggle grid
             if(key === 'g' && this.state === 'playing'){
                 this.map.toggleGrid();
             }
@@ -128,54 +141,22 @@ export class Game {
         window.addEventListener('blur', this._blurHandler);
     }
 
-    setupUI(){
-        const playBtn = document.getElementById('playBtn');
-        const resumeBtn = document.getElementById('resumeBtn');
-        const quitBtn = document.getElementById('quitBtn');
-
-        if (playBtn) playBtn.addEventListener('click', () => this.startGame());
-        if (resumeBtn) resumeBtn.addEventListener('click', () => this.resume());
-        if (quitBtn) quitBtn.addEventListener('click', () => this.quitToMenu());
-    }
-
-    hideAllPanels(){
-        document.querySelectorAll('.ui-panel').forEach(panel => {
-            panel.classList.remove('active');
-        });
-    }
-
     startGame(){
-        this.state = 'playing';
-        this.hideAllPanels();
-
-        //reset player
-        //this.player = new Player();
+        this.setState('playing');
         this.player.reset();
-
         this.lastTime = performance.now();
     }
 
     pause(){
-        this.state = 'paused';
-        const pauseMenu = document.getElementById('pauseMenu');
-        if (pauseMenu) pauseMenu.classList.add('active');
+        this.setState('paused');
     }
 
     resume(){
-        this.state = 'playing';
-        const pauseMenu = document.getElementById('pauseMenu');
-        if (pauseMenu) pauseMenu.classList.remove('active');
-    }
-
-    quitToMenu(){
-        this.returnToMenu();
+        this.setState('playing');
     }
 
     returnToMenu(){
-        this.state = 'menu';
-        this.hideAllPanels();
-        const mainMenu = document.getElementById('mainMenu');
-        if (mainMenu) mainMenu.classList.add('active');
+        this.setState('menu');
     }
 
     resizeCanvas(){
@@ -194,7 +175,6 @@ export class Game {
             w = availableWidth;
             h = w / ratio;
         }
-
 
         this.canvas.width = GAME_WIDTH;
         this.canvas.height = GAME_HEIGHT;

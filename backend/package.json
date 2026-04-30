@@ -5,13 +5,16 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "migrate": "node-pg-migrate",
+    "migrate:up": "node-pg-migrate up"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
     "minio": "^7.0.32",
+    "node-pg-migrate": "^6.2.2",
     "pg": "^8.10.0"
   },
   "devDependencies": {

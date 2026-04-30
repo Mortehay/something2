@@ -1,7 +1,7 @@
 .PHONY: dev build lint preview
 
 dev:
-	npm run dev
+	npm run dev -- --host
 
 build:
 	npm run build
