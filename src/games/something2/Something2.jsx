@@ -98,13 +98,14 @@ function Something2() {
 
   return (
     <StyledGameContainer id="gameContainer">
-      <canvas id="gameCanvas" width="800" height="600"></canvas>
+      <canvas id="gameCanvas" width="720" height="480"></canvas>
       {/*main menu*/}
       <div id="mainMenu" className="ui-panel">
         <h1>Game starter kit</h1>
         <button id="playBtn">Play</button>
         <div style={{ marginTop: "20px", fontSize: "14px", color: "#aaa" }}>
           <div>WASD - Move</div>
+          <div>G - Toggle Grid</div>
           <div>ESC - Pause</div>
         </div>
       </div>

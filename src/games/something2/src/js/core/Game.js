@@ -1,7 +1,9 @@
 import { GAME_WIDTH, GAME_HEIGHT } from "./constants.js";
 import { RenderSystem } from "../systems/RenderSystem.js";
 import { Player } from "../entities/Player.js";
-import { ImageManager } from "../managers/imageManager.js";
+import { ImageManager } from "../managers/ImageManager.js";
+import { Camera } from "./Camera.js";
+import { Map } from "./Map.js";
 
 export class Game {
     constructor() {
@@ -11,6 +13,9 @@ export class Game {
         this.imageManager = new ImageManager();
 
         this.player = new Player();
+        this.camera = new Camera();
+        this.map = new Map();
+        
         this.keys = {};
         this.lastTime = 0;
         this.state = 'menu';
@@ -28,6 +33,7 @@ export class Game {
 
         await Promise.all([
             this.imageManager.loadAll(),
+            this.map.init(),
         ]);
 
         //hide loading screen
@@ -60,6 +66,7 @@ export class Game {
     update(dt){
         if(this.state !== 'playing') return;
         this.player.update(dt, this.keys);
+        this.camera.update(this.player);
     }
 
     render(){
@@ -67,7 +74,7 @@ export class Game {
             this.ctx.fillStyle = '#0f3460';
             this.ctx.fillRect(0,0,this.canvas.width,this.canvas.height);
         } else {
-            this.renderSystem.render(this.player);
+            this.renderSystem.render(this.player, this.camera, this.map);
         }
     }
 
@@ -85,14 +92,21 @@ export class Game {
 
     setupInput(){
         this._keydownHandler = (e) => {
-            this.keys[e.key.toLowerCase()] = true;
+            const key = e.key.toLowerCase();
+            this.keys[key] = true;
+            
             //Escape toogle pause/resume
-            if(e.key.toLowerCase() === 'escape'){
+            if(key === 'escape'){
                 if(this.state === 'playing'){
                     this.pause();
                 }else if(this.state === 'paused'){
                     this.resume();
                 }
+            }
+
+            // G - toggle grid
+            if(key === 'g' && this.state === 'playing'){
+                this.map.toggleGrid();
             }
         };
 

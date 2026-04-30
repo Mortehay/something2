@@ -8,11 +8,22 @@ export class RenderSystem {
         this.imageManager = imageManager;
     }
 
-    render(player){
+    render(player, camera, map){
+        // Clear background
         this.ctx.fillStyle = '#0f3460';
         this.ctx.fillRect(0,0,GAME_WIDTH,GAME_HEIGHT);
-        this.renderGrid();
+
+        // Apply camera for world-space objects
+        camera.apply(this.ctx);
+        
+        // Render map (plane)
+        map.render(this.ctx, camera);
+        
+        // Render entities
         this.renderPlayer(player);
+        
+        // Restore camera transformation
+        camera.reset(this.ctx);
     }
 
     renderPlayer(player){
@@ -27,26 +38,5 @@ export class RenderSystem {
             this.ctx.strokeStyle = 'white';
             this.ctx.strokeRect(player.x,player.y,player.width,player.height);
         }
-     
-
-    }
-
-    renderGrid(){
-        this.ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-        this.ctx.lineWidth = 3;
-        this.ctx.beginPath();
-        for(let i = 0; i < GAME_WIDTH; i += GRID_SIZE){
-            this.ctx.moveTo(i,0);
-            this.ctx.lineTo(i,GAME_HEIGHT);
-        }
-        
-        for(let i = 0; i < GAME_HEIGHT; i += GRID_SIZE){
-            this.ctx.moveTo(0,i);
-            this.ctx.lineTo(GAME_WIDTH,i);
-        }
-        this.ctx.stroke(); 
-        
-
-        
     }
 }
