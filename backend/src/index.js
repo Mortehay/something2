@@ -101,6 +101,23 @@ app.post('/api/maps/generate', async (req, res) => {
   }
 });
 
+// Delete a map
+app.delete('/api/maps/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM maps WHERE id = $1 RETURNING id', [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Map not found' });
+    }
+    
+    res.json({ success: true, id: result.rows[0].id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete map' });
+  }
+});
+
 app.listen(port, () => {
   console.log(`Backend server running on port ${port}`);
 });

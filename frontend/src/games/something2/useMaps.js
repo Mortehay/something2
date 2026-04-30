@@ -55,3 +55,24 @@ export async function fetchMap(selectedMapId) {
   if (!res.ok) throw new Error("Failed to load map data");
   return res.json();
 }
+
+export function useDeleteMap(onSuccessCallback) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await fetch(`${API_URL}/api/maps/${id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete map');
+      return res.json();
+    },
+    onSuccess: (data, deletedId) => {
+      queryClient.invalidateQueries({ queryKey: ['maps'] });
+      if (onSuccessCallback) {
+        onSuccessCallback(deletedId);
+      }
+      toast.success('Map deleted!');
+    },
+    onError: (err) => toast.error(`Deletion failed: ${err.message}`)
+  });
+}

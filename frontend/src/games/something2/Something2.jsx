@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
+import { HiOutlineTrash } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
-import { useMaps, useMapTiles, useGenerateMap, fetchMap } from "./useMaps.js";
+import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap } from "./useMaps.js";
 
 const StyledGameContainer = styled.div`
   display: flex;
@@ -119,6 +120,12 @@ function Something2() {
     setSelectedMapId(newMap.id);
   });
 
+  const deleteMutation = useDeleteMap((deletedId) => {
+    if (selectedMapId === deletedId) {
+      setSelectedMapId(null);
+    }
+  });
+
   // Effect to generate first map if none exist
   useEffect(() => {
     if (!isLoadingMaps && maps && maps.length === 0 && !generateMutation.isPending) {
@@ -195,10 +202,60 @@ function Something2() {
                   className={`map-item ${selectedMapId === map.id ? 'selected' : ''}`}
                   onClick={() => setSelectedMapId(map.id)}
                 >
-                  <span>{map.name}</span>
-                  <small style={{ fontSize: '0.8rem', opacity: 0.7 }}>
-                    {new Date(map.created_at).toLocaleDateString()}
-                  </small>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                    <span>{map.name}</span>
+                    <small style={{ fontSize: '0.8rem', opacity: 0.7 }}>
+                      {new Date(map.created_at).toLocaleDateString()}
+                    </small>
+                  </div>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toast((t) => (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <span style={{ color: '#e9e7e7' }}>Are you sure you want to delete this map?</span>
+                          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+                            <button 
+                              onClick={() => {
+                                deleteMutation.mutate(map.id);
+                                toast.dismiss(t.id);
+                              }}
+                              style={{ padding: '6px 12px', background: '#e47d7d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px' }}
+                            >
+                              Yes, Delete
+                            </button>
+                            <button 
+                              onClick={() => toast.dismiss(t.id)}
+                              style={{ padding: '6px 12px', background: '#555', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px' }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ), { 
+                        duration: Infinity,
+                        position: 'top-center',
+                        style: {
+                          marginTop: '40vh',
+                          background: '#1a1a2e',
+                          border: '2px solid #4a9eff',
+                          padding: '20px',
+                          boxShadow: '0 0 20px rgba(74, 158, 255, 0.4)'
+                        }
+                      });
+                    }}
+                    disabled={deleteMutation.isPending}
+                    style={{
+                      padding: '5px 10px',
+                      fontSize: '1rem',
+                      border: 'none',
+                      color: 'white',
+                      margin: 0
+                    }}
+                    title="Delete Map"
+                  >
+                    <HiOutlineTrash/>
+                  </button>
                 </div>
               ))}
             </div>
