@@ -56,6 +56,32 @@ export async function fetchMap(selectedMapId) {
   return res.json();
 }
 
+export async function fetchMapEnvironments(selectedMapId) {
+  const res = await fetch(`${API_URL}/api/maps/${selectedMapId}/environments`);
+  if (!res.ok) throw new Error("Failed to load map environments");
+  return res.json();
+}
+
+export function useSaveEnvironments(onSuccessCallback) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, environments }) => {
+      const res = await fetch(`${API_URL}/api/maps/${id}/environments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ environments })
+      });
+      if (!res.ok) throw new Error('Failed to save environments');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maps'] });
+      if (onSuccessCallback) onSuccessCallback();
+    },
+    onError: (err) => toast.error(`Save environments failed: ${err.message}`)
+  });
+}
+
 export function useDeleteMap(onSuccessCallback) {
   const queryClient = useQueryClient();
   return useMutation({

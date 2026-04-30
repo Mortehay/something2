@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
-import { HiOutlineTrash } from "react-icons/hi2";
+import { HiOutlineTrash, HiOutlineSparkles } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
-import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap } from "./useMaps.js";
+import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap, fetchMapEnvironments, useSaveEnvironments } from "./useMaps.js";
 
 const StyledGameContainer = styled.div`
   display: flex;
@@ -126,6 +126,8 @@ function Something2() {
     }
   });
 
+  const saveEnvironmentsMutation = useSaveEnvironments();
+
   // Effect to generate first map if none exist
   useEffect(() => {
     if (!isLoadingMaps && maps && maps.length === 0 && !generateMutation.isPending) {
@@ -165,13 +167,15 @@ function Something2() {
     try {
       setGameState('loading');
       const mapData = await fetchMap(selectedMapId);
+      const envData = await fetchMapEnvironments(selectedMapId);
       
       const tiles = typeof mapData.data === 'string' ? JSON.parse(mapData.data) : mapData.data;
+      const environments = typeof envData === 'string' ? JSON.parse(envData) : envData;
       
       if (!gameRef.current.canvas) {
-        await gameRef.current.init(tiles, mapTiles);
+        await gameRef.current.init(tiles, mapTiles, environments);
       } else {
-        gameRef.current.setMap(tiles, mapTiles);
+        gameRef.current.setMap(tiles, mapTiles, environments);
       }
       
       gameRef.current.startGame();
@@ -203,7 +207,12 @@ function Something2() {
                   onClick={() => setSelectedMapId(map.id)}
                 >
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                    <span>{map.name}</span>
+                    <span style={{ display: 'flex', alignItems: 'center' }}>
+                      {map.name}
+                      {map.has_environments && (
+                        <HiOutlineSparkles style={{ marginLeft: '8px', color: '#facc15' }} title="Has Environments" />
+                      )}
+                    </span>
                     <small style={{ fontSize: '0.8rem', opacity: 0.7 }}>
                       {new Date(map.created_at).toLocaleDateString()}
                     </small>
@@ -271,6 +280,40 @@ function Something2() {
               disabled={!selectedMapId || gameState === 'loading'}
             >
               Play Selected World
+            </button>
+            <button 
+              onClick={async () => {
+                if (gameState !== 'playing' && gameRef.current) {
+                  try {
+                    setGameState('loading');
+                    const mapData = await fetchMap(selectedMapId);
+                    const tiles = typeof mapData.data === 'string' ? JSON.parse(mapData.data) : mapData.data;
+                    
+                    if (!gameRef.current.canvas) {
+                      await gameRef.current.init(tiles, mapTiles, []);
+                    } else {
+                      gameRef.current.setMap(tiles, mapTiles, []);
+                    }
+                    
+                    gameRef.current.map.generateEnvironments();
+                    saveEnvironmentsMutation.mutate({ id: selectedMapId, environments: gameRef.current.map.environments });
+                    gameRef.current.startGame();
+                    toast.success("Environments Generated and Saved!");
+                  } catch(e) {
+                     toast.error("Failed: " + e.message);
+                     setGameState('menu');
+                  }
+                } else if (gameRef.current) {
+                  gameRef.current.map.generateEnvironments();
+                  saveEnvironmentsMutation.mutate({ id: selectedMapId, environments: gameRef.current.map.environments });
+                  toast.success("Environments Generated and Saved!");
+                }
+              }}
+              disabled={!selectedMapId || gameState === 'loading' || saveEnvironmentsMutation.isPending}
+            >
+              {saveEnvironmentsMutation.isPending 
+                ? 'Saving...' 
+                : (maps?.find(m => m.id === selectedMapId)?.has_environments ? 'Regenerate Environment' : 'Add Environment')}
             </button>
           </>
         )}

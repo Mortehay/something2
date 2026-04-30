@@ -1,4 +1,7 @@
 import { WORLD_WIDTH, WORLD_HEIGHT, MAP_TILE_SIZE } from "./constants.js";
+import { Tree } from "../entities/Tree.js";
+import { Stone } from "../entities/Stone.js";
+import { IceRock } from "../entities/IceRock.js";
 
 export class Map {
     constructor() {
@@ -6,6 +9,7 @@ export class Map {
         this.cols = Math.ceil(WORLD_WIDTH / this.tileSize);
         this.rows = Math.ceil(WORLD_HEIGHT / this.tileSize);
         this.tiles = [];
+        this.environments = [];
         this.showGrid = true;
     }
 
@@ -14,8 +18,9 @@ export class Map {
      * @param {Array} tiles 
      * @param {Array|Object} mapTiles
      */
-    init(tiles, mapTiles) {
+    init(tiles, mapTiles, loadedEnvironments) {
         this.mapTiles = mapTiles;
+        this.environments = [];
         if (tiles && Array.isArray(tiles) && tiles.length > 0) {
             this.tiles = tiles;
             this.rows = tiles.length;
@@ -26,6 +31,18 @@ export class Map {
             // Fallback empty map
             this.tiles = Array(this.rows).fill(null).map(() => Array(this.cols).fill('grass'));
         }
+
+        if (loadedEnvironments && loadedEnvironments.length > 0) {
+            this.environments = loadedEnvironments.map(e => {
+                let inst = null;
+                if (e.type === 'Tree') inst = new Tree(0, 0);
+                else if (e.type === 'Stone') inst = new Stone(0, 0);
+                else if (e.type === 'IceRock') inst = new IceRock(0, 0);
+                
+                if (inst) Object.assign(inst, e);
+                return inst;
+            }).filter(Boolean);
+        }
     }
 
     getTileAt(x, y) {
@@ -35,6 +52,38 @@ export class Map {
             return this.tiles[r][c];
         }
         return null;
+    }
+
+    generateEnvironments() {
+        this.environments = [];
+        for (let r = 0; r < this.rows; r++) {
+            for (let c = 0; c < this.cols; c++) {
+                const tileType = this.tiles[r][c];
+                if (!tileType) continue;
+
+                // 10% to 40% probability
+                if (Math.random() < (0.1 + Math.random() * 0.3)) {
+                    let env = null;
+                    if (tileType === 'earth') {
+                        env = Math.random() > 0.5 ? new Tree(r, c) : new Stone(r, c);
+                        env.type = env instanceof Tree ? 'Tree' : 'Stone';
+                    } else if (['grass', 'leafs', 'dirt'].includes(tileType)) {
+                        env = new Tree(r, c);
+                        env.type = 'Tree';
+                    } else if (['rocks', 'sand'].includes(tileType)) {
+                        env = new Stone(r, c);
+                        env.type = 'Stone';
+                    } else if (['snow', 'ice'].includes(tileType)) {
+                        env = new IceRock(r, c);
+                        env.type = 'IceRock';
+                    }
+                    if (env) {
+                        this.environments.push(env);
+                    }
+                }
+            }
+        }
+        console.log(`Generated ${this.environments.length} environment items.`);
     }
 
     toggleGrid() {
@@ -58,6 +107,11 @@ export class Map {
                 ctx.fillStyle = tileDef ? tileDef.color : '#000000';
                 ctx.fillRect(c * this.tileSize, r * this.tileSize, this.tileSize + 0.5, this.tileSize + 0.5);
             }
+        }
+
+        // Render environments over tiles
+        for (const env of this.environments) {
+            env.render(ctx, camera);
         }
 
         if (this.showGrid) {

@@ -78,10 +78,36 @@ export class Player{
             const nextTileX = map ? map.getTileAt(centerX + stepX, centerY) : null;
             const nextTileY = map ? map.getTileAt(centerX, centerY + stepY) : null;
 
-            if (isWalkable(nextTileX)) {
+            let canMoveX = isWalkable(nextTileX);
+            let canMoveY = isWalkable(nextTileY);
+
+            // Check against generated environments
+            if (map && map.environments) {
+                const checkEnvCollision = (nextPx, nextPy) => {
+                    // Use a smaller core collision box representing the player's "feet/stump"
+                    // This allows them to physically walk ON the tile without hitting the 1/4 area tree immediately
+                    const pColX = nextPx + this.width / 2 - 15;
+                    const pColY = nextPy + this.height - 25;
+                    const pColW = 30;
+                    const pColH = 25;
+
+                    return map.environments.some(env => {
+                        if (env.walkable) return false;
+                        return pColX < env.x + env.width &&
+                               pColX + pColW > env.x &&
+                               pColY < env.y + env.height &&
+                               pColY + pColH > env.y;
+                    });
+                };
+
+                if (canMoveX && checkEnvCollision(this.x + stepX, this.y)) canMoveX = false;
+                if (canMoveY && checkEnvCollision(this.x, this.y + stepY)) canMoveY = false;
+            }
+
+            if (canMoveX) {
                 this.x += stepX;
             }
-            if (isWalkable(nextTileY)) {
+            if (canMoveY) {
                 this.y += stepY;
             }
         }
