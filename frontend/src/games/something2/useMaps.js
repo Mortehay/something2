@@ -56,29 +56,29 @@ export async function fetchMap(selectedMapId) {
   return res.json();
 }
 
-export async function fetchMapEnvironments(selectedMapId) {
-  const res = await fetch(`${API_URL}/api/maps/${selectedMapId}/environments`);
-  if (!res.ok) throw new Error("Failed to load map environments");
+export async function fetchMapEntities(selectedMapId) {
+  const res = await fetch(`${API_URL}/api/maps/${selectedMapId}/entities`);
+  if (!res.ok) throw new Error("Failed to load map entities");
   return res.json();
 }
 
-export function useSaveEnvironments(onSuccessCallback) {
+export function useSaveEntities(onSuccessCallback) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, environments }) => {
-      const res = await fetch(`${API_URL}/api/maps/${id}/environments`, {
+    mutationFn: async ({ id, entities }) => {
+      const res = await fetch(`${API_URL}/api/maps/${id}/entities`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ environments })
+        body: JSON.stringify({ entities })
       });
-      if (!res.ok) throw new Error('Failed to save environments');
+      if (!res.ok) throw new Error('Failed to save entities');
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maps'] });
       if (onSuccessCallback) onSuccessCallback();
     },
-    onError: (err) => toast.error(`Save environments failed: ${err.message}`)
+    onError: (err) => toast.error(`Save entities failed: ${err.message}`)
   });
 }
 
@@ -177,16 +177,16 @@ export function useDeleteTileType() {
   });
 }
 
-export function useEnvironmentTypes() {
-  const { data: environmentTypes, isLoading: isLoadingEnvironmentTypes } = useQuery({
-    queryKey: ['environmentTypes'],
+export function useEntityTypes() {
+  const { data: entityTypes, isLoading: isLoadingEntityTypes } = useQuery({
+    queryKey: ['entityTypes'],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/environment-types`);
-      if (!res.ok) throw new Error('Failed to fetch environment types');
+      const res = await fetch(`${API_URL}/api/entity-types`);
+      if (!res.ok) throw new Error('Failed to fetch entity types');
       return res.json();
     }
   });
-  return { environmentTypes, isLoadingEnvironmentTypes };
+  return { entityTypes, isLoadingEntityTypes };
 }
 
 export function useMapConfig() {
@@ -201,63 +201,63 @@ export function useMapConfig() {
   return { mapConfig, isLoadingMapConfig };
 }
 
-export function useCreateEnvironmentType() {
+export function useCreateEntityType() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (newEnvType) => {
-      const res = await fetch(`${API_URL}/api/environment-types`, {
+    mutationFn: async (newEntityType) => {
+      const res = await fetch(`${API_URL}/api/entity-types`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newEnvType)
+        body: JSON.stringify(newEntityType)
       });
-      if (!res.ok) throw new Error('Failed to create environment type');
+      if (!res.ok) throw new Error('Failed to create entity type');
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['environmentTypes'] });
+      queryClient.invalidateQueries({ queryKey: ['entityTypes'] });
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
-      toast.success('Environment type created!');
+      toast.success('Entity type created!');
     },
     onError: (err) => toast.error(`Creation failed: ${err.message}`)
   });
 }
 
-export function useUpdateEnvironmentType() {
+export function useUpdateEntityType() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (updatedEnvType) => {
-      const { id, ...data } = updatedEnvType;
-      const res = await fetch(`${API_URL}/api/environment-types/${id}`, {
+    mutationFn: async (updatedEntityType) => {
+      const { id, ...data } = updatedEntityType;
+      const res = await fetch(`${API_URL}/api/entity-types/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
-      if (!res.ok) throw new Error('Failed to update environment type');
+      if (!res.ok) throw new Error('Failed to update entity type');
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['environmentTypes'] });
+      queryClient.invalidateQueries({ queryKey: ['entityTypes'] });
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
-      toast.success('Environment type updated!');
+      toast.success('Entity type updated!');
     },
     onError: (err) => toast.error(`Update failed: ${err.message}`)
   });
 }
 
-export function useDeleteEnvironmentType() {
+export function useDeleteEntityType() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id) => {
-      const res = await fetch(`${API_URL}/api/environment-types/${id}`, {
+      const res = await fetch(`${API_URL}/api/entity-types/${id}`, {
         method: 'DELETE',
       });
-      if (!res.ok) throw new Error('Failed to delete environment type');
+      if (!res.ok) throw new Error('Failed to delete entity type');
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['environmentTypes'] });
+      queryClient.invalidateQueries({ queryKey: ['entityTypes'] });
       queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
-      toast.success('Environment type deleted!');
+      toast.success('Entity type deleted!');
     },
     onError: (err) => toast.error(`Deletion failed: ${err.message}`)
   });

@@ -56,12 +56,12 @@ async function getTileTypesMap() {
   return tileTypes;
 }
 
-// Helper to get environment types
-async function getEnvironmentTypesMap() {
-  const result = await pool.query('SELECT * FROM environment_types ORDER BY id ASC');
-  const envTypes = {};
+// Helper to get entity types
+async function getEntityTypesMap() {
+  const result = await pool.query('SELECT * FROM entity_types ORDER BY id ASC');
+  const entityTypes = {};
   result.rows.forEach(row => {
-    envTypes[row.name] = {
+    entityTypes[row.name] = {
       id: row.id,
       color: row.color,
       walkable: row.walkable,
@@ -69,7 +69,7 @@ async function getEnvironmentTypesMap() {
       chance: row.chance
     };
   });
-  return envTypes;
+  return entityTypes;
 }
 
 // API Routes
@@ -85,7 +85,7 @@ app.get('/api/maps', async (req, res) => {
     const result = await pool.query(`
       SELECT 
         m.id, m.name, m.description, m.created_at, m.updated_at,
-        EXISTS(SELECT 1 FROM map_environments me WHERE me.map_id = m.id) as has_environments
+        EXISTS(SELECT 1 FROM map_entities me WHERE me.map_id = m.id) as has_entities
       FROM maps m 
       ORDER BY m.created_at DESC
     `);
@@ -96,12 +96,12 @@ app.get('/api/maps', async (req, res) => {
   }
 });
 
-// List all map configuration (tiles + environments)
+// List all map configuration (tiles + entities)
 app.get('/api/map/config', async (req, res) => {
   try {
     const tileTypes = await getTileTypesMap();
-    const environmentTypes = await getEnvironmentTypesMap();
-    res.json({ tileTypes, environmentTypes });
+    const entityTypes = await getEntityTypesMap();
+    res.json({ tileTypes, entityTypes });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch map configuration' });
@@ -119,58 +119,58 @@ app.get('/api/map/tiles', async (req, res) => {
   }
 });
 
-// Environment Types CRUD
-app.get('/api/environment-types', async (req, res) => {
+// Entity Types CRUD
+app.get('/api/entity-types', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM environment_types ORDER BY id ASC');
+    const result = await pool.query('SELECT * FROM entity_types ORDER BY id ASC');
     res.json(result.rows);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to fetch environment types' });
+    res.status(500).json({ error: 'Failed to fetch entity types' });
   }
 });
 
-app.post('/api/environment-types', async (req, res) => {
+app.post('/api/entity-types', async (req, res) => {
   try {
     const { name, color, walkable, spawn_tiles, chance } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
 
     const result = await pool.query(
-      'INSERT INTO environment_types (name, color, walkable, spawn_tiles, chance) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      'INSERT INTO entity_types (name, color, walkable, spawn_tiles, chance) VALUES ($1, $2, $3, $4, $5) RETURNING *',
       [name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to create environment type' });
+    res.status(500).json({ error: 'Failed to create entity type' });
   }
 });
 
-app.put('/api/environment-types/:id', async (req, res) => {
+app.put('/api/entity-types/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, color, walkable, spawn_tiles, chance } = req.body;
     const result = await pool.query(
-      'UPDATE environment_types SET name = $1, color = $2, walkable = $3, spawn_tiles = $4, chance = $5, updated_at = CURRENT_TIMESTAMP WHERE id = $6 RETURNING *',
+      'UPDATE entity_types SET name = $1, color = $2, walkable = $3, spawn_tiles = $4, chance = $5, updated_at = CURRENT_TIMESTAMP WHERE id = $6 RETURNING *',
       [name, color, walkable, JSON.stringify(spawn_tiles), chance, id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Environment type not found' });
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to update environment type' });
+    res.status(500).json({ error: 'Failed to update entity type' });
   }
 });
 
-app.delete('/api/environment-types/:id', async (req, res) => {
+app.delete('/api/entity-types/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM environment_types WHERE id = $1 RETURNING id', [id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Environment type not found' });
+    const result = await pool.query('DELETE FROM entity_types WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
     res.json({ success: true, id: result.rows[0].id });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to delete environment type' });
+    res.status(500).json({ error: 'Failed to delete entity type' });
   }
 });
 
@@ -299,44 +299,45 @@ app.delete('/api/maps/:id', async (req, res) => {
   }
 });
 
-// Save map environments
-app.post('/api/maps/:id/environments', async (req, res) => {
+// Save map entities
+app.post('/api/maps/:id/entities', async (req, res) => {
   try {
     const { id } = req.params;
-    const { environments } = req.body;
+    const { entities } = req.body;
     
     const mapResult = await pool.query('SELECT id FROM maps WHERE id = $1', [id]);
     if (mapResult.rows.length === 0) return res.status(404).json({ error: 'Map not found' });
     
-    await pool.query('DELETE FROM map_environments WHERE map_id = $1', [id]);
-    if (environments && environments.length > 0) {
+    await pool.query('DELETE FROM map_entities WHERE map_id = $1', [id]);
+    if (entities && entities.length > 0) {
       await pool.query(
-        'INSERT INTO map_environments (map_id, data) VALUES ($1, $2)',
-        [id, JSON.stringify(environments)]
+        'INSERT INTO map_entities (map_id, data) VALUES ($1, $2)',
+        [id, JSON.stringify(entities)]
       );
     }
     
     res.json({ success: true });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to save environments' });
+    res.status(500).json({ error: 'Failed to save entities' });
   }
 });
 
-// Load map environments
-app.get('/api/maps/:id/environments', async (req, res) => {
+// Load map entities
+app.get('/api/maps/:id/entities', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT data FROM map_environments WHERE map_id = $1', [id]);
+    const result = await pool.query('SELECT data FROM map_entities WHERE map_id = $1', [id]);
     if (result.rows.length === 0) {
       return res.json([]);
     }
     res.json(result.rows[0].data);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to fetch environments' });
+    res.status(500).json({ error: 'Failed to fetch entities' });
   }
 });
+
 
 app.listen(port, () => {
   console.log(`Backend server running on port ${port}`);

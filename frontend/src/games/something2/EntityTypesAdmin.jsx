@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { useEnvironmentTypes, useCreateEnvironmentType, useUpdateEnvironmentType, useDeleteEnvironmentType, useTileTypes } from './useMaps.js';
+import { useEntityTypes, useCreateEntityType, useUpdateEntityType, useDeleteEntityType, useTileTypes } from './useMaps.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 
@@ -26,13 +26,13 @@ const Header = styled.div`
   }
 `;
 
-const EnvGrid = styled.div`
+const EntityGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 2rem;
 `;
 
-const EnvCard = styled.div`
+const EntityCard = styled.div`
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid #facc1533;
   border-radius: 12px;
@@ -46,14 +46,14 @@ const EnvCard = styled.div`
   }
 `;
 
-const EnvHeader = styled.div`
+const EntityHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 1.5rem;
 `;
 
-const EnvInfo = styled.div`
+const EntityInfo = styled.div`
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -67,7 +67,7 @@ const ColorBadge = styled.div`
   border: 2px solid rgba(255, 255, 255, 0.1);
 `;
 
-const EnvName = styled.h3`
+const EntityName = styled.h3`
   font-size: 1.8rem;
   margin: 0;
   text-transform: capitalize;
@@ -94,7 +94,7 @@ const IconButton = styled.button`
   }
 `;
 
-const EnvStats = styled.div`
+const EntityStats = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
@@ -247,15 +247,15 @@ const SecondaryButton = styled.button`
   &:hover { background: rgba(255, 255, 255, 0.05); }
 `;
 
-function EnvironmentTypesAdmin() {
-  const { environmentTypes, isLoadingEnvironmentTypes } = useEnvironmentTypes();
+function EntityTypesAdmin() {
+  const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
   const { tileTypes } = useTileTypes();
-  const createMutation = useCreateEnvironmentType();
-  const updateMutation = useUpdateEnvironmentType();
-  const deleteMutation = useDeleteEnvironmentType();
+  const createMutation = useCreateEntityType();
+  const updateMutation = useUpdateEntityType();
+  const deleteMutation = useDeleteEntityType();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingEnv, setEditingEnv] = useState(null);
+  const [editingEntity, setEditingEntity] = useState(null);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -266,13 +266,13 @@ function EnvironmentTypesAdmin() {
   });
 
   useEffect(() => {
-    if (editingEnv) {
+    if (editingEntity) {
       setFormData({
-        name: editingEnv.name,
-        color: editingEnv.color,
-        walkable: editingEnv.walkable,
-        spawn_tiles: editingEnv.spawn_tiles || [],
-        chance: editingEnv.chance
+        name: editingEntity.name,
+        color: editingEntity.color,
+        walkable: editingEntity.walkable,
+        spawn_tiles: editingEntity.spawn_tiles || [],
+        chance: editingEntity.chance
       });
     } else {
       setFormData({
@@ -283,15 +283,15 @@ function EnvironmentTypesAdmin() {
         chance: 0.1
       });
     }
-  }, [editingEnv, isModalOpen]);
+  }, [editingEntity, isModalOpen]);
 
   const handleOpenAdd = () => {
-    setEditingEnv(null);
+    setEditingEntity(null);
     setIsModalOpen(true);
   };
 
-  const handleOpenEdit = (env) => {
-    setEditingEnv(env);
+  const handleOpenEdit = (entity) => {
+    setEditingEntity(entity);
     setIsModalOpen(true);
   };
 
@@ -302,8 +302,8 @@ function EnvironmentTypesAdmin() {
       return;
     }
     
-    if (editingEnv) {
-      updateMutation.mutate({ id: editingEnv.id, ...formData }, {
+    if (editingEntity) {
+      updateMutation.mutate({ id: editingEntity.id, ...formData }, {
         onSuccess: () => setIsModalOpen(false)
       });
     } else {
@@ -314,7 +314,7 @@ function EnvironmentTypesAdmin() {
   };
 
   const handleDelete = (id) => {
-    if (window.confirm("Are you sure you want to delete this environment type?")) {
+    if (window.confirm("Are you sure you want to delete this entity type?")) {
       deleteMutation.mutate(id);
     }
   };
@@ -328,66 +328,66 @@ function EnvironmentTypesAdmin() {
     });
   };
 
-  if (isLoadingEnvironmentTypes) return <div>Loading fauna registry...</div>;
+  if (isLoadingEntityTypes) return <div>Loading entity registry...</div>;
 
   return (
     <AdminContainer>
       <Header>
-        <h2>Environment Types Registry</h2>
+        <h2>Entity Types Registry</h2>
         <MainButton onClick={handleOpenAdd}>
           <HiOutlinePlus style={{ marginRight: '8px' }} />
-          Add New Environment
+          Add New Entity
         </MainButton>
       </Header>
 
-      <EnvGrid>
-        {environmentTypes?.map(env => (
-          <EnvCard key={env.id}>
-            <EnvHeader>
-              <EnvInfo>
-                <ColorBadge color={env.color} />
-                <EnvName>{env.name}</EnvName>
-              </EnvInfo>
+      <EntityGrid>
+        {entityTypes?.map(entity => (
+          <EntityCard key={entity.id}>
+            <EntityHeader>
+              <EntityInfo>
+                <ColorBadge color={entity.color} />
+                <EntityName>{entity.name}</EntityName>
+              </EntityInfo>
               <ActionButtons>
-                <IconButton onClick={() => handleOpenEdit(env)} title="Edit">
+                <IconButton onClick={() => handleOpenEdit(entity)} title="Edit">
                   <HiOutlinePencil />
                 </IconButton>
-                <IconButton delete onClick={() => handleDelete(env.id)} title="Delete">
+                <IconButton delete onClick={() => handleDelete(entity.id)} title="Delete">
                   <HiOutlineTrash />
                 </IconButton>
               </ActionButtons>
-            </EnvHeader>
+            </EntityHeader>
             
-            <EnvStats>
+            <EntityStats>
               <StatItem>
                 <span>Walkable</span>
-                {env.walkable ? 'YES' : 'NO'}
+                {entity.walkable ? 'YES' : 'NO'}
               </StatItem>
               <StatItem>
                 <span>Spawn Chance</span>
-                {(env.chance * 100).toFixed(0)}%
+                {(entity.chance * 100).toFixed(0)}%
               </StatItem>
-            </EnvStats>
+            </EntityStats>
             
             <SpawnList>
               <span>Spawns On</span>
               <TagCloud>
-                {env.spawn_tiles?.length > 0 ? (
-                  env.spawn_tiles.map(t => <Tag key={t}>{t}</Tag>)
+                {entity.spawn_tiles?.length > 0 ? (
+                  entity.spawn_tiles.map(t => <Tag key={t}>{t}</Tag>)
                 ) : (
                   <span style={{ fontSize: '1rem', opacity: 0.5 }}>None defined</span>
                 )}
               </TagCloud>
             </SpawnList>
-          </EnvCard>
+          </EntityCard>
         ))}
-      </EnvGrid>
+      </EntityGrid>
 
       {isModalOpen && (
         <Overlay>
           <Modal>
             <Header style={{ marginBottom: '1.5rem' }}>
-              <h2>{editingEnv ? 'Edit Environment' : 'Create New Environment'}</h2>
+              <h2>{editingEntity ? 'Edit Entity' : 'Create New Entity'}</h2>
               <IconButton onClick={() => setIsModalOpen(false)}>
                 <HiOutlineXMark />
               </IconButton>
@@ -400,7 +400,7 @@ function EnvironmentTypesAdmin() {
                   value={formData.name} 
                   onChange={e => setFormData({...formData, name: e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1)})}
                   placeholder="e.g. Bush"
-                  disabled={editingEnv}
+                  disabled={editingEntity}
                   style={{ background: '#0f0f1a', border: '1px solid rgba(250, 204, 21, 0.3)', color: 'white', padding: '1rem', borderRadius: '8px' }}
                 />
               </FormGroup>
@@ -458,7 +458,7 @@ function EnvironmentTypesAdmin() {
               <FormActions>
                 <SecondaryButton type="button" onClick={() => setIsModalOpen(false)}>Cancel</SecondaryButton>
                 <MainButton type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
-                  {editingEnv ? 'Save Changes' : 'Create Environment'}
+                  {editingEntity ? 'Save Changes' : 'Create Entity'}
                 </MainButton>
               </FormActions>
             </Form>
@@ -469,4 +469,4 @@ function EnvironmentTypesAdmin() {
   );
 }
 
-export default EnvironmentTypesAdmin;
+export default EntityTypesAdmin;

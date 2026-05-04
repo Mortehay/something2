@@ -2,7 +2,7 @@ import { WORLD_WIDTH, WORLD_HEIGHT, MAP_TILE_SIZE } from "./constants.js";
 import { Tree } from "../entities/Tree.js";
 import { Stone } from "../entities/Stone.js";
 import { IceRock } from "../entities/IceRock.js";
-import { Environment } from "../entities/Environment.js";
+import { Entity } from "../entities/Entity.js";
 
 export class Map {
     constructor() {
@@ -10,22 +10,22 @@ export class Map {
         this.cols = Math.ceil(WORLD_WIDTH / this.tileSize);
         this.rows = Math.ceil(WORLD_HEIGHT / this.tileSize);
         this.tiles = [];
-        this.environments = [];
+        this.entities = [];
         this.showGrid = true;
-        this.environmentTypes = null;
+        this.entityTypes = null;
     }
 
     /**
      * Initialize the map with provided tile data
      * @param {Array} tiles 
      * @param {Array|Object} mapTiles
-     * @param {Array} loadedEnvironments
-     * @param {Object} environmentTypes
+     * @param {Array} loadedEntities
+     * @param {Object} entityTypes
      */
-    init(tiles, mapTiles, loadedEnvironments, environmentTypes) {
+    init(tiles, mapTiles, loadedEntities, entityTypes) {
         this.mapTiles = mapTiles;
-        this.environmentTypes = environmentTypes;
-        this.environments = [];
+        this.entityTypes = entityTypes;
+        this.entities = [];
         if (tiles && Array.isArray(tiles) && tiles.length > 0) {
             this.tiles = tiles;
             this.rows = tiles.length;
@@ -37,22 +37,22 @@ export class Map {
             this.tiles = Array(this.rows).fill(null).map(() => Array(this.cols).fill('grass'));
         }
 
-        if (loadedEnvironments && loadedEnvironments.length > 0) {
-            this.environments = loadedEnvironments.map(e => {
+        if (loadedEntities && loadedEntities.length > 0) {
+            this.entities = loadedEntities.map(e => {
                 let inst = null;
                 const type = e.type || e.name;
                 
                 if (type === 'Tree') inst = new Tree(0, 0);
                 else if (type === 'Stone') inst = new Stone(0, 0);
                 else if (type === 'IceRock') inst = new IceRock(0, 0);
-                else inst = new Environment(0, 0);
+                else inst = new Entity(0, 0);
                 
                 if (inst) {
                     Object.assign(inst, e);
                     // Override with latest type config if available
-                    if (this.environmentTypes && this.environmentTypes[type]) {
-                        inst.color = this.environmentTypes[type].color;
-                        inst.walkable = this.environmentTypes[type].walkable;
+                    if (this.entityTypes && this.entityTypes[type]) {
+                        inst.color = this.entityTypes[type].color;
+                        inst.walkable = this.entityTypes[type].walkable;
                     }
                 }
                 return inst;
@@ -69,14 +69,14 @@ export class Map {
         return null;
     }
 
-    generateEnvironments() {
-        this.environments = [];
-        if (!this.environmentTypes) {
-            console.warn("Cannot generate environments: no environment types defined");
+    generateEntities() {
+        this.entities = [];
+        if (!this.entityTypes) {
+            console.warn("Cannot generate entities: no entity types defined");
             return;
         }
 
-        const envTypesList = Object.entries(this.environmentTypes).map(([name, config]) => ({
+        const entityTypesList = Object.entries(this.entityTypes).map(([name, config]) => ({
             name, ...config
         }));
 
@@ -85,30 +85,30 @@ export class Map {
                 const tileType = this.tiles[r][c];
                 if (!tileType) continue;
 
-                // Find all environment types that can spawn on this tile
-                const possibleEnvs = envTypesList.filter(env => env.spawnTiles && env.spawnTiles.includes(tileType));
+                // Find all entity types that can spawn on this tile
+                const possibleEntities = entityTypesList.filter(entity => entity.spawnTiles && entity.spawnTiles.includes(tileType));
                 
-                for (const envDef of possibleEnvs) {
-                    if (Math.random() < envDef.chance) {
+                for (const entityDef of possibleEntities) {
+                    if (Math.random() < entityDef.chance) {
                         let inst = null;
-                        if (envDef.name === 'Tree') inst = new Tree(r, c);
-                        else if (envDef.name === 'Stone') inst = new Stone(r, c);
-                        else if (envDef.name === 'IceRock') inst = new IceRock(r, c);
-                        else inst = new Environment(r, c);
+                        if (entityDef.name === 'Tree') inst = new Tree(r, c);
+                        else if (entityDef.name === 'Stone') inst = new Stone(r, c);
+                        else if (entityDef.name === 'IceRock') inst = new IceRock(r, c);
+                        else inst = new Entity(r, c);
 
-                        inst.type = envDef.name;
-                        inst.color = envDef.color;
-                        inst.walkable = envDef.walkable;
+                        inst.type = entityDef.name;
+                        inst.color = entityDef.color;
+                        inst.walkable = entityDef.walkable;
                         
-                        this.environments.push(inst);
-                        // We could break here if we only want one environment per tile, 
+                        this.entities.push(inst);
+                        // We could break here if we only want one entity per tile, 
                         // but allowing multiple is more flexible.
                         break; 
                     }
                 }
             }
         }
-        console.log(`Generated ${this.environments.length} environment items.`);
+        console.log(`Generated ${this.entities.length} entity items.`);
     }
 
 
@@ -135,9 +135,9 @@ export class Map {
             }
         }
 
-        // Render environments over tiles
-        for (const env of this.environments) {
-            env.render(ctx, camera);
+        // Render entities over tiles
+        for (const entity of this.entities) {
+            entity.render(ctx, camera);
         }
 
         if (this.showGrid) {

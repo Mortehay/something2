@@ -1,6 +1,6 @@
 import { MAP_TILE_SIZE } from "../core/constants.js";
 
-export class Environment {
+export class Entity {
     constructor(row, col) {
         // Randomize side length between 35% and 50% of tile (approx 1/8 to 1/4 area)
         const sizeRatio = Math.random() * 0.15 + 0.35;
