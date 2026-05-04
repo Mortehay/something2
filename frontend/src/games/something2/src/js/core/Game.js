@@ -41,6 +41,7 @@ export class Game {
             return;
         }
         this.ctx = this.canvas.getContext('2d');
+        this.state = 'playing';
 
         this.renderSystem = new RenderSystem(this.canvas, this.imageManager);
 
@@ -48,6 +49,14 @@ export class Game {
         
         if (tiles) {
             this.map.init(tiles, mapTiles, loadedEntities, entityTypes);
+            
+            // Find a safe spawn point for the player
+            const spawnPoint = this.map.findSafeSpawn();
+            if (spawnPoint) {
+                this.player.x = spawnPoint.x - this.player.width / 2;
+                this.player.y = spawnPoint.y - this.player.height / 2;
+                this.camera.update(this.player);
+            }
         }
 
         await Promise.all(initPromises);
@@ -58,8 +67,12 @@ export class Game {
         this.setupInput();
 
         //start game loop
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+        }
         this.lastTime = performance.now();
         this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
+        console.log(`game loop started`)        
     }
 
     setMap(tiles, mapTiles, loadedEntities, entityTypes = null) {
@@ -104,11 +117,15 @@ export class Game {
     }
 
     setupInput(){
+        if (this._inputAttached) return;
+        this._inputAttached = true;
+
         this._keydownHandler = (e) => {
             const key = e.key.toLowerCase();
             this.keys[key] = true;
             
             if(key === 'escape'){
+                console.log("Escape pressed, current state:", this.state);
                 if(this.state === 'playing'){
                     this.pause();
                 }else if(this.state === 'paused'){

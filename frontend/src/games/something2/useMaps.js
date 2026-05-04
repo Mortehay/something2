@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from 'react-hot-toast';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13001';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
 
 export function useMaps(){
   const { data: maps, isLoading: isLoadingMaps } = useQuery({
@@ -260,5 +260,27 @@ export function useDeleteEntityType() {
       toast.success('Entity type deleted!');
     },
     onError: (err) => toast.error(`Deletion failed: ${err.message}`)
+  });
+}
+
+export function useGenerateEntities(onSuccessCallback) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await fetch(`${API_URL}/api/maps/${id}/generate-entities`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to generate entities');
+      }
+      return res.json();
+    },
+    onSuccess: (data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['maps'] });
+      if (onSuccessCallback) onSuccessCallback(data);
+      toast.success(`Generated ${data.count} entities and saved to database!`);
+    },
+    onError: (err) => toast.error(`Generation failed: ${err.message}`)
   });
 }

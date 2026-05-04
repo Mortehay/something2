@@ -81,8 +81,8 @@ export class Player{
             let canMoveX = isWalkable(nextTileX);
             let canMoveY = isWalkable(nextTileY);
 
-            // Check against generated environments
-            if (map && map.environments) {
+            // Check against generated entities
+            if (map && map.entities) {
                 const checkEnvCollision = (nextPx, nextPy) => {
                     // Use a smaller core collision box representing the player's "feet/stump"
                     // This allows them to physically walk ON the tile without hitting the 1/4 area tree immediately
@@ -91,7 +91,7 @@ export class Player{
                     const pColW = 30;
                     const pColH = 25;
 
-                    return map.environments.some(env => {
+                    return map.entities.some(env => {
                         if (env.walkable) return false;
                         return pColX < env.x + env.width &&
                                pColX + pColW > env.x &&

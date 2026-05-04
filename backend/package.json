@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "dev": "nodemon src/index.js --inspect",
     "migrate": "node-pg-migrate",
     "migrate:up": "node-pg-migrate up"
   },

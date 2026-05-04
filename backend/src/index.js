@@ -7,7 +7,7 @@ const { generateWFC } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 3101;
 
 // Middleware
 app.use(cors());
@@ -301,6 +301,8 @@ app.delete('/api/maps/:id', async (req, res) => {
 
 // Save map entities
 app.post('/api/maps/:id/entities', async (req, res) => {
+  console.log("api/maps/:id/entities called with params:", req.params);
+  console.log("and body:", req.body);
   try {
     const { id } = req.params;
     const { entities } = req.body;
@@ -335,6 +337,68 @@ app.get('/api/maps/:id/entities', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch entities' });
+  }
+});
+
+// Generate and save entities for a map
+app.post('/api/maps/:id/generate-entities', async (req, res) => {
+  const { id } = req.params;
+  try {
+    // 1. Get Map data (tiles)
+    const mapResult = await pool.query('SELECT data FROM maps WHERE id = $1', [id]);
+    if (mapResult.rows.length === 0) return res.status(404).json({ error: 'Map not found' });
+    const tiles = mapResult.rows[0].data;
+
+    // 2. Get all Entity Types rules
+    const typeResult = await pool.query('SELECT * FROM entity_types');
+    const entityTypes = typeResult.rows;
+
+    // 3. Generation logic
+    const generatedEntities = [];
+    const rows = tiles.length;
+    const cols = tiles[0].length;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const tileType = tiles[r][c];
+        // Find entity types that can spawn on this tile
+        const possible = entityTypes.filter(t => t.spawn_tiles && t.spawn_tiles.includes(tileType));
+        
+        for (const def of possible) {
+          if (Math.random() < def.chance) {
+            generatedEntities.push({
+              type: def.name,
+              row: r,
+              col: c,
+              name: def.name
+            });
+            // Stop at first successful spawn for this tile to avoid overcrowding
+            break; 
+          }
+        }
+      }
+    }
+
+    // 4. Save to map_entities table (Overwrite existing)
+    await pool.query('DELETE FROM map_entities WHERE map_id = $1', [id]);
+    if (generatedEntities.length > 0) {
+      await pool.query(
+        'INSERT INTO map_entities (map_id, data) VALUES ($1, $2)',
+        [id, JSON.stringify(generatedEntities)]
+      );
+    }
+
+    // 5. Update timestamp
+    await pool.query('UPDATE maps SET updated_at = NOW() WHERE id = $1', [id]);
+
+    res.json({ 
+      success: true, 
+      count: generatedEntities.length, 
+      entities: generatedEntities 
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Generation failed: ' + err.message });
   }
 });
 

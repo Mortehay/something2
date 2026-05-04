@@ -89,7 +89,7 @@ const IconButton = styled.button`
   transition: all 0.2s;
   
   &:hover {
-    color: ${props => props.delete ? '#ef4444' : '#4a9eff'};
+    color: ${props => props.$delete ? '#ef4444' : '#4a9eff'};
     background: rgba(255, 255, 255, 0.05);
   }
 `;
@@ -367,7 +367,7 @@ function TileTypesAdmin() {
                 <IconButton onClick={() => handleOpenEdit(tile)} title="Edit">
                   <HiOutlinePencil />
                 </IconButton>
-                <IconButton delete onClick={() => handleDelete(tile.id)} title="Delete">
+                <IconButton $delete onClick={() => handleDelete(tile.id)} title="Delete">
                   <HiOutlineTrash />
                 </IconButton>
               </ActionButtons>

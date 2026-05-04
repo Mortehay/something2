@@ -10,6 +10,6 @@ RUN npm install
 
 COPY backend/ .
 
-EXPOSE 3001
+EXPOSE 3101
 
 CMD ["tail", "-f", "/dev/null"]

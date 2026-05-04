@@ -89,7 +89,7 @@ const IconButton = styled.button`
   transition: all 0.2s;
   
   &:hover {
-    color: ${props => props.delete ? '#ef4444' : '#facc15'};
+    color: ${props => props.$delete ? '#ef4444' : '#facc15'};
     background: rgba(255, 255, 255, 0.05);
   }
 `;
@@ -352,7 +352,7 @@ function EntityTypesAdmin() {
                 <IconButton onClick={() => handleOpenEdit(entity)} title="Edit">
                   <HiOutlinePencil />
                 </IconButton>
-                <IconButton delete onClick={() => handleDelete(entity.id)} title="Delete">
+                <IconButton $delete onClick={() => handleDelete(entity.id)} title="Delete">
                   <HiOutlineTrash />
                 </IconButton>
               </ActionButtons>

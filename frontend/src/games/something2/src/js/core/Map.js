@@ -42,10 +42,13 @@ export class Map {
                 let inst = null;
                 const type = e.type || e.name;
                 
-                if (type === 'Tree') inst = new Tree(0, 0);
-                else if (type === 'Stone') inst = new Stone(0, 0);
-                else if (type === 'IceRock') inst = new IceRock(0, 0);
-                else inst = new Entity(0, 0);
+                const r = e.row || 0;
+                const c = e.col || 0;
+                
+                if (type === 'Tree') inst = new Tree(r, c);
+                else if (type === 'Stone') inst = new Stone(r, c);
+                else if (type === 'IceRock') inst = new IceRock(r, c);
+                else inst = new Entity(r, c);
                 
                 if (inst) {
                     Object.assign(inst, e);
@@ -69,9 +72,48 @@ export class Map {
         return null;
     }
 
-    generateEntities() {
+    findSafeSpawn() {
+        const centerR = Math.floor(this.rows / 2);
+        const centerC = Math.floor(this.cols / 2);
+        
+        // Search in expanding squares
+        for (let radius = 0; radius < Math.max(this.rows, this.cols); radius++) {
+            for (let r = centerR - radius; r <= centerR + radius; r++) {
+                for (let c = centerC - radius; c <= centerC + radius; c++) {
+                    if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) continue;
+                    
+                    const tileType = this.tiles[r][c];
+                    const def = this.mapTiles ? (this.mapTiles[tileType] || (Array.isArray(this.mapTiles) ? this.mapTiles.find(t => t.name === tileType || t.type === tileType) : null)) : null;
+                    if (def && def.walkable === false) continue;
+                    
+                    const x = c * this.tileSize + this.tileSize / 2;
+                    const y = r * this.tileSize + this.tileSize / 2;
+                    
+                    const hasCollision = this.entities.some(env => {
+                        if (env.walkable) return false;
+                        return x >= env.x && x <= env.x + env.width &&
+                               y >= env.y && y <= env.y + env.height;
+                    });
+                    
+                    if (!hasCollision) return { x, y };
+                }
+            }
+        }
+        return null;
+    }
+
+    generateEntities(entityTypes = null) {
+        if (entityTypes) {
+            this.entityTypes = entityTypes;
+        }
+        
+        if (!this.tiles || this.tiles.length === 0) {
+            console.warn("Cannot generate entities: map tiles not loaded yet");
+            return;
+        }
+
         this.entities = [];
-        if (!this.entityTypes) {
+        if (!this.entityTypes || Object.keys(this.entityTypes).length === 0) {
             console.warn("Cannot generate entities: no entity types defined");
             return;
         }
