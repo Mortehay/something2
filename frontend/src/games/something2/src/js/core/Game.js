@@ -35,7 +35,7 @@ export class Game {
         }
     }
 
-    async init(tiles = null, mapTiles = null, loadedEnvironments = null){
+    async init(tiles = null, mapTiles = null, loadedEnvironments = null, environmentTypes = null){
         this.canvas = document.getElementById('gameCanvas');
         if (!this.canvas) {
             console.error("Canvas not found!");
@@ -48,7 +48,7 @@ export class Game {
         const initPromises = [this.imageManager.loadAll()];
         
         if (tiles) {
-            this.map.init(tiles, mapTiles, loadedEnvironments);
+            this.map.init(tiles, mapTiles, loadedEnvironments, environmentTypes);
         }
 
         await Promise.all(initPromises);
@@ -65,9 +65,10 @@ export class Game {
         this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
     }
 
-    setMap(tiles, mapTiles, loadedEnvironments) {
-        this.map.init(tiles, mapTiles, loadedEnvironments);
+    setMap(tiles, mapTiles, loadedEnvironments, environmentTypes = null) {
+        this.map.init(tiles, mapTiles, loadedEnvironments, environmentTypes);
     }
+
 
     destroy() {
         if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);

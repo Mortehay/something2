@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
-import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver } from "react-icons/hi2";
+import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
-import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap, fetchMapEnvironments, useSaveEnvironments } from "./useMaps.js";
+import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap, fetchMapEnvironments, useSaveEnvironments, useEnvironmentTypes } from "./useMaps.js";
 import TileTypesAdmin from "./TileTypesAdmin";
+import EnvironmentTypesAdmin from "./EnvironmentTypesAdmin";
 
 const StyledGameContainer = styled.div`
   display: flex;
@@ -25,11 +26,11 @@ const TabBar = styled.div`
 
 const TabButton = styled.button`
   background: ${props => props.active ? 'rgba(74, 158, 255, 0.1)' : 'transparent'};
-  color: ${props => props.active ? '#4a9eff' : '#aaa'};
+  color: ${props => props.active ? (props.adminType === 'env' ? '#facc15' : '#4a9eff') : '#aaa'};
   border: none;
-  border-bottom: 3px solid ${props => props.active ? '#4a9eff' : 'transparent'};
-  padding: 1.5rem 2.5rem;
-  font-size: 1.4rem;
+  border-bottom: 3px solid ${props => props.active ? (props.adminType === 'env' ? '#facc15' : '#4a9eff') : 'transparent'};
+  padding: 1.5rem 2rem;
+  font-size: 1.3rem;
   font-weight: bold;
   cursor: pointer;
   display: flex;
@@ -39,7 +40,7 @@ const TabButton = styled.button`
   font-family: 'Courier New', Courier, monospace;
 
   &:hover {
-    color: #4a9eff;
+    color: ${props => props.adminType === 'env' ? '#facc15' : '#4a9eff'};
     background: rgba(74, 158, 255, 0.05);
   }
 `;
@@ -154,11 +155,12 @@ function Something2() {
   const gameRef = useRef(null);
   const [selectedMapId, setSelectedMapId] = useState(null);
   const [gameState, setGameState] = useState('menu'); // 'menu', 'loading', 'playing', 'paused'
-  const [activeTab, setActiveTab] = useState('game'); // 'game' or 'admin'
+  const [activeTab, setActiveTab] = useState('game'); // 'game', 'admin', 'environment'
 
   // Queries
   const { maps, isLoadingMaps } = useMaps();
   const { mapTiles, isLoadingMapTiles } = useMapTiles();
+  const { environmentTypes, isLoadingEnvironmentTypes } = useEnvironmentTypes();
 
   // Mutations
   const generateMutation = useGenerateMap((newMap) => {
@@ -217,10 +219,23 @@ function Something2() {
       const tiles = typeof mapData.data === 'string' ? JSON.parse(mapData.data) : mapData.data;
       const environments = typeof envData === 'string' ? JSON.parse(envData) : envData;
       
+      // Convert environmentTypes array to map for the engine if needed
+      const envTypesMap = {};
+      if (environmentTypes) {
+        environmentTypes.forEach(t => {
+          envTypesMap[t.name] = {
+            color: t.color,
+            walkable: t.walkable,
+            spawnTiles: t.spawn_tiles,
+            chance: t.chance
+          };
+        });
+      }
+
       if (!gameRef.current.canvas) {
-        await gameRef.current.init(tiles, mapTiles, environments);
+        await gameRef.current.init(tiles, mapTiles, environments, envTypesMap);
       } else {
-        gameRef.current.setMap(tiles, mapTiles, environments);
+        gameRef.current.setMap(tiles, mapTiles, environments, envTypesMap);
       }
       
       gameRef.current.startGame();
@@ -239,6 +254,9 @@ function Something2() {
         </TabButton>
         <TabButton active={activeTab === 'admin'} onClick={() => setActiveTab('admin')}>
           <HiOutlineWrenchScrewdriver /> TILE_TYPES Admin
+        </TabButton>
+        <TabButton active={activeTab === 'environment'} adminType="env" onClick={() => setActiveTab('environment')}>
+          <HiOutlineBeaker /> Environment Admin
         </TabButton>
       </TabBar>
 
@@ -346,10 +364,23 @@ function Something2() {
                           const mapData = await fetchMap(selectedMapId);
                           const tiles = typeof mapData.data === 'string' ? JSON.parse(mapData.data) : mapData.data;
                           
+                          // Convert environmentTypes array to map
+                          const envTypesMap = {};
+                          if (environmentTypes) {
+                            environmentTypes.forEach(t => {
+                              envTypesMap[t.name] = {
+                                color: t.color,
+                                walkable: t.walkable,
+                                spawnTiles: t.spawn_tiles,
+                                chance: t.chance
+                              };
+                            });
+                          }
+
                           if (!gameRef.current.canvas) {
-                            await gameRef.current.init(tiles, mapTiles, []);
+                            await gameRef.current.init(tiles, mapTiles, [], envTypesMap);
                           } else {
-                            gameRef.current.setMap(tiles, mapTiles, []);
+                            gameRef.current.setMap(tiles, mapTiles, [], envTypesMap);
                           }
                           
                           gameRef.current.map.generateEnvironments();
@@ -393,8 +424,10 @@ function Something2() {
               <p id="loadingText">Retrieving terrain data from HQ...</p>
             </div>
           </GameWrapper>
-        ) : (
+        ) : activeTab === 'admin' ? (
           <TileTypesAdmin />
+        ) : (
+          <EnvironmentTypesAdmin />
         )}
       </ContentArea>
     </StyledGameContainer>

@@ -2,6 +2,7 @@ import { WORLD_WIDTH, WORLD_HEIGHT, MAP_TILE_SIZE } from "./constants.js";
 import { Tree } from "../entities/Tree.js";
 import { Stone } from "../entities/Stone.js";
 import { IceRock } from "../entities/IceRock.js";
+import { Environment } from "../entities/Environment.js";
 
 export class Map {
     constructor() {
@@ -11,15 +12,19 @@ export class Map {
         this.tiles = [];
         this.environments = [];
         this.showGrid = true;
+        this.environmentTypes = null;
     }
 
     /**
      * Initialize the map with provided tile data
      * @param {Array} tiles 
      * @param {Array|Object} mapTiles
+     * @param {Array} loadedEnvironments
+     * @param {Object} environmentTypes
      */
-    init(tiles, mapTiles, loadedEnvironments) {
+    init(tiles, mapTiles, loadedEnvironments, environmentTypes) {
         this.mapTiles = mapTiles;
+        this.environmentTypes = environmentTypes;
         this.environments = [];
         if (tiles && Array.isArray(tiles) && tiles.length > 0) {
             this.tiles = tiles;
@@ -35,11 +40,21 @@ export class Map {
         if (loadedEnvironments && loadedEnvironments.length > 0) {
             this.environments = loadedEnvironments.map(e => {
                 let inst = null;
-                if (e.type === 'Tree') inst = new Tree(0, 0);
-                else if (e.type === 'Stone') inst = new Stone(0, 0);
-                else if (e.type === 'IceRock') inst = new IceRock(0, 0);
+                const type = e.type || e.name;
                 
-                if (inst) Object.assign(inst, e);
+                if (type === 'Tree') inst = new Tree(0, 0);
+                else if (type === 'Stone') inst = new Stone(0, 0);
+                else if (type === 'IceRock') inst = new IceRock(0, 0);
+                else inst = new Environment(0, 0);
+                
+                if (inst) {
+                    Object.assign(inst, e);
+                    // Override with latest type config if available
+                    if (this.environmentTypes && this.environmentTypes[type]) {
+                        inst.color = this.environmentTypes[type].color;
+                        inst.walkable = this.environmentTypes[type].walkable;
+                    }
+                }
                 return inst;
             }).filter(Boolean);
         }
@@ -56,35 +71,46 @@ export class Map {
 
     generateEnvironments() {
         this.environments = [];
+        if (!this.environmentTypes) {
+            console.warn("Cannot generate environments: no environment types defined");
+            return;
+        }
+
+        const envTypesList = Object.entries(this.environmentTypes).map(([name, config]) => ({
+            name, ...config
+        }));
+
         for (let r = 0; r < this.rows; r++) {
             for (let c = 0; c < this.cols; c++) {
                 const tileType = this.tiles[r][c];
                 if (!tileType) continue;
 
-                // 10% to 40% probability
-                if (Math.random() < (0.1 + Math.random() * 0.3)) {
-                    let env = null;
-                    if (tileType === 'earth') {
-                        env = Math.random() > 0.5 ? new Tree(r, c) : new Stone(r, c);
-                        env.type = env instanceof Tree ? 'Tree' : 'Stone';
-                    } else if (['grass', 'leafs', 'dirt'].includes(tileType)) {
-                        env = new Tree(r, c);
-                        env.type = 'Tree';
-                    } else if (['rocks', 'sand'].includes(tileType)) {
-                        env = new Stone(r, c);
-                        env.type = 'Stone';
-                    } else if (['snow', 'ice'].includes(tileType)) {
-                        env = new IceRock(r, c);
-                        env.type = 'IceRock';
-                    }
-                    if (env) {
-                        this.environments.push(env);
+                // Find all environment types that can spawn on this tile
+                const possibleEnvs = envTypesList.filter(env => env.spawnTiles && env.spawnTiles.includes(tileType));
+                
+                for (const envDef of possibleEnvs) {
+                    if (Math.random() < envDef.chance) {
+                        let inst = null;
+                        if (envDef.name === 'Tree') inst = new Tree(r, c);
+                        else if (envDef.name === 'Stone') inst = new Stone(r, c);
+                        else if (envDef.name === 'IceRock') inst = new IceRock(r, c);
+                        else inst = new Environment(r, c);
+
+                        inst.type = envDef.name;
+                        inst.color = envDef.color;
+                        inst.walkable = envDef.walkable;
+                        
+                        this.environments.push(inst);
+                        // We could break here if we only want one environment per tile, 
+                        // but allowing multiple is more flexible.
+                        break; 
                     }
                 }
             }
         }
         console.log(`Generated ${this.environments.length} environment items.`);
     }
+
 
     toggleGrid() {
         this.showGrid = !this.showGrid;

@@ -176,3 +176,89 @@ export function useDeleteTileType() {
     onError: (err) => toast.error(`Deletion failed: ${err.message}`)
   });
 }
+
+export function useEnvironmentTypes() {
+  const { data: environmentTypes, isLoading: isLoadingEnvironmentTypes } = useQuery({
+    queryKey: ['environmentTypes'],
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/environment-types`);
+      if (!res.ok) throw new Error('Failed to fetch environment types');
+      return res.json();
+    }
+  });
+  return { environmentTypes, isLoadingEnvironmentTypes };
+}
+
+export function useMapConfig() {
+  const { data: mapConfig, isLoading: isLoadingMapConfig } = useQuery({
+    queryKey: ['mapConfig'],
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/map/config`);
+      if (!res.ok) throw new Error('Failed to fetch map configuration');
+      return res.json();
+    }
+  });
+  return { mapConfig, isLoadingMapConfig };
+}
+
+export function useCreateEnvironmentType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (newEnvType) => {
+      const res = await fetch(`${API_URL}/api/environment-types`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newEnvType)
+      });
+      if (!res.ok) throw new Error('Failed to create environment type');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['environmentTypes'] });
+      queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
+      toast.success('Environment type created!');
+    },
+    onError: (err) => toast.error(`Creation failed: ${err.message}`)
+  });
+}
+
+export function useUpdateEnvironmentType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (updatedEnvType) => {
+      const { id, ...data } = updatedEnvType;
+      const res = await fetch(`${API_URL}/api/environment-types/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) throw new Error('Failed to update environment type');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['environmentTypes'] });
+      queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
+      toast.success('Environment type updated!');
+    },
+    onError: (err) => toast.error(`Update failed: ${err.message}`)
+  });
+}
+
+export function useDeleteEnvironmentType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await fetch(`${API_URL}/api/environment-types/${id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete environment type');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['environmentTypes'] });
+      queryClient.invalidateQueries({ queryKey: ['mapConfig'] });
+      toast.success('Environment type deleted!');
+    },
+    onError: (err) => toast.error(`Deletion failed: ${err.message}`)
+  });
+}

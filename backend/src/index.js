@@ -56,6 +56,22 @@ async function getTileTypesMap() {
   return tileTypes;
 }
 
+// Helper to get environment types
+async function getEnvironmentTypesMap() {
+  const result = await pool.query('SELECT * FROM environment_types ORDER BY id ASC');
+  const envTypes = {};
+  result.rows.forEach(row => {
+    envTypes[row.name] = {
+      id: row.id,
+      color: row.color,
+      walkable: row.walkable,
+      spawnTiles: row.spawn_tiles || [],
+      chance: row.chance
+    };
+  });
+  return envTypes;
+}
+
 // API Routes
 
 // Health check
@@ -80,7 +96,19 @@ app.get('/api/maps', async (req, res) => {
   }
 });
 
-// List all map tiles
+// List all map configuration (tiles + environments)
+app.get('/api/map/config', async (req, res) => {
+  try {
+    const tileTypes = await getTileTypesMap();
+    const environmentTypes = await getEnvironmentTypesMap();
+    res.json({ tileTypes, environmentTypes });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch map configuration' });
+  }
+});
+
+// List all map tiles (legacy/backward compatibility)
 app.get('/api/map/tiles', async (req, res) => {
   try {
     const tileTypes = await getTileTypesMap();
@@ -90,6 +118,62 @@ app.get('/api/map/tiles', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch map tiles' });
   }
 });
+
+// Environment Types CRUD
+app.get('/api/environment-types', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM environment_types ORDER BY id ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch environment types' });
+  }
+});
+
+app.post('/api/environment-types', async (req, res) => {
+  try {
+    const { name, color, walkable, spawn_tiles, chance } = req.body;
+    if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
+
+    const result = await pool.query(
+      'INSERT INTO environment_types (name, color, walkable, spawn_tiles, chance) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create environment type' });
+  }
+});
+
+app.put('/api/environment-types/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, color, walkable, spawn_tiles, chance } = req.body;
+    const result = await pool.query(
+      'UPDATE environment_types SET name = $1, color = $2, walkable = $3, spawn_tiles = $4, chance = $5, updated_at = CURRENT_TIMESTAMP WHERE id = $6 RETURNING *',
+      [name, color, walkable, JSON.stringify(spawn_tiles), chance, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Environment type not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update environment type' });
+  }
+});
+
+app.delete('/api/environment-types/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM environment_types WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Environment type not found' });
+    res.json({ success: true, id: result.rows[0].id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete environment type' });
+  }
+});
+
 
 // Tile Types CRUD
 app.get('/api/tile-types', async (req, res) => {
