@@ -1,18 +1,62 @@
 import { useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
-import { HiOutlineTrash, HiOutlineSparkles } from "react-icons/hi2";
+import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
 import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap, fetchMapEnvironments, useSaveEnvironments } from "./useMaps.js";
+import TileTypesAdmin from "./TileTypesAdmin";
 
 const StyledGameContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+  background-color: #0f0f1a;
+  overflow: hidden;
+`;
+
+const TabBar = styled.div`
+  display: flex;
+  background: #1a1a2e;
+  border-bottom: 2px solid #2e2e3e;
+  padding: 0 20px;
+  z-index: 100;
+`;
+
+const TabButton = styled.button`
+  background: ${props => props.active ? 'rgba(74, 158, 255, 0.1)' : 'transparent'};
+  color: ${props => props.active ? '#4a9eff' : '#aaa'};
+  border: none;
+  border-bottom: 3px solid ${props => props.active ? '#4a9eff' : 'transparent'};
+  padding: 1.5rem 2.5rem;
+  font-size: 1.4rem;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  transition: all 0.2s;
+  font-family: 'Courier New', Courier, monospace;
+
+  &:hover {
+    color: #4a9eff;
+    background: rgba(74, 158, 255, 0.05);
+  }
+`;
+
+const ContentArea = styled.div`
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+`;
+
+const GameWrapper = styled.div`
   display: flex;
   height: 100%;
   width: 100%;
   position: relative;
   justify-content: center;
   align-items: center;
-  background-color: #1a1a2e;
   overflow: hidden;
 
   #gameCanvas {
@@ -110,6 +154,7 @@ function Something2() {
   const gameRef = useRef(null);
   const [selectedMapId, setSelectedMapId] = useState(null);
   const [gameState, setGameState] = useState('menu'); // 'menu', 'loading', 'playing', 'paused'
+  const [activeTab, setActiveTab] = useState('game'); // 'game' or 'admin'
 
   // Queries
   const { maps, isLoadingMaps } = useMaps();
@@ -187,154 +232,171 @@ function Something2() {
   };
 
   return (
-    <StyledGameContainer id="gameContainer">
-      <canvas id="gameCanvas" width="720" height="480"></canvas>
-      
-      {/*main menu*/}
-      <div id="mainMenu" className={`ui-panel ${gameState === 'menu' ? 'active' : ''}`}>
-        <h1>Game World Manager</h1>
-        
-        {isLoadingMaps ? (
-          <div>Scanning horizons...</div>
-        ) : (
-          <>
-            <h2>Available Worlds</h2>
-            <div className="map-list">
-              {maps?.map(map => (
-                <div 
-                  key={map.id} 
-                  className={`map-item ${selectedMapId === map.id ? 'selected' : ''}`}
-                  onClick={() => setSelectedMapId(map.id)}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                    <span style={{ display: 'flex', alignItems: 'center' }}>
-                      {map.name}
-                      {map.has_environments && (
-                        <HiOutlineSparkles style={{ marginLeft: '8px', color: '#facc15' }} title="Has Environments" />
-                      )}
-                    </span>
-                    <small style={{ fontSize: '0.8rem', opacity: 0.7 }}>
-                      {new Date(map.created_at).toLocaleDateString()}
-                    </small>
-                  </div>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toast((t) => (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          <span style={{ color: '#e9e7e7' }}>Are you sure you want to delete this map?</span>
-                          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-                            <button 
-                              onClick={() => {
-                                deleteMutation.mutate(map.id);
-                                toast.dismiss(t.id);
-                              }}
-                              style={{ padding: '6px 12px', background: '#e47d7d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px' }}
-                            >
-                              Yes, Delete
-                            </button>
-                            <button 
-                              onClick={() => toast.dismiss(t.id)}
-                              style={{ padding: '6px 12px', background: '#555', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px' }}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ), { 
-                        duration: Infinity,
-                        position: 'top-center',
-                        style: {
-                          marginTop: '40vh',
-                          background: '#1a1a2e',
-                          border: '2px solid #4a9eff',
-                          padding: '20px',
-                          boxShadow: '0 0 20px rgba(74, 158, 255, 0.4)'
-                        }
-                      });
-                    }}
-                    disabled={deleteMutation.isPending}
-                    style={{
-                      padding: '5px 10px',
-                      fontSize: '1rem',
-                      border: 'none',
-                      color: 'white',
-                      margin: 0
-                    }}
-                    title="Delete Map"
-                  >
-                    <HiOutlineTrash/>
-                  </button>
-                </div>
-              ))}
-            </div>
+    <StyledGameContainer>
+      <TabBar>
+        <TabButton active={activeTab === 'game'} onClick={() => setActiveTab('game')}>
+          <HiOutlinePuzzlePiece /> Game Window
+        </TabButton>
+        <TabButton active={activeTab === 'admin'} onClick={() => setActiveTab('admin')}>
+          <HiOutlineWrenchScrewdriver /> TILE_TYPES Admin
+        </TabButton>
+      </TabBar>
+
+      <ContentArea>
+        {activeTab === 'game' ? (
+          <GameWrapper id="gameContainer">
+            <canvas id="gameCanvas" width="720" height="480"></canvas>
             
-            <button 
-              onClick={() => generateMutation.mutate()} 
-              disabled={generateMutation.isPending}
-            >
-              {generateMutation.isPending ? 'Generating...' : 'Regenerate World'}
-            </button>
-            <button 
-              onClick={handlePlay}
-              disabled={!selectedMapId || gameState === 'loading'}
-            >
-              Play Selected World
-            </button>
-            <button 
-              onClick={async () => {
-                if (gameState !== 'playing' && gameRef.current) {
-                  try {
-                    setGameState('loading');
-                    const mapData = await fetchMap(selectedMapId);
-                    const tiles = typeof mapData.data === 'string' ? JSON.parse(mapData.data) : mapData.data;
-                    
-                    if (!gameRef.current.canvas) {
-                      await gameRef.current.init(tiles, mapTiles, []);
-                    } else {
-                      gameRef.current.setMap(tiles, mapTiles, []);
-                    }
-                    
-                    gameRef.current.map.generateEnvironments();
-                    saveEnvironmentsMutation.mutate({ id: selectedMapId, environments: gameRef.current.map.environments });
-                    gameRef.current.startGame();
-                    toast.success("Environments Generated and Saved!");
-                  } catch(e) {
-                     toast.error("Failed: " + e.message);
-                     setGameState('menu');
-                  }
-                } else if (gameRef.current) {
-                  gameRef.current.map.generateEnvironments();
-                  saveEnvironmentsMutation.mutate({ id: selectedMapId, environments: gameRef.current.map.environments });
-                  toast.success("Environments Generated and Saved!");
-                }
-              }}
-              disabled={!selectedMapId || gameState === 'loading' || saveEnvironmentsMutation.isPending}
-            >
-              {saveEnvironmentsMutation.isPending 
-                ? 'Saving...' 
-                : (maps?.find(m => m.id === selectedMapId)?.has_environments ? 'Regenerate Environment' : 'Add Environment')}
-            </button>
-          </>
+            {/*main menu*/}
+            <div id="mainMenu" className={`ui-panel ${gameState === 'menu' ? 'active' : ''}`}>
+              <h1>Game World Manager</h1>
+              
+              {isLoadingMaps ? (
+                <div>Scanning horizons...</div>
+              ) : (
+                <>
+                  <h2>Available Worlds</h2>
+                  <div className="map-list">
+                    {maps?.map(map => (
+                      <div 
+                        key={map.id} 
+                        className={`map-item ${selectedMapId === map.id ? 'selected' : ''}`}
+                        onClick={() => setSelectedMapId(map.id)}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                          <span style={{ display: 'flex', alignItems: 'center' }}>
+                            {map.name}
+                            {map.has_environments && (
+                              <HiOutlineSparkles style={{ marginLeft: '8px', color: '#facc15' }} title="Has Environments" />
+                            )}
+                          </span>
+                          <small style={{ fontSize: '0.8rem', opacity: 0.7 }}>
+                            {new Date(map.created_at).toLocaleDateString()}
+                          </small>
+                        </div>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toast((t) => (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                <span style={{ color: '#e9e7e7' }}>Are you sure you want to delete this map?</span>
+                                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+                                  <button 
+                                    onClick={() => {
+                                      deleteMutation.mutate(map.id);
+                                      toast.dismiss(t.id);
+                                    }}
+                                    style={{ padding: '6px 12px', background: '#e47d7d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px' }}
+                                  >
+                                    Yes, Delete
+                                  </button>
+                                  <button 
+                                    onClick={() => toast.dismiss(t.id)}
+                                    style={{ padding: '6px 12px', background: '#555', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '14px' }}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ), { 
+                              duration: Infinity,
+                              position: 'top-center',
+                              style: {
+                                marginTop: '40vh',
+                                background: '#1a1a2e',
+                                border: '2px solid #4a9eff',
+                                padding: '20px',
+                                boxShadow: '0 0 20px rgba(74, 158, 255, 0.4)'
+                              }
+                            });
+                          }}
+                          disabled={deleteMutation.isPending}
+                          style={{
+                            padding: '5px 10px',
+                            fontSize: '1rem',
+                            border: 'none',
+                            color: 'white',
+                            margin: 0
+                          }}
+                          title="Delete Map"
+                        >
+                          <HiOutlineTrash/>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <button 
+                    onClick={() => generateMutation.mutate()} 
+                    disabled={generateMutation.isPending}
+                  >
+                    {generateMutation.isPending ? 'Generating...' : 'Regenerate World'}
+                  </button>
+                  <button 
+                    onClick={handlePlay}
+                    disabled={!selectedMapId || gameState === 'loading'}
+                  >
+                    Play Selected World
+                  </button>
+                  <button 
+                    onClick={async () => {
+                      if (gameState !== 'playing' && gameRef.current) {
+                        try {
+                          setGameState('loading');
+                          const mapData = await fetchMap(selectedMapId);
+                          const tiles = typeof mapData.data === 'string' ? JSON.parse(mapData.data) : mapData.data;
+                          
+                          if (!gameRef.current.canvas) {
+                            await gameRef.current.init(tiles, mapTiles, []);
+                          } else {
+                            gameRef.current.setMap(tiles, mapTiles, []);
+                          }
+                          
+                          gameRef.current.map.generateEnvironments();
+                          saveEnvironmentsMutation.mutate({ id: selectedMapId, environments: gameRef.current.map.environments });
+                          gameRef.current.startGame();
+                          toast.success("Environments Generated and Saved!");
+                        } catch(e) {
+                           toast.error("Failed: " + e.message);
+                           setGameState('menu');
+                        }
+                      } else if (gameRef.current) {
+                        gameRef.current.map.generateEnvironments();
+                        saveEnvironmentsMutation.mutate({ id: selectedMapId, environments: gameRef.current.map.environments });
+                        toast.success("Environments Generated and Saved!");
+                      }
+                    }}
+                    disabled={!selectedMapId || gameState === 'loading' || saveEnvironmentsMutation.isPending}
+                  >
+                    {saveEnvironmentsMutation.isPending 
+                      ? 'Saving...' 
+                      : (maps?.find(m => m.id === selectedMapId)?.has_environments ? 'Regenerate Environment' : 'Add Environment')}
+                  </button>
+                </>
+              )}
+              
+              <div style={{ marginTop: "20px", fontSize: "12px", color: "#aaa" }}>
+                WASD - Move | G - Toggle Grid | ESC - Pause
+              </div>
+            </div>
+
+            {/*pause menu*/}
+            <div id="pauseMenu" className={`ui-panel ${gameState === 'paused' ? 'active' : ''}`}>
+              <h2>Paused</h2>
+              <button onClick={() => gameRef.current?.resume()}>Resume</button>
+              <button onClick={() => gameRef.current?.returnToMenu()}>Quit to Menu</button>
+            </div>
+
+            {/*loading screen*/}
+            <div id="loadingScreen" className={`ui-panel ${gameState === 'loading' ? 'active' : ''}`}>
+              <h2>Loading World...</h2>
+              <p id="loadingText">Retrieving terrain data from HQ...</p>
+            </div>
+          </GameWrapper>
+        ) : (
+          <TileTypesAdmin />
         )}
-        
-        <div style={{ marginTop: "20px", fontSize: "12px", color: "#aaa" }}>
-          WASD - Move | G - Toggle Grid | ESC - Pause
-        </div>
-      </div>
-
-      {/*pause menu*/}
-      <div id="pauseMenu" className={`ui-panel ${gameState === 'paused' ? 'active' : ''}`}>
-        <h2>Paused</h2>
-        <button onClick={() => gameRef.current?.resume()}>Resume</button>
-        <button onClick={() => gameRef.current?.returnToMenu()}>Quit to Menu</button>
-      </div>
-
-      {/*loading screen*/}
-      <div id="loadingScreen" className={`ui-panel ${gameState === 'loading' ? 'active' : ''}`}>
-        <h2>Loading World...</h2>
-        <p id="loadingText">Retrieving terrain data from HQ...</p>
-      </div>
+      </ContentArea>
     </StyledGameContainer>
   )
 }

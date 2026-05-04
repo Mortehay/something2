@@ -1,86 +1,7 @@
-const TILE_TYPES = {
-    grass:{
-        color:"#00FF00",
-        walkable:true,
-        speed:1,
-        image:"",
-        validNeighbors: ['grass', 'highgrass', 'leafs', 'sand', 'earth']
-    }, 
-    highgrass:{
-        color:"#035c03ff",
-        walkable:true,
-        speed:0.8,
-        image:"",
-        validNeighbors: ['highgrass', 'grass', 'leafs', 'swamp']
-    }, 
-    leafs:{
-        color:"#023b02ff",
-        walkable:true,
-        speed:0.8,
-        image:"",
-        validNeighbors: ['leafs', 'highgrass', 'grass', 'dirt']
-    }, 
-    sand:{
-        color:"#FFFF00",
-        walkable:true,
-        speed:0.6,
-        image:"",
-        validNeighbors: ['sand', 'grass', 'earth', 'water']
-    }, 
-    rocks:{
-        color:"#808080", // changed to grey to avoid being brown like earth
-        walkable:true,
-        speed:0.8,
-        image:"",
-        validNeighbors: ['rocks', 'earth', 'snow', 'dirt']
-    }, 
-    earth:{
-        color:"#8B4513",
-        walkable:true,
-        speed:1,
-        image:"",
-        validNeighbors: ['earth', 'grass', 'sand', 'rocks', 'dirt', 'swamp']
-    },
-    dirt:{
-        color:"#301604ff",
-        walkable:true,
-        speed:0.6,
-        image:"",
-        validNeighbors: ['dirt', 'earth', 'rocks', 'leafs', 'swamp']
-    }, 
-    snow:{
-        color:"#FFFFFF",
-        walkable:true,
-        speed:0.5,
-        image:"",
-        validNeighbors: ['snow', 'rocks', 'ice']
-    }, 
-    ice:{
-        color:"#bae6fd", // changed to ice blue
-        walkable:true,
-        speed:0.2,
-        image:"",
-        validNeighbors: ['ice', 'snow', 'water']
-    },
-    swamp:{
-        color:"#4d7c0f", // changed to dark swampy green
-        walkable:true,
-        speed:0.1,
-        image:"",
-        validNeighbors: ['swamp', 'earth', 'dirt', 'water', 'highgrass']
-    },
-    water:{
-        color:"#3b82f6", // changed to water blue
-        walkable:false,
-        speed:0,
-        image:"",
-        validNeighbors: ['water', 'sand', 'ice', 'swamp']
-    },
-};
-
-function generateWFC(rows, cols) {
+function generateWFC(rows, cols, tileTypes) {
+    const tileNames = Object.keys(tileTypes);
     const grid = Array(rows).fill(null).map(() => 
-        Array(cols).fill(null).map(() => [...Object.keys(TILE_TYPES)])
+        Array(cols).fill(null).map(() => [...tileNames])
     );
 
     const getEntropy = (r, c) => grid[r][c].length;
@@ -123,7 +44,7 @@ function generateWFC(rows, cols) {
 
                     const validForNeighbor = new Set();
                     currOptions.forEach(opt => {
-                        const allowedNeighbors = TILE_TYPES[opt]?.validNeighbors || [];
+                        const allowedNeighbors = tileTypes[opt]?.validNeighbors || [];
                         allowedNeighbors.forEach(validOpt => validForNeighbor.add(validOpt));
                     });
 
@@ -147,7 +68,8 @@ function generateWFC(rows, cols) {
         propagate(r, c);
     }
 
-    return grid.map(row => row.map(cell => cell[0] || 'grass'));
+    return grid.map(row => row.map(cell => cell[0] || tileNames[0] || 'grass'));
 }
 
-module.exports = { generateWFC, TILE_TYPES };
+module.exports = { generateWFC };
+

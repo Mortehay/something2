@@ -3,7 +3,7 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWFC, TILE_TYPES } = require('./services/mapService');
+const { generateWFC } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -39,6 +39,23 @@ async function runMigrations() {
 
 runMigrations();
 
+// Helper to get tile types in the format expected by the game engine
+async function getTileTypesMap() {
+  const result = await pool.query('SELECT * FROM tile_types ORDER BY id ASC');
+  const tileTypes = {};
+  result.rows.forEach(row => {
+    tileTypes[row.name] = {
+      id: row.id,
+      color: row.color,
+      walkable: row.walkable,
+      speed: row.speed,
+      image: row.image,
+      validNeighbors: row.valid_neighbors || []
+    };
+  });
+  return tileTypes;
+}
+
 // API Routes
 
 // Health check
@@ -66,10 +83,79 @@ app.get('/api/maps', async (req, res) => {
 // List all map tiles
 app.get('/api/map/tiles', async (req, res) => {
   try {
-    res.json(TILE_TYPES);
+    const tileTypes = await getTileTypesMap();
+    res.json(tileTypes);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch map tiles' });
+  }
+});
+
+// Tile Types CRUD
+app.get('/api/tile-types', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM tile_types ORDER BY id ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch tile types' });
+  }
+});
+
+app.post('/api/tile-types', async (req, res) => {
+  try {
+    const { name, color, walkable, speed, image, valid_neighbors } = req.body;
+    
+    // Simple validation
+    if (!name || !color) {
+      return res.status(400).json({ error: 'Name and color are required' });
+    }
+
+    const result = await pool.query(
+      'INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [name, color, walkable ?? true, speed ?? 1.0, image || '', JSON.stringify(valid_neighbors || [])]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create tile type' });
+  }
+});
+
+app.put('/api/tile-types/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, color, walkable, speed, image, valid_neighbors } = req.body;
+    
+    const result = await pool.query(
+      'UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4, image = $5, valid_neighbors = $6, updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
+      [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Tile type not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update tile type' });
+  }
+});
+
+app.delete('/api/tile-types/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM tile_types WHERE id = $1 RETURNING id', [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Tile type not found' });
+    }
+    
+    res.json({ success: true, id: result.rows[0].id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete tile type' });
   }
 });
 
@@ -94,7 +180,10 @@ app.post('/api/maps/generate', async (req, res) => {
     const { name, description, rows = 100, cols = 100 } = req.body;
     
     console.log(`Generating map: ${name} (${rows}x${cols})`);
-    const mapData = generateWFC(rows, cols);
+    
+    // Fetch tile types from DB for generation
+    const tileTypes = await getTileTypesMap();
+    const mapData = generateWFC(rows, cols, tileTypes);
     
     const result = await pool.query(
       'INSERT INTO maps (name, data, description) VALUES ($1, $2, $3) RETURNING id, name, created_at',
@@ -107,6 +196,7 @@ app.post('/api/maps/generate', async (req, res) => {
     res.status(500).json({ error: 'Failed to generate map' });
   }
 });
+
 
 // Delete a map
 app.delete('/api/maps/:id', async (req, res) => {

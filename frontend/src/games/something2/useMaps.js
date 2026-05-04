@@ -102,3 +102,77 @@ export function useDeleteMap(onSuccessCallback) {
     onError: (err) => toast.error(`Deletion failed: ${err.message}`)
   });
 }
+
+export function useTileTypes() {
+  const { data: tileTypes, isLoading: isLoadingTileTypes } = useQuery({
+    queryKey: ['tileTypes'],
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/tile-types`);
+      if (!res.ok) throw new Error('Failed to fetch tile types');
+      return res.json();
+    }
+  });
+  return { tileTypes, isLoadingTileTypes };
+}
+
+export function useCreateTileType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (newTileType) => {
+      const res = await fetch(`${API_URL}/api/tile-types`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTileType)
+      });
+      if (!res.ok) throw new Error('Failed to create tile type');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tileTypes'] });
+      queryClient.invalidateQueries({ queryKey: ['mapTiles'] });
+      toast.success('Tile type created!');
+    },
+    onError: (err) => toast.error(`Creation failed: ${err.message}`)
+  });
+}
+
+export function useUpdateTileType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (updatedTileType) => {
+      const { id, ...data } = updatedTileType;
+      const res = await fetch(`${API_URL}/api/tile-types/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) throw new Error('Failed to update tile type');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tileTypes'] });
+      queryClient.invalidateQueries({ queryKey: ['mapTiles'] });
+      toast.success('Tile type updated!');
+    },
+    onError: (err) => toast.error(`Update failed: ${err.message}`)
+  });
+}
+
+export function useDeleteTileType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await fetch(`${API_URL}/api/tile-types/${id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete tile type');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tileTypes'] });
+      queryClient.invalidateQueries({ queryKey: ['mapTiles'] });
+      toast.success('Tile type deleted!');
+    },
+    onError: (err) => toast.error(`Deletion failed: ${err.message}`)
+  });
+}
