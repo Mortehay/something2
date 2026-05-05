@@ -52,11 +52,14 @@ export class Map {
                 else inst = new MapEntity(r, c);
                 
                 if (inst) {
+                    // Copy instance properties (x, y, row, col, etc.)
                     Object.assign(inst, e);
-                    // Override with latest type config if available
-                    if (this.entityTypes && this.entityTypes[type]) {
-                        inst.color = this.entityTypes[type].color;
-                        inst.walkable = this.entityTypes[type].walkable;
+                    
+                    // Apply type configuration (color, walkable, stats, image)
+                    const typeConfig = this.entityTypes ? this.entityTypes[type] : null;
+                    if (typeConfig) {
+                        // Merge all type properties into the instance
+                        Object.assign(inst, typeConfig);
                     }
                 }
                 return inst;

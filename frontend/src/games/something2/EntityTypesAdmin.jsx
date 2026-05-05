@@ -262,7 +262,20 @@ function EntityTypesAdmin() {
     color: '#ffffff',
     walkable: false,
     spawn_tiles: [],
-    chance: 0.1
+    chance: 0.1,
+    image: '',
+    strength: 0,
+    dexterity: 0,
+    constitution: 0,
+    intelligence: 0,
+    wisdom: 0,
+    charisma: 0,
+    hp: 0,
+    max_hp: 0,
+    hp_regen_rate: 0,
+    mana: 0,
+    max_mana: 0,
+    mana_regen_rate: 0
   });
 
   useEffect(() => {
@@ -272,7 +285,20 @@ function EntityTypesAdmin() {
         color: editingEntity.color,
         walkable: editingEntity.walkable,
         spawn_tiles: editingEntity.spawn_tiles || [],
-        chance: editingEntity.chance
+        chance: editingEntity.chance,
+        image: editingEntity.image || '',
+        strength: editingEntity.strength || 0,
+        dexterity: editingEntity.dexterity || 0,
+        constitution: editingEntity.constitution || 0,
+        intelligence: editingEntity.intelligence || 0,
+        wisdom: editingEntity.wisdom || 0,
+        charisma: editingEntity.charisma || 0,
+        hp: editingEntity.hp || 0,
+        max_hp: editingEntity.max_hp || 0,
+        hp_regen_rate: editingEntity.hp_regen_rate || 0,
+        mana: editingEntity.mana || 0,
+        max_mana: editingEntity.max_mana || 0,
+        mana_regen_rate: editingEntity.mana_regen_rate || 0
       });
     } else {
       setFormData({
@@ -280,7 +306,20 @@ function EntityTypesAdmin() {
         color: '#00ff00',
         walkable: false,
         spawn_tiles: [],
-        chance: 0.1
+        chance: 0.1,
+        image: '',
+        strength: 10,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 10,
+        hp: 100,
+        max_hp: 100,
+        hp_regen_rate: 1,
+        mana: 50,
+        max_mana: 50,
+        mana_regen_rate: 0.5
       });
     }
   }, [editingEntity, isModalOpen]);
@@ -364,9 +403,26 @@ function EntityTypesAdmin() {
                 {entity.walkable ? 'YES' : 'NO'}
               </StatItem>
               <StatItem>
-                <span>Spawn Chance</span>
+                <span>Chance</span>
                 {(entity.chance * 100).toFixed(0)}%
               </StatItem>
+              <StatItem>
+                <span>HP</span>
+                {entity.hp}/{entity.max_hp}
+              </StatItem>
+              <StatItem>
+                <span>Mana</span>
+                {entity.mana}/{entity.max_mana}
+              </StatItem>
+            </EntityStats>
+            
+            <EntityStats style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.5rem' }}>
+               <StatItem><span>STR</span>{entity.strength}</StatItem>
+               <StatItem><span>DEX</span>{entity.dexterity}</StatItem>
+               <StatItem><span>CON</span>{entity.constitution}</StatItem>
+               <StatItem><span>INT</span>{entity.intelligence}</StatItem>
+               <StatItem><span>WIS</span>{entity.wisdom}</StatItem>
+               <StatItem><span>CHA</span>{entity.charisma}</StatItem>
             </EntityStats>
             
             <SpawnList>
@@ -437,6 +493,33 @@ function EntityTypesAdmin() {
                     onChange={e => setFormData({...formData, chance: parseFloat(e.target.value)})}
                   />
                 </FormGroup>
+              </div>
+
+              <FormGroup>
+                <label>Image Asset Path/URL</label>
+                <input 
+                  value={formData.image} 
+                  onChange={e => setFormData({...formData, image: e.target.value})}
+                  placeholder="e.g. /assets/entities/player.png"
+                />
+              </FormGroup>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+                <FormGroup><label>STR</label><input type="number" value={formData.strength} onChange={e => setFormData({...formData, strength: parseInt(e.target.value)})}/></FormGroup>
+                <FormGroup><label>DEX</label><input type="number" value={formData.dexterity} onChange={e => setFormData({...formData, dexterity: parseInt(e.target.value)})}/></FormGroup>
+                <FormGroup><label>CON</label><input type="number" value={formData.constitution} onChange={e => setFormData({...formData, constitution: parseInt(e.target.value)})}/></FormGroup>
+                <FormGroup><label>INT</label><input type="number" value={formData.intelligence} onChange={e => setFormData({...formData, intelligence: parseInt(e.target.value)})}/></FormGroup>
+                <FormGroup><label>WIS</label><input type="number" value={formData.wisdom} onChange={e => setFormData({...formData, wisdom: parseInt(e.target.value)})}/></FormGroup>
+                <FormGroup><label>CHA</label><input type="number" value={formData.charisma} onChange={e => setFormData({...formData, charisma: parseInt(e.target.value)})}/></FormGroup>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <FormGroup><label>HP</label><input type="number" value={formData.hp} onChange={e => setFormData({...formData, hp: parseInt(e.target.value)})}/></FormGroup>
+                <FormGroup><label>Max HP</label><input type="number" value={formData.max_hp} onChange={e => setFormData({...formData, max_hp: parseInt(e.target.value)})}/></FormGroup>
+                <FormGroup><label>HP Regen</label><input type="number" step="0.1" value={formData.hp_regen_rate} onChange={e => setFormData({...formData, hp_regen_rate: parseFloat(e.target.value)})}/></FormGroup>
+                <FormGroup><label>Mana</label><input type="number" value={formData.mana} onChange={e => setFormData({...formData, mana: parseInt(e.target.value)})}/></FormGroup>
+                <FormGroup><label>Max Mana</label><input type="number" value={formData.max_mana} onChange={e => setFormData({...formData, max_mana: parseInt(e.target.value)})}/></FormGroup>
+                <FormGroup><label>Mana Regen</label><input type="number" step="0.1" value={formData.mana_regen_rate} onChange={e => setFormData({...formData, mana_regen_rate: parseFloat(e.target.value)})}/></FormGroup>
               </div>
 
               <FormGroup>
