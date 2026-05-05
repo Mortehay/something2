@@ -275,7 +275,9 @@ function EntityTypesAdmin() {
     hp_regen_rate: 0,
     mana: 0,
     max_mana: 0,
-    mana_regen_rate: 0
+    mana_regen_rate: 0,
+    display_width: 0,
+    display_height: 0
   });
 
   useEffect(() => {
@@ -298,7 +300,9 @@ function EntityTypesAdmin() {
         hp_regen_rate: editingEntity.hp_regen_rate || 0,
         mana: editingEntity.mana || 0,
         max_mana: editingEntity.max_mana || 0,
-        mana_regen_rate: editingEntity.mana_regen_rate || 0
+        mana_regen_rate: editingEntity.mana_regen_rate || 0,
+        display_width: editingEntity.display_width || 0,
+        display_height: editingEntity.display_height || 0
       });
     } else {
       setFormData({
@@ -319,7 +323,9 @@ function EntityTypesAdmin() {
         hp_regen_rate: 1,
         mana: 50,
         max_mana: 50,
-        mana_regen_rate: 0.5
+        mana_regen_rate: 0.5,
+        display_width: 64,
+        display_height: 64
       });
     }
   }, [editingEntity, isModalOpen]);
@@ -520,6 +526,11 @@ function EntityTypesAdmin() {
                 <FormGroup><label>Mana</label><input type="number" value={formData.mana} onChange={e => setFormData({...formData, mana: parseInt(e.target.value)})}/></FormGroup>
                 <FormGroup><label>Max Mana</label><input type="number" value={formData.max_mana} onChange={e => setFormData({...formData, max_mana: parseInt(e.target.value)})}/></FormGroup>
                 <FormGroup><label>Mana Regen</label><input type="number" step="0.1" value={formData.mana_regen_rate} onChange={e => setFormData({...formData, mana_regen_rate: parseFloat(e.target.value)})}/></FormGroup>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <FormGroup><label>Display Width</label><input type="number" value={formData.display_width} onChange={e => setFormData({...formData, display_width: parseInt(e.target.value)})}/></FormGroup>
+                <FormGroup><label>Display Height</label><input type="number" value={formData.display_height} onChange={e => setFormData({...formData, display_height: parseInt(e.target.value)})}/></FormGroup>
               </div>
 
               <FormGroup>

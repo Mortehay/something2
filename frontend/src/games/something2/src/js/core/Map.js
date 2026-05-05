@@ -55,11 +55,19 @@ export class Map {
                     // Copy instance properties (x, y, row, col, etc.)
                     Object.assign(inst, e);
                     
-                    // Apply type configuration (color, walkable, stats, image)
+                    // Apply type configuration (color, walkable, stats, image, display dimensions)
                     const typeConfig = this.entityTypes ? this.entityTypes[type] : null;
                     if (typeConfig) {
                         // Merge all type properties into the instance
                         Object.assign(inst, typeConfig);
+
+                        // Ensure display dimensions fallback to collision dimensions if not set or invalid
+                        if (!inst.displayWidth || inst.displayWidth <= 0) {
+                            inst.displayWidth = inst.width;
+                        }
+                        if (!inst.displayHeight || inst.displayHeight <= 0) {
+                            inst.displayHeight = inst.height;
+                        }
                     }
                 }
                 return inst;

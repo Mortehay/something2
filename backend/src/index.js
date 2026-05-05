@@ -79,7 +79,9 @@ async function getEntityTypesMap() {
       mana: row.mana,
       maxMana: row.max_mana,
       manaRegenRate: row.mana_regen_rate,
-      image: row.image
+      image: row.image,
+      displayWidth: row.display_width,
+      displayHeight: row.display_height
     };
   });
   return entityTypes;
@@ -148,7 +150,8 @@ app.post('/api/entity-types', async (req, res) => {
     const { 
       name, color, walkable, spawn_tiles, chance, 
       strength, dexterity, constitution, intelligence, wisdom, charisma,
-      hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image
+      hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
+      display_width, display_height
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
 
@@ -156,12 +159,14 @@ app.post('/api/entity-types', async (req, res) => {
       `INSERT INTO entity_types (
         name, color, walkable, spawn_tiles, chance, 
         strength, dexterity, constitution, intelligence, wisdom, charisma,
-        hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING *`,
+        hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
+        display_width, display_height
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
-        hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image
+        hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
+        display_width, display_height
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -177,19 +182,21 @@ app.put('/api/entity-types/:id', async (req, res) => {
     const { 
       name, color, walkable, spawn_tiles, chance,
       strength, dexterity, constitution, intelligence, wisdom, charisma,
-      hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image
+      hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
+      display_width, display_height
     } = req.body;
     const result = await pool.query(
       `UPDATE entity_types SET 
         name = $1, color = $2, walkable = $3, spawn_tiles = $4, chance = $5,
         strength = $6, dexterity = $7, constitution = $8, intelligence = $9, wisdom = $10, charisma = $11,
         hp = $12, max_hp = $13, hp_regen_rate = $14, mana = $15, max_mana = $16, mana_regen_rate = $17, 
-        image = $18, updated_at = CURRENT_TIMESTAMP 
-      WHERE id = $19 RETURNING *`,
+        image = $18, display_width = $19, display_height = $20, updated_at = CURRENT_TIMESTAMP 
+      WHERE id = $21 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
-        hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image, id
+        hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
+        display_width, display_height, id
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
