@@ -3,6 +3,7 @@ import { Tree } from "../entities/Tree.js";
 import { Stone } from "../entities/Stone.js";
 import { IceRock } from "../entities/IceRock.js";
 import { Entity } from "../entities/Entity.js";
+import { MapEntity } from "../entities/MapEntity.js";
 
 export class Map {
     constructor() {
@@ -48,7 +49,7 @@ export class Map {
                 if (type === 'Tree') inst = new Tree(r, c);
                 else if (type === 'Stone') inst = new Stone(r, c);
                 else if (type === 'IceRock') inst = new IceRock(r, c);
-                else inst = new Entity(r, c);
+                else inst = new MapEntity(r, c);
                 
                 if (inst) {
                     Object.assign(inst, e);

@@ -1,25 +1,15 @@
+import { Entity } from "./Entity.js";
 import { GAME_WIDTH, GAME_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT } from "../core/constants.js";
 
-export class Player{
+export class Player extends Entity {
     constructor(){
-        this.width = 64;
-        this.height = 64;
-
-        this.x = WORLD_WIDTH / 2;
-        this.y = WORLD_HEIGHT / 2;
-
+        super(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 64, 64);
         this.speed = 100;
-        
-        //collision size
         this.hitboxRadius = 30;
-
-        //multipliers (for upgrades) - applied for all weapons;
         this.damageMultiplier = 1;
         this.fireRateMultiplier = 1;
         this.speedMultiplier = 2;
         this.rangeMultiplier = 1;
-
-        //weapons array - STARTS EMPTY
         this.weapons = [];
     }
 
