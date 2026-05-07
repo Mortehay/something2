@@ -1,16 +1,26 @@
-# React + Vite
+# something2
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Real-time 2D MMORPG. Go game engine over websockets (collisions, pathfinding, mob AI), Node + Express backend, Vite + React client, Postgres + Redis + MinIO.
 
-Currently, two official plugins are available:
+## Quickstart
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```
+make up        # start db + backend + frontend
+make logs      # tail logs
+make db-shell  # psql into game_db
+make down      # stop everything
+```
 
-## React Compiler
+## Layout
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- `backend/` — Node + Express REST API, Postgres persistence
+- `frontend/` — Vite + React 19 client
+- `engine/` — Go game engine (websocket server) — scaffold only for now
+- `compose/` — Docker Compose dev stack
 
-## Expanding the ESLint configuration
+## More
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- [AGENTS.md](AGENTS.md) — index for AI agents and humans alike
+- [.ai/context.md](.ai/context.md) — project context
+- [.ai/commands.md](.ai/commands.md) — full command reference
+- [.ai/stack.md](.ai/stack.md) — tech stack details
