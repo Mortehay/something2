@@ -26,6 +26,7 @@ frontend/dist/
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+.claude/settings.local.json
 .idea
 .DS_Store
 *.suo

@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
@@ -92,6 +93,24 @@ async function getEntityTypesMap() {
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Dev-only: mints a short-lived JWT signed with the engine's shared secret so
+// the frontend can connect to the WS engine without a real auth flow yet.
+// Replace with a proper login endpoint when auth lands.
+app.get('/api/dev-token', (req, res) => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    return res.status(500).json({ error: 'JWT_SECRET not configured' });
+  }
+  const userId = parseInt(req.query.user_id, 10) || Math.floor(Math.random() * 1e9) + 1;
+  const username = req.query.username || `dev-${userId}`;
+  const token = jwt.sign(
+    { user_id: userId, username, sub: String(userId) },
+    secret,
+    { algorithm: 'HS256', expiresIn: '24h' }
+  );
+  res.json({ token, user_id: userId, username });
 });
 
 // List all maps
@@ -344,106 +363,132 @@ app.delete('/api/maps/:id', async (req, res) => {
   }
 });
 
-// Save map entities
+// Save map entities. Frontend payload: [{ type: "Tree"|"Stone"|..., row, col, name }, ...].
+// Persisted as row-per-entity in map_entities (type='obstacle', entity_type_id resolved by name,
+// x = col + 0.5, y = row + 0.5 in tile coords).
 app.post('/api/maps/:id/entities', async (req, res) => {
-  console.log("api/maps/:id/entities called with params:", req.params);
-  console.log("and body:", req.body);
+  const client = await pool.connect();
   try {
     const { id } = req.params;
     const { entities } = req.body;
-    
-    const mapResult = await pool.query('SELECT id FROM maps WHERE id = $1', [id]);
+
+    const mapResult = await client.query('SELECT id FROM maps WHERE id = $1', [id]);
     if (mapResult.rows.length === 0) return res.status(404).json({ error: 'Map not found' });
-    
-    await pool.query('DELETE FROM map_entities WHERE map_id = $1', [id]);
+
+    const typeResult = await client.query('SELECT id, name FROM entity_types');
+    const idByName = new Map(typeResult.rows.map((t) => [t.name, t.id]));
+
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM map_entities WHERE map_id = $1 AND type = 'obstacle'`, [id]);
+
     if (entities && entities.length > 0) {
-      await pool.query(
-        'INSERT INTO map_entities (map_id, data) VALUES ($1, $2)',
-        [id, JSON.stringify(entities)]
-      );
+      for (const e of entities) {
+        const name = e.type || e.name;
+        const etId = idByName.get(name);
+        if (!etId) {
+          console.warn(`save-entities: skipping unknown entity_type "${name}"`);
+          continue;
+        }
+        const r = e.row ?? 0;
+        const c = e.col ?? 0;
+        await client.query(
+          `INSERT INTO map_entities (map_id, type, entity_type_id, x, y)
+           VALUES ($1, 'obstacle', $2, $3, $4)`,
+          [id, etId, c + 0.5, r + 0.5]
+        );
+      }
     }
-    
+    await client.query('COMMIT');
     res.json({ success: true });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Failed to save entities' });
+  } finally {
+    client.release();
   }
 });
 
-// Load map entities
+// Load map entities. Returns the legacy frontend shape derived from row-per-entity rows:
+// { type: <entity_type.name>, name: <entity_type.name>, row, col, id }.
 app.get('/api/maps/:id/entities', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT data FROM map_entities WHERE map_id = $1', [id]);
-    if (result.rows.length === 0) {
-      return res.json([]);
-    }
-    res.json(result.rows[0].data);
+    const result = await pool.query(
+      `SELECT me.id, et.name, me.x, me.y
+       FROM map_entities me
+       JOIN entity_types et ON et.id = me.entity_type_id
+       WHERE me.map_id = $1 AND me.type = 'obstacle'
+       ORDER BY me.id`,
+      [id]
+    );
+    res.json(
+      result.rows.map((r) => ({
+        id: r.id,
+        type: r.name,
+        name: r.name,
+        row: Math.floor(r.y),
+        col: Math.floor(r.x),
+      }))
+    );
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch entities' });
   }
 });
 
-// Generate and save entities for a map
+// Generate static obstacles (type='obstacle') from entity_types.spawn_tiles + chance.
 app.post('/api/maps/:id/generate-entities', async (req, res) => {
   const { id } = req.params;
+  const client = await pool.connect();
   try {
-    // 1. Get Map data (tiles)
-    const mapResult = await pool.query('SELECT data FROM maps WHERE id = $1', [id]);
+    const mapResult = await client.query('SELECT data FROM maps WHERE id = $1', [id]);
     if (mapResult.rows.length === 0) return res.status(404).json({ error: 'Map not found' });
     const tiles = mapResult.rows[0].data;
 
-    // 2. Get all Entity Types rules
-    const typeResult = await pool.query('SELECT * FROM entity_types');
-    const entityTypes = typeResult.rows;
+    const typeResult = await client.query('SELECT * FROM entity_types');
+    const entityTypes = typeResult.rows.filter((t) => t.walkable === false);
 
-    // 3. Generation logic
-    const generatedEntities = [];
+    const generated = [];
     const rows = tiles.length;
     const cols = tiles[0].length;
 
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const tileType = tiles[r][c];
-        // Find entity types that can spawn on this tile
-        const possible = entityTypes.filter(t => t.spawn_tiles && t.spawn_tiles.includes(tileType));
-        
+        const possible = entityTypes.filter((t) => t.spawn_tiles && t.spawn_tiles.includes(tileType));
         for (const def of possible) {
           if (Math.random() < def.chance) {
-            generatedEntities.push({
-              type: def.name,
-              row: r,
-              col: c,
-              name: def.name
-            });
-            // Stop at first successful spawn for this tile to avoid overcrowding
-            break; 
+            generated.push({ entity_type_id: def.id, name: def.name, row: r, col: c });
+            break;
           }
         }
       }
     }
 
-    // 4. Save to map_entities table (Overwrite existing)
-    await pool.query('DELETE FROM map_entities WHERE map_id = $1', [id]);
-    if (generatedEntities.length > 0) {
-      await pool.query(
-        'INSERT INTO map_entities (map_id, data) VALUES ($1, $2)',
-        [id, JSON.stringify(generatedEntities)]
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM map_entities WHERE map_id = $1 AND type = 'obstacle'`, [id]);
+    for (const g of generated) {
+      await client.query(
+        `INSERT INTO map_entities (map_id, type, entity_type_id, x, y)
+         VALUES ($1, 'obstacle', $2, $3, $4)`,
+        [id, g.entity_type_id, g.col + 0.5, g.row + 0.5]
       );
     }
+    await client.query('COMMIT');
+    await client.query('UPDATE maps SET updated_at = NOW() WHERE id = $1', [id]);
 
-    // 5. Update timestamp
-    await pool.query('UPDATE maps SET updated_at = NOW() WHERE id = $1', [id]);
-
-    res.json({ 
-      success: true, 
-      count: generatedEntities.length, 
-      entities: generatedEntities 
+    res.json({
+      success: true,
+      count: generated.length,
+      entities: generated.map((g) => ({ type: g.name, name: g.name, row: g.row, col: g.col })),
     });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Generation failed: ' + err.message });
+  } finally {
+    client.release();
   }
 });
 

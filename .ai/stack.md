@@ -14,6 +14,7 @@ Source of truth for each piece is the linked config file. Update those, then upd
 ## Backend — [backend/package.json](backend/package.json)
 
 - Express 4
+- cors 2
 - pg 8
 - node-pg-migrate 6
 - minio 7
@@ -22,17 +23,19 @@ Source of truth for each piece is the linked config file. Update those, then upd
 
 ## Engine — [engine/](engine/)
 
-- Go (target language; sources not yet committed)
-- Websocket server: live game state transport, client ↔ engine
-- Reads/writes Postgres for durable state and Redis for live state
-- Authoritative for collisions, pathfinding, mob/NPC AI
+- Go 1.22 — see [engine/go.mod](engine/go.mod)
+- WebSocket hub: live game state transport, client ↔ engine; JWT-authed (HS256, shared secret with backend)
+- Postgres for durable state, Redis for live state; 5-min batch flush Redis → Postgres
+- Authoritative for collisions (grid spatial hash), pathfinding, mob/NPC AI; 60Hz tick loop
+- Local dev and full layout: [engine/README.md](engine/README.md)
 
 ## Infra — [compose/docker-compose.yml](compose/docker-compose.yml)
 
-- Postgres — db `game_db`, user `user` (compose default)
-- Redis — planned for live runtime state (**not yet in compose**)
+- Postgres — db `game_db`, user `user` (compose default), host port 15432
+- Redis — live runtime state for the engine, image `redis:7-alpine`, host port 16379
 - MinIO — asset storage
-- Docker Compose orchestrates db + backend + frontend (+ minio) for dev
+- Docker Compose orchestrates frontend + backend + game-engine + db + redis + minio for dev
+- Required env: `JWT_SECRET` (engine refuses to start without it; shared secret with backend) — see [.env](.env) and [engine/README.md](engine/README.md)
 
 ## Port convention
 
@@ -42,7 +45,9 @@ External (host) ports use a `1xxxx` prefix to avoid clashes with other dev proje
 |----------|-------|-----------|
 | frontend | 15173 | 5173      |
 | backend  | 13101 | 3101      |
+| engine   | 18080 | 8080      |
 | db       | 15432 | 5432      |
+| redis    | 16379 | 6379      |
 | minio    | 19000 | 9000      |
 | minio UI | 19001 | 9001      |
 

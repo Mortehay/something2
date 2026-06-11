@@ -36,18 +36,15 @@ export class MapEntity extends Entity {
             displayY + this.displayHeight < camera.y || displayY > camera.y + camera.height) return;
 
         if (this.image && typeof this.image === 'string') {
-            // Placeholder for image rendering logic
-            // For now, still drawing a rectangle but we can load actual images
             ctx.fillStyle = this.color;
-            ctx.fillRect(displayX - camera.x, displayY - camera.y, this.displayWidth, this.displayHeight);
-            
-            // If we have a cached image object, we can use ctx.drawImage
+            ctx.fillRect(displayX, displayY, this.displayWidth, this.displayHeight);
+
             if (this._imgObj) {
-                 ctx.drawImage(this._imgObj, displayX - camera.x, displayY - camera.y, this.displayWidth, this.displayHeight);
+                ctx.drawImage(this._imgObj, displayX, displayY, this.displayWidth, this.displayHeight);
             }
         } else {
             ctx.fillStyle = this.color;
-            ctx.fillRect(displayX - camera.x, displayY - camera.y, this.displayWidth, this.displayHeight);
+            ctx.fillRect(displayX, displayY, this.displayWidth, this.displayHeight);
         }
     }
 }
