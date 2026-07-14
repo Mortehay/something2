@@ -12,6 +12,7 @@
 - `make shell-backend` — exec `sh` in backend container
 - `make shell-frontend` — exec `sh` in frontend container
 - `make db-shell` — psql into `game_db` as user `user`
+- `make redis-shell` — `redis-cli` into the redis container
 
 ## Backend — [backend/](backend/)
 
@@ -30,4 +31,21 @@
 
 ## Engine — [engine/](engine/)
 
-Go engine — build/run commands TBD once Go sources land.
+Docker (from repo root):
+
+- `make engine-up` — start db + redis + game-engine
+- `make engine-down` — stop game-engine
+- `make engine-build` — build the engine image
+- `make engine-rebuild` — build + up
+- `make engine-logs` — tail engine logs (`-f`)
+- `make engine-shell` — exec `sh` in engine container
+- `make engine-test` — `cd engine && go test ./...`
+
+Local dev (Go 1.22):
+
+- `cd engine && go run ./cmd/engine`
+- `cd engine && go test ./...`
+- `cd engine && go vet ./...`
+- `cd engine && go mod tidy`
+
+Engine WebSocket: `ws://localhost:18080/ws?token=<jwt>`. Protocol reference: [engine/README.md](engine/README.md).

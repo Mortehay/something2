@@ -3,7 +3,11 @@ import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
+import { EngineClient, fetchDevToken } from "./src/js/net/EngineClient.js";
 import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap, fetchMapEntities, useSaveEntities, useEntityTypes, useGenerateEntities } from "./useMaps.js";
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
+const ENGINE_WS_URL = import.meta.env.VITE_ENGINE_WS_URL || 'ws://localhost:18080/ws';
 import TileTypesAdmin from "./TileTypesAdmin";
 import EntityTypesAdmin from "./EntityTypesAdmin";
 
@@ -159,6 +163,7 @@ const PausePanel = styled(Panel)`
 export default function Something2() {
   const canvasRef = useRef(null);
   const gameRef = useRef(null);
+  const engineRef = useRef(null);
   const [activeTab, setActiveTab] = useState('game');
   const [selectedMapId, setSelectedMapId] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -188,7 +193,14 @@ export default function Something2() {
   const handleExit = () => {
     setIsPlaying(false);
     setIsPaused(false);
-    if (gameRef.current) gameRef.current.setState('menu');
+    if (gameRef.current) {
+      gameRef.current.setState('menu');
+      gameRef.current.setEngineClient?.(null, null);
+    }
+    if (engineRef.current) {
+      engineRef.current.disconnect();
+      engineRef.current = null;
+    }
   };
 
   useEffect(() => {
@@ -210,6 +222,12 @@ export default function Something2() {
         }
       });
     }
+    return () => {
+      if (engineRef.current) {
+        engineRef.current.disconnect();
+        engineRef.current = null;
+      }
+    };
   }, [activeTab]);
 
   const handleEnterWorld = async (shouldGenerate = false) => {
@@ -238,6 +256,28 @@ export default function Something2() {
 
       gameRef.current.init(tiles, mapTiles, entities, entityTypesMap);
       setIsPlaying(true);
+
+      // Connect to the Go engine. Dev path: pull a JWT from /api/dev-token,
+      // open WS, send `join`. Game pushes moves and reconciles incoming ticks.
+      try {
+        if (engineRef.current) {
+          engineRef.current.disconnect();
+          engineRef.current = null;
+        }
+        const { token, user_id } = await fetchDevToken(API_URL);
+        const client = new EngineClient({
+          url: ENGINE_WS_URL,
+          token,
+          onJoined: (m) => console.log("engine joined:", m),
+          onError: (err) => toast.error(`Engine: ${err.message}`),
+          onClose: () => console.log("engine ws closed"),
+        });
+        gameRef.current.setEngineClient(client, user_id);
+        client.connect(selectedMapId);
+        engineRef.current = client;
+      } catch (err) {
+        toast.error(`Engine connect failed: ${err.message}`);
+      }
 
       if (shouldGenerate) {
         if (Object.keys(entityTypesMap).length === 0) {

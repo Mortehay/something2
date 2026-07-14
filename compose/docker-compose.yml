@@ -3,26 +3,27 @@ name: something2
 services:
   frontend:
     build:
-      context: ..
+      context: .
       dockerfile: compose/frontend.Dockerfile
     ports:
       - "15173:5173"
     volumes:
-      - ../frontend:/app
+      - ./frontend:/app
       - /app/node_modules
     environment:
       - VITE_API_URL=http://localhost:13101
+      - VITE_ENGINE_WS_URL=ws://localhost:18080/ws
     depends_on:
       - backend
 
   backend:
     build:
-      context: ..
+      context: .
       dockerfile: compose/backend.Dockerfile
     ports:
       - "13101:3101"
     volumes:
-      - ../backend:/app
+      - ./backend:/app
       - /app/node_modules
     environment:
       - DATABASE_URL=postgres://user:password@db:5432/game_db
@@ -30,9 +31,34 @@ services:
       - MINIO_PORT=9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
     depends_on:
       - db
       - minio
+
+  game-engine:
+    build:
+      context: .
+      dockerfile: compose/engine.Dockerfile
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./engine:/app
+      - /app/bin
+    environment:
+      - ENGINE_PORT=8080
+      - ENGINE_TICK_HZ=${ENGINE_TICK_HZ:-60}
+      - ENGINE_FLUSH_INTERVAL=${ENGINE_FLUSH_INTERVAL:-5m}
+      - ENGINE_IDLE_EVICT=${ENGINE_IDLE_EVICT:-10m}
+      - ENGINE_AOI_RADIUS=${ENGINE_AOI_RADIUS:-30}
+      - ENGINE_GRID_CELL_SIZE=${ENGINE_GRID_CELL_SIZE:-4}
+      - DATABASE_URL=postgres://user:password@db:5432/game_db
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      - db
+      - redis
 
   db:
     image: postgres:15-alpine
@@ -44,6 +70,14 @@ services:
       - "15432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "16379:6379"
+    volumes:
+      - redis_data:/data
 
   minio:
     image: minio/minio:latest
@@ -59,4 +93,5 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   minio_data:

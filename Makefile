@@ -1,35 +1,64 @@
-.PHONY: up down build logs restart clean shell-backend shell-frontend
+.PHONY: up down build logs restart rebuild clean shell-backend shell-frontend db-shell \
+        engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
+        redis-shell
 
 COMPOSE_FILE = compose/docker-compose.yml
 
 up:
-	docker compose -f $(COMPOSE_FILE) up -d
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) up -d
 
 down:
-	docker compose -f $(COMPOSE_FILE) down --remove-orphans
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) down --remove-orphans
 
 build:
-	docker compose -f $(COMPOSE_FILE) build
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) build
 
 logs:
-	docker compose -f $(COMPOSE_FILE) logs -f
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) logs -f
 
 restart:
-	docker compose -f $(COMPOSE_FILE) down && docker compose -f $(COMPOSE_FILE) up -d
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) down && docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) up -d
 
 rebuild:
-	docker compose -f $(COMPOSE_FILE) down
-	docker compose -f $(COMPOSE_FILE) build
-	docker compose -f $(COMPOSE_FILE) up -d
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) down
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) build
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) up -d
 
 clean:
-	docker compose -f $(COMPOSE_FILE) down -v --rmi all --remove-orphans
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) down -v --rmi all --remove-orphans
 
 shell-backend:
-	docker compose -f $(COMPOSE_FILE) exec backend sh
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) exec backend sh
 
 shell-frontend:
-	docker compose -f $(COMPOSE_FILE) exec frontend sh
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) exec frontend sh
 
 db-shell:
-	docker compose -f $(COMPOSE_FILE) exec db psql -U user -d game_db
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) exec db psql -U user -d game_db
+
+redis-shell:
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) exec redis redis-cli
+
+# --- Engine ----------------------------------------------------------------
+
+engine-build:
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) build game-engine
+
+engine-test:
+	cd engine && go test ./...
+
+engine-up:
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) up -d redis db game-engine
+
+engine-down:
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) stop game-engine
+
+engine-rebuild:
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) build game-engine
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) up -d game-engine
+
+engine-logs:
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) logs -f game-engine
+
+engine-shell:
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) exec game-engine sh

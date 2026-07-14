@@ -1,42 +1,109 @@
-import { GAME_WIDTH, GAME_HEIGHT, GRID_SIZE } from "../core/constants.js";
+import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H } from "../core/constants.js";
+import { worldToScreen, depthKey } from "../core/iso.js";
+import { drawPlaceholder } from "./placeholderSprite.js";
 
 export class RenderSystem {
-    constructor(canvas, imageManager){
-        this.canvas = canvas;
-        this.ctx = canvas.getContext('2d');
-        this.ctx.imageSmoothingEnabled = false;
-        this.imageManager = imageManager;
+  constructor(canvas, imageManager) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.ctx.imageSmoothingEnabled = false;
+    this.imageManager = imageManager;
+  }
+
+  // Pure, canvas-free: collect every world object into one list tagged with a
+  // depth key, sorted back-to-front for the painter's algorithm.
+  static buildDrawables(player, map, remotePlayers) {
+    const out = [];
+    const entities = (map && map.entities) || [];
+    for (const e of entities) {
+      out.push({ kind: "entity", ref: e, depth: depthKey(e.x, e.y) });
+    }
+    out.push({ kind: "player", ref: player, depth: depthKey(player.x, player.y) });
+    if (remotePlayers) {
+      for (const [userId, p] of remotePlayers) {
+        out.push({ kind: "remote", ref: p, userId, depth: depthKey(p.x, p.y) });
+      }
+    }
+    out.sort((a, b) => a.depth - b.depth);
+    return out;
+  }
+
+  render(player, camera, map, remotePlayers, localUserId) {
+    // Background
+    this.ctx.fillStyle = "#0f3460";
+    this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+    camera.apply(this.ctx);
+
+    // Tiles (drawn first; they underlay all sprites).
+    map.render(this.ctx, camera);
+
+    // Depth-sorted sprites (entities + local + remote players interleaved).
+    const drawables = RenderSystem.buildDrawables(player, map, remotePlayers);
+    for (const d of drawables) {
+      if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
+      else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
+      else this.drawEntity(d.ref);
     }
 
-    render(player, camera, map){
-        // Clear background
-        this.ctx.fillStyle = '#0f3460';
-        this.ctx.fillRect(0,0,GAME_WIDTH,GAME_HEIGHT);
+    camera.reset(this.ctx);
 
-        // Apply camera for world-space objects
-        camera.apply(this.ctx);
-        
-        // Render map (plane)
-        map.render(this.ctx, camera);
-        
-        // Render entities
-        this.renderPlayer(player);
-        
-        // Restore camera transformation
-        camera.reset(this.ctx);
-    }
+    this.renderHud(player, remotePlayers, localUserId);
+  }
 
-    renderPlayer(player){
-        const playerImage = this.imageManager.get('player');
-        
-        if(playerImage){
-            this.ctx.drawImage(playerImage, player.x, player.y, player.width, player.height);
-        } else {
-            //fallback if image not loaded
-            this.ctx.fillStyle = '#1a1a2e';
-            this.ctx.fillRect(player.x,player.y,player.width,player.height);
-            this.ctx.strokeStyle = 'white';
-            this.ctx.strokeRect(player.x,player.y,player.width,player.height);
-        }
+  // Draw a sprite so its feet sit on the tile center for its world (x,y).
+  drawCreature(obj, imageKey, alpha = 1, tag = null) {
+    const w = obj.width || 64;
+    const h = obj.height || 64;
+    // Anchor: project the feet (bottom-center of the world box).
+    const s = worldToScreen(obj.x + w / 2, obj.y + h / 2);
+    const drawX = s.x - w / 2;
+    const drawY = s.y - h + ISO_TILE_H / 2; // lift so feet rest on the diamond
+    const img = this.imageManager.get(imageKey);
+    this.ctx.globalAlpha = alpha;
+    if (img) {
+      this.ctx.drawImage(img, drawX, drawY, w, h);
+    } else {
+      const cx = s.x;
+      const cy = s.y - h / 2 + ISO_TILE_H / 2;
+      drawPlaceholder(this.ctx, cx, cy, w / 2, tag !== null ? "#f59e0b" : "#4a9eff", obj.facing);
     }
+    this.ctx.globalAlpha = 1;
+    if (tag !== null) {
+      this.ctx.fillStyle = "#fff";
+      this.ctx.font = "12px sans-serif";
+      this.ctx.fillText(`#${tag}`, drawX, drawY - 4);
+    }
+  }
+
+  drawEntity(e) {
+    const w = e.displayWidth || e.width || 40;
+    const h = e.displayHeight || e.height || 40;
+    const s = worldToScreen(e.x + (e.width || 40) / 2, e.y + (e.height || 40) / 2);
+    const drawX = s.x - w / 2;
+    const drawY = s.y - h + ISO_TILE_H / 2;
+    const img = e.image && this.imageManager ? this.imageManager.get(e.image) : null;
+    if (img) {
+      this.ctx.drawImage(img, drawX, drawY, w, h);
+    } else {
+      this.ctx.fillStyle = e.color || "#888";
+      this.ctx.fillRect(drawX, drawY, w, h);
+    }
+  }
+
+  renderHud(player, remotePlayers, localUserId) {
+    const remoteCount = remotePlayers ? remotePlayers.size : 0;
+    const lines = [
+      `Players online: ${1 + remoteCount}`,
+      `You: #${localUserId ?? "?"}  pos=(${Math.round(player.x)}, ${Math.round(player.y)})`,
+    ];
+    this.ctx.save();
+    this.ctx.fillStyle = "rgba(0,0,0,0.55)";
+    this.ctx.fillRect(10, 10, 260, 18 * lines.length + 12);
+    this.ctx.fillStyle = "#e5e7eb";
+    this.ctx.font = "13px monospace";
+    this.ctx.textBaseline = "top";
+    lines.forEach((t, i) => this.ctx.fillText(t, 18, 16 + i * 18));
+    this.ctx.restore();
+  }
 }

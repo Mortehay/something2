@@ -36,12 +36,7 @@ export class Entity {
         this.manaRegenRate = 0;
     }
 
-    render(ctx, camera) {
-        // Skip rendering if off screen
-        if (this.x + this.width < camera.x || this.x > camera.x + camera.width || 
-            this.y + this.height < camera.y || this.y > camera.y + camera.height) return;
-
-        ctx.fillStyle = this.color;
-        ctx.fillRect(this.x, this.y, this.width, this.height);
-    }
+    // Drawing is owned by RenderSystem (isometric depth sort). Kept for
+    // backward compatibility if any caller still invokes entity.render.
+    render() {}
 }

@@ -8,8 +8,8 @@ Claude and Codex follow the same rules. This file is the source of truth for bot
 
 - [backend/](backend/) — Node + Express REST API, Postgres persistence, MinIO. See [backend/package.json](backend/package.json).
 - [frontend/](frontend/) — Vite + React 19 client. See [frontend/package.json](frontend/package.json).
-- [engine/](engine/) — Go game engine (collisions, pathfinding, mob AI, websocket server). Currently scaffold only (`bin/`); Go sources not yet committed.
-- [compose/](compose/) — Docker Compose dev stack: db, backend, frontend.
+- [engine/](engine/) — Go game engine: JWT-authed WebSocket hub, 60Hz tick loop, grid-based collisions, Postgres + Redis stores, 5-min batch flush. See [engine/README.md](engine/README.md).
+- [compose/](compose/) — Docker Compose dev stack: frontend, backend, game-engine, db, redis, minio.
 
 ## Project context
 

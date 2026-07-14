@@ -1,4 +1,5 @@
-import { WORLD_WIDTH, WORLD_HEIGHT, MAP_TILE_SIZE } from "./constants.js";
+import { WORLD_WIDTH, WORLD_HEIGHT, MAP_TILE_SIZE, ISO_TILE_W, ISO_TILE_H } from "./constants.js";
+import { worldToScreen } from "./iso.js";
 import { Tree } from "../entities/Tree.js";
 import { Stone } from "../entities/Stone.js";
 import { IceRock } from "../entities/IceRock.js";
@@ -173,50 +174,72 @@ export class Map {
     render(ctx, camera) {
         if (this.tiles.length === 0) return;
 
-        const startCol = Math.floor(camera.x / this.tileSize);
-        const endCol = Math.ceil((camera.x + camera.width) / this.tileSize);
-        const startRow = Math.floor(camera.y / this.tileSize);
-        const endRow = Math.ceil((camera.y + camera.height) / this.tileSize);
+        // Draw tiles as diamonds. Iterate the whole grid but skip diamonds whose
+        // projected center is far outside the canvas (cheap cull using camera center).
+        const halfW = ISO_TILE_W / 2;
+        const halfH = ISO_TILE_H / 2;
+        const cullX = camera.width;   // generous screen-space margins
+        const cullY = camera.height;
 
-        for (let r = Math.max(0, startRow); r < Math.min(this.rows, endRow); r++) {
+        for (let r = 0; r < this.rows; r++) {
             if (!this.tiles[r]) continue;
-            for (let c = Math.max(0, startCol); c < Math.min(this.cols, endCol); c++) {
+            for (let c = 0; c < this.cols; c++) {
                 const tileType = this.tiles[r][c];
                 if (!tileType) continue;
+
+                // World-pixel center of this tile.
+                const wx = c * this.tileSize + this.tileSize / 2;
+                const wy = r * this.tileSize + this.tileSize / 2;
+                const s = worldToScreen(wx, wy);
+
+                // Cull: project relative to camera center.
+                const relX = s.x - camera.screenX;
+                const relY = s.y - camera.screenY;
+                if (relX < -cullX || relX > cullX || relY < -cullY || relY > cullY) continue;
+
                 const tileDef = this.mapTiles ? (this.mapTiles[tileType] || (Array.isArray(this.mapTiles) ? this.mapTiles.find(t => t.name === tileType || t.type === tileType) : null)) : null;
-                ctx.fillStyle = tileDef ? tileDef.color : '#000000';
-                ctx.fillRect(c * this.tileSize, r * this.tileSize, this.tileSize + 0.5, this.tileSize + 0.5);
+                ctx.fillStyle = tileDef ? tileDef.color : "#000000";
+
+                // Diamond centered on (s.x, s.y).
+                ctx.beginPath();
+                ctx.moveTo(s.x, s.y - halfH);
+                ctx.lineTo(s.x + halfW, s.y);
+                ctx.lineTo(s.x, s.y + halfH);
+                ctx.lineTo(s.x - halfW, s.y);
+                ctx.closePath();
+                ctx.fill();
             }
         }
 
-        // Render entities over tiles
-        for (const entity of this.entities) {
-            entity.render(ctx, camera);
+        if (this.showGrid) {
+            this.renderGrid(ctx, camera);
         }
 
-        if (this.showGrid) {
-            this.renderGrid(ctx, camera, startRow, endRow, startCol, endCol);
-        }
+        // NOTE: entities are no longer drawn here. RenderSystem collects and
+        // depth-sorts all drawables (entities + players) so iso overlap is correct.
     }
 
-    renderGrid(ctx, camera, startRow, endRow, startCol, endCol) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    renderGrid(ctx, camera) {
+        const halfW = ISO_TILE_W / 2;
+        const halfH = ISO_TILE_H / 2;
+        ctx.strokeStyle = "rgba(255,255,255,0.1)";
         ctx.lineWidth = 1;
-        ctx.beginPath();
-
-        // Vertical lines
-        for (let c = Math.max(0, startCol); c <= Math.min(this.cols, endCol); c++) {
-            const x = c * this.tileSize;
-            ctx.moveTo(x, Math.max(0, startRow * this.tileSize));
-            ctx.lineTo(x, Math.min(WORLD_HEIGHT, endRow * this.tileSize));
+        for (let r = 0; r < this.rows; r++) {
+            for (let c = 0; c < this.cols; c++) {
+                const wx = c * this.tileSize + this.tileSize / 2;
+                const wy = r * this.tileSize + this.tileSize / 2;
+                const s = worldToScreen(wx, wy);
+                const relX = s.x - camera.screenX;
+                const relY = s.y - camera.screenY;
+                if (relX < -camera.width || relX > camera.width || relY < -camera.height || relY > camera.height) continue;
+                ctx.beginPath();
+                ctx.moveTo(s.x, s.y - halfH);
+                ctx.lineTo(s.x + halfW, s.y);
+                ctx.lineTo(s.x, s.y + halfH);
+                ctx.lineTo(s.x - halfW, s.y);
+                ctx.closePath();
+                ctx.stroke();
+            }
         }
-
-        // Horizontal lines
-        for (let r = Math.max(0, startRow); r <= Math.min(this.rows, endRow); r++) {
-            const y = r * this.tileSize;
-            ctx.moveTo(Math.max(0, startCol * this.tileSize), y);
-            ctx.lineTo(Math.min(WORLD_WIDTH, endCol * this.tileSize), y);
-        }
-        ctx.stroke();
     }
 }

@@ -15,7 +15,7 @@ make down      # stop everything
 
 - `backend/` — Node + Express REST API, Postgres persistence
 - `frontend/` — Vite + React 19 client
-- `engine/` — Go game engine (websocket server) — scaffold only for now
+- `engine/` — Go game engine: WebSocket server, 60Hz tick, JWT auth, Postgres + Redis ([engine/README.md](engine/README.md))
 - `compose/` — Docker Compose dev stack
 
 ## More
