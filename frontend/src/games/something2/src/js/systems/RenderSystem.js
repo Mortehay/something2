@@ -1,5 +1,6 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
+import { drawPlaceholder } from "./placeholderSprite.js";
 
 export class RenderSystem {
   constructor(canvas, imageManager) {
@@ -63,10 +64,9 @@ export class RenderSystem {
     if (img) {
       this.ctx.drawImage(img, drawX, drawY, w, h);
     } else {
-      this.ctx.fillStyle = tag !== null ? "#f59e0b" : "#1a1a2e";
-      this.ctx.fillRect(drawX, drawY, w, h);
-      this.ctx.strokeStyle = "white";
-      this.ctx.strokeRect(drawX, drawY, w, h);
+      const cx = s.x;
+      const cy = s.y - h / 2 + ISO_TILE_H / 2;
+      drawPlaceholder(this.ctx, cx, cy, w / 2, tag !== null ? "#f59e0b" : "#4a9eff", obj.facing);
     }
     this.ctx.globalAlpha = 1;
     if (tag !== null) {
