@@ -1,0 +1,7 @@
+-r requirements-dev.txt
+torch==2.3.*
+diffusers==0.29.*
+transformers==4.42.*
+controlnet-aux==0.0.9
+accelerate==0.31.*
+rembg==2.0.*
