@@ -16,9 +16,15 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Database setup
-const pool = new Pool({
+let pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
+// Test seam: lets tests swap in a mock pool so routes don't need a live DB.
+const __setPool = (impl) => { pool = impl; };
+
+// Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
+let spriteGen = require('./services/spriteGen');
+const __setSpriteGen = (impl) => { spriteGen = impl; };
 
 const runner = require('node-pg-migrate').default;
 
@@ -38,7 +44,11 @@ async function runMigrations() {
   }
 }
 
-runMigrations();
+// Only run migrations (and later, app.listen) when this file is executed
+// directly, not when it's required (e.g. by tests importing `app`).
+if (require.main === module) {
+  runMigrations();
+}
 
 // Helper to get tile types in the format expected by the game engine
 async function getTileTypesMap() {
@@ -492,7 +502,57 @@ app.post('/api/maps/:id/generate-entities', async (req, res) => {
   }
 });
 
-
-app.listen(port, () => {
-  console.log(`Backend server running on port ${port}`);
+// Sprite-gen admin bridge: kick off a generation job with the sprite-gen
+// service and record it as a queued sprite_sets row.
+app.post('/api/sprite-jobs', async (req, res) => {
+  try {
+    const { entity_type, base_prompt, backend = 'stub', frames = 4, seed = 0 } = req.body;
+    const gen = await spriteGen.postGenerate({ creature: entity_type, base_prompt, backend, frames, seed });
+    const row = await pool.query(
+      `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
+       VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
+      [entity_type, backend, seed, frames, gen.job_id]
+    );
+    res.status(201).json({ ...row.rows[0], job_id: gen.job_id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to start sprite job' });
+  }
 });
+
+// Proxy job status from the sprite-gen service.
+app.get('/api/sprite-jobs/:jobId', async (req, res) => {
+  try {
+    const job = await spriteGen.getJob(req.params.jobId);
+    res.json(job);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch job' });
+  }
+});
+
+// Approve a generated sprite set and link it to an entity type.
+// :id is entity_types.id (integer); pg casts the string param automatically.
+app.post('/api/entity-types/:id/sprite', async (req, res) => {
+  try {
+    const { atlas_key, manifest_key, job_id } = req.body;
+    const result = await pool.query(
+      `UPDATE sprite_sets SET atlas_key = $1, manifest_key = $2, status = 'approved', entity_type_id = $3
+       WHERE job_id = $4 RETURNING *`,
+      [atlas_key, manifest_key, req.params.id, job_id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Sprite set not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save sprite' });
+  }
+});
+
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Backend server running on port ${port}`);
+  });
+}
+
+module.exports = { app, __setSpriteGen, __setPool };
