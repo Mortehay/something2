@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useEntityTypes, useCreateEntityType, useUpdateEntityType, useDeleteEntityType, useTileTypes } from './useMaps.js';
-import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
+import { useGenerateSprite, useSpriteJob, useApproveSprite } from './useSprites.js';
+import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
+
+const MINIO_URL = import.meta.env.VITE_MINIO_URL || 'http://localhost:19000';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -187,14 +190,16 @@ const FormGroup = styled.div`
     font-weight: bold;
   }
   
-  input, select {
+  input, select, textarea {
     background: #0f0f1a;
     border: 1px solid rgba(250, 204, 21, 0.3);
     color: white;
     padding: 1rem;
     border-radius: 8px;
     font-size: 1.4rem;
-    
+    font-family: inherit;
+    resize: vertical;
+
     &:focus {
       outline: none;
       border-color: #facc15;
@@ -246,6 +251,218 @@ const SecondaryButton = styled.button`
   
   &:hover { background: rgba(255, 255, 255, 0.05); }
 `;
+
+/* Sprite Panel Styles */
+const SpriteSection = styled.div`
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+`;
+
+const SpriteToggle = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  color: #facc15;
+  font-weight: bold;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 0;
+
+  &:hover { color: #fde047; }
+`;
+
+const SpriteBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+`;
+
+const SpriteRow = styled.div`
+  display: flex;
+  gap: 1rem;
+`;
+
+const SpriteProgress = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 1.1rem;
+  color: #ccc;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(250, 204, 21, 0.15);
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+`;
+
+const SpriteError = styled.div`
+  font-size: 1.1rem;
+  color: #ef4444;
+`;
+
+const SpritePreview = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-start;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(250, 204, 21, 0.15);
+  border-radius: 8px;
+  padding: 1rem;
+`;
+
+const AtlasImage = styled.img`
+  max-width: 100%;
+  max-height: 200px;
+  image-rendering: pixelated;
+  border: 1px solid rgba(250, 204, 21, 0.3);
+  border-radius: 4px;
+  background: #0f0f1a;
+`;
+
+const KeyLabel = styled.span`
+  font-size: 1rem;
+  color: #aaa;
+  word-break: break-all;
+`;
+
+function SpritePanel({ entity }) {
+  const [expanded, setExpanded] = useState(false);
+  const [backend, setBackend] = useState('stub');
+  const [frames, setFrames] = useState(4);
+  const [seed, setSeed] = useState(0);
+  const [basePrompt, setBasePrompt] = useState('');
+  const [jobId, setJobId] = useState(null);
+  const [atlasErrored, setAtlasErrored] = useState(false);
+
+  const generateSprite = useGenerateSprite();
+  const { data: job } = useSpriteJob(jobId);
+  const approveSprite = useApproveSprite();
+
+  const handleGenerate = () => {
+    if (!basePrompt.trim()) {
+      toast.error('Base prompt is required');
+      return;
+    }
+    setAtlasErrored(false);
+    generateSprite.mutate(
+      {
+        entity_type: entity.name,
+        base_prompt: basePrompt,
+        backend,
+        frames: parseInt(frames, 10) || 1,
+        seed: parseInt(seed, 10) || 0
+      },
+      { onSuccess: (data) => setJobId(data.job_id) }
+    );
+  };
+
+  const handleApprove = () => {
+    if (!job?.result) return;
+    approveSprite.mutate({
+      entityTypeId: entity.id,
+      job_id: jobId,
+      atlas_key: job.result.atlas_key,
+      manifest_key: job.result.manifest_key
+    });
+  };
+
+  const status = job?.status;
+  const progressDone = job?.progress?.done ?? 0;
+  const progressTotal = job?.progress?.total ?? 0;
+  const atlasUrl = job?.result?.atlas_key ? `${MINIO_URL}/${job.result.atlas_key}` : null;
+
+  return (
+    <SpriteSection>
+      <SpriteToggle type="button" onClick={() => setExpanded(prev => !prev)}>
+        <span>Sprites</span>
+        {expanded ? <HiOutlineChevronUp /> : <HiOutlineChevronDown />}
+      </SpriteToggle>
+
+      {expanded && (
+        <SpriteBody>
+          <FormGroup>
+            <label>Backend</label>
+            <select value={backend} onChange={e => setBackend(e.target.value)}>
+              <option value="stub">stub (instant placeholder)</option>
+              <option value="sd15">SD 1.5 + ControlNet</option>
+              <option value="sd-turbo">SD-Turbo (fast)</option>
+              <option value="sdxl">SDXL + ControlNet</option>
+            </select>
+          </FormGroup>
+
+          <SpriteRow>
+            <FormGroup style={{ flex: 1 }}>
+              <label>Frames</label>
+              <input
+                type="number"
+                min="1"
+                max="16"
+                value={frames}
+                onChange={e => setFrames(e.target.value)}
+              />
+            </FormGroup>
+            <FormGroup style={{ flex: 1 }}>
+              <label>Seed</label>
+              <input
+                type="number"
+                value={seed}
+                onChange={e => setSeed(e.target.value)}
+              />
+            </FormGroup>
+          </SpriteRow>
+
+          <FormGroup>
+            <label>Base Prompt</label>
+            <textarea
+              rows={2}
+              value={basePrompt}
+              onChange={e => setBasePrompt(e.target.value)}
+              placeholder={`a ${entity.name}, fantasy creature, game sprite`}
+            />
+          </FormGroup>
+
+          <MainButton type="button" onClick={handleGenerate} disabled={generateSprite.isPending}>
+            {generateSprite.isPending ? 'Starting...' : 'Generate'}
+          </MainButton>
+
+          {jobId && (
+            <SpriteProgress>
+              <span>Status: {status || 'starting...'}</span>
+              {progressTotal > 0 && <span>{progressDone}/{progressTotal} frames</span>}
+            </SpriteProgress>
+          )}
+
+          {status === 'error' && (
+            <SpriteError>Error: {job?.error || 'sprite generation failed'}</SpriteError>
+          )}
+
+          {status === 'done' && (
+            <SpritePreview>
+              {atlasUrl && !atlasErrored ? (
+                <AtlasImage
+                  src={atlasUrl}
+                  alt={`${entity.name} sprite atlas`}
+                  onError={() => setAtlasErrored(true)}
+                />
+              ) : (
+                <KeyLabel>Atlas: {job?.result?.atlas_key || 'unavailable'}</KeyLabel>
+              )}
+              <MainButton type="button" onClick={handleApprove} disabled={approveSprite.isPending}>
+                {approveSprite.isPending ? 'Approving...' : 'Approve'}
+              </MainButton>
+            </SpritePreview>
+          )}
+        </SpriteBody>
+      )}
+    </SpriteSection>
+  );
+}
 
 function EntityTypesAdmin() {
   const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
@@ -441,6 +658,8 @@ function EntityTypesAdmin() {
                 )}
               </TagCloud>
             </SpawnList>
+
+            <SpritePanel entity={entity} />
           </EntityCard>
         ))}
       </EntityGrid>
