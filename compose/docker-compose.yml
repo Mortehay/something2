@@ -32,6 +32,7 @@ services:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
+      - SPRITE_GEN_URL=http://sprite-gen:8100
     depends_on:
       - db
       - minio
@@ -59,6 +60,26 @@ services:
     depends_on:
       - db
       - redis
+
+  sprite-gen:
+    build:
+      context: .
+      dockerfile: sprite-gen/Dockerfile
+    ports:
+      - "18100:8100"
+    environment:
+      - DEVICE=cpu
+      - SPRITE_BACKEND=stub
+      - SPRITE_STORE_ENABLED=true
+      - N_FRAMES=4
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=sprites
+    volumes:
+      - sprite-models:/root/.cache/huggingface
+    depends_on:
+      - minio
 
   db:
     image: postgres:15-alpine
@@ -95,3 +116,4 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  sprite-models:
