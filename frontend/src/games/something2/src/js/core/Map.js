@@ -154,7 +154,9 @@ export class Map {
                         inst.type = entityDef.name;
                         inst.color = entityDef.color;
                         inst.walkable = entityDef.walkable;
-                        
+                        inst.render_mode = entityDef.render_mode;
+                        inst.image = entityDef.image;
+
                         this.entities.push(inst);
                         // We could break here if we only want one entity per tile, 
                         // but allowing multiple is more flexible.

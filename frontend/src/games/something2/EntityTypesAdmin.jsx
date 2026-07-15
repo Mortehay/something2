@@ -511,6 +511,7 @@ function EntityTypesAdmin() {
     spawn_tiles: [],
     chance: 0.1,
     image: '',
+    render_mode: 'rect',
     strength: 0,
     dexterity: 0,
     constitution: 0,
@@ -536,6 +537,7 @@ function EntityTypesAdmin() {
         spawn_tiles: editingEntity.spawn_tiles || [],
         chance: editingEntity.chance,
         image: editingEntity.image || '',
+        render_mode: editingEntity.render_mode || 'rect',
         strength: editingEntity.strength || 0,
         dexterity: editingEntity.dexterity || 0,
         constitution: editingEntity.constitution || 0,
@@ -559,6 +561,7 @@ function EntityTypesAdmin() {
         spawn_tiles: [],
         chance: 0.1,
         image: '',
+        render_mode: 'rect',
         strength: 10,
         dexterity: 10,
         constitution: 10,
@@ -762,11 +765,23 @@ function EntityTypesAdmin() {
 
               <FormGroup>
                 <label>Image Asset Path/URL</label>
-                <input 
-                  value={formData.image} 
+                <input
+                  value={formData.image}
                   onChange={e => setFormData({...formData, image: e.target.value})}
                   placeholder="e.g. /assets/entities/player.png"
                 />
+              </FormGroup>
+
+              <FormGroup>
+                <label>Render Mode</label>
+                <select
+                  value={formData.render_mode}
+                  onChange={e => setFormData({...formData, render_mode: e.target.value})}
+                >
+                  <option value="rect">rect — colored rectangle (default, fast)</option>
+                  <option value="static">static — image sprite</option>
+                  <option value="animated">animated — moving sprite</option>
+                </select>
               </FormGroup>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>

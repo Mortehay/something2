@@ -221,6 +221,12 @@ export class Game {
             if(key === 'g' && this.state === 'playing'){
                 this.map.toggleGrid();
             }
+
+            // Dev: cycle the global render-mode override (none -> rect -> static -> animated).
+            if(key === 'm' && this.state === 'playing'){
+                const mode = this.renderSystem.cycleRenderModeOverride();
+                console.log(`Render-mode override: ${mode ?? 'off (per-entity)'}`);
+            }
         };
 
         this._keyupHandler = (e) => {

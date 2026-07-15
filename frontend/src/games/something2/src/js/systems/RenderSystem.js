@@ -8,6 +8,23 @@ export class RenderSystem {
     this.ctx = canvas.getContext("2d");
     this.ctx.imageSmoothingEnabled = false;
     this.imageManager = imageManager;
+    // Global render-mode override (dev toggle). null = use each entity's own
+    // renderMode; a mode string forces every entity to that mode.
+    this.renderModeOverride = null;
+  }
+
+  // Effective render mode for an entity: the global override wins, else the
+  // entity type's own render_mode, else 'rect' (the safe default).
+  static resolveRenderMode(entity, override = null) {
+    return override || entity.renderMode || entity.render_mode || "rect";
+  }
+
+  // Dev cycle: none -> force rect -> force static -> force animated -> none.
+  cycleRenderModeOverride() {
+    const order = [null, "rect", "static", "animated"];
+    const next = order[(order.indexOf(this.renderModeOverride) + 1) % order.length];
+    this.renderModeOverride = next;
+    return next;
   }
 
   // Pure, canvas-free: collect every world object into one list tagged with a
@@ -82,7 +99,15 @@ export class RenderSystem {
     const s = worldToScreen(e.x + (e.width || 40) / 2, e.y + (e.height || 40) / 2);
     const drawX = s.x - w / 2;
     const drawY = s.y - h + ISO_TILE_H / 2;
-    const img = e.image && this.imageManager ? this.imageManager.get(e.image) : null;
+
+    const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
+    // Only the sprite modes look for an image; 'rect' never does. Degrade
+    // animated -> static -> rect: both sprite modes currently draw the static
+    // image (the animated frame path lands in SOMET-43), and a missing asset
+    // falls through to a rectangle so nothing disappears.
+    const img = mode !== "rect" && e.image && this.imageManager
+      ? this.imageManager.get(e.image)
+      : null;
     if (img) {
       this.ctx.drawImage(img, drawX, drawY, w, h);
     } else {
