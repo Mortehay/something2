@@ -18,6 +18,19 @@ export function useGenerateSprite() {
   });
 }
 
+export function useSpriteCapability() {
+  return useQuery({
+    queryKey: ["sprite-capability"],
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const res = await fetch(`${API}/api/sprite-capability`);
+      if (!res.ok) throw new Error("sprite service unavailable");
+      return res.json();
+    },
+  });
+}
+
 export function useSpriteJob(jobId) {
   return useQuery({
     queryKey: ["sprite-jobs", jobId],
