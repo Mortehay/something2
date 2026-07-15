@@ -1,7 +1,7 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
-import { frameRect, staticFrameKey } from "./spriteAtlas.js";
+import { frameRect, staticFrameKey, animatedFrameKey, facingToDir } from "./spriteAtlas.js";
 
 export class RenderSystem {
   constructor(canvas, imageManager) {
@@ -47,6 +47,8 @@ export class RenderSystem {
   }
 
   render(player, camera, map, remotePlayers, localUserId) {
+    // Timestamp for this frame; animated sprites advance off it.
+    this.nowMs = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
     // Background
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -96,13 +98,18 @@ export class RenderSystem {
 
   // Resolve the atlas image + source-crop rect for an entity in a sprite mode,
   // or null to fall through. Requires a loaded atlas and an attached manifest.
-  static resolveSprite(entity, imageManager, mode) {
+  // Animated mode cycles the facing's frames at timeMs; static shows one frame.
+  static resolveSprite(entity, imageManager, mode, timeMs = 0) {
     if (mode === "rect" || !entity.sprite || !imageManager) return null;
     const atlas = imageManager.get(entity.sprite.atlas_key);
     const manifest = entity.sprite.manifest;
     if (!atlas || !manifest) return null;
-    // Static shows a representative frame; animated frame selection is SOMET-43.
-    const rect = frameRect(manifest, staticFrameKey(entity.sprite, manifest));
+    // Animated -> cycle the facing's frames, degrading to the static frame if
+    // that direction has none; static -> a single representative frame.
+    const key = mode === "animated"
+      ? (animatedFrameKey(manifest, facingToDir(entity.facing), timeMs) || staticFrameKey(entity.sprite, manifest))
+      : staticFrameKey(entity.sprite, manifest);
+    const rect = frameRect(manifest, key);
     return rect ? { img: atlas, crop: rect } : null;
   }
 
@@ -115,7 +122,7 @@ export class RenderSystem {
 
     const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
     // Preferred sprite path: crop a frame out of the generated atlas.
-    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode);
+    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs);
     if (sprite) {
       const [sx, sy, sw, sh] = sprite.crop;
       this.ctx.drawImage(sprite.img, sx, sy, sw, sh, drawX, drawY, w, h);

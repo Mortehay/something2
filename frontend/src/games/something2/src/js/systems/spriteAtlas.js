@@ -20,3 +20,26 @@ export function staticFrameKey(sprite, manifest) {
   const keys = Object.keys(frames);
   return keys.length ? keys[0] : null;
 }
+
+const DIRS = new Set(["N", "NE", "E", "SE", "S", "SW", "W", "NW"]);
+
+// Facing (already a DIR string in this engine) -> a valid manifest direction,
+// defaulting to "S" for entities that don't face (obstacles).
+export function facingToDir(facing) {
+  return DIRS.has(facing) ? facing : "S";
+}
+
+// The animated frame key for a direction at time `timeMs`: cycles that
+// direction's frames at `fps`. Returns null if the direction has no frames.
+export function animatedFrameKey(manifest, dir, timeMs, fps = 6) {
+  const frames = (manifest && manifest.frames) || {};
+  const prefix = `${dir}/`;
+  const idxs = Object.keys(frames)
+    .filter((k) => k.startsWith(prefix))
+    .map((k) => parseInt(k.slice(prefix.length), 10))
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+  if (!idxs.length) return null;
+  const i = Math.floor((timeMs / 1000) * fps) % idxs.length;
+  return `${dir}/${idxs[i]}`;
+}
