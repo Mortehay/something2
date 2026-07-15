@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWFC } = require('./services/mapService');
+const { generateWorld } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -335,13 +335,14 @@ app.get('/api/maps/:id', async (req, res) => {
 // Generate a new map
 app.post('/api/maps/generate', async (req, res) => {
   try {
-    const { name, description, rows = 100, cols = 100 } = req.body;
-    
+    const { name, description, rows = 100, cols = 100, seed } = req.body;
+
     console.log(`Generating map: ${name} (${rows}x${cols})`);
-    
+
     // Fetch tile types from DB for generation
     const tileTypes = await getTileTypesMap();
-    const mapData = generateWFC(rows, cols, tileTypes);
+    const worldSeed = Number.isFinite(seed) ? seed : Date.now();
+    const mapData = generateWorld(rows, cols, tileTypes, { seed: worldSeed });
     
     const result = await pool.query(
       'INSERT INTO maps (name, data, description) VALUES ($1, $2, $3) RETURNING id, name, created_at',
