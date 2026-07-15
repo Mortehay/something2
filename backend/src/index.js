@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -460,22 +460,20 @@ app.post('/api/maps/:id/generate-entities', async (req, res) => {
     const typeResult = await client.query('SELECT * FROM entity_types');
     const entityTypes = typeResult.rows.filter((t) => t.walkable === false);
 
-    const generated = [];
-    const rows = tiles.length;
-    const cols = tiles[0].length;
-
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const tileType = tiles[r][c];
-        const possible = entityTypes.filter((t) => t.spawn_tiles && t.spawn_tiles.includes(tileType));
-        for (const def of possible) {
-          if (Math.random() < def.chance) {
-            generated.push({ entity_type_id: def.id, name: def.name, row: r, col: c });
-            break;
-          }
-        }
-      }
-    }
+    // Density-driven clustered placement: objects clump (forest stands), while
+    // carved paths and clearings stay open. Deterministic per optional seed.
+    const pathTile = detectPathTile(uniqueTileNames(tiles));
+    const placeSeed = Number.isFinite(req.body?.seed) ? req.body.seed : Date.now();
+    const { placed } = placeEntities(tiles, entityTypes, {
+      seed: placeSeed,
+      pathTiles: pathTile ? [pathTile] : [],
+    });
+    const generated = placed.map((p) => ({
+      entity_type_id: p.def.id,
+      name: p.def.name,
+      row: p.row,
+      col: p.col,
+    }));
 
     await client.query('BEGIN');
     await client.query(`DELETE FROM map_entities WHERE map_id = $1 AND type = 'obstacle'`, [id]);

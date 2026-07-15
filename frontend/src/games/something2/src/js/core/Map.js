@@ -135,32 +135,48 @@ export class Map {
             name, ...config
         }));
 
-        for (let r = 0; r < this.rows; r++) {
-            for (let c = 0; c < this.cols; c++) {
-                const tileType = this.tiles[r][c];
-                if (!tileType) continue;
+        // Clustered placement: seed clusters and grow them (denser toward the
+        // center) so objects clump into stands instead of the uniform scatter a
+        // per-tile roll produced. Carved paths are avoided; one object per tile.
+        // Mirrors the backend density model in mapService.placeEntities.
+        const PATH_RE = /path|dirt|road|trail|earth|sand/i;
+        const occupied = new Set();
+        const radius = Math.max(2, Math.round(Math.min(this.rows, this.cols) / 12));
 
-                // Find all entity types that can spawn on this tile
-                const possibleEntities = entityTypesList.filter(entity => entity.spawnTiles && entity.spawnTiles.includes(tileType));
-                
-                for (const entityDef of possibleEntities) {
-                    if (Math.random() < entityDef.chance) {
-                        let inst = null;
-                        if (entityDef.name === 'Tree') inst = new Tree(r, c);
-                        else if (entityDef.name === 'Stone') inst = new Stone(r, c);
-                        else if (entityDef.name === 'IceRock') inst = new IceRock(r, c);
-                        else inst = new Entity(r, c);
+        const makeInst = (entityDef, r, c) => {
+            let inst;
+            if (entityDef.name === 'Tree') inst = new Tree(r, c);
+            else if (entityDef.name === 'Stone') inst = new Stone(r, c);
+            else if (entityDef.name === 'IceRock') inst = new IceRock(r, c);
+            else inst = new Entity(r, c);
+            inst.type = entityDef.name;
+            inst.color = entityDef.color;
+            inst.walkable = entityDef.walkable;
+            inst.render_mode = entityDef.render_mode;
+            inst.image = entityDef.image;
+            return inst;
+        };
 
-                        inst.type = entityDef.name;
-                        inst.color = entityDef.color;
-                        inst.walkable = entityDef.walkable;
-                        inst.render_mode = entityDef.render_mode;
-                        inst.image = entityDef.image;
-
-                        this.entities.push(inst);
-                        // We could break here if we only want one entity per tile, 
-                        // but allowing multiple is more flexible.
-                        break; 
+        for (const entityDef of entityTypesList) {
+            if (!entityDef.spawnTiles || entityDef.spawnTiles.length === 0) continue;
+            const clusters = Math.max(1, Math.round((this.rows * this.cols * (entityDef.chance || 0)) / 40));
+            for (let k = 0; k < clusters; k++) {
+                const cr = Math.floor(Math.random() * this.rows);
+                const cc = Math.floor(Math.random() * this.cols);
+                for (let r = Math.max(0, cr - radius); r <= Math.min(this.rows - 1, cr + radius); r++) {
+                    for (let c = Math.max(0, cc - radius); c <= Math.min(this.cols - 1, cc + radius); c++) {
+                        const key = r * this.cols + c;
+                        if (occupied.has(key)) continue;
+                        const tileType = this.tiles[r][c];
+                        if (!tileType || PATH_RE.test(tileType)) continue;
+                        if (!entityDef.spawnTiles.includes(tileType)) continue;
+                        const dist = Math.sqrt((r - cr) ** 2 + (c - cc) ** 2);
+                        if (dist > radius) continue;
+                        // Denser toward the cluster center.
+                        if (Math.random() < 0.85 * (1 - dist / radius)) {
+                            this.entities.push(makeInst(entityDef, r, c));
+                            occupied.add(key);
+                        }
                     }
                 }
             }

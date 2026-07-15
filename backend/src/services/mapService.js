@@ -172,10 +172,15 @@ function generateWorld(rows, cols, tileTypes, options = {}) {
     const rng = makeRng(seed);
 
     // Stage A: biome field -> map each tile's noise value to a tile-type band.
+    // Exclude the path tile from the biome bands (when other tiles exist) so
+    // carved paths read as distinct trails rather than blending into a biome.
+    const biomeNames = pathTile && names.length > 1
+        ? names.filter((n) => n !== pathTile)
+        : names;
     const field = valueNoise(rows, cols, cellSize, rng);
     const grid = field.map((row) => row.map((v) => {
-        const idx = Math.min(names.length - 1, Math.floor(v * names.length));
-        return names[idx];
+        const idx = Math.min(biomeNames.length - 1, Math.floor(v * biomeNames.length));
+        return biomeNames[idx];
     }));
 
     // Stage B: carve winding paths between anchor points (if a path tile exists).
@@ -186,13 +191,100 @@ function generateWorld(rows, cols, tileTypes, options = {}) {
     return grid;
 }
 
+// --- Density-driven object placement --------------------------------------
+//
+// Replaces the flat per-tile `Math.random() < chance` roll (which scatters
+// objects uniformly) with a smooth density field so objects CLUMP: forests
+// form dense stands, open ground stays sparse, carved paths and deliberate
+// clearings stay empty, and optional landmarks seed dense groves.
+//
+// entityDefs: [{ chance, spawnTiles: string[], ...anything }]. Returns
+// { placed: [{ def, row, col }], clearings: [[r,c]], landmarks: [[r,c]] }.
+function uniqueTileNames(tiles) {
+    const s = new Set();
+    for (const row of tiles) for (const t of row) s.add(t);
+    return [...s];
+}
+
+function placeEntities(tiles, entityDefs, options = {}) {
+    const rows = tiles.length;
+    const cols = rows ? tiles[0].length : 0;
+    if (!rows || !cols || !entityDefs || entityDefs.length === 0) {
+        return { placed: [], clearings: [], landmarks: [] };
+    }
+
+    const {
+        seed = 0,
+        cellSize = Math.max(4, Math.round(Math.min(rows, cols) / 8)),
+        clearings = 3,
+        landmarks = 1,
+        fill = 0.85,   // fraction of an in-clump tile that actually gets an object
+        gain = 3,      // how much a def's `chance` expands into contiguous area
+        pathTiles = detectPathTile(uniqueTileNames(tiles)),
+    } = options;
+
+    const pathSet = new Set(
+        Array.isArray(pathTiles) ? pathTiles : (pathTiles ? [pathTiles] : [])
+    );
+
+    const rng = makeRng(seed);
+    const field = valueNoise(rows, cols, cellSize, rng);
+    // Hard-exclusion mask (clearings): kept separate from the density field so
+    // a clearing stays empty even when a high `chance` pushes the threshold to 0.
+    const blocked = Array.from({ length: rows }, () => new Array(cols).fill(false));
+
+    const disc = (cr, cc, radius, fn) => {
+        for (let r = Math.max(0, cr - radius); r <= Math.min(rows - 1, cr + radius); r++) {
+            for (let c = Math.max(0, cc - radius); c <= Math.min(cols - 1, cc + radius); c++) {
+                if ((r - cr) ** 2 + (c - cc) ** 2 <= radius * radius) fn(r, c);
+            }
+        }
+    };
+
+    const radius = Math.max(2, Math.round(Math.min(rows, cols) / 10));
+    const clearingCenters = [];
+    for (let i = 0; i < clearings; i++) {
+        const cr = Math.floor(rng() * rows), cc = Math.floor(rng() * cols);
+        clearingCenters.push([cr, cc]);
+        disc(cr, cc, radius, (r, c) => { blocked[r][c] = true; }); // open clearing
+    }
+    const landmarkCenters = [];
+    for (let i = 0; i < landmarks; i++) {
+        const cr = Math.floor(rng() * rows), cc = Math.floor(rng() * cols);
+        landmarkCenters.push([cr, cc]);
+        disc(cr, cc, Math.max(2, Math.round(radius * 0.6)), (r, c) => { field[r][c] = 1; }); // dense grove
+    }
+
+    const placed = [];
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const t = tiles[r][c];
+            if (pathSet.has(t) || blocked[r][c]) continue; // paths + clearings stay open
+            const d = field[r][c];
+            for (const def of entityDefs) {
+                const spawn = def.spawnTiles || def.spawn_tiles;
+                if (!spawn || !spawn.includes(t)) continue;
+                const threshold = 1 - clamp((def.chance || 0) * gain, 0, 1);
+                if (d >= threshold && rng() < fill) {
+                    placed.push({ def, row: r, col: c });
+                    break; // one object per tile
+                }
+            }
+        }
+    }
+
+    return { placed, clearings: clearingCenters, landmarks: landmarkCenters };
+}
+
 module.exports = {
     generateWFC,
     generateWorld,
+    placeEntities,
     // exported for unit testing / reuse
     makeRng,
     valueNoise,
     detectPathTile,
     carvePaths,
+    uniqueTileNames,
 };
 
