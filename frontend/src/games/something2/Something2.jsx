@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker } from "react-icons/hi2";
@@ -10,6 +10,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
 const ENGINE_WS_URL = import.meta.env.VITE_ENGINE_WS_URL || 'ws://localhost:18080/ws';
 import TileTypesAdmin from "./TileTypesAdmin";
 import EntityTypesAdmin from "./EntityTypesAdmin";
+import MapPreview from "./MapPreview.jsx";
 
 const StyledGameContainer = styled.div`
   display: flex;
@@ -172,6 +173,17 @@ export default function Something2() {
   const { maps, isLoadingMaps } = useMaps();
   const { mapTiles, isLoadingMapTiles } = useMapTiles();
   const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
+
+  // name -> color for the minimap preview (mapTiles is keyed by tile name).
+  const tileColors = useMemo(() => {
+    const m = {};
+    if (mapTiles && typeof mapTiles === 'object') {
+      for (const [name, def] of Object.entries(mapTiles)) {
+        m[name] = (def && typeof def === 'object') ? def.color : def;
+      }
+    }
+    return m;
+  }, [mapTiles]);
 
   const generateMapMutation = useGenerateMap((newMap) => {
     setSelectedMapId(newMap.id);
@@ -434,6 +446,17 @@ export default function Something2() {
             </PauseOverlay>
           )}
 
+          {!isPlaying && selectedMapId && (
+            <MapPreview mapId={selectedMapId} tileColors={tileColors} />
+          )}
+          {!isPlaying && !selectedMapId && (
+            <div style={{
+              width: '100%', height: '100%', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', color: 'rgba(255,255,255,0.35)', fontSize: '15px'
+            }}>
+              Select a world to preview it, then Enter World.
+            </div>
+          )}
           <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: isPlaying ? 'block' : 'none' }} />
           </>
         )}
