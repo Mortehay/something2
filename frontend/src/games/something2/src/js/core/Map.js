@@ -154,6 +154,7 @@ export class Map {
             inst.walkable = entityDef.walkable;
             inst.render_mode = entityDef.render_mode;
             inst.image = entityDef.image;
+            inst.sprite = entityDef.sprite;
             return inst;
         };
 

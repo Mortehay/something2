@@ -1,6 +1,7 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
+import { frameRect, staticFrameKey } from "./spriteAtlas.js";
 
 export class RenderSystem {
   constructor(canvas, imageManager) {
@@ -93,6 +94,18 @@ export class RenderSystem {
     }
   }
 
+  // Resolve the atlas image + source-crop rect for an entity in a sprite mode,
+  // or null to fall through. Requires a loaded atlas and an attached manifest.
+  static resolveSprite(entity, imageManager, mode) {
+    if (mode === "rect" || !entity.sprite || !imageManager) return null;
+    const atlas = imageManager.get(entity.sprite.atlas_key);
+    const manifest = entity.sprite.manifest;
+    if (!atlas || !manifest) return null;
+    // Static shows a representative frame; animated frame selection is SOMET-43.
+    const rect = frameRect(manifest, staticFrameKey(entity.sprite, manifest));
+    return rect ? { img: atlas, crop: rect } : null;
+  }
+
   drawEntity(e) {
     const w = e.displayWidth || e.width || 40;
     const h = e.displayHeight || e.height || 40;
@@ -101,10 +114,15 @@ export class RenderSystem {
     const drawY = s.y - h + ISO_TILE_H / 2;
 
     const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
-    // Only the sprite modes look for an image; 'rect' never does. Degrade
-    // animated -> static -> rect: both sprite modes currently draw the static
-    // image (the animated frame path lands in SOMET-43), and a missing asset
-    // falls through to a rectangle so nothing disappears.
+    // Preferred sprite path: crop a frame out of the generated atlas.
+    const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode);
+    if (sprite) {
+      const [sx, sy, sw, sh] = sprite.crop;
+      this.ctx.drawImage(sprite.img, sx, sy, sw, sh, drawX, drawY, w, h);
+      return;
+    }
+    // Legacy single-image fallback (whole image) still honored in sprite modes;
+    // then degrade to a rectangle so a missing asset never leaves a hole.
     const img = mode !== "rect" && e.image && this.imageManager
       ? this.imageManager.get(e.image)
       : null;

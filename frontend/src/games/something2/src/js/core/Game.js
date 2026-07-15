@@ -63,6 +63,39 @@ export class Game {
         }
     }
 
+    // Load each sprited entity type's atlas image + manifest from MinIO and
+    // attach the manifest to the type's sprite descriptor. Because entity
+    // instances share that descriptor object (Object.assign copies the ref),
+    // attaching here also lights up already-created entities. Any failure
+    // leaves the manifest unset, so rendering degrades to a rectangle.
+    async preloadSprites(entityTypes) {
+        if (!entityTypes) return;
+        const MINIO = (import.meta.env && import.meta.env.VITE_MINIO_URL) || 'http://localhost:19000';
+        const byAtlas = {};
+        for (const name in entityTypes) {
+            const spr = entityTypes[name] && entityTypes[name].sprite;
+            if (spr && spr.atlas_key) byAtlas[spr.atlas_key] = spr;
+        }
+        const manifests = {};
+        await Promise.all(Object.values(byAtlas).map(async (spr) => {
+            await this.imageManager.load(spr.atlas_key, `${MINIO}/${spr.atlas_key}`);
+            try {
+                const res = await fetch(`${MINIO}/${spr.manifest_key}`);
+                if (res.ok) manifests[spr.atlas_key] = await res.json();
+            } catch { /* leave unset -> rect fallback */ }
+        }));
+        for (const name in entityTypes) {
+            const spr = entityTypes[name] && entityTypes[name].sprite;
+            if (spr && spr.atlas_key && manifests[spr.atlas_key]) spr.manifest = manifests[spr.atlas_key];
+        }
+        // Also attach to any entities whose sprite is a distinct object.
+        for (const ent of this.map.entities) {
+            if (ent.sprite && ent.sprite.atlas_key && manifests[ent.sprite.atlas_key]) {
+                ent.sprite.manifest = manifests[ent.sprite.atlas_key];
+            }
+        }
+    }
+
     async init(tiles = null, mapTiles = null, loadedEntities = null, entityTypes = null){
         if (!this.canvas) {
             console.error("Canvas not found!");
@@ -77,7 +110,9 @@ export class Game {
         
         if (tiles) {
             this.map.init(tiles, mapTiles, loadedEntities, entityTypes);
-            
+            // Load generated sprite atlases + manifests for any sprited types.
+            initPromises.push(this.preloadSprites(entityTypes));
+
             // Find a safe spawn point for the player
             const spawnPoint = this.map.findSafeSpawn();
             if (spawnPoint) {

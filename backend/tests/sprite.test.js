@@ -100,6 +100,31 @@ test('POST /api/entity-types/:id/sprite approves a sprite set and links it', asy
   assert.equal(res.body.entity_type_id, 5);
 });
 
+test('approve links the atlas to the entity type and flips render_mode to static', async () => {
+  const calls = [];
+  __setSpriteGen({ postGenerate: async () => ({}), getJob: async () => ({}) });
+  __setPool({
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      return { rows: [{ id: 'row-1', entity_type_id: 7, status: 'approved' }] };
+    },
+  });
+
+  const res = await request(app)
+    .post('/api/entity-types/7/sprite')
+    .send({ atlas_key: 'sprites/goblin/atlas.png', manifest_key: 'sprites/goblin/atlas.json', job_id: 'job-1' });
+
+  assert.equal(res.status, 200);
+  const upd = calls.find((c) => /UPDATE entity_types/.test(c.sql));
+  assert.ok(upd, 'entity_types should be updated');
+  assert.ok(/render_mode = 'static'/.test(upd.sql));
+  const sprite = JSON.parse(upd.params[0]);
+  assert.equal(sprite.atlas_key, 'sprites/goblin/atlas.png');
+  assert.equal(sprite.static_frame, 'S/0'); // default representative frame
+  assert.equal(upd.params[1], '7');
+  assert.equal(res.body.sprite.static_frame, 'S/0');
+});
+
 test('POST /api/entity-types/:id/sprite returns 404 when no row matches', async () => {
   __setSpriteGen({ postGenerate: async () => ({}), getJob: async () => ({}) });
   __setPool({ query: async () => ({ rows: [] }) });

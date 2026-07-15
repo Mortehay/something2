@@ -557,14 +557,23 @@ app.get('/api/sprite-jobs/:jobId', async (req, res) => {
 // :id is entity_types.id (integer); pg casts the string param automatically.
 app.post('/api/entity-types/:id/sprite', async (req, res) => {
   try {
-    const { atlas_key, manifest_key, job_id } = req.body;
+    const { atlas_key, manifest_key, job_id, static_frame } = req.body;
     const result = await pool.query(
       `UPDATE sprite_sets SET atlas_key = $1, manifest_key = $2, status = 'approved', entity_type_id = $3
        WHERE job_id = $4 RETURNING *`,
       [atlas_key, manifest_key, req.params.id, job_id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Sprite set not found' });
-    res.json(result.rows[0]);
+
+    // Link the atlas to the entity type and flip it to static rendering so the
+    // game crops the named frame from the atlas (default: south-facing frame 0).
+    const sprite = { atlas_key, manifest_key, static_frame: static_frame || 'S/0' };
+    await pool.query(
+      `UPDATE entity_types SET sprite = $1, render_mode = 'static', updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [JSON.stringify(sprite), req.params.id]
+    );
+
+    res.json({ ...result.rows[0], sprite });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to save sprite' });
