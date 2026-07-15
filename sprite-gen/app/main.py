@@ -5,6 +5,7 @@ from .config import settings
 from . import backends
 from .jobs import JobManager
 from .orchestrator import generate_creature
+from .recipe import recipe_for
 
 app = FastAPI(title="something2 sprite-gen")
 job_manager = JobManager()
@@ -16,11 +17,21 @@ class GenerateRequest(BaseModel):
     seed: int = 0
     frames: Optional[int] = None
     size: Optional[List[int]] = None
-    steps: int = 20
+    steps: Optional[int] = None
+    tier: Optional[str] = None  # override the detected hardware tier
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "device": settings.device, "default_backend": settings.default_backend}
+    return {
+        "status": "ok",
+        "device": settings.device,
+        "default_backend": settings.default_backend,
+        "capability": settings.capability(),
+    }
+
+@app.get("/capability")
+def capability():
+    return settings.capability()
 
 @app.get("/backends")
 def list_backends():
@@ -28,16 +39,21 @@ def list_backends():
 
 @app.post("/generate", status_code=202)
 def generate(req: GenerateRequest):
-    backend_name = req.backend or settings.default_backend
+    # Resolve the recipe from the detected (or overridden) hardware tier, then
+    # let any explicit request field win over the recipe default.
+    tier = req.tier or settings.capability()["tier"]
+    recipe = recipe_for(tier)
+    backend_name = req.backend or recipe.backend
     if backend_name not in backends.available():
         raise HTTPException(status_code=400, detail=f"unknown backend '{backend_name}'")
-    frames = req.frames or settings.n_frames
+    frames = req.frames or recipe.n_frames
+    steps = req.steps if req.steps is not None else recipe.steps
     size = tuple(req.size) if req.size else (128, 160)
 
     def work(progress):
         out = generate_creature(
             creature=req.creature, base_prompt=req.base_prompt, backend_name=backend_name,
-            seed=req.seed, n_frames=frames, size=size, steps=req.steps, progress=progress,
+            seed=req.seed, n_frames=frames, size=size, steps=steps, progress=progress,
         )
         # Persist to MinIO only when a real store is reachable; failures surface
         # in the job error. In tests the store call is skipped (STORE disabled).
@@ -46,7 +62,16 @@ def generate(req: GenerateRequest):
             return default_store().put_creature(req.creature, out)
         return {"frames": len(out["frames"]), "manifest": out["manifest"]}
 
-    return {"job_id": job_manager.submit(work)}
+    return {
+        "job_id": job_manager.submit(work),
+        "recipe": {
+            "tier": recipe.tier,
+            "backend": backend_name,
+            "steps": steps,
+            "frames": frames,
+            "controlnet": recipe.controlnet,
+        },
+    }
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):

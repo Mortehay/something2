@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWFC } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -176,26 +176,26 @@ app.get('/api/entity-types', async (req, res) => {
 
 app.post('/api/entity-types', async (req, res) => {
   try {
-    const { 
-      name, color, walkable, spawn_tiles, chance, 
+    const {
+      name, color, walkable, spawn_tiles, chance,
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-      display_width, display_height
+      display_width, display_height, render_mode
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
 
     const result = await pool.query(
       `INSERT INTO entity_types (
-        name, color, walkable, spawn_tiles, chance, 
+        name, color, walkable, spawn_tiles, chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-        display_width, display_height
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING *`,
+        display_width, display_height, render_mode
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
-        display_width, display_height
+        display_width, display_height, render_mode ?? 'rect'
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -208,24 +208,24 @@ app.post('/api/entity-types', async (req, res) => {
 app.put('/api/entity-types/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { 
+    const {
       name, color, walkable, spawn_tiles, chance,
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-      display_width, display_height
+      display_width, display_height, render_mode
     } = req.body;
     const result = await pool.query(
-      `UPDATE entity_types SET 
+      `UPDATE entity_types SET
         name = $1, color = $2, walkable = $3, spawn_tiles = $4, chance = $5,
         strength = $6, dexterity = $7, constitution = $8, intelligence = $9, wisdom = $10, charisma = $11,
-        hp = $12, max_hp = $13, hp_regen_rate = $14, mana = $15, max_mana = $16, mana_regen_rate = $17, 
-        image = $18, display_width = $19, display_height = $20, updated_at = CURRENT_TIMESTAMP 
-      WHERE id = $21 RETURNING *`,
+        hp = $12, max_hp = $13, hp_regen_rate = $14, mana = $15, max_mana = $16, mana_regen_rate = $17,
+        image = $18, display_width = $19, display_height = $20, render_mode = $21, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $22 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-        display_width, display_height, id
+        display_width, display_height, render_mode ?? 'rect', id
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
@@ -335,13 +335,14 @@ app.get('/api/maps/:id', async (req, res) => {
 // Generate a new map
 app.post('/api/maps/generate', async (req, res) => {
   try {
-    const { name, description, rows = 100, cols = 100 } = req.body;
-    
+    const { name, description, rows = 100, cols = 100, seed } = req.body;
+
     console.log(`Generating map: ${name} (${rows}x${cols})`);
-    
+
     // Fetch tile types from DB for generation
     const tileTypes = await getTileTypesMap();
-    const mapData = generateWFC(rows, cols, tileTypes);
+    const worldSeed = Number.isFinite(seed) ? seed : Date.now();
+    const mapData = generateWorld(rows, cols, tileTypes, { seed: worldSeed });
     
     const result = await pool.query(
       'INSERT INTO maps (name, data, description) VALUES ($1, $2, $3) RETURNING id, name, created_at',
@@ -459,22 +460,20 @@ app.post('/api/maps/:id/generate-entities', async (req, res) => {
     const typeResult = await client.query('SELECT * FROM entity_types');
     const entityTypes = typeResult.rows.filter((t) => t.walkable === false);
 
-    const generated = [];
-    const rows = tiles.length;
-    const cols = tiles[0].length;
-
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const tileType = tiles[r][c];
-        const possible = entityTypes.filter((t) => t.spawn_tiles && t.spawn_tiles.includes(tileType));
-        for (const def of possible) {
-          if (Math.random() < def.chance) {
-            generated.push({ entity_type_id: def.id, name: def.name, row: r, col: c });
-            break;
-          }
-        }
-      }
-    }
+    // Density-driven clustered placement: objects clump (forest stands), while
+    // carved paths and clearings stay open. Deterministic per optional seed.
+    const pathTile = detectPathTile(uniqueTileNames(tiles));
+    const placeSeed = Number.isFinite(req.body?.seed) ? req.body.seed : Date.now();
+    const { placed } = placeEntities(tiles, entityTypes, {
+      seed: placeSeed,
+      pathTiles: pathTile ? [pathTile] : [],
+    });
+    const generated = placed.map((p) => ({
+      entity_type_id: p.def.id,
+      name: p.def.name,
+      row: p.row,
+      col: p.col,
+    }));
 
     await client.query('BEGIN');
     await client.query(`DELETE FROM map_entities WHERE map_id = $1 AND type = 'obstacle'`, [id]);
@@ -502,18 +501,41 @@ app.post('/api/maps/:id/generate-entities', async (req, res) => {
   }
 });
 
+// Report the sprite-gen service's detected hardware capability so the entity
+// editor can show the tier and pick the right generation options.
+app.get('/api/sprite-capability', async (req, res) => {
+  try {
+    res.json(await spriteGen.getCapability());
+  } catch (err) {
+    console.error(err);
+    res.status(502).json({ error: 'Sprite-gen service unavailable' });
+  }
+});
+
 // Sprite-gen admin bridge: kick off a generation job with the sprite-gen
-// service and record it as a queued sprite_sets row.
+// service and record it as a queued sprite_sets row. When the caller doesn't
+// pin a backend/tier we auto-select the tier from detected hardware; the
+// sprite-gen recipe then fills backend/frames/steps for that tier.
 app.post('/api/sprite-jobs', async (req, res) => {
   try {
-    const { entity_type, base_prompt, backend = 'stub', frames = 4, seed = 0 } = req.body;
-    const gen = await spriteGen.postGenerate({ creature: entity_type, base_prompt, backend, frames, seed });
+    const { entity_type, base_prompt, backend, frames, seed = 0, tier } = req.body;
+    let effectiveTier = tier;
+    if (!effectiveTier && !backend) {
+      // Best-effort: if capability lookup fails, let sprite-gen use its own default.
+      try { effectiveTier = (await spriteGen.getCapability()).tier; } catch (_) { /* ignore */ }
+    }
+    const gen = await spriteGen.postGenerate({
+      creature: entity_type, base_prompt, backend, frames, seed, tier: effectiveTier,
+    });
+    // Record the actually-chosen backend/frames (from the recipe when not pinned).
+    const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
+    const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || 4;
     const row = await pool.query(
       `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
        VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
-      [entity_type, backend, seed, frames, gen.job_id]
+      [entity_type, chosenBackend, seed, chosenFrames, gen.job_id]
     );
-    res.status(201).json({ ...row.rows[0], job_id: gen.job_id });
+    res.status(201).json({ ...row.rows[0], job_id: gen.job_id, recipe: gen.recipe });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to start sprite job' });
@@ -535,14 +557,23 @@ app.get('/api/sprite-jobs/:jobId', async (req, res) => {
 // :id is entity_types.id (integer); pg casts the string param automatically.
 app.post('/api/entity-types/:id/sprite', async (req, res) => {
   try {
-    const { atlas_key, manifest_key, job_id } = req.body;
+    const { atlas_key, manifest_key, job_id, static_frame } = req.body;
     const result = await pool.query(
       `UPDATE sprite_sets SET atlas_key = $1, manifest_key = $2, status = 'approved', entity_type_id = $3
        WHERE job_id = $4 RETURNING *`,
       [atlas_key, manifest_key, req.params.id, job_id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Sprite set not found' });
-    res.json(result.rows[0]);
+
+    // Link the atlas to the entity type and flip it to static rendering so the
+    // game crops the named frame from the atlas (default: south-facing frame 0).
+    const sprite = { atlas_key, manifest_key, static_frame: static_frame || 'S/0' };
+    await pool.query(
+      `UPDATE entity_types SET sprite = $1, render_mode = 'static', updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [JSON.stringify(sprite), req.params.id]
+    );
+
+    res.json({ ...result.rows[0], sprite });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to save sprite' });

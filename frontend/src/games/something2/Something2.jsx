@@ -249,7 +249,10 @@ export default function Something2() {
             color: t.color,
             walkable: t.walkable,
             spawnTiles: t.spawn_tiles,
-            chance: t.chance
+            chance: t.chance,
+            render_mode: t.render_mode,
+            image: t.image,
+            sprite: t.sprite
           };
         });
       }

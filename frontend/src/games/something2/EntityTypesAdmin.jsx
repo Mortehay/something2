@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useEntityTypes, useCreateEntityType, useUpdateEntityType, useDeleteEntityType, useTileTypes } from './useMaps.js';
-import { useGenerateSprite, useSpriteJob, useApproveSprite } from './useSprites.js';
+import { useGenerateSprite, useSpriteJob, useApproveSprite, useSpriteCapability } from './useSprites.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 
@@ -252,6 +252,25 @@ const SecondaryButton = styled.button`
   &:hover { background: rgba(255, 255, 255, 0.05); }
 `;
 
+/* Capability banner */
+const CapabilityBanner = styled.div`
+  margin-bottom: 1.5rem;
+  padding: 0.9rem 1.2rem;
+  border-radius: 8px;
+  font-size: 1.2rem;
+  border: 1px solid;
+  /* gpu = green, cpu = amber, down = red */
+  color: ${p => p.$variant === 'gpu' ? '#4ade80' : p.$variant === 'down' ? '#f87171' : '#fcd34d'};
+  border-color: ${p => p.$variant === 'gpu' ? '#4ade8055' : p.$variant === 'down' ? '#f8717155' : '#fcd34d55'};
+  background: ${p => p.$variant === 'gpu' ? '#4ade8011' : p.$variant === 'down' ? '#f8717111' : '#fcd34d11'};
+`;
+
+const SpriteHint = styled.div`
+  font-size: 1.05rem;
+  color: #fcd34d;
+  opacity: 0.85;
+`;
+
 /* Sprite Panel Styles */
 const SpriteSection = styled.div`
   margin-top: 1rem;
@@ -331,9 +350,9 @@ const KeyLabel = styled.span`
   word-break: break-all;
 `;
 
-function SpritePanel({ entity }) {
+function SpritePanel({ entity, capability, capabilityDown }) {
   const [expanded, setExpanded] = useState(false);
-  const [backend, setBackend] = useState('stub');
+  const [backend, setBackend] = useState('auto');
   const [frames, setFrames] = useState(4);
   const [seed, setSeed] = useState(0);
   const [basePrompt, setBasePrompt] = useState('');
@@ -350,16 +369,15 @@ function SpritePanel({ entity }) {
       return;
     }
     setAtlasErrored(false);
-    generateSprite.mutate(
-      {
-        entity_type: entity.name,
-        base_prompt: basePrompt,
-        backend,
-        frames: parseInt(frames, 10) || 1,
-        seed: parseInt(seed, 10) || 0
-      },
-      { onSuccess: (data) => setJobId(data.job_id) }
-    );
+    // 'auto' -> omit backend so the server picks it from the detected hardware tier.
+    const body = {
+      entity_type: entity.name,
+      base_prompt: basePrompt,
+      frames: parseInt(frames, 10) || 1,
+      seed: parseInt(seed, 10) || 0
+    };
+    if (backend !== 'auto') body.backend = backend;
+    generateSprite.mutate(body, { onSuccess: (data) => setJobId(data.job_id) });
   };
 
   const handleApprove = () => {
@@ -389,12 +407,19 @@ function SpritePanel({ entity }) {
           <FormGroup>
             <label>Backend</label>
             <select value={backend} onChange={e => setBackend(e.target.value)}>
+              <option value="auto">
+                auto — match hardware{capability?.recommended_backend ? ` (${capability.recommended_backend})` : ''}
+              </option>
               <option value="stub">stub (instant placeholder)</option>
               <option value="sd15">SD 1.5 + ControlNet</option>
               <option value="sd-turbo">SD-Turbo (fast)</option>
               <option value="sdxl">SDXL + ControlNet</option>
             </select>
           </FormGroup>
+
+          {backend === 'auto' && capability?.tier === 'cpu' && (
+            <SpriteHint>CPU tier: real generation runs, but a set can take several minutes to hours.</SpriteHint>
+          )}
 
           <SpriteRow>
             <FormGroup style={{ flex: 1 }}>
@@ -427,8 +452,12 @@ function SpritePanel({ entity }) {
             />
           </FormGroup>
 
-          <MainButton type="button" onClick={handleGenerate} disabled={generateSprite.isPending}>
-            {generateSprite.isPending ? 'Starting...' : 'Generate'}
+          <MainButton
+            type="button"
+            onClick={handleGenerate}
+            disabled={generateSprite.isPending || capabilityDown}
+          >
+            {capabilityDown ? 'Sprite service offline' : generateSprite.isPending ? 'Starting...' : 'Generate'}
           </MainButton>
 
           {jobId && (
@@ -467,6 +496,7 @@ function SpritePanel({ entity }) {
 function EntityTypesAdmin() {
   const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
   const { tileTypes } = useTileTypes();
+  const { data: capability, isError: capabilityDown, isLoading: capabilityLoading } = useSpriteCapability();
   const createMutation = useCreateEntityType();
   const updateMutation = useUpdateEntityType();
   const deleteMutation = useDeleteEntityType();
@@ -481,6 +511,7 @@ function EntityTypesAdmin() {
     spawn_tiles: [],
     chance: 0.1,
     image: '',
+    render_mode: 'rect',
     strength: 0,
     dexterity: 0,
     constitution: 0,
@@ -506,6 +537,7 @@ function EntityTypesAdmin() {
         spawn_tiles: editingEntity.spawn_tiles || [],
         chance: editingEntity.chance,
         image: editingEntity.image || '',
+        render_mode: editingEntity.render_mode || 'rect',
         strength: editingEntity.strength || 0,
         dexterity: editingEntity.dexterity || 0,
         constitution: editingEntity.constitution || 0,
@@ -529,6 +561,7 @@ function EntityTypesAdmin() {
         spawn_tiles: [],
         chance: 0.1,
         image: '',
+        render_mode: 'rect',
         strength: 10,
         dexterity: 10,
         constitution: 10,
@@ -602,6 +635,16 @@ function EntityTypesAdmin() {
         </MainButton>
       </Header>
 
+      <CapabilityBanner $variant={capabilityDown ? 'down' : capability?.tier}>
+        {capabilityLoading
+          ? 'Checking sprite-generation hardware…'
+          : capabilityDown
+            ? 'Sprite service unavailable — generation is disabled.'
+            : capability?.tier === 'gpu'
+              ? `GPU detected (${capability.device}) — full pixel-art sprites available.`
+              : 'CPU only — generation works but is slow and reduced quality. A GPU will auto-accelerate it.'}
+      </CapabilityBanner>
+
       <EntityGrid>
         {entityTypes?.map(entity => (
           <EntityCard key={entity.id}>
@@ -659,7 +702,7 @@ function EntityTypesAdmin() {
               </TagCloud>
             </SpawnList>
 
-            <SpritePanel entity={entity} />
+            <SpritePanel entity={entity} capability={capability} capabilityDown={capabilityDown} />
           </EntityCard>
         ))}
       </EntityGrid>
@@ -722,11 +765,23 @@ function EntityTypesAdmin() {
 
               <FormGroup>
                 <label>Image Asset Path/URL</label>
-                <input 
-                  value={formData.image} 
+                <input
+                  value={formData.image}
                   onChange={e => setFormData({...formData, image: e.target.value})}
                   placeholder="e.g. /assets/entities/player.png"
                 />
+              </FormGroup>
+
+              <FormGroup>
+                <label>Render Mode</label>
+                <select
+                  value={formData.render_mode}
+                  onChange={e => setFormData({...formData, render_mode: e.target.value})}
+                >
+                  <option value="rect">rect — colored rectangle (default, fast)</option>
+                  <option value="static">static — image sprite</option>
+                  <option value="animated">animated — moving sprite</option>
+                </select>
               </FormGroup>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
