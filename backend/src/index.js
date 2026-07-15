@@ -502,18 +502,41 @@ app.post('/api/maps/:id/generate-entities', async (req, res) => {
   }
 });
 
+// Report the sprite-gen service's detected hardware capability so the entity
+// editor can show the tier and pick the right generation options.
+app.get('/api/sprite-capability', async (req, res) => {
+  try {
+    res.json(await spriteGen.getCapability());
+  } catch (err) {
+    console.error(err);
+    res.status(502).json({ error: 'Sprite-gen service unavailable' });
+  }
+});
+
 // Sprite-gen admin bridge: kick off a generation job with the sprite-gen
-// service and record it as a queued sprite_sets row.
+// service and record it as a queued sprite_sets row. When the caller doesn't
+// pin a backend/tier we auto-select the tier from detected hardware; the
+// sprite-gen recipe then fills backend/frames/steps for that tier.
 app.post('/api/sprite-jobs', async (req, res) => {
   try {
-    const { entity_type, base_prompt, backend = 'stub', frames = 4, seed = 0 } = req.body;
-    const gen = await spriteGen.postGenerate({ creature: entity_type, base_prompt, backend, frames, seed });
+    const { entity_type, base_prompt, backend, frames, seed = 0, tier } = req.body;
+    let effectiveTier = tier;
+    if (!effectiveTier && !backend) {
+      // Best-effort: if capability lookup fails, let sprite-gen use its own default.
+      try { effectiveTier = (await spriteGen.getCapability()).tier; } catch (_) { /* ignore */ }
+    }
+    const gen = await spriteGen.postGenerate({
+      creature: entity_type, base_prompt, backend, frames, seed, tier: effectiveTier,
+    });
+    // Record the actually-chosen backend/frames (from the recipe when not pinned).
+    const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
+    const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || 4;
     const row = await pool.query(
       `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
        VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
-      [entity_type, backend, seed, frames, gen.job_id]
+      [entity_type, chosenBackend, seed, chosenFrames, gen.job_id]
     );
-    res.status(201).json({ ...row.rows[0], job_id: gen.job_id });
+    res.status(201).json({ ...row.rows[0], job_id: gen.job_id, recipe: gen.recipe });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to start sprite job' });
