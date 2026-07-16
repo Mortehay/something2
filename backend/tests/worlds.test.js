@@ -79,7 +79,7 @@ test('GET chunk cache MISS generates, caches, returns an NxN grid', async () => 
     [/SELECT .* FROM world_chunks/i, () => ({ rows: [] })],               // cache miss
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42', chunk_size: 8 }] })],
     [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
-    [/INSERT INTO world_chunks/i, (p) => { inserted = p; return { rows: [] }; }],
+    [/INSERT INTO world_chunks/i, (p) => { inserted = p; return { rowCount: 1, rows: [] }; }],
     [/FROM entity_types/i, () => ({ rows: [] })],                        // no creature types -> no spawn
   ]);
   __setPool(pool);
@@ -90,6 +90,19 @@ test('GET chunk cache MISS generates, caches, returns an NxN grid', async () => 
   assert.equal(res.body.data.length, 8);        // chunk_size rows
   assert.equal(res.body.data[0].length, 8);     // chunk_size cols
   assert.ok(inserted, 'expected an INSERT into world_chunks on cache miss');
+});
+
+test('chunk cache-miss that loses the insert race does not spawn creatures', async () => {
+  const pool = mockPool([
+    [/SELECT .* FROM world_chunks/i, () => ({ rows: [] })],               // cache miss
+    [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] })],
+    [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
+    [/INSERT INTO world_chunks/i, () => ({ rowCount: 0, rows: [] })],     // lost the race (ON CONFLICT)
+    // NO entity_types / world_creatures handlers: if the route spawns, mockPool throws.
+  ]);
+  __setPool(pool);
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0');
+  assert.equal(res.status, 200); // still returns the generated chunk data
 });
 
 test('GET chunk cache HIT returns cached data without regenerating', async () => {

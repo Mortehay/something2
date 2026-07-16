@@ -655,25 +655,29 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
       cy,
     );
 
-    await pool.query(
+    const chunkIns = await pool.query(
       `INSERT INTO world_chunks (world_id, cx, cy, data) VALUES ($1, $2, $3, $4)
        ON CONFLICT (world_id, cx, cy) DO NOTHING`,
       [worldId, cx, cy, JSON.stringify(data)],
     );
 
     // Seed this chunk's creatures once, tied to chunk materialization.
-    const entityTypes = await getEntityTypesMap();
-    const typed = Object.entries(entityTypes)
-      .filter(([name, t]) => (t.hp || 0) > 0 && name !== 'Player')
-      .map(([name, t]) => ({ name, hp: t.hp }));
-    const creatures = spawnChunkCreatures(
-      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes }, cx, cy, typed,
-    );
-    for (const c of creatures) {
-      await pool.query(
-        `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [worldId, c.type, c.x, c.y, c.hp, c.facing],
+    // Only the request that actually inserted the chunk row spawns creatures;
+    // the loser of a concurrent-first-access race (rowCount 0, ON CONFLICT) spawns nothing.
+    if (chunkIns.rowCount > 0) {
+      const entityTypes = await getEntityTypesMap();
+      const typed = Object.entries(entityTypes)
+        .filter(([name, t]) => (t.hp || 0) > 0 && name !== 'Player')
+        .map(([name, t]) => ({ name, hp: t.hp }));
+      const creatures = spawnChunkCreatures(
+        { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes }, cx, cy, typed,
       );
+      for (const c of creatures) {
+        await pool.query(
+          `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [worldId, c.type, c.x, c.y, c.hp, c.facing],
+        );
+      }
     }
 
     res.json({ world_id: worldId, cx, cy, data });
