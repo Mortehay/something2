@@ -80,7 +80,7 @@ export class RenderSystem {
     const halfW = ISO_TILE_W / 2;
     const halfH = ISO_TILE_H / 2;
     const mapTiles = chunkedMap.mapTiles;
-    for (const cell of chunkTileCells(chunkedMap)) {
+    for (const cell of chunkTileCells(chunkedMap, camera)) {
       const s = worldToScreen(cell.worldX, cell.worldY);
       const relX = s.x - camera.screenX;
       const relY = s.y - camera.screenY;
