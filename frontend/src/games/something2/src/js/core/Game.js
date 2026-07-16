@@ -194,7 +194,17 @@ export class Game {
     // Fire-and-forget: for any chunk that's loaded in the map but whose
     // creatures we haven't fetched yet, fetch + merge them in. Guarded by
     // _loadedCreatureChunks so each chunk key is only fetched once.
+    //
+    // Chunks that fell out of the map's loaded set are also dropped from
+    // _loadedCreatureChunks here, so if the player re-enters that chunk later
+    // it's treated as unfetched again and re-queried from the DB (the
+    // creatures for it were pruned client-side by pruneOutOfRange, but still
+    // live authoritatively on the server).
     _syncCreatureChunks() {
+        const current = new Set(this.chunkedMap.loadedKeys());
+        for (const key of this._loadedCreatureChunks) {
+            if (!current.has(key)) this._loadedCreatureChunks.delete(key);
+        }
         for (const key of this.chunkedMap.loadedKeys()) {
             if (this._loadedCreatureChunks.has(key)) continue;
             this._loadedCreatureChunks.add(key);
@@ -229,6 +239,12 @@ export class Game {
                 this._flushAccum = 0;
                 const dirty = this.creatures.takeDirty();
                 if (dirty.length) this.flushCreatures(dirty).catch(() => {});
+                // Bound memory: drop creatures that are both out of the loaded
+                // neighborhood AND not dirty (i.e. any position they had was
+                // just flushed above, or they never moved). Dirty out-of-range
+                // creatures survive to the next flush cycle so we never lose
+                // an unpersisted position.
+                this.creatures.pruneOutOfRange(this.chunkedMap.loadedKeys());
             }
             this.camera.update(this.player);
             if (this.engine && this.engine.joined) this.engine.sendMove(cx, cy);

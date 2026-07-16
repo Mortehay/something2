@@ -69,4 +69,22 @@ export class CreatureManager {
     }
     return dirty;
   }
+
+  // Drop creatures whose chunk has fallen out of the loaded neighborhood —
+  // but ONLY once their last roamed position has been flushed (dirty ===
+  // false). A dirty out-of-range creature is kept until a later prune, after
+  // a flush cycle has cleared its dirty flag, so we never lose an unpersisted
+  // position. Returns the number of creatures dropped.
+  pruneOutOfRange(loadedKeys) {
+    const loaded = loadedKeys instanceof Set ? loadedKeys : new Set(loadedKeys);
+    let dropped = 0;
+    for (const [id, c] of this.creatures) {
+      const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
+      if (loaded.has(CHUNK_KEY(cx, cy))) continue;
+      if (c.dirty) continue; // unflushed — keep until it's safe to drop
+      this.creatures.delete(id);
+      dropped++;
+    }
+    return dropped;
+  }
 }
