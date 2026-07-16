@@ -47,7 +47,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const wr = await pool.query('SELECT id, seed, chunk_size FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
-        const tr = await pool.query('SELECT name, walkable, speed FROM tile_types');
+        const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
         const map = new ServerMap({ seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes });
