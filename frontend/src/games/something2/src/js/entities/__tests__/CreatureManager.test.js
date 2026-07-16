@@ -27,6 +27,16 @@ describe("CreatureManager", () => {
     expect(cm.has("a")).toBe(true);
   });
 
+  it("copies the entity-type color from the server payload onto the creature", () => {
+    const cm = new CreatureManager(N);
+    cm.addCreatures([
+      { id: "a", type: "wolf", x: 50, y: 50, color: "#00ff00" },
+      { id: "b", type: "boar", x: 60, y: 60 },
+    ]);
+    expect(cm.all().find((c) => c.id === "a").color).toBe("#00ff00");
+    expect(cm.all().find((c) => c.id === "b").color).toBeUndefined();
+  });
+
   it("roams creatures in a loaded chunk and marks them dirty", () => {
     const cm = new CreatureManager(N, seqRng([0.9, 0.0, 0.9, 0.0]));
     cm.addCreatures([{ id: "a", type: "wolf", x: 50, y: 50, hp: 10 }]);

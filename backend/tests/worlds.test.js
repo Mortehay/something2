@@ -142,12 +142,13 @@ test('POST /api/worlds rejects chunk_size out of range', async () => {
 test('GET creatures returns rows for a chunk bbox', async () => {
   __setPool(mockPool([
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', chunk_size: 16 }] })],
-    [/FROM world_creatures/i, () => ({ rows: [{ id: 'c1', type: 'wolf', x: 810, y: 810, hp: 12, facing: 'S' }] })],
+    [/FROM world_creatures/i, () => ({ rows: [{ id: 'c1', type: 'wolf', x: 810, y: 810, hp: 12, facing: 'S', color: '#c0392b' }] })],
   ]));
   const res = await request(app).get('/api/worlds/w1/creatures?cx=0&cy=0');
   assert.equal(res.status, 200);
   assert.equal(res.body.length, 1);
   assert.equal(res.body[0].id, 'c1');
+  assert.equal(res.body[0].color, '#c0392b');
 });
 
 test('GET creatures rejects non-integer cx/cy', async () => {
