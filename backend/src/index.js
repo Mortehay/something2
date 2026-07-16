@@ -622,6 +622,49 @@ app.get('/api/worlds/:id', async (req, res) => {
   }
 });
 
+app.get('/api/worlds/:id/chunk', async (req, res) => {
+  try {
+    const cx = Number(req.query.cx);
+    const cy = Number(req.query.cy);
+    if (!Number.isInteger(cx) || !Number.isInteger(cy)) {
+      return res.status(400).json({ error: 'cx and cy must be integers' });
+    }
+    const worldId = req.params.id;
+
+    // Cache hit?
+    const cached = await pool.query(
+      'SELECT data FROM world_chunks WHERE world_id = $1 AND cx = $2 AND cy = $3',
+      [worldId, cx, cy],
+    );
+    if (cached.rows[0]) {
+      return res.json({ world_id: worldId, cx, cy, data: cached.rows[0].data });
+    }
+
+    // Miss: load the world, generate, cache.
+    const worldRes = await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
+    const world = worldRes.rows[0];
+    if (!world) return res.status(404).json({ error: 'world not found' });
+
+    const tileTypes = await getTileTypesMap();
+    const data = generateChunk(
+      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes },
+      cx,
+      cy,
+    );
+
+    await pool.query(
+      `INSERT INTO world_chunks (world_id, cx, cy, data) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (world_id, cx, cy) DO NOTHING`,
+      [worldId, cx, cy, JSON.stringify(data)],
+    );
+
+    res.json({ world_id: worldId, cx, cy, data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch chunk' });
+  }
+});
+
 if (require.main === module) {
   app.listen(port, () => {
     console.log(`Backend server running on port ${port}`);
