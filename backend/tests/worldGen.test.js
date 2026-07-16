@@ -124,3 +124,49 @@ test('biomes are cohesive, not per-tile noise', () => {
   }
   assert.ok(same / total > 0.6, `sameness ${same / total}`);
 });
+
+const { collectPathCells } = require('../src/services/mapService');
+
+// Tiles WITH a path-like name -> paths get carved.
+const PATH_TILES = { grass: {}, forest: {}, water: {}, dirt: {} };
+
+test('paths are carved when a path tile exists', () => {
+  const world = { seed: 3, chunkSize: 48, tileTypes: PATH_TILES };
+  const grid = generateChunk(world, 0, 0);
+  let dirt = 0;
+  for (const row of grid) for (const cell of row) if (cell === 'dirt') dirt++;
+  assert.ok(dirt > 0, 'expected carved dirt path tiles');
+});
+
+test('collectPathCells is deterministic and window-consistent', () => {
+  const cfg = worldConfig({ seed: 8, chunkSize: 48, tileTypes: PATH_TILES });
+  const a = collectPathCells(cfg, 0, 0, 96, 96);
+  const b = collectPathCells(cfg, 0, 0, 96, 96);
+  assert.deepEqual([...a].sort(), [...b].sort());
+  // A sub-window's path cells are exactly the full set restricted to that window.
+  const sub = collectPathCells(cfg, 0, 0, 48, 48);
+  for (const key of sub) assert.ok(a.has(key), `sub cell ${key} missing from full set`);
+});
+
+// SEAM INVARIANT WITH PATHS: adjacent chunks still equal one direct region,
+// so any trail crossing the boundary is continuous.
+test('adjacent chunks match a direct region even with paths', () => {
+  const world = { seed: 21, chunkSize: 48, tileTypes: PATH_TILES };
+  const N = 48;
+  const left = generateChunk(world, 0, 0);
+  const right = generateChunk(world, 1, 0);
+  const direct = generateRegion(world, 0, 0, N, 2 * N);
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      assert.equal(left[r][c], direct[r][c], `left seam mismatch @${r},${c}`);
+      assert.equal(right[r][c], direct[r][c + N], `right seam mismatch @${r},${c}`);
+    }
+  }
+});
+
+test('no path tile -> generateChunk carves nothing (pure biomes)', () => {
+  const world = { seed: 3, chunkSize: 32, tileTypes: BIOMES }; // no path-like name
+  const grid = generateChunk(world, 0, 0);
+  const names = Object.keys(BIOMES);
+  for (const row of grid) for (const cell of row) assert.ok(names.includes(cell));
+});

@@ -191,15 +191,19 @@ function sampleBiome(cfg, gRow, gCol) {
 }
 
 // Generate an arbitrary rows x cols window of the world. Cell [r][c] is the
-// world tile at (rMin + r, cMin + c). Biomes only for now; paths overlaid in
-// Task 3. generateChunk is a fixed-size wrapper over this.
+// world tile at (rMin + r, cMin + c). Overlays carved paths on biomes.
+// generateChunk is a fixed-size wrapper over this.
 function generateRegion(world, rMin, cMin, rows, cols) {
   const cfg = worldConfig(world);
+  const paths = collectPathCells(cfg, rMin, cMin, rows, cols);
   const grid = [];
   for (let r = 0; r < rows; r++) {
     const row = new Array(cols);
     for (let c = 0; c < cols; c++) {
-      row[c] = sampleBiome(cfg, rMin + r, cMin + c);
+      const gRow = rMin + r, gCol = cMin + c;
+      row[c] = cfg.pathTile && paths.has(`${gRow},${gCol}`)
+        ? cfg.pathTile
+        : sampleBiome(cfg, gRow, gCol);
     }
     grid[r] = row;
   }
@@ -210,6 +214,71 @@ function generateChunk(world, cx, cy) {
   const cfg = worldConfig(world);
   const N = cfg.chunkSize;
   return generateRegion(world, cy * N, cx * N, N, N);
+}
+
+// --- Global carved paths --------------------------------------------------
+//
+// Coarse path lattice: one anchor per `pathCell` tiles, jittered deterministically.
+// Each anchor connects to its East and South neighbor via a biased random walk
+// seeded ONLY by the two node ids -> the same trail cells regardless of which
+// window regenerates them, so paths cross chunk seams continuously.
+
+function pathAnchor(cfg, pi, pj) {
+  const jr = Math.floor(hash2(cfg.seed ^ 0x1111, pi, pj) * (2 * cfg.pathJitter + 1)) - cfg.pathJitter;
+  const jc = Math.floor(hash2(cfg.seed ^ 0x2222, pi, pj) * (2 * cfg.pathJitter + 1)) - cfg.pathJitter;
+  return [pi * cfg.pathCell + jr, pj * cfg.pathCell + jc];
+}
+
+function pathSegmentCells(cfg, pi, pj, dir) {
+  const from = pathAnchor(cfg, pi, pj);
+  const to = dir === 'E' ? pathAnchor(cfg, pi, pj + 1) : pathAnchor(cfg, pi + 1, pj);
+  // Deterministic per-segment RNG: distinct integer per (node, dir).
+  const segSeed = (Math.imul(hash2(cfg.seed, pi, pj) * 4294967296 >>> 0, 31)
+    ^ (dir === 'E' ? 0xE : 0x5)) >>> 0;
+  const rng = makeRng(segSeed || 1);
+  const cells = [];
+  let [r, c] = from;
+  const [tr, tc] = to;
+  let guard = (cfg.pathCell + 2 * cfg.pathJitter) * 6 + 8;
+  while ((r !== tr || c !== tc) && guard-- > 0) {
+    cells.push([r, c]);
+    const dr = Math.sign(tr - r), dc = Math.sign(tc - c);
+    const roll = rng();
+    if (roll < 0.45 && dr !== 0) r += dr;
+    else if (roll < 0.9 && dc !== 0) c += dc;
+    else if (rng() < 0.5 && dr !== 0) r += dr;
+    else if (dc !== 0) c += dc;
+    else if (dr !== 0) r += dr;
+  }
+  cells.push([tr, tc]);
+  return cells;
+}
+
+// Every path cell inside the window [rMin,rMin+rows) x [cMin,cMin+cols).
+// Iterate coarse nodes whose segments could reach the window (one extra ring),
+// union their segment cells, clipped to the window.
+function collectPathCells(cfg, rMin, cMin, rows, cols) {
+  const set = new Set();
+  if (!cfg.pathTile) return set;
+  const rMax = rMin + rows, cMax = cMin + cols;
+  // Coarse-node index range covering the window, padded by 1 node each side so
+  // trails entering from outside are included.
+  const piLo = Math.floor(rMin / cfg.pathCell) - 1;
+  const piHi = Math.floor((rMax - 1) / cfg.pathCell) + 1;
+  const pjLo = Math.floor(cMin / cfg.pathCell) - 1;
+  const pjHi = Math.floor((cMax - 1) / cfg.pathCell) + 1;
+  const add = (cells) => {
+    for (const [r, c] of cells) {
+      if (r >= rMin && r < rMax && c >= cMin && c < cMax) set.add(`${r},${c}`);
+    }
+  };
+  for (let pi = piLo; pi <= piHi; pi++) {
+    for (let pj = pjLo; pj <= pjHi; pj++) {
+      add(pathSegmentCells(cfg, pi, pj, 'E'));
+      add(pathSegmentCells(cfg, pi, pj, 'S'));
+    }
+  }
+  return set;
 }
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -380,5 +449,8 @@ module.exports = {
     sampleBiome,
     generateRegion,
     generateChunk,
+    pathAnchor,
+    pathSegmentCells,
+    collectPathCells,
 };
 
