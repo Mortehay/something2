@@ -4,10 +4,15 @@ import { Player } from "../entities/Player.js";
 import { ImageManager } from "../managers/ImageManager.js";
 import { Camera } from "./Camera.js";
 import { Map as GameMap } from "./Map.js";
+import { ChunkedMap } from "./ChunkedMap.js";
+import { ChunkStreamer } from "../net/ChunkStreamer.js";
+import { makeChunkFetcher } from "../net/chunkFetcher.js";
 
 // Native Map shadowed by the world Map import above; alias to keep the
 // distinction obvious at the call sites.
 const NativeMap = globalThis.Map;
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
 
 // Reconciliation tunables (pixel space). The local player runs prediction; on
 // each engine tick we compare the server-authoritative position to ours.
@@ -28,6 +33,10 @@ export class Game {
         this.player = new Player();
         this.camera = new Camera();
         this.map = new GameMap();
+
+        this.chunked = false;
+        this.chunkedMap = null;
+        this.streamer = null;
 
         this.keys = {};
         this.lastTime = 0;
@@ -142,6 +151,36 @@ export class Game {
         this.map.init(tiles, mapTiles, loadedEntities, entityTypes);
     }
 
+    async initChunked({ worldId, chunkSize, tileTypes, spawnX = 0, spawnY = 0 }) {
+        if (!this.canvas) {
+            console.error("Canvas not found!");
+            return;
+        }
+        this.ctx = this.canvas.getContext("2d");
+        this.state = "playing";
+        this.chunked = true;
+        this.renderSystem = new RenderSystem(this.canvas, this.imageManager);
+        this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
+        this.streamer = new ChunkStreamer(this.chunkedMap, makeChunkFetcher(worldId, API_URL), 1);
+
+        this.player.x = spawnX;
+        this.player.y = spawnY;
+        await this.imageManager.loadAll();
+        // Load the initial neighborhood before the first frame so we don't render empty.
+        await this.streamer.update(this.player.x + this.player.width / 2, this.player.y + this.player.height / 2);
+        this.camera.update(this.player);
+
+        this.resizeCanvas();
+        this._resizeHandler = () => this.resizeCanvas();
+        window.addEventListener("resize", this._resizeHandler);
+        this.setupInput();
+
+        if (this.animationFrameId) cancelAnimationFrame(this.animationFrameId);
+        this.lastTime = performance.now();
+        this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
+        console.log(`chunked game loop started (world ${worldId})`);
+    }
+
 
     destroy() {
         if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
@@ -155,6 +194,15 @@ export class Game {
 
     update(dt){
         if(this.state !== 'playing') return;
+        if (this.chunked) {
+            const cx = this.player.x + this.player.width / 2;
+            const cy = this.player.y + this.player.height / 2;
+            this.streamer.update(cx, cy); // fire-and-forget; wanted-guard makes it safe
+            this.player.update(dt, this.keys, this.chunkedMap);
+            this.camera.update(this.player);
+            if (this.engine && this.engine.joined) this.engine.sendMove(cx, cy);
+            return;
+        }
         this.player.update(dt, this.keys, this.map);
         this.camera.update(this.player);
 
@@ -220,6 +268,8 @@ export class Game {
         if(this.state === 'menu'){
             this.ctx.fillStyle = '#0f3460';
             this.ctx.fillRect(0,0,this.canvas.width,this.canvas.height);
+        } else if (this.chunked) {
+            this.renderSystem.renderChunked(this.player, this.camera, this.chunkedMap, this.remotePlayers, this.localUserId);
         } else {
             this.renderSystem.render(this.player, this.camera, this.map, this.remotePlayers, this.localUserId);
         }

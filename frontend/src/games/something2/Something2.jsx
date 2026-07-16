@@ -5,6 +5,8 @@ import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenc
 import { Game } from "./src/js/main.js";
 import { EngineClient, fetchDevToken } from "./src/js/net/EngineClient.js";
 import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap, fetchMapEntities, useSaveEntities, useEntityTypes, useGenerateEntities } from "./useMaps.js";
+import { useWorlds, useCreateWorld } from "./useWorlds";
+import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
 const ENGINE_WS_URL = import.meta.env.VITE_ENGINE_WS_URL || 'ws://localhost:18080/ws';
@@ -161,18 +163,43 @@ const PausePanel = styled(Panel)`
   }
 `;
 
+const Input = styled.input`
+  background: #161625;
+  border: 1px solid #2e2e3e;
+  border-radius: 6px;
+  color: white;
+  padding: 8px 10px;
+  font-size: 14px;
+  width: 100%;
+  box-sizing: border-box;
+
+  &:focus {
+    outline: none;
+    border-color: #4a9eff;
+  }
+
+  &::placeholder {
+    color: #666;
+  }
+`;
+
 export default function Something2() {
   const canvasRef = useRef(null);
   const gameRef = useRef(null);
   const engineRef = useRef(null);
   const [activeTab, setActiveTab] = useState('game');
   const [selectedMapId, setSelectedMapId] = useState(null);
+  const [selectedWorldId, setSelectedWorldId] = useState(null);
+  const [newWorldName, setNewWorldName] = useState('');
+  const [newWorldSeed, setNewWorldSeed] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
 
   const { maps, isLoadingMaps } = useMaps();
   const { mapTiles, isLoadingMapTiles } = useMapTiles();
   const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
+  const { worlds, isLoadingWorlds } = useWorlds();
+  const createWorldMutation = useCreateWorld();
 
   // name -> color for the minimap preview (mapTiles is keyed by tile name).
   const tileColors = useMemo(() => {
@@ -309,6 +336,42 @@ export default function Something2() {
 
   const handlePlay = () => handleEnterWorld(false);
 
+  const handleEnterChunkedWorld = async () => {
+    if (!selectedWorldId || !gameRef.current) return;
+
+    try {
+      const world = worlds?.find(w => w.id === selectedWorldId);
+      const chunkSize = world?.chunk_size || 64;
+      const spawn = (chunkSize * MAP_TILE_SIZE) / 2;
+
+      await gameRef.current.initChunked({
+        worldId: selectedWorldId,
+        chunkSize,
+        tileTypes: mapTiles,
+        spawnX: spawn,
+        spawnY: spawn,
+      });
+      setIsPlaying(true);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleCreateWorld = () => {
+    if (!newWorldName.trim()) return;
+    createWorldMutation.mutate({
+      name: newWorldName.trim(),
+      seed: newWorldSeed ? Number(newWorldSeed) : undefined,
+      chunk_size: 64,
+    }, {
+      onSuccess: (world) => {
+        setNewWorldName('');
+        setNewWorldSeed('');
+        if (world?.id) setSelectedWorldId(world.id);
+      }
+    });
+  };
+
   const handleSaveEntities = () => {
     if (!selectedMapId || !gameRef.current) return;
     const entities = gameRef.current.map.entities.map(e => ({
@@ -371,6 +434,62 @@ export default function Something2() {
          
           {!isPlaying && (
             <UIOverlay>
+                <Panel>
+                  <h2 style={{ color: 'white', margin: '0 0 15px 0', fontSize: '20px' }}>Worlds</h2>
+
+                  {isLoadingWorlds ? (
+                    <p style={{ color: '#aaa' }}>Loading worlds...</p>
+                  ) : (
+                    <MapList style={{ marginTop: 0 }}>
+                      {worlds?.map(world => (
+                        <MapItem
+                          key={world.id}
+                          selected={selectedWorldId === world.id}
+                          onClick={() => setSelectedWorldId(world.id)}
+                        >
+                          <div>
+                            <div style={{ color: 'white', fontWeight: 'bold' }}>{world.name}</div>
+                            <div style={{ color: '#888', fontSize: '12px' }}>
+                              chunk_size {world.chunk_size || 64}{world.seed != null ? ` · seed ${world.seed}` : ''}
+                            </div>
+                          </div>
+                        </MapItem>
+                      ))}
+                      {worlds?.length === 0 && (
+                        <p style={{ color: '#666', fontSize: '13px', margin: 0 }}>No worlds yet.</p>
+                      )}
+                    </MapList>
+                  )}
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '15px' }}>
+                    <Input
+                      placeholder="New world name"
+                      value={newWorldName}
+                      onChange={(e) => setNewWorldName(e.target.value)}
+                    />
+                    <Input
+                      placeholder="Seed (optional)"
+                      value={newWorldSeed}
+                      onChange={(e) => setNewWorldSeed(e.target.value)}
+                    />
+                    <Button
+                      onClick={handleCreateWorld}
+                      disabled={createWorldMutation.isPending || !newWorldName.trim()}
+                      style={{ width: '100%' }}
+                    >
+                      Create World
+                    </Button>
+                  </div>
+
+                  <Button
+                    onClick={handleEnterChunkedWorld}
+                    disabled={!selectedWorldId}
+                    style={{ width: '100%', marginTop: '10px', background: '#10b981' }}
+                  >
+                    Enter World (chunked)
+                  </Button>
+                </Panel>
+
                 <Panel>
                   <h2 style={{ color: 'white', margin: '0 0 15px 0', fontSize: '20px' }}>World Browser</h2>
                   <Button onClick={() => generateMapMutation.mutate()} disabled={generateMapMutation.isPending} style={{ width: '100%' }}>
