@@ -590,6 +590,9 @@ app.post('/api/worlds', async (req, res) => {
     }
     const worldSeed = Number.isFinite(seed) ? Math.floor(seed) : Math.floor(Math.random() * 2 ** 31);
     const chunkSize = Number.isFinite(chunk_size) ? Math.floor(chunk_size) : 64;
+    if (chunkSize < 1 || chunkSize > 256) {
+      return res.status(400).json({ error: 'chunk_size must be an integer between 1 and 256' });
+    }
     const result = await pool.query(
       'INSERT INTO worlds (name, seed, chunk_size) VALUES ($1, $2, $3) RETURNING *',
       [name.trim(), worldSeed, chunkSize],

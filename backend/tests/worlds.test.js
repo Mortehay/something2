@@ -112,3 +112,15 @@ test('GET chunk returns 404 for an unknown world on cache miss', async () => {
   const res = await request(app).get('/api/worlds/ghost/chunk?cx=0&cy=0');
   assert.equal(res.status, 404);
 });
+
+test('POST /api/worlds rejects chunk_size out of range', async () => {
+  __setPool(mockPool([
+    [/INSERT INTO worlds/i, (p) => ({ rows: [{ id: 'w', name: p[0], seed: String(p[1]), chunk_size: p[2] }] })],
+  ]));
+  const zero = await request(app).post('/api/worlds').send({ name: 'Z', seed: 1, chunk_size: 0 });
+  assert.equal(zero.status, 400);
+  const huge = await request(app).post('/api/worlds').send({ name: 'H', seed: 1, chunk_size: 1000000 });
+  assert.equal(huge.status, 400);
+  const neg = await request(app).post('/api/worlds').send({ name: 'N', seed: 1, chunk_size: -5 });
+  assert.equal(neg.status, 400);
+});
