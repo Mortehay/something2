@@ -508,6 +508,7 @@ function EntityTypesAdmin() {
     name: '',
     color: '#ffffff',
     walkable: false,
+    is_creature: false,
     spawn_tiles: [],
     chance: 0.1,
     image: '',
@@ -534,6 +535,7 @@ function EntityTypesAdmin() {
         name: editingEntity.name,
         color: editingEntity.color,
         walkable: editingEntity.walkable,
+        is_creature: editingEntity.is_creature || false,
         spawn_tiles: editingEntity.spawn_tiles || [],
         chance: editingEntity.chance,
         image: editingEntity.image || '',
@@ -558,6 +560,7 @@ function EntityTypesAdmin() {
         name: '',
         color: '#00ff00',
         walkable: false,
+        is_creature: false,
         spawn_tiles: [],
         chance: 0.1,
         image: '',
@@ -748,6 +751,16 @@ function EntityTypesAdmin() {
                     style={{ width: '20px', height: '20px' }}
                   />
                   <label style={{ fontSize: '1.2rem', color: '#facc15' }}>Walkable</label>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={formData.is_creature}
+                    onChange={e => setFormData({...formData, is_creature: e.target.checked})}
+                    style={{ width: '20px', height: '20px' }}
+                  />
+                  <label style={{ fontSize: '1.2rem', color: '#facc15' }}>Is creature (roams the world)</label>
                 </div>
 
                 <FormGroup style={{ flex: 1 }}>
