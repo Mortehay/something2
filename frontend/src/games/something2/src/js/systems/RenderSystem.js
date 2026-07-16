@@ -1,7 +1,8 @@
-import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H } from "../core/constants.js";
+import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir } from "./spriteAtlas.js";
+import { chunkTileCells } from "../core/chunkTiles.js";
 
 export class RenderSystem {
   constructor(canvas, imageManager) {
@@ -68,6 +69,41 @@ export class RenderSystem {
 
     camera.reset(this.ctx);
 
+    this.renderHud(player, remotePlayers, localUserId);
+  }
+
+  renderChunked(player, camera, chunkedMap, remotePlayers, localUserId) {
+    this.ctx.fillStyle = "#0f3460";
+    this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    camera.apply(this.ctx);
+
+    const halfW = ISO_TILE_W / 2;
+    const halfH = ISO_TILE_H / 2;
+    const mapTiles = chunkedMap.mapTiles;
+    for (const cell of chunkTileCells(chunkedMap)) {
+      const s = worldToScreen(cell.worldX, cell.worldY);
+      const relX = s.x - camera.screenX;
+      const relY = s.y - camera.screenY;
+      if (relX < -camera.width || relX > camera.width || relY < -camera.height || relY > camera.height) continue;
+      const def = mapTiles ? (mapTiles[cell.tile] || (Array.isArray(mapTiles) ? mapTiles.find(t => t.name === cell.tile || t.type === cell.tile) : null)) : null;
+      this.ctx.fillStyle = def ? def.color : "#123";
+      this.ctx.beginPath();
+      this.ctx.moveTo(s.x, s.y - halfH);
+      this.ctx.lineTo(s.x + halfW, s.y);
+      this.ctx.lineTo(s.x, s.y + halfH);
+      this.ctx.lineTo(s.x - halfW, s.y);
+      this.ctx.closePath();
+      this.ctx.fill();
+    }
+
+    // Players on top (reuse the depth-sorted creature drawing; no world entities yet).
+    const drawables = RenderSystem.buildDrawables(player, { entities: [] }, remotePlayers);
+    for (const d of drawables) {
+      if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
+      else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
+    }
+
+    camera.reset(this.ctx);
     this.renderHud(player, remotePlayers, localUserId);
   }
 
