@@ -7,6 +7,9 @@ import { Map as GameMap } from "./Map.js";
 import { ChunkedMap } from "./ChunkedMap.js";
 import { ChunkStreamer } from "../net/ChunkStreamer.js";
 import { makeChunkFetcher } from "../net/chunkFetcher.js";
+import { CreatureManager } from "../entities/CreatureManager.js";
+import { makeCreatureFetcher, makeCreatureFlusher } from "../net/creatureClient.js";
+import { parseKey } from "./worldCoords.js";
 
 // Native Map shadowed by the world Map import above; alias to keep the
 // distinction obvious at the call sites.
@@ -163,6 +166,12 @@ export class Game {
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
         this.streamer = new ChunkStreamer(this.chunkedMap, makeChunkFetcher(worldId, API_URL), 1);
 
+        this.creatures = new CreatureManager(chunkSize);
+        this.fetchCreatures = makeCreatureFetcher(worldId, API_URL);
+        this.flushCreatures = makeCreatureFlusher(worldId, API_URL);
+        this._loadedCreatureChunks = new Set();
+        this._flushAccum = 0;
+
         this.player.x = spawnX;
         this.player.y = spawnY;
         await this.imageManager.loadAll();
@@ -182,6 +191,20 @@ export class Game {
     }
 
 
+    // Fire-and-forget: for any chunk that's loaded in the map but whose
+    // creatures we haven't fetched yet, fetch + merge them in. Guarded by
+    // _loadedCreatureChunks so each chunk key is only fetched once.
+    _syncCreatureChunks() {
+        for (const key of this.chunkedMap.loadedKeys()) {
+            if (this._loadedCreatureChunks.has(key)) continue;
+            this._loadedCreatureChunks.add(key);
+            const { cx, cy } = parseKey(key);
+            this.fetchCreatures(cx, cy)
+                .then((list) => this.creatures.addCreatures(list))
+                .catch(() => {});
+        }
+    }
+
     destroy() {
         if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
         if (this._keydownHandler) window.removeEventListener('keydown', this._keydownHandler);
@@ -199,6 +222,14 @@ export class Game {
             const cy = this.player.y + this.player.height / 2;
             this.streamer.update(cx, cy); // fire-and-forget; wanted-guard makes it safe
             this.player.update(dt, this.keys, this.chunkedMap);
+            this._syncCreatureChunks();
+            this.creatures.update(dt, this.chunkedMap.loadedKeys(), this.chunkedMap);
+            this._flushAccum += dt;
+            if (this._flushAccum > 3) {
+                this._flushAccum = 0;
+                const dirty = this.creatures.takeDirty();
+                if (dirty.length) this.flushCreatures(dirty).catch(() => {});
+            }
             this.camera.update(this.player);
             if (this.engine && this.engine.joined) this.engine.sendMove(cx, cy);
             return;
@@ -269,7 +300,7 @@ export class Game {
             this.ctx.fillStyle = '#0f3460';
             this.ctx.fillRect(0,0,this.canvas.width,this.canvas.height);
         } else if (this.chunked) {
-            this.renderSystem.renderChunked(this.player, this.camera, this.chunkedMap, this.remotePlayers, this.localUserId);
+            this.renderSystem.renderChunked(this.player, this.camera, this.chunkedMap, this.remotePlayers, this.localUserId, this.creatures.all());
         } else {
             this.renderSystem.render(this.player, this.camera, this.map, this.remotePlayers, this.localUserId);
         }

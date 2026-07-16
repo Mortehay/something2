@@ -294,6 +294,40 @@ function densityAt(world, gRow, gCol) {
   return globalValueNoise((cfg.seed ^ 0x9e3779b9) >>> 0, gRow, gCol, cfg.cellSize);
 }
 
+const CREATURE_TILE_PX = 100;      // world px per tile (matches frontend MAP_TILE_SIZE)
+const CREATURE_SALT = 0x5eed1e;    // separate the creature roll from terrain fields
+const CREATURE_SPAWN_CHANCE = 0.01; // ~1% of tiles seed a creature (sparse)
+
+// Deterministic per-chunk creature spawn. Pure function of (seed, cx, cy,
+// creatureTypes). Each tile gets a seeded roll; a hit spawns a creature of a
+// deterministically-picked type at the tile center (world pixels). Empty
+// creatureTypes -> no creatures.
+function spawnChunkCreatures(world, cx, cy, creatureTypes) {
+  if (!creatureTypes || creatureTypes.length === 0) return [];
+  const cfg = worldConfig(world);
+  const N = cfg.chunkSize;
+  const out = [];
+  for (let lr = 0; lr < N; lr++) {
+    for (let lc = 0; lc < N; lc++) {
+      const gRow = cy * N + lr;
+      const gCol = cx * N + lc;
+      const roll = hash2(cfg.seed ^ CREATURE_SALT, gCol, gRow);
+      if (roll >= CREATURE_SPAWN_CHANCE) continue;
+      // pick a type deterministically from a second hash
+      const pick = hash2((cfg.seed ^ CREATURE_SALT) >>> 1, gCol, gRow);
+      const t = creatureTypes[Math.min(creatureTypes.length - 1, Math.floor(pick * creatureTypes.length))];
+      out.push({
+        type: t.name,
+        x: gCol * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
+        y: gRow * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
+        hp: t.hp || 10,
+        facing: 'S',
+      });
+    }
+  }
+  return out;
+}
+
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 // Biased random walk from `from` to `to`, stamping pathTile. Mostly steps
@@ -466,5 +500,6 @@ module.exports = {
     pathSegmentCells,
     collectPathCells,
     densityAt,
+    spawnChunkCreatures,
 };
 

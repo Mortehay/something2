@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, spawnChunkCreatures } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -655,16 +655,78 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
       cy,
     );
 
-    await pool.query(
+    const chunkIns = await pool.query(
       `INSERT INTO world_chunks (world_id, cx, cy, data) VALUES ($1, $2, $3, $4)
        ON CONFLICT (world_id, cx, cy) DO NOTHING`,
       [worldId, cx, cy, JSON.stringify(data)],
     );
 
+    // Seed this chunk's creatures once, tied to chunk materialization.
+    // Only the request that actually inserted the chunk row spawns creatures;
+    // the loser of a concurrent-first-access race (rowCount 0, ON CONFLICT) spawns nothing.
+    if (chunkIns.rowCount > 0) {
+      const entityTypes = await getEntityTypesMap();
+      const typed = Object.entries(entityTypes)
+        .filter(([name, t]) => (t.hp || 0) > 0 && name !== 'Player')
+        .map(([name, t]) => ({ name, hp: t.hp }));
+      const creatures = spawnChunkCreatures(
+        { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes }, cx, cy, typed,
+      );
+      for (const c of creatures) {
+        await pool.query(
+          `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [worldId, c.type, c.x, c.y, c.hp, c.facing],
+        );
+      }
+    }
+
     res.json({ world_id: worldId, cx, cy, data });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch chunk' });
+  }
+});
+
+app.get('/api/worlds/:id/creatures', async (req, res) => {
+  try {
+    const cx = Number(req.query.cx);
+    const cy = Number(req.query.cy);
+    if (!Number.isInteger(cx) || !Number.isInteger(cy)) {
+      return res.status(400).json({ error: 'cx and cy must be integers' });
+    }
+    const worldRes = await pool.query('SELECT * FROM worlds WHERE id = $1', [req.params.id]);
+    const world = worldRes.rows[0];
+    if (!world) return res.status(404).json({ error: 'world not found' });
+    const span = world.chunk_size * 100;
+    const x0 = cx * span, y0 = cy * span;
+    const result = await pool.query(
+      `SELECT id, type, x, y, hp, facing FROM world_creatures
+       WHERE world_id = $1 AND x >= $2 AND x < $3 AND y >= $4 AND y < $5`,
+      [req.params.id, x0, x0 + span, y0, y0 + span],
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch creatures' });
+  }
+});
+
+app.post('/api/worlds/:id/creatures/flush', async (req, res) => {
+  try {
+    const list = Array.isArray(req.body.creatures) ? req.body.creatures : [];
+    let updated = 0;
+    for (const c of list) {
+      const r = await pool.query(
+        `UPDATE world_creatures SET x=$1, y=$2, facing=$3, updated_at=now()
+         WHERE id=$4 AND world_id=$5`,
+        [c.x, c.y, c.facing || 'S', c.id, req.params.id],
+      );
+      updated += r.rowCount || 0;
+    }
+    res.json({ updated });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to flush creatures' });
   }
 });
 
