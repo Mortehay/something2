@@ -25,6 +25,7 @@ export class CreatureManager {
         id: c.id, type: c.type, x: c.x, y: c.y,
         width: CREATURE_SIZE, height: CREATURE_SIZE,
         speed: CREATURE_SPEED, facing: c.facing || "S", hp: c.hp,
+        color: c.color,
         _dir: dirIdx, dirty: false,
       });
     }

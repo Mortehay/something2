@@ -700,8 +700,9 @@ app.get('/api/worlds/:id/creatures', async (req, res) => {
     const span = world.chunk_size * 100;
     const x0 = cx * span, y0 = cy * span;
     const result = await pool.query(
-      `SELECT id, type, x, y, hp, facing FROM world_creatures
-       WHERE world_id = $1 AND x >= $2 AND x < $3 AND y >= $4 AND y < $5`,
+      `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, et.color FROM world_creatures wc
+       LEFT JOIN entity_types et ON et.name = wc.type
+       WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
       [req.params.id, x0, x0 + span, y0, y0 + span],
     );
     res.json(result.rows);
