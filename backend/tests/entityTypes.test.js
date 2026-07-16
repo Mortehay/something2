@@ -11,8 +11,8 @@ test('POST /api/entity-types defaults render_mode to rect', async () => {
   const res = await request(app).post('/api/entity-types').send({ name: 'Bush', color: '#0f0' });
 
   assert.equal(res.status, 201);
-  // render_mode is the last INSERT parameter.
-  assert.equal(params[params.length - 1], 'rect');
+  // render_mode is the second-to-last INSERT parameter (is_creature is last).
+  assert.equal(params[params.length - 2], 'rect');
 });
 
 test('POST /api/entity-types passes an explicit render_mode', async () => {
@@ -24,10 +24,10 @@ test('POST /api/entity-types passes an explicit render_mode', async () => {
     .send({ name: 'Tree', color: '#0f0', render_mode: 'static' });
 
   assert.equal(res.status, 201);
-  assert.equal(params[params.length - 1], 'static');
+  assert.equal(params[params.length - 2], 'static');
 });
 
-test('PUT /api/entity-types/:id passes render_mode (before the id param)', async () => {
+test('PUT /api/entity-types/:id passes render_mode (before is_creature and the id param)', async () => {
   let params = null;
   __setPool({ query: async (_sql, p) => { params = p; return { rows: [{ id: 5 }] }; } });
 
@@ -36,6 +36,43 @@ test('PUT /api/entity-types/:id passes render_mode (before the id param)', async
     .send({ name: 'Tree', color: '#0f0', render_mode: 'animated' });
 
   assert.equal(res.status, 200);
-  assert.equal(params[params.length - 2], 'animated'); // render_mode
+  assert.equal(params[params.length - 3], 'animated'); // render_mode
+  assert.equal(params[params.length - 2], false);       // is_creature default
   assert.equal(params[params.length - 1], '5');         // id
+});
+
+test('POST /api/entity-types defaults is_creature to false', async () => {
+  let params = null;
+  __setPool({ query: async (_sql, p) => { params = p; return { rows: [{ id: 1 }] }; } });
+
+  const res = await request(app).post('/api/entity-types').send({ name: 'Bush', color: '#0f0' });
+
+  assert.equal(res.status, 201);
+  // is_creature is the last INSERT parameter.
+  assert.equal(params[params.length - 1], false);
+});
+
+test('POST /api/entity-types passes an explicit is_creature', async () => {
+  let params = null;
+  __setPool({ query: async (_sql, p) => { params = p; return { rows: [{ id: 1 }] }; } });
+
+  const res = await request(app)
+    .post('/api/entity-types')
+    .send({ name: 'Wolf', color: '#0f0', is_creature: true });
+
+  assert.equal(res.status, 201);
+  assert.equal(params[params.length - 1], true);
+});
+
+test('PUT /api/entity-types/:id passes is_creature (before the id param)', async () => {
+  let params = null;
+  __setPool({ query: async (_sql, p) => { params = p; return { rows: [{ id: 5 }] }; } });
+
+  const res = await request(app)
+    .put('/api/entity-types/5')
+    .send({ name: 'Wolf', color: '#0f0', is_creature: true });
+
+  assert.equal(res.status, 200);
+  assert.equal(params[params.length - 2], true); // is_creature
+  assert.equal(params[params.length - 1], '5');  // id
 });
