@@ -164,6 +164,21 @@ export class Game {
             console.error("Canvas not found!");
             return;
         }
+        // Re-entry guard: if initChunked runs twice on the same Game instance
+        // (double-click, retry after join timeout, StrictMode double-invoke),
+        // tear down the previous run's leakable resources before starting a
+        // new one. destroy() is not guaranteed to be called in between.
+        if (this.authorityClient) {
+            this.authorityClient.disconnect();
+            this.authorityClient = null;
+        }
+        if (this._resizeHandler) {
+            window.removeEventListener('resize', this._resizeHandler);
+            this._resizeHandler = null;
+        }
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+        }
         this.ctx = this.canvas.getContext("2d");
         this.state = "playing";
         this.chunked = true;
@@ -332,7 +347,7 @@ export class Game {
         this.lastServerTick = msg.tick || 0;
         const next = new NativeMap();
         let mine = null;
-        for (const p of msg.players) {
+        for (const p of (msg.players || [])) {
             if (p.id === this.localUserId) { mine = p; continue; }
             next.set(p.id, { x: p.x, y: p.y, facing: p.facing });
         }
