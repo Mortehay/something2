@@ -72,7 +72,7 @@ export class RenderSystem {
     this.renderHud(player, remotePlayers, localUserId);
   }
 
-  renderChunked(player, camera, chunkedMap, remotePlayers, localUserId) {
+  renderChunked(player, camera, chunkedMap, remotePlayers, localUserId, creatures = []) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     camera.apply(this.ctx);
@@ -96,11 +96,12 @@ export class RenderSystem {
       this.ctx.fill();
     }
 
-    // Players on top (reuse the depth-sorted creature drawing; no world entities yet).
-    const drawables = RenderSystem.buildDrawables(player, { entities: [] }, remotePlayers);
+    // Players + creatures on top, depth-sorted together.
+    const drawables = RenderSystem.buildDrawables(player, { entities: creatures }, remotePlayers);
     for (const d of drawables) {
       if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
       else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
+      else this.drawEntity(d.ref);
     }
 
     camera.reset(this.ctx);
@@ -172,7 +173,7 @@ export class RenderSystem {
     if (img) {
       this.ctx.drawImage(img, drawX, drawY, w, h);
     } else {
-      this.ctx.fillStyle = e.color || "#888";
+      this.ctx.fillStyle = e.color || "#c0392b";
       this.ctx.fillRect(drawX, drawY, w, h);
     }
   }
