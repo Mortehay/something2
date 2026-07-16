@@ -158,6 +158,60 @@ function detectPathTile(tileNames, override) {
     return tileNames.find((n) => PATH_NAME_RE.test(n)) || null;
 }
 
+// Normalize a world config, applying defaults and deriving name lists. Throws
+// on empty tileTypes (a world must have at least one tile).
+function worldConfig(world = {}) {
+  const tileTypes = world.tileTypes || {};
+  const names = Object.keys(tileTypes);
+  if (names.length === 0) throw new Error('worldConfig: tileTypes is empty');
+  const pathTile = world.pathTile !== undefined
+    ? world.pathTile
+    : detectPathTile(names);
+  const biomeNames = pathTile && names.length > 1
+    ? names.filter((n) => n !== pathTile)
+    : names;
+  return {
+    seed: world.seed || 0,
+    chunkSize: world.chunkSize || 64,
+    cellSize: world.cellSize || 8,
+    pathCell: world.pathCell || 24,
+    pathJitter: world.pathJitter || 6,
+    pathTile,
+    names,
+    biomeNames,
+  };
+}
+
+// Biome tile name at absolute world coords: band the global noise value across
+// the biome names (path tile excluded — paths are stamped separately).
+function sampleBiome(cfg, gRow, gCol) {
+  const v = globalValueNoise(cfg.seed, gRow, gCol, cfg.cellSize);
+  const idx = Math.min(cfg.biomeNames.length - 1, Math.floor(v * cfg.biomeNames.length));
+  return cfg.biomeNames[idx];
+}
+
+// Generate an arbitrary rows x cols window of the world. Cell [r][c] is the
+// world tile at (rMin + r, cMin + c). Biomes only for now; paths overlaid in
+// Task 3. generateChunk is a fixed-size wrapper over this.
+function generateRegion(world, rMin, cMin, rows, cols) {
+  const cfg = worldConfig(world);
+  const grid = [];
+  for (let r = 0; r < rows; r++) {
+    const row = new Array(cols);
+    for (let c = 0; c < cols; c++) {
+      row[c] = sampleBiome(cfg, rMin + r, cMin + c);
+    }
+    grid[r] = row;
+  }
+  return grid;
+}
+
+function generateChunk(world, cx, cy) {
+  const cfg = worldConfig(world);
+  const N = cfg.chunkSize;
+  return generateRegion(world, cy * N, cx * N, N, N);
+}
+
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 // Biased random walk from `from` to `to`, stamping pathTile. Mostly steps
@@ -322,5 +376,9 @@ module.exports = {
     uniqueTileNames,
     hash2,
     globalValueNoise,
+    worldConfig,
+    sampleBiome,
+    generateRegion,
+    generateChunk,
 };
 
