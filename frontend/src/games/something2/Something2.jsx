@@ -192,14 +192,19 @@ export default function Something2() {
   const [selectedWorldId, setSelectedWorldId] = useState(null);
   const [newWorldName, setNewWorldName] = useState('');
   const [newWorldSeed, setNewWorldSeed] = useState('');
+  const [newWorldChunkSize, setNewWorldChunkSize] = useState('64');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
 
   const { maps, isLoadingMaps } = useMaps();
   const { mapTiles, isLoadingMapTiles } = useMapTiles();
   const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
-  const { worlds, isLoadingWorlds } = useWorlds();
+  const { worlds, isLoadingWorlds, worldsError } = useWorlds();
   const createWorldMutation = useCreateWorld();
+
+  useEffect(() => {
+    if (worldsError) toast.error(`Failed to load worlds: ${worldsError.message}`);
+  }, [worldsError]);
 
   // name -> color for the minimap preview (mapTiles is keyed by tile name).
   const tileColors = useMemo(() => {
@@ -359,10 +364,12 @@ export default function Something2() {
 
   const handleCreateWorld = () => {
     if (!newWorldName.trim()) return;
+    const cs = Number(newWorldChunkSize);
+    const chunk_size = Number.isInteger(cs) && cs >= 1 && cs <= 256 ? cs : 64;
     createWorldMutation.mutate({
       name: newWorldName.trim(),
       seed: newWorldSeed ? Number(newWorldSeed) : undefined,
-      chunk_size: 64,
+      chunk_size,
     }, {
       onSuccess: (world) => {
         setNewWorldName('');
@@ -471,6 +478,12 @@ export default function Something2() {
                       placeholder="Seed (optional)"
                       value={newWorldSeed}
                       onChange={(e) => setNewWorldSeed(e.target.value)}
+                    />
+                    <Input
+                      type="number"
+                      placeholder="Chunk size (1-256)"
+                      value={newWorldChunkSize}
+                      onChange={(e) => setNewWorldChunkSize(e.target.value)}
                     />
                     <Button
                       onClick={handleCreateWorld}

@@ -4,7 +4,9 @@ import toast from "react-hot-toast";
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
 
 export function useWorlds() {
-  const { data: worlds, isLoading: isLoadingWorlds } = useQuery({
+  // TanStack Query v5 removed per-query `onError` from useQuery options, so
+  // errors are surfaced via the returned `error` and toasted by the caller.
+  const { data: worlds, isLoading: isLoadingWorlds, error: worldsError } = useQuery({
     queryKey: ["worlds"],
     queryFn: async () => {
       const res = await fetch(`${API_URL}/api/worlds`);
@@ -12,7 +14,7 @@ export function useWorlds() {
       return res.json();
     },
   });
-  return { worlds, isLoadingWorlds };
+  return { worlds, isLoadingWorlds, worldsError };
 }
 
 export function useCreateWorld() {
