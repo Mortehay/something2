@@ -29,3 +29,9 @@ export function chunkOrigin(cx, cy, chunkSize) {
 export function CHUNK_KEY(cx, cy) {
   return `${cx},${cy}`;
 }
+
+// Inverse of CHUNK_KEY: "cx,cy" -> { cx, cy }. Handles negative indices.
+export function parseKey(key) {
+  const [cx, cy] = key.split(",").map(Number);
+  return { cx, cy };
+}

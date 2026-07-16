@@ -84,3 +84,17 @@ describe("ChunkedMap.isWalkable / speedAt", () => {
     expect(m.isWalkable(T, 0)).toBe(true);  // grass
   });
 });
+
+describe("ChunkedMap resolves a chunk offset in both cx and cy", () => {
+  it("indexes grid[lr][lc] correctly for chunk (2,-1) at an off-diagonal cell", () => {
+    const m = new ChunkedMap(N);
+    // grid[lr][lc] = `Q-<lr><lc>`
+    m.setChunk(2, -1, Array.from({ length: N }, (_, r) =>
+      Array.from({ length: N }, (_, c) => `Q-${r}${c}`)));
+    // world px inside chunk (2,-1): cx*N*T .. , choose local (lr=1, lc=3):
+    // gCol = 2*N + 3, gRow = -1*N + 1 ; worldX = gCol*T + 1, worldY = gRow*T + 1
+    const worldX = (2 * N + 3) * T + 1;
+    const worldY = (-1 * N + 1) * T + 1;
+    expect(m.getTileAt(worldX, worldY)).toBe("Q-13"); // lr=1, lc=3 (NOT "Q-31")
+  });
+});
