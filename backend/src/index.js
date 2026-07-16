@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -577,6 +577,94 @@ app.post('/api/entity-types/:id/sprite', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to save sprite' });
+  }
+});
+
+// --- Worlds (chunked overworld) -------------------------------------------
+
+app.post('/api/worlds', async (req, res) => {
+  try {
+    const { name, seed, chunk_size } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    const worldSeed = Number.isFinite(seed) ? Math.floor(seed) : Math.floor(Math.random() * 2 ** 31);
+    const chunkSize = Number.isFinite(chunk_size) ? Math.floor(chunk_size) : 64;
+    if (chunkSize < 1 || chunkSize > 256) {
+      return res.status(400).json({ error: 'chunk_size must be an integer between 1 and 256' });
+    }
+    const result = await pool.query(
+      'INSERT INTO worlds (name, seed, chunk_size) VALUES ($1, $2, $3) RETURNING *',
+      [name.trim(), worldSeed, chunkSize],
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create world' });
+  }
+});
+
+app.get('/api/worlds', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM worlds ORDER BY created_at DESC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to list worlds' });
+  }
+});
+
+app.get('/api/worlds/:id', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM worlds WHERE id = $1', [req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'world not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch world' });
+  }
+});
+
+app.get('/api/worlds/:id/chunk', async (req, res) => {
+  try {
+    const cx = Number(req.query.cx);
+    const cy = Number(req.query.cy);
+    if (!Number.isInteger(cx) || !Number.isInteger(cy)) {
+      return res.status(400).json({ error: 'cx and cy must be integers' });
+    }
+    const worldId = req.params.id;
+
+    // Cache hit?
+    const cached = await pool.query(
+      'SELECT data FROM world_chunks WHERE world_id = $1 AND cx = $2 AND cy = $3',
+      [worldId, cx, cy],
+    );
+    if (cached.rows[0]) {
+      return res.json({ world_id: worldId, cx, cy, data: cached.rows[0].data });
+    }
+
+    // Miss: load the world, generate, cache.
+    const worldRes = await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
+    const world = worldRes.rows[0];
+    if (!world) return res.status(404).json({ error: 'world not found' });
+
+    const tileTypes = await getTileTypesMap();
+    const data = generateChunk(
+      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes },
+      cx,
+      cy,
+    );
+
+    await pool.query(
+      `INSERT INTO world_chunks (world_id, cx, cy, data) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (world_id, cx, cy) DO NOTHING`,
+      [worldId, cx, cy, JSON.stringify(data)],
+    );
+
+    res.json({ world_id: worldId, cx, cy, data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch chunk' });
   }
 });
 
