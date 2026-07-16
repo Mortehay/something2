@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { it, expect } from "vitest";
 import { ChunkStreamer } from "../ChunkStreamer.js";
 import { ChunkedMap } from "../../core/ChunkedMap.js";
 import { MAP_TILE_SIZE } from "../../core/constants.js";
@@ -29,15 +29,45 @@ it("loads the full 3x3 neighborhood on first update", async () => {
   expect(res.dropped.length).toBe(0);
 });
 
-it("does nothing while the player stays in the same chunk", async () => {
+it("issues no new fetches when all wanted chunks are already loaded", async () => {
   const map = new ChunkedMap(N);
   const { fetchChunk, requested } = makeFetch();
   const s = new ChunkStreamer(map, fetchChunk, 1);
   await s.update(0, 0);
   const before = requested.length;
-  const res = await s.update(MAP_TILE_SIZE, MAP_TILE_SIZE); // still chunk (0,0)
-  expect(requested.length).toBe(before); // no new fetches
+  const res = await s.update(MAP_TILE_SIZE, MAP_TILE_SIZE); // still chunk (0,0), all 9 already loaded
+  expect(requested.length).toBe(before); // no new fetches: toLoad is empty
   expect(res.loaded.length).toBe(0);
+  expect(res.dropped.length).toBe(0);
+});
+
+it("retries a chunk whose fetch failed, even when the center chunk is unchanged", async () => {
+  const map = new ChunkedMap(N);
+  const requested = [];
+  const failingKey = "1,1";
+  let failedOnce = false;
+  const fetchChunk = async (cx, cy) => {
+    const key = `${cx},${cy}`;
+    requested.push(key);
+    if (key === failingKey && !failedOnce) {
+      failedOnce = true;
+      throw new Error("simulated transient network failure");
+    }
+    return Array.from({ length: N }, () => Array.from({ length: N }, () => `t-${cx}-${cy}`));
+  };
+  const s = new ChunkStreamer(map, fetchChunk, 1);
+
+  const res1 = await s.update(0, 0); // center (0,0): 8 succeed, "1,1" throws
+  expect(map.hasChunk(1, 1)).toBe(false); // failed chunk stays unloaded
+  expect(res1.loaded.length).toBe(8);
+  expect(map.loadedKeys().length).toBe(8);
+
+  // SECOND update with the SAME center: under the old early-return behavior this
+  // would be a no-op and "1,1" would remain permanently unloaded (invisible wall).
+  const res2 = await s.update(0, 0);
+  expect(res2.loaded).toEqual(["1,1"]);
+  expect(map.hasChunk(1, 1)).toBe(true); // retried and now loaded
+  expect(map.loadedKeys().length).toBe(9);
 });
 
 it("streams the new ring and drops the far ring when crossing a seam", async () => {

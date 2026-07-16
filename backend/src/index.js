@@ -694,7 +694,7 @@ app.get('/api/worlds/:id/creatures', async (req, res) => {
     if (!Number.isInteger(cx) || !Number.isInteger(cy)) {
       return res.status(400).json({ error: 'cx and cy must be integers' });
     }
-    const worldRes = await pool.query('SELECT * FROM worlds WHERE id = $1', [req.params.id]);
+    const worldRes = await pool.query('SELECT chunk_size FROM worlds WHERE id = $1', [req.params.id]);
     const world = worldRes.rows[0];
     if (!world) return res.status(404).json({ error: 'world not found' });
     const span = world.chunk_size * 100;

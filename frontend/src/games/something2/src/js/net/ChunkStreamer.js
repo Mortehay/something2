@@ -18,27 +18,34 @@ export class ChunkStreamer {
   async update(worldX, worldY) {
     const { cx, cy } = chunkOf(worldX, worldY, this.map.chunkSize);
     const key = CHUNK_KEY(cx, cy);
-    if (key === this.centerKey) return { loaded: [], dropped: [] };
-
-    const prev = this.centerKey
-      ? neighborhoodKeys(...Object.values(parseKey(this.centerKey)), this.radius)
-      : [];
     const next = neighborhoodKeys(cx, cy, this.radius);
-    this.centerKey = key;
     this.wanted = new Set(next);
 
-    const { toLoad, toDrop } = diffNeighborhoods(prev, next);
-
-    for (const k of toDrop) {
-      const { cx: dcx, cy: dcy } = parseKey(k);
-      this.map.removeChunk(dcx, dcy);
+    // Drops only when the center chunk changed.
+    let dropped = [];
+    if (key !== this.centerKey) {
+      const prev = this.centerKey
+        ? neighborhoodKeys(...Object.values(parseKey(this.centerKey)), this.radius)
+        : [];
+      dropped = diffNeighborhoods(prev, next).toDrop;
+      for (const k of dropped) {
+        const { cx: dcx, cy: dcy } = parseKey(k);
+        this.map.removeChunk(dcx, dcy);
+      }
+      this.centerKey = key;
     }
+
+    // Always: load any wanted chunk not already loaded and not inflight.
+    // This retries chunks whose earlier fetch failed, even when the center is unchanged.
+    const toLoad = next.filter((k) => {
+      const { cx: lcx, cy: lcy } = parseKey(k);
+      return !this.map.hasChunk(lcx, lcy) && !this.inflight.has(k);
+    });
 
     const loaded = [];
     await Promise.all(
       toLoad.map(async (k) => {
         const { cx: lcx, cy: lcy } = parseKey(k);
-        if (this.map.hasChunk(lcx, lcy) || this.inflight.has(k)) return;
         this.inflight.add(k);
         try {
           const grid = await this.fetchChunk(lcx, lcy);
@@ -54,6 +61,6 @@ export class ChunkStreamer {
       }),
     );
 
-    return { loaded, dropped: toDrop };
+    return { loaded, dropped };
   }
 }

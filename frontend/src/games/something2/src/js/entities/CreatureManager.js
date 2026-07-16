@@ -69,4 +69,46 @@ export class CreatureManager {
     }
     return dirty;
   }
+
+  // Like takeDirty(), but does NOT clear the dirty flag. Use this when the
+  // caller must confirm a flush succeeded before treating the position as
+  // persisted (see clearDirty).
+  getDirty() {
+    const dirty = [];
+    for (const c of this.creatures.values()) {
+      if (c.dirty) {
+        dirty.push({ id: c.id, x: c.x, y: c.y, facing: c.facing });
+      }
+    }
+    return dirty;
+  }
+
+  // Clear the dirty flag for the given creature ids. Call this only after a
+  // flush of those ids' positions has succeeded — a failed or in-flight
+  // flush must leave the creature dirty so pruneOutOfRange won't drop an
+  // unpersisted position.
+  clearDirty(ids) {
+    for (const id of ids) {
+      const c = this.creatures.get(id);
+      if (c) c.dirty = false;
+    }
+  }
+
+  // Drop creatures whose chunk has fallen out of the loaded neighborhood —
+  // but ONLY once their last roamed position has been flushed (dirty ===
+  // false). A dirty out-of-range creature is kept until a later prune, after
+  // a flush cycle has cleared its dirty flag, so we never lose an unpersisted
+  // position. Returns the number of creatures dropped.
+  pruneOutOfRange(loadedKeys) {
+    const loaded = loadedKeys instanceof Set ? loadedKeys : new Set(loadedKeys);
+    let dropped = 0;
+    for (const [id, c] of this.creatures) {
+      const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
+      if (loaded.has(CHUNK_KEY(cx, cy))) continue;
+      if (c.dirty) continue; // unflushed — keep until it's safe to drop
+      this.creatures.delete(id);
+      dropped++;
+    }
+    return dropped;
+  }
 }
