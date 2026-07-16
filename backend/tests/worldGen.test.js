@@ -170,3 +170,17 @@ test('no path tile -> generateChunk carves nothing (pure biomes)', () => {
   const names = Object.keys(BIOMES);
   for (const row of grid) for (const cell of row) assert.ok(names.includes(cell));
 });
+
+test('paths stay continuous across seams even with large pathJitter (padding covers jitter)', () => {
+  const world = { seed: 99, chunkSize: 24, tileTypes: PATH_TILES, pathCell: 8, pathJitter: 20 };
+  const N = 24;
+  const left = generateChunk(world, 0, 0);
+  const right = generateChunk(world, 1, 0);
+  const direct = generateRegion(world, 0, 0, N, 2 * N);
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      assert.equal(left[r][c], direct[r][c], `left seam mismatch @${r},${c}`);
+      assert.equal(right[r][c], direct[r][c + N], `right seam mismatch @${r},${c}`);
+    }
+  }
+});

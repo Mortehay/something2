@@ -261,12 +261,16 @@ function collectPathCells(cfg, rMin, cMin, rows, cols) {
   const set = new Set();
   if (!cfg.pathTile) return set;
   const rMax = rMin + rows, cMax = cMin + cols;
-  // Coarse-node index range covering the window, padded by 1 node each side so
-  // trails entering from outside are included.
-  const piLo = Math.floor(rMin / cfg.pathCell) - 1;
-  const piHi = Math.floor((rMax - 1) / cfg.pathCell) + 1;
-  const pjLo = Math.floor(cMin / cfg.pathCell) - 1;
-  const pjHi = Math.floor((cMax - 1) / cfg.pathCell) + 1;
+  // Coarse-node index range covering the window, padded so trails entering
+  // from outside are included. A node's segment can reach up to pathJitter
+  // tiles beyond its nominal pathCell span (anchor jitter), so the padding
+  // ring must cover that reach -- not just a fixed 1 node -- or a window
+  // computed narrowly could miss cells a wider region would include.
+  const pad = Math.ceil(cfg.pathJitter / cfg.pathCell) + 1;
+  const piLo = Math.floor(rMin / cfg.pathCell) - pad;
+  const piHi = Math.floor((rMax - 1) / cfg.pathCell) + pad;
+  const pjLo = Math.floor(cMin / cfg.pathCell) - pad;
+  const pjHi = Math.floor((cMax - 1) / cfg.pathCell) + pad;
   const add = (cells) => {
     for (const [r, c] of cells) {
       if (r >= rMin && r < rMax && c >= cMin && c < cMax) set.add(`${r},${c}`);
