@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
@@ -733,9 +734,11 @@ app.post('/api/worlds/:id/creatures/flush', async (req, res) => {
 });
 
 if (require.main === module) {
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`Backend server running on port ${port}`);
   });
+  attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
+  console.log('Authority WS attached at /authority');
 }
 
 module.exports = { app, __setSpriteGen, __setPool };
