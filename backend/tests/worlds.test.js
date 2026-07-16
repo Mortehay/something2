@@ -92,6 +92,31 @@ test('GET chunk cache MISS generates, caches, returns an NxN grid', async () => 
   assert.ok(inserted, 'expected an INSERT into world_chunks on cache miss');
 });
 
+test('GET chunk cache MISS only spawns entity types flagged is_creature', async () => {
+  let spawnedTypes = null;
+  const pool = mockPool([
+    [/SELECT .* FROM world_chunks/i, () => ({ rows: [] })],               // cache miss
+    [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42', chunk_size: 8 }] })],
+    [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
+    [/INSERT INTO world_chunks/i, () => ({ rowCount: 1, rows: [] })],
+    [/FROM entity_types/i, () => ({
+      rows: [
+        // Not a creature despite hp>0: must NOT be spawned (the old hp-hack would have picked this up).
+        { id: 1, name: 'Bandit', hp: 10, max_hp: 10, is_creature: false, walkable: false, spawn_tiles: [], chance: 0.1 },
+        // Flagged as a creature: must be spawned.
+        { id: 2, name: 'Wolf', hp: 12, max_hp: 12, is_creature: true, walkable: false, spawn_tiles: [], chance: 0.1 },
+      ],
+    })],
+    [/INSERT INTO world_creatures/i, (p) => { spawnedTypes = spawnedTypes || []; spawnedTypes.push(p[1]); return { rowCount: 1, rows: [] }; }],
+  ]);
+  __setPool(pool);
+  const res = await request(app).get('/api/worlds/w1/chunk?cx=1&cy=-2');
+  assert.equal(res.status, 200);
+  // Deterministic for this seed/chunk/coords: exactly one creature spawns, and
+  // since only is_creature types are ever handed to the spawner, it must be Wolf.
+  assert.deepEqual(spawnedTypes, ['Wolf']);
+});
+
 test('chunk cache-miss that loses the insert race does not spawn creatures', async () => {
   const pool = mockPool([
     [/SELECT .* FROM world_chunks/i, () => ({ rows: [] })],               // cache miss
