@@ -1,5 +1,6 @@
 import { Entity } from "./Entity.js";
 import { GAME_WIDTH, GAME_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT } from "../core/constants.js";
+import { resolveMove } from "../systems/movement.js";
 
 export class Player extends Entity {
     constructor(){
@@ -25,13 +26,26 @@ export class Player extends Entity {
     }
 
     update(dt, keys, map){
-        let dx = 0,dy = 0;
-
+        let dx = 0, dy = 0;
         if(keys['w'] || keys['arrowup']) dy -= 1;
         if(keys['s'] || keys['arrowdown']) dy += 1;
         if(keys['a'] || keys['arrowleft']) dx -= 1;
         if(keys['d'] || keys['arrowright']) dx += 1;
 
+        // Chunked world: delegate collision to the ChunkedMap via resolveMove.
+        // No world-bounds clamp (infinite world); the streaming frontier
+        // (unloaded chunk -> isWalkable false) is the only boundary.
+        if (map && typeof map.isWalkable === 'function') {
+            if (dx !== 0 || dy !== 0) {
+                const speed = this.speed * (this.speedMultiplier || 1);
+                const r = resolveMove(map, { x: this.x, y: this.y, width: this.width, height: this.height, speed }, dx, dy, dt);
+                this.x = r.x;
+                this.y = r.y;
+            }
+            return;
+        }
+
+        // --- legacy single-Map path (unchanged) ---
         //normalize diagonal movement
         if(dx !== 0 || dy !== 0){
             const len = Math.sqrt(dx*dx + dy*dy);
