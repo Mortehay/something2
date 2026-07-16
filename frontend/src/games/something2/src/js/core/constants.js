@@ -13,3 +13,6 @@ export const MAP_TILE_SIZE = 100;
 // on screen. Rendering only; world logic never uses these.
 export const ISO_TILE_W = 128;
 export const ISO_TILE_H = 64;
+
+// Effective player speed used by the authoritative sim (Player.speed * speedMultiplier).
+export const PLAYER_SPEED_EFFECTIVE = 200;

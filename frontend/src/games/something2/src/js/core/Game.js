@@ -10,6 +10,11 @@ import { makeChunkFetcher } from "../net/chunkFetcher.js";
 import { CreatureManager } from "../entities/CreatureManager.js";
 import { makeCreatureFetcher, makeCreatureFlusher } from "../net/creatureClient.js";
 import { parseKey } from "./worldCoords.js";
+import { WorldAuthorityClient } from "../net/WorldAuthorityClient.js";
+import { fetchDevToken } from "../net/EngineClient.js";
+import { reconcile } from "../net/reconcile.js";
+import { inputVector } from "../entities/Player.js";
+import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 
 // Native Map shadowed by the world Map import above; alias to keep the
 // distinction obvious at the call sites.
@@ -172,8 +177,26 @@ export class Game {
         this._loadedCreatureChunks = new Set();
         this._flushAccum = 0;
 
-        this.player.x = spawnX;
-        this.player.y = spawnY;
+        this._inputBuffer = [];
+        // Connect to the authoritative sim; spawn comes from the server.
+        const { token, user_id } = await fetchDevToken(API_URL);
+        this.localUserId = String(user_id);
+        const wsUrl = API_URL.replace(/^http/, 'ws') + '/authority';
+        const spawn = await new Promise((resolve, reject) => {
+            this.authorityClient = new WorldAuthorityClient({
+                url: wsUrl,
+                token,
+                onJoined: (msg) => resolve(msg.spawn),
+                onState: (msg) => this._onWorldState(msg),
+                onError: (e) => console.error('[authority]', e),
+                onClose: () => { this.authorityJoined = false; },
+            });
+            this.authorityClient.connect(worldId);
+            setTimeout(() => reject(new Error('authority join timeout')), 5000);
+        });
+        this.authorityJoined = true;
+        this.player.x = spawn.x;
+        this.player.y = spawn.y;
         await this.imageManager.loadAll();
         // Load the initial neighborhood before the first frame so we don't render empty.
         await this.streamer.update(this.player.x + this.player.width / 2, this.player.y + this.player.height / 2);
@@ -221,7 +244,8 @@ export class Game {
         if (this._keyupHandler) window.removeEventListener('keyup', this._keyupHandler);
         if (this._contextMenuHandler) window.removeEventListener('contextmenu', this._contextMenuHandler);
         if (this._blurHandler) window.removeEventListener('blur', this._blurHandler);
-        
+        if (this.authorityClient) this.authorityClient.disconnect();
+
         cancelAnimationFrame(this.animationFrameId);
     }
 
@@ -231,7 +255,13 @@ export class Game {
             const cx = this.player.x + this.player.width / 2;
             const cy = this.player.y + this.player.height / 2;
             this.streamer.update(cx, cy); // fire-and-forget; wanted-guard makes it safe
-            this.player.update(dt, this.keys, this.chunkedMap);
+            this.player.update(dt, this.keys, this.chunkedMap); // local prediction
+            // Send input to the authority; buffer actual sends for reconciliation.
+            if (this.authorityClient) {
+                const { dx, dy } = inputVector(this.keys);
+                const s = this.authorityClient.sendInput(dx, dy, dt);
+                if (s.sent) this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt });
+            }
             this._syncCreatureChunks();
             this.creatures.update(dt, this.chunkedMap.loadedKeys(), this.chunkedMap);
             this._flushAccum += dt;
@@ -251,7 +281,6 @@ export class Game {
                 this.creatures.pruneOutOfRange(this.chunkedMap.loadedKeys());
             }
             this.camera.update(this.player);
-            if (this.engine && this.engine.joined) this.engine.sendMove(cx, cy);
             return;
         }
         this.player.update(dt, this.keys, this.map);
@@ -293,6 +322,32 @@ export class Game {
                 `local=(${Math.round(this.player.x)},${Math.round(this.player.y)}) ` +
                 `remote=${this.remotePlayers.size} ids=[${[...this.remotePlayers.keys()].join(",")}]`
             );
+        }
+    }
+
+    // Authoritative tick from the world authority. Reconcile the local player
+    // (snap to server pos for the acked seq, replay un-acked inputs) and refresh
+    // remote players for the renderer.
+    _onWorldState(msg) {
+        this.lastServerTick = msg.tick || 0;
+        const next = new NativeMap();
+        let mine = null;
+        for (const p of msg.players) {
+            if (p.id === this.localUserId) { mine = p; continue; }
+            next.set(p.id, { x: p.x, y: p.y, facing: p.facing });
+        }
+        this.remotePlayers = next;
+        if (mine) {
+            const out = reconcile(
+                { x: mine.x, y: mine.y },
+                msg.ackSeq || 0,
+                this._inputBuffer,
+                this.chunkedMap,
+                { width: this.player.width, height: this.player.height, speed: PLAYER_SPEED_EFFECTIVE }
+            );
+            this.player.x = out.x;
+            this.player.y = out.y;
+            this._inputBuffer = out.buffer;
         }
     }
 
