@@ -90,6 +90,40 @@ function makeRng(seed) {
     };
 }
 
+// Smoothstep easing for value-noise interpolation.
+function smoothstep(t) {
+  return t * t * (3 - 2 * t);
+}
+
+// Deterministic integer hash -> float in [0,1). Pure function of (seed, x, y);
+// handles negative coordinates (chunks exist at negative cx/cy). This replaces
+// the sequential-rng lattice of valueNoise with a coordinate-addressable one so
+// any lattice node is reproducible without generating its neighbors.
+function hash2(seed, x, y) {
+  let h = seed >>> 0;
+  h = Math.imul(h ^ (x | 0), 0x27d4eb2d);
+  h ^= h >>> 15;
+  h = Math.imul(h ^ (y | 0), 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+// Value noise sampled at ABSOLUTE world coords: bilinear-interpolate the four
+// hashed lattice nodes surrounding (gRow, gCol). Same coords -> same value,
+// regardless of which chunk asks -> adjacent chunks are continuous.
+function globalValueNoise(seed, gRow, gCol, cellSize) {
+  const gy = gRow / cellSize, gx = gCol / cellSize;
+  const y0 = Math.floor(gy), x0 = Math.floor(gx);
+  const sy = smoothstep(gy - y0), sx = smoothstep(gx - x0);
+  const v00 = hash2(seed, x0, y0),     v10 = hash2(seed, x0 + 1, y0);
+  const v01 = hash2(seed, x0, y0 + 1), v11 = hash2(seed, x0 + 1, y0 + 1);
+  const top = v00 + (v10 - v00) * sx;
+  const bot = v01 + (v11 - v01) * sx;
+  return top + (bot - top) * sy;
+}
+
 // Value-noise field: a coarse random lattice (cellSize apart) smoothly
 // interpolated to full resolution -> contiguous low-frequency regions.
 function valueNoise(rows, cols, cellSize, rng) {
@@ -286,5 +320,7 @@ module.exports = {
     detectPathTile,
     carvePaths,
     uniqueTileNames,
+    hash2,
+    globalValueNoise,
 };
 
