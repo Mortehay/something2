@@ -34,14 +34,36 @@ function token(userId) {
 
 // Boot an http server with the authority attached; returns {url, handle, server}.
 function boot() {
+  return bootWith(fakePool());
+}
+
+// Same as boot(), but with a caller-supplied pool (e.g. one with an
+// artificial delay to force concurrent cold-start loads to interleave).
+function bootWith(pool) {
   return new Promise((resolve) => {
     const server = http.createServer();
-    const handle = attachAuthority(server, fakePool(), { jwtSecret: SECRET, tickMs: 20 });
+    const handle = attachAuthority(server, pool, { jwtSecret: SECRET, tickMs: 20 });
     server.listen(0, () => {
       const port = server.address().port;
       resolve({ url: `ws://127.0.0.1:${port}/authority`, handle, server });
     });
   });
+}
+
+// Like fakePool(), but the world-lookup query awaits a real delay before
+// resolving, so two concurrent first-joins to the same world genuinely
+// interleave across the `await pool.query(...)` in loadWorld (instant
+// microtask resolution is too fast to ever interleave two loads).
+function delayedFakePool(delayMs) {
+  return {
+    query: async (sql, ...args) => {
+      if (/FROM worlds WHERE id/i.test(sql)) {
+        await new Promise((r) => setTimeout(r, delayMs));
+        return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
+      }
+      return fakePool().query(sql, ...args);
+    },
+  };
 }
 
 function connect(url, uid) {
@@ -116,6 +138,36 @@ test('two clients in one world see each other', async () => {
     if (ids.includes('1') && ids.includes('2')) both = true;
   }
   assert.ok(both, "a should see both players");
+  a.close(); b.close();
+  handle.close(); server.close();
+});
+
+test('concurrent first-joins to a fresh (unloaded) world both get ticked, not orphaned', async () => {
+  // Regression test for the cold-start race in loadWorld(): with an
+  // instant-resolving pool two concurrent joins never actually interleave
+  // across the await, so we use a pool whose world lookup takes a real
+  // 15ms round-trip to force both joins to pass the `worlds.get` miss
+  // check before either query resolves.
+  const { url, handle, server } = await bootWith(delayedFakePool(15));
+  const a = connect(url, 1);
+  const b = connect(url, 2);
+  await Promise.all([
+    new Promise((r) => a.on('open', r)),
+    new Promise((r) => b.on('open', r)),
+  ]);
+  // Fire both joins as close together as possible so they race the same
+  // cold-start load.
+  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  b.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await Promise.all([nextMsg(a, 'joined'), nextMsg(b, 'joined')]);
+
+  let both = false;
+  for (let i = 0; i < 20 && !both; i++) {
+    const s = await nextMsg(a, 'state');
+    const ids = s.players.map((p) => p.id).sort();
+    if (ids.includes('1') && ids.includes('2')) both = true;
+  }
+  assert.ok(both, 'both concurrently-joined players should end up present, not orphaned');
   a.close(); b.close();
   handle.close(); server.close();
 });

@@ -16,6 +16,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
   const wss = new WebSocketServer({ noServer: true });
   const worlds = new Map(); // world_id -> { world, row, sockets: Map<userId, ws> }
+  const loading = new Map(); // world_id -> in-flight loadWorld promise (cold-start dedupe)
 
   httpServer.on('upgrade', (req, socket, head) => {
     let userId;
@@ -37,18 +38,31 @@ function attachAuthority(httpServer, pool, opts = {}) {
   });
 
   async function loadWorld(worldId) {
-    let entry = worlds.get(worldId);
-    if (entry) return entry;
-    const wr = await pool.query('SELECT id, seed, chunk_size FROM worlds WHERE id = $1', [worldId]);
-    if (wr.rows.length === 0) return null;
-    const row = wr.rows[0];
-    const tr = await pool.query('SELECT name, walkable, speed FROM tile_types');
-    const tileTypes = {};
-    for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
-    const map = new ServerMap({ seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes });
-    entry = { world: new World(map), row, sockets: new Map() };
-    worlds.set(worldId, entry);
-    return entry;
+    const existing = worlds.get(worldId);
+    if (existing) return existing;
+
+    let pending = loading.get(worldId);
+    if (!pending) {
+      pending = (async () => {
+        const wr = await pool.query('SELECT id, seed, chunk_size FROM worlds WHERE id = $1', [worldId]);
+        if (wr.rows.length === 0) return null;
+        const row = wr.rows[0];
+        const tr = await pool.query('SELECT name, walkable, speed FROM tile_types');
+        const tileTypes = {};
+        for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
+        const map = new ServerMap({ seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes });
+        const entry = { world: new World(map), row, sockets: new Map() };
+        worlds.set(worldId, entry);
+        return entry;
+      })();
+      loading.set(worldId, pending);
+    }
+
+    try {
+      return await pending;
+    } finally {
+      loading.delete(worldId);
+    }
   }
 
   async function loadSpawn(worldId, userId, chunkSize) {
