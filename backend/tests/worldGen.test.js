@@ -204,3 +204,45 @@ test('densityAt is continuous across a chunk boundary', () => {
   }
   assert.ok(maxJump < 0.35, `density discontinuous at seam, maxJump ${maxJump}`);
 });
+
+const { spawnChunkCreatures } = require('../src/services/mapService');
+
+const CREATURE_TYPES = [{ name: 'wolf', hp: 12 }, { name: 'boar', hp: 8 }];
+
+test('spawnChunkCreatures is deterministic per (seed, chunk)', () => {
+  const world = { seed: 5, chunkSize: 16, tileTypes: { grass: {} } };
+  const a = spawnChunkCreatures(world, 0, 0, CREATURE_TYPES);
+  const b = spawnChunkCreatures(world, 0, 0, CREATURE_TYPES);
+  assert.deepEqual(a, b);
+});
+
+test('spawned creatures sit inside the chunk world bounds with valid types', () => {
+  const N = 16, T = 100;
+  const world = { seed: 9, chunkSize: N, tileTypes: { grass: {} } };
+  const cx = 2, cy = -1;
+  const creatures = spawnChunkCreatures(world, cx, cy, CREATURE_TYPES);
+  const x0 = cx * N * T, y0 = cy * N * T;
+  for (const c of creatures) {
+    assert.ok(c.x >= x0 && c.x < x0 + N * T, `x ${c.x} out of chunk`);
+    assert.ok(c.y >= y0 && c.y < y0 + N * T, `y ${c.y} out of chunk`);
+    assert.ok(['wolf', 'boar'].includes(c.type));
+    assert.ok(c.hp > 0);
+  }
+});
+
+test('spawn is sparse (not one per tile) and non-empty somewhere', () => {
+  const world = { seed: 3, chunkSize: 32, tileTypes: { grass: {} } };
+  let total = 0, chunksWithCreatures = 0;
+  for (let cx = 0; cx < 6; cx++) {
+    const c = spawnChunkCreatures(world, cx, 0, CREATURE_TYPES);
+    total += c.length;
+    if (c.length) chunksWithCreatures++;
+    assert.ok(c.length < 32 * 32, 'not sparse');
+  }
+  assert.ok(total > 0, 'expected some creatures across several chunks');
+});
+
+test('no creature types -> no creatures', () => {
+  const world = { seed: 3, chunkSize: 16, tileTypes: { grass: {} } };
+  assert.deepEqual(spawnChunkCreatures(world, 0, 0, []), []);
+});
