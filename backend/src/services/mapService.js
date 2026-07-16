@@ -90,6 +90,40 @@ function makeRng(seed) {
     };
 }
 
+// Smoothstep easing for value-noise interpolation.
+function smoothstep(t) {
+  return t * t * (3 - 2 * t);
+}
+
+// Deterministic integer hash -> float in [0,1). Pure function of (seed, x, y);
+// handles negative coordinates (chunks exist at negative cx/cy). This replaces
+// the sequential-rng lattice of valueNoise with a coordinate-addressable one so
+// any lattice node is reproducible without generating its neighbors.
+function hash2(seed, x, y) {
+  let h = seed >>> 0;
+  h = Math.imul(h ^ (x | 0), 0x27d4eb2d);
+  h ^= h >>> 15;
+  h = Math.imul(h ^ (y | 0), 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+// Value noise sampled at ABSOLUTE world coords: bilinear-interpolate the four
+// hashed lattice nodes surrounding (gRow, gCol). Same coords -> same value,
+// regardless of which chunk asks -> adjacent chunks are continuous.
+function globalValueNoise(seed, gRow, gCol, cellSize) {
+  const gy = gRow / cellSize, gx = gCol / cellSize;
+  const y0 = Math.floor(gy), x0 = Math.floor(gx);
+  const sy = smoothstep(gy - y0), sx = smoothstep(gx - x0);
+  const v00 = hash2(seed, x0, y0),     v10 = hash2(seed, x0 + 1, y0);
+  const v01 = hash2(seed, x0, y0 + 1), v11 = hash2(seed, x0 + 1, y0 + 1);
+  const top = v00 + (v10 - v00) * sx;
+  const bot = v01 + (v11 - v01) * sx;
+  return top + (bot - top) * sy;
+}
+
 // Value-noise field: a coarse random lattice (cellSize apart) smoothly
 // interpolated to full resolution -> contiguous low-frequency regions.
 function valueNoise(rows, cols, cellSize, rng) {
@@ -122,6 +156,142 @@ const PATH_NAME_RE = /path|dirt|road|trail|earth|sand/i;
 function detectPathTile(tileNames, override) {
     if (override && tileNames.includes(override)) return override;
     return tileNames.find((n) => PATH_NAME_RE.test(n)) || null;
+}
+
+// Normalize a world config, applying defaults and deriving name lists. Throws
+// on empty tileTypes (a world must have at least one tile).
+function worldConfig(world = {}) {
+  const tileTypes = world.tileTypes || {};
+  const names = Object.keys(tileTypes);
+  if (names.length === 0) throw new Error('worldConfig: tileTypes is empty');
+  const pathTile = world.pathTile !== undefined
+    ? world.pathTile
+    : detectPathTile(names);
+  const biomeNames = pathTile && names.length > 1
+    ? names.filter((n) => n !== pathTile)
+    : names;
+  return {
+    seed: world.seed || 0,
+    chunkSize: world.chunkSize || 64,
+    cellSize: world.cellSize || 8,
+    pathCell: world.pathCell || 24,
+    pathJitter: world.pathJitter || 6,
+    pathTile,
+    names,
+    biomeNames,
+  };
+}
+
+// Biome tile name at absolute world coords: band the global noise value across
+// the biome names (path tile excluded — paths are stamped separately).
+function sampleBiome(cfg, gRow, gCol) {
+  const v = globalValueNoise(cfg.seed, gRow, gCol, cfg.cellSize);
+  const idx = Math.min(cfg.biomeNames.length - 1, Math.floor(v * cfg.biomeNames.length));
+  return cfg.biomeNames[idx];
+}
+
+// Generate an arbitrary rows x cols window of the world. Cell [r][c] is the
+// world tile at (rMin + r, cMin + c). Overlays carved paths on biomes.
+// generateChunk is a fixed-size wrapper over this.
+function generateRegion(world, rMin, cMin, rows, cols) {
+  const cfg = worldConfig(world);
+  const paths = collectPathCells(cfg, rMin, cMin, rows, cols);
+  const grid = [];
+  for (let r = 0; r < rows; r++) {
+    const row = new Array(cols);
+    for (let c = 0; c < cols; c++) {
+      const gRow = rMin + r, gCol = cMin + c;
+      row[c] = cfg.pathTile && paths.has(`${gRow},${gCol}`)
+        ? cfg.pathTile
+        : sampleBiome(cfg, gRow, gCol);
+    }
+    grid[r] = row;
+  }
+  return grid;
+}
+
+function generateChunk(world, cx, cy) {
+  const cfg = worldConfig(world);
+  const N = cfg.chunkSize;
+  return generateRegion(world, cy * N, cx * N, N, N);
+}
+
+// --- Global carved paths --------------------------------------------------
+//
+// Coarse path lattice: one anchor per `pathCell` tiles, jittered deterministically.
+// Each anchor connects to its East and South neighbor via a biased random walk
+// seeded ONLY by the two node ids -> the same trail cells regardless of which
+// window regenerates them, so paths cross chunk seams continuously.
+
+function pathAnchor(cfg, pi, pj) {
+  const jr = Math.floor(hash2(cfg.seed ^ 0x1111, pi, pj) * (2 * cfg.pathJitter + 1)) - cfg.pathJitter;
+  const jc = Math.floor(hash2(cfg.seed ^ 0x2222, pi, pj) * (2 * cfg.pathJitter + 1)) - cfg.pathJitter;
+  return [pi * cfg.pathCell + jr, pj * cfg.pathCell + jc];
+}
+
+function pathSegmentCells(cfg, pi, pj, dir) {
+  const from = pathAnchor(cfg, pi, pj);
+  const to = dir === 'E' ? pathAnchor(cfg, pi, pj + 1) : pathAnchor(cfg, pi + 1, pj);
+  // Deterministic per-segment RNG: distinct integer per (node, dir).
+  const segSeed = (Math.imul(hash2(cfg.seed, pi, pj) * 4294967296 >>> 0, 31)
+    ^ (dir === 'E' ? 0xE : 0x5)) >>> 0;
+  const rng = makeRng(segSeed || 1);
+  const cells = [];
+  let [r, c] = from;
+  const [tr, tc] = to;
+  let guard = (cfg.pathCell + 2 * cfg.pathJitter) * 6 + 8;
+  while ((r !== tr || c !== tc) && guard-- > 0) {
+    cells.push([r, c]);
+    const dr = Math.sign(tr - r), dc = Math.sign(tc - c);
+    const roll = rng();
+    if (roll < 0.45 && dr !== 0) r += dr;
+    else if (roll < 0.9 && dc !== 0) c += dc;
+    else if (rng() < 0.5 && dr !== 0) r += dr;
+    else if (dc !== 0) c += dc;
+    else if (dr !== 0) r += dr;
+  }
+  cells.push([tr, tc]);
+  return cells;
+}
+
+// Every path cell inside the window [rMin,rMin+rows) x [cMin,cMin+cols).
+// Iterate coarse nodes whose segments could reach the window (one extra ring),
+// union their segment cells, clipped to the window.
+function collectPathCells(cfg, rMin, cMin, rows, cols) {
+  const set = new Set();
+  if (!cfg.pathTile) return set;
+  const rMax = rMin + rows, cMax = cMin + cols;
+  // Coarse-node index range covering the window, padded so trails entering
+  // from outside are included. A node's segment can reach up to pathJitter
+  // tiles beyond its nominal pathCell span (anchor jitter), so the padding
+  // ring must cover that reach -- not just a fixed 1 node -- or a window
+  // computed narrowly could miss cells a wider region would include.
+  const pad = Math.ceil(cfg.pathJitter / cfg.pathCell) + 1;
+  const piLo = Math.floor(rMin / cfg.pathCell) - pad;
+  const piHi = Math.floor((rMax - 1) / cfg.pathCell) + pad;
+  const pjLo = Math.floor(cMin / cfg.pathCell) - pad;
+  const pjHi = Math.floor((cMax - 1) / cfg.pathCell) + pad;
+  const add = (cells) => {
+    for (const [r, c] of cells) {
+      if (r >= rMin && r < rMax && c >= cMin && c < cMax) set.add(`${r},${c}`);
+    }
+  };
+  for (let pi = piLo; pi <= piHi; pi++) {
+    for (let pj = pjLo; pj <= pjHi; pj++) {
+      add(pathSegmentCells(cfg, pi, pj, 'E'));
+      add(pathSegmentCells(cfg, pi, pj, 'S'));
+    }
+  }
+  return set;
+}
+
+// Global object-density field at absolute coords. Independent frequency + seed
+// offset from the biome field so object clumps don't mirror biome bands. Read
+// by later phases to place clustered objects/creatures consistently across
+// chunk seams. Deterministic and continuous.
+function densityAt(world, gRow, gCol) {
+  const cfg = worldConfig(world);
+  return globalValueNoise((cfg.seed ^ 0x9e3779b9) >>> 0, gRow, gCol, cfg.cellSize);
 }
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -286,5 +456,15 @@ module.exports = {
     detectPathTile,
     carvePaths,
     uniqueTileNames,
+    hash2,
+    globalValueNoise,
+    worldConfig,
+    sampleBiome,
+    generateRegion,
+    generateChunk,
+    pathAnchor,
+    pathSegmentCells,
+    collectPathCells,
+    densityAt,
 };
 
