@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -577,6 +577,48 @@ app.post('/api/entity-types/:id/sprite', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to save sprite' });
+  }
+});
+
+// --- Worlds (chunked overworld) -------------------------------------------
+
+app.post('/api/worlds', async (req, res) => {
+  try {
+    const { name, seed, chunk_size } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    const worldSeed = Number.isFinite(seed) ? Math.floor(seed) : Math.floor(Math.random() * 2 ** 31);
+    const chunkSize = Number.isFinite(chunk_size) ? Math.floor(chunk_size) : 64;
+    const result = await pool.query(
+      'INSERT INTO worlds (name, seed, chunk_size) VALUES ($1, $2, $3) RETURNING *',
+      [name.trim(), worldSeed, chunkSize],
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create world' });
+  }
+});
+
+app.get('/api/worlds', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM worlds ORDER BY created_at DESC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to list worlds' });
+  }
+});
+
+app.get('/api/worlds/:id', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM worlds WHERE id = $1', [req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'world not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch world' });
   }
 });
 
