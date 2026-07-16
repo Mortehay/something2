@@ -1,0 +1,36 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import toast from "react-hot-toast";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
+
+export function useWorlds() {
+  const { data: worlds, isLoading: isLoadingWorlds } = useQuery({
+    queryKey: ["worlds"],
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/worlds`);
+      if (!res.ok) throw new Error("Failed to fetch worlds");
+      return res.json();
+    },
+  });
+  return { worlds, isLoadingWorlds };
+}
+
+export function useCreateWorld() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ name, seed, chunk_size }) => {
+      const res = await fetch(`${API_URL}/api/worlds`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, seed, chunk_size }),
+      });
+      if (!res.ok) throw new Error("Failed to create world");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["worlds"] });
+      toast.success("World created");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+}
