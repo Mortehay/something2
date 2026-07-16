@@ -12,6 +12,7 @@ export class ChunkStreamer {
     this.radius = radius;
     this.centerKey = null;     // last center chunk "cx,cy"
     this.inflight = new Set(); // keys currently being fetched
+    this.wanted = new Set();   // keys in the currently-wanted neighborhood
   }
 
   async update(worldX, worldY) {
@@ -24,6 +25,7 @@ export class ChunkStreamer {
       : [];
     const next = neighborhoodKeys(cx, cy, this.radius);
     this.centerKey = key;
+    this.wanted = new Set(next);
 
     const { toLoad, toDrop } = diffNeighborhoods(prev, next);
 
@@ -40,6 +42,7 @@ export class ChunkStreamer {
         this.inflight.add(k);
         try {
           const grid = await this.fetchChunk(lcx, lcy);
+          if (!this.wanted.has(k)) return; // neighborhood moved on; discard stale load
           this.map.setChunk(lcx, lcy, grid);
           loaded.push(k);
         } catch (err) {

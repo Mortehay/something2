@@ -76,3 +76,28 @@ it("does not re-fetch an already-loaded chunk", async () => {
   // only the re-entered west column (-1,*) should be fetched, not the whole 3x3.
   expect(new Set(requested)).toEqual(new Set(["-1,-1", "-1,0", "-1,1"]));
 });
+
+it("discards a stale in-flight load whose chunk was dropped before it resolved", async () => {
+  const map = new ChunkedMap(N);
+  // Deferred fetch: hold each chunk's resolver so we control timing.
+  const resolvers = {};
+  const fetchChunk = (cx, cy) => new Promise((resolve) => {
+    resolvers[`${cx},${cy}`] = () => resolve(
+      Array.from({ length: N }, () => Array.from({ length: N }, () => `t-${cx}-${cy}`)));
+  });
+  const s = new ChunkStreamer(map, fetchChunk, 1);
+
+  // Start loading the neighborhood around (0,0) but DON'T resolve yet.
+  const p1 = s.update(0, 0);
+  // Move far away to center (5,0): (-1,0) is dropped and no longer wanted.
+  // Resolve everything from BOTH updates.
+  const p2 = s.update(5 * CHUNK_PX, 0);
+  Object.values(resolvers).forEach((r) => r());
+  await Promise.all([p1, p2]);
+
+  // The stale (-1,0) fetch (started for center (0,0), dropped by the move) must
+  // NOT have been applied to the map.
+  expect(map.hasChunk(-1, 0)).toBe(false);
+  // The current neighborhood around (5,0) is present.
+  expect(map.hasChunk(5, 0)).toBe(true);
+});
