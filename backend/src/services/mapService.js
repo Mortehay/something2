@@ -285,6 +285,15 @@ function collectPathCells(cfg, rMin, cMin, rows, cols) {
   return set;
 }
 
+// Global object-density field at absolute coords. Independent frequency + seed
+// offset from the biome field so object clumps don't mirror biome bands. Read
+// by later phases to place clustered objects/creatures consistently across
+// chunk seams. Deterministic and continuous.
+function densityAt(world, gRow, gCol) {
+  const cfg = worldConfig(world);
+  return globalValueNoise((cfg.seed ^ 0x9e3779b9) >>> 0, gRow, gCol, cfg.cellSize);
+}
+
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 // Biased random walk from `from` to `to`, stamping pathTile. Mostly steps
@@ -456,5 +465,6 @@ module.exports = {
     pathAnchor,
     pathSegmentCells,
     collectPathCells,
+    densityAt,
 };
 
