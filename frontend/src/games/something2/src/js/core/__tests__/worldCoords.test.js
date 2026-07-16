@@ -63,3 +63,13 @@ describe("CHUNK_KEY", () => {
     expect(CHUNK_KEY(-2, 3)).toBe("-2,3");
   });
 });
+
+import { parseKey } from "../worldCoords.js";
+
+describe("parseKey", () => {
+  it("is the inverse of CHUNK_KEY, incl. negatives", () => {
+    for (const [cx, cy] of [[0, 0], [3, -2], [-5, 7], [-1, -1]]) {
+      expect(parseKey(CHUNK_KEY(cx, cy))).toEqual({ cx, cy });
+    }
+  });
+});
