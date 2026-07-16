@@ -2,6 +2,18 @@ import { Entity } from "./Entity.js";
 import { GAME_WIDTH, GAME_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT } from "../core/constants.js";
 import { resolveMove } from "../systems/movement.js";
 
+// Single source of the key → direction-vector mapping. Used by Player.update
+// (local prediction) AND by Game (input sent to the authority) so the two
+// never drift.
+export function inputVector(keys) {
+    let dx = 0, dy = 0;
+    if (keys['w'] || keys['arrowup']) dy -= 1;
+    if (keys['s'] || keys['arrowdown']) dy += 1;
+    if (keys['a'] || keys['arrowleft']) dx -= 1;
+    if (keys['d'] || keys['arrowright']) dx += 1;
+    return { dx, dy };
+}
+
 export class Player extends Entity {
     constructor(){
         super(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 64, 64);
@@ -26,11 +38,7 @@ export class Player extends Entity {
     }
 
     update(dt, keys, map){
-        let dx = 0, dy = 0;
-        if(keys['w'] || keys['arrowup']) dy -= 1;
-        if(keys['s'] || keys['arrowdown']) dy += 1;
-        if(keys['a'] || keys['arrowleft']) dx -= 1;
-        if(keys['d'] || keys['arrowright']) dx += 1;
+        let { dx, dy } = inputVector(keys);
 
         // Chunked world: delegate collision to the ChunkedMap via resolveMove.
         // No world-bounds clamp (infinite world); the streaming frontier
