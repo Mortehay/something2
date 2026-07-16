@@ -237,8 +237,12 @@ export class Game {
             this._flushAccum += dt;
             if (this._flushAccum > 3) {
                 this._flushAccum = 0;
-                const dirty = this.creatures.takeDirty();
-                if (dirty.length) this.flushCreatures(dirty).catch(() => {});
+                const dirty = this.creatures.getDirty();
+                if (dirty.length) {
+                    this.flushCreatures(dirty)
+                        .then(() => this.creatures.clearDirty(dirty.map((d) => d.id)))
+                        .catch(() => {}); // flush failed: keep dirty -> retried, not pruned
+                }
                 // Bound memory: drop creatures that are both out of the loaded
                 // neighborhood AND not dirty (i.e. any position they had was
                 // just flushed above, or they never moved). Dirty out-of-range
