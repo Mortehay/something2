@@ -61,13 +61,9 @@ export class WorldAuthorityClient {
     const seq = ++this._seq;
     this._send({ type: 'input', seq, dx, dy });
     this._lastSentAt = now;
-    // First send doesn't include accumulated dt or reset accumulator; subsequent sends do.
-    if (seq > 1) {
-      const sentDt = this._accumDt;
-      this._accumDt = 0;
-      return { sent: true, seq, dx, dy, dt: sentDt };
-    }
-    return { sent: true, seq, dx, dy };
+    const sentDt = this._accumDt;
+    this._accumDt = 0;
+    return { sent: true, seq, dx, dy, dt: sentDt };
   }
 
   ping() { this._send({ type: 'ping' }); }

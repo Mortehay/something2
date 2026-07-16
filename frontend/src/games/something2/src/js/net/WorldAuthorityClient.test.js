@@ -39,8 +39,9 @@ describe('WorldAuthorityClient', () => {
     const r3 = c.sendInput(0, 1, 0.016); // 60ms since last send → send
     expect(r3.sent).toBe(true);
     expect(r3.seq).toBe(2);
-    // dt accumulated across the throttled + current frame
-    expect(r3.dt).toBeCloseTo(0.048, 5);
+    // dt accumulated since the previous actual send (r1 already reported/reset its
+    // own dt): the throttled r2 frame (0.016) + the current r3 frame (0.016) = 0.032.
+    expect(r3.dt).toBeCloseTo(0.032, 5);
     // most-recent input vector wins
     const last = FakeWS.last.sent[FakeWS.last.sent.length - 1];
     expect(last).toMatchObject({ type: 'input', seq: 2, dx: 0, dy: 1 });
