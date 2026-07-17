@@ -371,7 +371,7 @@ export class Game {
             const key = e.key.toLowerCase();
             this.keys[key] = true;
 
-            if (key === ' ' && this.chunked && this.authorityClient && !e.repeat) {
+            if (key === ' ' && this.state === 'playing' && this.chunked && this.authorityClient && !e.repeat) {
                 e.preventDefault();
                 this.authorityClient.sendAttack();
             }
