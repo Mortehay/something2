@@ -13,6 +13,7 @@ const ENGINE_WS_URL = import.meta.env.VITE_ENGINE_WS_URL || 'ws://localhost:1808
 import TileTypesAdmin from "./TileTypesAdmin";
 import EntityTypesAdmin from "./EntityTypesAdmin";
 import MapPreview from "./MapPreview.jsx";
+import WorldPreview from "./WorldPreview.jsx";
 
 const StyledGameContainer = styled.div`
   display: flex;
@@ -592,7 +593,10 @@ export default function Something2() {
           {!isPlaying && selectedMapId && (
             <MapPreview mapId={selectedMapId} tileColors={tileColors} />
           )}
-          {!isPlaying && !selectedMapId && (
+          {!isPlaying && !selectedMapId && selectedWorldId && (
+            <WorldPreview worldId={selectedWorldId} tileColors={tileColors} />
+          )}
+          {!isPlaying && !selectedMapId && !selectedWorldId && (
             <div style={{
               width: '100%', height: '100%', display: 'flex', alignItems: 'center',
               justifyContent: 'center', color: 'rgba(255,255,255,0.35)', fontSize: '15px'

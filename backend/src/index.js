@@ -5,7 +5,7 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -22,6 +22,11 @@ let pool = new Pool({
 });
 // Test seam: lets tests swap in a mock pool so routes don't need a live DB.
 const __setPool = (impl) => { pool = impl; };
+
+// World preview memo
+const PREVIEW_DIM = 64;
+const PREVIEW_STRIDE = 8;
+const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome grid)
 
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
 let spriteGen = require('./services/spriteGen');
@@ -663,6 +668,29 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch chunk' });
+  }
+});
+
+app.get('/api/worlds/:id/preview', async (req, res) => {
+  try {
+    const worldId = req.params.id;
+    if (worldPreviewCache.has(worldId)) {
+      return res.json({ world_id: worldId, data: worldPreviewCache.get(worldId) });
+    }
+    const worldRes = await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
+    const world = worldRes.rows[0];
+    if (!world) return res.status(404).json({ error: 'world not found' });
+
+    const tileTypes = await getTileTypesMap();
+    const data = generateWorldPreview(
+      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes },
+      PREVIEW_DIM, PREVIEW_STRIDE,
+    );
+    worldPreviewCache.set(worldId, data);
+    res.json({ world_id: worldId, data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to generate world preview' });
   }
 });
 

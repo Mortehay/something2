@@ -190,6 +190,24 @@ function sampleBiome(cfg, gRow, gCol) {
   return cfg.biomeNames[idx];
 }
 
+// Downsampled biome overview for a world preview: a dim x dim grid sampled at
+// `stride` world tiles per cell, centered on origin. Biomes only (sampleBiome
+// excludes the path tile). Pure + deterministic — cost is fixed at dim*dim
+// samples regardless of the covered extent.
+function generateWorldPreview(world, dim, stride) {
+  const cfg = worldConfig(world);
+  const start = -Math.floor(dim / 2) * stride;
+  const grid = [];
+  for (let pr = 0; pr < dim; pr++) {
+    const row = new Array(dim);
+    for (let pc = 0; pc < dim; pc++) {
+      row[pc] = sampleBiome(cfg, start + pr * stride, start + pc * stride);
+    }
+    grid[pr] = row;
+  }
+  return grid;
+}
+
 // Generate an arbitrary rows x cols window of the world. Cell [r][c] is the
 // world tile at (rMin + r, cMin + c). Overlays carved paths on biomes.
 // generateChunk is a fixed-size wrapper over this.
@@ -494,6 +512,7 @@ module.exports = {
     globalValueNoise,
     worldConfig,
     sampleBiome,
+    generateWorldPreview,
     generateRegion,
     generateChunk,
     pathAnchor,
