@@ -73,61 +73,27 @@ test('GET chunk rejects non-integer cx/cy', async () => {
   assert.equal(res.status, 400);
 });
 
-test('GET chunk cache MISS generates, caches, returns an NxN grid', async () => {
-  let inserted = null;
+test('GET chunk cache MISS generates and returns an NxN grid WITHOUT inserting', async () => {
   const pool = mockPool([
     [/SELECT .* FROM world_chunks/i, () => ({ rows: [] })],               // cache miss
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42', chunk_size: 8 }] })],
     [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
-    [/INSERT INTO world_chunks/i, (p) => { inserted = p; return { rowCount: 1, rows: [] }; }],
-    [/FROM entity_types/i, () => ({ rows: [] })],                        // no creature types -> no spawn
+    // NO INSERT INTO world_chunks / entity_types / world_creatures handlers:
+    // the authority alone materializes chunks and spawns creatures now, so if
+    // the route issues any of those queries, mockPool throws.
   ]);
   __setPool(pool);
   const res = await request(app).get('/api/worlds/w1/chunk?cx=1&cy=-2');
   assert.equal(res.status, 200);
+  assert.equal(res.body.world_id, 'w1');
   assert.equal(res.body.cx, 1);
   assert.equal(res.body.cy, -2);
   assert.equal(res.body.data.length, 8);        // chunk_size rows
   assert.equal(res.body.data[0].length, 8);     // chunk_size cols
-  assert.ok(inserted, 'expected an INSERT into world_chunks on cache miss');
-});
-
-test('GET chunk cache MISS only spawns entity types flagged is_creature', async () => {
-  let spawnedTypes = null;
-  const pool = mockPool([
-    [/SELECT .* FROM world_chunks/i, () => ({ rows: [] })],               // cache miss
-    [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42', chunk_size: 8 }] })],
-    [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
-    [/INSERT INTO world_chunks/i, () => ({ rowCount: 1, rows: [] })],
-    [/FROM entity_types/i, () => ({
-      rows: [
-        // Not a creature despite hp>0: must NOT be spawned (the old hp-hack would have picked this up).
-        { id: 1, name: 'Bandit', hp: 10, max_hp: 10, is_creature: false, walkable: false, spawn_tiles: [], chance: 0.1 },
-        // Flagged as a creature: must be spawned.
-        { id: 2, name: 'Wolf', hp: 12, max_hp: 12, is_creature: true, walkable: false, spawn_tiles: [], chance: 0.1 },
-      ],
-    })],
-    [/INSERT INTO world_creatures/i, (p) => { spawnedTypes = spawnedTypes || []; spawnedTypes.push(p[1]); return { rowCount: 1, rows: [] }; }],
-  ]);
-  __setPool(pool);
-  const res = await request(app).get('/api/worlds/w1/chunk?cx=1&cy=-2');
-  assert.equal(res.status, 200);
-  // Deterministic for this seed/chunk/coords: exactly one creature spawns, and
-  // since only is_creature types are ever handed to the spawner, it must be Wolf.
-  assert.deepEqual(spawnedTypes, ['Wolf']);
-});
-
-test('chunk cache-miss that loses the insert race does not spawn creatures', async () => {
-  const pool = mockPool([
-    [/SELECT .* FROM world_chunks/i, () => ({ rows: [] })],               // cache miss
-    [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] })],
-    [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
-    [/INSERT INTO world_chunks/i, () => ({ rowCount: 0, rows: [] })],     // lost the race (ON CONFLICT)
-    // NO entity_types / world_creatures handlers: if the route spawns, mockPool throws.
-  ]);
-  __setPool(pool);
-  const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0');
-  assert.equal(res.status, 200); // still returns the generated chunk data
+  assert.ok(
+    !pool.calls.some((c) => /INSERT INTO world_chunks/i.test(c.sql)),
+    'GET /chunk must not insert into world_chunks',
+  );
 });
 
 test('GET chunk cache HIT returns cached data without regenerating', async () => {
@@ -162,35 +128,4 @@ test('POST /api/worlds rejects chunk_size out of range', async () => {
   assert.equal(huge.status, 400);
   const neg = await request(app).post('/api/worlds').send({ name: 'N', seed: 1, chunk_size: -5 });
   assert.equal(neg.status, 400);
-});
-
-test('GET creatures returns rows for a chunk bbox', async () => {
-  __setPool(mockPool([
-    [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', chunk_size: 16 }] })],
-    [/FROM world_creatures/i, () => ({ rows: [{ id: 'c1', type: 'wolf', x: 810, y: 810, hp: 12, facing: 'S', color: '#c0392b' }] })],
-  ]));
-  const res = await request(app).get('/api/worlds/w1/creatures?cx=0&cy=0');
-  assert.equal(res.status, 200);
-  assert.equal(res.body.length, 1);
-  assert.equal(res.body[0].id, 'c1');
-  assert.equal(res.body[0].color, '#c0392b');
-});
-
-test('GET creatures rejects non-integer cx/cy', async () => {
-  __setPool(mockPool([]));
-  const res = await request(app).get('/api/worlds/w1/creatures?cx=x&cy=0');
-  assert.equal(res.status, 400);
-});
-
-test('POST creatures/flush batch-updates positions', async () => {
-  let updates = 0;
-  __setPool(mockPool([
-    [/UPDATE world_creatures/i, () => { updates++; return { rowCount: 1, rows: [] }; }],
-  ]));
-  const res = await request(app)
-    .post('/api/worlds/w1/creatures/flush')
-    .send({ creatures: [{ id: 'c1', x: 850, y: 860, facing: 'E' }, { id: 'c2', x: 900, y: 900, facing: 'W' }] });
-  assert.equal(res.status, 200);
-  assert.equal(res.body.updated, 2);
-  assert.equal(updates, 2);
 });
