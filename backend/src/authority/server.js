@@ -28,7 +28,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const u = new URL(req.url, 'http://localhost');
       if (u.pathname !== path) { socket.destroy(); return; }
       const token = u.searchParams.get('token');
-      const payload = jwt.verify(token, jwtSecret);
+      const payload = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] });
       userId = String(payload.user_id);
     } catch {
       socket.destroy();

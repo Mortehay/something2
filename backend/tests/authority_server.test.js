@@ -171,3 +171,33 @@ test('concurrent first-joins to a fresh (unloaded) world both get ticked, not or
   a.close(); b.close();
   handle.close(); server.close();
 });
+
+test('rejects an upgrade with a non-HS256 token (alg:none)', async () => {
+  const { url, handle, server } = await boot();
+  // A token with alg "none" and no signature — accepted by an unpinned verify
+  // if the secret check is bypassed; must be rejected when algorithms:['HS256'].
+  const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ user_id: 99 })).toString('base64url');
+  const noneToken = `${header}.${body}.`;
+  const ws = new WebSocket(`${url}?token=${encodeURIComponent(noneToken)}`);
+  const outcome = await new Promise((res) => {
+    ws.on('error', () => res('error'));
+    ws.on('close', () => res('close'));
+    ws.on('open', () => res('open'));
+  });
+  assert.ok(outcome === 'error' || outcome === 'close', `alg:none must be rejected, got ${outcome}`);
+  try { ws.close(); } catch { /* already closed */ }
+  handle.close(); server.close();
+});
+
+test('accepts a valid HS256 token', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1); // connect() signs with HS256
+  const opened = await new Promise((res) => {
+    ws.on('open', () => res(true));
+    ws.on('error', () => res(false));
+    ws.on('close', () => res(false));
+  });
+  assert.ok(opened, 'a valid HS256 token should connect');
+  ws.close(); handle.close(); server.close();
+});
