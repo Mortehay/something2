@@ -3,6 +3,8 @@ const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
+const { chunkOf, CHUNK_KEY, parseKey, neighborhoodKeys } = require('./coords');
+const { spawnChunkCreatures } = require('../services/mapService');
 
 const MAP_TILE_SIZE = 100;
 
@@ -13,6 +15,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const path = opts.path || '/authority';
   const tickMs = opts.tickMs || 50;
   const flushMs = opts.flushMs || 30000;
+  const creatureBroadcastEvery = opts.creatureBroadcastEvery || 4; // 4 ticks @50ms = ~5Hz
+  const creatureFlushMs = opts.creatureFlushMs || 3000;
 
   const wss = new WebSocketServer({ noServer: true });
   const worlds = new Map(); // world_id -> { world, row, sockets: Map<userId, ws> }
@@ -50,8 +54,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
+        const cr = await pool.query('SELECT name, color, hp FROM entity_types WHERE is_creature = true ORDER BY id ASC');
+        const creatureTypes = cr.rows.map((r) => ({ name: r.name, hp: r.hp, color: r.color }));
         const map = new ServerMap({ seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes });
-        const entry = { world: new World(map), row, sockets: new Map() };
+        const entry = {
+          worldId, world: new World(map), row, sockets: new Map(),
+          tileTypes, creatureTypes,
+          activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
+          chunkLoads: new Set(),     // in-flight activation guard per chunk key
+        };
         worlds.set(worldId, entry);
         return entry;
       })();
@@ -88,6 +99,90 @@ function attachAuthority(httpServer, pool, opts = {}) {
     );
   }
 
+  // Materialize + spawn (once) + load a chunk's creatures into the sim.
+  async function activateChunk(entry, chunkKey) {
+    if (entry.chunkLoads.has(chunkKey)) return;
+    entry.chunkLoads.add(chunkKey);
+    try {
+      const { cx, cy } = parseKey(chunkKey);
+      const N = entry.row.chunk_size;
+      const grid = entry.world.map.getChunk(cx, cy); // deterministic terrain
+      const ins = await pool.query(
+        `INSERT INTO world_chunks (world_id, cx, cy, data) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (world_id, cx, cy) DO NOTHING RETURNING id`,
+        [entry.worldId, cx, cy, JSON.stringify(grid)],
+      );
+      if (ins.rowCount > 0 && entry.creatureTypes.length) {
+        const spawned = spawnChunkCreatures(
+          { seed: Number(entry.row.seed), chunkSize: N, tileTypes: entry.tileTypes },
+          cx, cy, entry.creatureTypes,
+        );
+        for (const c of spawned) {
+          await pool.query(
+            `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
+            [entry.worldId, c.type, c.x, c.y, c.hp, c.facing],
+          );
+        }
+      }
+      const span = N * 100;
+      const rows = await pool.query(
+        `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, et.color
+         FROM world_creatures wc LEFT JOIN entity_types et ON et.name = wc.type
+         WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
+        [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
+      );
+      entry.world.creatures.addCreatures(rows.rows);
+    } catch {
+      // best-effort: retried on the next recompute
+    } finally {
+      entry.chunkLoads.delete(chunkKey);
+    }
+  }
+
+  // Recompute the active chunk set from player positions; activate newly-entered
+  // chunks. Removal is handled by flushAndPrune (confirm-before-drop).
+  function recomputeActive(entry) {
+    const N = entry.row.chunk_size;
+    const want = new Set();
+    for (const p of entry.world.players.values()) {
+      const { cx, cy } = chunkOf(p.x, p.y, N);
+      for (const k of neighborhoodKeys(cx, cy, 1)) want.add(k);
+    }
+    for (const k of want) {
+      if (!entry.activeChunks.has(k)) activateChunk(entry, k); // fire-and-forget (guarded)
+    }
+    entry.activeChunks = want;
+  }
+
+  function broadcastCreatures(entry) {
+    const N = entry.row.chunk_size;
+    for (const [userId, ws] of entry.sockets) {
+      const p = entry.world.getPlayer(userId);
+      if (!p) continue;
+      const { cx, cy } = chunkOf(p.x, p.y, N);
+      const keys = neighborhoodKeys(cx, cy, 1);
+      send(ws, { type: 'creatures', creatures: entry.world.creatures.snapshotForNeighborhood(keys) });
+    }
+  }
+
+  async function flushAndPrune(entry) {
+    const dirty = entry.world.creatures.getDirty();
+    if (dirty.length) {
+      const ok = [];
+      for (const c of dirty) {
+        try {
+          await pool.query(
+            `UPDATE world_creatures SET x=$1, y=$2, facing=$3, updated_at=now() WHERE id=$4`,
+            [c.x, c.y, c.facing, c.id],
+          );
+          ok.push(c.id);
+        } catch { /* keep dirty → retried */ }
+      }
+      entry.world.creatures.clearDirty(ok);
+    }
+    entry.world.creatures.pruneInactive(entry.activeChunks);
+  }
+
   wss.on('connection', (ws) => {
     ws.on('message', async (data) => {
       let msg;
@@ -120,7 +215,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (p) { try { await persist(ws.worldId, ws.userId, p); } catch { /* best-effort */ } }
       entry.world.removePlayer(ws.userId);
       entry.sockets.delete(ws.userId);
-      if (entry.world.isEmpty()) worlds.delete(ws.worldId);
+      if (entry.world.isEmpty()) {
+        await flushAndPrune(entry).catch(() => {});
+        worlds.delete(ws.worldId);
+      }
     });
   });
 
@@ -136,8 +234,20 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const p = entry.world.getPlayer(userId);
         send(ws, { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players });
       }
+      entry.world.creatures.tick(dt, entry.activeChunks);
+      if (tick % creatureBroadcastEvery === 0) {
+        recomputeActive(entry);
+        broadcastCreatures(entry);
+      }
     }
   }, tickMs);
+
+  const creatureFlushTimer = setInterval(() => {
+    for (const entry of worlds.values()) {
+      if (entry.world.isEmpty()) continue;
+      flushAndPrune(entry).catch(() => {});
+    }
+  }, creatureFlushMs);
 
   const flushTimer = setInterval(() => {
     for (const [worldId, entry] of worlds) {
@@ -152,6 +262,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);
+      clearInterval(creatureFlushTimer);
       // Terminate any live client sockets before closing the server. wss.close()
       // alone only stops accepting new connections; open sockets would keep the
       // event loop alive (and hang a clean shutdown / test process).
