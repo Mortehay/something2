@@ -215,6 +215,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
         return;
       }
 
+      if (msg.type === 'attack') {
+        const entry = worlds.get(ws.worldId);
+        if (entry) {
+          const killed = entry.world.attack(ws.userId);
+          for (const id of killed) {
+            pool.query('DELETE FROM world_creatures WHERE id = $1', [id]).catch(() => {});
+          }
+        }
+        return;
+      }
+
       if (msg.type === 'ping') { send(ws, { type: 'pong' }); return; }
     });
 
@@ -239,12 +250,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
     for (const entry of worlds.values()) {
       if (entry.world.isEmpty()) continue;
       entry.world.tick(dt);
+      entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
       const snap = entry.world.snapshot();
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
         send(ws, { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players });
       }
-      entry.world.creatures.tick(dt, entry.activeChunks);
       if (tick % creatureBroadcastEvery === 0) {
         recomputeActive(entry);
         broadcastCreatures(entry);
