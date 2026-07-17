@@ -17,6 +17,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const flushMs = opts.flushMs || 30000;
   const creatureBroadcastEvery = opts.creatureBroadcastEvery || 4; // 4 ticks @50ms = ~5Hz
   const creatureFlushMs = opts.creatureFlushMs || 3000;
+  const heartbeatMs = opts.heartbeatMs || 30000;
 
   const wss = new WebSocketServer({ noServer: true });
   const worlds = new Map(); // world_id -> { world, row, sockets: Map<userId, ws> }
@@ -194,6 +195,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
   }
 
   wss.on('connection', (ws) => {
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+
     ws.on('message', async (data) => {
       let msg;
       try { msg = JSON.parse(data); } catch { return; }
@@ -279,11 +283,20 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }, flushMs);
 
+  const heartbeatTimer = setInterval(() => {
+    for (const ws of wss.clients) {
+      if (ws.isAlive === false) { ws.terminate(); continue; }
+      ws.isAlive = false;
+      ws.ping();
+    }
+  }, heartbeatMs);
+
   return {
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);
       clearInterval(creatureFlushTimer);
+      clearInterval(heartbeatTimer);
       // Terminate any live client sockets before closing the server. wss.close()
       // alone only stops accepting new connections; open sockets would keep the
       // event loop alive (and hang a clean shutdown / test process).

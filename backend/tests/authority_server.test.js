@@ -201,3 +201,54 @@ test('accepts a valid HS256 token', async () => {
   assert.ok(opened, 'a valid HS256 token should connect');
   ws.close(); handle.close(); server.close();
 });
+
+// Boot with a caller-supplied heartbeat interval (ms) for the reaper tests.
+function bootHeartbeat(heartbeatMs) {
+  return new Promise((resolve) => {
+    const server = http.createServer();
+    const handle = attachAuthority(server, fakePool(), {
+      jwtSecret: SECRET, tickMs: 20, heartbeatMs,
+    });
+    server.listen(0, () => {
+      const port = server.address().port;
+      resolve({ url: `ws://127.0.0.1:${port}/authority`, handle, server });
+    });
+  });
+}
+
+test('reaps a dead socket that stops answering protocol pings', async () => {
+  const HB = 40;
+  const { url, handle, server } = await bootHeartbeat(HB);
+  // autoPong:false → this ws client does NOT auto-reply to server pings,
+  // so the server sees it as dead after one missed cycle and terminates it.
+  const dead = new WebSocket(`${url}?token=${encodeURIComponent(token(1))}`, [], { autoPong: false });
+  await new Promise((res) => dead.on('open', res));
+  dead.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(dead, 'joined');
+
+  // Within ~2 heartbeat cycles the server should terminate the socket, which
+  // the client observes as a close event.
+  const closed = await new Promise((res) => {
+    const to = setTimeout(() => res(false), HB * 6);
+    dead.on('close', () => { clearTimeout(to); res(true); });
+  });
+  assert.ok(closed, 'dead (non-ponging) socket should be terminated by the reaper');
+  handle.close(); server.close();
+});
+
+test('does not reap a live socket that answers protocol pings', async () => {
+  const HB = 40;
+  const { url, handle, server } = await bootHeartbeat(HB);
+  const live = connect(url, 2); // default autoPong:true → auto-replies to pings
+  await new Promise((res) => live.on('open', res));
+  live.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(live, 'joined');
+
+  // Over several heartbeat cycles the live socket must NOT be closed.
+  const stillOpen = await new Promise((res) => {
+    const to = setTimeout(() => res(true), HB * 6);
+    live.on('close', () => { clearTimeout(to); res(false); });
+  });
+  assert.ok(stillOpen, 'live (ponging) socket must survive the reaper');
+  live.close(); handle.close(); server.close();
+});
