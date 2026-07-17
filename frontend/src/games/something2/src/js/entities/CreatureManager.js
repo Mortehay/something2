@@ -1,114 +1,49 @@
-import { chunkOf, CHUNK_KEY } from "../core/worldCoords.js";
-import { resolveMove } from "../systems/movement.js";
-
-// 8 wander directions (dx,dy) in world space.
-const DIRS = [
-  [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
-];
-const DIR_FACING = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
+// Render-only creature store for the chunked world. The server (authority) owns
+// creature simulation and sends a per-neighborhood snapshot ~5Hz over the
+// `creatures` WS message; this class reconciles the rendered set to each
+// snapshot and interpolates positions toward the latest target for smoothness.
 const CREATURE_SIZE = 48;
-const CREATURE_SPEED = 40;       // world px/s (slower than the player)
-const REDIRECT_CHANCE = 0.02;    // per update, chance to pick a new wander dir
+const INTERP_RATE = 12; // higher = snappier; ~reaches target within a couple frames
 
 export class CreatureManager {
-  constructor(chunkSize, rng = Math.random) {
-    this.chunkSize = chunkSize;
-    this.rng = rng;
+  constructor() {
     this.creatures = new Map(); // id -> creature
-  }
-
-  addCreatures(list) {
-    for (const c of list) {
-      if (this.creatures.has(c.id)) continue;
-      const dirIdx = Math.min(DIRS.length - 1, Math.floor(this.rng() * DIRS.length));
-      this.creatures.set(c.id, {
-        id: c.id, type: c.type, x: c.x, y: c.y,
-        width: CREATURE_SIZE, height: CREATURE_SIZE,
-        speed: CREATURE_SPEED, facing: c.facing || "S", hp: c.hp,
-        color: c.color,
-        _dir: dirIdx, dirty: false,
-      });
-    }
   }
 
   has(id) { return this.creatures.has(id); }
   count() { return this.creatures.size; }
   all() { return [...this.creatures.values()]; }
 
-  update(dt, loadedKeys, chunkedMap) {
-    const loaded = loadedKeys instanceof Set ? loadedKeys : new Set(loadedKeys);
-    let roamed = 0;
-    for (const c of this.creatures.values()) {
-      const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
-      if (!loaded.has(CHUNK_KEY(cx, cy))) continue; // frozen (out of neighborhood)
-      if (this.rng() < REDIRECT_CHANCE) {
-        c._dir = Math.min(DIRS.length - 1, Math.floor(this.rng() * DIRS.length));
-      }
-      const [dx, dy] = DIRS[c._dir];
-      const r = resolveMove(chunkedMap, c, dx, dy, dt);
-      if (r.x !== c.x || r.y !== c.y) {
-        c.x = r.x; c.y = r.y;
-        c.facing = DIR_FACING[c._dir];
-        c.dirty = true;
-        roamed++;
+  // Reconcile the rendered set to the snapshot (the full current neighborhood).
+  applySnapshot(list) {
+    const seen = new Set();
+    for (const c of list) {
+      seen.add(c.id);
+      const ex = this.creatures.get(c.id);
+      if (ex) {
+        ex.tx = c.x; ex.ty = c.y;
+        ex.facing = c.facing; ex.hp = c.hp;
+        if (c.color) ex.color = c.color;
       } else {
-        // blocked -> turn for next time
-        c._dir = (c._dir + 1) % DIRS.length;
+        this.creatures.set(c.id, {
+          id: c.id, type: c.type,
+          x: c.x, y: c.y, tx: c.x, ty: c.y,
+          width: CREATURE_SIZE, height: CREATURE_SIZE,
+          facing: c.facing || 'S', hp: c.hp, color: c.color,
+        });
       }
     }
-    return roamed;
+    for (const id of [...this.creatures.keys()]) {
+      if (!seen.has(id)) this.creatures.delete(id);
+    }
   }
 
-  takeDirty() {
-    const dirty = [];
+  // Lerp each creature toward its latest target so 5Hz snapshots render smoothly.
+  interpolate(dt) {
+    const k = Math.min(1, dt * INTERP_RATE);
     for (const c of this.creatures.values()) {
-      if (c.dirty) {
-        dirty.push({ id: c.id, x: c.x, y: c.y, facing: c.facing });
-        c.dirty = false;
-      }
+      c.x += (c.tx - c.x) * k;
+      c.y += (c.ty - c.y) * k;
     }
-    return dirty;
-  }
-
-  // Like takeDirty(), but does NOT clear the dirty flag. Use this when the
-  // caller must confirm a flush succeeded before treating the position as
-  // persisted (see clearDirty).
-  getDirty() {
-    const dirty = [];
-    for (const c of this.creatures.values()) {
-      if (c.dirty) {
-        dirty.push({ id: c.id, x: c.x, y: c.y, facing: c.facing });
-      }
-    }
-    return dirty;
-  }
-
-  // Clear the dirty flag for the given creature ids. Call this only after a
-  // flush of those ids' positions has succeeded — a failed or in-flight
-  // flush must leave the creature dirty so pruneOutOfRange won't drop an
-  // unpersisted position.
-  clearDirty(ids) {
-    for (const id of ids) {
-      const c = this.creatures.get(id);
-      if (c) c.dirty = false;
-    }
-  }
-
-  // Drop creatures whose chunk has fallen out of the loaded neighborhood —
-  // but ONLY once their last roamed position has been flushed (dirty ===
-  // false). A dirty out-of-range creature is kept until a later prune, after
-  // a flush cycle has cleared its dirty flag, so we never lose an unpersisted
-  // position. Returns the number of creatures dropped.
-  pruneOutOfRange(loadedKeys) {
-    const loaded = loadedKeys instanceof Set ? loadedKeys : new Set(loadedKeys);
-    let dropped = 0;
-    for (const [id, c] of this.creatures) {
-      const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
-      if (loaded.has(CHUNK_KEY(cx, cy))) continue;
-      if (c.dirty) continue; // unflushed — keep until it's safe to drop
-      this.creatures.delete(id);
-      dropped++;
-    }
-    return dropped;
   }
 }
