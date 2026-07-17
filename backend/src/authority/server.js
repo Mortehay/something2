@@ -198,6 +198,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
 
+    // Swallow socket-level errors (e.g. a malformed inbound frame) so they
+    // don't surface as an uncaught 'error' event that crashes the process.
+    ws.on('error', () => {});
+
     ws.on('message', async (data) => {
       let msg;
       try { msg = JSON.parse(data); } catch { return; }

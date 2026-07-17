@@ -190,6 +190,23 @@ test('rejects an upgrade with a non-HS256 token (alg:none)', async () => {
   handle.close(); server.close();
 });
 
+test('rejects an upgrade with a valid signature but wrong algorithm (HS384, same secret)', async () => {
+  const { url, handle, server } = await boot();
+  // Signed with the correct secret but HS384 — an unpinned verify would ACCEPT
+  // this; the algorithms:['HS256'] pin must reject it. This is the test that
+  // actually guards the pin against regression.
+  const hs384 = jwt.sign({ user_id: 1 }, SECRET, { algorithm: 'HS384' });
+  const ws = new WebSocket(`${url}?token=${encodeURIComponent(hs384)}`);
+  const outcome = await new Promise((res) => {
+    ws.on('error', () => res('error'));
+    ws.on('close', () => res('close'));
+    ws.on('open', () => res('open'));
+  });
+  assert.ok(outcome === 'error' || outcome === 'close', `HS384 token must be rejected, got ${outcome}`);
+  try { ws.close(); } catch { /* already closed */ }
+  handle.close(); server.close();
+});
+
 test('accepts a valid HS256 token', async () => {
   const { url, handle, server } = await boot();
   const ws = connect(url, 1); // connect() signs with HS256
