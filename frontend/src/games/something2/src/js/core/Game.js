@@ -303,10 +303,12 @@ export class Game {
         let mine = null;
         for (const p of (msg.players || [])) {
             if (p.id === this.localUserId) { mine = p; continue; }
-            next.set(p.id, { x: p.x, y: p.y, facing: p.facing });
+            next.set(p.id, { x: p.x, y: p.y, facing: p.facing, hp: p.hp, maxHp: p.maxHp });
         }
         this.remotePlayers = next;
         if (mine) {
+            this.player.hp = mine.hp;
+            this.player.maxHp = mine.maxHp;
             const out = reconcile(
                 { x: mine.x, y: mine.y },
                 msg.ackSeq || 0,
@@ -368,7 +370,12 @@ export class Game {
         this._keydownHandler = (e) => {
             const key = e.key.toLowerCase();
             this.keys[key] = true;
-            
+
+            if (key === ' ' && this.chunked && this.authorityClient && !e.repeat) {
+                e.preventDefault();
+                this.authorityClient.sendAttack();
+            }
+
             if(key === 'escape'){
                 console.log("Escape pressed, current state:", this.state);
                 if(this.state === 'playing'){

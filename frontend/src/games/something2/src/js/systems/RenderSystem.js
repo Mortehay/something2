@@ -108,6 +108,18 @@ export class RenderSystem {
     this.renderHud(player, remotePlayers, localUserId);
   }
 
+  // Small red/yellow/green bar above a damaged actor (creature or player).
+  // (drawX, drawY) is the actor's screen draw origin (top-left of its sprite
+  // rect); the bar sits just above it, spanning the sprite's width.
+  _drawHpBar(drawX, drawY, w, hp, maxHp) {
+    const bx = drawX, by = drawY - 8, bw = w, bh = 4;
+    const frac = Math.max(0, Math.min(1, hp / maxHp));
+    this.ctx.fillStyle = "rgba(0,0,0,0.6)";
+    this.ctx.fillRect(bx, by, bw, bh);
+    this.ctx.fillStyle = frac > 0.5 ? "#4ade80" : frac > 0.25 ? "#facc15" : "#ef4444";
+    this.ctx.fillRect(bx, by, bw * frac, bh);
+  }
+
   // Draw a sprite so its feet sit on the tile center for its world (x,y).
   drawCreature(obj, imageKey, alpha = 1, tag = null) {
     const w = obj.width || 64;
@@ -126,6 +138,10 @@ export class RenderSystem {
       drawPlaceholder(this.ctx, cx, cy, w / 2, tag !== null ? "#f59e0b" : "#4a9eff", obj.facing);
     }
     this.ctx.globalAlpha = 1;
+    // HP bar for damaged actors (players carry hp/maxHp; see _onWorldState).
+    if (obj.maxHp && obj.hp != null && obj.hp < obj.maxHp) {
+      this._drawHpBar(drawX, drawY, w, obj.hp, obj.maxHp);
+    }
     if (tag !== null) {
       this.ctx.fillStyle = "#fff";
       this.ctx.font = "12px sans-serif";
@@ -163,18 +179,25 @@ export class RenderSystem {
     if (sprite) {
       const [sx, sy, sw, sh] = sprite.crop;
       this.ctx.drawImage(sprite.img, sx, sy, sw, sh, drawX, drawY, w, h);
-      return;
-    }
-    // Legacy single-image fallback (whole image) still honored in sprite modes;
-    // then degrade to a rectangle so a missing asset never leaves a hole.
-    const img = mode !== "rect" && e.image && this.imageManager
-      ? this.imageManager.get(e.image)
-      : null;
-    if (img) {
-      this.ctx.drawImage(img, drawX, drawY, w, h);
     } else {
-      this.ctx.fillStyle = e.color || "#c0392b";
-      this.ctx.fillRect(drawX, drawY, w, h);
+      // Legacy single-image fallback (whole image) still honored in sprite modes;
+      // then degrade to a rectangle so a missing asset never leaves a hole.
+      const img = mode !== "rect" && e.image && this.imageManager
+        ? this.imageManager.get(e.image)
+        : null;
+      if (img) {
+        this.ctx.drawImage(img, drawX, drawY, w, h);
+      } else {
+        this.ctx.fillStyle = e.color || "#c0392b";
+        this.ctx.fillRect(drawX, drawY, w, h);
+      }
+    }
+
+    // HP bar for damaged actors. Map decorations never carry hp/maxHp, so
+    // this only fires for creatures (which are rendered through this path
+    // in renderChunked — see buildDrawables' "entity" kind).
+    if (e.maxHp && e.hp != null && e.hp < e.maxHp) {
+      this._drawHpBar(drawX, drawY, w, e.hp, e.maxHp);
     }
   }
 
@@ -183,6 +206,7 @@ export class RenderSystem {
     const lines = [
       `Players online: ${1 + remoteCount}`,
       `You: #${localUserId ?? "?"}  pos=(${Math.round(player.x)}, ${Math.round(player.y)})`,
+      `HP: ${player.hp ?? "-"} / ${player.maxHp ?? "-"}`,
     ];
     this.ctx.save();
     this.ctx.fillStyle = "rgba(0,0,0,0.55)";
