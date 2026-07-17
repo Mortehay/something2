@@ -274,6 +274,17 @@ export default function Something2() {
     };
   }, [activeTab]);
 
+  // Mount-once effect whose cleanup only fires on true component unmount
+  // (empty dep array), unlike the [activeTab] effect above whose cleanup
+  // also runs on every tab switch. Tears down the chunked Game instance
+  // (authority WebSocket + rAF loop) so leaving this component doesn't
+  // leave a ghost player connected to the server world sim.
+  useEffect(() => {
+    return () => {
+      gameRef.current?.destroy();
+    };
+  }, []);
+
   const handleEnterWorld = async (shouldGenerate = false) => {
     console.log("handleEnterWorld called", { selectedMapId, gameRef: !!gameRef.current });
     if (!selectedMapId || !gameRef.current) return;
