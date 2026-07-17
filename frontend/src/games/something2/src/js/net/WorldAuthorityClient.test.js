@@ -57,4 +57,12 @@ describe('WorldAuthorityClient', () => {
     expect(onJoined).toHaveBeenCalledWith(expect.objectContaining({ user_id: '1' }));
     expect(onState).toHaveBeenCalledWith(expect.objectContaining({ tick: 1 }));
   });
+
+  it('dispatches a creatures message to onCreatures', () => {
+    const onCreatures = vi.fn();
+    const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', onCreatures });
+    c.connect('w1');
+    FakeWS.last.emit('message', { data: JSON.stringify({ type: 'creatures', creatures: [{ id: 'a', x: 1, y: 2 }] }) });
+    expect(onCreatures).toHaveBeenCalledWith(expect.objectContaining({ type: 'creatures' }));
+  });
 });
