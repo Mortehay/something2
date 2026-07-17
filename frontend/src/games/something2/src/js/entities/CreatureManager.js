@@ -22,14 +22,14 @@ export class CreatureManager {
       const ex = this.creatures.get(c.id);
       if (ex) {
         ex.tx = c.x; ex.ty = c.y;
-        ex.facing = c.facing; ex.hp = c.hp;
+        ex.facing = c.facing; ex.hp = c.hp; ex.maxHp = c.maxHp; ex.mode = c.mode;
         if (c.color) ex.color = c.color;
       } else {
         this.creatures.set(c.id, {
           id: c.id, type: c.type,
           x: c.x, y: c.y, tx: c.x, ty: c.y,
           width: CREATURE_SIZE, height: CREATURE_SIZE,
-          facing: c.facing || 'S', hp: c.hp, color: c.color,
+          facing: c.facing || 'S', hp: c.hp, maxHp: c.maxHp, mode: c.mode, color: c.color,
         });
       }
     }

@@ -31,4 +31,13 @@ describe('CreatureManager (render-only)', () => {
     expect(a.x).toBeGreaterThan(0);
     expect(a.x).toBeLessThanOrEqual(100);
   });
+
+  it('applySnapshot stores maxHp and mode for hp bars', () => {
+    const m = new CreatureManager();
+    m.applySnapshot([{ id: 'a', type: 'Wolf', x: 0, y: 0, facing: 'S', hp: 7, maxHp: 10, mode: 'chase', color: '#c00' }]);
+    const a = m.all()[0];
+    expect(a.hp).toBe(7);
+    expect(a.maxHp).toBe(10);
+    expect(a.mode).toBe('chase');
+  });
 });

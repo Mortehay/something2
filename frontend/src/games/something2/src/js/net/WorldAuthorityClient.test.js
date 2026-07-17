@@ -65,4 +65,13 @@ describe('WorldAuthorityClient', () => {
     FakeWS.last.emit('message', { data: JSON.stringify({ type: 'creatures', creatures: [{ id: 'a', x: 1, y: 2 }] }) });
     expect(onCreatures).toHaveBeenCalledWith(expect.objectContaining({ type: 'creatures' }));
   });
+
+  it('sendAttack sends an attack message', () => {
+    const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't' });
+    c.connect('w1');
+    FakeWS.last.emit('open');
+    FakeWS.last.sent.length = 0;
+    c.sendAttack();
+    expect(FakeWS.last.sent).toContainEqual({ type: 'attack' });
+  });
 });

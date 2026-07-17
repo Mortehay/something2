@@ -70,6 +70,8 @@ export class WorldAuthorityClient {
 
   ping() { this._send({ type: 'ping' }); }
 
+  sendAttack() { this._send({ type: 'attack' }); }
+
   disconnect() {
     if (this.ws) { try { this.ws.close(); } catch { /* already closed */ } this.ws = null; }
     this.connected = false; this.joined = false;
