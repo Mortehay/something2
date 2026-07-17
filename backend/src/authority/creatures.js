@@ -24,11 +24,12 @@ class CreatureSim {
   addCreatures(list) {
     for (const c of list) {
       if (this.creatures.has(c.id)) continue;
+      const dirIdx = Math.min(DIRS.length - 1, Math.floor(this.rng() * DIRS.length));
       this.creatures.set(c.id, {
         id: c.id, type: c.type, x: c.x, y: c.y,
         width: CREATURE_SIZE, height: CREATURE_SIZE, speed: CREATURE_SPEED,
         facing: c.facing || 'S', hp: c.hp, color: c.color,
-        _dir: 0, dirty: false,
+        _dir: dirIdx, dirty: false,
       });
     }
   }

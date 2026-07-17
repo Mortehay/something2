@@ -7,7 +7,7 @@ function stubMap(blockAll = false) {
   return { isWalkable: () => !blockAll, speedAt: () => 1, chunkSize: 8 };
 }
 // Deterministic rng: never redirect (>=0.02), fixed dir index 0 (east).
-const noRedirect = () => 0.99;
+const noRedirect = () => 0.05; // seeds initial _dir = floor(0.05*8) = 0 (east); 0.05 >= 0.02 so no redirect fires
 
 test('addCreatures dedups by id', () => {
   const s = new CreatureSim(stubMap(), noRedirect);
