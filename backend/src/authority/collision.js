@@ -7,6 +7,7 @@
 const { generateChunk } = require('../services/mapService');
 
 const MAP_TILE_SIZE = 100; // must match frontend core/constants.js
+const MAX_CHUNKS = 512; // per-ServerMap LRU cap on memoized chunk grids
 
 function resolveMove(map, actor, dirX, dirY, dt) {
   if (dirX === 0 && dirY === 0) return { x: actor.x, y: actor.y, moved: false };
@@ -43,12 +44,20 @@ class ServerMap {
 
   getChunk(cx, cy) {
     const key = `${cx},${cy}`;
-    let g = this.chunks.get(key);
-    if (!g) {
-      g = generateChunk(this.world, cx, cy);
+    const g = this.chunks.get(key);
+    if (g !== undefined) {
+      // Refresh recency: delete + re-set moves the key to the newest position
+      // (Map preserves insertion order, so the first key is the LRU victim).
+      this.chunks.delete(key);
       this.chunks.set(key, g);
+      return g;
     }
-    return g;
+    const grid = generateChunk(this.world, cx, cy);
+    this.chunks.set(key, grid);
+    if (this.chunks.size > MAX_CHUNKS) {
+      this.chunks.delete(this.chunks.keys().next().value); // evict oldest
+    }
+    return grid;
   }
 
   getTileAt(worldX, worldY) {
@@ -77,4 +86,4 @@ class ServerMap {
   }
 }
 
-module.exports = { resolveMove, ServerMap, MAP_TILE_SIZE };
+module.exports = { resolveMove, ServerMap, MAP_TILE_SIZE, MAX_CHUNKS };

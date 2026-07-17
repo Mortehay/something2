@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { resolveMove, ServerMap, MAP_TILE_SIZE } = require('../src/authority/collision.js');
+const { resolveMove, ServerMap, MAP_TILE_SIZE, MAX_CHUNKS } = require('../src/authority/collision.js');
 
 // Stub map: everything walkable at speed 1 unless (wx,wy) falls in a blocked band.
 function stubMap({ blockX = null } = {}) {
@@ -50,4 +50,47 @@ test('ServerMap resolves tiles, walkability and speed incl. negative coords', ()
   // Chunk ownership: (-50,-50) world px → global tile (-1,-1) → chunk (-1,-1).
   const g = map.getChunk(-1, -1);
   assert.equal(g.length, 8);
+});
+
+// A ServerMap over an all-grass world so getChunk always succeeds.
+function lruMap() {
+  return new ServerMap({
+    seed: 1,
+    chunkSize: 8,
+    tileTypes: { grass: { walkable: true, speed: 1 } },
+  });
+}
+
+test('ServerMap.chunks is bounded at MAX_CHUNKS (evicts the oldest)', () => {
+  const m = lruMap();
+  // Request MAX_CHUNKS distinct chunks (row 0, cols 0..MAX_CHUNKS-1).
+  for (let cx = 0; cx < MAX_CHUNKS; cx++) m.getChunk(cx, 0);
+  assert.equal(m.chunks.size, MAX_CHUNKS);
+  assert.ok(m.chunks.has('0,0'), 'oldest still present at exactly cap');
+  // One more distinct chunk pushes past the cap → oldest ('0,0') evicted.
+  m.getChunk(MAX_CHUNKS, 0);
+  assert.equal(m.chunks.size, MAX_CHUNKS);
+  assert.ok(!m.chunks.has('0,0'), 'oldest chunk evicted past cap');
+  assert.ok(m.chunks.has(`${MAX_CHUNKS},0`), 'newest chunk present');
+});
+
+test('ServerMap.getChunk refreshes recency so a re-touched chunk survives eviction', () => {
+  const m = lruMap();
+  for (let cx = 0; cx < MAX_CHUNKS; cx++) m.getChunk(cx, 0);
+  // Re-touch the oldest key so it becomes newest.
+  m.getChunk(0, 0);
+  // Now insert a new distinct chunk → the *next*-oldest ('1,0') is evicted, not '0,0'.
+  m.getChunk(MAX_CHUNKS, 0);
+  assert.ok(m.chunks.has('0,0'), 're-touched chunk survives');
+  assert.ok(!m.chunks.has('1,0'), 'next-oldest evicted instead');
+});
+
+test('evicted chunk regenerates identically (eviction is memory-only)', () => {
+  const m = lruMap();
+  const first = m.getChunk(0, 0);
+  const snapshot = JSON.stringify(first);
+  for (let cx = 1; cx <= MAX_CHUNKS; cx++) m.getChunk(cx, 0); // evicts '0,0'
+  assert.ok(!m.chunks.has('0,0'));
+  const regen = m.getChunk(0, 0);
+  assert.equal(JSON.stringify(regen), snapshot, 'regenerated chunk is identical');
 });
