@@ -1,4 +1,5 @@
 const { resolveMove } = require('./collision');
+const { CreatureSim } = require('./creatures');
 
 const PLAYER_W = 64;
 const PLAYER_H = 64;
@@ -18,6 +19,7 @@ class World {
   constructor(map) {
     this.map = map;
     this.players = new Map(); // userId -> state
+    this.creatures = new CreatureSim(map);
   }
 
   addPlayer(userId, spawn) {

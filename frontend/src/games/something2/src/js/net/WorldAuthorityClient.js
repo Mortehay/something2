@@ -5,13 +5,14 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
     this.onState = onState || (() => {});
     this.onError = onError || ((e) => console.error('WorldAuthorityClient:', e));
     this.onClose = onClose || (() => {});
+    this.onCreatures = onCreatures || (() => {});
     this.inputIntervalMs = inputIntervalMs;
     this.now = now;
 
@@ -41,6 +42,7 @@ export class WorldAuthorityClient {
         case 'joined': this.joined = true; this.onJoined(msg); break;
         case 'state': this.onState(msg); break;
         case 'pong': break;
+        case 'creatures': this.onCreatures(msg); break;
         case 'error': this.onError(new Error(msg.message || 'authority error')); break;
         default: console.warn('WorldAuthorityClient: unknown msg', msg.type);
       }
