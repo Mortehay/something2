@@ -38,6 +38,38 @@ function fakePool() {
   };
 }
 
+// Same as fakePool but the world_creatures bbox SELECT for chunk (0,0) throws
+// once (simulating a transient pg error) before succeeding on the next call.
+// Used to prove a failed chunk activation is retried on a later recompute
+// instead of being permanently marked active with no creatures loaded.
+function fakePoolFlaky() {
+  let thrown = false;
+  return {
+    query: async (sql, params) => {
+      if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
+      if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
+      if (/FROM entity_types WHERE is_creature/i.test(sql)) return { rows: [{ name: 'Wolf', color: '#c0392b', hp: 10 }] };
+      if (/INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 }; // already materialized
+      if (/FROM world_players WHERE/i.test(sql)) return { rows: [] }; // user 1 → default center
+      if (/FROM world_creatures/i.test(sql)) {
+        // bbox load: chunk (0,0) spans x in [0,800) AND y in [0,800). Neighbor
+        // chunks like (0,-1)/(-1,0) share one of those bounds (xMin or yMin
+        // === 0) but not both, so checking only xMin would let a neighbor's
+        // one-time throw get consumed before it reaches chunk (0,0).
+        const [xMin, , yMin] = [params[1], params[2], params[3]];
+        if (xMin === 0 && yMin === 0) {
+          if (!thrown) { thrown = true; throw new Error('transient pg error'); }
+          return { rows: [{ id: 'wolf1', type: 'Wolf', x: 380, y: 380, hp: 10, facing: 'S', color: '#c0392b' }] };
+        }
+        return { rows: [] };
+      }
+      if (/UPDATE world_creatures/i.test(sql)) return { rows: [] };
+      if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
+      return { rows: [] };
+    },
+  };
+}
+
 function token(u) { return jwt.sign({ user_id: u }, SECRET, { algorithm: 'HS256' }); }
 function bootWith(pool) {
   return new Promise((resolve) => {
@@ -91,6 +123,38 @@ test('AOI: a far player does not receive the wolf', async () => {
     if (m.creatures.some((c) => c.id === 'wolf1')) sawWolf = true;
   }
   assert.equal(sawWolf, false, 'far player must not see the near wolf');
+  ws.close(); handle.close(); server.close();
+});
+
+test('a transiently failed chunk activation is retried, not stuck unloaded', async () => {
+  const { url, handle, server } = await bootWith(fakePoolFlaky());
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  // The wolf's chunk (0,0) fails its first activation attempt. Because
+  // recomputeActive runs synchronously before the (async) activateChunk
+  // promise can settle, the very next creatures broadcast can never include
+  // it — so the first message is guaranteed wolf-free regardless of timing.
+  const firstMsg = await nextMsg(ws, 'creatures');
+  assert.ok(
+    !firstMsg.creatures.some((c) => c.id === 'wolf1'),
+    'wolf must not appear in the first creatures message (transient load failure)'
+  );
+
+  // Old (buggy) behavior: the chunk key is marked active before load and
+  // never retried, so the wolf would never appear. New behavior: activation
+  // is gated on loadedChunks, so recomputeActive retries every cycle until
+  // it succeeds. Poll for up to ~1.5s (many 5Hz-ish recompute cycles here).
+  let sawWolf = false;
+  const start = Date.now();
+  while (!sawWolf && Date.now() - start < 1500) {
+    const m = await nextMsg(ws, 'creatures');
+    sawWolf = m.creatures.some((c) => c.id === 'wolf1');
+  }
+  assert.ok(sawWolf, 'wolf must appear via retry within 1.5s of the transient failure');
+
   ws.close(); handle.close(); server.close();
 });
 

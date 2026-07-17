@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
-const { chunkOf, CHUNK_KEY, parseKey, neighborhoodKeys } = require('./coords');
+const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { spawnChunkCreatures } = require('../services/mapService');
 
 const MAP_TILE_SIZE = 100;
@@ -62,6 +62,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           tileTypes, creatureTypes,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
+          loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
         };
         worlds.set(worldId, entry);
         return entry;
@@ -132,8 +133,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
       entry.world.creatures.addCreatures(rows.rows);
+      entry.loadedChunks.add(chunkKey);
     } catch {
-      // best-effort: retried on the next recompute
+      // best-effort: left out of loadedChunks so recomputeActive retries it
     } finally {
       entry.chunkLoads.delete(chunkKey);
     }
@@ -148,10 +150,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const { cx, cy } = chunkOf(p.x, p.y, N);
       for (const k of neighborhoodKeys(cx, cy, 1)) want.add(k);
     }
-    for (const k of want) {
-      if (!entry.activeChunks.has(k)) activateChunk(entry, k); // fire-and-forget (guarded)
-    }
     entry.activeChunks = want;
+    // Activate any desired chunk not yet loaded (retries failures, since
+    // loadedChunks is only set on success). The chunkLoads in-flight guard
+    // inside activateChunk prevents duplicate concurrent loads.
+    for (const k of want) {
+      if (!entry.loadedChunks.has(k)) activateChunk(entry, k);
+    }
+    // Forget chunks no longer desired so a later re-entry reloads them (their
+    // creatures are dropped by flushAndPrune's pruneInactive).
+    for (const k of entry.loadedChunks) {
+      if (!want.has(k)) entry.loadedChunks.delete(k);
+    }
   }
 
   function broadcastCreatures(entry) {
