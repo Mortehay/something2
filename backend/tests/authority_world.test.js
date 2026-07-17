@@ -42,7 +42,7 @@ test('ackSeq tracks the latest input seq; snapshot has the right shape', () => {
   assert.equal(w.getPlayer('u1').ackSeq, 7);
   const snap = w.snapshot();
   assert.equal(snap.players.length, 1);
-  assert.deepEqual(Object.keys(snap.players[0]).sort(), ['facing', 'id', 'x', 'y']);
+  assert.deepEqual(Object.keys(snap.players[0]).sort(), ['facing', 'hp', 'id', 'maxHp', 'x', 'y']);
   assert.equal(snap.players[0].id, 'u1');
 });
 

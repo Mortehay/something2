@@ -4,6 +4,10 @@ const { CreatureSim } = require('./creatures');
 const PLAYER_W = 64;
 const PLAYER_H = 64;
 const PLAYER_SPEED = 200; // client: this.speed(100) * speedMultiplier(2)
+const PLAYER_MAX_HP = 100;
+const MELEE_RANGE = 90;            // px
+const PLAYER_DAMAGE = 10;
+const PLAYER_ATTACK_COOLDOWN = 0.5; // s
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -34,6 +38,10 @@ class World {
       input: { dx: 0, dy: 0 },
       pendingSeq: 0,
       ackSeq: 0,
+      hp: PLAYER_MAX_HP,
+      maxHp: PLAYER_MAX_HP,
+      spawn: { x: spawn.x, y: spawn.y },
+      _attackCd: 0,
     });
   }
 
@@ -50,6 +58,7 @@ class World {
 
   tick(dt) {
     for (const p of this.players.values()) {
+      if (p._attackCd > 0) p._attackCd = Math.max(0, p._attackCd - dt);
       const r = resolveMove(this.map, p, p.input.dx, p.input.dy, dt);
       p.x = r.x;
       p.y = r.y;
@@ -59,13 +68,35 @@ class World {
     }
   }
 
+  // Tick creatures with the live players (aggro/chase/contact damage), then
+  // respawn any player killed this tick.
+  tickCreatures(dt, activeKeys) {
+    const players = [...this.players.values()];
+    this.creatures.tick(dt, activeKeys, players);
+    for (const p of players) {
+      if (p.hp <= 0) { p.x = p.spawn.x; p.y = p.spawn.y; p.hp = p.maxHp; }
+    }
+  }
+
+  // Player melee attack (cooldown-gated). Returns killed creature ids.
+  attack(userId) {
+    const p = this.players.get(userId);
+    if (!p || p._attackCd > 0) return [];
+    p._attackCd = PLAYER_ATTACK_COOLDOWN;
+    const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+    return this.creatures.applyAttack(cx, cy, MELEE_RANGE, PLAYER_DAMAGE);
+  }
+
   snapshot() {
     return {
       players: [...this.players.values()].map((p) => ({
-        id: p.userId, x: p.x, y: p.y, facing: p.facing,
+        id: p.userId, x: p.x, y: p.y, facing: p.facing, hp: p.hp, maxHp: p.maxHp,
       })),
     };
   }
 }
 
-module.exports = { World, PLAYER_W, PLAYER_H, PLAYER_SPEED };
+module.exports = {
+  World, PLAYER_W, PLAYER_H, PLAYER_SPEED,
+  PLAYER_MAX_HP, MELEE_RANGE, PLAYER_DAMAGE, PLAYER_ATTACK_COOLDOWN,
+};
