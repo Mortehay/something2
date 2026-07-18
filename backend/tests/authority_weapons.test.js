@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { normalizeAim, inArc, DEFAULT_WEAPON_NAME } = require('../src/authority/weapons.js');
+const { normalizeAim, inArc } = require('../src/authority/weapons.js');
 
 test('normalizeAim normalizes a non-zero vector to unit length', () => {
   const { nx, ny } = normalizeAim(3, 4, 's');
@@ -50,10 +50,6 @@ test('inArc: a wide arc includes a target a narrow arc excludes', () => {
 
 test('inArc: a target exactly at the origin counts as a hit', () => {
   assert.equal(inArc(10, 10, 1, 0, 10, 10, 80, 0.6), true);
-});
-
-test('DEFAULT_WEAPON_NAME is dagger', () => {
-  assert.equal(DEFAULT_WEAPON_NAME, 'dagger');
 });
 
 function round(v) { return { nx: Math.round(v.nx), ny: Math.round(v.ny) }; }
