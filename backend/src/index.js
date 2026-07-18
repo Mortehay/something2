@@ -271,6 +271,9 @@ function validateItemType(b) {
       if (!ITEM_ELEMENTS.includes(k)) return `resistances key '${k}' is not a known element`;
     }
   }
+  if (b.kind != null && !['melee', 'projectile'].includes(b.kind)) {
+    return "kind must be 'melee' or 'projectile' (or unset)";
+  }
   if (b.category === 'weapon') {
     if (!['melee', 'projectile'].includes(b.kind)) return "weapon kind must be 'melee' or 'projectile'";
     if (b.kind === 'melee' && (b.reach == null || b.arc_width == null)) return 'melee weapons need reach and arc_width';

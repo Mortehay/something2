@@ -77,6 +77,24 @@ test('POST /api/item-types rejects resistances with an unknown element key', asy
   assert.equal(res.status, 400);
 });
 
+test('POST /api/item-types rejects armor with a stray non-null kind (400, not 500)', async () => {
+  __setPool(mockPool([]));
+  const res = await request(app).post('/api/item-types').send({
+    name: 'stray-kind-armor', category: 'armor', slot: 'chest', defense: 1, kind: 'anything',
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /kind/i);
+});
+
+test('PUT /api/item-types/:id rejects armor with a stray non-null kind (400, not 500)', async () => {
+  __setPool(mockPool([]));
+  const res = await request(app).put('/api/item-types/1').send({
+    name: 'stray-kind-armor', category: 'armor', slot: 'chest', defense: 1, kind: 'anything',
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /kind/i);
+});
+
 test('POST /api/players/:userId/items grants an item instance', async () => {
   const pool = mockPool([
     [/INSERT INTO player_items/i, (p) => ({ rows: [{ id: 'pi1', user_id: p[0], item_type_id: p[1] }] })],
