@@ -64,6 +64,7 @@ test('step hits a player (not the owner), reduces hp', () => {
   sim.step(0.12, { creatures: creaturesStub([]), players: [owner, target], map: WALK_ALL }); // x→108 passes 94
   assert.equal(target.hp, 80);
   assert.equal(owner.hp, 100); // owner never hit
+  assert.equal(sim.count(), 0); // pierce:1 → despawned after the single player hit
 });
 
 test('pierce: a pierce-2 projectile hits two creatures before despawning', () => {
@@ -81,7 +82,10 @@ test('a projectile never hits the same target twice', () => {
   const sim = new ProjectileSim();
   sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 1, pierce: 5, range: 1000, projectile_speed: 200 } });
   const target = { userId: 'u2', x: 20, y: -32, width: 64, height: 64, hp: 100 }; // center 52,0
-  // Multiple steps keep the projectile near the target; hp drops by exactly 1.
-  for (let i = 0; i < 3; i++) sim.step(0.02, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
-  assert.equal(target.hp, 99);
+  // 10 steps at 4px/step keep the projectile inside the target's capture window
+  // (x from 4..40, window x>=12) for many consecutive hit-checks; hitIds must
+  // ensure exactly ONE hit → hp drops by 1 and the projectile survives (pierce 5).
+  for (let i = 0; i < 10; i++) sim.step(0.02, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
+  assert.equal(target.hp, 99);   // exactly one hit despite many in-range checks
+  assert.equal(sim.count(), 1);  // still alive (pierce not consumed past 1)
 });
