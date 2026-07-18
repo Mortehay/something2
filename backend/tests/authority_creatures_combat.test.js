@@ -125,3 +125,30 @@ test('damageCreatureById reduces hp and reports death', () => {
   assert.ok(!sim.has('a'));
   assert.equal(sim.damageCreatureById('missing', 5), false); // no-op
 });
+
+test('creature contact damage is mitigated by player armor (defense)', () => {
+  const s = new CreatureSim(stubMap(), rng);
+  s.addCreatures([creatureAt('a', 100, 100)]);
+  // Player WITH armor: mit.defense = 3 should reduce CREATURE_DAMAGE by 3
+  const armored = {
+    userId: 'u1', x: 110, y: 100, width: 64, height: 64,
+    hp: 100, maxHp: 100, mit: { defense: 3, resistances: {} }
+  };
+  s.tick(0.05, new Set(['0,0']), [armored]); // acquire + first hit
+  // Raw damage is CREATURE_DAMAGE, defense is 3, so mitigated damage = CREATURE_DAMAGE - 3 = 5 - 3 = 2
+  const mitigated = Math.max(1, CREATURE_DAMAGE - 3); // MIN_DAMAGE floor
+  assert.equal(armored.hp, 100 - mitigated, `armored player took ${mitigated} (reduced by defense 3)`);
+});
+
+test('creature contact damage on player with no mit falls back to NO_MITIGATION (regression)', () => {
+  const s = new CreatureSim(stubMap(), rng);
+  s.addCreatures([creatureAt('a', 100, 100)]);
+  // Player WITHOUT mit field (legacy or test object)
+  const unarmored = {
+    userId: 'u2', x: 110, y: 100, width: 64, height: 64,
+    hp: 100, maxHp: 100
+    // no mit field
+  };
+  s.tick(0.05, new Set(['0,0']), [unarmored]); // acquire + first hit
+  assert.equal(unarmored.hp, 100 - CREATURE_DAMAGE, 'unarmored player took full damage (no crash)');
+});

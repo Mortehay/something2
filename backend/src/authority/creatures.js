@@ -5,6 +5,7 @@
 const { resolveMove } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc } = require('./weapons');
+const { applyDamage, NO_MITIGATION } = require('./damage');
 
 const DIRS = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
@@ -92,7 +93,7 @@ class CreatureSim {
         }
         // Contact damage.
         if (c._attackCd <= 0 && dist2(cc.x, cc.y, tc.x, tc.y) <= CONTACT_RANGE * CONTACT_RANGE) {
-          tp.hp -= CREATURE_DAMAGE;
+          applyDamage(tp, CREATURE_DAMAGE, 'physical', tp.mit || NO_MITIGATION);
           c._attackCd = CREATURE_ATTACK_COOLDOWN;
         }
         continue;
