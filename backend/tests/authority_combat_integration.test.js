@@ -19,12 +19,19 @@ function fakePool() {
       if (/FROM entity_types WHERE is_creature/i.test(sql)) return { rows: [{ name: 'Wolf', color: '#c00', hp: 5 }] };
       // Dagger tuned as an omnidirectional hit (arc_width = full circle) so this
       // integration test doesn't depend on the player's facing at attack time.
-      if (/FROM weapon_types/i.test(sql)) {
+      if (/FROM item_types/i.test(sql)) {
         return { rows: [
-          { id: 1, name: 'dagger', kind: 'melee', damage: 10, cooldown: 0.3, reach: 90, arc_width: Math.PI * 2,
-            range: null, projectile_speed: null, projectile_radius: null, pierce: null, mana_cost: 0, element: null },
+          { id: 1, name: 'dagger', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'melee',
+            damage: 10, cooldown: 0.3, reach: 90, arc_width: Math.PI * 2,
+            range: null, projectile_speed: null, projectile_radius: null, pierce: null, mana_cost: 0, element: null,
+            defense: null, resistances: null },
         ] };
       }
+      if (/FROM player_items/i.test(sql)) return { rows: [] };
+      if (/FROM player_equipment/i.test(sql)) return { rows: [] };
+      if (/INSERT INTO player_items/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/INSERT INTO player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/DELETE FROM player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
       if (/INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 };
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] }; // spawn = center 400,400
       // DELETE check must come before the generic bbox-SELECT check below:

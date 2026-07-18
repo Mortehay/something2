@@ -23,14 +23,24 @@ function fakePool() {
       }
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
-      if (/FROM weapon_types/i.test(sql)) {
+      if (/FROM item_types/i.test(sql)) {
         return { rows: [
-          { id: 1, name: 'dagger', kind: 'melee', damage: 8, cooldown: 0.3, reach: 80, arc_width: 0.6,
-            range: null, projectile_speed: null, projectile_radius: null, pierce: null, mana_cost: 0, element: null },
-          { id: 3, name: 'bow', kind: 'projectile', damage: 12, cooldown: 0.05, reach: null, arc_width: null,
-            range: 2000, projectile_speed: 4000, projectile_radius: 40, pierce: 1, mana_cost: 0, element: null },
+          { id: 1, name: 'dagger', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'melee',
+            damage: 8, cooldown: 0.3, reach: 80, arc_width: 6.3, range: null, projectile_speed: null,
+            projectile_radius: null, pierce: null, mana_cost: 0, element: null, defense: null, resistances: null },
+          { id: 3, name: 'bow', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'projectile',
+            damage: 12, cooldown: 0.05, reach: null, arc_width: null, range: 2000, projectile_speed: 4000,
+            projectile_radius: 40, pierce: 1, mana_cost: 0, element: null, defense: null, resistances: null },
+          { id: 5, name: 'leather-vest', category: 'armor', slot: 'chest', two_handed: false, kind: null,
+            damage: 0, cooldown: 0, reach: null, arc_width: null, range: null, projectile_speed: null,
+            projectile_radius: null, pierce: null, mana_cost: 0, element: null, defense: 2, resistances: {} },
         ] };
       }
+      if (/FROM player_items/i.test(sql)) return { rows: [{ id: 'i1', item_type_id: 1 }, { id: 'i3', item_type_id: 3 }, { id: 'i5', item_type_id: 5 }] };
+      if (/FROM player_equipment/i.test(sql)) return { rows: [] };
+      if (/INSERT INTO player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/DELETE FROM player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/INSERT INTO player_items/i.test(sql)) return { rows: [], rowCount: 1 };
       return { rows: [] };
     },
   };
@@ -278,21 +288,21 @@ test('does not reap a live socket that answers protocol pings', async () => {
   live.close(); handle.close(); server.close();
 });
 
-test('equip switches the weapon; a later state reflects weaponId', async () => {
+test('equip switches the weapon; a later state reflects equipment.main_hand', async () => {
   const { url, handle, server } = await boot();
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
   const joined = await nextMsg(ws, 'joined');
-  assert.ok(Array.isArray(joined.weapons) && joined.weapons.length >= 1, 'joined lists weapons');
-  ws.send(JSON.stringify({ type: 'equip', weaponId: 3 }));
+  assert.ok(Array.isArray(joined.itemTypes) && joined.itemTypes.length >= 1, 'joined lists the item catalog');
+  ws.send(JSON.stringify({ type: 'equip', itemId: 'i3', slot: 'main_hand' })); // bow
   let got = null;
   for (let i = 0; i < 20 && got == null; i++) {
     const s = await nextMsg(ws, 'state');
     const me = s.players.find((p) => p.id === '1');
-    if (me && me.weaponId === 3) got = me;
+    if (me && me.equipment && me.equipment.main_hand === 'i3') got = me;
   }
-  assert.ok(got, 'weaponId updates to 3 after equip');
+  assert.ok(got, 'equipment.main_hand updates to i3 after equip');
   ws.close(); handle.close(); server.close();
 });
 
@@ -302,7 +312,17 @@ test('a projectile attack makes a projectile appear in a later state', async () 
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
   await nextMsg(ws, 'joined');
-  ws.send(JSON.stringify({ type: 'equip', weaponId: 3 })); // bow (fast)
+  ws.send(JSON.stringify({ type: 'equip', itemId: 'i3', slot: 'main_hand' })); // bow (fast)
+  // equip is now async (DB write-through); wait for it to land before
+  // attacking so the attack doesn't race ahead of the equip and hit with
+  // the still-equipped melee default.
+  let equipped = false;
+  for (let i = 0; i < 20 && !equipped; i++) {
+    const s = await nextMsg(ws, 'state');
+    const me = s.players.find((p) => p.id === '1');
+    if (me && me.equipment && me.equipment.main_hand === 'i3') equipped = true;
+  }
+  assert.ok(equipped, 'bow equipped before attacking');
   ws.send(JSON.stringify({ type: 'attack', ax: 1, ay: 0 }));
   let sawProjectile = false;
   for (let i = 0; i < 10 && !sawProjectile; i++) {
@@ -310,5 +330,45 @@ test('a projectile attack makes a projectile appear in a later state', async () 
     if (Array.isArray(s.projectiles) && s.projectiles.length > 0) sawProjectile = true;
   }
   assert.ok(sawProjectile, 'state includes an active projectile after a projectile attack');
+  ws.close(); handle.close(); server.close();
+});
+
+test('joined carries the item catalog, the owned items and the equipment map', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  const joined = await nextMsg(ws, 'joined');
+  assert.ok(Array.isArray(joined.itemTypes) && joined.itemTypes.length >= 2);
+  assert.ok(Array.isArray(joined.items) && joined.items.length >= 1);
+  assert.equal(typeof joined.equipment, 'object');
+  assert.equal(joined.weapons, undefined, 'the 3b-1 weapons payload is retired');
+  ws.close(); handle.close(); server.close();
+});
+
+test('equip is reflected in a later state; unequip clears it', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  ws.send(JSON.stringify({ type: 'equip', itemId: 'i5', slot: 'chest' }));
+  let got = null;
+  for (let i = 0; i < 25 && !got; i++) {
+    const s = await nextMsg(ws, 'state');
+    const me = s.players.find((p) => p.id === '1');
+    if (me && me.equipment && me.equipment.chest === 'i5') got = me;
+  }
+  assert.ok(got, 'chest equipment appears in state');
+
+  ws.send(JSON.stringify({ type: 'unequip', slot: 'chest' }));
+  let cleared = false;
+  for (let i = 0; i < 25 && !cleared; i++) {
+    const s = await nextMsg(ws, 'state');
+    const me = s.players.find((p) => p.id === '1');
+    if (me && me.equipment && me.equipment.chest === undefined) cleared = true;
+  }
+  assert.ok(cleared, 'chest equipment cleared in state');
   ws.close(); handle.close(); server.close();
 });

@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
-const { loadWeaponTypes, resolveDefaultWeaponId } = require('./weapons');
+const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { spawnChunkCreatures } = require('../services/mapService');
 
@@ -62,11 +62,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
         const cr = await pool.query('SELECT name, color, hp FROM entity_types WHERE is_creature = true ORDER BY id ASC');
         const creatureTypes = cr.rows.map((r) => ({ name: r.name, hp: r.hp, color: r.color }));
-        const weaponsById = await loadWeaponTypes(pool);
-        const defaultWeaponId = resolveDefaultWeaponId(weaponsById);
+        const itemTypes = await loadItemTypes(pool);
+        const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const map = new ServerMap({ seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes });
         const entry = {
-          worldId, world: new World(map, weaponsById, defaultWeaponId), row, sockets: new Map(),
+          worldId, world: new World(map, itemTypes, defaultWeaponId), row, sockets: new Map(),
           tileTypes, creatureTypes,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
@@ -217,12 +217,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const entry = await loadWorld(msg.world_id).catch(() => null);
         if (!entry) { send(ws, { type: 'error', message: 'unknown world' }); return; }
         const spawn = await loadSpawn(msg.world_id, ws.userId, entry.row.chunk_size);
+        let inv = await loadInventory(pool, ws.userId);
+        if (inv.items.length === 0) {
+          const granted = await grantStartingLoadout(pool, ws.userId, entry.world.weapons);
+          if (granted) inv = await loadInventory(pool, ws.userId);
+        }
         ws.worldId = msg.world_id;
-        entry.world.addPlayer(ws.userId, spawn);
+        entry.world.addPlayer(ws.userId, spawn, inv);
         entry.sockets.set(ws.userId, ws);
         send(ws, {
           type: 'joined', user_id: ws.userId, spawn, tickRate: 1000 / tickMs,
-          weapons: [...entry.world.weapons.values()].map((w) => ({ id: w.id, name: w.name, kind: w.kind, element: w.element })),
+          itemTypes: [...entry.world.weapons.values()],
+          items: inv.items,
+          equipment: inv.equipment,
         });
         return;
       }
@@ -246,7 +253,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
       if (msg.type === 'equip') {
         const entry = worlds.get(ws.worldId);
-        if (entry) entry.world.setWeapon(ws.userId, msg.weaponId);
+        if (entry) {
+          const r = await entry.world.setEquipment(pool, ws.userId, msg.itemId, msg.slot);
+          if (!r.ok) send(ws, { type: 'error', message: r.reason || 'cannot equip' });
+        }
+        return;
+      }
+
+      if (msg.type === 'unequip') {
+        const entry = worlds.get(ws.worldId);
+        if (entry) await entry.world.clearEquipment(pool, ws.userId, msg.slot);
         return;
       }
 
