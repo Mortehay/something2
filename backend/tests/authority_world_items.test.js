@@ -61,3 +61,82 @@ test('snapshot exposes each player equipment map', () => {
   assert.deepEqual(pl.equipment, { chest: 'a5' });
   assert.equal(pl.weaponId, undefined, 'weaponId is retired');
 });
+
+function fakePool() {
+  const calls = [];
+  return {
+    calls,
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      return { rows: [], rowCount: 0 };
+    },
+  };
+}
+
+test('setEquipment recomputes mitigation on success', async () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 0, y: 0 }, emptyInv());
+  w.addPlayer('u2', { x: 150, y: 100 }, { items: [{ id: 'a5', typeId: 5 }], equipment: {} });
+
+  // First attack: no armor, should deal 10 damage
+  const before1 = w.getPlayer('u2').hp;
+  w.attack('u1', 1, 0);
+  const damage1 = before1 - w.getPlayer('u2').hp;
+  assert.equal(damage1, 10, 'first hit should deal full 10 damage (no armor)');
+
+  // Equip the vest
+  const pool = fakePool();
+  const r = await w.setEquipment(pool, 'u2', 'a5', 'chest');
+  assert.equal(r.ok, true);
+  assert.equal(w.getPlayer('u2').mit.defense, 4, 'mitigation should be recomputed after successful equip');
+
+  // Second attack: with armor, should deal 6 damage
+  w.getPlayer('u1')._attackCd = 0;
+  const before2 = w.getPlayer('u2').hp;
+  w.attack('u1', 1, 0);
+  const damage2 = before2 - w.getPlayer('u2').hp;
+  assert.equal(damage2, 6, 'second hit should deal 6 damage (10 - 4 defense)');
+});
+
+test('setEquipment with an unowned item is a no-op', async () => {
+  const w = armWorld();
+  w.addPlayer('u2', { x: 150, y: 100 }, { items: [], equipment: {} });
+
+  const pool = fakePool();
+  const r = await w.setEquipment(pool, 'u2', 'ghost-item', 'chest');
+
+  assert.equal(r.ok, false, 'should reject unowned item');
+  assert.equal(w.getPlayer('u2').inv.equipment.chest, undefined, 'chest should remain unequipped');
+  assert.equal(w.getPlayer('u2').mit.defense, 0, 'mitigation should remain zero');
+
+  const insertCalls = pool.calls.filter((c) => c.sql.includes('INSERT INTO player_equipment'));
+  assert.equal(insertCalls.length, 0, 'no INSERT calls should be made for rejected equip');
+});
+
+test('clearEquipment recomputes mitigation', async () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 0, y: 0 }, emptyInv());
+  w.addPlayer('u2', { x: 150, y: 100 }, armoredInv());
+
+  // Confirm mitigation is active (defense 4)
+  assert.equal(w.getPlayer('u2').mit.defense, 4, 'defender should start with 4 defense');
+
+  // First attack: with armor, should deal 6 damage
+  const before1 = w.getPlayer('u2').hp;
+  w.attack('u1', 1, 0);
+  const damage1 = before1 - w.getPlayer('u2').hp;
+  assert.equal(damage1, 6, 'first hit should deal 6 damage (with armor)');
+
+  // Clear the equipment
+  const pool = fakePool();
+  const r = await w.clearEquipment(pool, 'u2', 'chest');
+  assert.equal(r.ok, true);
+  assert.equal(w.getPlayer('u2').mit.defense, 0, 'mitigation should be recomputed after clear');
+
+  // Second attack: no armor, should deal 10 damage
+  w.getPlayer('u1')._attackCd = 0;
+  const before2 = w.getPlayer('u2').hp;
+  w.attack('u1', 1, 0);
+  const damage2 = before2 - w.getPlayer('u2').hp;
+  assert.equal(damage2, 10, 'second hit should deal full 10 damage (armor cleared)');
+});
