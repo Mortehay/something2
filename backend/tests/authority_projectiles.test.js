@@ -96,3 +96,29 @@ test('a projectile never hits the same target twice', () => {
   assert.equal(target.hp, 99);   // exactly one hit despite many in-range checks
   assert.equal(sim.count(), 1);  // still alive (pierce not consumed past 1)
 });
+
+test('a projectile hitting an armored player goes through the shared mitigation path', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 20 } });
+  const target = { userId: 'u2', x: 62, y: -32, width: 64, height: 64, hp: 100,
+    mit: { defense: 5, resistances: {} } };
+  sim.step(0.12, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
+  assert.equal(target.hp, 85, '20 raw - 5 defense = 15');
+});
+
+test('a projectile element is resisted by the target', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 20, element: 'arcane' } });
+  const target = { userId: 'u2', x: 62, y: -32, width: 64, height: 64, hp: 100,
+    mit: { defense: 0, resistances: { arcane: 0.5 } } };
+  sim.step(0.12, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
+  assert.equal(target.hp, 90, '20 raw * (1 - 0.5) = 10');
+});
+
+test('a player with no mit field takes unmitigated damage (no crash)', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 20 } });
+  const target = { userId: 'u2', x: 62, y: -32, width: 64, height: 64, hp: 100 };
+  sim.step(0.12, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
+  assert.equal(target.hp, 80);
+});
