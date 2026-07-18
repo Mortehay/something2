@@ -87,4 +87,93 @@ async function grantStartingLoadout(pool, userId, itemTypes) {
   return true;
 }
 
-module.exports = { loadItemTypes, resolveDefaultWeaponId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory, grantStartingLoadout, STARTING_LOADOUT };
+const HAND_SLOTS = ['main_hand', 'off_hand'];
+
+function findItem(inv, itemId) { return inv.items.find((it) => it.id === itemId) || null; }
+
+// Pure legality check. Returns {ok:true} or {ok:false, reason}.
+function canEquip(inv, itemTypes, itemId, slot) {
+  if (!SLOTS.includes(slot)) return { ok: false, reason: 'unknown slot' };
+  const item = findItem(inv, itemId);
+  if (!item) return { ok: false, reason: 'you do not own that item' };
+  const type = itemTypes.get(item.typeId);
+  if (!type) return { ok: false, reason: 'unknown item type' };
+
+  if (type.category === 'weapon') {
+    if (!HAND_SLOTS.includes(slot)) return { ok: false, reason: 'weapons go in a hand slot' };
+    if (slot === 'off_hand' && type.two_handed) return { ok: false, reason: 'two-handed weapon needs the main hand' };
+    if (slot === 'off_hand') {
+      const mh = inv.equipment.main_hand;
+      const mhType = mh ? itemTypes.get((findItem(inv, mh) || {}).typeId) : null;
+      if (mhType && mhType.two_handed) return { ok: false, reason: 'a two-handed weapon is equipped' };
+    }
+    return { ok: true };
+  }
+
+  // armor: must go in its own slot
+  if (type.slot !== slot) return { ok: false, reason: `that item goes in ${type.slot}` };
+  return { ok: true };
+}
+
+// Sum equipped ARMOR defense and merge resistances per element.
+function mitigation(inv, itemTypes) {
+  let defense = 0;
+  const resistances = {};
+  for (const slot of SLOTS) {
+    const itemId = inv.equipment[slot];
+    if (!itemId) continue;
+    const item = findItem(inv, itemId);
+    if (!item) continue;
+    const type = itemTypes.get(item.typeId);
+    if (!type || type.category !== 'armor') continue;
+    defense += type.defense || 0;
+    for (const [el, v] of Object.entries(type.resistances || {})) {
+      resistances[el] = (resistances[el] || 0) + v;
+    }
+  }
+  return { defense, resistances };
+}
+
+// The item type driving attacks: whatever is in main_hand, else the default.
+function activeWeaponType(inv, itemTypes, defaultWeaponId) {
+  const itemId = inv.equipment.main_hand;
+  if (itemId) {
+    const item = findItem(inv, itemId);
+    const type = item ? itemTypes.get(item.typeId) : null;
+    if (type && type.category === 'weapon') return type;
+  }
+  return itemTypes.get(defaultWeaponId) || null;
+}
+
+// Equip with write-through. Clears any slot the instance currently occupies and,
+// for a two-handed weapon, the off hand.
+async function equip(pool, userId, inv, itemTypes, itemId, slot) {
+  const check = canEquip(inv, itemTypes, itemId, slot);
+  if (!check.ok) return check;
+
+  const type = itemTypes.get(findItem(inv, itemId).typeId);
+  const toClear = [];
+  for (const s of SLOTS) if (inv.equipment[s] === itemId && s !== slot) toClear.push(s);
+  if (slot === 'main_hand' && type.two_handed && inv.equipment.off_hand) toClear.push('off_hand');
+
+  for (const s of toClear) {
+    await pool.query('DELETE FROM player_equipment WHERE user_id = $1 AND slot = $2', [userId, s]);
+    delete inv.equipment[s];
+  }
+  await pool.query(
+    `INSERT INTO player_equipment (user_id, slot, item_id) VALUES ($1,$2,$3)
+     ON CONFLICT (user_id, slot) DO UPDATE SET item_id = $3`,
+    [userId, slot, itemId],
+  );
+  inv.equipment[slot] = itemId;
+  return { ok: true };
+}
+
+async function unequip(pool, userId, inv, slot) {
+  if (!SLOTS.includes(slot)) return { ok: false, reason: 'unknown slot' };
+  await pool.query('DELETE FROM player_equipment WHERE user_id = $1 AND slot = $2', [userId, slot]);
+  delete inv.equipment[slot];
+  return { ok: true };
+}
+
+module.exports = { loadItemTypes, resolveDefaultWeaponId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory, grantStartingLoadout, STARTING_LOADOUT, canEquip, mitigation, activeWeaponType, equip, unequip };
