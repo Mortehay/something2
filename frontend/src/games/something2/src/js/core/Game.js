@@ -15,6 +15,11 @@ import { reconcile } from "../net/reconcile.js";
 import { inputVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { aimVector } from "./aim.js";
+import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf } from "./inventory.js";
+
+// Fallback weapon name shown when nothing is equipped in main_hand yet
+// (mirrors the server's DEFAULT_WEAPON_NAME in authority/items.js).
+const DEFAULT_WEAPON_NAME = "dagger";
 
 // Native Map shadowed by the world Map import above; alias to keep the
 // distinction obvious at the call sites.
@@ -57,13 +62,18 @@ export class Game {
         this.remotePlayers = new NativeMap(); // user_id -> {x, y, hp}
         this.lastServerTick = 0;
 
-        // Combat (Slice 3b): weapon catalog from `joined`, local mana/weapon
-        // state from `state`, and the projectile render store.
-        this.weaponCatalog = [];
+        // Combat (Slice 3b): local mana state from `state`, and the
+        // projectile render store.
         this.localMana = null;
         this.localMaxMana = null;
-        this.localWeaponId = null;
         this.projectiles = null;
+
+        // Inventory / paper-doll (Slice 3b-2a). `inventory` mirrors the
+        // account-wide item catalog + owned items + equipment; the server is
+        // authoritative for equip legality (see core/inventory.js).
+        this.inventory = createInventory();
+        this.inventoryOpen = false;
+        this.inventorySelectedItemId = null;
     }
 
     setEngineClient(engine, localUserId) {
@@ -197,6 +207,12 @@ export class Game {
         this.creatures = new CreatureManager();
         this.projectiles = new ProjectileManager();
 
+        // Fresh inventory state per join (re-entry guard above tears down the
+        // previous authority connection, so mirror that for the paper-doll).
+        this.inventory = createInventory();
+        this.inventoryOpen = false;
+        this.inventorySelectedItemId = null;
+
         this._inputBuffer = [];
         // Connect to the authoritative sim; spawn comes from the server.
         const { token, user_id } = await fetchDevToken(API_URL);
@@ -207,13 +223,18 @@ export class Game {
                 url: wsUrl,
                 token,
                 onJoined: (msg) => {
-                    this.weaponCatalog = msg.weapons || [];
+                    applyJoined(this.inventory, msg);
                     resolve(msg.spawn);
                 },
                 onState: (msg) => this._onWorldState(msg),
                 onCreatures: (msg) => this.creatures.applySnapshot(msg.creatures),
                 onError: (e) => console.error('[authority]', e),
                 onClose: () => { this.authorityJoined = false; },
+                onKicked: () => {
+                    console.warn('[authority] kicked: signed in elsewhere');
+                    this.setState('kicked');
+                    if (this.authorityClient) this.authorityClient.disconnect();
+                },
             });
             this.authorityClient.connect(worldId);
             setTimeout(() => reject(new Error('authority join timeout')), 5000);
@@ -337,11 +358,10 @@ export class Game {
             this.player.y = out.y;
             this._inputBuffer = out.buffer;
         }
-        const me = (msg.players || []).find((p) => p.id === this.localUserId);
-        if (me) {
-            this.localMana = me.mana;
-            this.localMaxMana = me.maxMana;
-            this.localWeaponId = me.weaponId;
+        if (mine) {
+            this.localMana = mine.mana;
+            this.localMaxMana = mine.maxMana;
+            applyEquipment(this.inventory, mine.equipment || {});
         }
         if (this.projectiles) this.projectiles.applySnapshot(msg.projectiles || []);
     }
@@ -365,12 +385,41 @@ export class Game {
         this.player.y += dy * RECONCILE_LERP;
     }
 
+    // The HUD weapon name: whatever occupies main_hand, else the default
+    // weapon (mirrors the server's DEFAULT_WEAPON_NAME fallback).
+    _resolveWeaponName() {
+        const mainHandId = this.inventory.equipment.main_hand;
+        const equipped = mainHandId != null ? typeOf(this.inventory, mainHandId) : null;
+        if (equipped) return equipped.name;
+        for (const t of this.inventory.types.values()) {
+            if (t.name === DEFAULT_WEAPON_NAME) return t.name;
+        }
+        return DEFAULT_WEAPON_NAME;
+    }
+
     render(){
         if(this.state === 'menu'){
             this.ctx.fillStyle = '#0f3460';
             this.ctx.fillRect(0,0,this.canvas.width,this.canvas.height);
+        } else if (this.state === 'kicked') {
+            // Freeze on the last frame's background and surface why input stopped
+            // working; the authority socket is already gone (see onKicked).
+            this.ctx.fillStyle = 'rgba(0,0,0,0.75)';
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            this.ctx.save();
+            this.ctx.fillStyle = '#ef4444';
+            this.ctx.font = '24px sans-serif';
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
+            this.ctx.fillText('Signed in elsewhere — this session was disconnected.', this.canvas.width / 2, this.canvas.height / 2);
+            this.ctx.restore();
         } else if (this.chunked) {
-            this.renderSystem.renderChunked(this.player, this.camera, this.chunkedMap, this.remotePlayers, this.localUserId, this.creatures.all(), this.projectiles ? this.projectiles.all() : [], this.weaponCatalog, this.localMana, this.localMaxMana, this.localWeaponId);
+            this.renderSystem.renderChunked(
+                this.player, this.camera, this.chunkedMap, this.remotePlayers, this.localUserId,
+                this.creatures.all(), this.projectiles ? this.projectiles.all() : [],
+                this.localMana, this.localMaxMana, this._resolveWeaponName(),
+                this.inventory, this.inventoryOpen, this.inventorySelectedItemId,
+            );
         } else {
             this.renderSystem.render(this.player, this.camera, this.map, this.remotePlayers, this.localUserId);
         }
@@ -387,6 +436,34 @@ export class Game {
         this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
     }
 
+    // Hit-test the slot/item rects RenderSystem recorded while drawing the
+    // open panel (canvas-px space, same as _cursorX/_cursorY). Clicking an
+    // item selects it (click again to deselect); clicking a slot equips the
+    // selected item there (if legal client-side) or unequips an occupied
+    // slot when nothing is selected. Legality is re-checked server-side.
+    _handleInventoryClick(cx, cy) {
+        const hitAreas = (this.renderSystem && this.renderSystem._invHitAreas) || [];
+        const hit = hitAreas.find((a) => cx >= a.x && cx <= a.x + a.w && cy >= a.y && cy <= a.y + a.h);
+        if (!hit) return;
+
+        if (hit.kind === 'item') {
+            this.inventorySelectedItemId = (this.inventorySelectedItemId === hit.id) ? null : hit.id;
+            return;
+        }
+
+        if (hit.kind === 'slot') {
+            const slot = hit.id;
+            if (this.inventorySelectedItemId != null) {
+                if (canEquipClient(this.inventory, this.inventorySelectedItemId, slot)) {
+                    this.authorityClient.sendEquip(this.inventorySelectedItemId, slot);
+                }
+                this.inventorySelectedItemId = null;
+            } else if (this.inventory.equipment[slot]) {
+                this.authorityClient.sendUnequip(slot);
+            }
+        }
+    }
+
     setupInput(){
         if (this._inputAttached) return;
         this._inputAttached = true;
@@ -395,9 +472,11 @@ export class Game {
             const key = e.key.toLowerCase();
             this.keys[key] = true;
 
-            if (this.state === 'playing' && this.chunked && this.authorityClient && !e.repeat && /^[1-9]$/.test(key)) {
-                const w = this.weaponCatalog[Number(key) - 1];
-                if (w) this.authorityClient.sendEquip(w.id);
+            // Inventory / paper-doll toggle (replaces the retired number-key
+            // weapon switch — equipping now goes through the panel).
+            if (key === 'i' && this.state === 'playing' && this.chunked && !e.repeat) {
+                this.inventoryOpen = !this.inventoryOpen;
+                if (!this.inventoryOpen) this.inventorySelectedItemId = null;
             }
 
             if(key === 'escape'){
@@ -442,6 +521,12 @@ export class Game {
         this._mouseDownHandler = (e) => {
             if (e.button !== 0) return;
             if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
+            // While the panel is open, clicks hit-test it and must NOT also
+            // fire an attack.
+            if (this.inventoryOpen) {
+                this._handleInventoryClick(this._cursorX ?? 0, this._cursorY ?? 0);
+                return;
+            }
             const pcx = this.player.x + this.player.width / 2;
             const pcy = this.player.y + this.player.height / 2;
             const { nx, ny } = aimVector(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera, pcx, pcy);

@@ -3,6 +3,7 @@ import { worldToScreen, depthKey } from "../core/iso.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir } from "./spriteAtlas.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
+import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 
 export class RenderSystem {
   constructor(canvas, imageManager) {
@@ -13,6 +14,9 @@ export class RenderSystem {
     // Global render-mode override (dev toggle). null = use each entity's own
     // renderMode; a mode string forces every entity to that mode.
     this.renderModeOverride = null;
+    // Hit-test rects for the inventory panel, recorded while drawing it and
+    // read back by Game on click. Empty whenever the panel isn't open.
+    this._invHitAreas = [];
   }
 
   // Effective render mode for an entity: the global override wins, else the
@@ -72,7 +76,7 @@ export class RenderSystem {
     this.renderHud(player, remotePlayers, localUserId);
   }
 
-  renderChunked(player, camera, chunkedMap, remotePlayers, localUserId, creatures = [], projectiles = [], weaponCatalog = [], mana = null, maxMana = null, weaponId = null) {
+  renderChunked(player, camera, chunkedMap, remotePlayers, localUserId, creatures = [], projectiles = [], mana = null, maxMana = null, weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     camera.apply(this.ctx);
@@ -114,7 +118,14 @@ export class RenderSystem {
     }
 
     camera.reset(this.ctx);
-    this.renderHud(player, remotePlayers, localUserId, weaponCatalog, mana, maxMana, weaponId);
+    this.renderHud(player, remotePlayers, localUserId, mana, maxMana, weaponName);
+
+    // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
+    // pixel space — same space Game hit-tests clicks against).
+    this._invHitAreas = [];
+    if (inventoryOpen && inventory) {
+      this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId);
+    }
   }
 
   // Small red/yellow/green bar above a damaged actor (creature or player).
@@ -210,7 +221,7 @@ export class RenderSystem {
     }
   }
 
-  renderHud(player, remotePlayers, localUserId, weaponCatalog = [], mana = null, maxMana = null, weaponId = null) {
+  renderHud(player, remotePlayers, localUserId, mana = null, maxMana = null, weaponName = null) {
     const remoteCount = remotePlayers ? remotePlayers.size : 0;
     const lines = [
       `Players online: ${1 + remoteCount}`,
@@ -220,10 +231,10 @@ export class RenderSystem {
     if (mana != null && maxMana != null) {
       lines.push(`MP: ${Math.round(mana)} / ${Math.round(maxMana)}`);
     }
-    if (weaponId != null) {
-      const w = (weaponCatalog || []).find((wpn) => wpn.id === weaponId);
-      lines.push(`Weapon: ${w ? w.name : `#${weaponId}`}`);
+    if (weaponName) {
+      lines.push(`Weapon: ${weaponName}`);
     }
+    lines.push(`[i] Inventory`);
     this.ctx.save();
     this.ctx.fillStyle = "rgba(0,0,0,0.55)";
     this.ctx.fillRect(10, 10, 260, 18 * lines.length + 12);
@@ -232,5 +243,102 @@ export class RenderSystem {
     this.ctx.textBaseline = "top";
     lines.forEach((t, i) => this.ctx.fillText(t, 18, 16 + i * 18));
     this.ctx.restore();
+  }
+
+  // Canvas-drawn inventory / paper-doll overlay — styled consistently with
+  // the HUD box above (same dark translucent panel, monospace HUD font).
+  // Draws:
+  //   - a paper-doll column: one labelled box per SLOTS entry showing the
+  //     equipped item's type name, greyed out when `selectedItemId` cannot
+  //     legally go there (per canEquipClient);
+  //   - an item list: each owned item's type name + a stat line (weapon:
+  //     damage/cooldown; armor: defense/resistances), highlighted when
+  //     selected.
+  // Every drawn slot/item box is pushed into `hitAreas` as
+  // {x, y, w, h, kind: 'slot' | 'item', id} so Game can hit-test clicks
+  // against this same frame's layout.
+  renderInventory(ctx, inventory, hitAreas, selectedItemId = null) {
+    const panelW = 760;
+    const panelH = 560;
+    const px = (GAME_WIDTH - panelW) / 2;
+    const py = (GAME_HEIGHT - panelH) / 2;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(px, py, panelW, panelH);
+    ctx.strokeStyle = "#3a3a4e";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, panelW, panelH);
+
+    ctx.fillStyle = "#e5e7eb";
+    ctx.font = "14px monospace";
+    ctx.textBaseline = "top";
+    ctx.fillText("Inventory — [i] to close", px + 16, py + 14);
+
+    // Paper-doll column (left).
+    const dollX = px + 16;
+    const dollTop = py + 44;
+    const slotW = 320;
+    const slotH = 34;
+    const slotGap = 6;
+    ctx.font = "12px monospace";
+    SLOTS.forEach((slot, i) => {
+      const y = dollTop + i * (slotH + slotGap);
+      const equippedId = inventory.equipment[slot];
+      const equippedType = equippedId != null ? typeOf(inventory, equippedId) : null;
+      const disabled = selectedItemId != null && !canEquipClient(inventory, selectedItemId, slot);
+
+      ctx.fillStyle = disabled ? "rgba(60,60,70,0.5)" : "rgba(40,40,60,0.85)";
+      ctx.fillRect(dollX, y, slotW, slotH);
+      ctx.strokeStyle = disabled ? "#3a3a3a" : "#4a9eff";
+      ctx.strokeRect(dollX, y, slotW, slotH);
+      ctx.fillStyle = disabled ? "#6b7280" : "#e5e7eb";
+      ctx.fillText(`${slot}: ${equippedType ? equippedType.name : "-"}`, dollX + 8, y + 11);
+
+      hitAreas.push({ x: dollX, y, w: slotW, h: slotH, kind: "slot", id: slot });
+    });
+
+    // Owned-item list (right).
+    const listX = dollX + slotW + 24;
+    const listTop = py + 44;
+    const listW = px + panelW - 16 - listX;
+    const itemH = 40;
+    const itemGap = 6;
+    const listBottom = py + panelH - 16;
+    ctx.font = "12px monospace";
+    let y = listTop;
+    for (const item of inventory.items) {
+      if (y + itemH > listBottom) break; // no scrolling yet; loadouts fit today
+      const type = inventory.types.get(item.typeId);
+      if (!type) continue;
+      const selected = item.id === selectedItemId;
+
+      ctx.fillStyle = selected ? "rgba(74,158,255,0.28)" : "rgba(40,40,60,0.85)";
+      ctx.fillRect(listX, y, listW, itemH);
+      ctx.strokeStyle = selected ? "#4a9eff" : "#3a3a4e";
+      ctx.strokeRect(listX, y, listW, itemH);
+
+      ctx.fillStyle = "#e5e7eb";
+      ctx.fillText(type.name, listX + 8, y + 6);
+
+      const statLine = type.category === "weapon"
+        ? `dmg ${type.damage}  cd ${type.cooldown}s${type.two_handed ? "  (2H)" : ""}`
+        : `def ${type.defense}${
+            Object.keys(type.resistances || {}).length
+              ? "  " + Object.entries(type.resistances).map(([el, v]) => `${el} ${v}`).join(", ")
+              : ""
+          }`;
+      ctx.fillStyle = "#9ca3af";
+      ctx.fillText(statLine, listX + 8, y + 22);
+
+      hitAreas.push({ x: listX, y, w: listW, h: itemH, kind: "item", id: item.id });
+      y += itemH + itemGap;
+    }
+    if (inventory.items.length === 0) {
+      ctx.fillStyle = "#6b7280";
+      ctx.fillText("No items owned.", listX + 8, listTop + 6);
+    }
+
+    ctx.restore();
   }
 }
