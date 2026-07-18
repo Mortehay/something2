@@ -38,4 +38,41 @@ function inArc(ox, oy, nx, ny, tx, ty, reach, arcWidth) {
   return dot >= Math.cos(arcWidth / 2);
 }
 
-module.exports = { DEFAULT_WEAPON_NAME, normalizeAim, inArc, vectorFromFacing };
+function num(v) { return v == null ? null : Number(v); }
+
+// Load the weapon catalog into a Map keyed by id. Numbers are coerced; nullable
+// melee/projectile fields are kept null.
+async function loadWeaponTypes(pool) {
+  const r = await pool.query(
+    `SELECT id, name, kind, damage, cooldown, reach, arc_width,
+            range, projectile_speed, projectile_radius, pierce, mana_cost, element
+     FROM weapon_types ORDER BY id ASC`,
+  );
+  const m = new Map();
+  for (const row of r.rows) {
+    m.set(row.id, {
+      id: row.id,
+      name: row.name,
+      kind: row.kind,
+      damage: Number(row.damage),
+      cooldown: Number(row.cooldown),
+      reach: num(row.reach),
+      arc_width: num(row.arc_width),
+      range: num(row.range),
+      projectile_speed: num(row.projectile_speed),
+      projectile_radius: num(row.projectile_radius),
+      pierce: num(row.pierce),
+      mana_cost: Number(row.mana_cost),
+      element: row.element ?? null,
+    });
+  }
+  return m;
+}
+
+function resolveDefaultWeaponId(mapById) {
+  for (const [id, w] of mapById) if (w.name === DEFAULT_WEAPON_NAME) return id;
+  const first = mapById.keys().next();
+  return first.done ? null : first.value;
+}
+
+module.exports = { DEFAULT_WEAPON_NAME, normalizeAim, inArc, vectorFromFacing, loadWeaponTypes, resolveDefaultWeaponId };
