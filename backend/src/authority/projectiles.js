@@ -41,10 +41,11 @@ class ProjectileSim {
   step(dt, { creatures, players, map }) {
     const killedCreatureIds = [];
     const survivors = [];
+    const creatureList = creatures.all(); // hoisted: creatures don't move during this step
     const MAX_SUB = 16; // px; must be < the smallest capture radius (radius+targetHalf)
     for (const p of this.projectiles) {
       const speed = Math.hypot(p.vx, p.vy);
-      let dead = speed === 0;
+      let dead = !(speed > 0) || !Number.isFinite(speed) || !Number.isFinite(p.x) || !Number.isFinite(p.y);
       const ux = speed === 0 ? 0 : p.vx / speed;
       const uy = speed === 0 ? 0 : p.vy / speed;
       let moveLeft = speed * dt;
@@ -58,7 +59,7 @@ class ProjectileSim {
         if (!map.isWalkable(p.x, p.y)) { dead = true; break; }
 
         // Creatures.
-        for (const c of creatures.all()) {
+        for (const c of creatureList) {
           const key = `c:${c.id}`;
           if (p.hitIds.has(key)) continue;
           const half = c.width / 2;

@@ -395,7 +395,7 @@ export class Game {
             const key = e.key.toLowerCase();
             this.keys[key] = true;
 
-            if (this.state === 'playing' && this.chunked && this.authorityClient && this.weaponCatalog && /^[1-9]$/.test(key)) {
+            if (this.state === 'playing' && this.chunked && this.authorityClient && !e.repeat && /^[1-9]$/.test(key)) {
                 const w = this.weaponCatalog[Number(key) - 1];
                 if (w) this.authorityClient.sendEquip(w.id);
             }

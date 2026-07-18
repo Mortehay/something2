@@ -18,6 +18,15 @@ test('normalizeAim falls back to the facing direction on a zero vector', () => {
   assert.deepEqual(round(normalizeAim(0, 0, null)), { nx: 0, ny: 1 });
 });
 
+test('normalizeAim falls back to facing on non-finite aim', () => {
+  for (const [ax, ay] of [[Infinity, 0], [NaN, 0], [0, -Infinity]]) {
+    const { nx, ny } = normalizeAim(ax, ay, 'e');
+    assert.deepEqual({ nx, ny }, { nx: 1, ny: 0 });
+    assert.equal(Number.isNaN(nx), false);
+    assert.equal(Number.isNaN(ny), false);
+  }
+});
+
 test('inArc: inside reach and cone is a hit', () => {
   // aim east; target due east, close.
   assert.equal(inArc(0, 0, 1, 0, 50, 0, 80, 0.6), true);

@@ -20,8 +20,10 @@ function vectorFromFacing(facing) {
 
 // Normalize an aim vector; fall back to the facing direction if it is ~zero.
 function normalizeAim(ax, ay, facing) {
-  const len = Math.hypot(ax || 0, ay || 0);
-  if (len > 1e-9) return { nx: ax / len, ny: ay / len };
+  const x = Number.isFinite(ax) ? ax : 0;
+  const y = Number.isFinite(ay) ? ay : 0;
+  const len = Math.hypot(x, y);
+  if (len > 1e-9) return { nx: x / len, ny: y / len };
   return vectorFromFacing(facing);
 }
 

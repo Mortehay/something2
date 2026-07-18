@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { World, PLAYER_MAX_HP, MELEE_RANGE, PLAYER_DAMAGE, PLAYER_ATTACK_COOLDOWN, PLAYER_MAX_MANA } = require('../src/authority/world.js');
+const { World, PLAYER_MAX_HP, PLAYER_MAX_MANA } = require('../src/authority/world.js');
 
 function stubMap() { return { isWalkable: () => true, speedAt: () => 1, chunkSize: 8 }; }
 

@@ -67,6 +67,13 @@ test('step hits a player (not the owner), reduces hp', () => {
   assert.equal(sim.count(), 0); // pierce:1 → despawned after the single player hit
 });
 
+test('a non-finite-velocity projectile is culled, not leaked', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: NaN, ny: 0, weapon: BOW });
+  sim.step(0.05, { creatures: creaturesStub([]), players: [], map: WALK_ALL });
+  assert.equal(sim.count(), 0);
+});
+
 test('pierce: a pierce-2 projectile hits two creatures before despawning', () => {
   const sim = new ProjectileSim();
   sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 100, pierce: 2, range: 1000, projectile_speed: 2000 } });

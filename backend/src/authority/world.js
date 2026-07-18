@@ -7,9 +7,6 @@ const PLAYER_W = 64;
 const PLAYER_H = 64;
 const PLAYER_SPEED = 200; // client: this.speed(100) * speedMultiplier(2)
 const PLAYER_MAX_HP = 100;
-const MELEE_RANGE = 90;            // px
-const PLAYER_DAMAGE = 10;
-const PLAYER_ATTACK_COOLDOWN = 0.5; // s
 const PLAYER_MAX_MANA = 100;
 const PLAYER_MANA_REGEN = 10; // per second
 
@@ -102,11 +99,11 @@ class World {
     if (!w) return { killedCreatureIds: [] };
 
     const { nx, ny } = normalizeAim(ax, ay, p.facing);
-    const f = facingFromInput(sign(nx), sign(ny));
-    if (f) p.facing = f;
     const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
 
     if (w.kind === 'melee') {
+      const f = facingFromInput(sign(nx), sign(ny));
+      if (f) p.facing = f;
       const killed = this.creatures.applyMeleeArc(cx, cy, nx, ny, w.reach, w.arc_width, w.damage);
       for (const other of this.players.values()) {
         if (other.userId === userId) continue;
@@ -119,6 +116,8 @@ class World {
 
     // projectile
     if (p.mana < w.mana_cost) return { killedCreatureIds: [] }; // denied, no cooldown
+    const f = facingFromInput(sign(nx), sign(ny));
+    if (f) p.facing = f;
     p.mana -= w.mana_cost;
     this.projectiles.spawn({ ownerId: userId, x: cx, y: cy, nx, ny, weapon: w });
     p._attackCd = w.cooldown;
@@ -156,6 +155,6 @@ class World {
 
 module.exports = {
   World, PLAYER_W, PLAYER_H, PLAYER_SPEED,
-  PLAYER_MAX_HP, MELEE_RANGE, PLAYER_DAMAGE, PLAYER_ATTACK_COOLDOWN,
+  PLAYER_MAX_HP,
   PLAYER_MAX_MANA, PLAYER_MANA_REGEN,
 };

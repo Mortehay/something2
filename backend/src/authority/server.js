@@ -9,6 +9,10 @@ const { spawnChunkCreatures } = require('../services/mapService');
 
 const MAP_TILE_SIZE = 100;
 
+// Coerce a wire-provided number to a finite value (clients can send NaN/Infinity
+// via JSON, e.g. 1e999 parses to Infinity).
+function finiteOr(v, fallback) { return Number.isFinite(v) ? v : fallback; }
+
 // Attach the authoritative WebSocket simulation to an existing http server.
 // Returns { close() } so callers/tests can tear it down.
 function attachAuthority(httpServer, pool, opts = {}) {
@@ -225,14 +229,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
       if (msg.type === 'input') {
         const entry = worlds.get(ws.worldId);
-        if (entry) entry.world.setInput(ws.userId, msg.seq, msg.dx, msg.dy);
+        if (entry) entry.world.setInput(ws.userId, msg.seq, finiteOr(msg.dx, 0), finiteOr(msg.dy, 0));
         return;
       }
 
       if (msg.type === 'attack') {
         const entry = worlds.get(ws.worldId);
         if (entry) {
-          const { killedCreatureIds } = entry.world.attack(ws.userId, msg.ax, msg.ay);
+          const { killedCreatureIds } = entry.world.attack(ws.userId, finiteOr(msg.ax, 0), finiteOr(msg.ay, 0));
           for (const id of new Set(killedCreatureIds)) {
             pool.query('DELETE FROM world_creatures WHERE id = $1', [id]).catch(() => {});
           }
