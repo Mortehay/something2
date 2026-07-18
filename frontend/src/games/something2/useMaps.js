@@ -263,6 +263,86 @@ export function useDeleteEntityType() {
   });
 }
 
+export function useItemTypes() {
+  const { data: itemTypes, isLoading: isLoadingItemTypes } = useQuery({
+    queryKey: ['itemTypes'],
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/item-types`);
+      if (!res.ok) throw new Error('Failed to fetch item types');
+      return res.json();
+    }
+  });
+  return { itemTypes, isLoadingItemTypes };
+}
+
+export function useCreateItemType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (newItemType) => {
+      const res = await fetch(`${API_URL}/api/item-types`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newItemType)
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || 'Failed to create item type');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['itemTypes'] });
+      toast.success('Item type created!');
+    },
+    onError: (err) => toast.error(`Creation failed: ${err.message}`)
+  });
+}
+
+export function useUpdateItemType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (updatedItemType) => {
+      const { id, ...data } = updatedItemType;
+      const res = await fetch(`${API_URL}/api/item-types/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || 'Failed to update item type');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['itemTypes'] });
+      toast.success('Item type updated!');
+    },
+    onError: (err) => toast.error(`Update failed: ${err.message}`)
+  });
+}
+
+export function useDeleteItemType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await fetch(`${API_URL}/api/item-types/${id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || 'Failed to delete item type');
+      }
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['itemTypes'] });
+      toast.success('Item type deleted!');
+    },
+    onError: (err) => toast.error(`Deletion failed: ${err.message}`)
+  });
+}
+
 export function useGenerateEntities(onSuccessCallback) {
   const queryClient = useQueryClient();
   return useMutation({
