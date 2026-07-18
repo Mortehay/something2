@@ -4,6 +4,7 @@
 // creature's CURRENT chunk (chunkOf), never its spawn chunk.
 const { resolveMove } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
+const { inArc } = require('./weapons');
 
 const DIRS = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
@@ -125,6 +126,31 @@ class CreatureSim {
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
     }
     return killed;
+  }
+
+  // Melee arc: damage every creature whose center is within reach AND inside the
+  // aim cone; remove + return the dead ids. (nx,ny) must be normalized.
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage) {
+    const killed = [];
+    for (const [id, c] of this.creatures) {
+      const cc = center(c);
+      if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth)) continue;
+      c.hp -= damage;
+      c.dirty = true;
+      if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
+    }
+    return killed;
+  }
+
+  // Point damage to one creature (used by projectile collision). Returns true
+  // if it died (and was removed).
+  damageCreatureById(id, damage) {
+    const c = this.creatures.get(id);
+    if (!c) return false;
+    c.hp -= damage;
+    c.dirty = true;
+    if (c.hp <= 0) { this.creatures.delete(id); return true; }
+    return false;
   }
 
   getDirty() {

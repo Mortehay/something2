@@ -70,7 +70,9 @@ export class WorldAuthorityClient {
 
   ping() { this._send({ type: 'ping' }); }
 
-  sendAttack() { this._send({ type: 'attack' }); }
+  sendAttack(ax, ay) { this._send({ type: 'attack', ax, ay }); }
+
+  sendEquip(weaponId) { this._send({ type: 'equip', weaponId }); }
 
   disconnect() {
     if (this.ws) { try { this.ws.close(); } catch { /* already closed */ } this.ws = null; }

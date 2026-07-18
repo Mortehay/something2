@@ -3,10 +3,15 @@ const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
+const { loadWeaponTypes, resolveDefaultWeaponId } = require('./weapons');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { spawnChunkCreatures } = require('../services/mapService');
 
 const MAP_TILE_SIZE = 100;
+
+// Coerce a wire-provided number to a finite value (clients can send NaN/Infinity
+// via JSON, e.g. 1e999 parses to Infinity).
+function finiteOr(v, fallback) { return Number.isFinite(v) ? v : fallback; }
 
 // Attach the authoritative WebSocket simulation to an existing http server.
 // Returns { close() } so callers/tests can tear it down.
@@ -57,9 +62,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
         const cr = await pool.query('SELECT name, color, hp FROM entity_types WHERE is_creature = true ORDER BY id ASC');
         const creatureTypes = cr.rows.map((r) => ({ name: r.name, hp: r.hp, color: r.color }));
+        const weaponsById = await loadWeaponTypes(pool);
+        const defaultWeaponId = resolveDefaultWeaponId(weaponsById);
         const map = new ServerMap({ seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes });
         const entry = {
-          worldId, world: new World(map), row, sockets: new Map(),
+          worldId, world: new World(map, weaponsById, defaultWeaponId), row, sockets: new Map(),
           tileTypes, creatureTypes,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
@@ -213,24 +220,33 @@ function attachAuthority(httpServer, pool, opts = {}) {
         ws.worldId = msg.world_id;
         entry.world.addPlayer(ws.userId, spawn);
         entry.sockets.set(ws.userId, ws);
-        send(ws, { type: 'joined', user_id: ws.userId, spawn, tickRate: 1000 / tickMs });
+        send(ws, {
+          type: 'joined', user_id: ws.userId, spawn, tickRate: 1000 / tickMs,
+          weapons: [...entry.world.weapons.values()].map((w) => ({ id: w.id, name: w.name, kind: w.kind, element: w.element })),
+        });
         return;
       }
 
       if (msg.type === 'input') {
         const entry = worlds.get(ws.worldId);
-        if (entry) entry.world.setInput(ws.userId, msg.seq, msg.dx, msg.dy);
+        if (entry) entry.world.setInput(ws.userId, msg.seq, finiteOr(msg.dx, 0), finiteOr(msg.dy, 0));
         return;
       }
 
       if (msg.type === 'attack') {
         const entry = worlds.get(ws.worldId);
         if (entry) {
-          const killed = entry.world.attack(ws.userId);
-          for (const id of killed) {
+          const { killedCreatureIds } = entry.world.attack(ws.userId, finiteOr(msg.ax, 0), finiteOr(msg.ay, 0));
+          for (const id of new Set(killedCreatureIds)) {
             pool.query('DELETE FROM world_creatures WHERE id = $1', [id]).catch(() => {});
           }
         }
+        return;
+      }
+
+      if (msg.type === 'equip') {
+        const entry = worlds.get(ws.worldId);
+        if (entry) entry.world.setWeapon(ws.userId, msg.weaponId);
         return;
       }
 
@@ -259,10 +275,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (entry.world.isEmpty()) continue;
       entry.world.tick(dt);
       entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
+      const killedByProjectiles = entry.world.tickProjectiles(dt);
+      for (const id of new Set(killedByProjectiles)) {
+        pool.query('DELETE FROM world_creatures WHERE id = $1', [id]).catch(() => {});
+      }
+      entry.world.resolveDeaths();
       const snap = entry.world.snapshot();
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
-        send(ws, { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players });
+        send(ws, { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players, projectiles: snap.projectiles });
       }
       if (tick % creatureBroadcastEvery === 0) {
         recomputeActive(entry);

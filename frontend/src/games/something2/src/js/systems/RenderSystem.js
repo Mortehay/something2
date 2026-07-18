@@ -72,7 +72,7 @@ export class RenderSystem {
     this.renderHud(player, remotePlayers, localUserId);
   }
 
-  renderChunked(player, camera, chunkedMap, remotePlayers, localUserId, creatures = []) {
+  renderChunked(player, camera, chunkedMap, remotePlayers, localUserId, creatures = [], projectiles = [], weaponCatalog = [], mana = null, maxMana = null, weaponId = null) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     camera.apply(this.ctx);
@@ -104,8 +104,17 @@ export class RenderSystem {
       else this.drawEntity(d.ref);
     }
 
+    // Projectiles render on top — small, fast, no depth-sort needed.
+    for (const pr of projectiles) {
+      const s = worldToScreen(pr.x, pr.y);
+      this.ctx.beginPath();
+      this.ctx.arc(s.x, s.y - ISO_TILE_H / 2, 6, 0, Math.PI * 2);
+      this.ctx.fillStyle = pr.element === 'arcane' ? '#9b5de5' : '#f4d35e';
+      this.ctx.fill();
+    }
+
     camera.reset(this.ctx);
-    this.renderHud(player, remotePlayers, localUserId);
+    this.renderHud(player, remotePlayers, localUserId, weaponCatalog, mana, maxMana, weaponId);
   }
 
   // Small red/yellow/green bar above a damaged actor (creature or player).
@@ -201,13 +210,20 @@ export class RenderSystem {
     }
   }
 
-  renderHud(player, remotePlayers, localUserId) {
+  renderHud(player, remotePlayers, localUserId, weaponCatalog = [], mana = null, maxMana = null, weaponId = null) {
     const remoteCount = remotePlayers ? remotePlayers.size : 0;
     const lines = [
       `Players online: ${1 + remoteCount}`,
       `You: #${localUserId ?? "?"}  pos=(${Math.round(player.x)}, ${Math.round(player.y)})`,
       `HP: ${player.hp ?? "-"} / ${player.maxHp ?? "-"}`,
     ];
+    if (mana != null && maxMana != null) {
+      lines.push(`MP: ${Math.round(mana)} / ${Math.round(maxMana)}`);
+    }
+    if (weaponId != null) {
+      const w = (weaponCatalog || []).find((wpn) => wpn.id === weaponId);
+      lines.push(`Weapon: ${w ? w.name : `#${weaponId}`}`);
+    }
     this.ctx.save();
     this.ctx.fillStyle = "rgba(0,0,0,0.55)";
     this.ctx.fillRect(10, 10, 260, 18 * lines.length + 12);

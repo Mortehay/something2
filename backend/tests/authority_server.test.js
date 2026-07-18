@@ -23,6 +23,14 @@ function fakePool() {
       }
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
+      if (/FROM weapon_types/i.test(sql)) {
+        return { rows: [
+          { id: 1, name: 'dagger', kind: 'melee', damage: 8, cooldown: 0.3, reach: 80, arc_width: 0.6,
+            range: null, projectile_speed: null, projectile_radius: null, pierce: null, mana_cost: 0, element: null },
+          { id: 3, name: 'bow', kind: 'projectile', damage: 12, cooldown: 0.05, reach: null, arc_width: null,
+            range: 2000, projectile_speed: 4000, projectile_radius: 40, pierce: 1, mana_cost: 0, element: null },
+        ] };
+      }
       return { rows: [] };
     },
   };
@@ -268,4 +276,39 @@ test('does not reap a live socket that answers protocol pings', async () => {
   });
   assert.ok(stillOpen, 'live (ponging) socket must survive the reaper');
   live.close(); handle.close(); server.close();
+});
+
+test('equip switches the weapon; a later state reflects weaponId', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  const joined = await nextMsg(ws, 'joined');
+  assert.ok(Array.isArray(joined.weapons) && joined.weapons.length >= 1, 'joined lists weapons');
+  ws.send(JSON.stringify({ type: 'equip', weaponId: 3 }));
+  let got = null;
+  for (let i = 0; i < 20 && got == null; i++) {
+    const s = await nextMsg(ws, 'state');
+    const me = s.players.find((p) => p.id === '1');
+    if (me && me.weaponId === 3) got = me;
+  }
+  assert.ok(got, 'weaponId updates to 3 after equip');
+  ws.close(); handle.close(); server.close();
+});
+
+test('a projectile attack makes a projectile appear in a later state', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+  ws.send(JSON.stringify({ type: 'equip', weaponId: 3 })); // bow (fast)
+  ws.send(JSON.stringify({ type: 'attack', ax: 1, ay: 0 }));
+  let sawProjectile = false;
+  for (let i = 0; i < 10 && !sawProjectile; i++) {
+    const s = await nextMsg(ws, 'state');
+    if (Array.isArray(s.projectiles) && s.projectiles.length > 0) sawProjectile = true;
+  }
+  assert.ok(sawProjectile, 'state includes an active projectile after a projectile attack');
+  ws.close(); handle.close(); server.close();
 });
