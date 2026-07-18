@@ -3,6 +3,8 @@
 // players (never the owner). Ranged and magic share this one path; they differ
 // only by weapon data.
 
+const { applyDamage, NO_MITIGATION } = require('./damage');
+
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
 class ProjectileSim {
@@ -84,7 +86,7 @@ class ProjectileSim {
           const rr = p.radius + half;
           if (dist2(p.x, p.y, px, py) <= rr * rr) {
             p.hitIds.add(key);
-            pl.hp -= p.damage;
+            applyDamage(pl, p.damage, p.element, pl.mit || NO_MITIGATION);
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
           }
