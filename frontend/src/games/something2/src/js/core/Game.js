@@ -8,11 +8,13 @@ import { ChunkedMap } from "./ChunkedMap.js";
 import { ChunkStreamer } from "../net/ChunkStreamer.js";
 import { makeChunkFetcher } from "../net/chunkFetcher.js";
 import { CreatureManager } from "../entities/CreatureManager.js";
+import { ProjectileManager } from "../entities/ProjectileManager.js";
 import { WorldAuthorityClient } from "../net/WorldAuthorityClient.js";
 import { fetchDevToken } from "../net/EngineClient.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
+import { aimVector } from "./aim.js";
 
 // Native Map shadowed by the world Map import above; alias to keep the
 // distinction obvious at the call sites.
@@ -54,6 +56,14 @@ export class Game {
         this.localUserId = null;
         this.remotePlayers = new NativeMap(); // user_id -> {x, y, hp}
         this.lastServerTick = 0;
+
+        // Combat (Slice 3b): weapon catalog from `joined`, local mana/weapon
+        // state from `state`, and the projectile render store.
+        this.weaponCatalog = [];
+        this.localMana = null;
+        this.localMaxMana = null;
+        this.localWeaponId = null;
+        this.projectiles = null;
     }
 
     setEngineClient(engine, localUserId) {
@@ -185,6 +195,7 @@ export class Game {
         this.streamer = new ChunkStreamer(this.chunkedMap, makeChunkFetcher(worldId, API_URL), 1);
 
         this.creatures = new CreatureManager();
+        this.projectiles = new ProjectileManager();
 
         this._inputBuffer = [];
         // Connect to the authoritative sim; spawn comes from the server.
@@ -195,7 +206,10 @@ export class Game {
             this.authorityClient = new WorldAuthorityClient({
                 url: wsUrl,
                 token,
-                onJoined: (msg) => resolve(msg.spawn),
+                onJoined: (msg) => {
+                    this.weaponCatalog = msg.weapons || [];
+                    resolve(msg.spawn);
+                },
                 onState: (msg) => this._onWorldState(msg),
                 onCreatures: (msg) => this.creatures.applySnapshot(msg.creatures),
                 onError: (e) => console.error('[authority]', e),
@@ -230,6 +244,8 @@ export class Game {
         if (this._keyupHandler) window.removeEventListener('keyup', this._keyupHandler);
         if (this._contextMenuHandler) window.removeEventListener('contextmenu', this._contextMenuHandler);
         if (this._blurHandler) window.removeEventListener('blur', this._blurHandler);
+        if (this._mouseMoveHandler) this.canvas.removeEventListener('mousemove', this._mouseMoveHandler);
+        if (this._mouseDownHandler) this.canvas.removeEventListener('mousedown', this._mouseDownHandler);
         if (this.authorityClient) this.authorityClient.disconnect();
 
         cancelAnimationFrame(this.animationFrameId);
@@ -249,6 +265,7 @@ export class Game {
                 if (s.sent) this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt });
             }
             this.creatures.interpolate(dt);
+            if (this.projectiles) this.projectiles.interpolate(dt);
             this.camera.update(this.player);
             return;
         }
@@ -320,6 +337,13 @@ export class Game {
             this.player.y = out.y;
             this._inputBuffer = out.buffer;
         }
+        const me = (msg.players || []).find((p) => p.id === this.localUserId);
+        if (me) {
+            this.localMana = me.mana;
+            this.localMaxMana = me.maxMana;
+            this.localWeaponId = me.weaponId;
+        }
+        if (this.projectiles) this.projectiles.applySnapshot(msg.projectiles || []);
     }
 
     _reconcileSelf(serverPlayer) {
@@ -346,7 +370,7 @@ export class Game {
             this.ctx.fillStyle = '#0f3460';
             this.ctx.fillRect(0,0,this.canvas.width,this.canvas.height);
         } else if (this.chunked) {
-            this.renderSystem.renderChunked(this.player, this.camera, this.chunkedMap, this.remotePlayers, this.localUserId, this.creatures.all());
+            this.renderSystem.renderChunked(this.player, this.camera, this.chunkedMap, this.remotePlayers, this.localUserId, this.creatures.all(), this.projectiles ? this.projectiles.all() : [], this.weaponCatalog, this.localMana, this.localMaxMana, this.localWeaponId);
         } else {
             this.renderSystem.render(this.player, this.camera, this.map, this.remotePlayers, this.localUserId);
         }
@@ -371,9 +395,9 @@ export class Game {
             const key = e.key.toLowerCase();
             this.keys[key] = true;
 
-            if (key === ' ' && this.state === 'playing' && this.chunked && this.authorityClient && !e.repeat) {
-                e.preventDefault();
-                this.authorityClient.sendAttack();
+            if (this.state === 'playing' && this.chunked && this.authorityClient && this.weaponCatalog && /^[1-9]$/.test(key)) {
+                const w = this.weaponCatalog[Number(key) - 1];
+                if (w) this.authorityClient.sendEquip(w.id);
             }
 
             if(key === 'escape'){
@@ -408,10 +432,28 @@ export class Game {
             this.keys = {};
         };
 
+        // Mouse aim (Slice 3b): track cursor canvas-px position, and on
+        // left-click compute the aim vector toward it and send an attack.
+        this._mouseMoveHandler = (e) => {
+            const rect = this.canvas.getBoundingClientRect();
+            this._cursorX = (e.clientX - rect.left) * (this.canvas.width / rect.width);
+            this._cursorY = (e.clientY - rect.top) * (this.canvas.height / rect.height);
+        };
+        this._mouseDownHandler = (e) => {
+            if (e.button !== 0) return;
+            if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
+            const pcx = this.player.x + this.player.width / 2;
+            const pcy = this.player.y + this.player.height / 2;
+            const { nx, ny } = aimVector(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera, pcx, pcy);
+            this.authorityClient.sendAttack(nx, ny);
+        };
+
         window.addEventListener('keydown', this._keydownHandler);
         window.addEventListener('keyup', this._keyupHandler);
         window.addEventListener('contextmenu', this._contextMenuHandler);
         window.addEventListener('blur', this._blurHandler);
+        this.canvas.addEventListener('mousemove', this._mouseMoveHandler);
+        this.canvas.addEventListener('mousedown', this._mouseDownHandler);
     }
 
     startGame(){
