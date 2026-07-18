@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
-import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker } from "react-icons/hi2";
+import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
 import { EngineClient, fetchDevToken } from "./src/js/net/EngineClient.js";
 import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap, fetchMapEntities, useSaveEntities, useEntityTypes, useGenerateEntities } from "./useMaps.js";
@@ -12,6 +12,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
 const ENGINE_WS_URL = import.meta.env.VITE_ENGINE_WS_URL || 'ws://localhost:18080/ws';
 import TileTypesAdmin from "./TileTypesAdmin";
 import EntityTypesAdmin from "./EntityTypesAdmin";
+import ItemTypesAdmin from "./ItemTypesAdmin";
 import MapPreview from "./MapPreview.jsx";
 import WorldPreview from "./WorldPreview.jsx";
 
@@ -32,11 +33,13 @@ const TabBar = styled.div`
   z-index: 100;
 `;
 
+const ADMIN_TAB_COLORS = { entity: '#facc15', items: '#f472b6' };
+
 const TabButton = styled.button`
   background: ${props => props.$active ? 'rgba(74, 158, 255, 0.1)' : 'transparent'};
-  color: ${props => props.$active ? (props.$adminType === 'entity' ? '#facc15' : '#4a9eff') : '#aaa'};
+  color: ${props => props.$active ? (ADMIN_TAB_COLORS[props.$adminType] || '#4a9eff') : '#aaa'};
   border: none;
-  border-bottom: 3px solid ${props => props.$active ? (props.$adminType === 'entity' ? '#facc15' : '#4a9eff') : 'transparent'};
+  border-bottom: 3px solid ${props => props.$active ? (ADMIN_TAB_COLORS[props.$adminType] || '#4a9eff') : 'transparent'};
   padding: 1.5rem 2rem;
   font-size: 1.3rem;
   font-weight: bold;
@@ -47,7 +50,7 @@ const TabButton = styled.button`
   transition: all 0.2s;
   
   &:hover {
-    color: ${props => props.$active ? (props.$adminType === 'entity' ? '#facc15' : '#4a9eff') : '#eee'};
+    color: ${props => props.$active ? (ADMIN_TAB_COLORS[props.$adminType] || '#4a9eff') : '#eee'};
     background: rgba(255, 255, 255, 0.05);
   }
   
@@ -445,6 +448,9 @@ export default function Something2() {
         <TabButton $active={activeTab === 'entity'} $adminType="entity" onClick={() => setActiveTab('entity')}>
           <HiOutlineBeaker /> Entity Admin
         </TabButton>
+        <TabButton $active={activeTab === 'items'} $adminType="items" onClick={() => setActiveTab('items')}>
+          <HiOutlineCube /> Items
+        </TabButton>
       </TabBar>
 
       <ContentArea>
@@ -609,6 +615,7 @@ export default function Something2() {
         )}
         {activeTab === 'tiles' && <TileTypesAdmin />}
         {activeTab === 'entity' && <EntityTypesAdmin />}
+        {activeTab === 'items' && <ItemTypesAdmin />}
       </ContentArea>
     </StyledGameContainer>
   );

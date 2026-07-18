@@ -2,6 +2,8 @@ const { resolveMove } = require('./collision');
 const { CreatureSim } = require('./creatures');
 const { normalizeAim, inArc } = require('./weapons');
 const { ProjectileSim } = require('./projectiles');
+const { applyDamage, NO_MITIGATION } = require('./damage');
+const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
 
 const PLAYER_W = 64;
 const PLAYER_H = 64;
@@ -31,7 +33,7 @@ class World {
     this.projectiles = new ProjectileSim();
   }
 
-  addPlayer(userId, spawn) {
+  addPlayer(userId, spawn, inv = { items: [], equipment: {} }) {
     this.players.set(userId, {
       userId,
       x: spawn.x,
@@ -47,7 +49,8 @@ class World {
       maxHp: PLAYER_MAX_HP,
       mana: PLAYER_MAX_MANA,
       maxMana: PLAYER_MAX_MANA,
-      weaponId: this.defaultWeaponId,
+      inv,
+      mit: mitigation(inv, this.weapons),
       spawn: { x: spawn.x, y: spawn.y },
       _attackCd: 0,
     });
@@ -84,9 +87,26 @@ class World {
     this.creatures.tick(dt, activeKeys, [...this.players.values()]);
   }
 
-  setWeapon(userId, weaponId) {
+  activeWeapon(userId) {
     const p = this.players.get(userId);
-    if (p && this.weapons.has(weaponId)) p.weaponId = weaponId;
+    if (!p) return null;
+    return activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
+  }
+
+  async setEquipment(pool, userId, itemId, slot) {
+    const p = this.players.get(userId);
+    if (!p) return { ok: false, reason: 'no player' };
+    const r = await equipItem(pool, userId, p.inv, this.weapons, itemId, slot);
+    if (r.ok) p.mit = mitigation(p.inv, this.weapons);
+    return r;
+  }
+
+  async clearEquipment(pool, userId, slot) {
+    const p = this.players.get(userId);
+    if (!p) return { ok: false, reason: 'no player' };
+    const r = await unequipItem(pool, userId, p.inv, slot);
+    if (r.ok) p.mit = mitigation(p.inv, this.weapons);
+    return r;
   }
 
   // Attack in the aim direction with the equipped weapon. Melee resolves an arc
@@ -95,7 +115,7 @@ class World {
   attack(userId, ax, ay) {
     const p = this.players.get(userId);
     if (!p || p._attackCd > 0) return { killedCreatureIds: [] };
-    const w = this.weapons.get(p.weaponId) || this.weapons.get(this.defaultWeaponId);
+    const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
     if (!w) return { killedCreatureIds: [] };
 
     const { nx, ny } = normalizeAim(ax, ay, p.facing);
@@ -108,7 +128,9 @@ class World {
       for (const other of this.players.values()) {
         if (other.userId === userId) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
-        if (inArc(cx, cy, nx, ny, ocx, ocy, w.reach, w.arc_width)) other.hp -= w.damage;
+        if (inArc(cx, cy, nx, ny, ocx, ocy, w.reach, w.arc_width)) {
+          applyDamage(other, w.damage, w.element, other.mit || NO_MITIGATION);
+        }
       }
       p._attackCd = w.cooldown;
       return { killedCreatureIds: killed };
@@ -146,7 +168,7 @@ class World {
     return {
       players: [...this.players.values()].map((p) => ({
         id: p.userId, x: p.x, y: p.y, facing: p.facing,
-        hp: p.hp, maxHp: p.maxHp, mana: p.mana, maxMana: p.maxMana, weaponId: p.weaponId,
+        hp: p.hp, maxHp: p.maxHp, mana: p.mana, maxMana: p.maxMana, equipment: p.inv ? p.inv.equipment : {},
       })),
       projectiles: this.projectiles.snapshot(),
     };

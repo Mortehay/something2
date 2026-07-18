@@ -23,14 +23,24 @@ function fakePool() {
       }
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
-      if (/FROM weapon_types/i.test(sql)) {
+      if (/FROM item_types/i.test(sql)) {
         return { rows: [
-          { id: 1, name: 'dagger', kind: 'melee', damage: 8, cooldown: 0.3, reach: 80, arc_width: 0.6,
-            range: null, projectile_speed: null, projectile_radius: null, pierce: null, mana_cost: 0, element: null },
-          { id: 3, name: 'bow', kind: 'projectile', damage: 12, cooldown: 0.05, reach: null, arc_width: null,
-            range: 2000, projectile_speed: 4000, projectile_radius: 40, pierce: 1, mana_cost: 0, element: null },
+          { id: 1, name: 'dagger', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'melee',
+            damage: 8, cooldown: 0.3, reach: 80, arc_width: 6.3, range: null, projectile_speed: null,
+            projectile_radius: null, pierce: null, mana_cost: 0, element: null, defense: null, resistances: null },
+          { id: 3, name: 'bow', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'projectile',
+            damage: 12, cooldown: 0.05, reach: null, arc_width: null, range: 2000, projectile_speed: 4000,
+            projectile_radius: 40, pierce: 1, mana_cost: 0, element: null, defense: null, resistances: null },
+          { id: 5, name: 'leather-vest', category: 'armor', slot: 'chest', two_handed: false, kind: null,
+            damage: 0, cooldown: 0, reach: null, arc_width: null, range: null, projectile_speed: null,
+            projectile_radius: null, pierce: null, mana_cost: 0, element: null, defense: 2, resistances: {} },
         ] };
       }
+      if (/FROM player_items/i.test(sql)) return { rows: [{ id: 'i1', item_type_id: 1 }, { id: 'i3', item_type_id: 3 }, { id: 'i5', item_type_id: 5 }] };
+      if (/FROM player_equipment/i.test(sql)) return { rows: [] };
+      if (/INSERT INTO player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/DELETE FROM player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/INSERT INTO player_items/i.test(sql)) return { rows: [], rowCount: 1 };
       return { rows: [] };
     },
   };
@@ -62,12 +72,22 @@ function bootWith(pool) {
 // resolving, so two concurrent first-joins to the same world genuinely
 // interleave across the `await pool.query(...)` in loadWorld (instant
 // microtask resolution is too fast to ever interleave two loads).
-function delayedFakePool(delayMs) {
+//
+// opts.itemsDelayMs additionally delays the player_items (inventory) query,
+// which is used to force a real await window across the join handler's
+// `await loadInventory(...)` so a kicked socket's close can genuinely race
+// the new session's registration (again, instant microtask resolution can
+// never interleave the two).
+function delayedFakePool(delayMs, opts = {}) {
+  const itemsDelayMs = opts.itemsDelayMs || 0;
   return {
     query: async (sql, ...args) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
         await new Promise((r) => setTimeout(r, delayMs));
         return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
+      }
+      if (itemsDelayMs && /FROM player_items/i.test(sql)) {
+        await new Promise((r) => setTimeout(r, itemsDelayMs));
       }
       return fakePool().query(sql, ...args);
     },
@@ -278,21 +298,21 @@ test('does not reap a live socket that answers protocol pings', async () => {
   live.close(); handle.close(); server.close();
 });
 
-test('equip switches the weapon; a later state reflects weaponId', async () => {
+test('equip switches the weapon; a later state reflects equipment.main_hand', async () => {
   const { url, handle, server } = await boot();
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
   const joined = await nextMsg(ws, 'joined');
-  assert.ok(Array.isArray(joined.weapons) && joined.weapons.length >= 1, 'joined lists weapons');
-  ws.send(JSON.stringify({ type: 'equip', weaponId: 3 }));
+  assert.ok(Array.isArray(joined.itemTypes) && joined.itemTypes.length >= 1, 'joined lists the item catalog');
+  ws.send(JSON.stringify({ type: 'equip', itemId: 'i3', slot: 'main_hand' })); // bow
   let got = null;
   for (let i = 0; i < 20 && got == null; i++) {
     const s = await nextMsg(ws, 'state');
     const me = s.players.find((p) => p.id === '1');
-    if (me && me.weaponId === 3) got = me;
+    if (me && me.equipment && me.equipment.main_hand === 'i3') got = me;
   }
-  assert.ok(got, 'weaponId updates to 3 after equip');
+  assert.ok(got, 'equipment.main_hand updates to i3 after equip');
   ws.close(); handle.close(); server.close();
 });
 
@@ -302,7 +322,17 @@ test('a projectile attack makes a projectile appear in a later state', async () 
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
   await nextMsg(ws, 'joined');
-  ws.send(JSON.stringify({ type: 'equip', weaponId: 3 })); // bow (fast)
+  ws.send(JSON.stringify({ type: 'equip', itemId: 'i3', slot: 'main_hand' })); // bow (fast)
+  // equip is now async (DB write-through); wait for it to land before
+  // attacking so the attack doesn't race ahead of the equip and hit with
+  // the still-equipped melee default.
+  let equipped = false;
+  for (let i = 0; i < 20 && !equipped; i++) {
+    const s = await nextMsg(ws, 'state');
+    const me = s.players.find((p) => p.id === '1');
+    if (me && me.equipment && me.equipment.main_hand === 'i3') equipped = true;
+  }
+  assert.ok(equipped, 'bow equipped before attacking');
   ws.send(JSON.stringify({ type: 'attack', ax: 1, ay: 0 }));
   let sawProjectile = false;
   for (let i = 0; i < 10 && !sawProjectile; i++) {
@@ -311,4 +341,182 @@ test('a projectile attack makes a projectile appear in a later state', async () 
   }
   assert.ok(sawProjectile, 'state includes an active projectile after a projectile attack');
   ws.close(); handle.close(); server.close();
+});
+
+test('joined carries the item catalog, the owned items and the equipment map', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  const joined = await nextMsg(ws, 'joined');
+  assert.ok(Array.isArray(joined.itemTypes) && joined.itemTypes.length >= 2);
+  assert.ok(Array.isArray(joined.items) && joined.items.length >= 1);
+  assert.equal(typeof joined.equipment, 'object');
+  assert.equal(joined.weapons, undefined, 'the 3b-1 weapons payload is retired');
+  ws.close(); handle.close(); server.close();
+});
+
+test('equip is reflected in a later state; unequip clears it', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  ws.send(JSON.stringify({ type: 'equip', itemId: 'i5', slot: 'chest' }));
+  let got = null;
+  for (let i = 0; i < 25 && !got; i++) {
+    const s = await nextMsg(ws, 'state');
+    const me = s.players.find((p) => p.id === '1');
+    if (me && me.equipment && me.equipment.chest === 'i5') got = me;
+  }
+  assert.ok(got, 'chest equipment appears in state');
+
+  ws.send(JSON.stringify({ type: 'unequip', slot: 'chest' }));
+  let cleared = false;
+  for (let i = 0; i < 25 && !cleared; i++) {
+    const s = await nextMsg(ws, 'state');
+    const me = s.players.find((p) => p.id === '1');
+    if (me && me.equipment && me.equipment.chest === undefined) cleared = true;
+  }
+  assert.ok(cleared, 'chest equipment cleared in state');
+  ws.close(); handle.close(); server.close();
+});
+
+test('a second session for the same account kicks the first (newest wins)', async () => {
+  const { url, handle, server } = await boot();
+  const a = connect(url, 1);
+  await new Promise((r) => a.on('open', r));
+  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(a, 'joined');
+
+  // Second connection, same user id.
+  const b = connect(url, 1);
+  await new Promise((r) => b.on('open', r));
+  const aClosed = new Promise((res) => a.on('close', () => res(true)));
+  b.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(b, 'joined');
+
+  const closed = await Promise.race([aClosed, new Promise((r) => setTimeout(() => r(false), 1500))]);
+  assert.ok(closed, 'the first session should be terminated by the second');
+
+  // The new session stays alive and keeps receiving state.
+  const s = await nextMsg(b, 'state');
+  assert.ok(Array.isArray(s.players));
+  b.close(); handle.close(); server.close();
+});
+
+// Like fakePool(), but simulates the real DB behavior that the double-equip
+// race actually trips: player_equipment_item_unique. INSERT INTO
+// player_equipment is delayed (so two equip frames sent back-to-back
+// genuinely interleave across the await, same rationale as delayedFakePool
+// above) and rejects with a unique-violation-shaped error if the same
+// item_id is inserted twice (the ON CONFLICT target is (user_id, slot), so
+// it does NOT cover this constraint — a second slot for the same item_id
+// is a real conflict, not a merge).
+function equipRacePool(delayMs = 20) {
+  const base = fakePool();
+  const usedItemIds = new Set();
+  return {
+    query: async (sql, params) => {
+      if (/INSERT INTO player_equipment/i.test(sql)) {
+        await new Promise((r) => setTimeout(r, delayMs));
+        const itemId = params[2];
+        if (usedItemIds.has(itemId)) {
+          const err = new Error('duplicate key value violates unique constraint "player_equipment_item_unique"');
+          err.code = '23505';
+          throw err;
+        }
+        usedItemIds.add(itemId);
+        return { rows: [], rowCount: 1 };
+      }
+      return base.query(sql, params);
+    },
+  };
+}
+
+test('concurrent double-equip of the same item into two hand slots does not crash the process', async () => {
+  // Regression test for the equip/unequip unhandled-rejection crash: send
+  // two equip frames back-to-back for the SAME one-handed weapon instance
+  // into main_hand and off_hand. Both handlers' canEquip() reads run before
+  // either write lands, so both pass; the second write then conflicts on
+  // player_equipment_item_unique. Pre-fix, that rejection had no .catch and
+  // propagated out of the `async (data) => {...}` message handler as an
+  // unhandled rejection — which crashes the whole Node process by default
+  // (confirmed with a standalone `node` repro outside the test harness; see
+  // the review-fixes report). node's test runner installs its own
+  // process-level rejection handlers, which swallow that crash without
+  // reproducing it faithfully here, so this assertion targets the
+  // fix-specific, deterministic signal instead: the loser must come back as
+  // a normal 'error' reply (from the new try/catch), not silence. Pre-fix,
+  // nothing ever catches it, so no 'error' is ever sent and this times out.
+  const { url, handle, server } = await bootWith(equipRacePool());
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  ws.send(JSON.stringify({ type: 'equip', itemId: 'i1', slot: 'main_hand' }));
+  ws.send(JSON.stringify({ type: 'equip', itemId: 'i1', slot: 'off_hand' }));
+
+  const err = await nextMsg(ws, 'error');
+  assert.match(err.message, /equip failed/i, "the loser's DB conflict is reported, not swallowed as an unhandled rejection");
+
+  // And the connection must still be fully alive afterwards.
+  const s = await nextMsg(ws, 'state');
+  assert.ok(Array.isArray(s.players), 'a later state still arrives after the racing equips');
+  assert.equal(ws.readyState, ws.OPEN, 'the socket stays open despite the equip conflict');
+
+  ws.close(); handle.close(); server.close();
+});
+
+test('a second join on the same socket is rejected (no free re-heal / no ghost)', async () => {
+  // Regression test: prev === ws used to skip the kick check entirely, so a
+  // client could join twice on one socket. Re-joining the SAME world calls
+  // addPlayer again, which resets hp/mana to max and teleports to spawn — a
+  // free full heal now that combat is real. A second join must be refused.
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  const err = await nextMsg(ws, 'error');
+  assert.match(err.message, /already joined/i, 'the second join on the same socket is refused');
+
+  // The connection is otherwise unaffected: it keeps receiving state.
+  const s = await nextMsg(ws, 'state');
+  assert.ok(Array.isArray(s.players));
+
+  ws.close(); handle.close(); server.close();
+});
+
+test('a kicked socket closing mid-join does not tear down the new session', async () => {
+  // Delay the inventory (player_items) query so the new session's join
+  // handler genuinely sits mid-await while the kicked (old) socket's real
+  // 'close' event fires — the exact ordering the Critical exploited: the
+  // old socket's close must not find itself still "owning" entry.sockets
+  // and tear down the whole world entry out from under the new session.
+  const { url, handle, server } = await bootWith(delayedFakePool(0, { itemsDelayMs: 60 }));
+  const a = connect(url, 1);
+  await new Promise((r) => a.on('open', r));
+  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(a, 'joined');
+
+  const b = connect(url, 1); // same user id as a → a gets kicked
+  await new Promise((r) => b.on('open', r));
+  const aClosed = new Promise((res) => a.on('close', () => res(true)));
+  b.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+
+  const closed = await Promise.race([aClosed, new Promise((r) => setTimeout(() => r(false), 5000))]);
+  assert.ok(closed, 'the kicked (old) session should be terminated');
+
+  // The new session must still complete its join and keep receiving state —
+  // if the kicked socket's close tore down the world entry mid-await, b
+  // would either never see 'joined'/'state' or would be silently soft-locked.
+  await nextMsg(b, 'joined');
+  const s = await nextMsg(b, 'state');
+  assert.ok(Array.isArray(s.players), 'the new session should still receive state after the kicked close');
+  b.close(); handle.close(); server.close();
 });

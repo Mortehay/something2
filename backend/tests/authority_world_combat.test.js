@@ -55,20 +55,19 @@ function armWorld() {
     getChunk: () => [],
   };
   const weapons = new Map([
-    [1, { id: 1, name: 'dagger', kind: 'melee', damage: 8, cooldown: 0.3, reach: 80, arc_width: 0.6, mana_cost: 0, element: null }],
-    [2, { id: 2, name: 'halberd', kind: 'melee', damage: 18, cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, element: null }],
-    [3, { id: 3, name: 'bow', kind: 'projectile', damage: 12, cooldown: 0.6, range: 700, projectile_speed: 900, projectile_radius: 8, pierce: 1, mana_cost: 0, element: null }],
-    [4, { id: 4, name: 'magic-bolt', kind: 'projectile', damage: 14, cooldown: 0.7, range: 600, projectile_speed: 700, projectile_radius: 12, pierce: 1, mana_cost: 15, element: 'arcane' }],
+    [1, { id: 1, name: 'dagger', category: 'weapon', kind: 'melee', damage: 8, cooldown: 0.3, reach: 80, arc_width: 0.6, mana_cost: 0, element: null }],
+    [2, { id: 2, name: 'halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, element: null }],
+    [3, { id: 3, name: 'bow', category: 'weapon', kind: 'projectile', damage: 12, cooldown: 0.6, range: 700, projectile_speed: 900, projectile_radius: 8, pierce: 1, mana_cost: 0, element: null }],
+    [4, { id: 4, name: 'magic-bolt', category: 'weapon', kind: 'projectile', damage: 14, cooldown: 0.7, range: 600, projectile_speed: 700, projectile_radius: 12, pierce: 1, mana_cost: 15, element: 'arcane' }],
   ]);
   return new World(map, weapons, 1);
 }
 
 test('melee attack hits creatures AND other players in the arc', () => {
   const w = armWorld();
-  w.addPlayer('u1', { x: 100, y: 100 });          // center 132,132
+  w.addPlayer('u1', { x: 100, y: 100 }, { items: [{ id: 'i2', typeId: 2 }], equipment: { main_hand: 'i2' } }); // center 132,132; halberd (reach 190, wide), damage 18
   w.addPlayer('u2', { x: 150, y: 100 });          // center 182,132 — east, within halberd reach
   w.creatures.addCreatures([{ id: 'c1', type: 'wolf', x: 150, y: 108, hp: 10, facing: 'S', color: '#f00' }]);
-  w.setWeapon('u1', 2);                            // halberd (reach 190, wide), damage 18
   const { killedCreatureIds } = w.attack('u1', 1, 0); // aim east
   assert.deepEqual(killedCreatureIds, ['c1']);     // c1 (hp 10) in-arc, killed by 18 dmg
   assert.equal(w.getPlayer('u2').hp, w.getPlayer('u2').maxHp - 18); // u2 in-arc, took melee damage
@@ -76,8 +75,7 @@ test('melee attack hits creatures AND other players in the arc', () => {
 
 test('projectile attack spawns a projectile and deducts mana', () => {
   const w = armWorld();
-  w.addPlayer('u1', { x: 0, y: 0 });
-  w.setWeapon('u1', 4);                            // magic-bolt, cost 15
+  w.addPlayer('u1', { x: 0, y: 0 }, { items: [{ id: 'i4', typeId: 4 }], equipment: { main_hand: 'i4' } }); // magic-bolt, cost 15
   const before = w.getPlayer('u1').mana;
   w.attack('u1', 1, 0);
   assert.equal(w.snapshot().projectiles.length, 1);
@@ -86,9 +84,9 @@ test('projectile attack spawns a projectile and deducts mana', () => {
 
 test('projectile attack with insufficient mana is denied, no cooldown consumed', () => {
   const w = armWorld();
-  w.addPlayer('u1', { x: 0, y: 0 });
+  w.addPlayer('u1', { x: 0, y: 0 }, { items: [{ id: 'i4', typeId: 4 }], equipment: { main_hand: 'i4' } }); // magic-bolt, cost 15
   const p = w.getPlayer('u1');
-  p.mana = 5; p.weaponId = 4;                      // below cost 15
+  p.mana = 5;                                      // below cost 15
   const out = w.attack('u1', 1, 0);
   assert.equal(w.snapshot().projectiles.length, 0);
   assert.equal(p.mana, 5);
@@ -121,11 +119,10 @@ test('resolveDeaths respawns a player at spawn with full hp+mana', () => {
 
 test('tickProjectiles returns killed creature ids', () => {
   const w = armWorld();
-  w.addPlayer('u1', { x: 0, y: 0 });
+  w.addPlayer('u1', { x: 0, y: 0 }, { items: [{ id: 'i3', typeId: 3 }], equipment: { main_hand: 'i3' } }); // bow
   // Player at (0,0) → center (32,32); a bow projectile spawns there and flies
   // east at y=32, so place the creature ON that line (center y=32).
   w.creatures.addCreatures([{ id: 'c1', type: 'wolf', x: 40, y: 8, hp: 1, facing: 'S', color: '#f00' }]); // center 64,32
-  w.setWeapon('u1', 3);                            // bow
   w.attack('u1', 1, 0);                            // aim east from center (32,32)
   // Advance until the fast projectile reaches the creature.
   let killed = [];
@@ -133,20 +130,14 @@ test('tickProjectiles returns killed creature ids', () => {
   assert.deepEqual(killed, ['c1']);
 });
 
-test('snapshot includes mana/maxMana/weaponId per player and a projectiles array', () => {
+test('snapshot includes mana/maxMana/equipment per player and a projectiles array', () => {
   const w = armWorld();
   w.addPlayer('u1', { x: 0, y: 0 });
   const snap = w.snapshot();
   const pl = snap.players[0];
   assert.equal(pl.mana, PLAYER_MAX_MANA);
   assert.equal(pl.maxMana, PLAYER_MAX_MANA);
-  assert.equal(pl.weaponId, 1);                    // default (dagger)
+  assert.deepEqual(pl.equipment, {});              // nothing equipped
+  assert.equal(w.activeWeapon('u1').id, 1);        // falls back to the default (dagger)
   assert.ok(Array.isArray(snap.projectiles));
-});
-
-test('setWeapon ignores an unknown id', () => {
-  const w = armWorld();
-  w.addPlayer('u1', { x: 0, y: 0 });
-  w.setWeapon('u1', 999);
-  assert.equal(w.getPlayer('u1').weaponId, 1);     // unchanged
 });

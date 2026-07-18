@@ -43,10 +43,11 @@ test('ackSeq tracks the latest input seq; snapshot has the right shape', () => {
   const snap = w.snapshot();
   assert.equal(snap.players.length, 1);
   // Widened in Task 5 (weapon dispatch/mana/projectiles): snapshot now also
-  // carries mana/maxMana/weaponId per player (mirrors the hp/maxHp precedent).
+  // carries mana/maxMana/equipment per player (mirrors the hp/maxHp precedent).
+  // Task 6: weaponId retired in favor of equipment (inventory-driven weapon).
   assert.deepEqual(
     Object.keys(snap.players[0]).sort(),
-    ['facing', 'hp', 'id', 'mana', 'maxHp', 'maxMana', 'weaponId', 'x', 'y'],
+    ['equipment', 'facing', 'hp', 'id', 'mana', 'maxHp', 'maxMana', 'x', 'y'],
   );
   assert.equal(snap.players[0].id, 'u1');
 });
