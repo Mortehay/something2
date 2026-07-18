@@ -69,6 +69,7 @@ exports.down = (pgm) => {
   pgm.dropTable('player_equipment');
   pgm.dropTable('player_items');
   pgm.sql(`DELETE FROM item_types WHERE name IN ('leather-vest','arcane-ward');`);
+  pgm.alterColumn('item_types', 'kind', { notNull: true });
   pgm.dropConstraint('item_types', 'item_types_armor_fields_check');
   pgm.dropConstraint('item_types', 'item_types_weapon_fields_check');
   pgm.dropConstraint('item_types', 'item_types_element_check');
