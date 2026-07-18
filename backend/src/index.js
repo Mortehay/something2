@@ -256,6 +256,119 @@ app.delete('/api/entity-types/:id', async (req, res) => {
 });
 
 
+// Item Types CRUD + admin item grant
+const ITEM_ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
+const ITEM_SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
+
+// Mirror the DB CHECKs so the API returns 400 instead of a constraint error.
+function validateItemType(b) {
+  if (!b.name) return 'Name is required';
+  if (!['weapon', 'armor'].includes(b.category)) return "category must be 'weapon' or 'armor'";
+  if (b.element != null && !ITEM_ELEMENTS.includes(b.element)) return `element must be one of ${ITEM_ELEMENTS.join(', ')}`;
+  if (b.slot != null && !ITEM_SLOTS.includes(b.slot)) return `slot must be one of ${ITEM_SLOTS.join(', ')}`;
+  if (b.resistances) {
+    for (const k of Object.keys(b.resistances)) {
+      if (!ITEM_ELEMENTS.includes(k)) return `resistances key '${k}' is not a known element`;
+    }
+  }
+  if (b.category === 'weapon') {
+    if (!['melee', 'projectile'].includes(b.kind)) return "weapon kind must be 'melee' or 'projectile'";
+    if (b.kind === 'melee' && (b.reach == null || b.arc_width == null)) return 'melee weapons need reach and arc_width';
+    if (b.kind === 'projectile' && (b.range == null || b.projectile_speed == null || b.projectile_radius == null)) {
+      return 'projectile weapons need range, projectile_speed and projectile_radius';
+    }
+  } else {
+    if (b.slot == null || b.defense == null) return 'armor needs slot and defense';
+  }
+  return null;
+}
+
+app.get('/api/item-types', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM item_types ORDER BY id ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch item types' });
+  }
+});
+
+app.post('/api/item-types', async (req, res) => {
+  try {
+    const b = req.body;
+    const bad = validateItemType(b);
+    if (bad) return res.status(400).json({ error: bad });
+    const result = await pool.query(
+      `INSERT INTO item_types
+        (name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
+         range, projectile_speed, projectile_radius, pierce, mana_cost, element, defense, resistances, icon)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+      [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
+       b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
+       b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
+       b.mana_cost ?? 0, b.element ?? null, b.defense ?? null,
+       JSON.stringify(b.resistances ?? {}), b.icon ?? null],
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create item type' });
+  }
+});
+
+app.put('/api/item-types/:id', async (req, res) => {
+  try {
+    const b = req.body;
+    const bad = validateItemType(b);
+    if (bad) return res.status(400).json({ error: bad });
+    const result = await pool.query(
+      `UPDATE item_types SET
+        name=$1, category=$2, slot=$3, two_handed=$4, kind=$5, damage=$6, cooldown=$7,
+        reach=$8, arc_width=$9, range=$10, projectile_speed=$11, projectile_radius=$12,
+        pierce=$13, mana_cost=$14, element=$15, defense=$16, resistances=$17, icon=$18,
+        updated_at=now()
+       WHERE id=$19 RETURNING *`,
+      [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
+       b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
+       b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
+       b.mana_cost ?? 0, b.element ?? null, b.defense ?? null,
+       JSON.stringify(b.resistances ?? {}), b.icon ?? null, req.params.id],
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update item type' });
+  }
+});
+
+app.delete('/api/item-types/:id', async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM item_types WHERE id = $1 RETURNING id', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete item type' });
+  }
+});
+
+// Admin grant: give a user an instance of an item type.
+app.post('/api/players/:userId/items', async (req, res) => {
+  try {
+    const { item_type_id } = req.body;
+    if (item_type_id == null) return res.status(400).json({ error: 'item_type_id is required' });
+    const result = await pool.query(
+      'INSERT INTO player_items (user_id, item_type_id) VALUES ($1,$2) RETURNING *',
+      [req.params.userId, item_type_id],
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to grant item' });
+  }
+});
+
 // Tile Types CRUD
 app.get('/api/tile-types', async (req, res) => {
   try {
