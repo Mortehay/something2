@@ -372,3 +372,26 @@ test('equip is reflected in a later state; unequip clears it', async () => {
   assert.ok(cleared, 'chest equipment cleared in state');
   ws.close(); handle.close(); server.close();
 });
+
+test('a second session for the same account kicks the first (newest wins)', async () => {
+  const { url, handle, server } = await boot();
+  const a = connect(url, 1);
+  await new Promise((r) => a.on('open', r));
+  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(a, 'joined');
+
+  // Second connection, same user id.
+  const b = connect(url, 1);
+  await new Promise((r) => b.on('open', r));
+  const aClosed = new Promise((res) => a.on('close', () => res(true)));
+  b.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(b, 'joined');
+
+  const closed = await Promise.race([aClosed, new Promise((r) => setTimeout(() => r(false), 1500))]);
+  assert.ok(closed, 'the first session should be terminated by the second');
+
+  // The new session stays alive and keeps receiving state.
+  const s = await nextMsg(b, 'state');
+  assert.ok(Array.isArray(s.players));
+  b.close(); handle.close(); server.close();
+});

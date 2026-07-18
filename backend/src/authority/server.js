@@ -27,6 +27,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const wss = new WebSocketServer({ noServer: true });
   const worlds = new Map(); // world_id -> { world, row, sockets: Map<userId, ws> }
   const loading = new Map(); // world_id -> in-flight loadWorld promise (cold-start dedupe)
+  const sessionsByUser = new Map(); // userId -> ws (exactly one live authority session per account)
 
   httpServer.on('upgrade', (req, socket, head) => {
     let userId;
@@ -217,6 +218,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const entry = await loadWorld(msg.world_id).catch(() => null);
         if (!entry) { send(ws, { type: 'error', message: 'unknown world' }); return; }
         const spawn = await loadSpawn(msg.world_id, ws.userId, entry.row.chunk_size);
+        // One live session per account: the newest join wins. (Refusing instead
+        // would lock a user out for up to a full heartbeat cycle after a crash,
+        // since the dead-socket reaper needs one interval to notice.)
+        const prev = sessionsByUser.get(ws.userId);
+        if (prev && prev !== ws) {
+          try { send(prev, { type: 'kicked', reason: 'signed_in_elsewhere' }); } catch { /* best-effort */ }
+          prev.terminate();
+        }
+        sessionsByUser.set(ws.userId, ws);
         let inv = await loadInventory(pool, ws.userId);
         if (inv.items.length === 0) {
           const granted = await grantStartingLoadout(pool, ws.userId, entry.world.weapons);
@@ -270,8 +280,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
     });
 
     ws.on('close', async () => {
+      // Identity-checked: a kicked socket's late close must not evict the
+      // new session's registry entry (it already overwrote this key).
+      if (sessionsByUser.get(ws.userId) === ws) sessionsByUser.delete(ws.userId);
       const entry = worlds.get(ws.worldId);
       if (!entry) return;
+      // Identity-checked, same reason: if a newer session for this account
+      // already re-registered in this world (entry.sockets/world.players are
+      // keyed by userId only), this stale close must not tear down its
+      // player/world state.
+      if (entry.sockets.get(ws.userId) !== ws) return;
       const p = entry.world.getPlayer(ws.userId);
       if (p) { try { await persist(ws.worldId, ws.userId, p); } catch { /* best-effort */ } }
       entry.world.removePlayer(ws.userId);
@@ -343,6 +361,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // event loop alive (and hang a clean shutdown / test process).
       for (const client of wss.clients) client.terminate();
       wss.close();
+      sessionsByUser.clear();
     },
   };
 }
