@@ -52,4 +52,39 @@ function resolveDefaultWeaponId(mapById) {
   return firstWeapon;
 }
 
-module.exports = { loadItemTypes, resolveDefaultWeaponId, DEFAULT_WEAPON_NAME, SLOTS };
+const STARTING_LOADOUT = ['dagger', 'leather-vest'];
+
+// A user's owned instances + their paper-doll, both account-wide.
+async function loadInventory(pool, userId) {
+  const ir = await pool.query(
+    'SELECT id, item_type_id FROM player_items WHERE user_id = $1 ORDER BY created_at ASC, id ASC',
+    [userId],
+  );
+  const er = await pool.query(
+    'SELECT slot, item_id FROM player_equipment WHERE user_id = $1',
+    [userId],
+  );
+  const equipment = {};
+  for (const row of er.rows) equipment[row.slot] = row.item_id;
+  return { items: ir.rows.map((r) => ({ id: r.id, typeId: r.item_type_id })), equipment };
+}
+
+// Grant the starter set to a user who owns nothing. Idempotent: a user with
+// any item is left alone. Returns whether anything was granted.
+async function grantStartingLoadout(pool, userId, itemTypes) {
+  const existing = await pool.query('SELECT id FROM player_items WHERE user_id = $1 LIMIT 1', [userId]);
+  if (existing.rows.length) return false;
+  const byName = new Map();
+  for (const t of itemTypes.values()) byName.set(t.name, t.id);
+  for (const name of STARTING_LOADOUT) {
+    const typeId = byName.get(name);
+    if (typeId == null) continue; // catalog missing this type -> skip, don't crash
+    await pool.query(
+      'INSERT INTO player_items (user_id, item_type_id) VALUES ($1, $2)',
+      [userId, typeId],
+    );
+  }
+  return true;
+}
+
+module.exports = { loadItemTypes, resolveDefaultWeaponId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory, grantStartingLoadout, STARTING_LOADOUT };
