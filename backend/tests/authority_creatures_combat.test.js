@@ -83,3 +83,45 @@ test('snapshotForNeighborhood includes maxHp and mode', () => {
   assert.equal(snap[0].maxHp, 10);
   assert.equal(snap[0].mode, 'roam');
 });
+
+// All-grass stub map so resolveMove/isWalkable never block (not used by these
+// two methods, but CreatureSim's constructor needs a map with chunkSize).
+function armSim() {
+  const map = { chunkSize: 8, isWalkable: () => true, speedAt: () => 1 };
+  const sim = new CreatureSim(map, () => 0.5);
+  sim.addCreatures([
+    { id: 'a', type: 'wolf', x: 100, y: 100, hp: 10, facing: 'S', color: '#f00' },
+    { id: 'b', type: 'wolf', x: 300, y: 100, hp: 10, facing: 'S', color: '#f00' },
+  ]);
+  return sim;
+}
+
+test('applyMeleeArc damages creatures in the cone, returns the dead ids', () => {
+  const sim = armSim();
+  // Origin just west of 'a' (center 124,124), aim east, wide reach+arc, lethal.
+  const killed = sim.applyMeleeArc(60, 124, 1, 0, 120, 1.8, 20);
+  assert.deepEqual(killed, ['a']);      // 'a' in reach, dead
+  assert.ok(!sim.has('a'));
+  assert.ok(sim.has('b'));              // 'b' at 324,124 is out of reach 120
+});
+
+test('applyMeleeArc excludes a creature outside the angular cone', () => {
+  const sim = armSim();
+  // Origin south of 'a' (124,300), aim NORTH with a narrow cone: 'a' at (124,124)
+  // is dead ahead within reach → hit; 'b' at (324,124) is ~37° off the aim axis,
+  // beyond the 0.6 rad (±0.3 rad) cone → excluded.
+  const killed = sim.applyMeleeArc(124, 300, 0, -1, 400, 0.6, 20);
+  assert.deepEqual(killed, ['a']);
+  assert.ok(!sim.has('a'));
+  assert.ok(sim.has('b'), "'b' is outside the cone and survives");
+});
+
+test('damageCreatureById reduces hp and reports death', () => {
+  const sim = armSim();
+  assert.equal(sim.damageCreatureById('a', 4), false); // 10→6, alive
+  assert.equal(sim.creatures.get('a').hp, 6);
+  assert.equal(sim.creatures.get('a').dirty, true);
+  assert.equal(sim.damageCreatureById('a', 6), true);  // 6→0, dead
+  assert.ok(!sim.has('a'));
+  assert.equal(sim.damageCreatureById('missing', 5), false); // no-op
+});
