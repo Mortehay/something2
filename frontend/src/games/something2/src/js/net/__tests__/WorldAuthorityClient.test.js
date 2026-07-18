@@ -26,11 +26,11 @@ it('sendAttack sends an aim vector', () => {
   expect(f).toEqual({ type: 'attack', ax: 0.6, ay: -0.8 });
 });
 
-it('sendEquip sends the weaponId', () => {
+it('sendEquip sends itemId + slot', () => {
   const c = armClient();
-  c.sendEquip(3);
+  c.sendEquip('w3', 'hand');
   const f = FakeWS.last.sent.find((m) => m.type === 'equip');
-  expect(f).toEqual({ type: 'equip', weaponId: 3 });
+  expect(f).toEqual({ type: 'equip', itemId: 'w3', slot: 'hand' });
 });
 
 it('onState receives projectiles from a state frame', () => {
@@ -40,4 +40,26 @@ it('onState receives projectiles from a state frame', () => {
   FakeWS.last._l.open();
   FakeWS.last._l.message({ data: JSON.stringify({ type: 'state', players: [], projectiles: [{ id: '1', x: 1, y: 2, element: 'arcane' }] }) });
   expect(states[0].projectiles).toHaveLength(1);
+});
+
+it('sendEquip sends itemId + slot', () => {
+  const c = armClient();
+  c.sendEquip('i5', 'chest');
+  expect(FakeWS.last.sent.find((m) => m.type === 'equip')).toEqual({ type: 'equip', itemId: 'i5', slot: 'chest' });
+});
+
+it('sendUnequip sends the slot', () => {
+  const c = armClient();
+  c.sendUnequip('chest');
+  expect(FakeWS.last.sent.find((m) => m.type === 'unequip')).toEqual({ type: 'unequip', slot: 'chest' });
+});
+
+it('a kicked message invokes onKicked', () => {
+  const seen = [];
+  const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', onKicked: (m) => seen.push(m) });
+  c.connect('w1');
+  FakeWS.last._l.open();
+  FakeWS.last._l.message({ data: JSON.stringify({ type: 'kicked', reason: 'signed_in_elsewhere' }) });
+  expect(seen).toHaveLength(1);
+  expect(seen[0].reason).toBe('signed_in_elsewhere');
 });
