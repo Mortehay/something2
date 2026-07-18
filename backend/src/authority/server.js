@@ -215,40 +215,73 @@ function attachAuthority(httpServer, pool, opts = {}) {
       try { msg = JSON.parse(data); } catch { return; }
 
       if (msg.type === 'join') {
+        // A second join on an already-joined socket bypasses the "newest
+        // session wins" kick (prev === ws skips it) and re-runs addPlayer,
+        // which resets hp/mana to max and teleports to spawn — a free full
+        // heal/exploit now that combat is real. One join per socket; a
+        // client that wants a different world must reconnect.
+        if (ws.worldId != null) { send(ws, { type: 'error', message: 'already joined' }); return; }
+
         const entry = await loadWorld(msg.world_id).catch(() => null);
         if (!entry) { send(ws, { type: 'error', message: 'unknown world' }); return; }
-        const spawn = await loadSpawn(msg.world_id, ws.userId, entry.row.chunk_size);
-        // One live session per account: the newest join wins. (Refusing instead
-        // would lock a user out for up to a full heartbeat cycle after a crash,
-        // since the dead-socket reaper needs one interval to notice.)
-        const prev = sessionsByUser.get(ws.userId);
-        if (prev && prev !== ws) {
-          try { send(prev, { type: 'kicked', reason: 'signed_in_elsewhere' }); } catch { /* best-effort */ }
-          prev.terminate();
+
+        try {
+          const spawn = await loadSpawn(msg.world_id, ws.userId, entry.row.chunk_size);
+          if (ws.readyState !== ws.OPEN) return; // client vanished while we awaited spawn
+
+          // One live session per account: the newest join wins. (Refusing instead
+          // would lock a user out for up to a full heartbeat cycle after a crash,
+          // since the dead-socket reaper needs one interval to notice.)
+          const prev = sessionsByUser.get(ws.userId);
+          if (prev && prev !== ws) {
+            try { send(prev, { type: 'kicked', reason: 'signed_in_elsewhere' }); } catch { /* best-effort */ }
+            prev.terminate();
+          }
+          sessionsByUser.set(ws.userId, ws);
+          // Reserve socket ownership synchronously too (mirrors sessionsByUser
+          // above), before the inventory awaits below hit the DB. Otherwise a
+          // kicked socket's 'close' can fire during that window and find
+          // entry.sockets still pointing at the OLD socket (nothing reassigned
+          // it yet), so its identity guard passes and it tears down the world
+          // entry the new session is about to join. The tick loop and
+          // broadcastCreatures already tolerate a registered socket with no
+          // player yet (they null-check getPlayer), so this is safe.
+          entry.sockets.set(ws.userId, ws);
+
+          let inv = await loadInventory(pool, ws.userId);
+          if (inv.items.length === 0) {
+            const granted = await grantStartingLoadout(pool, ws.userId, entry.world.weapons);
+            if (granted) inv = await loadInventory(pool, ws.userId);
+          }
+
+          // A newer session for this same account may have won (and kicked
+          // us) while we awaited inventory above. If so, our reservation was
+          // already overwritten — mutating world state now would clobber the
+          // newer session's already-added player with our stale snapshot,
+          // leaving it soft-locked (entry.sockets now points at us, so it
+          // stops receiving 'state') with no way to recover: its own later
+          // close() checks identity against entry.sockets, finds us there
+          // instead of itself, and no-ops instead of cleaning up — an
+          // unremovable ghost player. Bail instead of mutating shared state.
+          if (sessionsByUser.get(ws.userId) !== ws || entry.sockets.get(ws.userId) !== ws || ws.readyState !== ws.OPEN) {
+            if (entry.sockets.get(ws.userId) === ws) entry.sockets.delete(ws.userId);
+            return;
+          }
+
+          ws.worldId = msg.world_id;
+          entry.world.addPlayer(ws.userId, spawn, inv);
+          send(ws, {
+            type: 'joined', user_id: ws.userId, spawn, tickRate: 1000 / tickMs,
+            itemTypes: [...entry.world.weapons.values()],
+            items: inv.items,
+            equipment: inv.equipment,
+          });
+        } catch (err) {
+          console.error('join failed:', err);
+          if (entry.sockets.get(ws.userId) === ws) entry.sockets.delete(ws.userId);
+          if (sessionsByUser.get(ws.userId) === ws) sessionsByUser.delete(ws.userId);
+          send(ws, { type: 'error', message: 'join failed' });
         }
-        sessionsByUser.set(ws.userId, ws);
-        // Reserve socket ownership synchronously too (mirrors sessionsByUser
-        // above), before the inventory awaits below hit the DB. Otherwise a
-        // kicked socket's 'close' can fire during that window and find
-        // entry.sockets still pointing at the OLD socket (nothing reassigned
-        // it yet), so its identity guard passes and it tears down the world
-        // entry the new session is about to join. The tick loop and
-        // broadcastCreatures already tolerate a registered socket with no
-        // player yet (they null-check getPlayer), so this is safe.
-        entry.sockets.set(ws.userId, ws);
-        let inv = await loadInventory(pool, ws.userId);
-        if (inv.items.length === 0) {
-          const granted = await grantStartingLoadout(pool, ws.userId, entry.world.weapons);
-          if (granted) inv = await loadInventory(pool, ws.userId);
-        }
-        ws.worldId = msg.world_id;
-        entry.world.addPlayer(ws.userId, spawn, inv);
-        send(ws, {
-          type: 'joined', user_id: ws.userId, spawn, tickRate: 1000 / tickMs,
-          itemTypes: [...entry.world.weapons.values()],
-          items: inv.items,
-          equipment: inv.equipment,
-        });
         return;
       }
 
@@ -269,18 +302,29 @@ function attachAuthority(httpServer, pool, opts = {}) {
         return;
       }
 
-      if (msg.type === 'equip') {
+      if (msg.type === 'equip' || msg.type === 'unequip') {
         const entry = worlds.get(ws.worldId);
-        if (entry) {
-          const r = await entry.world.setEquipment(pool, ws.userId, msg.itemId, msg.slot);
-          if (!r.ok) send(ws, { type: 'error', message: r.reason || 'cannot equip' });
-        }
-        return;
-      }
-
-      if (msg.type === 'unequip') {
-        const entry = worlds.get(ws.worldId);
-        if (entry) await entry.world.clearEquipment(pool, ws.userId, msg.slot);
+        if (!entry) return;
+        // Serialize per-socket mutations on the ws itself: without this, two
+        // equip/unequip frames sent back-to-back start concurrently, and the
+        // second's canEquip() check reads an inventory snapshot the first is
+        // still in the middle of writing (e.g. both see main_hand empty and
+        // both INSERT the same one-handed weapon instance), so the second
+        // write violates player_equipment_item_unique. pool.query then
+        // rejects; with no catch that propagated out of this async handler
+        // as an unhandled rejection and crashed the whole process (Node
+        // exits by default on unhandledRejection).
+        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
+          try {
+            const r = msg.type === 'equip'
+              ? await entry.world.setEquipment(pool, ws.userId, msg.itemId, msg.slot)
+              : await entry.world.clearEquipment(pool, ws.userId, msg.slot);
+            if (r && !r.ok) send(ws, { type: 'error', message: r.reason || `cannot ${msg.type}` });
+          } catch (err) {
+            console.error(`${msg.type} failed:`, err);
+            send(ws, { type: 'error', message: `${msg.type} failed` });
+          }
+        });
         return;
       }
 

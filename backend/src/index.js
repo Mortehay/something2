@@ -267,8 +267,11 @@ function validateItemType(b) {
   if (b.element != null && !ITEM_ELEMENTS.includes(b.element)) return `element must be one of ${ITEM_ELEMENTS.join(', ')}`;
   if (b.slot != null && !ITEM_SLOTS.includes(b.slot)) return `slot must be one of ${ITEM_SLOTS.join(', ')}`;
   if (b.resistances) {
-    for (const k of Object.keys(b.resistances)) {
+    for (const [k, v] of Object.entries(b.resistances)) {
       if (!ITEM_ELEMENTS.includes(k)) return `resistances key '${k}' is not a known element`;
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) {
+        return `resistances.${k} must be a finite number between 0 and 1`;
+      }
     }
   }
   if (b.kind != null && !['melee', 'projectile'].includes(b.kind)) {

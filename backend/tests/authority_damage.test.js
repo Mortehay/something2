@@ -51,3 +51,23 @@ test('a missing/unknown element is treated as physical with no resistance', () =
 test('ELEMENTS lists the supported set with physical first', () => {
   assert.deepEqual(ELEMENTS, ['physical', 'arcane', 'fire', 'ice', 'lightning']);
 });
+
+test('a NaN resistance is clamped to 0 instead of producing NaN damage/hp', () => {
+  // Defence in depth: even though the API now validates resistance values,
+  // a NaN reaching this path (e.g. a pre-existing row) must not silently
+  // make the target immortal (NaN <= 0 is false, so resolveDeaths never
+  // fires).
+  const x = t();
+  const dealt = applyDamage(x, 10, 'fire', { defense: 0, resistances: { fire: NaN } });
+  assert.ok(Number.isFinite(dealt), 'dealt damage must be finite');
+  assert.ok(dealt >= MIN_DAMAGE);
+  assert.ok(Number.isFinite(x.hp), 'target hp must stay finite');
+  assert.equal(x.hp, 90);
+});
+
+test('a negative resistance is clamped to 0, not amplifying damage', () => {
+  const x = t();
+  const dealt = applyDamage(x, 10, 'fire', { defense: 0, resistances: { fire: -0.5 } });
+  assert.equal(dealt, 10, 'negative resistance must not deal MORE than raw damage');
+  assert.ok(Number.isFinite(dealt));
+});

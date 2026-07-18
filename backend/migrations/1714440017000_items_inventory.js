@@ -68,7 +68,14 @@ exports.up = (pgm) => {
 exports.down = (pgm) => {
   pgm.dropTable('player_equipment');
   pgm.dropTable('player_items');
-  pgm.sql(`DELETE FROM item_types WHERE name IN ('leather-vest','arcane-ward');`);
+  // Delete ALL kind-IS-NULL rows, not just the two seeded armor rows: any
+  // armor created via the item-types editor since this migration ran also
+  // has kind IS NULL, and the alterColumn below (restoring kind NOT NULL)
+  // errors on any surviving NULL, aborting the rollback halfway (after
+  // player_equipment/player_items are already dropped). This makes the
+  // rollback lossy for admin-authored armor — acceptable for a dev rollback,
+  // but worth knowing before running it against a DB with real data.
+  pgm.sql(`DELETE FROM item_types WHERE kind IS NULL;`);
   pgm.alterColumn('item_types', 'kind', { notNull: true });
   pgm.dropConstraint('item_types', 'item_types_armor_fields_check');
   pgm.dropConstraint('item_types', 'item_types_weapon_fields_check');

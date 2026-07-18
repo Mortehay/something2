@@ -406,6 +406,92 @@ test('a second session for the same account kicks the first (newest wins)', asyn
   b.close(); handle.close(); server.close();
 });
 
+// Like fakePool(), but simulates the real DB behavior that the double-equip
+// race actually trips: player_equipment_item_unique. INSERT INTO
+// player_equipment is delayed (so two equip frames sent back-to-back
+// genuinely interleave across the await, same rationale as delayedFakePool
+// above) and rejects with a unique-violation-shaped error if the same
+// item_id is inserted twice (the ON CONFLICT target is (user_id, slot), so
+// it does NOT cover this constraint — a second slot for the same item_id
+// is a real conflict, not a merge).
+function equipRacePool(delayMs = 20) {
+  const base = fakePool();
+  const usedItemIds = new Set();
+  return {
+    query: async (sql, params) => {
+      if (/INSERT INTO player_equipment/i.test(sql)) {
+        await new Promise((r) => setTimeout(r, delayMs));
+        const itemId = params[2];
+        if (usedItemIds.has(itemId)) {
+          const err = new Error('duplicate key value violates unique constraint "player_equipment_item_unique"');
+          err.code = '23505';
+          throw err;
+        }
+        usedItemIds.add(itemId);
+        return { rows: [], rowCount: 1 };
+      }
+      return base.query(sql, params);
+    },
+  };
+}
+
+test('concurrent double-equip of the same item into two hand slots does not crash the process', async () => {
+  // Regression test for the equip/unequip unhandled-rejection crash: send
+  // two equip frames back-to-back for the SAME one-handed weapon instance
+  // into main_hand and off_hand. Both handlers' canEquip() reads run before
+  // either write lands, so both pass; the second write then conflicts on
+  // player_equipment_item_unique. Pre-fix, that rejection had no .catch and
+  // propagated out of the `async (data) => {...}` message handler as an
+  // unhandled rejection — which crashes the whole Node process by default
+  // (confirmed with a standalone `node` repro outside the test harness; see
+  // the review-fixes report). node's test runner installs its own
+  // process-level rejection handlers, which swallow that crash without
+  // reproducing it faithfully here, so this assertion targets the
+  // fix-specific, deterministic signal instead: the loser must come back as
+  // a normal 'error' reply (from the new try/catch), not silence. Pre-fix,
+  // nothing ever catches it, so no 'error' is ever sent and this times out.
+  const { url, handle, server } = await bootWith(equipRacePool());
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  ws.send(JSON.stringify({ type: 'equip', itemId: 'i1', slot: 'main_hand' }));
+  ws.send(JSON.stringify({ type: 'equip', itemId: 'i1', slot: 'off_hand' }));
+
+  const err = await nextMsg(ws, 'error');
+  assert.match(err.message, /equip failed/i, "the loser's DB conflict is reported, not swallowed as an unhandled rejection");
+
+  // And the connection must still be fully alive afterwards.
+  const s = await nextMsg(ws, 'state');
+  assert.ok(Array.isArray(s.players), 'a later state still arrives after the racing equips');
+  assert.equal(ws.readyState, ws.OPEN, 'the socket stays open despite the equip conflict');
+
+  ws.close(); handle.close(); server.close();
+});
+
+test('a second join on the same socket is rejected (no free re-heal / no ghost)', async () => {
+  // Regression test: prev === ws used to skip the kick check entirely, so a
+  // client could join twice on one socket. Re-joining the SAME world calls
+  // addPlayer again, which resets hp/mana to max and teleports to spawn — a
+  // free full heal now that combat is real. A second join must be refused.
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  const err = await nextMsg(ws, 'error');
+  assert.match(err.message, /already joined/i, 'the second join on the same socket is refused');
+
+  // The connection is otherwise unaffected: it keeps receiving state.
+  const s = await nextMsg(ws, 'state');
+  assert.ok(Array.isArray(s.players));
+
+  ws.close(); handle.close(); server.close();
+});
+
 test('a kicked socket closing mid-join does not tear down the new session', async () => {
   // Delay the inventory (player_items) query so the new session's join
   // handler genuinely sits mid-await while the kicked (old) socket's real

@@ -77,6 +77,39 @@ test('POST /api/item-types rejects resistances with an unknown element key', asy
   assert.equal(res.status, 400);
 });
 
+test('POST /api/item-types rejects a non-numeric resistance value', async () => {
+  // A string resistance value flows unvalidated into items.js mitigation()
+  // (string concat), then damage.js (raw2 * (1 - NaN)), landing hp on NaN —
+  // resolveDeaths() never fires on NaN <= 0, so the target is permanently
+  // immortal. Must be rejected at the API boundary.
+  __setPool(mockPool([]));
+  const res = await request(app).post('/api/item-types').send({
+    name: 'x', category: 'armor', slot: 'chest', defense: 1, resistances: { fire: 'x' },
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /resistances/i);
+});
+
+test('POST /api/item-types rejects a negative resistance value', async () => {
+  // A negative resistance amplifies damage instead of reducing it.
+  __setPool(mockPool([]));
+  const res = await request(app).post('/api/item-types').send({
+    name: 'x', category: 'armor', slot: 'chest', defense: 1, resistances: { fire: -0.5 },
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /resistances/i);
+});
+
+test('POST /api/item-types accepts a valid in-range resistance value', async () => {
+  __setPool(mockPool([
+    [/INSERT INTO item_types/i, (p) => ({ rows: [{ id: 11, name: p[0], category: p[1] }] })],
+  ]));
+  const res = await request(app).post('/api/item-types').send({
+    name: 'x', category: 'armor', slot: 'chest', defense: 1, resistances: { fire: 0.25 },
+  });
+  assert.equal(res.status, 201);
+});
+
 test('POST /api/item-types rejects armor with a stray non-null kind (400, not 500)', async () => {
   __setPool(mockPool([]));
   const res = await request(app).post('/api/item-types').send({
