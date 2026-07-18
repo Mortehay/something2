@@ -227,6 +227,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
           prev.terminate();
         }
         sessionsByUser.set(ws.userId, ws);
+        // Reserve socket ownership synchronously too (mirrors sessionsByUser
+        // above), before the inventory awaits below hit the DB. Otherwise a
+        // kicked socket's 'close' can fire during that window and find
+        // entry.sockets still pointing at the OLD socket (nothing reassigned
+        // it yet), so its identity guard passes and it tears down the world
+        // entry the new session is about to join. The tick loop and
+        // broadcastCreatures already tolerate a registered socket with no
+        // player yet (they null-check getPlayer), so this is safe.
+        entry.sockets.set(ws.userId, ws);
         let inv = await loadInventory(pool, ws.userId);
         if (inv.items.length === 0) {
           const granted = await grantStartingLoadout(pool, ws.userId, entry.world.weapons);
@@ -234,7 +243,6 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
         ws.worldId = msg.world_id;
         entry.world.addPlayer(ws.userId, spawn, inv);
-        entry.sockets.set(ws.userId, ws);
         send(ws, {
           type: 'joined', user_id: ws.userId, spawn, tickRate: 1000 / tickMs,
           itemTypes: [...entry.world.weapons.values()],

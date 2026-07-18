@@ -72,12 +72,22 @@ function bootWith(pool) {
 // resolving, so two concurrent first-joins to the same world genuinely
 // interleave across the `await pool.query(...)` in loadWorld (instant
 // microtask resolution is too fast to ever interleave two loads).
-function delayedFakePool(delayMs) {
+//
+// opts.itemsDelayMs additionally delays the player_items (inventory) query,
+// which is used to force a real await window across the join handler's
+// `await loadInventory(...)` so a kicked socket's close can genuinely race
+// the new session's registration (again, instant microtask resolution can
+// never interleave the two).
+function delayedFakePool(delayMs, opts = {}) {
+  const itemsDelayMs = opts.itemsDelayMs || 0;
   return {
     query: async (sql, ...args) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
         await new Promise((r) => setTimeout(r, delayMs));
         return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
+      }
+      if (itemsDelayMs && /FROM player_items/i.test(sql)) {
+        await new Promise((r) => setTimeout(r, itemsDelayMs));
       }
       return fakePool().query(sql, ...args);
     },
@@ -393,5 +403,34 @@ test('a second session for the same account kicks the first (newest wins)', asyn
   // The new session stays alive and keeps receiving state.
   const s = await nextMsg(b, 'state');
   assert.ok(Array.isArray(s.players));
+  b.close(); handle.close(); server.close();
+});
+
+test('a kicked socket closing mid-join does not tear down the new session', async () => {
+  // Delay the inventory (player_items) query so the new session's join
+  // handler genuinely sits mid-await while the kicked (old) socket's real
+  // 'close' event fires — the exact ordering the Critical exploited: the
+  // old socket's close must not find itself still "owning" entry.sockets
+  // and tear down the whole world entry out from under the new session.
+  const { url, handle, server } = await bootWith(delayedFakePool(0, { itemsDelayMs: 60 }));
+  const a = connect(url, 1);
+  await new Promise((r) => a.on('open', r));
+  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(a, 'joined');
+
+  const b = connect(url, 1); // same user id as a → a gets kicked
+  await new Promise((r) => b.on('open', r));
+  const aClosed = new Promise((res) => a.on('close', () => res(true)));
+  b.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+
+  const closed = await Promise.race([aClosed, new Promise((r) => setTimeout(() => r(false), 5000))]);
+  assert.ok(closed, 'the kicked (old) session should be terminated');
+
+  // The new session must still complete its join and keep receiving state —
+  // if the kicked socket's close tore down the world entry mid-await, b
+  // would either never see 'joined'/'state' or would be silently soft-locked.
+  await nextMsg(b, 'joined');
+  const s = await nextMsg(b, 'state');
+  assert.ok(Array.isArray(s.players), 'the new session should still receive state after the kicked close');
   b.close(); handle.close(); server.close();
 });
