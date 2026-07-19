@@ -370,6 +370,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         return;
       }
 
+      if (msg.type === 'autoloot') {
+        const entry = worlds.get(ws.worldId);
+        // Strict boolean — a truthy string from the wire must not enable it.
+        if (entry) entry.world.setAutoLoot(ws.userId, msg.on === true);
+        return;
+      }
+
       if (msg.type === 'ping') { send(ws, { type: 'pong' }); return; }
     });
 
@@ -406,6 +413,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const killedByProjectiles = entry.world.tickProjectiles(dt);
       for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);
       entry.world.resolveDeaths();
+      // Auto-loot: fire claims off-tick. The tick is synchronous and must never
+      // await; `claiming` de-dups the repeats this produces across ticks while
+      // a claim is still in flight.
+      for (const p of entry.world.players.values()) {
+        if (!p.autoLoot) continue;
+        const pcx = p.x + p.width / 2, pcy = p.y + p.height / 2;
+        for (const it of entry.world.groundItems.within(pcx, pcy, PICKUP_RADIUS)) {
+          const sock = entry.sockets.get(p.userId);
+          claimItem(pool, entry, p.userId, it.id)
+            .then((got) => { if (got && sock) send(sock, { type: 'picked', item: got }); })
+            .catch((err) => console.error('auto-loot failed:', err));
+        }
+      }
       const snap = entry.world.snapshot();
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
