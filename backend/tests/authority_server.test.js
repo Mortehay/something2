@@ -50,6 +50,25 @@ function token(userId) {
   return jwt.sign({ user_id: userId }, SECRET, { algorithm: 'HS256' });
 }
 
+// Everything a test opened, torn down after that test WHETHER IT PASSED OR
+// THREW. The per-test `handle.close(); server.close()` lines below are the
+// normal path and stay; this is the safety net for the failure path, and it
+// is not optional hygiene. attachAuthority runs five setInterval timers and
+// holds a listening http server, none of which are unref'd, so a test that
+// throws before reaching its own close() leaks all of them — and node:test
+// does not kill the process while a timer is armed. The visible symptom is
+// not a failed test but a suite that reports every result and then hangs
+// forever, which is how four assertion failures in this file turned into a
+// five-minute `npm test` that never exited. Registering teardown at boot
+// time means a new test cannot reintroduce that by forgetting a close().
+const openResources = [];
+test.afterEach(() => {
+  while (openResources.length) {
+    const r = openResources.pop();
+    try { r.close(); } catch { /* already closed: teardown is idempotent */ }
+  }
+});
+
 // Boot an http server with the authority attached; returns {url, handle, server}.
 function boot() {
   return bootWith(fakePool());
@@ -61,10 +80,23 @@ function bootWith(pool) {
   return new Promise((resolve) => {
     const server = http.createServer();
     const handle = attachAuthority(server, pool, { jwtSecret: SECRET, tickMs: 20 });
+    track(handle, server);
     server.listen(0, () => {
       const port = server.address().port;
       resolve({ url: `ws://127.0.0.1:${port}/authority`, handle, server });
     });
+  });
+}
+
+// Register an authority handle + its server for guaranteed teardown.
+// server.close() throws ERR_SERVER_NOT_RUNNING if the test already closed it,
+// hence the listening guard rather than a bare call.
+function track(handle, server) {
+  openResources.push({
+    close() {
+      handle.close();
+      if (server.listening) server.close();
+    },
   });
 }
 
@@ -95,7 +127,13 @@ function delayedFakePool(delayMs, opts = {}) {
 }
 
 function connect(url, uid) {
-  return new WebSocket(`${url}?token=${encodeURIComponent(token(uid))}`);
+  const ws = new WebSocket(`${url}?token=${encodeURIComponent(token(uid))}`);
+  // Client sockets are tracked for the same failure-path reason as the server:
+  // terminate(), not close(), so a socket still mid-handshake when the test
+  // threw is dropped outright instead of waiting on a close reply from a
+  // server that is already gone.
+  openResources.push({ close() { ws.terminate(); } });
+  return ws;
 }
 
 // Await the next JSON message of a given type.
@@ -254,6 +292,7 @@ function bootHeartbeat(heartbeatMs) {
     const handle = attachAuthority(server, fakePool(), {
       jwtSecret: SECRET, tickMs: 20, heartbeatMs,
     });
+    track(handle, server);
     server.listen(0, () => {
       const port = server.address().port;
       resolve({ url: `ws://127.0.0.1:${port}/authority`, handle, server });
@@ -536,10 +575,20 @@ async function mkAttackHarness(opts = {}) {
     query: async (sql, params) => {
       // Must be matched BEFORE the generic /FROM player_items/ branch: the
       // consume statement mentions player_items in its subquery too.
+      //
+      // The shape here IS the contract consumeAmmo reads, and it must track
+      // src/authority/ammo.js exactly. That statement is a single CTE whose
+      // final SELECT is `(count(*) FROM del) + (count(*) FROM upd) AS spent`,
+      // so it ALWAYS returns exactly one row, and "no unit was spent" is
+      // spent = 0 — never zero rows and never a bare rowCount. Returning the
+      // pre-CTE shape (rowCount plus an id/quantity row) makes consumeAmmo
+      // read `undefined` for spent and report every successful shot as out of
+      // ammo, which is silent: the four tests below then fail on the
+      // *cooldown* assertion with no hint that the mock is the liar. count(*)
+      // is a bigint, so node-pg hands back a STRING — modelled here so the
+      // Number() coercion in consumeAmmo stays exercised by this suite.
       if (/UPDATE player_items SET quantity/i.test(sql)) {
-        return onConsume(params)
-          ? { rowCount: 1, rows: [{ id: 'ammo1', quantity: 5 }] }
-          : { rowCount: 0, rows: [] };
+        return { rowCount: 1, rows: [{ spent: onConsume(params) ? '1' : '0' }] };
       }
       // Also must precede the generic /FROM player_items/ branch below:
       // ammoCount()'s SUM query mentions player_items too.
