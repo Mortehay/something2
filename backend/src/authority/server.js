@@ -472,7 +472,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             if (r.status === 'fulfilled' && r.value) send(sock, { type: 'picked', item: r.value });
             else if (r.status === 'rejected') console.error('auto-loot failed:', r.reason);
           }
-        });
+        }).catch((err) => console.error('auto-loot notify failed:', err));
       }
       const snap = entry.world.snapshot();
       for (const [userId, ws] of entry.sockets) {
@@ -512,8 +512,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
   }, heartbeatMs);
 
   // Expired ground items: delete from the DB and evict from every live sim.
+  // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
+  // sweep by up to itemSweepMs; the two are complementary (DB delete is
+  // authoritative across worlds, removeExpired just keeps each sim tidy).
   const itemSweepTimer = setInterval(() => {
     if (worlds.size === 0) return;
+    const now = Date.now();
+    for (const entry of worlds.values()) entry.world.groundItems.removeExpired(now);
     pool.query('DELETE FROM world_items WHERE expires_at <= now() RETURNING id')
       .then((r) => {
         if (!r.rowCount) return;

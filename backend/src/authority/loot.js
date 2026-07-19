@@ -127,10 +127,11 @@ const DROP_GRACE_MS = 3000;
 // claim path for both) never consults `dropGrace` itself; the caller decides
 // whether grace applies before invoking it.
 //
-// Opportunistically prunes: an expired entry found here is deleted on the
-// spot, so a player's `dropGrace` map cannot grow without bound merely from
-// items that later left pickup range (and so stopped being checked) before
-// their grace expired.
+// Opportunistically prunes the entry it looks up, but that alone does not
+// bound the map: an item dropped with auto-loot off, or one the player walks
+// away from before its grace expires, is never looked up again and would sit
+// in `dropGrace` for the rest of the session. `dropItem` is what actually
+// bounds the map, by sweeping already-expired entries before every insert.
 function dropGraceActive(p, groundItemId, now) {
   const exp = p.dropGrace.get(groundItemId);
   if (exp == null) return false;
@@ -165,6 +166,15 @@ async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000, now = Dat
     [entry.worldId, del.rows[0].item_type_id, cx, cy, ttlMs],
   );
   entry.world.groundItems.add(ins.rows);
+  // Bound p.dropGrace: entries only get pruned opportunistically when looked
+  // up by dropGraceActive (i.e. while the item is still in pickup range), so
+  // an item dropped with auto-loot off, or one the player walks away from,
+  // would otherwise linger for the rest of the session. Sweep expired
+  // entries here, on every drop, so the map tracks at most a few seconds'
+  // worth of recent drops regardless of how auto-loot is used.
+  for (const [id, exp] of p.dropGrace) {
+    if (exp <= now) p.dropGrace.delete(id);
+  }
   p.dropGrace.set(ins.rows[0].id, now + graceMs);
   p.inv.items = p.inv.items.filter((it) => it.id !== itemId);
   return { ok: true, item: ins.rows[0] };
