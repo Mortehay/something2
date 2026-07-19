@@ -5,6 +5,12 @@ import { frameRect, staticFrameKey, animatedFrameKey, facingToDir } from "./spri
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 
+// Mirrors PICKUP_RADIUS in backend/src/authority/groundItems.js — used here
+// only to decide when a ground item's name label is shown (i.e. when the
+// player is actually close enough to loot it). Keep the two in sync, or the
+// label will appear at a different range than looting actually works.
+const PICKUP_RADIUS = 80;
+
 export class RenderSystem {
   constructor(canvas, imageManager) {
     this.canvas = canvas;
@@ -80,6 +86,7 @@ export class RenderSystem {
     player, camera, chunkedMap, remotePlayers, localUserId,
     creatures = [], projectiles = [], mana = null, maxMana = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
+    groundItems = [], autoLoot = false,
   }) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -104,11 +111,18 @@ export class RenderSystem {
       this.ctx.fill();
     }
 
-    // Players + creatures on top, depth-sorted together.
+    // Players + creatures + ground items, all depth-sorted together — ground
+    // items must join the same sort rather than being drawn in a later pass,
+    // or they would render on top of entities they are actually behind.
     const drawables = RenderSystem.buildDrawables(player, { entities: creatures }, remotePlayers);
+    for (const gi of groundItems) {
+      drawables.push({ kind: "grounditem", ref: gi, depth: depthKey(gi.x, gi.y) });
+    }
+    drawables.sort((a, b) => a.depth - b.depth);
     for (const d of drawables) {
       if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
       else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
+      else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
       else this.drawEntity(d.ref);
     }
 
@@ -128,8 +142,45 @@ export class RenderSystem {
     // pixel space — same space Game hit-tests clicks against).
     this._invHitAreas = [];
     if (inventoryOpen && inventory) {
-      this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId);
+      this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, autoLoot);
     }
+  }
+
+  // A small diamond, coloured by the item type's category. The name is drawn
+  // only when the player is close enough to actually loot it, so a busy field
+  // of drops does not become a wall of text.
+  drawGroundItem(item, inventory, player) {
+    // Same convention the projectile draw uses: worldToScreen then lift by
+    // half a tile so the marker sits on the diamond rather than at its top
+    // corner.
+    const s = worldToScreen(item.x, item.y);
+    const dx = s.x, dy = s.y - ISO_TILE_H / 2;
+    const type = inventory && inventory.types ? inventory.types.get(item.typeId) : null;
+    const color = type && type.category === "armor" ? "#7ec8e3" : "#e3c27e";
+    const r = 9;
+    this.ctx.save();
+    this.ctx.fillStyle = color;
+    this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(dx, dy - r);
+    this.ctx.lineTo(dx + r, dy);
+    this.ctx.lineTo(dx, dy + r);
+    this.ctx.lineTo(dx - r, dy);
+    this.ctx.closePath();
+    this.ctx.fill();
+    this.ctx.stroke();
+    if (type && player) {
+      const pdx = (player.x + player.width / 2) - item.x;
+      const pdy = (player.y + player.height / 2) - item.y;
+      if (pdx * pdx + pdy * pdy <= PICKUP_RADIUS * PICKUP_RADIUS) {
+        this.ctx.fillStyle = "#fff";
+        this.ctx.font = "12px sans-serif";
+        this.ctx.textAlign = "center";
+        this.ctx.fillText(type.name, dx, dy - r - 6);
+      }
+    }
+    this.ctx.restore();
   }
 
   // Small red/yellow/green bar above a damaged actor (creature or player).
@@ -261,7 +312,7 @@ export class RenderSystem {
   // Every drawn slot/item box is pushed into `hitAreas` as
   // {x, y, w, h, kind: 'slot' | 'item', id} so Game can hit-test clicks
   // against this same frame's layout.
-  renderInventory(ctx, inventory, hitAreas, selectedItemId = null) {
+  renderInventory(ctx, inventory, hitAreas, selectedItemId = null, autoLoot = false) {
     const panelW = 760;
     const panelH = 560;
     const px = (GAME_WIDTH - panelW) / 2;
@@ -278,6 +329,20 @@ export class RenderSystem {
     ctx.font = "14px monospace";
     ctx.textBaseline = "top";
     ctx.fillText("Inventory — [i] to close", px + 16, py + 14);
+
+    // Auto-loot toggle — top-right of the header row. Renders the server-
+    // owned flag mirrored locally; clicking it only requests the flip.
+    const alW = 150, alH = 26;
+    const alX = px + panelW - 16 - alW;
+    const alY = py + 10;
+    ctx.fillStyle = autoLoot ? "rgba(74,158,255,0.28)" : "rgba(40,40,60,0.85)";
+    ctx.fillRect(alX, alY, alW, alH);
+    ctx.strokeStyle = "#4a9eff";
+    ctx.strokeRect(alX, alY, alW, alH);
+    ctx.fillStyle = "#e5e7eb";
+    ctx.font = "12px monospace";
+    ctx.fillText(`Auto-loot: ${autoLoot ? "ON" : "OFF"}`, alX + 8, alY + 7);
+    hitAreas.push({ x: alX, y: alY, w: alW, h: alH, kind: "autoloot", id: null });
 
     // Paper-doll column (left).
     const dollX = px + 16;
@@ -301,6 +366,22 @@ export class RenderSystem {
 
       hitAreas.push({ x: dollX, y, w: slotW, h: slotH, kind: "slot", id: slot });
     });
+
+    // Drop button — only shown while an item is selected, directly below the
+    // paper-doll column.
+    if (selectedItemId) {
+      const dropW = slotW, dropH = 40;
+      const dropX = dollX;
+      const dropY = dollTop + SLOTS.length * (slotH + slotGap) + 12;
+      ctx.fillStyle = "rgba(74,158,255,0.28)";
+      ctx.fillRect(dropX, dropY, dropW, dropH);
+      ctx.strokeStyle = "#4a9eff";
+      ctx.strokeRect(dropX, dropY, dropW, dropH);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "13px monospace";
+      ctx.fillText("Drop selected item", dropX + 8, dropY + 13);
+      hitAreas.push({ x: dropX, y: dropY, w: dropW, h: dropH, kind: "drop", id: selectedItemId });
+    }
 
     // Owned-item list (right).
     const listX = dollX + slotW + 24;
