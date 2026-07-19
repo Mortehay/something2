@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, SLOTS } from '../inventory.js';
+import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, SLOTS, addItem, removeItem } from '../inventory.js';
 
 const JOINED = {
   itemTypes: [
@@ -45,4 +45,15 @@ it('canEquipClient blocks the off hand while a two-handed weapon is held', () =>
 
 it('SLOTS matches the server paper-doll', () => {
   expect(SLOTS).toEqual(['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2']);
+});
+
+it('addItem appends and removeItem deletes by id', () => {
+  const inv = createInventory();
+  addItem(inv, { id: 'i1', typeId: 3 });
+  expect(inv.items).toHaveLength(1);
+  addItem(inv, { id: 'i1', typeId: 3 }); // dedup: server may echo
+  expect(inv.items).toHaveLength(1);
+  removeItem(inv, 'i1');
+  expect(inv.items).toHaveLength(0);
+  removeItem(inv, 'nope'); // must not throw
 });

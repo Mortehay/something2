@@ -26,6 +26,18 @@ export function typeOf(inv, itemId) {
   return item ? inv.types.get(item.typeId) || null : null;
 }
 
+// Append a granted instance (from a pickup). Dedup by id: the server is the
+// authority and may echo an instance the store already holds.
+export function addItem(inv, item) {
+  if (!item || item.id == null) return;
+  if (inv.items.some((it) => it.id === item.id)) return;
+  inv.items.push({ id: item.id, typeId: item.typeId });
+}
+
+export function removeItem(inv, itemId) {
+  inv.items = inv.items.filter((it) => it.id !== itemId);
+}
+
 export function canEquipClient(inv, itemId, slot) {
   if (!SLOTS.includes(slot)) return false;
   const type = typeOf(inv, itemId);
