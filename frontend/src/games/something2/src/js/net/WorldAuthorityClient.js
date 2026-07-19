@@ -51,7 +51,16 @@ export class WorldAuthorityClient {
         case 'items': this.onItems(msg); break;
         case 'picked': this.onPicked(msg); break;
         case 'dropped': this.onDropped(msg); break;
-        case 'error': this.onError(new Error(msg.message || 'authority error')); break;
+        case 'error': {
+          // Tag so callers can tell a server-issued protocol rejection (e.g.
+          // "unequip it first") apart from a raw transport failure below —
+          // only the former carries a message worth showing the player.
+          const err = new Error(msg.message || 'authority error');
+          err.isServerRejection = true;
+          err.serverMessage = msg.message || null;
+          this.onError(err);
+          break;
+        }
         default: console.warn('WorldAuthorityClient: unknown msg', msg.type);
       }
     });
