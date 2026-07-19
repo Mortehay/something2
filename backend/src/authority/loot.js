@@ -63,4 +63,45 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
   }
 }
 
-module.exports = { rollDrops, commitCreatureDeath, spawnDrops };
+// The single claim path, shared by the keypress and auto-loot. The
+// DELETE ... RETURNING is the race resolution: two players grabbing the same
+// item in one tick both issue it, Postgres serialises them, and exactly one
+// gets rowCount 1. Correct without any in-memory lock — `claiming` only
+// avoids wasted queries.
+async function claimItem(pool, entry, userId, groundItemId) {
+  if (entry.claiming.has(groundItemId)) return null;
+  entry.claiming.add(groundItemId);
+  try {
+    const del = await pool.query(
+      'DELETE FROM world_items WHERE id = $1 RETURNING item_type_id', [groundItemId],
+    );
+    if (del.rowCount !== 1) {
+      entry.world.groundItems.remove(groundItemId); // stale row, evict
+      return null;
+    }
+    const typeId = del.rows[0].item_type_id;
+    // Ordering matters: the world row is already gone, so if this INSERT
+    // throws the item is destroyed rather than duplicated. Losing one drop
+    // is the acceptable failure; duplicating it is not.
+    let instanceId = null;
+    try {
+      const ins = await pool.query(
+        'INSERT INTO player_items (user_id, item_type_id) VALUES ($1, $2) RETURNING id',
+        [userId, typeId],
+      );
+      instanceId = ins.rows[0].id;
+    } catch (err) {
+      console.error('claim lost the item (player_items insert failed):', err);
+      entry.world.groundItems.remove(groundItemId);
+      return null;
+    }
+    entry.world.groundItems.remove(groundItemId);
+    const p = entry.world.getPlayer(userId);
+    if (p && p.inv) p.inv.items.push({ id: instanceId, typeId }); // so a later equip validates without a reload
+    return { id: instanceId, typeId };
+  } finally {
+    entry.claiming.delete(groundItemId);
+  }
+}
+
+module.exports = { rollDrops, commitCreatureDeath, spawnDrops, claimItem };

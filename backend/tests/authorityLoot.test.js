@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { World } = require('../src/authority/world.js');
-const { commitCreatureDeath } = require('../src/authority/loot.js');
+const { commitCreatureDeath, claimItem } = require('../src/authority/loot.js');
 
 // Routes queries by SQL pattern and records every call, so a test can assert
 // that a query NEVER ran — which is the point of the rowCount guard.
@@ -99,4 +99,57 @@ test('removing the rowCount guard would double-drop on two damage sources report
 
   assert.strictEqual(pool.matching(/FROM creature_drops/i).length, 0, 'second finalize must not roll drops');
   assert.strictEqual(entry.world.groundItems.count(), 0);
+});
+
+function armClaimEntry() {
+  const entry = armEntry();
+  entry.claiming = new Set();
+  entry.world.addPlayer('u1', { x: 0, y: 0 }, { items: [], equipment: {} });
+  entry.world.groundItems.add([{ id: 'g1', item_type_id: 7, x: 10, y: 10, expires_at: '2999-01-01T00:00:00Z' }]);
+  return entry;
+}
+
+test('two claims of one item yield exactly one player_items INSERT', async () => {
+  const entry = armClaimEntry();
+  let deletes = 0;
+  const pool = scriptedPool([
+    // First DELETE wins, every later one finds the row already gone. This is
+    // exactly what Postgres does when two sessions race the same row.
+    [/DELETE FROM world_items/i, () => (++deletes === 1
+      ? { rows: [{ item_type_id: 7 }], rowCount: 1 }
+      : { rows: [], rowCount: 0 })],
+    [/INSERT INTO player_items/i, { rows: [{ id: 'inst-1' }], rowCount: 1 }],
+  ]);
+
+  const first = await claimItem(pool, entry, 'u1', 'g1');
+  const second = await claimItem(pool, entry, 'u1', 'g1');
+
+  assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7 });
+  assert.strictEqual(second, null, 'the loser gets nothing');
+  assert.strictEqual(pool.matching(/INSERT INTO player_items/i).length, 1, 'the item is granted exactly once');
+  assert.strictEqual(entry.world.groundItems.get('g1'), null, 'gone from the sim either way');
+});
+
+test('a failed player_items INSERT destroys the item rather than duplicating it', async () => {
+  const entry = armClaimEntry();
+  const pool = scriptedPool([
+    [/DELETE FROM world_items/i, { rows: [{ item_type_id: 7 }], rowCount: 1 }],
+    [/INSERT INTO player_items/i, () => { throw new Error('db down'); }],
+  ]);
+
+  const got = await claimItem(pool, entry, 'u1', 'g1');
+
+  assert.strictEqual(got, null);
+  assert.strictEqual(entry.world.groundItems.get('g1'), null, 'the world row is already gone; do not resurrect it');
+  assert.strictEqual(entry.world.getPlayer('u1').inv.items.length, 0, 'and the player did not get it');
+});
+
+test('a successful claim adds the instance to the in-memory inventory', async () => {
+  const entry = armClaimEntry();
+  const pool = scriptedPool([
+    [/DELETE FROM world_items/i, { rows: [{ item_type_id: 7 }], rowCount: 1 }],
+    [/INSERT INTO player_items/i, { rows: [{ id: 'inst-1' }], rowCount: 1 }],
+  ]);
+  await claimItem(pool, entry, 'u1', 'g1');
+  assert.deepStrictEqual(entry.world.getPlayer('u1').inv.items, [{ id: 'inst-1', typeId: 7 }]);
 });

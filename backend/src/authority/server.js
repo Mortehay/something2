@@ -6,7 +6,8 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { spawnChunkCreatures } = require('../services/mapService');
-const { commitCreatureDeath } = require('./loot');
+const { commitCreatureDeath, claimItem } = require('./loot');
+const { PICKUP_RADIUS } = require('./groundItems');
 
 const MAP_TILE_SIZE = 100;
 
@@ -77,6 +78,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
+          claiming: new Set(),       // ground item ids with a claim in flight (avoids wasted queries)
         };
         worlds.set(worldId, entry);
         return entry;
@@ -342,6 +344,27 @@ function attachAuthority(httpServer, pool, opts = {}) {
           } catch (err) {
             console.error(`${msg.type} failed:`, err);
             send(ws, { type: 'error', message: `${msg.type} failed` });
+          }
+        });
+        return;
+      }
+
+      if (msg.type === 'pickup') {
+        const entry = worlds.get(ws.worldId);
+        if (!entry) return;
+        // Same per-socket serialisation and try/catch as equip: an unhandled
+        // rejection in an async ws handler kills the process on Node 20.
+        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
+          try {
+            const p = entry.world.getPlayer(ws.userId);
+            if (!p) return;
+            const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+            const target = entry.world.groundItems.nearest(cx, cy, PICKUP_RADIUS);
+            if (!target) return; // nothing in range: silent no-op, not an error
+            const got = await claimItem(pool, entry, ws.userId, target.id);
+            if (got) send(ws, { type: 'picked', item: got });
+          } catch (err) {
+            console.error('pickup failed:', err);
           }
         });
         return;
