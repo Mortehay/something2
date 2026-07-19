@@ -207,6 +207,20 @@ test('loadItemTypes actually SELECTs every column it maps', async () => {
   ]) {
     assert.ok(new RegExp(`\\b${col}\\b`).test(sql), `SELECT must name ${col}`);
   }
+  for (const col of ['stackable', 'ammo_type_id', 'aoe_radius']) {
+    assert.ok(sql.includes(col), `loadItemTypes SELECT must name ${col} — a mapped column missing from the SELECT loads as undefined, so ammo silently never depletes and AoE silently never fires`);
+  }
+});
+
+test('loadItemTypes exposes ammo and aoe fields', async () => {
+  const pool = { query: async () => ({ rows: [{
+    id: 1, name: 'bow', category: 'weapon', kind: 'projectile',
+    stackable: false, ammo_type_id: 7, aoe_radius: null,
+  }] }) };
+  const m = await loadItemTypes(pool);
+  assert.equal(m.get(1).stackable, false);
+  assert.equal(m.get(1).ammo_type_id, 7);
+  assert.equal(m.get(1).aoe_radius, null);
 });
 
 // A resource gate only ever "fires" (refuses an attack) if what a weapon

@@ -12,7 +12,7 @@ async function loadItemTypes(pool) {
   const r = await pool.query(
     `SELECT id, name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
             range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element,
-            defense, resistances
+            defense, resistances, stackable, ammo_type_id, aoe_radius
      FROM item_types ORDER BY id ASC`,
   );
   const m = new Map();
@@ -37,6 +37,9 @@ async function loadItemTypes(pool) {
       element: row.element ?? null,
       defense: Number(row.defense ?? 0),
       resistances: row.resistances || {},
+      stackable: row.stackable === true,
+      ammo_type_id: num(row.ammo_type_id),
+      aoe_radius: num(row.aoe_radius),
     });
   }
   return m;
@@ -58,7 +61,7 @@ const STARTING_LOADOUT = ['dagger', 'leather-vest'];
 // A user's owned instances + their paper-doll, both account-wide.
 async function loadInventory(pool, userId) {
   const ir = await pool.query(
-    'SELECT id, item_type_id FROM player_items WHERE user_id = $1 ORDER BY created_at ASC, id ASC',
+    'SELECT id, item_type_id, quantity FROM player_items WHERE user_id = $1 ORDER BY created_at ASC, id ASC',
     [userId],
   );
   const er = await pool.query(
@@ -67,7 +70,10 @@ async function loadInventory(pool, userId) {
   );
   const equipment = {};
   for (const row of er.rows) equipment[row.slot] = row.item_id;
-  return { items: ir.rows.map((r) => ({ id: r.id, typeId: r.item_type_id })), equipment };
+  return {
+    items: ir.rows.map((r) => ({ id: r.id, typeId: r.item_type_id, quantity: Number(r.quantity ?? 1) })),
+    equipment,
+  };
 }
 
 // Grant the starter set to a user who owns nothing. Idempotent: a user with
