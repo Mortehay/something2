@@ -62,6 +62,26 @@ test('snapshot exposes each player equipment map', () => {
   assert.equal(pl.weaponId, undefined, 'weaponId is retired');
 });
 
+// F1: autoLoot must ride the same wire snapshot as hp/mana/equipment so the
+// client mirror can be corrected every tick instead of only agreeing with the
+// server by luck of topology (initChunked happening to reset both to false).
+test('snapshot exposes autoLoot, and it reflects setAutoLoot', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 0, y: 0 }, emptyInv());
+  assert.strictEqual(w.snapshot().players[0].autoLoot, false, 'addPlayer defaults to false');
+
+  w.setAutoLoot('u1', true);
+  assert.strictEqual(w.snapshot().players[0].autoLoot, true, 'snapshot reflects setAutoLoot(true)');
+
+  w.setAutoLoot('u1', false);
+  assert.strictEqual(w.snapshot().players[0].autoLoot, false, 'snapshot reflects setAutoLoot(false)');
+
+  // Strict boolean coercion (setAutoLoot's own contract) must survive the
+  // round trip through snapshot() too — a truthy string must not read as on.
+  w.setAutoLoot('u1', 'true');
+  assert.strictEqual(w.snapshot().players[0].autoLoot, false, 'truthy non-boolean must not enable it');
+});
+
 function fakePool() {
   const calls = [];
   return {

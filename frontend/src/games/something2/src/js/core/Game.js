@@ -81,6 +81,19 @@ export class Game {
         // (used only to render the toggle's current state).
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
+
+        // Transient on-screen toast (Slice 3b fast-follow F3): the server's
+        // rejection frames (equip/drop/etc "error" replies) previously only
+        // hit console.error, so a rejected action produced no in-game
+        // feedback at all. {message, expiresAt} in performance.now() units;
+        // null when nothing is showing. See _showToast / onError below.
+        this.toast = null;
+    }
+
+    // Show `message` for `durationMs`, then let it clear on its own — no
+    // queueing; a newer toast simply replaces whatever was showing.
+    _showToast(message, durationMs = 3000) {
+        this.toast = { message, expiresAt: performance.now() + durationMs };
     }
 
     setEngineClient(engine, localUserId) {
@@ -233,6 +246,7 @@ export class Game {
                 token,
                 onJoined: (msg) => {
                     applyJoined(this.inventory, msg);
+                    this.autoLoot = msg.autoLoot === true;
                     resolve(msg.spawn);
                 },
                 onState: (msg) => this._onWorldState(msg),
@@ -243,7 +257,14 @@ export class Game {
                     removeItem(this.inventory, msg.itemId);
                     if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
                 },
-                onError: (e) => console.error('[authority]', e),
+                onError: (e) => {
+                    console.error('[authority]', e);
+                    // Only a server-issued protocol rejection (type:'error' frame,
+                    // e.g. "unequip it first") is worth surfacing to the player —
+                    // a raw socket failure has no actionable server message and
+                    // would just be noise (and may fire repeatedly).
+                    if (e && e.isServerRejection && e.serverMessage) this._showToast(e.serverMessage);
+                },
                 onClose: () => { this.authorityJoined = false; },
                 onKicked: () => {
                     console.warn('[authority] kicked: signed in elsewhere');
@@ -377,6 +398,12 @@ export class Game {
             this.localMana = mine.mana;
             this.localMaxMana = mine.maxMana;
             applyEquipment(this.inventory, mine.equipment || {});
+            // Server wins: a click sets this.autoLoot optimistically (see
+            // _handleInventoryClick), but every subsequent state frame
+            // corrects it to whatever the server actually holds, so a lost
+            // 'autoloot' send (e.g. socket closed silently) can't leave the
+            // UI reading a value the server never agreed to.
+            this.autoLoot = mine.autoLoot === true;
         }
         if (this.projectiles) this.projectiles.applySnapshot(msg.projectiles || []);
     }
@@ -429,6 +456,9 @@ export class Game {
             this.ctx.fillText('Signed in elsewhere — this session was disconnected.', this.canvas.width / 2, this.canvas.height / 2);
             this.ctx.restore();
         } else if (this.chunked) {
+            // Expire the toast here (once per frame) rather than on a timer,
+            // consistent with how the rest of Game drives state off the loop.
+            if (this.toast && performance.now() >= this.toast.expiresAt) this.toast = null;
             this.renderSystem.renderChunked({
                 player: this.player,
                 camera: this.camera,
@@ -445,6 +475,7 @@ export class Game {
                 selectedItemId: this.inventorySelectedItemId,
                 groundItems: this.groundItems.all(),
                 autoLoot: this.autoLoot,
+                toast: this.toast,
             });
         } else {
             this.renderSystem.render(this.player, this.camera, this.map, this.remotePlayers, this.localUserId);
@@ -491,8 +522,15 @@ export class Game {
         }
 
         if (hit.kind === 'autoloot') {
-            this.autoLoot = !this.autoLoot;
-            if (this.authorityClient) this.authorityClient.sendAutoLoot(this.autoLoot);
+            // Only mirror the flip if the intent actually reached the server.
+            // On a dead socket the send is silently dropped and no later
+            // `state` frame can correct us, so an unconditional flip would
+            // leave the label lying — the exact failure this flag's wire
+            // echo exists to prevent.
+            if (!this.authorityClient) return;
+            if (this.authorityClient.sendAutoLoot(!this.autoLoot)) {
+                this.autoLoot = !this.autoLoot;
+            }
             return;
         }
         if (hit.kind === 'drop') {

@@ -86,7 +86,7 @@ export class RenderSystem {
     player, camera, chunkedMap, remotePlayers, localUserId,
     creatures = [], projectiles = [], mana = null, maxMana = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
-    groundItems = [], autoLoot = false,
+    groundItems = [], autoLoot = false, toast = null,
   }) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -145,6 +145,7 @@ export class RenderSystem {
 
     camera.reset(this.ctx);
     this.renderHud(player, remotePlayers, localUserId, mana, maxMana, weaponName);
+    if (toast) this.renderToast(toast);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
     // pixel space — same space Game hit-tests clicks against).
@@ -152,6 +153,42 @@ export class RenderSystem {
     if (inventoryOpen && inventory) {
       this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, autoLoot);
     }
+  }
+
+  // A small transient toast for server-rejected actions (e.g. "unequip it
+  // first") — the server previously only reached console.error, so a
+  // rejected click produced no in-game feedback at all. Styled like the HUD
+  // box (dark translucent panel, same monospace font); fades over its last
+  // TOAST_FADE_MS rather than popping off abruptly. `toast` is
+  // {message, expiresAt} in performance.now() units, or null/undefined to
+  // draw nothing — the caller (Game) owns clearing it once expired.
+  renderToast(toast) {
+    const TOAST_FADE_MS = 500;
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+    const remaining = toast.expiresAt - now;
+    if (remaining <= 0) return;
+    const alpha = Math.min(1, remaining / TOAST_FADE_MS);
+
+    const text = String(toast.message);
+    this.ctx.save();
+    this.ctx.font = "13px monospace";
+    const textW = this.ctx.measureText(text).width;
+    const boxW = Math.min(GAME_WIDTH - 40, textW + 32);
+    const boxH = 30;
+    const boxX = (GAME_WIDTH - boxW) / 2;
+    const boxY = GAME_HEIGHT - 56;
+
+    this.ctx.globalAlpha = alpha;
+    this.ctx.fillStyle = "rgba(120,20,20,0.75)";
+    this.ctx.fillRect(boxX, boxY, boxW, boxH);
+    this.ctx.strokeStyle = "#ef4444";
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(boxX, boxY, boxW, boxH);
+    this.ctx.fillStyle = "#f5f5f5";
+    this.ctx.textAlign = "center";
+    this.ctx.textBaseline = "middle";
+    this.ctx.fillText(text, GAME_WIDTH / 2, boxY + boxH / 2 + 1);
+    this.ctx.restore();
   }
 
   // A small diamond, coloured by the item type's category. The name is drawn

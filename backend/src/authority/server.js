@@ -309,6 +309,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
             itemTypes: [...entry.world.weapons.values()],
             items: inv.items,
             equipment: inv.equipment,
+            // Server-authoritative: addPlayer always resets this to false, but
+            // read it back off the player rather than hardcoding — the wire
+            // value must always reflect whatever World actually holds, not an
+            // assumption about what addPlayer currently does.
+            autoLoot: entry.world.getPlayer(ws.userId).autoLoot,
           });
         } catch (err) {
           console.error('join failed:', err);

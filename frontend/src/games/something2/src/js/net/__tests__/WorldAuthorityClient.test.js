@@ -54,6 +54,30 @@ it('sendUnequip sends the slot', () => {
   expect(FakeWS.last.sent.find((m) => m.type === 'unequip')).toEqual({ type: 'unequip', slot: 'chest' });
 });
 
+// F3: onError must let callers tell a server-issued protocol rejection
+// (a `type:'error'` frame, e.g. an equip/drop refusal) apart from a raw
+// transport failure, so the UI can show the former without spamming the
+// player for the latter.
+it("a server 'error' frame is tagged as a rejection carrying the server's message", () => {
+  const seen = [];
+  const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', onError: (e) => seen.push(e) });
+  c.connect('w1');
+  FakeWS.last._l.open();
+  FakeWS.last._l.message({ data: JSON.stringify({ type: 'error', message: 'unequip it first' }) });
+  expect(seen).toHaveLength(1);
+  expect(seen[0].isServerRejection).toBe(true);
+  expect(seen[0].serverMessage).toBe('unequip it first');
+});
+
+it('a raw websocket error is NOT tagged as a server rejection', () => {
+  const seen = [];
+  const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', onError: (e) => seen.push(e) });
+  c.connect('w1');
+  FakeWS.last._l.error();
+  expect(seen).toHaveLength(1);
+  expect(seen[0].isServerRejection).toBeUndefined();
+});
+
 it('a kicked message invokes onKicked', () => {
   const seen = [];
   const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', onKicked: (m) => seen.push(m) });
