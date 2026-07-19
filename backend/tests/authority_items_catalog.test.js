@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { loadItemTypes, resolveDefaultWeaponId, SLOTS } = require('../src/authority/items.js');
+const { PLAYER_STAMINA_REGEN, PLAYER_MANA_REGEN } = require('../src/authority/world.js');
 
 function fakePool(rows) {
   return { query: async (sql) => { assert.match(sql, /FROM item_types/i); return { rows }; } };
@@ -100,23 +101,24 @@ function catalogProblems(typesById) {
 // SEED_ROWS mirrors the migration's VALUES lists exactly — the 4 original
 // weapons from 1714440016000_create_weapon_types.js (with stamina_cost
 // backfilled per 1714440019000_weapon_catalog.js) plus the 18 new weapons
-// from 1714440019000_weapon_catalog.js. 22 weapons total. Keep in sync with
+// from 1714440019000_weapon_catalog.js, with stamina_cost rebalanced per
+// 1714440020000_rebalance_stamina.js. 22 weapons total. Keep in sync with
 // the migrations.
 const SEED_ROWS = [
-  // --- original 4, from 1714440016000 (+ stamina backfill from 1714440019000) ---
+  // --- original 4, from 1714440016000 (+ stamina backfill/rebalance) ---
   { id: 1, name: 'dagger', category: 'weapon', kind: 'melee', damage: 8, cooldown: 0.30,
     reach: 80, arc_width: 0.6, range: null, projectile_speed: null, projectile_radius: null,
     pierce: null, mana_cost: 0, stamina_cost: 0, element: null },
   { id: 2, name: 'halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.90,
     reach: 190, arc_width: 1.8, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 8, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 15, element: null },
   { id: 3, name: 'bow', category: 'weapon', kind: 'projectile', damage: 12, cooldown: 0.60,
     reach: null, arc_width: null, range: 700, projectile_speed: 900, projectile_radius: 8,
-    pierce: 1, mana_cost: 0, stamina_cost: 3, element: null },
+    pierce: 1, mana_cost: 0, stamina_cost: 8, element: null },
   { id: 4, name: 'magic-bolt', category: 'weapon', kind: 'projectile', damage: 14, cooldown: 0.70,
     reach: null, arc_width: null, range: 600, projectile_speed: 700, projectile_radius: 12,
     pierce: 1, mana_cost: 15, stamina_cost: 0, element: 'arcane' },
-  // --- 18 new, from 1714440019000 ---
+  // --- 18 new, from 1714440019000 (stamina_cost rebalanced per 1714440020000) ---
   { id: 7, name: 'knife', category: 'weapon', kind: 'melee', damage: 6, cooldown: 0.25,
     reach: 70, arc_width: 0.5, range: null, projectile_speed: null, projectile_radius: null,
     pierce: null, mana_cost: 0, stamina_cost: 0, element: null },
@@ -125,37 +127,37 @@ const SEED_ROWS = [
     pierce: null, mana_cost: 0, stamina_cost: 0, element: null },
   { id: 9, name: 'club', category: 'weapon', kind: 'melee', damage: 10, cooldown: 0.45,
     reach: 85, arc_width: 0.8, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 2, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 6, element: null },
   { id: 10, name: 'short sword', category: 'weapon', kind: 'melee', damage: 11, cooldown: 0.45,
     reach: 100, arc_width: 0.9, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 2, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 6, element: null },
   { id: 11, name: 'mid club', category: 'weapon', kind: 'melee', damage: 14, cooldown: 0.60,
     reach: 115, arc_width: 1.0, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 4, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 9, element: null },
   { id: 12, name: 'long sword', category: 'weapon', kind: 'melee', damage: 15, cooldown: 0.65,
     reach: 140, arc_width: 1.2, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 4, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 9, element: null },
   { id: 13, name: 'morning star', category: 'weapon', kind: 'melee', damage: 17, cooldown: 0.75,
     reach: 130, arc_width: 1.6, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 6, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 12, element: null },
   { id: 14, name: 'two-handed sword', category: 'weapon', kind: 'melee', damage: 22, cooldown: 1.00,
     reach: 170, arc_width: 1.4, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 9, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 18, element: null },
   { id: 15, name: 'scythe', category: 'weapon', kind: 'melee', damage: 20, cooldown: 0.95,
     reach: 175, arc_width: 2.0, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 8, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 16, element: null },
   { id: 16, name: 'pike', category: 'weapon', kind: 'melee', damage: 19, cooldown: 0.85,
     reach: 200, arc_width: 0.5, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 7, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 14, element: null },
   { id: 17, name: 'darts', category: 'weapon', kind: 'projectile', damage: 7, cooldown: 0.35,
     reach: null, arc_width: null, range: 350, projectile_speed: 800, projectile_radius: 6,
-    pierce: 1, mana_cost: 0, stamina_cost: 1, element: null },
+    pierce: 1, mana_cost: 0, stamina_cost: 4, element: null },
   { id: 18, name: 'sling', category: 'weapon', kind: 'projectile', damage: 8, cooldown: 0.50,
     reach: null, arc_width: null, range: 450, projectile_speed: 700, projectile_radius: 8,
-    pierce: 1, mana_cost: 0, stamina_cost: 1, element: null },
+    pierce: 1, mana_cost: 0, stamina_cost: 6, element: null },
   { id: 19, name: 'arbalest', category: 'weapon', kind: 'projectile', damage: 20, cooldown: 1.20,
     reach: null, arc_width: null, range: 850, projectile_speed: 1100, projectile_radius: 8,
-    pierce: 2, mana_cost: 0, stamina_cost: 5, element: null },
+    pierce: 2, mana_cost: 0, stamina_cost: 15, element: null },
   { id: 20, name: 'apprentice staff', category: 'weapon', kind: 'projectile', damage: 10, cooldown: 0.55,
     reach: null, arc_width: null, range: 500, projectile_speed: 650, projectile_radius: 10,
     pierce: 1, mana_cost: 8, stamina_cost: 0, element: 'arcane' },
@@ -204,5 +206,45 @@ test('loadItemTypes actually SELECTs every column it maps', async () => {
     'defense', 'resistances', 'category', 'slot', 'two_handed', 'kind',
   ]) {
     assert.ok(new RegExp(`\\b${col}\\b`).test(sql), `SELECT must name ${col}`);
+  }
+});
+
+// A resource gate only ever "fires" (refuses an attack) if what a weapon
+// costs to swing exceeds what regenerates during its own cooldown. If
+// regen * cooldown >= cost, the cooldown alone always lets the pool
+// fully out-regenerate the spend before the next swing is even legal, and
+// the "insufficient resource" branch becomes unreachable through legal
+// play — the whole gate (and its tests, and the HUD bar) is decorative.
+// This guards PLAYER_STAMINA_REGEN (backend/src/authority/world.js) and
+// every seeded weapon's stamina_cost/cooldown (mirrored from the
+// migrations into SEED_ROWS above) against silently regressing back into
+// that state.
+test('every stamina-costed weapon\'s cost exceeds what regens during its own cooldown', () => {
+  for (const w of SEED_ROWS) {
+    if (!(w.stamina_cost > 0)) continue;
+    const regenPerSwing = PLAYER_STAMINA_REGEN * w.cooldown;
+    assert.ok(
+      w.stamina_cost > regenPerSwing,
+      `${w.name}: cost ${w.stamina_cost} <= regen ${PLAYER_STAMINA_REGEN} x cooldown ${w.cooldown} `
+      + `= ${regenPerSwing}, so the gate can never fire`,
+    );
+  }
+});
+
+// Mirror check for mana on staves/magic weapons. Unlike stamina, the
+// browser-verified behavior is that mana genuinely gates today (measured
+// recast intervals matched a pure regen-wait), and this assertion confirms
+// the seeded catalog is consistent with that: every mana-costed weapon's
+// cost already exceeds regen * cooldown, so — unlike stamina before this
+// change — no rebalance is needed here.
+test('every mana-costed weapon\'s cost exceeds what regens during its own cooldown', () => {
+  for (const w of SEED_ROWS) {
+    if (!(w.mana_cost > 0)) continue;
+    const regenPerCast = PLAYER_MANA_REGEN * w.cooldown;
+    assert.ok(
+      w.mana_cost > regenPerCast,
+      `${w.name}: mana cost ${w.mana_cost} <= regen ${PLAYER_MANA_REGEN} x cooldown ${w.cooldown} `
+      + `= ${regenPerCast}, so the mana gate can never fire`,
+    );
   }
 });

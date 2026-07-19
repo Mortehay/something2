@@ -208,7 +208,7 @@ test('stamina regenerates and clamps to max', () => {
   assert.strictEqual(p.stamina, p.maxStamina);
   p.stamina = 50;
   w.tick(1);
-  assert.strictEqual(p.stamina, 62, '12 per second');
+  assert.strictEqual(p.stamina, 60, '10 per second');
   p.stamina = p.maxStamina - 1;
   w.tick(1);
   assert.strictEqual(p.stamina, p.maxStamina, 'clamps, never exceeds max');

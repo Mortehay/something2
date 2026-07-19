@@ -13,7 +13,7 @@ const PLAYER_MAX_HP = 100;
 const PLAYER_MAX_MANA = 100;
 const PLAYER_MANA_REGEN = 10; // per second
 const PLAYER_MAX_STAMINA = 100;
-const PLAYER_STAMINA_REGEN = 12; // per second
+const PLAYER_STAMINA_REGEN = 10; // per second
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function sign(v) { return v > 0.3 ? 1 : v < -0.3 ? -1 : 0; }
