@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
 
-const { app, __setPool } = require('../src/index.js');
+const { app, __setPool, validateItemType } = require('../src/index.js');
 
 // A pool mock whose query() dispatches on the SQL text. `handlers` is an array
 // of [regex, (params) => ({ rows }|Promise)] pairs, tried in order.
@@ -126,6 +126,30 @@ test('PUT /api/item-types/:id rejects armor with a stray non-null kind (400, not
   });
   assert.equal(res.status, 400);
   assert.match(res.body.error, /kind/i);
+});
+
+test('rejects a negative stamina_cost', () => {
+  const err = validateItemType({ name: 'x', category: 'weapon', kind: 'melee', reach: 10, arc_width: 1, stamina_cost: -1 });
+  assert.match(err, /stamina_cost/i);
+});
+
+test('rejects a non-numeric stamina_cost', () => {
+  const err = validateItemType({ name: 'x', category: 'weapon', kind: 'melee', reach: 10, arc_width: 1, stamina_cost: 'lots' });
+  assert.match(err, /stamina_cost/i);
+});
+
+test('accepts a valid stamina_cost', () => {
+  assert.strictEqual(
+    validateItemType({ name: 'x', category: 'weapon', kind: 'melee', reach: 10, arc_width: 1, stamina_cost: 5 }),
+    null,
+  );
+});
+
+test('accepts an absent stamina_cost (defaults server-side)', () => {
+  assert.strictEqual(
+    validateItemType({ name: 'x', category: 'weapon', kind: 'melee', reach: 10, arc_width: 1 }),
+    null,
+  );
 });
 
 test('POST /api/players/:userId/items grants an item instance', async () => {

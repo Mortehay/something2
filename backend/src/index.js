@@ -286,6 +286,11 @@ function validateItemType(b) {
   } else {
     if (b.slot == null || b.defense == null) return 'armor needs slot and defense';
   }
+  if (b.stamina_cost != null) {
+    if (typeof b.stamina_cost !== 'number' || !Number.isFinite(b.stamina_cost) || b.stamina_cost < 0) {
+      return 'stamina_cost must be a non-negative finite number';
+    }
+  }
   return null;
 }
 
@@ -307,12 +312,12 @@ app.post('/api/item-types', async (req, res) => {
     const result = await pool.query(
       `INSERT INTO item_types
         (name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
-         range, projectile_speed, projectile_radius, pierce, mana_cost, element, defense, resistances, icon)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+         range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element, defense, resistances, icon)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
-       b.mana_cost ?? 0, b.element ?? null, b.defense ?? null,
+       b.mana_cost ?? 0, b.stamina_cost ?? 0, b.element ?? null, b.defense ?? null,
        JSON.stringify(b.resistances ?? {}), b.icon ?? null],
     );
     res.status(201).json(result.rows[0]);
@@ -331,13 +336,13 @@ app.put('/api/item-types/:id', async (req, res) => {
       `UPDATE item_types SET
         name=$1, category=$2, slot=$3, two_handed=$4, kind=$5, damage=$6, cooldown=$7,
         reach=$8, arc_width=$9, range=$10, projectile_speed=$11, projectile_radius=$12,
-        pierce=$13, mana_cost=$14, element=$15, defense=$16, resistances=$17, icon=$18,
+        pierce=$13, mana_cost=$14, stamina_cost=$15, element=$16, defense=$17, resistances=$18, icon=$19,
         updated_at=now()
-       WHERE id=$19 RETURNING *`,
+       WHERE id=$20 RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
-       b.mana_cost ?? 0, b.element ?? null, b.defense ?? null,
+       b.mana_cost ?? 0, b.stamina_cost ?? 0, b.element ?? null, b.defense ?? null,
        JSON.stringify(b.resistances ?? {}), b.icon ?? null, req.params.id],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
@@ -821,4 +826,4 @@ if (require.main === module) {
   console.log('Authority WS attached at /authority');
 }
 
-module.exports = { app, __setSpriteGen, __setPool };
+module.exports = { app, __setSpriteGen, __setPool, validateItemType };
