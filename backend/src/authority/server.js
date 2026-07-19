@@ -6,7 +6,7 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { spawnChunkCreatures } = require('../services/mapService');
-const { commitCreatureDeath, claimItem } = require('./loot');
+const { commitCreatureDeath, claimItem, dropItem } = require('./loot');
 const { PICKUP_RADIUS } = require('./groundItems');
 
 const MAP_TILE_SIZE = 100;
@@ -374,6 +374,23 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const entry = worlds.get(ws.worldId);
         // Strict boolean — a truthy string from the wire must not enable it.
         if (entry) entry.world.setAutoLoot(ws.userId, msg.on === true);
+        return;
+      }
+
+      if (msg.type === 'drop') {
+        const entry = worlds.get(ws.worldId);
+        if (!entry) return;
+        if (typeof msg.itemId !== 'string') return; // wire hygiene: ids are strings
+        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
+          try {
+            const r = await dropItem(pool, entry, ws.userId, msg.itemId, { ttlMs: groundItemTtlMs });
+            if (r.ok) send(ws, { type: 'dropped', itemId: msg.itemId });
+            else send(ws, { type: 'error', message: r.reason });
+          } catch (err) {
+            console.error('drop failed:', err);
+            send(ws, { type: 'error', message: 'drop failed' });
+          }
+        });
         return;
       }
 

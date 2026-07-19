@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { World } = require('../src/authority/world.js');
-const { commitCreatureDeath, claimItem } = require('../src/authority/loot.js');
+const { commitCreatureDeath, claimItem, dropItem } = require('../src/authority/loot.js');
 
 // Routes queries by SQL pattern and records every call, so a test can assert
 // that a query NEVER ran — which is the point of the rowCount guard.
@@ -211,4 +211,54 @@ test('a successful claim adds the instance to the in-memory inventory', async ()
   ]);
   await claimItem(pool, entry, 'u1', 'g1');
   assert.deepStrictEqual(entry.world.getPlayer('u1').inv.items, [{ id: 'inst-1', typeId: 7 }]);
+});
+
+function armDropEntry(equipment = {}) {
+  const entry = armEntry();
+  entry.world.addPlayer('u1', { x: 300, y: 400 }, { items: [{ id: 'i1', typeId: 7 }], equipment });
+  return entry;
+}
+
+test('dropping an equipped item is rejected and touches no table', async () => {
+  const entry = armDropEntry({ main_hand: 'i1' });
+  const pool = scriptedPool();
+
+  const r = await dropItem(pool, entry, 'u1', 'i1', { ttlMs: 1000 });
+
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /unequip/i);
+  assert.strictEqual(pool.matching(/DELETE FROM player_items/i).length, 0, 'must not delete the instance');
+  assert.strictEqual(pool.matching(/INSERT INTO world_items/i).length, 0, 'must not spawn a ground item');
+  assert.strictEqual(entry.world.getPlayer('u1').inv.items.length, 1, 'still owned');
+});
+
+test("dropping another user's item deletes nothing and spawns nothing", async () => {
+  const entry = armDropEntry();
+  // The user_id predicate matches no row -> rowCount 0.
+  const pool = scriptedPool([[/DELETE FROM player_items/i, { rows: [], rowCount: 0 }]]);
+
+  const r = await dropItem(pool, entry, 'u1', 'not-mine', { ttlMs: 1000 });
+
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(pool.matching(/INSERT INTO world_items/i).length, 0);
+});
+
+test('a successful drop spawns a ground item at the player centre and removes the instance', async () => {
+  const entry = armDropEntry();
+  const pool = scriptedPool([
+    [/DELETE FROM player_items/i, { rows: [{ item_type_id: 7 }], rowCount: 1 }],
+    [/INSERT INTO world_items/i, (p) => ({
+      rows: [{ id: 'g9', item_type_id: p[1], x: p[2], y: p[3], expires_at: '2999-01-01T00:00:00Z' }],
+      rowCount: 1,
+    })],
+  ]);
+
+  const r = await dropItem(pool, entry, 'u1', 'i1', { ttlMs: 1000 });
+
+  assert.strictEqual(r.ok, true);
+  const p = entry.world.getPlayer('u1');
+  const ins = pool.matching(/INSERT INTO world_items/i)[0];
+  assert.deepStrictEqual(ins.params.slice(0, 4), ['w1', 7, p.x + p.width / 2, p.y + p.height / 2]);
+  assert.strictEqual(entry.world.groundItems.count(), 1);
+  assert.strictEqual(p.inv.items.length, 0, 'no longer owned');
 });

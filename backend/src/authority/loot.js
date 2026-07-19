@@ -110,4 +110,35 @@ async function claimItem(pool, entry, userId, groundItemId) {
   }
 }
 
-module.exports = { rollDrops, commitCreatureDeath, spawnDrops, claimItem };
+async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000 } = {}) {
+  const p = entry.world.getPlayer(userId);
+  if (!p || !p.inv) return { ok: false, reason: 'no player' };
+
+  // Guard: dropping an equipped instance would delete the row while a
+  // player_equipment row still references it, leaving a dangling paper-doll
+  // entry.
+  if (Object.values(p.inv.equipment).includes(itemId)) {
+    return { ok: false, reason: 'unequip it first' };
+  }
+
+  // The user_id predicate IS the ownership check — a forged itemId naming
+  // someone else's item deletes nothing.
+  const del = await pool.query(
+    'DELETE FROM player_items WHERE id = $1 AND user_id = $2 RETURNING item_type_id',
+    [itemId, userId],
+  );
+  if (del.rowCount !== 1) return { ok: false, reason: 'you do not own that item' };
+
+  const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+  const ins = await pool.query(
+    `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at)
+     VALUES ($1, $2, $3, $4, now() + ($5::int * interval '1 millisecond'))
+     RETURNING id, item_type_id, x, y, expires_at`,
+    [entry.worldId, del.rows[0].item_type_id, cx, cy, ttlMs],
+  );
+  entry.world.groundItems.add(ins.rows);
+  p.inv.items = p.inv.items.filter((it) => it.id !== itemId);
+  return { ok: true, item: ins.rows[0] };
+}
+
+module.exports = { rollDrops, commitCreatureDeath, spawnDrops, claimItem, dropItem };
