@@ -376,7 +376,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
             // ammo, and fall back to the sync path if it now needs none.
             const ammoTypeId = g.weapon.ammo_type_id;
             if (ammoTypeId != null && !(await consumeAmmo(pool, ws.userId, ammoTypeId))) {
-              send(ws, { type: 'noammo' }); // no cooldown consumed
+              // The type id is carried so the client can zero ITS displayed
+              // count for exactly this ammo type. Without it the HUD keeps
+              // rendering whatever it last believed while the server refuses
+              // every shot, and the client would have to guess which type was
+              // refused from its own equipment state — which can already have
+              // moved on. A refusal is the server stating there is none of
+              // this type left; say which type.
+              send(ws, { type: 'noammo', item_type_id: ammoTypeId }); // no cooldown consumed
               return;
             }
             const { killedCreatureIds } = cur.world.attack(ws.userId, ax, ay);

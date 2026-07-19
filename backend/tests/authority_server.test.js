@@ -613,7 +613,15 @@ test('firing with no ammo sends noammo and leaves the cooldown untouched', async
   await h.sendAttack(1, 0);
   assert.equal(h.player._attackCd, 0,
     'an ammo denial must not consume the cooldown, matching the mana/stamina rule');
-  assert.ok(h.sent.some((m) => m.type === 'noammo'), 'the client is told it is out of ammo');
+  const noammo = h.sent.find((m) => m.type === 'noammo');
+  assert.ok(noammo, 'the client is told it is out of ammo');
+  // The refusal must name the ammo type. It is the client's only authoritative
+  // signal that this type is at zero — without it the HUD keeps rendering its
+  // last believed count while every shot is being refused, and the client
+  // would have to guess the type from equipment state that may already have
+  // moved on.
+  assert.equal(noammo.item_type_id, AMMO_TYPE_ID,
+    'noammo must carry the ammo type it refused, so the client can zero exactly that count');
   h.close();
 });
 

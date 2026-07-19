@@ -10,8 +10,28 @@ function qtyOf(item) {
   return Number.isFinite(q) && q > 0 ? q : 1;
 }
 
+// `ammoCounts` holds server-pushed authoritative ammo totals keyed by item
+// type id, kept DELIBERATELY OUTSIDE `items`. An earlier version wrote the
+// server's count back into `items` as a synthetic row with a fabricated id
+// (`ammo:62`), and that id leaked straight into the inventory panel's click
+// targets — so dropping a stack you had fired sent an id the server has never
+// heard of and came back "drop failed". `items` holds real server instances
+// and nothing else; anything the UI sends back on the wire therefore has an
+// id the server issued. See core/ammo.js for how the two are reconciled.
 export function createInventory() {
-  return { types: new Map(), items: [], equipment: {} };
+  return { types: new Map(), items: [], equipment: {}, ammoCounts: new Map() };
+}
+
+// Drop the server-pushed count cached for one item type.
+//
+// The rule this enforces: a pushed count is only ever a stand-in for a list
+// of stacks the client has not been re-sent yet. The moment the server tells
+// us something concrete about that type's stacks — a fresh join snapshot, a
+// pickup, a drop — the item list is the better source and the cached number
+// must go, or the HUD and the panel would render two different totals for the
+// same arrows.
+function forgetAmmoCount(inv, typeId) {
+  if (inv.ammoCounts && typeId != null) inv.ammoCounts.delete(typeId);
 }
 
 export function applyJoined(inv, msg) {
@@ -22,6 +42,9 @@ export function applyJoined(inv, msg) {
   // "one unit" instead of silently contributing 0 to that sum.
   inv.items = (msg.items || []).map((i) => ({ id: i.id, typeId: i.typeId, quantity: qtyOf(i) }));
   inv.equipment = { ...(msg.equipment || {}) };
+  // A join snapshot is the whole truth about every stack the player holds, so
+  // every cached ammo count is now stale by definition.
+  inv.ammoCounts = new Map();
   return inv;
 }
 
@@ -41,10 +64,13 @@ export function addItem(inv, item) {
   if (!item || item.id == null) return;
   if (inv.items.some((it) => it.id === item.id)) return;
   inv.items.push({ id: item.id, typeId: item.typeId, quantity: qtyOf(item) });
+  forgetAmmoCount(inv, item.typeId);
 }
 
 export function removeItem(inv, itemId) {
+  const gone = inv.items.find((it) => it.id === itemId);
   inv.items = inv.items.filter((it) => it.id !== itemId);
+  if (gone) forgetAmmoCount(inv, gone.typeId);
 }
 
 export function canEquipClient(inv, itemId, slot) {

@@ -273,7 +273,16 @@ export class Game {
                     removeItem(this.inventory, msg.itemId);
                     if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
                 },
-                onNoAmmo: () => { this.noAmmoUntil = performance.now() + NO_AMMO_FLASH_MS; },
+                // A refusal is authoritative information, not just a cue to
+                // flash: the server has stated it found no stack of this type
+                // left, so the displayed count goes to 0 too. Flashing without
+                // correcting the number left the HUD insisting "arrow: 1"
+                // while every shot was being refused. The count comes from the
+                // frame, never computed locally.
+                onNoAmmo: (msg) => {
+                    this.noAmmoUntil = performance.now() + NO_AMMO_FLASH_MS;
+                    applyAmmoCount(this.inventory, msg && msg.item_type_id, 0);
+                },
                 onAmmo: (msg) => applyAmmoCount(this.inventory, msg.item_type_id, msg.count),
                 onError: (e) => {
                     console.error('[authority]', e);
