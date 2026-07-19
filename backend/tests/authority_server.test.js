@@ -492,6 +492,155 @@ test('a second join on the same socket is rejected (no free re-heal / no ghost)'
   ws.close(); handle.close(); server.close();
 });
 
+// ---------------------------------------------------------------------------
+// Ammo: the attack handler's ordering invariant (canAttack → consume → attack)
+// ---------------------------------------------------------------------------
+
+const AMMO_TYPE_ID = 7;
+
+// A weapon type row with every optional column nulled out, so a test that
+// supplies a partial weapon (e.g. a melee one with no ammo) genuinely gets
+// ammo_type_id: null rather than inheriting the ammo bow's.
+const BLANK_WEAPON = {
+  id: 9, name: 'harness-weapon', category: 'weapon', slot: 'main_hand', two_handed: false,
+  kind: null, damage: 0, cooldown: 0, reach: null, arc_width: null, range: null,
+  projectile_speed: null, projectile_radius: null, pierce: null, mana_cost: 0,
+  stamina_cost: 0, element: null, defense: null, resistances: null,
+  stackable: false, ammo_type_id: null, aoe_radius: null,
+};
+
+// The default harness weapon: a bow that eats ammo and costs stamina, with a
+// long cooldown so `_attackCd > 0` after a successful shot is not a race with
+// the 20ms tick loop's cooldown decay.
+const AMMO_BOW = {
+  kind: 'projectile', damage: 12, cooldown: 5, range: 2000, projectile_speed: 4000,
+  projectile_radius: 40, pierce: 1, stamina_cost: 5, ammo_type_id: AMMO_TYPE_ID,
+};
+
+// Boot a world with one joined player holding `opts.weapon` in main_hand, and
+// route the real consumeAmmo() UPDATE through `opts.onConsume`.
+//
+// Nothing here reimplements the handler: frames go over a real websocket into
+// the real attachAuthority message handler, and the consume decision is made
+// at the pool boundary, so src/authority/ammo.js runs for real too. The only
+// thing the test injects is whether the DB had a unit to spend.
+async function mkAttackHarness(opts = {}) {
+  const weapon = { ...BLANK_WEAPON, ...(opts.weapon || AMMO_BOW) };
+  const onConsume = opts.onConsume || (() => true);
+  const base = fakePool();
+  const pool = {
+    query: async (sql, params) => {
+      // Must be matched BEFORE the generic /FROM player_items/ branch: the
+      // consume statement mentions player_items in its subquery too.
+      if (/UPDATE player_items SET quantity/i.test(sql)) {
+        return onConsume(params)
+          ? { rowCount: 1, rows: [{ id: 'ammo1', quantity: 5 }] }
+          : { rowCount: 0, rows: [] };
+      }
+      if (/FROM item_types/i.test(sql)) return { rows: [weapon] };
+      if (/FROM player_items/i.test(sql)) {
+        return { rows: [{ id: 'i9', item_type_id: 9, quantity: 1 },
+                        { id: 'ammo1', item_type_id: AMMO_TYPE_ID, quantity: 5 }] };
+      }
+      if (/FROM player_equipment/i.test(sql)) return { rows: [{ slot: 'main_hand', item_id: 'i9' }] };
+      return base.query(sql, params);
+    },
+  };
+
+  const { url, handle, server } = await bootWith(pool);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  const sent = [];
+  ws.on('message', (data) => {
+    const m = JSON.parse(data);
+    if (m.type !== 'state' && m.type !== 'creatures') sent.push(m);
+  });
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const world = handle.worlds.get('w1').world;
+  const player = world.getPlayer('1');
+  assert.ok(player, 'harness player joined');
+  assert.equal(world.canAttack('1').weapon.id, 9, 'the harness weapon is the active one');
+
+  return {
+    ws, handle, server, world, player, sent,
+    // Send attack frames and wait until the server has finished processing
+    // them. The barrier is an unequip of a bogus slot: it is a pure no-op that
+    // still chains onto ws._opChain, so its reply cannot arrive until every
+    // attack queued before it has fully run (and the synchronous melee path is
+    // long done by the time the barrier frame is even parsed).
+    async sendAttack(ax = 1, ay = 0, times = 1) {
+      for (let i = 0; i < times; i++) ws.send(JSON.stringify({ type: 'attack', ax, ay }));
+      ws.send(JSON.stringify({ type: 'unequip', slot: '__barrier__' }));
+      const err = await nextMsg(ws, 'error');
+      assert.match(err.message, /unknown slot/i, 'barrier resolved');
+    },
+    close() { ws.close(); handle.close(); server.close(); },
+  };
+}
+
+test('an attack refused for cooldown does not consume ammo', async () => {
+  const spent = [];
+  const h = await mkAttackHarness({ onConsume: () => { spent.push(1); return true; } });
+  h.player._attackCd = 1; // cooldown running
+  await h.sendAttack(1, 0);
+  assert.equal(spent.length, 0,
+    'ammo was spent on an attack that was refused for cooldown — the consume must come AFTER canAttack');
+  h.close();
+});
+
+test('an attack refused for stamina does not consume ammo', async () => {
+  const spent = [];
+  const h = await mkAttackHarness({ onConsume: () => { spent.push(1); return true; } });
+  h.player.stamina = 0;
+  await h.sendAttack(1, 0);
+  assert.equal(spent.length, 0, 'ammo was spent on an attack refused for stamina');
+  h.close();
+});
+
+test('firing with no ammo sends noammo and leaves the cooldown untouched', async () => {
+  const h = await mkAttackHarness({ onConsume: () => false });
+  await h.sendAttack(1, 0);
+  assert.equal(h.player._attackCd, 0,
+    'an ammo denial must not consume the cooldown, matching the mana/stamina rule');
+  assert.ok(h.sent.some((m) => m.type === 'noammo'), 'the client is told it is out of ammo');
+  h.close();
+});
+
+test('a weapon with no ammo_type_id never touches player_items', async () => {
+  let consumed = false;
+  const h = await mkAttackHarness({
+    weapon: { kind: 'melee', reach: 80, arc_width: 1, damage: 5, cooldown: 0.3 },
+    onConsume: () => { consumed = true; return true; },
+  });
+  await h.sendAttack(1, 0);
+  assert.equal(consumed, false, 'the ammo-free hot path must not hit the DB');
+  h.close();
+});
+
+test('a successful ammo attack spends exactly one unit and fires', async () => {
+  let count = 0;
+  const h = await mkAttackHarness({ onConsume: () => { count += 1; return true; } });
+  await h.sendAttack(1, 0);
+  assert.equal(count, 1);
+  assert.ok(h.player._attackCd > 0, 'a successful attack starts the cooldown');
+  h.close();
+});
+
+test('two attack frames in one batch spend only one unit', async () => {
+  // Both frames are parsed (and would both be gated) before either chained
+  // callback runs, so a gate captured at parse time is already stale by the
+  // time the second consume happens: the second shot would burn a unit and
+  // then be refused by attack() for the cooldown the first one started. The
+  // handler must re-gate inside the chain, immediately before consuming.
+  let count = 0;
+  const h = await mkAttackHarness({ onConsume: () => { count += 1; return true; } });
+  await h.sendAttack(1, 0, 2);
+  assert.equal(count, 1, 'the cooldown-refused second shot must not consume a unit');
+  h.close();
+});
+
 test('a kicked socket closing mid-join does not tear down the new session', async () => {
   // Delay the inventory (player_items) query so the new session's join
   // handler genuinely sits mid-await while the kicked (old) socket's real

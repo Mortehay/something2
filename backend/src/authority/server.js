@@ -7,6 +7,7 @@ const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoado
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { spawnChunkCreatures } = require('../services/mapService');
 const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
+const { consumeAmmo } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
 
 const MAP_TILE_SIZE = 100;
@@ -332,10 +333,58 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
       if (msg.type === 'attack') {
         const entry = worlds.get(ws.worldId);
-        if (entry) {
-          const { killedCreatureIds } = entry.world.attack(ws.userId, finiteOr(msg.ax, 0), finiteOr(msg.ay, 0));
+        if (!entry) return;
+        const ax = finiteOr(msg.ax, 0), ay = finiteOr(msg.ay, 0);
+
+        // Cheap synchronous reject: cooldown / mana / stamina. Nothing has
+        // been spent, and a refused attack must not consume the cooldown.
+        const gate = entry.world.canAttack(ws.userId);
+        if (!gate.ok) return;
+
+        // Ammo-free weapons (all melee, all staves, darts) keep the fully
+        // synchronous path: no DB round trip on the hot path.
+        if (gate.weapon.ammo_type_id == null) {
+          const { killedCreatureIds } = entry.world.attack(ws.userId, ax, ay);
           for (const id of new Set(killedCreatureIds)) onCreatureDeath(entry, id);
+          return;
         }
+
+        // Ammo is spent LAST, after every other gate has passed, so a refused
+        // attack can never destroy a unit. Serialized on the op chain for the
+        // same reason as equip/pickup/drop, and with the same try/catch: an
+        // unhandled rejection out of this async handler kills the process.
+        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
+          try {
+            // Everything is re-read INSIDE the chain. The `entry`/`gate`
+            // captured above were computed when the frame was parsed, which
+            // can be arbitrarily long before this callback runs — and the
+            // stale gate is exactly the bug that loses arrows. Two attack
+            // frames in one socket read are both parsed (and both gated)
+            // before either chained callback runs, so both would see
+            // _attackCd === 0; the second would then consume a unit and hand
+            // it to an attack() that refuses for the cooldown the first one
+            // just started. Re-gating here keeps canAttack → consume →
+            // attack a true sequence under every interleaving. The world
+            // entry can also have been swapped/evicted (rejoin, world
+            // teardown) across the await, so re-read that too.
+            const cur = worlds.get(ws.worldId);
+            if (!cur) return;
+            const g = cur.world.canAttack(ws.userId);
+            if (!g.ok) return; // nothing spent
+            // The equipped weapon may have changed too (an equip frame can be
+            // chained between the two): always spend the CURRENT weapon's
+            // ammo, and fall back to the sync path if it now needs none.
+            if (g.weapon.ammo_type_id != null
+                && !(await consumeAmmo(pool, ws.userId, g.weapon.ammo_type_id))) {
+              send(ws, { type: 'noammo' }); // no cooldown consumed
+              return;
+            }
+            const { killedCreatureIds } = cur.world.attack(ws.userId, ax, ay);
+            for (const id of new Set(killedCreatureIds)) onCreatureDeath(cur, id);
+          } catch (err) {
+            console.error('attack/ammo failed:', err);
+          }
+        });
         return;
       }
 
@@ -536,6 +585,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
   }, itemSweepMs);
 
   return {
+    // Live world registry (worldId -> { world, sockets, row }). Exposed for
+    // introspection/tests that need to assert on authoritative state the wire
+    // does not carry (e.g. a player's attack cooldown). Read-only by
+    // convention — the server owns every mutation.
+    worlds,
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);
