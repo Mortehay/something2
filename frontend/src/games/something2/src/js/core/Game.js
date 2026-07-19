@@ -528,7 +528,10 @@ export class Game {
             if (key === 'g' && this.state === 'playing') {
                 // Chunked mode: g loots. Legacy single-map mode keeps the grid toggle.
                 if (this.chunked) {
-                    if (!e.repeat && this.authorityClient) this.authorityClient.sendPickup();
+                    // Match the mouse handler's rule: no game-world intents
+                    // fire while the inventory panel is open and consuming
+                    // input.
+                    if (!e.repeat && this.authorityClient && !this.inventoryOpen) this.authorityClient.sendPickup();
                 } else {
                     this.map.toggleGrid();
                 }

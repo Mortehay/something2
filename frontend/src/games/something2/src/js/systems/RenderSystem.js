@@ -116,7 +116,15 @@ export class RenderSystem {
     // or they would render on top of entities they are actually behind.
     const drawables = RenderSystem.buildDrawables(player, { entities: creatures }, remotePlayers);
     for (const gi of groundItems) {
-      drawables.push({ kind: "grounditem", ref: gi, depth: depthKey(gi.x, gi.y) });
+      // Every other drawable's depth key is computed from its raw stored
+      // x/y, which are TOP-LEFT corners (drawCreature/drawEntity add w/2,h/2
+      // to reach the centre themselves). Ground items instead store their
+      // x/y as the drop's CENTRE (see GroundItemManager), so to sort on the
+      // same origin as everything else we have to subtract the half-extent
+      // back out here. Do not "simplify" this to depthKey(gi.x, gi.y) —
+      // that reintroduces up to a tile's worth of depth error against
+      // players/creatures.
+      drawables.push({ kind: "grounditem", ref: gi, depth: depthKey(gi.x - gi.width / 2, gi.y - gi.height / 2) });
     }
     drawables.sort((a, b) => a.depth - b.depth);
     for (const d of drawables) {
@@ -150,11 +158,14 @@ export class RenderSystem {
   // only when the player is close enough to actually loot it, so a busy field
   // of drops does not become a wall of text.
   drawGroundItem(item, inventory, player) {
-    // Same convention the projectile draw uses: worldToScreen then lift by
-    // half a tile so the marker sits on the diamond rather than at its top
-    // corner.
+    // worldToScreen returns the diamond's CENTRE (see the tile draw above,
+    // which draws its vertices at s.y +/- halfH / s.x +/- halfW around this
+    // same point) — so no lift is needed to sit the marker on the tile.
+    // Unlike here, the projectile draw below intentionally lifts by
+    // ISO_TILE_H/2, because projectiles fly at chest height rather than
+    // resting on the ground.
     const s = worldToScreen(item.x, item.y);
-    const dx = s.x, dy = s.y - ISO_TILE_H / 2;
+    const dx = s.x, dy = s.y;
     const type = inventory && inventory.types ? inventory.types.get(item.typeId) : null;
     const color = type && type.category === "armor" ? "#7ec8e3" : "#e3c27e";
     const r = 9;
