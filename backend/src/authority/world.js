@@ -186,6 +186,7 @@ class World {
       players: [...this.players.values()].map((p) => ({
         id: p.userId, x: p.x, y: p.y, facing: p.facing,
         hp: p.hp, maxHp: p.maxHp, mana: p.mana, maxMana: p.maxMana, equipment: p.inv ? p.inv.equipment : {},
+        autoLoot: p.autoLoot,
       })),
       projectiles: this.projectiles.snapshot(),
     };

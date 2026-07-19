@@ -45,9 +45,11 @@ test('ackSeq tracks the latest input seq; snapshot has the right shape', () => {
   // Widened in Task 5 (weapon dispatch/mana/projectiles): snapshot now also
   // carries mana/maxMana/equipment per player (mirrors the hp/maxHp precedent).
   // Task 6: weaponId retired in favor of equipment (inventory-driven weapon).
+  // F1 fast-follow: autoLoot added so the client mirror can be corrected from
+  // every state frame, not just `joined`.
   assert.deepEqual(
     Object.keys(snap.players[0]).sort(),
-    ['equipment', 'facing', 'hp', 'id', 'mana', 'maxHp', 'maxMana', 'x', 'y'],
+    ['autoLoot', 'equipment', 'facing', 'hp', 'id', 'mana', 'maxHp', 'maxMana', 'x', 'y'],
   );
   assert.equal(snap.players[0].id, 'u1');
 });

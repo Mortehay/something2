@@ -233,6 +233,7 @@ export class Game {
                 token,
                 onJoined: (msg) => {
                     applyJoined(this.inventory, msg);
+                    this.autoLoot = msg.autoLoot === true;
                     resolve(msg.spawn);
                 },
                 onState: (msg) => this._onWorldState(msg),
@@ -377,6 +378,12 @@ export class Game {
             this.localMana = mine.mana;
             this.localMaxMana = mine.maxMana;
             applyEquipment(this.inventory, mine.equipment || {});
+            // Server wins: a click sets this.autoLoot optimistically (see
+            // _handleInventoryClick), but every subsequent state frame
+            // corrects it to whatever the server actually holds, so a lost
+            // 'autoloot' send (e.g. socket closed silently) can't leave the
+            // UI reading a value the server never agreed to.
+            this.autoLoot = mine.autoLoot === true;
         }
         if (this.projectiles) this.projectiles.applySnapshot(msg.projectiles || []);
     }
