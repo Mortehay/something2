@@ -492,8 +492,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (entry.world.isEmpty()) continue;
       entry.world.tick(dt);
       entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
-      const killedByProjectiles = entry.world.tickProjectiles(dt);
+      const { killedCreatureIds: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
       for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);
+      // Stashed for this tick's broadcast (below). REPLACED, not appended, so
+      // an unconsumed stash can never grow without bound.
+      entry.pendingDetonations = detonations;
       entry.world.resolveDeaths();
       // Auto-loot: fire claims off-tick. The tick is synchronous and must never
       // await; `claiming` de-dups the repeats this produces across ticks while

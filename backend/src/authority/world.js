@@ -194,12 +194,15 @@ class World {
     return { killedCreatureIds: [] };
   }
 
+  // Returns the whole step result — { killedCreatureIds, detonations } — so
+  // AoE blasts reach the broadcast. Returning only the killed ids (as this
+  // used to) silently drops every detonation.
   tickProjectiles(dt) {
     return this.projectiles.step(dt, {
       creatures: this.creatures,
       players: [...this.players.values()],
       map: this.map,
-    }).killedCreatureIds;
+    });
   }
 
   // Respawn any player at <=0 hp (single place, after all damage sources).

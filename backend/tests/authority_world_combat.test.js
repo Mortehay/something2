@@ -137,9 +137,10 @@ test('tickProjectiles returns killed creature ids', () => {
   w.creatures.addCreatures([{ id: 'c1', type: 'wolf', x: 40, y: 8, hp: 1, facing: 'S', color: '#f00' }]); // center 64,32
   w.attack('u1', 1, 0);                            // aim east from center (32,32)
   // Advance until the fast projectile reaches the creature.
-  let killed = [];
-  for (let i = 0; i < 20 && killed.length === 0; i++) killed = w.tickProjectiles(0.02);
-  assert.deepEqual(killed, ['c1']);
+  let out = { killedCreatureIds: [], detonations: [] };
+  for (let i = 0; i < 20 && out.killedCreatureIds.length === 0; i++) out = w.tickProjectiles(0.02);
+  assert.deepEqual(out.killedCreatureIds, ['c1']);
+  assert.deepEqual(out.detonations, [], 'a bow is not an AoE weapon');
 });
 
 test('snapshot includes mana/maxMana/equipment per player and a projectiles array', () => {

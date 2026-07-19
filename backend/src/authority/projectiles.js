@@ -4,12 +4,13 @@
 // only by weapon data.
 
 const { applyDamage, NO_MITIGATION } = require('./damage');
+const { hasLineOfSight } = require('./weapons');
 
 // Sub-step resolution for terrain sampling, shared with the melee
-// line-of-sight walk in weapons.js. Must stay smaller than the thinnest
-// wall and than the smallest projectile capture radius, or a fast mover
-// (or a long swing) can sample straight past an obstacle.
-const MAX_SUB = 16;
+// line-of-sight walk in weapons.js. Defined in subStep.js (see the note there
+// on why it cannot live in either consumer) and re-exported here, which is
+// where callers have always imported it from.
+const { MAX_SUB } = require('./subStep');
 
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
@@ -31,15 +32,60 @@ class ProjectileSim {
       damage: weapon.damage,
       radius: weapon.projectile_radius,
       pierceLeft: weapon.pierce,
+      // null = today's point-collision projectile, unchanged. Normalized here
+      // so a 0/negative/non-finite radius can never reach the falloff division.
+      aoeRadius: weapon.aoe_radius > 0 ? weapon.aoe_radius : null,
       element: weapon.element ?? null,
       hitIds: new Set(), // 'c:<id>' / 'p:<id>' already hit by this projectile
     });
     return id;
   }
 
+  // Resolve an AoE blast at (bx,by). Damages every creature and every
+  // non-owner player within `radius`, scaled linearly from full damage at the
+  // centre to zero at the edge.
+  //
+  // Each candidate needs line of sight FROM THE BLAST POINT: without it AoE
+  // reintroduces the melee-through-walls exploit closed in 3b-3a, with a
+  // bigger hitbox. Reuses the same helper and the same shared MAX_SUB.
+  //
+  // The caster is exempt, matching the existing rule that a projectile never
+  // collides with its owner — one rule, not two.
+  _detonate(p, bx, by, { creatureList, creatures, players, map }, killedCreatureIds) {
+    const r = p.aoeRadius;
+    for (const c of creatureList) {
+      const half = c.width / 2;
+      const cx = c.x + half, cy = c.y + c.height / 2;
+      const d = Math.hypot(cx - bx, cy - by);
+      if (d >= r) continue;
+      if (!hasLineOfSight(map, bx, by, cx, cy)) continue;
+      // Creatures carry no mitigation, so falloff is the only scaling.
+      if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r))) {
+        killedCreatureIds.push(c.id);
+      }
+    }
+    for (const pl of players) {
+      if (pl.userId === p.ownerId) continue;
+      const half = pl.width / 2;
+      const px = pl.x + half, py = pl.y + pl.height / 2;
+      const d = Math.hypot(px - bx, py - by);
+      if (d >= r) continue;
+      if (!hasLineOfSight(map, bx, by, px, py)) continue;
+      // Falloff scales the RAW damage; applyDamage still applies defense and
+      // resistances on top. It floors at 1, so an edge hit still registers.
+      applyDamage(pl, p.damage * (1 - d / r), p.element, pl.mit || NO_MITIGATION);
+    }
+    return { x: bx, y: by, radius: r, element: p.element };
+  }
+
   // Advance every projectile one tick; resolve terrain, creature, and player
   // collisions. Returns the creature ids killed this step (for the caller to
-  // DELETE).
+  // DELETE) and the AoE blasts that went off (for the caller to broadcast).
+  //
+  // An AoE projectile detonates on its FIRST contact of ANY kind — terrain, a
+  // creature, a player, or running out of range — instead of applying the
+  // single-target hit. Exactly one detonation per projectile: every path that
+  // sets `dead` for an impact detonates, and `dead` ends the walk.
   //
   // Movement is SUB-STEPPED in <=MAX_SUB px increments so a fast projectile
   // cannot tunnel through a target within a single tick: a bow (900 px/s) moves
@@ -48,8 +94,10 @@ class ProjectileSim {
   // weapon's `pierce` (targets it can hit); it despawns once that reaches 0.
   step(dt, { creatures, players, map }) {
     const killedCreatureIds = [];
+    const detonations = [];
     const survivors = [];
     const creatureList = creatures.all(); // hoisted: creatures don't move during this step
+    const ctx = { creatureList, creatures, players, map };
     for (const p of this.projectiles) {
       const speed = Math.hypot(p.vx, p.vy);
       let dead = !(speed > 0) || !Number.isFinite(speed) || !Number.isFinite(p.x) || !Number.isFinite(p.y);
@@ -63,7 +111,10 @@ class ProjectileSim {
         p.remaining -= stepDist; moveLeft -= stepDist;
 
         // Terrain: walls stop projectiles.
-        if (!map.isWalkable(p.x, p.y)) { dead = true; break; }
+        if (!map.isWalkable(p.x, p.y)) {
+          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, killedCreatureIds));
+          dead = true; break;
+        }
 
         // Creatures.
         for (const c of creatureList) {
@@ -73,6 +124,10 @@ class ProjectileSim {
           const cx = c.x + half, cy = c.y + c.height / 2;
           const rr = p.radius + half;
           if (dist2(p.x, p.y, cx, cy) <= rr * rr) {
+            if (p.aoeRadius) {
+              detonations.push(this._detonate(p, p.x, p.y, ctx, killedCreatureIds));
+              dead = true; break;
+            }
             p.hitIds.add(key);
             if (creatures.damageCreatureById(c.id, p.damage)) killedCreatureIds.push(c.id);
             p.pierceLeft -= 1;
@@ -90,6 +145,10 @@ class ProjectileSim {
           const px = pl.x + half, py = pl.y + pl.height / 2;
           const rr = p.radius + half;
           if (dist2(p.x, p.y, px, py) <= rr * rr) {
+            if (p.aoeRadius) {
+              detonations.push(this._detonate(p, p.x, p.y, ctx, killedCreatureIds));
+              dead = true; break;
+            }
             p.hitIds.add(key);
             applyDamage(pl, p.damage, p.element, pl.mit || NO_MITIGATION);
             p.pierceLeft -= 1;
@@ -98,13 +157,18 @@ class ProjectileSim {
         }
         if (dead) break;
 
-        if (p.remaining <= 0) { dead = true; break; }
+        // Out of range counts as an impact: a fireball that reaches the end of
+        // its flight without touching anything still explodes.
+        if (p.remaining <= 0) {
+          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, killedCreatureIds));
+          dead = true; break;
+        }
       }
 
       if (!dead) survivors.push(p);
     }
     this.projectiles = survivors;
-    return { killedCreatureIds };
+    return { killedCreatureIds, detonations };
   }
 
   snapshot() {
