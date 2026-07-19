@@ -4,7 +4,7 @@
 // creature's CURRENT chunk (chunkOf), never its spawn chunk.
 const { resolveMove } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
-const { inArc } = require('./weapons');
+const { inArc, hasLineOfSight } = require('./weapons');
 const { applyDamage, NO_MITIGATION } = require('./damage');
 
 const DIRS = [
@@ -136,6 +136,8 @@ class CreatureSim {
     for (const [id, c] of this.creatures) {
       const cc = center(c);
       if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth)) continue;
+      // Terrain blocks the swing, exactly as it blocks a projectile.
+      if (!hasLineOfSight(this.map, ox, oy, cc.x, cc.y)) continue;
       c.hp -= damage;
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }

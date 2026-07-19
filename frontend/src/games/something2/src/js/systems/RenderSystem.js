@@ -79,12 +79,13 @@ export class RenderSystem {
 
     camera.reset(this.ctx);
 
-    this.renderHud(player, remotePlayers, localUserId);
+    this.renderHud({ player, remotePlayers, localUserId });
   }
 
   renderChunked({
     player, camera, chunkedMap, remotePlayers, localUserId,
     creatures = [], projectiles = [], mana = null, maxMana = null,
+    stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
     groundItems = [], autoLoot = false, toast = null,
   }) {
@@ -144,7 +145,7 @@ export class RenderSystem {
     }
 
     camera.reset(this.ctx);
-    this.renderHud(player, remotePlayers, localUserId, mana, maxMana, weaponName);
+    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName });
     if (toast) this.renderToast(toast);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
@@ -324,7 +325,7 @@ export class RenderSystem {
     }
   }
 
-  renderHud(player, remotePlayers, localUserId, mana = null, maxMana = null, weaponName = null) {
+  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, stamina = null, maxStamina = null, weaponName = null }) {
     const remoteCount = remotePlayers ? remotePlayers.size : 0;
     const lines = [
       `Players online: ${1 + remoteCount}`,
@@ -333,6 +334,9 @@ export class RenderSystem {
     ];
     if (mana != null && maxMana != null) {
       lines.push(`MP: ${Math.round(mana)} / ${Math.round(maxMana)}`);
+    }
+    if (stamina != null && maxStamina != null) {
+      lines.push(`SP: ${Math.round(stamina)} / ${Math.round(maxStamina)}`);
     }
     if (weaponName) {
       lines.push(`Weapon: ${weaponName}`);

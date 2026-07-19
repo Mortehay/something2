@@ -67,6 +67,8 @@ export class Game {
         // projectile render store.
         this.localMana = null;
         this.localMaxMana = null;
+        this.localStamina = null;
+        this.localMaxStamina = null;
         this.projectiles = null;
 
         // Inventory / paper-doll (Slice 3b-2a). `inventory` mirrors the
@@ -397,6 +399,8 @@ export class Game {
         if (mine) {
             this.localMana = mine.mana;
             this.localMaxMana = mine.maxMana;
+            this.localStamina = mine.stamina;
+            this.localMaxStamina = mine.maxStamina;
             applyEquipment(this.inventory, mine.equipment || {});
             // Server wins: a click sets this.autoLoot optimistically (see
             // _handleInventoryClick), but every subsequent state frame
@@ -469,6 +473,8 @@ export class Game {
                 projectiles: this.projectiles ? this.projectiles.all() : [],
                 mana: this.localMana,
                 maxMana: this.localMaxMana,
+                stamina: this.localStamina,
+                maxStamina: this.localMaxStamina,
                 weaponName: this._resolveWeaponName(),
                 inventory: this.inventory,
                 inventoryOpen: this.inventoryOpen,

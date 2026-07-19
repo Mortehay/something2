@@ -304,6 +304,7 @@ const WEAPON_DEFAULTS = {
   cooldown: 0.5,
   two_handed: false,
   mana_cost: 0,
+  stamina_cost: 0,
   reach: 60,
   arc_width: 0.5,
   range: '',
@@ -340,6 +341,7 @@ function formFromType(t) {
     cooldown: t.cooldown ?? 0,
     two_handed: !!t.two_handed,
     mana_cost: t.mana_cost ?? 0,
+    stamina_cost: t.stamina_cost ?? 0,
     reach: t.reach ?? '',
     arc_width: t.arc_width ?? '',
     range: t.range ?? '',
@@ -393,6 +395,7 @@ function buildPayload(f) {
       cooldown: num(f.cooldown, 0),
       two_handed: !!f.two_handed,
       mana_cost: num(f.mana_cost, 0),
+      stamina_cost: num(f.stamina_cost, 0),
       reach: f.kind === 'melee' ? num(f.reach) : null,
       arc_width: f.kind === 'melee' ? num(f.arc_width) : null,
       range: f.kind === 'projectile' ? num(f.range) : null,
@@ -416,6 +419,7 @@ function buildPayload(f) {
     cooldown: 0,
     two_handed: false,
     mana_cost: 0,
+    stamina_cost: 0,
     reach: null,
     arc_width: null,
     range: null,
@@ -558,6 +562,7 @@ function ItemTypesAdmin() {
                   <StatItem><span>Damage</span>{type.damage}</StatItem>
                   <StatItem><span>Cooldown</span>{type.cooldown}s</StatItem>
                   <StatItem><span>Mana Cost</span>{type.mana_cost}</StatItem>
+                  <StatItem><span>Stamina Cost</span>{type.stamina_cost}</StatItem>
                 </EntityStats>
                 <EntityStats>
                   {type.kind === 'melee' ? (
@@ -664,6 +669,10 @@ function ItemTypesAdmin() {
                     <FormGroup>
                       <label>Mana Cost</label>
                       <input type="number" step="1" value={formData.mana_cost} onChange={e => setFormData({ ...formData, mana_cost: e.target.value })} />
+                    </FormGroup>
+                    <FormGroup>
+                      <label>Stamina Cost</label>
+                      <input type="number" step="1" value={formData.stamina_cost} onChange={e => setFormData({ ...formData, stamina_cost: e.target.value })} />
                     </FormGroup>
                   </div>
 

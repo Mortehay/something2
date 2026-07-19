@@ -5,6 +5,12 @@
 
 const { applyDamage, NO_MITIGATION } = require('./damage');
 
+// Sub-step resolution for terrain sampling, shared with the melee
+// line-of-sight walk in weapons.js. Must stay smaller than the thinnest
+// wall and than the smallest projectile capture radius, or a fast mover
+// (or a long swing) can sample straight past an obstacle.
+const MAX_SUB = 16;
+
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
 class ProjectileSim {
@@ -44,7 +50,6 @@ class ProjectileSim {
     const killedCreatureIds = [];
     const survivors = [];
     const creatureList = creatures.all(); // hoisted: creatures don't move during this step
-    const MAX_SUB = 16; // px; must be < the smallest capture radius (radius+targetHalf)
     for (const p of this.projectiles) {
       const speed = Math.hypot(p.vx, p.vy);
       let dead = !(speed > 0) || !Number.isFinite(speed) || !Number.isFinite(p.x) || !Number.isFinite(p.y);
@@ -109,4 +114,4 @@ class ProjectileSim {
   count() { return this.projectiles.length; }
 }
 
-module.exports = { ProjectileSim };
+module.exports = { ProjectileSim, MAX_SUB };

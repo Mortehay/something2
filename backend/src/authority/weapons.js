@@ -1,6 +1,8 @@
 // Weapon geometry + aim helpers, shared by the attack resolver, the creature
 // arc hit-test, and their tests. Pure (no DB); the catalog loader is in items.js.
 
+const { MAX_SUB } = require('./projectiles');
+
 // Unit vector for an 8-way facing string ('n','s','e','w' and their combos,
 // e.g. 'se'). Used as the aim fallback when the client sends a zero vector.
 function vectorFromFacing(facing) {
@@ -37,4 +39,23 @@ function inArc(ox, oy, nx, ny, tx, ty, reach, arcWidth) {
   return dot >= Math.cos(arcWidth / 2);
 }
 
-module.exports = { normalizeAim, inArc, vectorFromFacing };
+// True when nothing blocks the straight line between two world points.
+// Walks in <=MAX_SUB px steps, the same resolution projectiles use for
+// terrain, so melee and ranged obey ONE rule. The endpoints are not tested:
+// an attacker standing in a doorway, or a target clipping a wall corner,
+// must not be self-blocking.
+function hasLineOfSight(map, x0, y0, x1, y1) {
+  if (!map || typeof map.isWalkable !== 'function') return true;
+  const dx = x1 - x0, dy = y1 - y0;
+  const dist = Math.hypot(dx, dy);
+  if (!Number.isFinite(dist) || dist <= MAX_SUB) return true; // point-blank
+  const steps = Math.ceil(dist / MAX_SUB);
+  const sx = dx / steps, sy = dy / steps;
+  // Start at 1 and stop before `steps` so both endpoints are excluded.
+  for (let i = 1; i < steps; i++) {
+    if (!map.isWalkable(x0 + sx * i, y0 + sy * i)) return false;
+  }
+  return true;
+}
+
+module.exports = { normalizeAim, inArc, vectorFromFacing, hasLineOfSight };

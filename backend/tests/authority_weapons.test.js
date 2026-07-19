@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { normalizeAim, inArc } = require('../src/authority/weapons.js');
+const { normalizeAim, inArc, hasLineOfSight } = require('../src/authority/weapons.js');
+const { MAX_SUB } = require('../src/authority/projectiles');
 
 test('normalizeAim normalizes a non-zero vector to unit length', () => {
   const { nx, ny } = normalizeAim(3, 4, 's');
@@ -53,3 +54,66 @@ test('inArc: a target exactly at the origin counts as a hit', () => {
 });
 
 function round(v) { return { nx: Math.round(v.nx), ny: Math.round(v.ny) }; }
+
+// Map stub: everything walkable except an x-range forming a vertical wall.
+function wallMap(wallXMin, wallXMax) {
+  return {
+    chunkSize: 8,
+    isWalkable: (x) => !(x >= wallXMin && x <= wallXMax),
+    speedAt: () => 1,
+    getChunk: () => [],
+  };
+}
+
+test('MAX_SUB is shared, not duplicated', () => {
+  assert.strictEqual(typeof MAX_SUB, 'number');
+  assert.ok(MAX_SUB > 0 && MAX_SUB <= 16, 'must stay small enough to not skip a wall');
+});
+
+test('clear terrain has line of sight', () => {
+  const map = wallMap(10000, 10001); // wall far away, irrelevant
+  assert.strictEqual(hasLineOfSight(map, 0, 0, 200, 0), true);
+});
+
+test('a wall between the two points blocks line of sight', () => {
+  const map = wallMap(90, 110);
+  assert.strictEqual(hasLineOfSight(map, 0, 0, 200, 0), false);
+});
+
+test('a wall BEYOND the target does not block', () => {
+  const map = wallMap(300, 320);
+  assert.strictEqual(hasLineOfSight(map, 0, 0, 200, 0), true);
+});
+
+test('point-blank is always visible', () => {
+  const map = wallMap(-1000, 1000); // standing inside a blocked tile
+  assert.strictEqual(hasLineOfSight(map, 50, 50, 50, 50), true);
+});
+
+test('line of sight is symmetric', () => {
+  const map = wallMap(90, 110);
+  assert.strictEqual(hasLineOfSight(map, 0, 0, 200, 0), hasLineOfSight(map, 200, 0, 0, 0));
+});
+
+test('a diagonal wall crossing is blocked', () => {
+  const map = wallMap(90, 110);
+  assert.strictEqual(hasLineOfSight(map, 0, 0, 200, 200), false);
+});
+
+// hasLineOfSight documents that BOTH endpoints are excluded from the walk, so
+// an attacker standing in a doorway (ORIGIN on a blocked tile) or a target
+// clipping a wall corner (TARGET on a blocked tile) must not be self-blocking.
+// Nothing previously asserted that; a loop bounds change to include either
+// endpoint left the whole suite green. Both cases below use a wall that is
+// exactly one point wide, positioned only under the endpoint under test, with
+// a distance well beyond MAX_SUB so the point-blank early return can't mask
+// the loop bounds.
+test('hasLineOfSight is not self-blocked when the ORIGIN sits on a blocked tile', () => {
+  const map = wallMap(100, 100); // only the origin's own tile is blocked
+  assert.strictEqual(hasLineOfSight(map, 100, 0, 300, 0), true);
+});
+
+test('hasLineOfSight is not self-blocked when the TARGET sits on a blocked tile', () => {
+  const map = wallMap(300, 300); // only the target's own tile is blocked
+  assert.strictEqual(hasLineOfSight(map, 0, 0, 300, 0), true);
+});
