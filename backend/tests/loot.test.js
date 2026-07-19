@@ -1,6 +1,23 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { rollDrops } = require('../src/authority/loot');
+const { rollDrops, dropItem, claimItem } = require('../src/authority/loot');
+const { World } = require('../src/authority/world');
+
+// Minimal armed entry: one player 'u1' holding item 'i1' (item_type_id 7),
+// plus the `claiming` set claimItem needs. Mirrors authorityLoot.test.js's
+// armDropEntry/armClaimEntry setup, kept local here since this file only
+// needs it for the two stack-quantity cases below.
+function mkEntry() {
+  const map = { chunkSize: 8, isWalkable: () => true, speedAt: () => 1, getChunk: () => [] };
+  const entry = {
+    worldId: 'w1',
+    world: new World(map, new Map(), null, 8),
+    creatureTypeIds: new Map(),
+    claiming: new Set(),
+  };
+  entry.world.addPlayer('u1', { x: 300, y: 400 }, { items: [{ id: 'i1', typeId: 7 }], equipment: {} });
+  return entry;
+}
 
 // Deterministic rng returning a scripted sequence.
 function seq(...vals) { let i = 0; return () => (i < vals.length ? vals[i++] : 0); }
@@ -95,4 +112,36 @@ test('rng closer to 1 never yields fewer items than rng closer to 0, even above 
   const high = rollDrops(rows, seq(0, 0.999999));
   assert.ok(high.length >= low.length, `expected high-rng roll (${high.length}) >= low-rng roll (${low.length})`);
   assert.ok(low.length <= 100 && high.length <= 100);
+});
+
+test('dropping a stack of N spawns one ground item of quantity N', async () => {
+  // The DELETE returns the dropped row's quantity; the INSERT must carry it.
+  // Without this a stack of 40 arrows drops as 1 and destroys 39.
+  const seen = [];
+  const pool = { query: async (sql, params) => {
+    seen.push({ sql, params });
+    if (/delete\s+from\s+player_items/i.test(sql)) {
+      return { rowCount: 1, rows: [{ item_type_id: 7, quantity: 40 }] };
+    }
+    return { rowCount: 1, rows: [{ id: 'g1', item_type_id: 7, x: 0, y: 0, quantity: 40 }] };
+  } };
+  const entry = mkEntry();   // existing helper
+  const r = await dropItem(pool, entry, 'u1', 'i1');
+  assert.equal(r.ok, true);
+  const ins = seen.find((c) => /insert\s+into\s+world_items/i.test(c.sql));
+  assert.ok(ins.sql.includes('quantity'), 'the world_items INSERT must name quantity');
+  assert.ok(ins.params.includes(40), 'the dropped stack size must reach the INSERT');
+});
+
+test('claiming a stack grants the full quantity', async () => {
+  let sql = '';
+  const pool = { query: async (q) => {
+    sql = q;
+    return { rowCount: 1, rows: [{ id: 'i9', item_type_id: 7, quantity: 40 }] };
+  } };
+  const entry = mkEntry();
+  entry.world.addPlayer('u1', { x: 0, y: 0 });
+  const r = await claimItem(pool, entry, 'u1', 'g1');
+  assert.equal(r.quantity, 40);
+  assert.ok(sql.includes('quantity'), 'the claim CTE must carry quantity across');
 });
