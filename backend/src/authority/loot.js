@@ -1,6 +1,8 @@
 // Drop-table rolling. Pure and rng-injectable so drops are deterministic under
 // test; the caller supplies the rows and performs the INSERTs.
 
+const { CREATURE_SIZE } = require('./creatures');
+
 // Upper bound on a single row's rolled quantity. The DB only constrains
 // min_qty <= max_qty (CHECK (min_qty >= 1 AND max_qty >= min_qty)) — nothing
 // stops a bad catalog row (min_qty and/or max_qty) from being huge, which
@@ -50,12 +52,19 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
     'SELECT item_type_id, chance, min_qty, max_qty FROM creature_drops WHERE entity_type_id = $1',
     [entityTypeId],
   );
+  // dead.x/dead.y are world_creatures' stored position, which is the
+  // creature's TOP-LEFT corner (creatures.js center() adds half its
+  // CREATURE_SIZE box) — but pickup measures from the player's CENTRE. Spawn
+  // the drop at the corpse's centre so it isn't offset from where the
+  // creature visibly died.
+  const dropX = dead.x + CREATURE_SIZE / 2;
+  const dropY = dead.y + CREATURE_SIZE / 2;
   for (const itemTypeId of rollDrops(dr.rows, rng)) {
     const ins = await pool.query(
       `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at)
        VALUES ($1, $2, $3, $4, now() + ($5::int * interval '1 millisecond'))
        RETURNING id, item_type_id, x, y, expires_at`,
-      [entry.worldId, itemTypeId, dead.x, dead.y, ttlMs],
+      [entry.worldId, itemTypeId, dropX, dropY, ttlMs],
     );
     // Straight into the sim so it appears in the next AOI broadcast rather than
     // waiting for a chunk reload.
@@ -63,38 +72,35 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
   }
 }
 
-// The single claim path, shared by the keypress and auto-loot. The
-// DELETE ... RETURNING is the race resolution: two players grabbing the same
-// item in one tick both issue it, Postgres serialises them, and exactly one
-// gets rowCount 1. Correct without any in-memory lock — `claiming` only
+// The single claim path, shared by the keypress and auto-loot. One
+// statement does the DELETE ... RETURNING and the player_items INSERT
+// together via a CTE, so Postgres commits or rolls back both as a unit —
+// there is no window where the world row is gone but the player_items row
+// doesn't exist yet (or vice versa). rowCount === 1 means THIS call both
+// deleted the world_items row AND granted it; rowCount 0 means it lost the
+// race (another claim, or the expiry sweep, already removed the row) and
+// nothing was granted. Correct without any in-memory lock — `claiming` only
 // avoids wasted queries.
+//
+// NOTE: the query is not wrapped in a try/catch, so a DB-level failure (e.g.
+// a dropped connection) rejects out of this function. server.js's `pickup`
+// handler catches it; any future auto-loot caller must too.
 async function claimItem(pool, entry, userId, groundItemId) {
   if (entry.claiming.has(groundItemId)) return null;
   entry.claiming.add(groundItemId);
   try {
-    const del = await pool.query(
-      'DELETE FROM world_items WHERE id = $1 RETURNING item_type_id', [groundItemId],
+    const r = await pool.query(
+      `WITH d AS (DELETE FROM world_items WHERE id = $1 RETURNING item_type_id)
+       INSERT INTO player_items (user_id, item_type_id)
+       SELECT $2, item_type_id FROM d
+       RETURNING id, item_type_id`,
+      [groundItemId, userId],
     );
-    if (del.rowCount !== 1) {
+    if (r.rowCount !== 1) {
       entry.world.groundItems.remove(groundItemId); // stale row, evict
       return null;
     }
-    const typeId = del.rows[0].item_type_id;
-    // Ordering matters: the world row is already gone, so if this INSERT
-    // throws the item is destroyed rather than duplicated. Losing one drop
-    // is the acceptable failure; duplicating it is not.
-    let instanceId = null;
-    try {
-      const ins = await pool.query(
-        'INSERT INTO player_items (user_id, item_type_id) VALUES ($1, $2) RETURNING id',
-        [userId, typeId],
-      );
-      instanceId = ins.rows[0].id;
-    } catch (err) {
-      console.error('claim lost the item (player_items insert failed):', err);
-      entry.world.groundItems.remove(groundItemId);
-      return null;
-    }
+    const { id: instanceId, item_type_id: typeId } = r.rows[0];
     entry.world.groundItems.remove(groundItemId);
     const p = entry.world.getPlayer(userId);
     if (p && p.inv) p.inv.items.push({ id: instanceId, typeId }); // so a later equip validates without a reload
