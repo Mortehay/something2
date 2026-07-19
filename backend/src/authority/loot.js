@@ -3,10 +3,11 @@
 
 // Upper bound on a single row's rolled quantity. The DB only constrains
 // min_qty <= max_qty (CHECK (min_qty >= 1 AND max_qty >= min_qty)) — nothing
-// stops a bad catalog row from setting max_qty to a billion, which would push
-// a billion entries into `out` and hang/OOM the process. Applied when
-// computing `max`, not to min_qty, so a legitimately large min_qty still
-// clamps to something finite rather than throwing.
+// stops a bad catalog row (min_qty and/or max_qty) from being huge, which
+// would push a huge number of entries into `out` and hang/OOM the process.
+// Applied to the final rolled quantity (not to `min`/`max` individually), so
+// both an oversized max_qty AND an oversized min_qty clamp to something
+// finite, and rng is still monotonic (a higher rng never yields fewer items).
 const MAX_DROP_QTY = 100;
 
 // Roll each drop row independently. Returns one item_type_id per unit of
@@ -19,8 +20,8 @@ function rollDrops(dropRows, rng = Math.random) {
     if (!Number.isFinite(chance) || chance <= 0) continue;
     if (rng() >= chance) continue;
     const min = Math.max(1, Number(row.min_qty) || 1);
-    const max = Math.min(MAX_DROP_QTY, Math.max(min, Number(row.max_qty) || min));
-    const qty = min + Math.floor(rng() * (max - min + 1));
+    const max = Math.max(min, Number(row.max_qty) || min);
+    const qty = Math.min(MAX_DROP_QTY, min + Math.floor(rng() * (max - min + 1)));
     for (let i = 0; i < qty; i++) out.push(row.item_type_id);
   }
   return out;

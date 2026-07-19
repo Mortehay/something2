@@ -81,10 +81,13 @@ test('removing the rowCount guard would double-drop on two damage sources report
   // attempt on an already-deleted row cannot roll drops at all, by scripting
   // the second call's DELETE to behave the way Postgres actually behaves:
   // rowCount 0, empty rows. If the `r.rowCount !== 1` guard in loot.js were
-  // ever weakened (e.g. to `!r.rows.length` on a query that still returns a
-  // row, or removed outright so `r.rows[0]` is read unconditionally), this
-  // test fails — either by throwing (rows[0] undefined) or by issuing the
-  // creature_drops lookup it must not issue.
+  // removed outright so `r.rows[0]` is read unconditionally, this test
+  // fails — either by throwing (rows[0] undefined) or by issuing the
+  // creature_drops lookup it must not issue. It does NOT prove anything
+  // about weakening the guard to `!r.rows.length`: for DELETE ... RETURNING,
+  // rowCount === rows.length always, so this mock's empty rows/rowCount pair
+  // makes that weakening behave identically here (verified: swapping in
+  // `!r.rows.length` still passes all 4 tests in this file).
   const entry = armEntry();
   const pool = scriptedPool([
     [/DELETE FROM world_creatures/i, { rows: [], rowCount: 0 }],
