@@ -59,3 +59,20 @@ test('removePlayer + isEmpty', () => {
   w.removePlayer('u1');
   assert.equal(w.isEmpty(), true);
 });
+
+test('world exposes a ground item sim sized to the chunk', () => {
+  const w = new World(stubMap(), new Map(), null, 32);
+  assert.strictEqual(w.groundItems.chunkSize, 32);
+  assert.strictEqual(w.groundItems.count(), 0);
+});
+
+test('autoLoot defaults off and toggles strictly', () => {
+  const w = new World(stubMap(), new Map(), null, 64);
+  w.addPlayer('u1', { x: 0, y: 0 });
+  assert.strictEqual(w.getPlayer('u1').autoLoot, false);
+  w.setAutoLoot('u1', true);
+  assert.strictEqual(w.getPlayer('u1').autoLoot, true);
+  w.setAutoLoot('u1', 'yes'); // non-boolean -> false, never truthy-coerced
+  assert.strictEqual(w.getPlayer('u1').autoLoot, false);
+  w.setAutoLoot('nobody', true); // unknown player must not throw
+});
