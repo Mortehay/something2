@@ -76,7 +76,11 @@ export class RenderSystem {
     this.renderHud(player, remotePlayers, localUserId);
   }
 
-  renderChunked(player, camera, chunkedMap, remotePlayers, localUserId, creatures = [], projectiles = [], mana = null, maxMana = null, weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null) {
+  renderChunked({
+    player, camera, chunkedMap, remotePlayers, localUserId,
+    creatures = [], projectiles = [], mana = null, maxMana = null,
+    weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
+  }) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     camera.apply(this.ctx);

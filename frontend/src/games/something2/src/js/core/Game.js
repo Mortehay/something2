@@ -414,12 +414,21 @@ export class Game {
             this.ctx.fillText('Signed in elsewhere — this session was disconnected.', this.canvas.width / 2, this.canvas.height / 2);
             this.ctx.restore();
         } else if (this.chunked) {
-            this.renderSystem.renderChunked(
-                this.player, this.camera, this.chunkedMap, this.remotePlayers, this.localUserId,
-                this.creatures.all(), this.projectiles ? this.projectiles.all() : [],
-                this.localMana, this.localMaxMana, this._resolveWeaponName(),
-                this.inventory, this.inventoryOpen, this.inventorySelectedItemId,
-            );
+            this.renderSystem.renderChunked({
+                player: this.player,
+                camera: this.camera,
+                chunkedMap: this.chunkedMap,
+                remotePlayers: this.remotePlayers,
+                localUserId: this.localUserId,
+                creatures: this.creatures.all(),
+                projectiles: this.projectiles ? this.projectiles.all() : [],
+                mana: this.localMana,
+                maxMana: this.localMaxMana,
+                weaponName: this._resolveWeaponName(),
+                inventory: this.inventory,
+                inventoryOpen: this.inventoryOpen,
+                selectedItemId: this.inventorySelectedItemId,
+            });
         } else {
             this.renderSystem.render(this.player, this.camera, this.map, this.remotePlayers, this.localUserId);
         }
