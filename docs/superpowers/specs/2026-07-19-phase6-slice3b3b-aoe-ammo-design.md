@@ -99,6 +99,32 @@ rather than a silent negative, so the invariant is enforced by Postgres rather t
 remembering to check it at every call site. The default of 1 means every existing row and
 every existing INSERT (loot drops, starting loadout, admin grants) keeps working unchanged.
 
+### `world_items` — quantity
+
+`world_items` gains the same `quantity integer NOT NULL DEFAULT 1 CHECK (quantity > 0)`.
+Without it, dropping a stack of 40 arrows would either lose 39 or spawn 40 ground items.
+The default of 1 keeps every existing drop path working untouched.
+
+### Multiple stacks are allowed, and this is deliberate
+
+A player may end up holding two separate stacks of the same ammo type — pick up 20 arrows
+while already holding 15 and the result is two rows, not one of 35.
+
+Merging them on claim was considered and **rejected**. A race-free merge needs a unique
+constraint on `(user_id, item_type_id)`, which is illegal here: a player may legitimately
+own two daggers. Without that constraint, two concurrent claims both find no existing stack
+and both insert anyway — so the merge would not even achieve the invariant it exists for,
+while requiring changes to the `claimItem` CTE that 3b-2b's contested-grab race test was
+built around.
+
+Instead, **the consume statement is made correct for any number of stacks** (the
+single-row subquery above), and multiple stacks become a cosmetic wrinkle rather than a
+correctness problem. The HUD sums quantity across stacks of the ammo type. `loot.js` is
+untouched by this slice.
+
+This is the cheaper invariant: one query is careful, instead of every write path
+coordinating.
+
 ### Migration ordering
 
 The ammo item rows must be inserted before the weapons that reference them, because
@@ -164,9 +190,20 @@ The handler in `server.js` becomes, in order:
 
 ```sql
 UPDATE player_items SET quantity = quantity - 1
- WHERE user_id = $1 AND item_type_id = $2 AND quantity > 0
+ WHERE id = (
+   SELECT id FROM player_items
+    WHERE user_id = $1 AND item_type_id = $2 AND quantity > 0
+    ORDER BY created_at ASC, id ASC LIMIT 1
+ )
  RETURNING id, quantity
 ```
+
+**The subquery is load-bearing, not a stylistic choice.** A player may hold more than one
+stack of the same ammo type (see "Multiple stacks" below). The obvious form —
+`WHERE user_id = $1 AND item_type_id = $2 AND quantity > 0` with no subquery — updates
+*every* matching row, so one shot would decrement all of the player's arrow stacks at
+once. Targeting a single id by subquery makes the statement correct regardless of how many
+stacks exist, and `ORDER BY created_at` drains the oldest first.
 
 4. `rowCount === 0` → out of ammo. Send a `noammo` frame. **No cooldown consumed** —
    matching the mana and stamina denial rule from 3b-3a.
@@ -256,12 +293,10 @@ together:
   the end of 3b-3a; those tests must be extended, not just left passing.
 - **`loadInventory`** — must return `quantity` per stack.
 - **`ItemTypesAdmin.jsx`** — fields for the three new columns.
-- **Loot** (`loot.js`) — `claimItem` must merge into an existing stack rather than creating
-  a second row for the same stackable type, or a player accumulates many one-arrow rows and
-  the consume UPDATE (which matches on `item_type_id`) empties them one at a time in
-  arbitrary order.
-- **`dropItem`** — dropping a stack drops the whole stack. Partial-stack drops are out of
-  scope.
+- **Loot** (`loot.js`) — **unchanged.** See "Multiple stacks" below; this is deliberate.
+- **`dropItem`** — dropping a stack drops the whole stack as a single ground item, and
+  picking it back up restores it as a stack of the same size. Partial-stack drops (drop 10
+  of 40) are out of scope.
 - **`world.js`** — `canAttack` extraction.
 - **`projectiles.js`** — detonation.
 - **Client** — HUD ammo count, `noammo` feedback, blast render.
@@ -298,10 +333,16 @@ together:
 - Every weapon with `ammo_type_id` set points at a row whose category is `'ammo'`.
 - No row has both `aoe_radius` and `pierce > 1`.
 
-**Loot integration:**
+**Stacks:**
 
-- Claiming an arrow when the player already owns an arrow stack increments that stack
-  rather than inserting a second row.
+- The consume statement decrements exactly ONE stack when the player holds two stacks of
+  the same ammo type. This is the test that would fail on the no-subquery form, and it is
+  the reason the subquery exists.
+- Dropping a stack of N spawns one ground item of quantity N; claiming it grants a stack of
+  N. Nothing is created or destroyed by a drop/pickup round trip.
+- 3b-2b's existing loot tests — including the contested-grab race test — must pass
+  **unmodified**. If one needs changing, that is a signal to stop rather than to edit the
+  test.
 
 Live browser verification must cover: firing a bow until arrows run out and seeing the HUD
 count fall and the `noammo` feedback; picking arrows up off the ground and the count
@@ -323,6 +364,6 @@ beyond the HUD count; AoE knockback.
 - **`archmage staff` at radius 110 with 24 damage** is the most likely balance outlier,
   since falloff makes large radii weaker at the edge but it still covers a lot of ground.
   Watch rather than pre-nerf.
-- **Stack merging in `claimItem`** changes a query that 3b-2b's tests were built around,
-  including the contested-grab race test. Those tests must still pass unmodified, and if
-  one needs changing that is a signal worth stopping on.
+- **Multiple stacks of one ammo type** are permitted by design. If the HUD's summed count
+  and the actual drain order ever confuse a player during the browser pass, the fix is a
+  merge-on-claim *with* a real uniqueness story — not a quiet patch to the consume query.
