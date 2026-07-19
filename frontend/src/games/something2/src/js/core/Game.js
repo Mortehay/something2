@@ -17,7 +17,7 @@ import { inputVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { aimVector } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
-import { resolveAmmoHud } from "./ammo.js";
+import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { addBlasts, pruneBlasts } from "./blasts.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
@@ -274,6 +274,7 @@ export class Game {
                     if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
                 },
                 onNoAmmo: () => { this.noAmmoUntil = performance.now() + NO_AMMO_FLASH_MS; },
+                onAmmo: (msg) => applyAmmoCount(this.inventory, msg.item_type_id, msg.count),
                 onError: (e) => {
                     console.error('[authority]', e);
                     // Only a server-issued protocol rejection (type:'error' frame,

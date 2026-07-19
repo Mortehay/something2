@@ -32,6 +32,27 @@ export function equippedAmmoTypeId(inventory) {
   return weapon && weapon.ammo_type_id != null ? weapon.ammo_type_id : null;
 }
 
+// Apply a server-pushed authoritative count for `ammoTypeId` (the 'ammo'
+// frame sent after a successful shot — see WorldAuthorityClient's onAmmo).
+//
+// The server's number always wins: this does NOT merge with, add to, or
+// diff against whatever the client currently believes. It collapses every
+// local stack of the type into a single synthetic stack holding exactly
+// `count`, so the very same summing `ammoCount` does for the HUD keeps
+// reading the server's number until the next real snapshot (joined/picked/
+// dropped) replaces it. A previous bug in this project had the client
+// mirror server-owned state after a send that never went out — this must
+// only ever be called from the 'ammo' frame handler, never from send().
+export function applyAmmoCount(inventory, ammoTypeId, count) {
+  if (!inventory || ammoTypeId == null) return;
+  const n = Number(count);
+  const safeCount = Number.isFinite(n) && n > 0 ? n : 0;
+  inventory.items = inventory.items.filter((it) => it.typeId !== ammoTypeId);
+  if (safeCount > 0) {
+    inventory.items.push({ id: `ammo:${ammoTypeId}`, typeId: ammoTypeId, quantity: safeCount });
+  }
+}
+
 // {typeId, name, count} for the HUD, or null when nothing should be drawn.
 // A count of 0 still returns an object: "Arrows: 0" is exactly the state the
 // player most needs to see.

@@ -527,6 +527,10 @@ const AMMO_BOW = {
 async function mkAttackHarness(opts = {}) {
   const weapon = { ...BLANK_WEAPON, ...(opts.weapon || AMMO_BOW) };
   const onConsume = opts.onConsume || (() => true);
+  // What ammoCount()'s SELECT SUM should currently report; a function so a
+  // test can make it move (e.g. decrement in lockstep with onConsume) to
+  // simulate the summed-across-stacks total draining shot by shot.
+  const ammoCountFn = opts.ammoCountFn || (() => 5);
   const base = fakePool();
   const pool = {
     query: async (sql, params) => {
@@ -536,6 +540,11 @@ async function mkAttackHarness(opts = {}) {
         return onConsume(params)
           ? { rowCount: 1, rows: [{ id: 'ammo1', quantity: 5 }] }
           : { rowCount: 0, rows: [] };
+      }
+      // Also must precede the generic /FROM player_items/ branch below:
+      // ammoCount()'s SUM query mentions player_items too.
+      if (/SELECT COALESCE\(SUM\(quantity\)/i.test(sql)) {
+        return { rows: [{ n: ammoCountFn(params) }] };
       }
       if (/FROM item_types/i.test(sql)) return { rows: [weapon] };
       if (/FROM player_items/i.test(sql)) {
@@ -638,6 +647,53 @@ test('two attack frames in one batch spend only one unit', async () => {
   const h = await mkAttackHarness({ onConsume: () => { count += 1; return true; } });
   await h.sendAttack(1, 0, 2);
   assert.equal(count, 1, 'the cooldown-refused second shot must not consume a unit');
+  h.close();
+});
+
+// ---------------------------------------------------------------------------
+// The 'ammo' push frame: the HUD's whole reason for existing. consumeAmmo
+// succeeding is not enough — the shooter must actually be told the new
+// count, or the number on screen freezes after the first shot.
+// ---------------------------------------------------------------------------
+
+test('a successful ammo attack sends an ammo frame with the correct summed count', async () => {
+  // 43 stands in for two real, never-merged stacks (12 + 31) — ammoCount()
+  // sums across all of them, so the pushed number must reflect that sum
+  // minus the one unit this shot just spent, not a single row's quantity.
+  let remaining = 43;
+  const h = await mkAttackHarness({
+    onConsume: () => { remaining -= 1; return true; },
+    ammoCountFn: () => remaining,
+  });
+  await h.sendAttack(1, 0);
+  const frame = h.sent.find((m) => m.type === 'ammo');
+  assert.ok(frame, 'a successful shot must push an ammo frame to the shooter');
+  assert.equal(frame.item_type_id, AMMO_TYPE_ID);
+  assert.equal(frame.count, 42, 'the pushed count must be the post-consume summed total');
+  h.close();
+});
+
+test('firing twice reports a decreasing count', async () => {
+  let remaining = 10;
+  const h = await mkAttackHarness({
+    onConsume: () => { remaining -= 1; return true; },
+    ammoCountFn: () => remaining,
+  });
+  await h.sendAttack(1, 0);
+  h.player._attackCd = 0; // clear the cooldown so the second shot is not refused
+  await h.sendAttack(1, 0);
+  const frames = h.sent.filter((m) => m.type === 'ammo');
+  assert.equal(frames.length, 2, 'each successful shot pushes its own ammo frame');
+  assert.equal(frames[0].count, 9);
+  assert.equal(frames[1].count, 8);
+  assert.ok(frames[1].count < frames[0].count, 'the count must decrease, not stay frozen');
+  h.close();
+});
+
+test('firing with no ammo does not push an ammo frame', async () => {
+  const h = await mkAttackHarness({ onConsume: () => false });
+  await h.sendAttack(1, 0);
+  assert.ok(!h.sent.some((m) => m.type === 'ammo'), 'a refused shot spends nothing, so there is no new count to push');
   h.close();
 });
 

@@ -7,7 +7,7 @@ const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoado
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { spawnChunkCreatures } = require('../services/mapService');
 const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
-const { consumeAmmo } = require('./ammo');
+const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
 
 const MAP_TILE_SIZE = 100;
@@ -374,13 +374,27 @@ function attachAuthority(httpServer, pool, opts = {}) {
             // The equipped weapon may have changed too (an equip frame can be
             // chained between the two): always spend the CURRENT weapon's
             // ammo, and fall back to the sync path if it now needs none.
-            if (g.weapon.ammo_type_id != null
-                && !(await consumeAmmo(pool, ws.userId, g.weapon.ammo_type_id))) {
+            const ammoTypeId = g.weapon.ammo_type_id;
+            if (ammoTypeId != null && !(await consumeAmmo(pool, ws.userId, ammoTypeId))) {
               send(ws, { type: 'noammo' }); // no cooldown consumed
               return;
             }
             const { killedCreatureIds } = cur.world.attack(ws.userId, ax, ay);
             for (const id of new Set(killedCreatureIds)) onCreatureDeath(cur, id);
+            // The shot is already committed above (ammo spent, kills
+            // resolved) — pushing the client its new count is best-effort on
+            // top of that, not a condition of it. Isolated in its own
+            // try/catch so a failed COUNT query can never look like a failed
+            // attack, and placed after attack()/onCreatureDeath so it cannot
+            // delay or skip the resolution that already succeeded.
+            if (ammoTypeId != null) {
+              try {
+                const count = await ammoCount(pool, ws.userId, ammoTypeId);
+                send(ws, { type: 'ammo', item_type_id: ammoTypeId, count });
+              } catch (err) {
+                console.error('ammoCount failed:', err);
+              }
+            }
           } catch (err) {
             console.error('attack/ammo failed:', err);
           }

@@ -36,4 +36,22 @@ async function consumeAmmo(pool, userId, ammoTypeId) {
   return true;
 }
 
-module.exports = { consumeAmmo };
+// Total units of `ammoTypeId` the player holds, summed across every stack.
+//
+// Same reasoning as the subquery above: stacks are deliberately never
+// merged, so a player can hold two arrow stacks at once, and reading a
+// single row (or a single stack's quantity) would report a wrong number to
+// the HUD. This is a read-only second query — an accepted second round trip
+// per successful shot, not merged into consumeAmmo's UPDATE, so a failure
+// here can never affect whether the shot itself succeeded.
+async function ammoCount(pool, userId, ammoTypeId) {
+  const r = await pool.query(
+    `SELECT COALESCE(SUM(quantity), 0)::int AS n
+       FROM player_items
+      WHERE user_id = $1 AND item_type_id = $2`,
+    [userId, ammoTypeId],
+  );
+  return Number(r.rows[0].n);
+}
+
+module.exports = { consumeAmmo, ammoCount };

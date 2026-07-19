@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { consumeAmmo } = require('../src/authority/ammo');
+const { consumeAmmo, ammoCount } = require('../src/authority/ammo');
 
 test('consumeAmmo returns true and spends one unit', async () => {
   const calls = [];
@@ -44,4 +44,28 @@ test('emptying a stack deletes it rather than leaving quantity 0', async () => {
   assert.equal(calls.length, 2);
   assert.match(calls[1].sql, /delete\s+from\s+player_items/i);
   assert.deepEqual(calls[1].params, ['i1']);
+});
+
+// This is the one that fails if someone "simplifies" ammoCount to reading a
+// single row: stacks are deliberately never merged (see consumeAmmo's own
+// comment above), so a player holding two arrow stacks must have both
+// counted, not just whichever one a naive query happens to hit first.
+test('ammoCount sums across multiple stacks of the same type', async () => {
+  let seenSql = '', seenParams = null;
+  const pool = { query: async (sql, params) => {
+    seenSql = sql;
+    seenParams = params;
+    // A real Postgres SUM query never returns per-row data — a mock that
+    // simulates it correctly returns exactly one aggregate row.
+    return { rows: [{ n: 12 + 30 + 1 }] };
+  } };
+  const n = await ammoCount(pool, 'u1', 7);
+  assert.equal(n, 43, 'the summed total across every stack must be returned');
+  assert.match(seenSql.toLowerCase(), /sum\(quantity\)/, 'must aggregate with SUM, not read one row');
+  assert.deepEqual(seenParams, ['u1', 7]);
+});
+
+test('ammoCount is 0 when the player holds no stacks of that type', async () => {
+  const pool = { query: async () => ({ rows: [{ n: 0 }] }) };
+  assert.equal(await ammoCount(pool, 'u1', 7), 0);
 });

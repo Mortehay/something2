@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ammoCount, equippedAmmoTypeId, resolveAmmoHud } from '../ammo.js';
+import { ammoCount, equippedAmmoTypeId, resolveAmmoHud, applyAmmoCount } from '../ammo.js';
 import { createInventory, applyJoined } from '../inventory.js';
 
 const ARROW = { id: 7, name: 'arrow', category: 'ammo', stackable: true, ammo_type_id: null };
@@ -79,6 +79,55 @@ describe('resolveAmmoHud', () => {
   it('is null when the weapon needs no ammo, so the HUD draws nothing', () => {
     const i = inv({ items: [{ id: 21, typeId: 1, quantity: 1 }], equipment: { main_hand: 21 } });
     expect(resolveAmmoHud(i)).toBeNull();
+  });
+});
+
+describe('applyAmmoCount', () => {
+  // Simulates the server's 'ammo' frame handler path: WorldAuthorityClient's
+  // onAmmo calls this directly with the pushed {item_type_id, count}, and
+  // resolveAmmoHud/ammoCount must read back exactly that number afterward —
+  // the frame and the HUD have to agree, not drift onto separate state.
+  it('makes ammoCount read back exactly the pushed number, replacing every prior stack', () => {
+    const i = inv({ items: [
+      { id: 10, typeId: 7, quantity: 12 },
+      { id: 11, typeId: 7, quantity: 30 },
+    ] });
+    applyAmmoCount(i, 7, 41);
+    expect(ammoCount(i, 7)).toBe(41);
+  });
+
+  it('is authoritative, not additive: it does not merge with the local total', () => {
+    const i = inv({ items: [{ id: 10, typeId: 7, quantity: 12 }] });
+    applyAmmoCount(i, 7, 5); // server says 5, even though local math says 12 - 1 = 11
+    expect(ammoCount(i, 7)).toBe(5);
+  });
+
+  it('leaves stacks of other types untouched', () => {
+    const i = inv({
+      items: [
+        { id: 10, typeId: 7, quantity: 12 },
+        { id: 20, typeId: 3, quantity: 1 },
+      ],
+      equipment: { main_hand: 20 },
+    });
+    applyAmmoCount(i, 7, 9);
+    expect(ammoCount(i, 7)).toBe(9);
+    expect(i.items.some((it) => it.id === 20)).toBe(true);
+  });
+
+  it('a count of 0 still shows on the HUD rather than vanishing the ammo line', () => {
+    const i = inv({
+      items: [{ id: 10, typeId: 7, quantity: 1 }, { id: 20, typeId: 3, quantity: 1 }],
+      equipment: { main_hand: 20 },
+    });
+    applyAmmoCount(i, 7, 0);
+    expect(resolveAmmoHud(i)).toEqual({ typeId: 7, name: 'arrow', count: 0 });
+  });
+
+  it('is a no-op for a null ammo type', () => {
+    const i = inv({ items: [{ id: 10, typeId: 7, quantity: 12 }] });
+    applyAmmoCount(i, null, 999);
+    expect(ammoCount(i, 7)).toBe(12);
   });
 });
 
