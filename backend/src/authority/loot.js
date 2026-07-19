@@ -110,7 +110,35 @@ async function claimItem(pool, entry, userId, groundItemId) {
   }
 }
 
-async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000 } = {}) {
+// How long a just-dropped ground item is exempt from ITS OWN DROPPER's
+// auto-loot scan. dropItem spawns the item at the player's exact centre, so
+// without this the tick's `within(pcx, pcy, PICKUP_RADIUS)` scan finds it at
+// distance 0 and re-claims it inside one tick (<=50ms): the client sees
+// `dropped` immediately followed by `picked` with a DIFFERENT instance id,
+// the item never actually leaves the inventory, and the client's held id
+// goes stale. Deliberately PER PLAYER, not global: another player standing
+// on the spot with auto-loot on may still claim it instantly — the item is
+// genuinely free-for-all, this only stops the dropper's own scan.
+const DROP_GRACE_MS = 3000;
+
+// True if `groundItemId` is still inside `p`'s drop-grace window as of `now`.
+// Only the auto-loot tick scan should call this — a manual pickup keypress
+// must always be honored regardless of grace, so `claimItem` (the shared
+// claim path for both) never consults `dropGrace` itself; the caller decides
+// whether grace applies before invoking it.
+//
+// Opportunistically prunes: an expired entry found here is deleted on the
+// spot, so a player's `dropGrace` map cannot grow without bound merely from
+// items that later left pickup range (and so stopped being checked) before
+// their grace expired.
+function dropGraceActive(p, groundItemId, now) {
+  const exp = p.dropGrace.get(groundItemId);
+  if (exp == null) return false;
+  if (exp <= now) { p.dropGrace.delete(groundItemId); return false; }
+  return true;
+}
+
+async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000, now = Date.now(), graceMs = DROP_GRACE_MS } = {}) {
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
 
@@ -137,8 +165,11 @@ async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000 } = {}) {
     [entry.worldId, del.rows[0].item_type_id, cx, cy, ttlMs],
   );
   entry.world.groundItems.add(ins.rows);
+  p.dropGrace.set(ins.rows[0].id, now + graceMs);
   p.inv.items = p.inv.items.filter((it) => it.id !== itemId);
   return { ok: true, item: ins.rows[0] };
 }
 
-module.exports = { rollDrops, commitCreatureDeath, spawnDrops, claimItem, dropItem };
+module.exports = {
+  rollDrops, commitCreatureDeath, spawnDrops, claimItem, dropItem, dropGraceActive, DROP_GRACE_MS,
+};

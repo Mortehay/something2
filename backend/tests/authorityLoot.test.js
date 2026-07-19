@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { World } = require('../src/authority/world.js');
-const { commitCreatureDeath, claimItem, dropItem } = require('../src/authority/loot.js');
+const { commitCreatureDeath, claimItem, dropItem, dropGraceActive, DROP_GRACE_MS } = require('../src/authority/loot.js');
 
 // Routes queries by SQL pattern and records every call, so a test can assert
 // that a query NEVER ran — which is the point of the rowCount guard.
@@ -204,6 +204,44 @@ test('concurrent claims of the same item: the second is blocked by the claiming 
   assert.strictEqual(entry.claiming.size, 0, 'drains after both settle');
 });
 
+test('the claiming guard reserves an id SYNCHRONOUSLY, before any await: two concurrent claims of the same id issue exactly one query', async () => {
+  // The auto-loot tick fires claimItem() calls unawaited from inside a
+  // synchronous loop; its only defense against a DELETE storm (every item
+  // under every auto-looting player, every tick) is that `claiming.has` /
+  // `claiming.add` run before claimItem's first `await`. This test pins
+  // that invariant directly, rather than trusting scriptedPool's
+  // near-instant resolution to exercise it: `query` returns a promise this
+  // test controls, so the assertion below runs BEFORE either query could
+  // possibly have settled, proving the guard is synchronous rather than
+  // merely fast.
+  const entry = armClaimEntry();
+  let calls = 0;
+  let resolveQuery;
+  const pending = new Promise((resolve) => { resolveQuery = resolve; });
+  const pool = {
+    query: () => {
+      calls++;
+      return pending.then(() => ({ rows: [{ id: 'inst-1', item_type_id: 7 }], rowCount: 1 }));
+    },
+  };
+
+  // Not awaited between calls, and nothing here yields to the microtask
+  // queue before the assertion: if `claiming.add` ran AFTER an `await`
+  // (e.g. someone inserts `await something()` above it), both calls would
+  // pass the (still-empty) `claiming.has` check and both would call
+  // pool.query before either's query resolves, making `calls` 2 here.
+  const p1 = claimItem(pool, entry, 'u1', 'g1');
+  const p2 = claimItem(pool, entry, 'u1', 'g1');
+
+  assert.strictEqual(calls, 1,
+    'only the first call may issue a query; the second must be blocked by the synchronous claiming-set check');
+
+  resolveQuery();
+  const [first, second] = await Promise.all([p1, p2]);
+  assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7 });
+  assert.strictEqual(second, null, 'blocked by the claiming set');
+});
+
 test('a successful claim adds the instance to the in-memory inventory', async () => {
   const entry = armClaimEntry();
   const pool = scriptedPool([
@@ -241,6 +279,21 @@ test("dropping another user's item deletes nothing and spawns nothing", async ()
 
   assert.strictEqual(r.ok, false);
   assert.strictEqual(pool.matching(/INSERT INTO world_items/i).length, 0);
+  // Scripting rowCount 0 alone proves nothing about the query that was
+  // actually issued — a test that only asserts a consequence of a result it
+  // supplied itself never observes the ownership predicate. Assert on the
+  // DELETE that was actually sent: both that its WHERE clause still filters
+  // by user_id, and that the bound params are (itemId, callerId) — not
+  // attacker-controlled data standing in for the caller. Without this, a
+  // refactor that deletes "AND user_id = $2" from the SQL (while leaving the
+  // params array untouched) would leave `r.ok === false` on THIS particular
+  // scripted call yet stay green, because nothing here forces the SQL
+  // itself to still contain the check.
+  const del = pool.matching(/DELETE FROM player_items/i)[0];
+  assert.match(del.sql, /user_id\s*=\s*\$2/i,
+    'the DELETE must filter by ownership (user_id), not just the item id');
+  assert.deepStrictEqual(del.params, ['not-mine', 'u1'],
+    'ownership predicate must bind the CALLER (u1), not the forged itemId, as user_id');
 });
 
 test('a successful drop spawns a ground item at the player centre and removes the instance', async () => {
@@ -261,4 +314,83 @@ test('a successful drop spawns a ground item at the player centre and removes th
   assert.deepStrictEqual(ins.params.slice(0, 4), ['w1', 7, p.x + p.width / 2, p.y + p.height / 2]);
   assert.strictEqual(entry.world.groundItems.count(), 1);
   assert.strictEqual(p.inv.items.length, 0, 'no longer owned');
+});
+
+// Finding 1: without a grace window, dropItem spawns the ground item at the
+// player's exact centre, and the tick's auto-loot scan (within(pcx, pcy,
+// PICKUP_RADIUS) from that same centre) finds it at distance 0 and re-claims
+// it inside one tick — drop becomes a silent no-op for a player with
+// auto-loot on. These tests drive dropGraceActive directly with explicit
+// `now` values (never a real sleep) so the window's expiry is deterministic.
+function scriptedDropPool() {
+  return scriptedPool([
+    [/DELETE FROM player_items/i, { rows: [{ item_type_id: 7 }], rowCount: 1 }],
+    [/INSERT INTO world_items/i, (p) => ({
+      rows: [{ id: 'g9', item_type_id: p[1], x: p[2], y: p[3], expires_at: '2999-01-01T00:00:00Z' }],
+      rowCount: 1,
+    })],
+  ]);
+}
+
+test('(a) a freshly-dropped item is inside the dropper\'s grace window: auto-loot must skip it', async () => {
+  const entry = armDropEntry();
+  const pool = scriptedDropPool();
+  const now = 1_000_000;
+
+  const r = await dropItem(pool, entry, 'u1', 'i1', { ttlMs: 1000, now });
+
+  const p = entry.world.getPlayer('u1');
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(
+    dropGraceActive(p, r.item.id, now + 1000), true,
+    '1s after the drop, well inside the 3s window, auto-loot must still skip this item',
+  );
+});
+
+test('(b) the grace window expires: auto-loot may claim the drop once it has', async () => {
+  const entry = armDropEntry();
+  const pool = scriptedDropPool();
+  const now = 1_000_000;
+
+  const r = await dropItem(pool, entry, 'u1', 'i1', { ttlMs: 1000, now });
+
+  const p = entry.world.getPlayer('u1');
+  const after = now + DROP_GRACE_MS + 1;
+  assert.strictEqual(
+    dropGraceActive(p, r.item.id, after), false,
+    'once the grace window has elapsed, auto-loot must be allowed to claim the drop',
+  );
+});
+
+test('(c) manual pickup ignores the grace window entirely: claimItem succeeds even while grace is active', async () => {
+  // claimItem is the single claim path shared by manual pickup and
+  // auto-loot; it must not consult dropGrace itself, so a deliberate
+  // keypress on a just-dropped item always succeeds. Only the tick's
+  // auto-loot scan (in server.js) is expected to check dropGraceActive
+  // before calling claimItem at all.
+  const entry = armClaimEntry(); // ground item 'g1' present, player 'u1'
+  const p = entry.world.getPlayer('u1');
+  p.dropGrace.set('g1', Date.now() + 60000); // deep inside an active grace window
+  const pool = scriptedPool([
+    [CLAIM_RE, { rows: [{ id: 'inst-1', item_type_id: 7 }], rowCount: 1 }],
+  ]);
+
+  const got = await claimItem(pool, entry, 'u1', 'g1');
+
+  assert.deepStrictEqual(got, { id: 'inst-1', typeId: 7 },
+    'manual pickup (claimItem) is unaffected by an active grace window');
+});
+
+test('(d) dropGraceActive prunes only the expired entry it checks, without disturbing unrelated entries', () => {
+  const entry = armDropEntry();
+  const p = entry.world.getPlayer('u1');
+  p.dropGrace.set('expired-1', 100); // already expired as of now=200
+  p.dropGrace.set('still-active', 5000); // not yet expired as of now=200
+  assert.strictEqual(p.dropGrace.size, 2);
+
+  assert.strictEqual(dropGraceActive(p, 'expired-1', 200), false);
+
+  assert.strictEqual(p.dropGrace.has('expired-1'), false, 'expired entry is pruned as it is checked');
+  assert.strictEqual(p.dropGrace.has('still-active'), true, 'unrelated, still-active entry is left alone');
+  assert.strictEqual(p.dropGrace.size, 1, 'the map does not grow without bound');
 });

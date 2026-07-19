@@ -56,6 +56,13 @@ class World {
       spawn: { x: spawn.x, y: spawn.y },
       _attackCd: 0,
       autoLoot: false,
+      // Recently-dropped GROUND ITEM ids -> grace expiry (ms, same clock as
+      // the `now` passed to dropItem/dropGraceActive). Lets the auto-loot
+      // scan skip an item this player JUST dropped (dropItem spawns it at
+      // their exact centre, i.e. distance 0 from the pickup-radius scan) so
+      // it isn't instantly re-vacuumed. Manual pickup ignores this entirely.
+      // See loot.js `dropGraceActive`.
+      dropGrace: new Map(),
     });
   }
 

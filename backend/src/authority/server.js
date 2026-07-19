@@ -6,7 +6,7 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { spawnChunkCreatures } = require('../services/mapService');
-const { commitCreatureDeath, claimItem, dropItem } = require('./loot');
+const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
 const { PICKUP_RADIUS } = require('./groundItems');
 
 const MAP_TILE_SIZE = 100;
@@ -444,15 +444,35 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Auto-loot: fire claims off-tick. The tick is synchronous and must never
       // await; `claiming` de-dups the repeats this produces across ticks while
       // a claim is still in flight.
+      const autoLootNow = Date.now();
       for (const p of entry.world.players.values()) {
         if (!p.autoLoot) continue;
         const pcx = p.x + p.width / 2, pcy = p.y + p.height / 2;
+        const claims = [];
         for (const it of entry.world.groundItems.within(pcx, pcy, PICKUP_RADIUS)) {
-          const sock = entry.sockets.get(p.userId);
-          claimItem(pool, entry, p.userId, it.id)
-            .then((got) => { if (got && sock) send(sock, { type: 'picked', item: got }); })
-            .catch((err) => console.error('auto-loot failed:', err));
+          // A player's own just-dropped item sits in their own grace window:
+          // skip it so auto-loot doesn't instantly re-vacuum a drop. Manual
+          // pickup (the 'pickup' handler above) never consults this — a
+          // deliberate keypress always succeeds.
+          if (dropGraceActive(p, it.id, autoLootNow)) continue;
+          claims.push(claimItem(pool, entry, p.userId, it.id));
         }
+        if (claims.length === 0) continue;
+        // Settled once per PLAYER, not per item: the socket is looked up
+        // after every claim for this player has resolved, inside the .then —
+        // never captured before the claim round trip starts. Captured early
+        // (the old bug), a reconnect mid-claim sends 'picked' to the dead
+        // socket and the new session never sees the item. allSettled (not
+        // all) so one failed claim can't swallow the notification for the
+        // player's other, successful claims in the same tick.
+        Promise.allSettled(claims).then((results) => {
+          const sock = entry.sockets.get(p.userId);
+          if (!sock) return;
+          for (const r of results) {
+            if (r.status === 'fulfilled' && r.value) send(sock, { type: 'picked', item: r.value });
+            else if (r.status === 'rejected') console.error('auto-loot failed:', r.reason);
+          }
+        });
       }
       const snap = entry.world.snapshot();
       for (const [userId, ws] of entry.sockets) {
