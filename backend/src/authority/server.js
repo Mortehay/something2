@@ -206,6 +206,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }
 
+  function broadcastItems(entry) {
+    const N = entry.row.chunk_size;
+    for (const [userId, ws] of entry.sockets) {
+      const p = entry.world.getPlayer(userId);
+      if (!p) continue;
+      const { cx, cy } = chunkOf(p.x, p.y, N);
+      const keys = neighborhoodKeys(cx, cy, 1);
+      send(ws, { type: 'items', items: entry.world.groundItems.snapshotForNeighborhood(keys) });
+    }
+  }
+
   async function flushAndPrune(entry) {
     const dirty = entry.world.creatures.getDirty();
     if (dirty.length) {
@@ -451,6 +462,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (tick % creatureBroadcastEvery === 0) {
         recomputeActive(entry);
         broadcastCreatures(entry);
+        broadcastItems(entry);
       }
     }
   }, tickMs);
