@@ -99,3 +99,21 @@ test('a diagonal wall crossing is blocked', () => {
   const map = wallMap(90, 110);
   assert.strictEqual(hasLineOfSight(map, 0, 0, 200, 200), false);
 });
+
+// hasLineOfSight documents that BOTH endpoints are excluded from the walk, so
+// an attacker standing in a doorway (ORIGIN on a blocked tile) or a target
+// clipping a wall corner (TARGET on a blocked tile) must not be self-blocking.
+// Nothing previously asserted that; a loop bounds change to include either
+// endpoint left the whole suite green. Both cases below use a wall that is
+// exactly one point wide, positioned only under the endpoint under test, with
+// a distance well beyond MAX_SUB so the point-blank early return can't mask
+// the loop bounds.
+test('hasLineOfSight is not self-blocked when the ORIGIN sits on a blocked tile', () => {
+  const map = wallMap(100, 100); // only the origin's own tile is blocked
+  assert.strictEqual(hasLineOfSight(map, 100, 0, 300, 0), true);
+});
+
+test('hasLineOfSight is not self-blocked when the TARGET sits on a blocked tile', () => {
+  const map = wallMap(300, 300); // only the target's own tile is blocked
+  assert.strictEqual(hasLineOfSight(map, 0, 0, 300, 0), true);
+});
