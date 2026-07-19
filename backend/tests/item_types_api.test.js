@@ -152,6 +152,51 @@ test('accepts an absent stamina_cost (defaults server-side)', () => {
   );
 });
 
+test('validateItemType accepts the ammo category', () => {
+  assert.equal(validateItemType({ name: 'arrow', category: 'ammo', stackable: true }), null);
+});
+
+test('validateItemType rejects a negative aoe_radius', () => {
+  const err = validateItemType({
+    name: 'x', category: 'weapon', kind: 'projectile',
+    range: 1, projectile_speed: 1, projectile_radius: 1, aoe_radius: -5,
+  });
+  assert.match(err, /aoe_radius/);
+});
+
+test('validateItemType rejects a non-stackable ammo row', () => {
+  assert.match(validateItemType({ name: 'arrow', category: 'ammo', stackable: false }), /stackable/);
+});
+
+test('validateItemType rejects an ammo row with a kind set', () => {
+  assert.match(
+    validateItemType({ name: 'arrow', category: 'ammo', stackable: true, kind: 'melee' }),
+    /kind/,
+  );
+});
+
+test('validateItemType rejects aoe_radius combined with pierce > 1', () => {
+  const err = validateItemType({
+    name: 'x', category: 'weapon', kind: 'projectile',
+    range: 1, projectile_speed: 1, projectile_radius: 1, aoe_radius: 50, pierce: 2,
+  });
+  assert.match(err, /aoe_radius|pierce/);
+});
+
+test('validateItemType rejects ammo_type_id on a non-projectile weapon', () => {
+  const err = validateItemType({
+    name: 'x', category: 'weapon', kind: 'melee', reach: 10, arc_width: 1, ammo_type_id: 3,
+  });
+  assert.match(err, /ammo_type_id/);
+});
+
+test('validateItemType accepts a projectile weapon with a valid ammo_type_id', () => {
+  assert.strictEqual(validateItemType({
+    name: 'bow', category: 'weapon', kind: 'projectile',
+    range: 700, projectile_speed: 900, projectile_radius: 8, ammo_type_id: 3,
+  }), null);
+});
+
 // Helpers to pull the column list and the aligned $n placeholders out of the
 // actual SQL text sent to the pool, rather than hardcoding positions (which
 // would themselves need updating on the next column addition).
@@ -185,7 +230,7 @@ function paramFor(columns, placeholders, params, col) {
 const LOAD_BEARING_COLUMNS = [
   'stamina_cost', 'mana_cost', 'element', 'damage', 'cooldown', 'reach', 'arc_width',
   'range', 'projectile_speed', 'projectile_radius', 'pierce', 'defense', 'resistances',
-  'category', 'slot', 'two_handed', 'kind', 'name',
+  'category', 'slot', 'two_handed', 'kind', 'name', 'stackable', 'ammo_type_id', 'aoe_radius',
 ];
 
 // The mock pool dispatches on SQL text but never asserted the column list or
@@ -200,8 +245,8 @@ test('POST /api/item-types INSERT names every load-bearing column with a positio
   ]);
   __setPool(pool);
   const body = {
-    name: 'x', category: 'weapon', kind: 'melee', reach: 10, arc_width: 1,
-    stamina_cost: 7, element: 'fire',
+    name: 'x', category: 'weapon', kind: 'projectile', range: 700, projectile_speed: 900, projectile_radius: 8,
+    stamina_cost: 7, element: 'fire', stackable: true, ammo_type_id: 3, aoe_radius: 42,
   };
   const res = await request(app).post('/api/item-types').send(body);
   assert.equal(res.status, 201);
@@ -220,6 +265,9 @@ test('POST /api/item-types INSERT names every load-bearing column with a positio
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'stamina_cost'), body.stamina_cost);
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'element'), body.element);
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'name'), body.name);
+  assert.strictEqual(paramFor(columns, placeholders, call.params, 'stackable'), body.stackable);
+  assert.strictEqual(paramFor(columns, placeholders, call.params, 'ammo_type_id'), body.ammo_type_id);
+  assert.strictEqual(paramFor(columns, placeholders, call.params, 'aoe_radius'), body.aoe_radius);
 });
 
 test('PUT /api/item-types/:id UPDATE names every load-bearing column with a positionally-aligned placeholder', async () => {
@@ -228,8 +276,8 @@ test('PUT /api/item-types/:id UPDATE names every load-bearing column with a posi
   ]);
   __setPool(pool);
   const body = {
-    name: 'y', category: 'weapon', kind: 'melee', reach: 20, arc_width: 2,
-    stamina_cost: 9, element: 'ice',
+    name: 'y', category: 'weapon', kind: 'projectile', range: 620, projectile_speed: 650, projectile_radius: 12,
+    stamina_cost: 9, element: 'ice', stackable: false, ammo_type_id: 5, aoe_radius: 30,
   };
   const res = await request(app).put('/api/item-types/1').send(body);
   assert.equal(res.status, 200);
@@ -248,6 +296,9 @@ test('PUT /api/item-types/:id UPDATE names every load-bearing column with a posi
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'stamina_cost'), body.stamina_cost);
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'element'), body.element);
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'name'), body.name);
+  assert.strictEqual(paramFor(columns, placeholders, call.params, 'stackable'), body.stackable);
+  assert.strictEqual(paramFor(columns, placeholders, call.params, 'ammo_type_id'), body.ammo_type_id);
+  assert.strictEqual(paramFor(columns, placeholders, call.params, 'aoe_radius'), body.aoe_radius);
 });
 
 test('POST /api/players/:userId/items grants an item instance', async () => {
