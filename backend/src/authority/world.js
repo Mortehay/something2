@@ -1,6 +1,6 @@
 const { resolveMove } = require('./collision');
 const { CreatureSim } = require('./creatures');
-const { normalizeAim, inArc } = require('./weapons');
+const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamage, NO_MITIGATION } = require('./damage');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
@@ -145,7 +145,8 @@ class World {
       for (const other of this.players.values()) {
         if (other.userId === userId) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
-        if (inArc(cx, cy, nx, ny, ocx, ocy, w.reach, w.arc_width)) {
+        if (inArc(cx, cy, nx, ny, ocx, ocy, w.reach, w.arc_width)
+            && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
           applyDamage(other, w.damage, w.element, other.mit || NO_MITIGATION);
         }
       }

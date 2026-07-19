@@ -46,7 +46,20 @@ test('attack from an unknown player returns no kills', () => {
   assert.deepEqual(w.attack('nobody', 1, 0).killedCreatureIds, []);
 });
 
-// A weapon catalog Map + all-grass map for World combat tests.
+// Weapon catalog shared by this file's World combat tests.
+const TYPES = new Map([
+  [1, { id: 1, name: 'dagger', category: 'weapon', kind: 'melee', damage: 8, cooldown: 0.3, reach: 80, arc_width: 0.6, mana_cost: 0, element: null }],
+  [2, { id: 2, name: 'halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, element: null }],
+  [3, { id: 3, name: 'bow', category: 'weapon', kind: 'projectile', damage: 12, cooldown: 0.6, range: 700, projectile_speed: 900, projectile_radius: 8, pierce: 1, mana_cost: 0, element: null }],
+  [4, { id: 4, name: 'magic-bolt', category: 'weapon', kind: 'projectile', damage: 14, cooldown: 0.7, range: 600, projectile_speed: 700, projectile_radius: 12, pierce: 1, mana_cost: 15, element: 'arcane' }],
+]);
+const DEFAULT_ID = 1;
+const emptyInv = () => ({ items: [], equipment: {} });
+// halberd: reach 190 (> 150) and arc_width 1.8 rad, wide enough to cover a
+// target directly on the aim vector (dot === 1 there regardless of width).
+const longReachInv = () => ({ items: [{ id: 'h2', typeId: 2 }], equipment: { main_hand: 'h2' } });
+
+// All-grass map for World combat tests.
 function armWorld() {
   const map = {
     chunkSize: 8,
@@ -54,13 +67,7 @@ function armWorld() {
     speedAt: () => 1,
     getChunk: () => [],
   };
-  const weapons = new Map([
-    [1, { id: 1, name: 'dagger', category: 'weapon', kind: 'melee', damage: 8, cooldown: 0.3, reach: 80, arc_width: 0.6, mana_cost: 0, element: null }],
-    [2, { id: 2, name: 'halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, element: null }],
-    [3, { id: 3, name: 'bow', category: 'weapon', kind: 'projectile', damage: 12, cooldown: 0.6, range: 700, projectile_speed: 900, projectile_radius: 8, pierce: 1, mana_cost: 0, element: null }],
-    [4, { id: 4, name: 'magic-bolt', category: 'weapon', kind: 'projectile', damage: 14, cooldown: 0.7, range: 600, projectile_speed: 700, projectile_radius: 12, pierce: 1, mana_cost: 15, element: 'arcane' }],
-  ]);
-  return new World(map, weapons, 1);
+  return new World(map, TYPES, DEFAULT_ID);
 }
 
 test('melee attack hits creatures AND other players in the arc', () => {
@@ -140,4 +147,51 @@ test('snapshot includes mana/maxMana/equipment per player and a projectiles arra
   assert.deepEqual(pl.equipment, {});              // nothing equipped
   assert.equal(w.activeWeapon('u1').id, 1);        // falls back to the default (dagger)
   assert.ok(Array.isArray(snap.projectiles));
+});
+
+// Map stub with a vertical wall between x=90 and x=110.
+function walledMap() {
+  return {
+    chunkSize: 8,
+    isWalkable: (x) => !(x >= 90 && x <= 110),
+    speedAt: () => 1,
+    getChunk: () => [],
+  };
+}
+function openMap() {
+  return { chunkSize: 8, isWalkable: () => true, speedAt: () => 1, getChunk: () => [] };
+}
+
+test('melee does NOT hit a player through a wall', () => {
+  const w = new World(walledMap(), TYPES, DEFAULT_ID);
+  w.addPlayer('u1', { x: 0, y: 0 }, longReachInv());
+  w.addPlayer('u2', { x: 150, y: 0 }, emptyInv());
+  const before = w.getPlayer('u2').hp;
+  w.attack('u1', 1, 0);
+  assert.strictEqual(w.getPlayer('u2').hp, before, 'wall must block the swing');
+});
+
+test('the SAME swing DOES hit with clear terrain', () => {
+  const w = new World(openMap(), TYPES, DEFAULT_ID);
+  w.addPlayer('u1', { x: 0, y: 0 }, longReachInv());
+  w.addPlayer('u2', { x: 150, y: 0 }, emptyInv());
+  const before = w.getPlayer('u2').hp;
+  w.attack('u1', 1, 0);
+  assert.ok(w.getPlayer('u2').hp < before, 'clear line must land — otherwise the block test is vacuous');
+});
+
+test('melee does NOT hit a creature through a wall', () => {
+  const w = new World(walledMap(), TYPES, DEFAULT_ID);
+  w.addPlayer('u1', { x: 0, y: 0 }, longReachInv());
+  w.creatures.addCreatures([{ id: 'c1', type: 'Wolf', x: 150, y: 0, hp: 50, facing: 's' }]);
+  w.attack('u1', 1, 0);
+  assert.strictEqual(w.creatures.creatures.get('c1').hp, 50, 'wall must block the swing');
+});
+
+test('the SAME swing DOES hit a creature with clear terrain', () => {
+  const w = new World(openMap(), TYPES, DEFAULT_ID);
+  w.addPlayer('u1', { x: 0, y: 0 }, longReachInv());
+  w.creatures.addCreatures([{ id: 'c1', type: 'Wolf', x: 150, y: 0, hp: 50, facing: 's' }]);
+  w.attack('u1', 1, 0);
+  assert.ok(w.creatures.creatures.get('c1').hp < 50, 'clear line must land');
 });
