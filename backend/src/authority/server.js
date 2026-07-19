@@ -156,6 +156,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
       entry.world.creatures.addCreatures(rows.rows);
+      const itemRows = await pool.query(
+        `SELECT id, item_type_id, x, y, expires_at FROM world_items
+         WHERE world_id = $1 AND x >= $2 AND x < $3 AND y >= $4 AND y < $5 AND expires_at > now()`,
+        [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
+      );
+      entry.world.groundItems.add(itemRows.rows);
       entry.loadedChunks.add(chunkKey);
     } catch {
       // best-effort: left out of loadedChunks so recomputeActive retries it
@@ -214,6 +220,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       entry.world.creatures.clearDirty(ok);
     }
     entry.world.creatures.pruneInactive(entry.activeChunks);
+    entry.world.groundItems.pruneInactive(entry.activeChunks);
   }
 
   wss.on('connection', (ws) => {
@@ -412,12 +419,27 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }, heartbeatMs);
 
+  // Expired ground items: delete from the DB and evict from every live sim.
+  const itemSweepTimer = setInterval(() => {
+    if (worlds.size === 0) return;
+    pool.query('DELETE FROM world_items WHERE expires_at <= now() RETURNING id')
+      .then((r) => {
+        if (!r.rowCount) return;
+        const ids = new Set(r.rows.map((row) => row.id));
+        for (const entry of worlds.values()) {
+          for (const id of ids) entry.world.groundItems.remove(id);
+        }
+      })
+      .catch((err) => console.error('ground item sweep failed:', err));
+  }, itemSweepMs);
+
   return {
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);
       clearInterval(creatureFlushTimer);
       clearInterval(heartbeatTimer);
+      clearInterval(itemSweepTimer);
       // Terminate any live client sockets before closing the server. wss.close()
       // alone only stops accepting new connections; open sockets would keep the
       // event loop alive (and hang a clean shutdown / test process).
