@@ -256,3 +256,14 @@ test('snapshot exposes stamina', () => {
   assert.strictEqual(pl.stamina, 100);
   assert.strictEqual(pl.maxStamina, 100);
 });
+
+test('respawn restores stamina alongside hp and mana', () => {
+  const w = new World(openMap(), TYPES, DEFAULT_ID);
+  w.addPlayer('u1', { x: 0, y: 0 }, emptyInv());
+  const p = w.getPlayer('u1');
+  p.hp = 0; p.mana = 0; p.stamina = 0;
+  w.resolveDeaths();
+  assert.strictEqual(p.hp, p.maxHp);
+  assert.strictEqual(p.mana, p.maxMana);
+  assert.strictEqual(p.stamina, p.maxStamina, 'respawning unable to swing is not a revival');
+});

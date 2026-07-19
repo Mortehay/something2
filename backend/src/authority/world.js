@@ -191,7 +191,9 @@ class World {
     for (const p of this.players.values()) {
       if (p.hp <= 0) {
         p.x = p.spawn.x; p.y = p.spawn.y;
-        p.hp = p.maxHp; p.mana = p.maxMana;
+        // Every resource is restored together. Leaving stamina out would
+        // respawn a player fully healed but unable to swing a heavy weapon.
+        p.hp = p.maxHp; p.mana = p.maxMana; p.stamina = p.maxStamina;
       }
     }
   }
