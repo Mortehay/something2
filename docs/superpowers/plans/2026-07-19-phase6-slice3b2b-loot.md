@@ -82,14 +82,19 @@ exports.down = (pgm) => {
 
 The `down()` must survive a database that has rows in both tables — that is where 3b-2a's rollback broke.
 
+There is **no `migrate:down` npm script** — only `migrate` and `migrate:up`. Use `npm run migrate -- down`. The database credentials are `user` / `game_db` (from `compose/docker-compose.yml`), not `postgres`/`something2`.
+
 Run from `backend/`:
 ```bash
 npm run migrate:up
-docker compose exec -T db psql -U postgres -d something2 -c "\d creature_drops" -c "SELECT count(*) FROM creature_drops;"
-npm run migrate:down
+docker compose exec -T db psql -U user -d game_db -c "\d creature_drops" -c "SELECT count(*) FROM creature_drops;"
+# Put a row in world_items too — down() must be proven with rows in BOTH tables.
+docker compose exec -T db psql -U user -d game_db -c \
+  "INSERT INTO world_items (world_id, item_type_id, x, y, expires_at) SELECT w.id, it.id, 0, 0, now() + interval '1 hour' FROM worlds w, item_types it LIMIT 1;"
+npm run migrate -- down
 npm run migrate:up
 ```
-Expected: both tables exist after the first `up`; `down` succeeds with rows present; the second `up` succeeds and re-seeds.
+Expected: both tables exist after the first `up`; `down` succeeds **with rows present in both tables**; the second `up` succeeds and re-seeds.
 
 - [ ] **Step 3: Commit**
 
@@ -1630,6 +1635,11 @@ git commit -m "feat(client): wire loot — g to pick up, drop/auto-loot controls
 ```bash
 docker compose up -d
 cd backend && npm run migrate:up
+```
+
+DB access for the verification queries below (credentials from `compose/docker-compose.yml`):
+```bash
+docker compose exec -T db psql -U user -d game_db -c "SELECT * FROM world_items;"
 ```
 
 - [ ] **Step 2: Verify the drop path**
