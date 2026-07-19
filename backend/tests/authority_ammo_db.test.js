@@ -59,7 +59,12 @@ async function stacks(pool, userId) {
 test('consumeAmmo against a REAL database: a stack drains through its last unit and the row is gone', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) {
-    t.skip(`NO DATABASE at ${DB_URL} (${pool.unreachable}) — the last-unit ammo spend is UNVERIFIED on this run`);
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — the last-unit ammo spend is UNVERIFIED on this run`;
+    // A skip reads identically to a pass in the summary count. Under CI that
+    // is not acceptable for the ONLY enforcement of CHECK (quantity > 0): an
+    // unreachable database must fail loudly there, not disappear quietly.
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
     return;
   }
   const user = testUser('drain');
@@ -112,7 +117,9 @@ test('consumeAmmo against a REAL database: a stack drains through its last unit 
 test('consumeAmmo against a REAL database: one shot touches exactly one stack, oldest first', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) {
-    t.skip(`NO DATABASE at ${DB_URL} (${pool.unreachable}) — single-stack targeting is UNVERIFIED on this run`);
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — single-stack targeting is UNVERIFIED on this run`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
     return;
   }
   const user = testUser('stacks');

@@ -1,7 +1,29 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const { Pool } = require('pg');
 const { loadItemTypes, resolveDefaultWeaponId, SLOTS } = require('../src/authority/items.js');
 const { PLAYER_STAMINA_REGEN, PLAYER_MANA_REGEN } = require('../src/authority/world.js');
+
+// Same reachability pattern as backend/tests/authority_ammo_db.test.js: skip
+// (loudly) rather than fail when no database is reachable, so this suite
+// still runs on a machine without Postgres — except under CI, where a skip
+// is indistinguishable from a pass in the summary count and this is one of
+// the few tests standing between a rebalanced/rewired migration and five
+// guards below silently defending a copy instead of the catalog.
+const DB_URL = process.env.TEST_DATABASE_URL
+  || process.env.DATABASE_URL
+  || 'postgres://user:password@localhost:15432/game_db';
+
+async function openPool() {
+  const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 2000, max: 2 });
+  try {
+    await pool.query('SELECT 1');
+    return pool;
+  } catch (err) {
+    await pool.end().catch(() => {});
+    return { unreachable: err.message };
+  }
+}
 
 function fakePool(rows) {
   return { query: async (sql) => { assert.match(sql, /FROM item_types/i); return { rows }; } };
@@ -211,6 +233,134 @@ const SEED_ROWS = [
     pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
     stackable: true, ammo_type_id: null, aoe_radius: null },
 ];
+
+// THE test that makes SEED_ROWS mean anything. Every guard below — the
+// stamina gate, the mana gate, "every weapon with ammo_type_id points at an
+// ammo row", "no weapon has both aoe_radius and pierce > 1", and "AoE
+// falloff leaves a meaningful damage band" — iterates SEED_ROWS, a
+// hand-transcribed fixture, not the database. Without this test, all five
+// are transcription checks: they prove SEED_ROWS is internally consistent
+// with itself, never that it still describes what Postgres actually serves.
+// A migration that rebalances a cooldown or drops an ammo wiring, with
+// nobody remembering to update SEED_ROWS, leaves every one of those tests
+// green while the live catalog is inert. That shape has shipped twice
+// already in this project (the stamina gate, the stale duplicated mock) —
+// this closes it for the catalog fixture too.
+//
+// Same skip-if-unreachable discipline as authority_ammo_db.test.js,
+// including its instinct of pre-checking that the thing this test leans on
+// (the self-referencing ammo FK) actually exists, so the ammo-name
+// comparison below can't itself go vacuous.
+test('the live item_types catalog matches SEED_ROWS (name, category, kind, damage, cooldown, mana_cost, stamina_cost, pierce, projectile_radius, stackable, ammo reference, aoe_radius)', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — SEED_ROWS is UNVERIFIED against the live `
+      + 'catalog on this run, which means the stamina gate, mana gate, ammo-wiring, aoe/pierce, and aoe-falloff '
+      + 'guards below are only checking a hand-transcribed copy, not the real database';
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    const fk = await pool.query(
+      `SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'item_types'::regclass AND contype = 'f'
+          AND confrelid = 'item_types'::regclass`,
+    );
+    assert.equal(fk.rowCount, 1,
+      'item_types must still have its self-referencing ammo_type_id FK — without it, comparing ammo '
+      + 'references by name below would be checking nothing');
+
+    // SEED_ROWS is deliberately weapon+ammo only ("22 weapons + 3 ammo = 25
+    // rows" per its own comment) — the five guards it defends never look at
+    // armor. Fetch id+name for every row (armor included) so ammo_type_id
+    // can resolve to a referenced name even in the hypothetical case ammo
+    // ever pointed at a non-weapon/ammo row, but restrict the comparison set
+    // itself to weapon+ammo so armor rows aren't reported as false drift.
+    const all = await pool.query('SELECT id, name FROM item_types');
+    const r = await pool.query(
+      `SELECT id, name, category, kind, damage, cooldown, mana_cost, stamina_cost,
+              pierce, projectile_radius, stackable, ammo_type_id, aoe_radius
+         FROM item_types
+        WHERE category IN ('weapon', 'ammo')`,
+    );
+    assert.ok(r.rows.length > 0, 'item_types must have weapon/ammo rows for this comparison to mean anything');
+
+    const nameById = new Map(all.rows.map((row) => [row.id, row.name]));
+    const num = (v) => (v == null ? null : Number(v));
+    // Compared fields only — the ones the five guards above actually read.
+    // `id` is deliberately excluded: ids are not stable across environments
+    // (seed order, prior migrations, manual edits), only names are.
+    const FIELDS = ['category', 'kind', 'damage', 'cooldown', 'mana_cost', 'stamina_cost',
+      'pierce', 'projectile_radius', 'stackable', 'ammo_type_name', 'aoe_radius'];
+
+    function fromDbRow(row) {
+      return {
+        category: row.category,
+        kind: row.kind,
+        damage: num(row.damage),
+        cooldown: num(row.cooldown),
+        mana_cost: num(row.mana_cost),
+        stamina_cost: num(row.stamina_cost),
+        pierce: num(row.pierce),
+        projectile_radius: num(row.projectile_radius),
+        stackable: row.stackable,
+        ammo_type_name: row.ammo_type_id == null ? null : nameById.get(row.ammo_type_id),
+        aoe_radius: num(row.aoe_radius),
+      };
+    }
+    function fromSeedRow(w) {
+      return {
+        category: w.category,
+        kind: w.kind,
+        damage: num(w.damage),
+        cooldown: num(w.cooldown),
+        mana_cost: num(w.mana_cost),
+        stamina_cost: num(w.stamina_cost),
+        pierce: num(w.pierce),
+        projectile_radius: num(w.projectile_radius),
+        stackable: w.stackable,
+        ammo_type_name: w.ammo_type_name ?? null,
+        aoe_radius: num(w.aoe_radius),
+      };
+    }
+
+    const dbByName = new Map(r.rows.map((row) => [row.name, fromDbRow(row)]));
+    const seedByName = new Map(SEED_ROWS.map((w) => [w.name, fromSeedRow(w)]));
+
+    // Report BOTH directions of mismatch, not just the first one found: a
+    // drifted migration can add, remove, and rebalance rows all at once, and
+    // whoever reads this failure needs the whole list to fix SEED_ROWS in
+    // one pass rather than one test-run-per-field.
+    const problems = [];
+    for (const [name, dbRow] of dbByName) {
+      if (!seedByName.has(name)) {
+        problems.push(`DB has item type '${name}' with no entry in SEED_ROWS — add it to SEED_ROWS`);
+        continue;
+      }
+      const seedRow = seedByName.get(name);
+      for (const field of FIELDS) {
+        if (dbRow[field] !== seedRow[field]) {
+          problems.push(
+            `'${name}' field '${field}' drifted: DB has ${JSON.stringify(dbRow[field])}, SEED_ROWS has `
+            + `${JSON.stringify(seedRow[field])} — update SEED_ROWS to match the live catalog`,
+          );
+        }
+      }
+    }
+    for (const name of seedByName.keys()) {
+      if (!dbByName.has(name)) {
+        problems.push(`SEED_ROWS has item type '${name}' with no matching row in the DB — update SEED_ROWS `
+          + '(the migration may have renamed, dropped, or never inserted it)');
+      }
+    }
+
+    assert.ok(problems.length === 0,
+      `SEED_ROWS has drifted from the live item_types catalog:\n${problems.join('\n')}`);
+  } finally {
+    await pool.end().catch(() => {});
+  }
+});
 
 test('the seeded catalog has no structurally broken weapon', async () => {
   const pool = { query: async () => ({ rows: SEED_ROWS }) };

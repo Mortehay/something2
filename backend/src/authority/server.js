@@ -557,6 +557,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // must ride out on THIS tick's broadcast or they are lost. Omitted from
       // the frame entirely when empty (the common case) to keep it small.
       const dets = entry.pendingDetonations;
+      // Cleared immediately after the read, not after the broadcast loop: if
+      // send() throws partway through, the stash must not survive to be
+      // re-broadcast (as stale, already-shown blasts) on the next tick.
+      entry.pendingDetonations = null;
       const hasDets = Array.isArray(dets) && dets.length > 0;
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
@@ -564,7 +568,6 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (hasDets) frame.detonations = dets;
         send(ws, frame);
       }
-      entry.pendingDetonations = null;
       if (tick % creatureBroadcastEvery === 0) {
         recomputeActive(entry);
         broadcastCreatures(entry);

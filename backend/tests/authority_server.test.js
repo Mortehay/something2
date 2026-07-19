@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
 const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const { attachAuthority } = require('../src/authority/server.js');
@@ -537,6 +539,16 @@ test('a second join on the same socket is rejected (no free re-heal / no ghost)'
 
 const AMMO_TYPE_ID = 7;
 
+// The shape mkAttackHarness's pool.query uses to recognize consumeAmmo's
+// UPDATE-branch of the CTE. Pulled out to a named constant — not just a
+// literal inline in the query function below — so the "does this still match
+// ammo.js" test a few lines down is checking the SAME regex the harness
+// actually runs, not a hand-copied lookalike that could drift from it
+// unnoticed. See the "actually matches ammo.js" test for why this binding
+// matters: a stale copy of exactly this mock already cost a full round of
+// misdiagnosis in this slice.
+const AMMO_UPDATE_RE = /UPDATE player_items SET quantity/i;
+
 // A weapon type row with every optional column nulled out, so a test that
 // supplies a partial weapon (e.g. a melee one with no ammo) genuinely gets
 // ammo_type_id: null rather than inheriting the ammo bow's.
@@ -587,7 +599,7 @@ async function mkAttackHarness(opts = {}) {
       // *cooldown* assertion with no hint that the mock is the liar. count(*)
       // is a bigint, so node-pg hands back a STRING — modelled here so the
       // Number() coercion in consumeAmmo stays exercised by this suite.
-      if (/UPDATE player_items SET quantity/i.test(sql)) {
+      if (AMMO_UPDATE_RE.test(sql)) {
         return { rowCount: 1, rows: [{ spent: onConsume(params) ? '1' : '0' }] };
       }
       // Also must precede the generic /FROM player_items/ branch below:
@@ -637,6 +649,23 @@ async function mkAttackHarness(opts = {}) {
     close() { ws.close(); handle.close(); server.close(); },
   };
 }
+
+// Nothing else binds AMMO_UPDATE_RE to production code. If the CTE in
+// ammo.js is reworded (e.g. the UPDATE clause's column list or spacing
+// changes), this mock's branch falls through silently to the generic
+// /FROM player_items/ branch further down, `spent` reads `undefined`, and
+// every test using mkAttackHarness fails on a misleading *cooldown*
+// assertion with no hint that the mock — not consumeAmmo — is the liar. This
+// is exactly the failure mode that cost a full round of misdiagnosis earlier
+// in this slice. Asserting against the real source text turns that into a
+// loud, correctly-attributed failure right here instead.
+test('mkAttackHarness ammo regex actually matches the real consumeAmmo SQL in ammo.js', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/authority/ammo.js'), 'utf8');
+  assert.match(src, AMMO_UPDATE_RE,
+    'AMMO_UPDATE_RE no longer matches src/authority/ammo.js — the consumeAmmo CTE was reworded. '
+    + 'Update AMMO_UPDATE_RE in this file to match the new SQL, or mkAttackHarness will silently '
+    + 'fall through to a generic branch and every test using it will fail on the wrong assertion.');
+});
 
 test('an attack refused for cooldown does not consume ammo', async () => {
   const spent = [];
