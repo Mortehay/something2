@@ -532,10 +532,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }).catch((err) => console.error('auto-loot notify failed:', err));
       }
       const snap = entry.world.snapshot();
+      // Detonations are per-tick and the stash is REPLACED each tick, so they
+      // must ride out on THIS tick's broadcast or they are lost. Omitted from
+      // the frame entirely when empty (the common case) to keep it small.
+      const dets = entry.pendingDetonations;
+      const hasDets = Array.isArray(dets) && dets.length > 0;
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
-        send(ws, { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players, projectiles: snap.projectiles });
+        const frame = { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players, projectiles: snap.projectiles };
+        if (hasDets) frame.detonations = dets;
+        send(ws, frame);
       }
+      entry.pendingDetonations = null;
       if (tick % creatureBroadcastEvery === 0) {
         recomputeActive(entry);
         broadcastCreatures(entry);

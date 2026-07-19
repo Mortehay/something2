@@ -17,6 +17,12 @@ import { inputVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { aimVector } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
+import { resolveAmmoHud } from "./ammo.js";
+import { addBlasts, pruneBlasts } from "./blasts.js";
+
+// How long the "out of ammo" HUD flash stays up after the server's `noammo`
+// frame arrives.
+const NO_AMMO_FLASH_MS = 600;
 
 // Fallback weapon name shown when nothing is equipped in main_hand yet
 // (mirrors the server's DEFAULT_WEAPON_NAME in authority/items.js).
@@ -70,6 +76,12 @@ export class Game {
         this.localStamina = null;
         this.localMaxStamina = null;
         this.projectiles = null;
+
+        // AoE (Slice 3b-3b): active blast rings, and the "out of ammo" flash.
+        // Detonations ride a single `state` frame and are never repeated, so
+        // they are copied into this list on arrival and animated locally.
+        this.blasts = [];
+        this.noAmmoUntil = 0;
 
         // Inventory / paper-doll (Slice 3b-2a). `inventory` mirrors the
         // account-wide item catalog + owned items + equipment; the server is
@@ -236,6 +248,8 @@ export class Game {
         this.inventorySelectedItemId = null;
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
+        this.blasts = [];
+        this.noAmmoUntil = 0;
 
         this._inputBuffer = [];
         // Connect to the authoritative sim; spawn comes from the server.
@@ -259,6 +273,7 @@ export class Game {
                     removeItem(this.inventory, msg.itemId);
                     if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
                 },
+                onNoAmmo: () => { this.noAmmoUntil = performance.now() + NO_AMMO_FLASH_MS; },
                 onError: (e) => {
                     console.error('[authority]', e);
                     // Only a server-issued protocol rejection (type:'error' frame,
@@ -410,6 +425,12 @@ export class Game {
             this.autoLoot = mine.autoLoot === true;
         }
         if (this.projectiles) this.projectiles.applySnapshot(msg.projectiles || []);
+        // Detonations are present only on the tick they happened (the server
+        // clears its stash after this broadcast), so they must be taken off
+        // THIS frame — there is no snapshot to re-read them from later.
+        if (msg.detonations && msg.detonations.length) {
+            addBlasts(this.blasts, msg.detonations, performance.now());
+        }
     }
 
     _reconcileSelf(serverPlayer) {
@@ -463,6 +484,10 @@ export class Game {
             // Expire the toast here (once per frame) rather than on a timer,
             // consistent with how the rest of Game drives state off the loop.
             if (this.toast && performance.now() >= this.toast.expiresAt) this.toast = null;
+            // Expire finished blasts once per frame, on the same clock the
+            // ring animation reads.
+            const nowMs = performance.now();
+            this.blasts = pruneBlasts(this.blasts, nowMs);
             this.renderSystem.renderChunked({
                 player: this.player,
                 camera: this.camera,
@@ -482,6 +507,11 @@ export class Game {
                 groundItems: this.groundItems.all(),
                 autoLoot: this.autoLoot,
                 toast: this.toast,
+                blasts: this.blasts,
+                // null whenever the equipped weapon needs no ammo — the HUD
+                // then draws no ammo line at all.
+                ammo: resolveAmmoHud(this.inventory),
+                noAmmoFlash: nowMs < this.noAmmoUntil,
             });
         } else {
             this.renderSystem.render(this.player, this.camera, this.map, this.remotePlayers, this.localUserId);

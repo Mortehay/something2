@@ -5,13 +5,22 @@
 export const SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
 const HAND_SLOTS = ['main_hand', 'off_hand'];
 
+function qtyOf(item) {
+  const q = Number(item && item.quantity);
+  return Number.isFinite(q) && q > 0 ? q : 1;
+}
+
 export function createInventory() {
   return { types: new Map(), items: [], equipment: {} };
 }
 
 export function applyJoined(inv, msg) {
   inv.types = new Map((msg.itemTypes || []).map((t) => [t.id, t]));
-  inv.items = (msg.items || []).map((i) => ({ id: i.id, typeId: i.typeId }));
+  // `quantity` is always sent and always a number (see authority/items.js);
+  // it is carried through here because the ammo HUD sums it across stacks.
+  // Defaulted to 1 rather than dropped so an older/partial frame degrades to
+  // "one unit" instead of silently contributing 0 to that sum.
+  inv.items = (msg.items || []).map((i) => ({ id: i.id, typeId: i.typeId, quantity: qtyOf(i) }));
   inv.equipment = { ...(msg.equipment || {}) };
   return inv;
 }
@@ -31,7 +40,7 @@ export function typeOf(inv, itemId) {
 export function addItem(inv, item) {
   if (!item || item.id == null) return;
   if (inv.items.some((it) => it.id === item.id)) return;
-  inv.items.push({ id: item.id, typeId: item.typeId });
+  inv.items.push({ id: item.id, typeId: item.typeId, quantity: qtyOf(item) });
 }
 
 export function removeItem(inv, itemId) {

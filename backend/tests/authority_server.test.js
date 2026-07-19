@@ -641,6 +641,69 @@ test('two attack frames in one batch spend only one unit', async () => {
   h.close();
 });
 
+// ---------------------------------------------------------------------------
+// AoE: detonations must actually reach a connected client
+// ---------------------------------------------------------------------------
+
+// An ammo-free AoE bow with a very short range, so the projectile runs out of
+// flight (which counts as an impact) and detonates within a tick or two.
+const AOE_BOW = {
+  kind: 'projectile', damage: 12, cooldown: 5, range: 60, projectile_speed: 900,
+  projectile_radius: 8, pierce: null, aoe_radius: 96, element: 'arcane',
+  ammo_type_id: null,
+};
+
+test('a detonation reaches the client on the state frame, and only once', async () => {
+  // Regression guard for the open item left by the AoE tick work: the tick
+  // stashed entry.pendingDetonations and NOTHING ever read it. Because the
+  // stash is replaced (not appended to) every tick, an unconsumed detonation
+  // is silently overwritten ~20ms later and no blast ever renders. This test
+  // fails outright if the broadcast does not carry it.
+  const h = await mkAttackHarness({ weapon: AOE_BOW });
+
+  const frames = [];
+  h.ws.on('message', (data) => {
+    const m = JSON.parse(data);
+    if (m.type === 'state') frames.push(m);
+  });
+
+  await h.sendAttack(1, 0);
+
+  // Poll real state frames until one carries a detonation.
+  let det = null;
+  for (let i = 0; i < 30 && det == null; i++) {
+    const s = await nextMsg(h.ws, 'state');
+    if (Array.isArray(s.detonations) && s.detonations.length > 0) det = s.detonations[0];
+  }
+
+  assert.ok(det, 'a state frame must carry the detonation the tick produced');
+  assert.equal(det.radius, 96, 'the blast radius the client renders comes from the weapon');
+  assert.equal(det.element, 'arcane');
+  assert.ok(Number.isFinite(det.x) && Number.isFinite(det.y), 'world-space centre');
+
+  // The stash must be cleared after sending: a detonation repeated on every
+  // subsequent frame would leave a blast ring stuck on screen forever.
+  const before = frames.length;
+  for (let i = 0; i < 5; i++) await nextMsg(h.ws, 'state');
+  const later = frames.slice(before).filter((f) => Array.isArray(f.detonations) && f.detonations.length);
+  assert.equal(later.length, 0, 'detonations must not repeat on later frames');
+
+  h.close();
+});
+
+test('a state frame with no detonations omits the field entirely', async () => {
+  // Keeps the common-case frame small; the client treats a missing field as
+  // "no blasts this tick".
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+  const s = await nextMsg(ws, 'state');
+  assert.equal(s.detonations, undefined);
+  ws.close(); handle.close(); server.close();
+});
+
 test('a kicked socket closing mid-join does not tear down the new session', async () => {
   // Delay the inventory (player_items) query so the new session's join
   // handler genuinely sits mid-await while the kicked (old) socket's real
