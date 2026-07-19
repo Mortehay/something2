@@ -7,33 +7,53 @@
 // actually spent; the caller must treat false as "out of ammo" and refuse the
 // attack WITHOUT consuming the cooldown.
 //
-// The subquery is load-bearing. A player may hold more than one stack of the
-// same ammo type (stacks are never merged — see the spec), and the obvious
-// form `WHERE user_id = $1 AND item_type_id = $2` would decrement EVERY one
-// of them on a single shot. Selecting one id first makes the statement
-// correct for any number of stacks; ORDER BY created_at drains oldest first.
+// The `pick` CTE is load-bearing. A player may hold more than one stack of
+// the same ammo type (stacks are never merged — see the spec), and the
+// obvious form `WHERE user_id = $1 AND item_type_id = $2` would decrement
+// EVERY one of them on a single shot. Picking one id first makes the
+// statement correct for any number of stacks; ORDER BY created_at drains the
+// oldest first. FOR UPDATE locks that one row so two concurrent spends
+// serialize on it instead of both reading the same pre-spend quantity.
 //
-// rowCount IS the has-ammo check: there is no separate SELECT that could
-// drift out of sync with the write, the same reasoning as the loot claim CTE.
+// The del/upd split is NOT a style choice — it is the whole fix for the
+// defect that shipped here. `player_items` carries CHECK (quantity > 0), and
+// that constraint is correct: a zero-quantity stack is a meaningless row.
+// Taking the last unit therefore CANNOT be expressed as a decrement followed
+// by a cleanup DELETE: the 1 -> 0 UPDATE violates the check *inside the
+// UPDATE itself*, Postgres evaluates it at statement end, and it is not
+// DEFERRABLE — so the statement throws and any DELETE written after it is
+// unreachable dead code. That is exactly what happened: every ammo stack got
+// permanently stuck at 1, the last arrow could never be fired, and the
+// caller's catch swallowed the rejection so the client was told nothing at
+// all. Branching *within one statement* — DELETE the row when it holds its
+// last unit, decrement otherwise — never constructs an illegal row, so the
+// constraint stays and the spend still succeeds.
+//
+// The returned count IS the has-ammo check: there is no separate SELECT that
+// could drift out of sync with the write, the same reasoning as the loot
+// claim CTE. Exactly one of del/upd can fire (their predicates partition
+// pick's single row), so `spent` is 1 on a successful spend and 0 when the
+// player holds no stack with anything left.
 async function consumeAmmo(pool, userId, ammoTypeId) {
   const r = await pool.query(
-    `UPDATE player_items SET quantity = quantity - 1
-      WHERE id = (
-        SELECT id FROM player_items
-         WHERE user_id = $1 AND item_type_id = $2 AND quantity > 0
-         ORDER BY created_at ASC, id ASC LIMIT 1
-      )
-      RETURNING id, quantity`,
+    `WITH pick AS (
+       SELECT id, quantity FROM player_items
+        WHERE user_id = $1 AND item_type_id = $2 AND quantity > 0
+        ORDER BY created_at ASC, id ASC LIMIT 1
+        FOR UPDATE
+     ), del AS (
+       DELETE FROM player_items
+        WHERE id IN (SELECT id FROM pick WHERE quantity = 1)
+        RETURNING id
+     ), upd AS (
+       UPDATE player_items SET quantity = quantity - 1
+        WHERE id IN (SELECT id FROM pick WHERE quantity > 1)
+        RETURNING id
+     )
+     SELECT (SELECT count(*) FROM del) + (SELECT count(*) FROM upd) AS spent`,
     [userId, ammoTypeId],
   );
-  if (r.rowCount !== 1) return false;
-  // quantity > 0 is a CHECK constraint, so an emptied stack must be removed
-  // rather than left at 0 — the next shot's `quantity > 0` predicate would
-  // skip it anyway, but leaving zero-rows around would grow the inventory.
-  if (Number(r.rows[0].quantity) === 0) {
-    await pool.query('DELETE FROM player_items WHERE id = $1', [r.rows[0].id]);
-  }
-  return true;
+  return Number(r.rows[0] && r.rows[0].spent) === 1;
 }
 
 // Total units of `ammoTypeId` the player holds, summed across every stack.

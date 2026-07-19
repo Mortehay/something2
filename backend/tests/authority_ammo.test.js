@@ -2,48 +2,65 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { consumeAmmo, ammoCount } = require('../src/authority/ammo');
 
-test('consumeAmmo returns true and spends one unit', async () => {
+// NOTE ON WHAT THESE TESTS CAN AND CANNOT SEE. Everything in this file mocks
+// the pool, so the SQL is never executed and no *schema* rule — above all
+// player_items' CHECK (quantity > 0) — can possibly fire here. That blind
+// spot is not hypothetical: a fully green run of this file shipped a
+// consumeAmmo whose decrement threw on the last unit of every stack, because
+// the constraint it violated lives in the schema and not in the code. These
+// tests defend the statement's *shape*; the behaviour that depends on the
+// real schema is covered by authority_ammo_db.test.js against a live
+// database, and that is the test that actually proves the last shot works.
+
+test('consumeAmmo returns true and spends one unit in a single statement', async () => {
   const calls = [];
   const pool = { query: async (sql, params) => {
     calls.push({ sql, params });
-    return { rowCount: 1, rows: [{ id: 'i1', quantity: 4 }] };
+    return { rowCount: 1, rows: [{ spent: 1 }] };
   } };
   assert.equal(await consumeAmmo(pool, 'u1', 7), true);
-  assert.equal(calls.length, 1, 'a non-empty stack needs no follow-up delete');
+  assert.deepEqual(calls[0].params, ['u1', 7]);
+  // One statement is a correctness requirement, not an optimisation: a
+  // decrement and a follow-up delete cannot be split across two statements
+  // without the first one violating CHECK (quantity > 0) on the last unit.
+  assert.equal(calls.length, 1, 'the spend must be one atomic statement, never a decrement plus a cleanup delete');
 });
 
 // The mock pool ignores the SQL string, so nothing about the statement is
 // defended unless the test reads the statement itself. Without the
-// single-row subquery, one shot decrements EVERY stack of that ammo type.
+// single-row pick, one shot decrements EVERY stack of that ammo type.
 test('the consume statement targets exactly one row', async () => {
   let sql = '';
-  const pool = { query: async (q) => { sql = q; return { rowCount: 1, rows: [{ id: 'i1', quantity: 2 }] }; } };
+  const pool = { query: async (q) => { sql = q; return { rowCount: 1, rows: [{ spent: 1 }] }; } };
   await consumeAmmo(pool, 'u1', 7);
   const norm = sql.replace(/\s+/g, ' ').toLowerCase();
   assert.ok(norm.includes('limit 1'),
-    'consume must select a single stack id — without LIMIT 1 the UPDATE hits every stack of this ammo type, so one shot spends several units');
-  assert.ok(norm.includes('where id ='),
-    'the UPDATE must be keyed on a single id, not on user_id/item_type_id directly');
+    'consume must pick a single stack id — without LIMIT 1 the write hits every stack of this ammo type, so one shot spends several units');
+  assert.ok(norm.includes('order by created_at'),
+    'the oldest stack must drain first');
   assert.ok(norm.includes('quantity > 0'),
-    'the quantity > 0 predicate is the has-ammo gate; without it an empty stack decrements to a CHECK violation and 500s');
+    'the quantity > 0 predicate is the has-ammo gate; without it an empty stack is picked and the shot is wrongly allowed');
+});
+
+// The regression guard for the shipped defect, at the level a mocked pool can
+// still express: the statement must remove the row it empties rather than
+// write a zero into it.
+test('the consume statement deletes the last-unit stack instead of decrementing it to zero', async () => {
+  let sql = '';
+  const pool = { query: async (q) => { sql = q; return { rowCount: 1, rows: [{ spent: 1 }] }; } };
+  await consumeAmmo(pool, 'u1', 7);
+  const norm = sql.replace(/\s+/g, ' ').toLowerCase();
+  assert.ok(norm.includes('delete from player_items'),
+    'a stack down to its last unit must be DELETEd; decrementing it to 0 violates CHECK (quantity > 0) and throws');
+  assert.ok(norm.includes('quantity = 1'),
+    'the delete branch must be selected by the stack holding exactly one unit');
+  assert.ok(norm.includes('quantity > 1'),
+    'the decrement branch must be restricted to stacks with more than one unit, so it can never construct a zero row');
 });
 
 test('consumeAmmo returns false when no stack has any left', async () => {
-  const pool = { query: async () => ({ rowCount: 0, rows: [] }) };
+  const pool = { query: async () => ({ rowCount: 1, rows: [{ spent: 0 }] }) };
   assert.equal(await consumeAmmo(pool, 'u1', 7), false);
-});
-
-test('emptying a stack deletes it rather than leaving quantity 0', async () => {
-  const calls = [];
-  const pool = { query: async (sql, params) => {
-    calls.push({ sql, params });
-    if (calls.length === 1) return { rowCount: 1, rows: [{ id: 'i1', quantity: 0 }] };
-    return { rowCount: 1, rows: [] };
-  } };
-  assert.equal(await consumeAmmo(pool, 'u1', 7), true);
-  assert.equal(calls.length, 2);
-  assert.match(calls[1].sql, /delete\s+from\s+player_items/i);
-  assert.deepEqual(calls[1].params, ['i1']);
 });
 
 // This is the one that fails if someone "simplifies" ammoCount to reading a
