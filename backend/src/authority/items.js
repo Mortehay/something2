@@ -11,7 +11,7 @@ function num(v) { return v == null ? null : Number(v); }
 async function loadItemTypes(pool) {
   const r = await pool.query(
     `SELECT id, name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
-            range, projectile_speed, projectile_radius, pierce, mana_cost, element,
+            range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element,
             defense, resistances
      FROM item_types ORDER BY id ASC`,
   );
@@ -33,6 +33,7 @@ async function loadItemTypes(pool) {
       projectile_radius: num(row.projectile_radius),
       pierce: num(row.pierce),
       mana_cost: Number(row.mana_cost ?? 0),
+      stamina_cost: Number(row.stamina_cost ?? 0),
       element: row.element ?? null,
       defense: Number(row.defense ?? 0),
       resistances: row.resistances || {},
