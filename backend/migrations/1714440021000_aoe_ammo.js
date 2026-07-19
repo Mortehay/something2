@@ -34,8 +34,15 @@ exports.up = (pgm) => {
   pgm.addConstraint('item_types', 'item_types_aoe_pierce_check',
     'CHECK (aoe_radius IS NULL OR pierce IS NULL OR pierce <= 1)');
   // A melee weapon with ammo_type_id set would silently never check it.
+  //
+  // `kind IS NOT NULL` is required, not redundant. A CHECK rejects a row only
+  // when its expression is FALSE — NULL passes. Armor and ammo rows both have
+  // kind IS NULL, so the shorter form `ammo_type_id IS NULL OR kind =
+  // 'projectile'` evaluates to (FALSE OR NULL) = NULL for them and is
+  // therefore VACUOUS: an armor row could carry an ammo_type_id that nothing
+  // ever reads. Verified against the live DB before this was tightened.
   pgm.addConstraint('item_types', 'item_types_ammo_ref_check',
-    "CHECK (ammo_type_id IS NULL OR kind = 'projectile')");
+    "CHECK (ammo_type_id IS NULL OR (kind IS NOT NULL AND kind = 'projectile'))");
 
   // Ammo rows FIRST — the weapon updates below reference them by FK.
   pgm.sql(`
