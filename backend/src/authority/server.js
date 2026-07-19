@@ -6,6 +6,7 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { spawnChunkCreatures } = require('../services/mapService');
+const { commitCreatureDeath } = require('./loot');
 
 const MAP_TILE_SIZE = 100;
 
@@ -23,6 +24,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const creatureBroadcastEvery = opts.creatureBroadcastEvery || 4; // 4 ticks @50ms = ~5Hz
   const creatureFlushMs = opts.creatureFlushMs || 3000;
   const heartbeatMs = opts.heartbeatMs || 30000;
+  const groundItemTtlMs = opts.groundItemTtlMs || 600000; // 10 min
+  const itemSweepMs = opts.itemSweepMs || 60000;
+  const rng = opts.rng || Math.random;
 
   const wss = new WebSocketServer({ noServer: true });
   const worlds = new Map(); // world_id -> { world, row, sockets: Map<userId, ws> }
@@ -61,14 +65,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
-        const cr = await pool.query('SELECT name, color, hp FROM entity_types WHERE is_creature = true ORDER BY id ASC');
+        const cr = await pool.query('SELECT id, name, color, hp FROM entity_types WHERE is_creature = true ORDER BY id ASC');
         const creatureTypes = cr.rows.map((r) => ({ name: r.name, hp: r.hp, color: r.color }));
+        const creatureTypeIds = new Map(cr.rows.map((r) => [r.name, r.id]));
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const map = new ServerMap({ seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes });
         const entry = {
-          worldId, world: new World(map, itemTypes, defaultWeaponId), row, sockets: new Map(),
-          tileTypes, creatureTypes,
+          worldId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
+          tileTypes, creatureTypes, creatureTypeIds,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -95,6 +100,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const center = (chunkSize * MAP_TILE_SIZE) / 2;
     return { x: center, y: center };
   }
+
+  // Single fire-and-forget entry point for a killed creature id: named once
+  // here so both kill sites (melee attack handler, projectile tick) share the
+  // same options instead of repeating them. The tick loop must not await this
+  // (it's on the hot path), so the .catch is mandatory — an unhandled
+  // rejection here would kill the process.
+  const onCreatureDeath = (entry, id) =>
+    commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs })
+      .catch((err) => console.error('death commit failed:', err));
 
   function send(ws, obj) {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
@@ -295,9 +309,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const entry = worlds.get(ws.worldId);
         if (entry) {
           const { killedCreatureIds } = entry.world.attack(ws.userId, finiteOr(msg.ax, 0), finiteOr(msg.ay, 0));
-          for (const id of new Set(killedCreatureIds)) {
-            pool.query('DELETE FROM world_creatures WHERE id = $1', [id]).catch(() => {});
-          }
+          for (const id of new Set(killedCreatureIds)) onCreatureDeath(entry, id);
         }
         return;
       }
@@ -362,9 +374,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       entry.world.tick(dt);
       entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
       const killedByProjectiles = entry.world.tickProjectiles(dt);
-      for (const id of new Set(killedByProjectiles)) {
-        pool.query('DELETE FROM world_creatures WHERE id = $1', [id]).catch(() => {});
-      }
+      for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);
       entry.world.resolveDeaths();
       const snap = entry.world.snapshot();
       for (const [userId, ws] of entry.sockets) {

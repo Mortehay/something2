@@ -42,3 +42,29 @@ test('malformed quantities degrade to a single drop rather than throwing', () =>
   const rows = [{ item_type_id: 9, chance: '1', min_qty: null, max_qty: null }];
   assert.deepStrictEqual(rollDrops(rows, seq(0, 0)), [9]);
 });
+
+test('chance 0 drops nothing', () => {
+  const rows = [{ item_type_id: 1, chance: '0', min_qty: 1, max_qty: 1 }];
+  assert.deepStrictEqual(rollDrops(rows, seq(0, 0)), []);
+});
+
+test('a negative chance drops nothing', () => {
+  const rows = [{ item_type_id: 1, chance: '-0.5', min_qty: 1, max_qty: 1 }];
+  assert.deepStrictEqual(rollDrops(rows, seq(0, 0)), []);
+});
+
+test('a NaN chance drops nothing', () => {
+  const rows = [{ item_type_id: 1, chance: 'not-a-number', min_qty: 1, max_qty: 1 }];
+  assert.deepStrictEqual(rollDrops(rows, seq(0, 0)), []);
+});
+
+test('a huge max_qty is clamped rather than hanging the process', () => {
+  // Migration 1714440018000 only enforces min_qty <= max_qty — nothing caps
+  // max_qty itself, so a bad catalog row (or a future admin typo) could set
+  // max_qty to 1e9. rollDrops must clamp internally rather than trust the row.
+  const rows = [{ item_type_id: 3, chance: '1', min_qty: 1, max_qty: 1000000000 }];
+  const out = rollDrops(rows, seq(0, 0.999999)); // roll(drop)=0 -> drops; roll(qty)~1 -> picks the max
+  assert.ok(out.length <= 100, `expected at most 100 entries, got ${out.length}`);
+  assert.ok(out.length > 0, 'still drops something');
+  assert.ok(out.every((id) => id === 3));
+});
