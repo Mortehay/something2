@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -14,6 +14,9 @@ export class WorldAuthorityClient {
     this.onClose = onClose || (() => {});
     this.onCreatures = onCreatures || (() => {});
     this.onKicked = onKicked || (() => {});
+    this.onItems = onItems || (() => {});
+    this.onPicked = onPicked || (() => {});
+    this.onDropped = onDropped || (() => {});
     this.inputIntervalMs = inputIntervalMs;
     this.now = now;
 
@@ -45,6 +48,9 @@ export class WorldAuthorityClient {
         case 'pong': break;
         case 'creatures': this.onCreatures(msg); break;
         case 'kicked': this.onKicked(msg); break;
+        case 'items': this.onItems(msg); break;
+        case 'picked': this.onPicked(msg); break;
+        case 'dropped': this.onDropped(msg); break;
         case 'error': this.onError(new Error(msg.message || 'authority error')); break;
         default: console.warn('WorldAuthorityClient: unknown msg', msg.type);
       }
@@ -77,6 +83,10 @@ export class WorldAuthorityClient {
   sendEquip(itemId, slot) { this._send({ type: 'equip', itemId, slot }); }
 
   sendUnequip(slot) { this._send({ type: 'unequip', slot }); }
+
+  sendPickup() { this._send({ type: 'pickup' }); }
+  sendDrop(itemId) { this._send({ type: 'drop', itemId }); }
+  sendAutoLoot(on) { this._send({ type: 'autoloot', on: on === true }); }
 
   disconnect() {
     if (this.ws) { try { this.ws.close(); } catch { /* already closed */ } this.ws = null; }

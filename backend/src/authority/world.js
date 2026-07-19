@@ -4,6 +4,7 @@ const { normalizeAim, inArc } = require('./weapons');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamage, NO_MITIGATION } = require('./damage');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
+const { GroundItemSim } = require('./groundItems');
 
 const PLAYER_W = 64;
 const PLAYER_H = 64;
@@ -24,13 +25,14 @@ function facingFromInput(dx, dy) {
 }
 
 class World {
-  constructor(map, weaponsById = new Map(), defaultWeaponId = null) {
+  constructor(map, weaponsById = new Map(), defaultWeaponId = null, chunkSize = 64) {
     this.map = map;
     this.players = new Map(); // userId -> state
     this.creatures = new CreatureSim(map);
     this.weapons = weaponsById;
     this.defaultWeaponId = defaultWeaponId;
     this.projectiles = new ProjectileSim();
+    this.groundItems = new GroundItemSim(chunkSize);
   }
 
   addPlayer(userId, spawn, inv = { items: [], equipment: {} }) {
@@ -53,6 +55,14 @@ class World {
       mit: mitigation(inv, this.weapons),
       spawn: { x: spawn.x, y: spawn.y },
       _attackCd: 0,
+      autoLoot: false,
+      // Recently-dropped GROUND ITEM ids -> grace expiry (ms, same clock as
+      // the `now` passed to dropItem/dropGraceActive). Lets the auto-loot
+      // scan skip an item this player JUST dropped (dropItem spawns it at
+      // their exact centre, i.e. distance 0 from the pickup-radius scan) so
+      // it isn't instantly re-vacuumed. Manual pickup ignores this entirely.
+      // See loot.js `dropGraceActive`.
+      dropGrace: new Map(),
     });
   }
 
@@ -65,6 +75,13 @@ class World {
     if (!p) return;
     p.input = { dx: clamp(dx, -1, 1), dy: clamp(dy, -1, 1) };
     p.pendingSeq = seq;
+  }
+
+  // Strict boolean: a truthy string from the wire must not enable auto-loot.
+  setAutoLoot(userId, on) {
+    const p = this.players.get(userId);
+    if (!p) return;
+    p.autoLoot = on === true;
   }
 
   tick(dt) {

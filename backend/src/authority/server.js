@@ -6,6 +6,8 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { spawnChunkCreatures } = require('../services/mapService');
+const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
+const { PICKUP_RADIUS } = require('./groundItems');
 
 const MAP_TILE_SIZE = 100;
 
@@ -23,6 +25,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const creatureBroadcastEvery = opts.creatureBroadcastEvery || 4; // 4 ticks @50ms = ~5Hz
   const creatureFlushMs = opts.creatureFlushMs || 3000;
   const heartbeatMs = opts.heartbeatMs || 30000;
+  const groundItemTtlMs = opts.groundItemTtlMs || 600000; // 10 min
+  const itemSweepMs = opts.itemSweepMs || 60000;
+  const rng = opts.rng || Math.random;
 
   const wss = new WebSocketServer({ noServer: true });
   const worlds = new Map(); // world_id -> { world, row, sockets: Map<userId, ws> }
@@ -61,17 +66,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
-        const cr = await pool.query('SELECT name, color, hp FROM entity_types WHERE is_creature = true ORDER BY id ASC');
+        const cr = await pool.query('SELECT id, name, color, hp FROM entity_types WHERE is_creature = true ORDER BY id ASC');
         const creatureTypes = cr.rows.map((r) => ({ name: r.name, hp: r.hp, color: r.color }));
+        const creatureTypeIds = new Map(cr.rows.map((r) => [r.name, r.id]));
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const map = new ServerMap({ seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes });
         const entry = {
-          worldId, world: new World(map, itemTypes, defaultWeaponId), row, sockets: new Map(),
-          tileTypes, creatureTypes,
+          worldId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
+          tileTypes, creatureTypes, creatureTypeIds,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
+          claiming: new Set(),       // ground item ids with a claim in flight (avoids wasted queries)
         };
         worlds.set(worldId, entry);
         return entry;
@@ -95,6 +102,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const center = (chunkSize * MAP_TILE_SIZE) / 2;
     return { x: center, y: center };
   }
+
+  // Single fire-and-forget entry point for a killed creature id: named once
+  // here so both kill sites (melee attack handler, projectile tick) share the
+  // same options instead of repeating them. The tick loop must not await this
+  // (it's on the hot path), so the .catch is mandatory — an unhandled
+  // rejection here would kill the process.
+  const onCreatureDeath = (entry, id) =>
+    commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs })
+      .catch((err) => console.error('death commit failed:', err));
 
   function send(ws, obj) {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
@@ -142,6 +158,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
       entry.world.creatures.addCreatures(rows.rows);
+      const itemRows = await pool.query(
+        `SELECT id, item_type_id, x, y, expires_at FROM world_items
+         WHERE world_id = $1 AND x >= $2 AND x < $3 AND y >= $4 AND y < $5 AND expires_at > now()`,
+        [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
+      );
+      entry.world.groundItems.add(itemRows.rows);
       entry.loadedChunks.add(chunkKey);
     } catch {
       // best-effort: left out of loadedChunks so recomputeActive retries it
@@ -184,6 +206,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }
 
+  function broadcastItems(entry) {
+    const N = entry.row.chunk_size;
+    for (const [userId, ws] of entry.sockets) {
+      const p = entry.world.getPlayer(userId);
+      if (!p) continue;
+      const { cx, cy } = chunkOf(p.x, p.y, N);
+      const keys = neighborhoodKeys(cx, cy, 1);
+      send(ws, { type: 'items', items: entry.world.groundItems.snapshotForNeighborhood(keys) });
+    }
+  }
+
   async function flushAndPrune(entry) {
     const dirty = entry.world.creatures.getDirty();
     if (dirty.length) {
@@ -200,6 +233,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       entry.world.creatures.clearDirty(ok);
     }
     entry.world.creatures.pruneInactive(entry.activeChunks);
+    entry.world.groundItems.pruneInactive(entry.activeChunks);
   }
 
   wss.on('connection', (ws) => {
@@ -295,9 +329,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const entry = worlds.get(ws.worldId);
         if (entry) {
           const { killedCreatureIds } = entry.world.attack(ws.userId, finiteOr(msg.ax, 0), finiteOr(msg.ay, 0));
-          for (const id of new Set(killedCreatureIds)) {
-            pool.query('DELETE FROM world_creatures WHERE id = $1', [id]).catch(() => {});
-          }
+          for (const id of new Set(killedCreatureIds)) onCreatureDeath(entry, id);
         }
         return;
       }
@@ -323,6 +355,51 @@ function attachAuthority(httpServer, pool, opts = {}) {
           } catch (err) {
             console.error(`${msg.type} failed:`, err);
             send(ws, { type: 'error', message: `${msg.type} failed` });
+          }
+        });
+        return;
+      }
+
+      if (msg.type === 'pickup') {
+        const entry = worlds.get(ws.worldId);
+        if (!entry) return;
+        // Same per-socket serialisation and try/catch as equip: an unhandled
+        // rejection in an async ws handler kills the process on Node 20.
+        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
+          try {
+            const p = entry.world.getPlayer(ws.userId);
+            if (!p) return;
+            const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+            const target = entry.world.groundItems.nearest(cx, cy, PICKUP_RADIUS);
+            if (!target) return; // nothing in range: silent no-op, not an error
+            const got = await claimItem(pool, entry, ws.userId, target.id);
+            if (got) send(ws, { type: 'picked', item: got });
+          } catch (err) {
+            console.error('pickup failed:', err);
+          }
+        });
+        return;
+      }
+
+      if (msg.type === 'autoloot') {
+        const entry = worlds.get(ws.worldId);
+        // Strict boolean — a truthy string from the wire must not enable it.
+        if (entry) entry.world.setAutoLoot(ws.userId, msg.on === true);
+        return;
+      }
+
+      if (msg.type === 'drop') {
+        const entry = worlds.get(ws.worldId);
+        if (!entry) return;
+        if (typeof msg.itemId !== 'string') return; // wire hygiene: ids are strings
+        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
+          try {
+            const r = await dropItem(pool, entry, ws.userId, msg.itemId, { ttlMs: groundItemTtlMs });
+            if (r.ok) send(ws, { type: 'dropped', itemId: msg.itemId });
+            else send(ws, { type: 'error', message: r.reason });
+          } catch (err) {
+            console.error('drop failed:', err);
+            send(ws, { type: 'error', message: 'drop failed' });
           }
         });
         return;
@@ -362,10 +439,41 @@ function attachAuthority(httpServer, pool, opts = {}) {
       entry.world.tick(dt);
       entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
       const killedByProjectiles = entry.world.tickProjectiles(dt);
-      for (const id of new Set(killedByProjectiles)) {
-        pool.query('DELETE FROM world_creatures WHERE id = $1', [id]).catch(() => {});
-      }
+      for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);
       entry.world.resolveDeaths();
+      // Auto-loot: fire claims off-tick. The tick is synchronous and must never
+      // await; `claiming` de-dups the repeats this produces across ticks while
+      // a claim is still in flight.
+      const autoLootNow = Date.now();
+      for (const p of entry.world.players.values()) {
+        if (!p.autoLoot) continue;
+        const pcx = p.x + p.width / 2, pcy = p.y + p.height / 2;
+        const claims = [];
+        for (const it of entry.world.groundItems.within(pcx, pcy, PICKUP_RADIUS)) {
+          // A player's own just-dropped item sits in their own grace window:
+          // skip it so auto-loot doesn't instantly re-vacuum a drop. Manual
+          // pickup (the 'pickup' handler above) never consults this — a
+          // deliberate keypress always succeeds.
+          if (dropGraceActive(p, it.id, autoLootNow)) continue;
+          claims.push(claimItem(pool, entry, p.userId, it.id));
+        }
+        if (claims.length === 0) continue;
+        // Settled once per PLAYER, not per item: the socket is looked up
+        // after every claim for this player has resolved, inside the .then —
+        // never captured before the claim round trip starts. Captured early
+        // (the old bug), a reconnect mid-claim sends 'picked' to the dead
+        // socket and the new session never sees the item. allSettled (not
+        // all) so one failed claim can't swallow the notification for the
+        // player's other, successful claims in the same tick.
+        Promise.allSettled(claims).then((results) => {
+          const sock = entry.sockets.get(p.userId);
+          if (!sock) return;
+          for (const r of results) {
+            if (r.status === 'fulfilled' && r.value) send(sock, { type: 'picked', item: r.value });
+            else if (r.status === 'rejected') console.error('auto-loot failed:', r.reason);
+          }
+        }).catch((err) => console.error('auto-loot notify failed:', err));
+      }
       const snap = entry.world.snapshot();
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
@@ -374,6 +482,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (tick % creatureBroadcastEvery === 0) {
         recomputeActive(entry);
         broadcastCreatures(entry);
+        broadcastItems(entry);
       }
     }
   }, tickMs);
@@ -402,12 +511,32 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }, heartbeatMs);
 
+  // Expired ground items: delete from the DB and evict from every live sim.
+  // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
+  // sweep by up to itemSweepMs; the two are complementary (DB delete is
+  // authoritative across worlds, removeExpired just keeps each sim tidy).
+  const itemSweepTimer = setInterval(() => {
+    if (worlds.size === 0) return;
+    const now = Date.now();
+    for (const entry of worlds.values()) entry.world.groundItems.removeExpired(now);
+    pool.query('DELETE FROM world_items WHERE expires_at <= now() RETURNING id')
+      .then((r) => {
+        if (!r.rowCount) return;
+        const ids = new Set(r.rows.map((row) => row.id));
+        for (const entry of worlds.values()) {
+          for (const id of ids) entry.world.groundItems.remove(id);
+        }
+      })
+      .catch((err) => console.error('ground item sweep failed:', err));
+  }, itemSweepMs);
+
   return {
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);
       clearInterval(creatureFlushTimer);
       clearInterval(heartbeatTimer);
+      clearInterval(itemSweepTimer);
       // Terminate any live client sockets before closing the server. wss.close()
       // alone only stops accepting new connections; open sockets would keep the
       // event loop alive (and hang a clean shutdown / test process).

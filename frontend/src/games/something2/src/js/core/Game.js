@@ -9,13 +9,14 @@ import { ChunkStreamer } from "../net/ChunkStreamer.js";
 import { makeChunkFetcher } from "../net/chunkFetcher.js";
 import { CreatureManager } from "../entities/CreatureManager.js";
 import { ProjectileManager } from "../entities/ProjectileManager.js";
+import { GroundItemManager } from "../entities/GroundItemManager.js";
 import { WorldAuthorityClient } from "../net/WorldAuthorityClient.js";
 import { fetchDevToken } from "../net/EngineClient.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { aimVector } from "./aim.js";
-import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf } from "./inventory.js";
+import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 
 // Fallback weapon name shown when nothing is equipped in main_hand yet
 // (mirrors the server's DEFAULT_WEAPON_NAME in authority/items.js).
@@ -74,6 +75,12 @@ export class Game {
         this.inventory = createInventory();
         this.inventoryOpen = false;
         this.inventorySelectedItemId = null;
+
+        // Ground items (Slice 3b-2b): render-only store of items on the
+        // ground, plus a local mirror of the server-owned auto-loot flag
+        // (used only to render the toggle's current state).
+        this.groundItems = new GroundItemManager();
+        this.autoLoot = false;
     }
 
     setEngineClient(engine, localUserId) {
@@ -212,6 +219,8 @@ export class Game {
         this.inventory = createInventory();
         this.inventoryOpen = false;
         this.inventorySelectedItemId = null;
+        this.groundItems = new GroundItemManager();
+        this.autoLoot = false;
 
         this._inputBuffer = [];
         // Connect to the authoritative sim; spawn comes from the server.
@@ -228,6 +237,12 @@ export class Game {
                 },
                 onState: (msg) => this._onWorldState(msg),
                 onCreatures: (msg) => this.creatures.applySnapshot(msg.creatures),
+                onItems: (msg) => this.groundItems.applySnapshot(msg.items || []),
+                onPicked: (msg) => { if (msg.item) addItem(this.inventory, msg.item); },
+                onDropped: (msg) => {
+                    removeItem(this.inventory, msg.itemId);
+                    if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
+                },
                 onError: (e) => console.error('[authority]', e),
                 onClose: () => { this.authorityJoined = false; },
                 onKicked: () => {
@@ -414,12 +429,23 @@ export class Game {
             this.ctx.fillText('Signed in elsewhere — this session was disconnected.', this.canvas.width / 2, this.canvas.height / 2);
             this.ctx.restore();
         } else if (this.chunked) {
-            this.renderSystem.renderChunked(
-                this.player, this.camera, this.chunkedMap, this.remotePlayers, this.localUserId,
-                this.creatures.all(), this.projectiles ? this.projectiles.all() : [],
-                this.localMana, this.localMaxMana, this._resolveWeaponName(),
-                this.inventory, this.inventoryOpen, this.inventorySelectedItemId,
-            );
+            this.renderSystem.renderChunked({
+                player: this.player,
+                camera: this.camera,
+                chunkedMap: this.chunkedMap,
+                remotePlayers: this.remotePlayers,
+                localUserId: this.localUserId,
+                creatures: this.creatures.all(),
+                projectiles: this.projectiles ? this.projectiles.all() : [],
+                mana: this.localMana,
+                maxMana: this.localMaxMana,
+                weaponName: this._resolveWeaponName(),
+                inventory: this.inventory,
+                inventoryOpen: this.inventoryOpen,
+                selectedItemId: this.inventorySelectedItemId,
+                groundItems: this.groundItems.all(),
+                autoLoot: this.autoLoot,
+            });
         } else {
             this.renderSystem.render(this.player, this.camera, this.map, this.remotePlayers, this.localUserId);
         }
@@ -461,6 +487,17 @@ export class Game {
             } else if (this.inventory.equipment[slot]) {
                 this.authorityClient.sendUnequip(slot);
             }
+            return;
+        }
+
+        if (hit.kind === 'autoloot') {
+            this.autoLoot = !this.autoLoot;
+            if (this.authorityClient) this.authorityClient.sendAutoLoot(this.autoLoot);
+            return;
+        }
+        if (hit.kind === 'drop') {
+            if (this.authorityClient) this.authorityClient.sendDrop(hit.id);
+            return;
         }
     }
 
@@ -488,8 +525,16 @@ export class Game {
                 }
             }
 
-            if(key === 'g' && this.state === 'playing'){
-                this.map.toggleGrid();
+            if (key === 'g' && this.state === 'playing') {
+                // Chunked mode: g loots. Legacy single-map mode keeps the grid toggle.
+                if (this.chunked) {
+                    // Match the mouse handler's rule: no game-world intents
+                    // fire while the inventory panel is open and consuming
+                    // input.
+                    if (!e.repeat && this.authorityClient && !this.inventoryOpen) this.authorityClient.sendPickup();
+                } else {
+                    this.map.toggleGrid();
+                }
             }
 
             // Dev: cycle the global render-mode override (none -> rect -> static -> animated).
