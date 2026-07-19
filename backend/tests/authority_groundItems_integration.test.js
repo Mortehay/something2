@@ -122,7 +122,7 @@ test('items in a chunk\'s bbox load into the sim on activation and are pickup-ab
 
   const picked = await pollPickup(ws, 1500);
   assert.ok(picked, 'the item that loaded with its chunk is pickup-able');
-  assert.deepStrictEqual(picked.item, { id: 'inst-1', typeId: 7 });
+  assert.deepStrictEqual(picked.item, { id: 'inst-1', typeId: 7, quantity: 1 });
 
   ws.close(); handle.close(); server.close();
 });

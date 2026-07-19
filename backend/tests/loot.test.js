@@ -145,3 +145,33 @@ test('claiming a stack grants the full quantity', async () => {
   assert.equal(r.quantity, 40);
   assert.ok(sql.includes('quantity'), 'the claim CTE must carry quantity across');
 });
+
+// A bare sql.includes('quantity') does NOT guard this statement: the word
+// appears in the DELETE's RETURNING, in the SELECT list and in the final
+// RETURNING, so dropping it from the INSERT's column list alone leaves such a
+// test green while every claimed stack silently collapses to the column
+// default of 1. Parse the INSERT's own column list instead, and check the
+// SELECT projects as many expressions as the INSERT names — a mismatch is a
+// runtime Postgres error the mock pool can never surface.
+test('the claim CTE INSERT names quantity in its own column list', async () => {
+  let sql = '';
+  const pool = { query: async (q) => {
+    sql = q;
+    return { rowCount: 1, rows: [{ id: 'i9', item_type_id: 7, quantity: 40 }] };
+  } };
+  const entry = mkEntry();
+  entry.world.addPlayer('u1', { x: 0, y: 0 });
+  await claimItem(pool, entry, 'u1', 'g1');
+
+  const m = sql.match(/insert\s+into\s+player_items\s*\(([^)]*)\)/i);
+  assert.ok(m, 'could not locate the player_items INSERT column list');
+  const cols = m[1].split(',').map((c) => c.trim().toLowerCase());
+  assert.ok(cols.includes('quantity'),
+    `the claim INSERT must name quantity in its column list (found: ${cols.join(', ')}) — without it a claimed stack of 40 becomes 1`);
+
+  const sel = sql.match(/select\s+(.*?)\s+from\s+d/is);
+  assert.ok(sel, 'could not locate the SELECT ... FROM d projection');
+  const exprs = sel[1].split(',').map((e) => e.trim());
+  assert.equal(exprs.length, cols.length,
+    `the INSERT names ${cols.length} columns but the SELECT projects ${exprs.length} expressions — Postgres would reject this at runtime`);
+});

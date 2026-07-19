@@ -105,14 +105,18 @@ async function claimItem(pool, entry, userId, groundItemId) {
       return null;
     }
     const { id: instanceId, item_type_id: typeId, quantity } = r.rows[0];
-    // Only attach `quantity` when the row actually carried one — spreading an
-    // explicit `quantity: undefined` key would still show up in
-    // Object.keys/deepStrictEqual, unlike a key that was never set.
-    const qty = quantity !== undefined ? { quantity } : {};
+    // `quantity` is ALWAYS present and always a number. world_items.quantity is
+    // NOT NULL DEFAULT 1, so the `?? 1` is a floor for callers with partial
+    // rows (tests), not a real production branch. Deliberately NOT conditional:
+    // omitting the key when the row lacks one would let a future RETURNING that
+    // stopped selecting quantity silently produce stack-less items instead of
+    // failing — the same "loads as undefined" class of bug the catalog SELECT
+    // guard exists to prevent.
+    const qty = Number(quantity ?? 1);
     entry.world.groundItems.remove(groundItemId);
     const p = entry.world.getPlayer(userId);
-    if (p && p.inv) p.inv.items.push({ id: instanceId, typeId, ...qty }); // so a later equip validates without a reload
-    return { id: instanceId, typeId, ...qty };
+    if (p && p.inv) p.inv.items.push({ id: instanceId, typeId, quantity: qty }); // so a later equip validates without a reload
+    return { id: instanceId, typeId, quantity: qty };
   } finally {
     entry.claiming.delete(groundItemId);
   }
