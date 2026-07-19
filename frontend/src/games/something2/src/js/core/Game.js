@@ -522,8 +522,15 @@ export class Game {
         }
 
         if (hit.kind === 'autoloot') {
-            this.autoLoot = !this.autoLoot;
-            if (this.authorityClient) this.authorityClient.sendAutoLoot(this.autoLoot);
+            // Only mirror the flip if the intent actually reached the server.
+            // On a dead socket the send is silently dropped and no later
+            // `state` frame can correct us, so an unconditional flip would
+            // leave the label lying — the exact failure this flag's wire
+            // echo exists to prevent.
+            if (!this.authorityClient) return;
+            if (this.authorityClient.sendAutoLoot(!this.autoLoot)) {
+                this.autoLoot = !this.autoLoot;
+            }
             return;
         }
         if (hit.kind === 'drop') {

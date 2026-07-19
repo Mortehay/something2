@@ -95,15 +95,20 @@ export class WorldAuthorityClient {
 
   sendPickup() { this._send({ type: 'pickup' }); }
   sendDrop(itemId) { this._send({ type: 'drop', itemId }); }
-  sendAutoLoot(on) { this._send({ type: 'autoloot', on: on === true }); }
+  sendAutoLoot(on) { return this._send({ type: 'autoloot', on: on === true }); }
 
   disconnect() {
     if (this.ws) { try { this.ws.close(); } catch { /* already closed */ } this.ws = null; }
     this.connected = false; this.joined = false;
   }
 
+  // Returns whether the frame actually went out. Callers that mirror
+  // server-owned state locally must not update that mirror on a false return:
+  // a dropped frame means the server never heard the intent, and no later
+  // `state` frame will arrive on a dead socket to correct the mirror.
   _send(obj) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
     this.ws.send(JSON.stringify(obj));
+    return true;
   }
 }
