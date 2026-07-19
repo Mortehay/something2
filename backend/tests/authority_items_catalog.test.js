@@ -189,3 +189,20 @@ test('the integrity check actually catches a broken row', () => {
   assert.ok(problems.length > 0, 'a melee weapon with no reach must be reported');
   assert.match(problems[0], /bad-axe/);
 });
+
+// The mock pool ignores the SQL string, so the tests above would still pass if
+// stamina_cost were dropped from the SELECT — verified: doing so left the whole
+// suite green while every weapon would load with cost 0 against a real DB,
+// silently disabling the stamina gate. Assert on the query text itself.
+test('loadItemTypes actually SELECTs every column it maps', async () => {
+  let sql = '';
+  const pool = { query: async (q) => { sql = q; return { rows: [] }; } };
+  await loadItemTypes(pool);
+  for (const col of [
+    'stamina_cost', 'mana_cost', 'damage', 'cooldown', 'reach', 'arc_width',
+    'range', 'projectile_speed', 'projectile_radius', 'pierce', 'element',
+    'defense', 'resistances', 'category', 'slot', 'two_handed', 'kind',
+  ]) {
+    assert.ok(new RegExp(`\\b${col}\\b`).test(sql), `SELECT must name ${col}`);
+  }
+});
