@@ -6,6 +6,7 @@ const { resolveMove } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc, hasLineOfSight } = require('./weapons');
 const { applyDamage, NO_MITIGATION } = require('./damage');
+const { applyElementEffect } = require('./effects');
 
 const DIRS = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
@@ -148,13 +149,15 @@ class CreatureSim {
   }
 
   // Player melee: damage creatures within `range` of (px,py); remove + return dead ids.
-  applyAttack(px, py, range, damage, element) {
+  // `now` is the world clock, needed to stamp the element's status rider.
+  applyAttack(px, py, range, damage, element, now = 0) {
     const killed = [];
     const r2 = range * range;
     for (const [id, c] of this.creatures) {
       const cc = center(c);
       if (dist2(cc.x, cc.y, px, py) > r2) continue;
       applyDamage(c, damage, element, c.mit || NO_MITIGATION);
+      applyElementEffect(c, element, now);
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
     }
@@ -163,7 +166,7 @@ class CreatureSim {
 
   // Melee arc: damage every creature whose center is within reach AND inside the
   // aim cone; remove + return the dead ids. (nx,ny) must be normalized.
-  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element) {
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0) {
     const killed = [];
     for (const [id, c] of this.creatures) {
       const cc = center(c);
@@ -171,6 +174,10 @@ class CreatureSim {
       // Terrain blocks the swing, exactly as it blocks a projectile.
       if (!hasLineOfSight(this.map, ox, oy, cc.x, cc.y)) continue;
       applyDamage(c, damage, element, c.mit || NO_MITIGATION);
+      // The element's status rider is applied wherever the element already
+      // deals damage — one call adjacent to each applyDamage, never a second
+      // rider table.
+      applyElementEffect(c, element, now);
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
     }
@@ -179,6 +186,13 @@ class CreatureSim {
 
   // Point damage to one creature (used by projectile collision). Returns true
   // if it died (and was removed).
+  //
+  // Deliberately does NOT apply the element's status rider, unlike the melee
+  // arc above: this is the generic creature-damage primitive, and burn's own
+  // damage tick routes through it with element 'fire'. A rider here would let
+  // burn refresh itself from its own tick and never expire. The projectile
+  // paths that DO carry a rider apply it at their call sites in projectiles.js,
+  // next to their own hit detection — a rider belongs to a HIT, not to damage.
   damageCreatureById(id, damage, element) {
     const c = this.creatures.get(id);
     if (!c) return false;

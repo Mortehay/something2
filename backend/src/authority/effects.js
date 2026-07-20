@@ -34,7 +34,12 @@ const BURN_MAGNITUDE = 2;    // damage dealt per burn tick (pre-mitigation)
 const BURN_TICK_MS = 1000;   // fixed interval between burn damage ticks
 
 const CHILL_DURATION_MS = 3000;
-const CHILL_MAGNITUDE = 0.3; // fractional move-speed reduction
+// Consumed by world.js's stepEffects as a MULTIPLIER on the entity's base
+// move speed (speed = base * magnitude while chilled), not as the fraction
+// subtracted. At 0.3 that is a 70% slow. See the note in task-5-report.md:
+// if a ~30-40% slow was the intent, this constant wants to be ~0.6-0.7 — the
+// semantics are now unambiguous either way.
+const CHILL_MAGNITUDE = 0.3;
 
 const SHOCK_DURATION_MS = 2000;
 const SHOCK_MAGNITUDE = 1;   // shock's effect is an interrupt, not a scalar
@@ -99,8 +104,46 @@ function tickEffects(target, dtMs, now, ctx) {
   return fired;
 }
 
+// element -> the status rider it carries.
+//
+// `arcane` is DELIBERATELY absent, and so is `physical`. Arcane is the
+// pure-damage generalist; carrying no rider is the counterweight to its
+// straight-line damage profile. Its absence here is the design, not an
+// oversight — do not "fix" it by adding an entry.
+const ELEMENT_EFFECTS = {
+  fire: { key: BURN, durationMs: BURN_DURATION_MS, magnitude: BURN_MAGNITUDE },
+  ice: { key: CHILL, durationMs: CHILL_DURATION_MS, magnitude: CHILL_MAGNITUDE },
+  lightning: { key: SHOCK, durationMs: SHOCK_DURATION_MS, magnitude: SHOCK_MAGNITUDE },
+};
+
+// Applies `element`'s rider to `target`, if it has one. ONE mapping, called
+// from every path that already deals elemental damage — the melee arc (against
+// creatures and players), the projectile direct hit, and the AoE detonation —
+// so no damage path can pick its own rider table and no element can end up
+// riderless in one path but not another. A rider wired only into the direct
+// hit would leave AoE staves riderless, which is most of what a staff does.
+//
+// Duration is NEVER scaled by the caller's damage falloff: a target clipped by
+// the edge of a blast still burns for the full time. A duration scaled toward
+// zero at the blast edge would tick zero times — an inert mechanic wearing a
+// working one's clothes.
+//
+// Deliberately NOT called from inside applyDamage, tempting as that is: burn's
+// own damage tick routes through applyDamage with element 'fire', so a rider
+// there would re-apply and refresh burn from its own tick, forever.
+function applyElementEffect(target, element, now, sourceId) {
+  const spec = ELEMENT_EFFECTS[element];
+  if (!spec) return null;
+  applyEffect(target, spec.key, {
+    durationMs: spec.durationMs, magnitude: spec.magnitude, sourceId, now,
+  });
+  return spec.key;
+}
+
 module.exports = {
   applyEffect,
+  applyElementEffect,
+  ELEMENT_EFFECTS,
   tickEffects,
   hasEffect,
   effectMagnitude,

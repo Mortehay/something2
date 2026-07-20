@@ -277,3 +277,134 @@ test('AoE: aoe_radius of 0 behaves as a plain point-collision projectile', () =>
   assert.equal(r.detonations.length, 0);
   assert.equal(target.hp, 90, 'a zero radius must fall back to the single-target hit, not divide by zero');
 });
+
+// --- elemental riders on the projectile paths (Task 5) ----------------------
+
+const { CreatureSim } = require('../src/authority/creatures.js');
+const { BURN, CHILL, BURN_DURATION_MS } = require('../src/authority/effects.js');
+
+// A REAL CreatureSim, not the stub above: the creature-side rider lives in
+// creatures.js, so a stubbed damageCreatureById would make these tests vacuous.
+const SIM_MAP = { isWalkable: () => true, speedAt: () => 1, chunkSize: 64 };
+function realCreatures(list) {
+  const cs = new CreatureSim(SIM_MAP);
+  cs.addCreatures(list);
+  return cs;
+}
+function mkTarget(id, cx, cy, hp = 500) {
+  // Player-shaped target whose CENTER is (cx,cy).
+  return { userId: id, x: cx - 32, y: cy - 32, width: 64, height: 64, hp, maxHp: hp, effects: new Map() };
+}
+
+test('a projectile direct hit applies the weapon element to a creature and to a player', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({
+    ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0,
+    weapon: { ...BOW, damage: 1, pierce: 5, element: 'fire' },
+  });
+  const creatures = realCreatures([{ id: 'c1', type: 'wolf', x: 30, y: -24, hp: 500, color: '#f00' }]); // center 54,0
+  const pl = mkTarget('u2', 250, 0);
+  for (let i = 0; i < 3; i++) {
+    sim.step(0.1, { creatures, players: [pl], map: WALK_ALL, now: 1000 });
+  }
+  const c1 = creatures.creatures.get('c1');
+  assert.ok(c1.hp < 500, 'the creature was never hit — test setup is wrong');
+  assert.equal(c1.effects.has(BURN), true, 'direct hit applied no rider to the creature');
+  assert.equal(c1.effects.size, 1, 'direct hit applied more than the weapon element rider');
+  assert.ok(pl.hp < 500, 'the player was never hit — test setup is wrong');
+  assert.equal(pl.effects.has(BURN), true, 'direct hit applied no rider to the player');
+  assert.equal(pl.effects.size, 1);
+});
+
+test('a projectile direct hit with a non-elemental weapon applies no rider', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 1 } }); // element null
+  const creatures = realCreatures([{ id: 'c1', type: 'wolf', x: 30, y: -24, hp: 500, color: '#f00' }]);
+  sim.step(0.1, { creatures, players: [], map: WALK_ALL, now: 1000 });
+  const c1 = creatures.creatures.get('c1');
+  assert.ok(c1.hp < 500);
+  assert.equal(c1.effects ? c1.effects.size : 0, 0);
+});
+
+// A staff's damage is mostly its blast, so a rider wired only into the direct
+// path would leave AoE staves riderless. Blast centred on the trigger creature
+// at (54,0), radius 200.
+const FIREBALL = {
+  damage: 30, range: 700, projectile_speed: 900, projectile_radius: 8,
+  pierce: 1, element: 'fire', aoe_radius: 200,
+};
+
+const TRIGGER = { id: 'trig', type: 'wolf', x: 30, y: -24, hp: 500, color: '#f00' }; // center 54,0
+
+// The blast lands wherever the sub-stepped walk first contacts the trigger, so
+// it is derived from a dry run rather than hardcoded: targets placed against a
+// guessed blast point silently drift outside the radius when MAX_SUB changes,
+// and the "no rider" assertions would then pass for the wrong reason.
+const BLAST_X = (() => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: FIREBALL });
+  const out = sim.step(0.1, { creatures: realCreatures([TRIGGER]), players: [], map: WALK_ALL, now: 0 });
+  return out.detonations[0].x;
+})();
+
+function detonate(now = 1000) {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: FIREBALL });
+  const creatures = realCreatures([
+    TRIGGER,
+    { id: 'near', type: 'wolf', x: BLAST_X + 20 - 24, y: -24, hp: 500, color: '#f00' }, // d=20
+  ]);
+  const edge = mkTarget('u2', BLAST_X + 190, 0); // d=190 of radius 200 — clipped by the edge
+  const out = sim.step(0.1, { creatures, players: [edge], map: WALK_ALL, now });
+  return { creatures, edge, out };
+}
+
+test('an AoE blast applies the element to every target it damages', () => {
+  const { creatures, edge, out } = detonate();
+  assert.equal(out.detonations.length, 1, 'the blast did not go off — test setup is wrong');
+  for (const id of ['trig', 'near']) {
+    const c = creatures.creatures.get(id);
+    assert.ok(c.hp < 500, `${id} took no blast damage — test setup is wrong`);
+    assert.equal(c.effects.has(BURN), true, `the blast applied no rider to creature ${id}`);
+    assert.equal(c.effects.size, 1, `the blast applied more than the weapon element rider to ${id}`);
+  }
+  assert.ok(edge.hp < 500, 'the edge player took no blast damage — test setup is wrong');
+  assert.equal(edge.effects.has(BURN), true, 'the blast applied no rider to the player it damaged');
+  assert.equal(edge.effects.size, 1);
+});
+
+test('AoE falloff scales damage but NEVER the effect duration', () => {
+  const now = 1000;
+  const { creatures, edge } = detonate(now);
+  const trig = creatures.creatures.get('trig');
+  // Damage really is scaled down at the edge...
+  assert.ok(500 - edge.hp < 500 - trig.hp,
+    'falloff is not scaling damage — this test would not prove anything about duration');
+  // ...but the burn lasts exactly as long. A duration scaled by falloff would
+  // give the edge target a burn too short to ever tick.
+  assert.equal(edge.effects.get(BURN).until, now + BURN_DURATION_MS,
+    'the blast edge got a shortened burn — falloff must not scale duration');
+  assert.equal(trig.effects.get(BURN).until, now + BURN_DURATION_MS);
+});
+
+test('the AoE rider follows the weapon element', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...FIREBALL, element: 'ice' } });
+  const creatures = realCreatures([TRIGGER]);
+  sim.step(0.1, { creatures, players: [], map: WALK_ALL, now: 1000 });
+  const trig = creatures.creatures.get('trig');
+  assert.equal(trig.effects.has(CHILL), true);
+  assert.equal(trig.effects.size, 1);
+});
+
+test('an arcane AoE blast damages but applies no rider', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...FIREBALL, element: 'arcane' } });
+  const creatures = realCreatures([TRIGGER]);
+  const edge = mkTarget('u2', BLAST_X + 190, 0);
+  sim.step(0.1, { creatures, players: [edge], map: WALK_ALL, now: 1000 });
+  const trig = creatures.creatures.get('trig');
+  assert.ok(trig.hp < 500 && edge.hp < 500, 'the blast must still deal damage');
+  assert.equal(trig.effects ? trig.effects.size : 0, 0, 'arcane must carry no rider');
+  assert.equal(edge.effects.size, 0, 'arcane must carry no rider');
+});

@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { World, PLAYER_SPEED } = require('../src/authority/world.js');
 const {
   applyEffect, hasEffect, BURN, CHILL,
-  BURN_MAGNITUDE, BURN_TICK_MS,
+  BURN_MAGNITUDE, BURN_TICK_MS, BURN_DURATION_MS,
 } = require('../src/authority/effects.js');
 
 // Stub map: walkable unless x >= wall; speed 1.
@@ -213,4 +213,27 @@ test('a burn tick that does not kill reports nothing', () => {
   const r = w.tick(BURN_TICK_MS / 1000);
   assert.deepEqual(r.killedCreatureIds, []);
   assert.equal(c.hp, 50 - BURN_MAGNITUDE);
+});
+
+// Burn deals FIRE damage, and fire carries the burn rider. If the burn tick's
+// own damage re-applied that rider, burn would refresh itself forever and
+// nothing hit by a fire weapon would ever stop burning. This is the reason
+// damageCreatureById does not apply riders — see the note there.
+test('a burn tick does not refresh its own burn', () => {
+  const w = mkWorld();
+  const c = addCreature(w, { hp: 100000 });
+  applyEffect(c, BURN, { durationMs: BURN_DURATION_MS, magnitude: BURN_MAGNITUDE, now: 0 });
+  for (let i = 0; i < 40; i++) w.tick(0.5); // 20s, far past the 4s duration
+  assert.equal(c.effects.has(BURN), false,
+    'burn refreshed itself from its own damage tick and never expires');
+  assert.ok(c.hp > 99000, 'burn kept ticking long past its duration');
+});
+
+test('a player burn tick does not refresh its own burn either', () => {
+  const w = mkWorld(); w.addPlayer('u1', { x: 0, y: 0 });
+  const p = w.getPlayer('u1');
+  p.maxHp = 100000; p.hp = 100000;
+  applyEffect(p, BURN, { durationMs: BURN_DURATION_MS, magnitude: BURN_MAGNITUDE, now: 0 });
+  for (let i = 0; i < 40; i++) w.tick(0.5);
+  assert.equal(p.effects.has(BURN), false);
 });

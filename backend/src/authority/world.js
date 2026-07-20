@@ -3,7 +3,7 @@ const { CreatureSim } = require('./creatures');
 const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamage, NO_MITIGATION } = require('./damage');
-const { tickEffects, effectMagnitude, BURN, CHILL } = require('./effects');
+const { tickEffects, effectMagnitude, applyElementEffect, BURN, CHILL } = require('./effects');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
 const { GroundItemSim } = require('./groundItems');
 
@@ -243,13 +243,14 @@ class World {
       if (f) p.facing = f;
       if (manaCost) p.mana -= manaCost;
       if (staminaCost) p.stamina -= staminaCost;
-      const killed = this.creatures.applyMeleeArc(cx, cy, nx, ny, w.reach, w.arc_width, w.damage, w.element);
+      const killed = this.creatures.applyMeleeArc(cx, cy, nx, ny, w.reach, w.arc_width, w.damage, w.element, this.now);
       for (const other of this.players.values()) {
         if (other.userId === userId) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
         if (inArc(cx, cy, nx, ny, ocx, ocy, w.reach, w.arc_width)
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
           applyDamage(other, w.damage, w.element, other.mit || NO_MITIGATION);
+          applyElementEffect(other, w.element, this.now, userId);
         }
       }
       p._attackCd = w.cooldown;
@@ -274,6 +275,7 @@ class World {
       creatures: this.creatures,
       players: [...this.players.values()],
       map: this.map,
+      now: this.now,
     });
   }
 

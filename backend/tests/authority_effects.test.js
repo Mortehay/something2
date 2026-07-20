@@ -1,8 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  applyEffect, tickEffects, hasEffect, effectMagnitude,
+  applyEffect, applyElementEffect, tickEffects, hasEffect, effectMagnitude,
   BURN, CHILL, SHOCK, BURN_TICK_MS,
+  BURN_DURATION_MS, BURN_MAGNITUDE,
 } = require('../src/authority/effects.js');
 
 // --- brief tests, verbatim ---
@@ -117,4 +118,42 @@ test('a still-live, non-expiring effect is left in place by tickEffects', () => 
   tickEffects(t, 100, 100, {});
   assert.equal(t.effects.size, 1, 'a live effect must not be evicted early');
   assert.equal(hasEffect(t, CHILL, 100), true);
+});
+
+// --- element -> rider mapping (Task 5) --------------------------------------
+
+function mkPlayer(id, x, y) {
+  return { userId: id, x, y, width: 64, height: 64, hp: 100, maxHp: 100, effects: new Map() };
+}
+
+test('each element applies its own effect and no other', () => {
+  for (const [element, key] of [['fire', BURN], ['ice', CHILL], ['lightning', SHOCK]]) {
+    const t = mkPlayer('t', 0, 0);
+    applyElementEffect(t, element, 0);
+    assert.equal(t.effects.has(key), true, `${element} did not apply ${key}`);
+    // size===1, not just has(key): asserting only presence would pass an
+    // implementation that applies all four riders on every hit.
+    assert.equal(t.effects.size, 1, `${element} applied more than its own effect`);
+  }
+});
+
+test('arcane applies no effect at all', () => {
+  const t = mkPlayer('t', 0, 0);
+  applyElementEffect(t, 'arcane', 0);
+  assert.equal(t.effects.size, 0, 'arcane is the pure-damage generalist and must carry no rider');
+});
+
+test('physical, null and unknown elements carry no rider', () => {
+  for (const element of ['physical', null, undefined, 'plasma']) {
+    const t = mkPlayer('t', 0, 0);
+    assert.equal(applyElementEffect(t, element, 0), null);
+    assert.equal(t.effects.size, 0, `${element} must not apply a rider`);
+  }
+});
+
+test('applyElementEffect stamps duration from `now`, never from a clock read', () => {
+  const t = mkPlayer('t', 0, 0);
+  applyElementEffect(t, 'fire', 5000);
+  assert.equal(t.effects.get(BURN).until, 5000 + BURN_DURATION_MS);
+  assert.equal(t.effects.get(BURN).magnitude, BURN_MAGNITUDE);
 });
