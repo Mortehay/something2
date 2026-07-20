@@ -4,7 +4,7 @@ const {
   applyEffect, applyElementEffect, tickEffects, hasEffect, effectMagnitude,
   BURN, CHILL, SHOCK, BURN_TICK_MS,
   BURN_DURATION_MS, BURN_MAGNITUDE,
-  SHOCK_MAGNITUDE, SHOCK_TICK_MS,
+  SHOCK_MAGNITUDE, SHOCK_TICK_MS, SHOCK_DURATION_MS, SHOCK_MANA_DRAIN,
   applyShockInterrupt, canAct, clearInterrupt, activeEffectKeys,
   SHOCK_INTERRUPT_MS, SHOCK_IMMUNITY_MS,
 } = require('../src/authority/effects.js');
@@ -100,6 +100,62 @@ test('BURN total tick count over a fixed wall-clock duration is independent of t
 
   assert.equal(fired20, fired30, '20Hz and 30Hz tick rates must produce the same number of burn ticks over equal real time');
   assert.equal(fired20, Math.floor(totalMs / BURN_TICK_MS));
+});
+
+// --- FULL-LIFETIME OBSERVATION (the class of test that was missing) ---------
+//
+// Everything above measures a RATE, or measures tick rates against EACH OTHER,
+// or derives an expected total from the same constants the code uses. None of
+// that can see a dropped boundary tick: burn shipped 3 ticks / 6 damage for a
+// designed 4 / 8, and the tick-rate sweep happily agreed that 3 == 3 == 3.
+//
+// These two tests instead run an effect from application to eviction — the
+// expiry boundary INCLUDED — and add up what it actually delivered. The
+// expected totals are written as literals (8 damage, 10 mana) taken from the
+// design, so a future constant change cannot silently move the target the way
+// a `MAGNITUDE * DURATION / TICK` expectation would.
+function simulateLifetime(key, durationMs, magnitude, dtMs) {
+  const t = { effects: new Map() };
+  applyEffect(t, key, { durationMs, magnitude, sourceId: 's1', now: 0 });
+  let ticks = 0;
+  let total = 0;
+  // Run well past expiry so eviction is exercised too, not just the ticks.
+  for (let now = dtMs; now <= durationMs + 2000; now += dtMs) {
+    for (const f of tickEffects(t, dtMs, now, {})) {
+      if (f.key !== key) continue;
+      ticks += 1;
+      total += f.magnitude;
+    }
+  }
+  return { ticks, total, evicted: t.effects.size === 0 };
+}
+
+test('a full BURN lifetime actually DEALS its designed 8 damage over 4 ticks, at every tick rate', () => {
+  for (const dtMs of [50, 100, 250]) {
+    const { ticks, total, evicted } = simulateLifetime(BURN, BURN_DURATION_MS, BURN_MAGNITUDE, dtMs);
+    assert.equal(ticks, 4,
+      `at dt=${dtMs}ms a full burn fired ${ticks} ticks, not 4 — the tick landing exactly on `
+      + `the expiry boundary is being evicted instead of fired`);
+    assert.equal(total, 8,
+      `at dt=${dtMs}ms a full burn dealt ${total} damage, not the designed 8`);
+    assert.ok(evicted, 'the burn entry must still be evicted once its lifetime is over');
+  }
+  // Guard the literals above against a constants drift that would make them lie.
+  assert.equal(BURN_MAGNITUDE * (BURN_DURATION_MS / BURN_TICK_MS), 8,
+    'burn constants no longer describe an 8-damage DOT — update the design and these totals together');
+});
+
+test('a full SHOCK lifetime actually DRAINS its designed 10 mana over 2 ticks, at every tick rate', () => {
+  for (const dtMs of [50, 100, 250]) {
+    // Drain magnitude is not carried on the entry (the entry's magnitude is the
+    // vulnerability fraction), so count ticks and price them at SHOCK_MANA_DRAIN
+    // the way world.js does.
+    const { ticks } = simulateLifetime(SHOCK, SHOCK_DURATION_MS, SHOCK_MAGNITUDE, dtMs);
+    assert.equal(ticks, 2,
+      `at dt=${dtMs}ms a full shock fired ${ticks} drain ticks, not 2`);
+    assert.equal(ticks * SHOCK_MANA_DRAIN, 10,
+      `at dt=${dtMs}ms a full shock drained ${ticks * SHOCK_MANA_DRAIN} mana, not the designed 10`);
+  }
 });
 
 // T6 gave SHOCK a periodic action (its mana drain), so it no longer belongs in

@@ -142,17 +142,39 @@ function tickEffects(target, dtMs, now, ctx) {
   if (!target.effects || target.effects.size === 0) return fired;
 
   for (const [key, e] of target.effects) {
-    if (e.until <= now) {
-      target.effects.delete(key);
-      continue;
-    }
+    const expired = e.until <= now;
     const interval = TICK_INTERVAL_MS[key];
-    if (!interval) continue;
-    e.elapsed += dtMs;
-    while (e.elapsed >= interval) {
-      e.elapsed -= interval;
-      fired.push({ target, key, magnitude: e.magnitude, sourceId: e.sourceId, now });
+    if (interval) {
+      // ADVANCE BEFORE EVICTING. An effect whose lifetime is an exact multiple
+      // of its interval (burn: 4000ms / 1000ms) crosses its FINAL interval on
+      // the very tick where `now` reaches `until`. Deleting on expiry before
+      // touching the accumulator therefore drops that last tick at every tick
+      // rate: burn shipped 3 ticks / 6 damage against a designed 4 / 8, and
+      // shock's drain shipped 1 tick / 5 mana against a designed 2 / 10.
+      //
+      // Only the portion of dt during which the effect was actually ALIVE is
+      // accumulated: the tick covers (now - dtMs, now], and the effect is alive
+      // up to `until`. Clamping the tail is what stops a huge dt arriving long
+      // after expiry from banking ticks for time the effect was already over
+      // (see `an expired SHOCK is evicted without firing a drain tick`), while
+      // still crediting the sliver of dt that lands exactly on the boundary.
+      //
+      // The live-path branch uses dtMs UNCHANGED rather than the algebraically
+      // identical `Math.min(now, e.until) - (now - dtMs)`: at a tick rate whose
+      // dt is not exact in binary (30Hz -> 33.333…ms) that round-trip loses a
+      // few ulps every tick, and the accumulated drift is enough to lose a tick
+      // over a 2s window — which is exactly the tick-rate independence this
+      // module exists to guarantee.
+      const liveDtMs = expired ? dtMs - (now - e.until) : dtMs;
+      if (liveDtMs > 0) {
+        e.elapsed += liveDtMs;
+        while (e.elapsed >= interval) {
+          e.elapsed -= interval;
+          fired.push({ target, key, magnitude: e.magnitude, sourceId: e.sourceId, now });
+        }
+      }
     }
+    if (expired) target.effects.delete(key);
   }
   return fired;
 }
