@@ -599,13 +599,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }, flushMs);
 
-  const heartbeatTimer = setInterval(() => {
+  // Named (rather than inlined into setInterval) so it can also be exposed as
+  // `_heartbeatSweep` below: a test seam that lets tests drive the reaper by
+  // explicit call instead of racing wall-clock heartbeatMs, the same way
+  // other modules take `now` as a parameter instead of reading the clock.
+  function heartbeatSweep() {
     for (const ws of wss.clients) {
       if (ws.isAlive === false) { ws.terminate(); continue; }
       ws.isAlive = false;
       ws.ping();
     }
-  }, heartbeatMs);
+  }
+  const heartbeatTimer = setInterval(heartbeatSweep, heartbeatMs);
 
   // Expired ground items: delete from the DB and evict from every live sim.
   // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
@@ -632,6 +637,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // does not carry (e.g. a player's attack cooldown). Read-only by
     // convention — the server owns every mutation.
     worlds,
+    // Test seam: run one reaper sweep synchronously instead of waiting for
+    // the real heartbeatTimer to fire. Boot with a very large heartbeatMs so
+    // the automatic interval never fires during the test, then call this to
+    // advance the reaper deterministically. The actual ping/pong round trip
+    // still crosses a real socket and event loop turn — that part cannot be
+    // faked without mocking the transport — so tests should await the real
+    // 'pong' event (observable via `worlds.get(id).sockets`) between calls
+    // rather than sleeping a guessed duration.
+    _heartbeatSweep: heartbeatSweep,
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);
