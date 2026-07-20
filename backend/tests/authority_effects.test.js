@@ -4,6 +4,7 @@ const {
   applyEffect, applyElementEffect, tickEffects, hasEffect, effectMagnitude,
   BURN, CHILL, SHOCK, BURN_TICK_MS,
   BURN_DURATION_MS, BURN_MAGNITUDE,
+  SHOCK_MAGNITUDE, SHOCK_TICK_MS,
 } = require('../src/authority/effects.js');
 
 // --- brief tests, verbatim ---
@@ -98,13 +99,36 @@ test('BURN total tick count over a fixed wall-clock duration is independent of t
   assert.equal(fired20, Math.floor(totalMs / BURN_TICK_MS));
 });
 
-test('CHILL and SHOCK do not produce fired entries from tickEffects (no periodic action), but are still evicted on expiry', () => {
+// T6 gave SHOCK a periodic action (its mana drain), so it no longer belongs in
+// the "purely passive" group with CHILL. CHILL alone is still read passively.
+test('CHILL does not produce fired entries from tickEffects (no periodic action), but is still evicted on expiry', () => {
   const t = { effects: new Map() };
   applyEffect(t, CHILL, { durationMs: 100, magnitude: 0.5, now: 0 });
-  applyEffect(t, SHOCK, { durationMs: 100, magnitude: 1, now: 0 });
   const fired = tickEffects(t, 200, 200, {});
-  assert.equal(fired.length, 0, 'CHILL/SHOCK have no periodic tick action');
-  assert.equal(t.effects.size, 0, 'both must still be evicted once expired');
+  assert.equal(fired.length, 0, 'CHILL has no periodic tick action');
+  assert.equal(t.effects.size, 0, 'it must still be evicted once expired');
+});
+
+// An EXPIRED effect must be evicted without firing, for shock exactly as for
+// burn: an entry whose expiry has passed is deleted before its interval is
+// consulted, so a long dt cannot bank drain ticks for time the effect was
+// already over.
+test('an expired SHOCK is evicted without firing a drain tick', () => {
+  const t = { effects: new Map() };
+  applyEffect(t, SHOCK, { durationMs: 100, magnitude: SHOCK_MAGNITUDE, now: 0 });
+  const fired = tickEffects(t, 5000, 5000, {});
+  assert.equal(fired.length, 0, 'an already-expired shock must not fire drain ticks');
+  assert.equal(t.effects.size, 0);
+});
+
+test('a live SHOCK fires one drain event per SHOCK_TICK_MS, at a tick-rate-independent cadence', () => {
+  const t = { effects: new Map() };
+  applyEffect(t, SHOCK, { durationMs: 100000, magnitude: SHOCK_MAGNITUDE, now: 0 });
+  let fired = 0;
+  // 4000ms of world time delivered in 50ms slices (20Hz).
+  for (let ms = 50; ms <= 4000; ms += 50) fired += tickEffects(t, 50, ms, {}).length;
+  assert.equal(fired, 4000 / SHOCK_TICK_MS,
+    'shock drain must fire on its own fixed interval, not once per tickEffects call');
 });
 
 test('tickEffects on a target with no effects map/entries is a no-op that returns an empty array', () => {

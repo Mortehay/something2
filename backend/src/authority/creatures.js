@@ -5,7 +5,7 @@
 const { resolveMove } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc, hasLineOfSight } = require('./weapons');
-const { applyDamage, NO_MITIGATION } = require('./damage');
+const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
 const { applyElementEffect } = require('./effects');
 
 const DIRS = [
@@ -89,7 +89,10 @@ class CreatureSim {
   count() { return this.creatures.size; }
   all() { return [...this.creatures.values()]; }
 
-  tick(dt, activeChunkKeys, players = []) {
+  // `now` is the world clock, threaded in for the same reason the attack
+  // resolvers take it: damage reads the target's live status effects (shock's
+  // vulnerability) and this module must never read a clock of its own.
+  tick(dt, activeChunkKeys, players = [], now = 0) {
     const active = activeChunkKeys instanceof Set ? activeChunkKeys : new Set(activeChunkKeys);
     const byId = new Map(players.map((p) => [p.userId, p]));
     for (const c of this.creatures.values()) {
@@ -126,7 +129,7 @@ class CreatureSim {
         }
         // Contact damage.
         if (c._attackCd <= 0 && dist2(cc.x, cc.y, tc.x, tc.y) <= CONTACT_RANGE * CONTACT_RANGE) {
-          applyDamage(tp, CREATURE_DAMAGE, 'physical', tp.mit || NO_MITIGATION);
+          applyDamageWithEffects(tp, CREATURE_DAMAGE, 'physical', tp.mit || NO_MITIGATION, now);
           c._attackCd = CREATURE_ATTACK_COOLDOWN;
         }
         continue;
@@ -156,7 +159,7 @@ class CreatureSim {
     for (const [id, c] of this.creatures) {
       const cc = center(c);
       if (dist2(cc.x, cc.y, px, py) > r2) continue;
-      applyDamage(c, damage, element, c.mit || NO_MITIGATION);
+      applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
       applyElementEffect(c, element, now);
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
@@ -173,7 +176,7 @@ class CreatureSim {
       if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth)) continue;
       // Terrain blocks the swing, exactly as it blocks a projectile.
       if (!hasLineOfSight(this.map, ox, oy, cc.x, cc.y)) continue;
-      applyDamage(c, damage, element, c.mit || NO_MITIGATION);
+      applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
       // The element's status rider is applied wherever the element already
       // deals damage — one call adjacent to each applyDamage, never a second
       // rider table.
@@ -193,10 +196,10 @@ class CreatureSim {
   // burn refresh itself from its own tick and never expire. The projectile
   // paths that DO carry a rider apply it at their call sites in projectiles.js,
   // next to their own hit detection — a rider belongs to a HIT, not to damage.
-  damageCreatureById(id, damage, element) {
+  damageCreatureById(id, damage, element, now) {
     const c = this.creatures.get(id);
     if (!c) return false;
-    applyDamage(c, damage, element, c.mit || NO_MITIGATION);
+    applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
     c.dirty = true;
     if (c.hp <= 0) { this.creatures.delete(id); return true; }
     return false;

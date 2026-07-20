@@ -3,7 +3,7 @@
 // players (never the owner). Ranged and magic share this one path; they differ
 // only by weapon data.
 
-const { applyDamage, NO_MITIGATION } = require('./damage');
+const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
 const { hasLineOfSight } = require('./weapons');
 const { applyElementEffect } = require('./effects');
 
@@ -62,7 +62,7 @@ class ProjectileSim {
       if (!hasLineOfSight(map, bx, by, cx, cy)) continue;
       // Falloff scales the RAW damage; the creature's own defense and
       // resistances are applied on top, inside damageCreatureById.
-      if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r), p.element)) {
+      if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r), p.element, now)) {
         killedCreatureIds.push(c.id);
       }
       // The rider is applied at FULL duration: falloff scales damage only. A
@@ -79,7 +79,7 @@ class ProjectileSim {
       if (!hasLineOfSight(map, bx, by, px, py)) continue;
       // Falloff scales the RAW damage; applyDamage still applies defense and
       // resistances on top. It floors at 1, so an edge hit still registers.
-      applyDamage(pl, p.damage * (1 - d / r), p.element, pl.mit || NO_MITIGATION);
+      applyDamageWithEffects(pl, p.damage * (1 - d / r), p.element, pl.mit || NO_MITIGATION, now);
       applyElementEffect(pl, p.element, now, p.ownerId);
     }
     return { x: bx, y: by, radius: r, element: p.element };
@@ -136,7 +136,7 @@ class ProjectileSim {
               dead = true; break;
             }
             p.hitIds.add(key);
-            if (creatures.damageCreatureById(c.id, p.damage, p.element)) killedCreatureIds.push(c.id);
+            if (creatures.damageCreatureById(c.id, p.damage, p.element, now)) killedCreatureIds.push(c.id);
             applyElementEffect(c, p.element, now, p.ownerId);
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
@@ -158,7 +158,7 @@ class ProjectileSim {
               dead = true; break;
             }
             p.hitIds.add(key);
-            applyDamage(pl, p.damage, p.element, pl.mit || NO_MITIGATION);
+            applyDamageWithEffects(pl, p.damage, p.element, pl.mit || NO_MITIGATION, now);
             applyElementEffect(pl, p.element, now, p.ownerId);
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }

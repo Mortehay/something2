@@ -2,9 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { World, PLAYER_SPEED } = require('../src/authority/world.js');
 const {
-  applyEffect, hasEffect, BURN, CHILL,
+  applyEffect, hasEffect, BURN, CHILL, SHOCK,
   BURN_MAGNITUDE, BURN_TICK_MS, BURN_DURATION_MS,
+  CHILL_MAGNITUDE, SHOCK_MAGNITUDE, SHOCK_MANA_DRAIN,
 } = require('../src/authority/effects.js');
+const { PLAYER_MANA_REGEN } = require('../src/authority/world.js');
+const { CREATURE_DAMAGE } = require('../src/authority/creatures.js');
+const { CHUNK_KEY } = require('../src/authority/coords.js');
 
 // Stub map: walkable unless x >= wall; speed 1.
 function stubMap(wall = Infinity) {
@@ -236,4 +240,90 @@ test('a player burn tick does not refresh its own burn either', () => {
   applyEffect(p, BURN, { durationMs: BURN_DURATION_MS, magnitude: BURN_MAGNITUDE, now: 0 });
   for (let i = 0; i < 40; i++) w.tick(0.5);
   assert.equal(p.effects.has(BURN), false);
+});
+
+// --- Task 6: shock's mana drain and vulnerability, through the real tick ---
+
+test('a shocked player loses mana through World.tick, on shock\'s own interval', () => {
+  const w = mkWorld(); w.addPlayer('u1', { x: 0, y: 0 });
+  const p = w.getPlayer('u1');
+  p.mana = 100; p.maxMana = 100;
+  applyEffect(p, SHOCK, { durationMs: 60000, magnitude: SHOCK_MAGNITUDE, now: 0 });
+  // 1000ms in 50ms slices -> exactly one drain tick, against 1s of regen.
+  for (let i = 0; i < 20; i++) w.tick(0.05);
+  // Regen adds PLAYER_MANA_REGEN over the same second, but the pool starts full
+  // and is capped, so the drain is what actually moves the number.
+  assert.ok(p.mana < 100, `mana did not drain under shock (still ${p.mana})`);
+  // The drain fires on the tick that crosses SHOCK_TICK_MS; regen then runs for
+  // that same 50ms slice, since the pool is no longer full. Exact, not
+  // approximate, so a changed drain or a second spurious tick both fail loudly.
+  assert.equal(p.mana, 100 - SHOCK_MANA_DRAIN + PLAYER_MANA_REGEN * 0.05);
+});
+
+// The drain must be strong enough to matter against regen, or it is decoration:
+// a caster under sustained lightning must recover mana STRICTLY slower than one
+// who is not. This is the reachability half — the clamp test proves it is safe,
+// this proves it is felt.
+test('shock\'s drain measurably slows mana recovery rather than being cosmetic', () => {
+  const w = mkWorld();
+  w.addPlayer('shocked', { x: 0, y: 0 });
+  w.addPlayer('clear', { x: 0, y: 0 });
+  const a = w.getPlayer('shocked'), b = w.getPlayer('clear');
+  a.mana = 0; b.mana = 0;
+  applyEffect(a, SHOCK, { durationMs: 60000, magnitude: SHOCK_MAGNITUDE, now: 0 });
+  for (let i = 0; i < 60; i++) {              // 3s
+    applyEffect(a, SHOCK, { durationMs: 60000, magnitude: SHOCK_MAGNITUDE, now: w.now });
+    w.tick(0.05);
+  }
+  assert.ok(a.mana < b.mana * 0.75,
+    `sustained shock left ${a.mana} mana vs ${b.mana} unshocked — the drain is not `
+    + 'meaningful against PLAYER_MANA_REGEN');
+});
+
+test('a creature under shock takes the vulnerability but is never given a mana pool', () => {
+  const w = mkWorld();
+  const c = addCreature(w, { hp: 100 });
+  applyEffect(c, SHOCK, { durationMs: 60000, magnitude: SHOCK_MAGNITUDE, now: 0 });
+  for (let i = 0; i < 40; i++) w.tick(0.05); // 2s: two drain ticks would have fired
+  assert.equal('mana' in c, false, 'the drain invented a mana pool on a creature');
+  assert.equal(c.hp, 100, 'the drain must not fall back to damaging a target with no mana');
+});
+
+test('shock amplifies damage taken from a creature\'s contact bite, not only from weapons', () => {
+  const w = mkWorld();
+  w.addPlayer('u1', { x: 0, y: 0 });
+  const p = w.getPlayer('u1');
+  applyEffect(p, SHOCK, { durationMs: 60000, magnitude: SHOCK_MAGNITUDE, now: 0 });
+  const c = addCreature(w, { hp: 100 });
+  c.x = p.x; c.y = p.y;                       // inside CONTACT_RANGE
+  // This file's stub map carries no chunkSize, so the sim's chunk maths would
+  // key on NaN and the creature would be frozen out of the active set.
+  w.creatures.chunkSize = 64;
+  const hp0 = p.hp;
+  w.tick(0.05);
+  w.tickCreatures(0.05, [CHUNK_KEY(0, 0)]);
+  assert.equal(hp0 - p.hp, CREATURE_DAMAGE * (1 + SHOCK_MAGNITUDE),
+    'creature contact damage bypassed the shock vulnerability — it is not reading the world clock');
+});
+
+// Chill reachability. PLAYER_SPEED is 200 and CREATURE_SPEED is 40, so a
+// chilled player at x0.6 still moves at 120 — three times creature speed.
+// Creatures cannot catch ANY player at any multiplier this slice would use, so
+// a test written against creature pursuit could never fail. Chill is a PvP /
+// projectile-dodging mechanic, and this asserts the differential is large
+// enough to decide a player-versus-player chase.
+test('chill is reachable as a PvP mechanic: the speed gap closes real distance', () => {
+  const w = mkWorld();
+  w.addPlayer('runner', { x: 0, y: 0 });
+  w.addPlayer('chaser', { x: 0, y: 0 });
+  const runner = w.getPlayer('runner'), chaser = w.getPlayer('chaser');
+  applyEffect(runner, CHILL, { durationMs: 60000, magnitude: CHILL_MAGNITUDE, now: 0 });
+  w.setInput('runner', 1, 1, 0);
+  w.setInput('chaser', 1, 1, 0);
+  for (let i = 0; i < 20; i++) w.tick(0.05);  // 1s of a straight-line chase
+  const closed = chaser.x - runner.x;
+  assert.ok(closed > PLAYER_SPEED * 0.3,
+    `an unchilled chaser closed only ${closed}px in one second — the chill differential is `
+    + 'too small to decide a PvP chase');
+  assert.equal(runner.speed, PLAYER_SPEED * CHILL_MAGNITUDE);
 });

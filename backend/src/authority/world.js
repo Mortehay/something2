@@ -2,8 +2,11 @@ const { resolveMove } = require('./collision');
 const { CreatureSim } = require('./creatures');
 const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
 const { ProjectileSim } = require('./projectiles');
-const { applyDamage, NO_MITIGATION } = require('./damage');
-const { tickEffects, effectMagnitude, applyElementEffect, BURN, CHILL } = require('./effects');
+const { applyDamageWithEffects, drainMana, NO_MITIGATION } = require('./damage');
+const {
+  tickEffects, effectMagnitude, applyElementEffect,
+  BURN, CHILL, SHOCK, SHOCK_MANA_DRAIN,
+} = require('./effects');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
 const { GroundItemSim } = require('./groundItems');
 
@@ -37,6 +40,17 @@ const BURN_ELEMENT = 'fire';
 function stepEffects(target, dtMs, now, dealBurn) {
   let died = false;
   for (const ev of tickEffects(target, dtMs, now)) {
+    if (ev.key === SHOCK) {
+      // Shock's mana drain. Uses the module constant rather than ev.magnitude
+      // because the shock entry's magnitude is already spoken for by the
+      // damage-vulnerability fraction — see effects.js's note on the split.
+      //
+      // Deliberately unconditional across BOTH entity kinds: drainMana no-ops
+      // on a target with no mana pool, which is every creature. Guarding here
+      // instead would put the "creatures have no mana" rule in two places.
+      drainMana(target, SHOCK_MANA_DRAIN);
+      continue;
+    }
     if (ev.key !== BURN) continue;
     if (dealBurn(target, ev.magnitude)) died = true;
   }
@@ -147,14 +161,14 @@ class World {
       // A player killed by burn is deliberately left at hp<=0 for
       // resolveDeaths(), the single player-death path.
       stepEffects(p, dtMs, this.now, (t, m) => {
-        applyDamage(t, m, BURN_ELEMENT, t.mit || NO_MITIGATION);
+        applyDamageWithEffects(t, m, BURN_ELEMENT, t.mit || NO_MITIGATION, this.now);
         return false;
       });
     }
     // Snapshot: damageCreatureById deletes from the live map on a kill.
     for (const c of this.creatures.all()) {
       stepEffects(c, dtMs, this.now, (t, m) => {
-        if (!this.creatures.damageCreatureById(t.id, m, BURN_ELEMENT)) return false;
+        if (!this.creatures.damageCreatureById(t.id, m, BURN_ELEMENT, this.now)) return false;
         killedCreatureIds.push(t.id);
         return true;
       });
@@ -178,7 +192,10 @@ class World {
   // resolution (respawn) now happens once for all damage sources in
   // resolveDeaths(), not here.
   tickCreatures(dt, activeKeys) {
-    this.creatures.tick(dt, activeKeys, [...this.players.values()]);
+    // `this.now` is threaded through so contact damage reads the same clock
+    // every other damage site does — a shocked player must take +25% from a
+    // creature's bite too, not only from weapons.
+    this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now);
   }
 
   activeWeapon(userId) {
@@ -249,7 +266,7 @@ class World {
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
         if (inArc(cx, cy, nx, ny, ocx, ocy, w.reach, w.arc_width)
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
-          applyDamage(other, w.damage, w.element, other.mit || NO_MITIGATION);
+          applyDamageWithEffects(other, w.damage, w.element, other.mit || NO_MITIGATION, this.now);
           applyElementEffect(other, w.element, this.now, userId);
         }
       }

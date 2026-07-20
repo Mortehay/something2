@@ -44,12 +44,33 @@ const CHILL_DURATION_MS = 3000;
 const CHILL_MAGNITUDE = 0.6;
 
 const SHOCK_DURATION_MS = 2000;
-const SHOCK_MAGNITUDE = 1;   // shock's effect is an interrupt, not a scalar
+// Shock carries THREE riders (the design's deliberate concentration of power
+// into lightning, paid for by the storm staff's damage-per-mana). Only ONE of
+// them fits in the entry's single `magnitude` field, so the split is:
+//
+//   magnitude          -> the damage-vulnerability FRACTION (0.25 = +25% taken).
+//                         Read passively by damage.js's applyDamageWithEffects.
+//   SHOCK_MANA_DRAIN   -> a periodic drain, fired by tickEffects like burn's DOT.
+//   the interrupt      -> T7; gated by its own non-refreshing immunity window.
+//
+// This is a fraction ADDED to 1, not a multiplier like CHILL_MAGNITUDE. The two
+// constants read alike and mean different things; see applyDamageWithEffects.
+const SHOCK_MAGNITUDE = 0.25;
+// Mana removed per shock tick. Half the player's 10/s regen (world.js's
+// PLAYER_MANA_REGEN), so sustained lightning halves a caster's effective regen
+// rather than emptying the pool outright — mana becomes contested, not deleted.
+const SHOCK_MANA_DRAIN = 5;
+const SHOCK_TICK_MS = 1000;  // fixed interval between mana-drain ticks
 
 // Effect kinds that act on a fixed periodic interval rather than being read
-// passively by whatever consumes them. Only BURN ticks today; CHILL/SHOCK
-// are read via hasEffect()/effectMagnitude() by movement/cast-bar code.
-const TICK_INTERVAL_MS = { [BURN]: BURN_TICK_MS };
+// passively by whatever consumes them. BURN deals damage; SHOCK drains mana.
+// CHILL is purely passive, read via effectMagnitude() by movement code.
+//
+// Both intervals are FIXED here rather than derived from the tick rate, for the
+// same reason burn's is: an action fired once per tickEffects() call would make
+// its throughput scale with the server's tick rate, so a 20Hz -> 30Hz change
+// would silently strengthen every fire and lightning weapon by 50%.
+const TICK_INTERVAL_MS = { [BURN]: BURN_TICK_MS, [SHOCK]: SHOCK_TICK_MS };
 
 // Refreshes (never stacks) the (target, key) effect entry. `existing.elapsed`
 // is preserved across a refresh so re-applying BURN mid-interval neither
@@ -159,4 +180,6 @@ module.exports = {
   CHILL_MAGNITUDE,
   SHOCK_DURATION_MS,
   SHOCK_MAGNITUDE,
+  SHOCK_MANA_DRAIN,
+  SHOCK_TICK_MS,
 };
