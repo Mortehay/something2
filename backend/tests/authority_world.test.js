@@ -410,3 +410,67 @@ test('respawn restores control and clears lingering effects, but not the shock i
   assert.equal(applyShockInterrupt(p, w.now), false,
     'respawning shed the immunity window, making death a route to being chain-locked at spawn');
 });
+
+// --- Task 9: status effects reach the client on the state frame ---
+
+test('world.snapshot broadcasts a burning player\'s effect keys, against the world clock', () => {
+  const w = new World(stubMap());
+  w.addPlayer('u1', { x: 0, y: 0 });
+  w.addPlayer('u2', { x: 0, y: 0 });
+  const p = w.getPlayer('u1');
+
+  // Nothing active: the field is omitted entirely, and the client's
+  // `p.effects || []` reads that as "no effects".
+  assert.equal(w.snapshot().players.find((s) => s.id === 'u1').effects, undefined,
+    'an unaffected player must not carry an effects field at all');
+
+  applyElementEffect(p, 'fire', w.now, 'u2');
+  const burning = w.snapshot().players.find((s) => s.id === 'u1');
+  assert.deepEqual(burning.effects, [BURN],
+    'a burning player broadcast no burn — the client cannot tint what it is never told about');
+  // The OTHER player is unaffected and must stay that way: an effects field
+  // computed once and shared across the map would tint everybody.
+  assert.equal(w.snapshot().players.find((s) => s.id === 'u2').effects, undefined);
+
+  // And it must lapse.
+  for (let i = 0; i < Math.ceil(BURN_DURATION_MS / 100) + 1; i++) w.tick(0.1);
+  assert.equal(w.snapshot().players.find((s) => s.id === 'u1').effects, undefined,
+    'the burn expired but is still being broadcast');
+});
+
+test('world.snapshot decides liveness against the WORLD clock, not a fixed zero', () => {
+  const w = new World(stubMap());
+  w.addPlayer('u1', { x: 0, y: 0 });
+  const p = w.getPlayer('u1');
+  // Advance the world well past any effect we are about to plant.
+  for (let i = 0; i < 50; i++) w.tick(0.1);   // w.now = 5000
+  assert.ok(w.now >= 5000, 'setup: the world clock has advanced');
+
+  // A lapsed entry that has NOT been swept: applied with an expiry of 1000
+  // while the world stands at 5000, and deliberately never ticked afterwards.
+  // tickEffects only evicts entries it walks, so this state is reachable
+  // whenever the snapshot runs before the sweep — and the previous test cannot
+  // see this bug at all, because there the tick loop had already emptied the
+  // map before the snapshot ran.
+  applyEffect(p, BURN, { durationMs: 1000, magnitude: BURN_MAGNITUDE, now: 0 });
+  assert.equal(p.effects.size, 1, 'setup: the lapsed entry is deliberately still in the map');
+
+  assert.equal(w.snapshot().players[0].effects, undefined,
+    'an effect that expired at 1000 is still broadcast at world time ' + w.now
+    + ' — snapshot() is not reading the world clock (a hardcoded 0 would look exactly like this)');
+});
+
+test('world.snapshot broadcasts several concurrent effects as keys, not entries', () => {
+  const w = new World(stubMap());
+  w.addPlayer('u1', { x: 0, y: 0 });
+  const p = w.getPlayer('u1');
+  applyElementEffect(p, 'fire', w.now, 'src');
+  applyElementEffect(p, 'ice', w.now, 'src');
+  const snap = w.snapshot().players[0];
+  assert.deepEqual([...snap.effects].sort(), [BURN, CHILL].sort());
+  // Serializing the whole frame must not smuggle the effect map's internals
+  // through some other field either.
+  const wire = JSON.stringify(w.snapshot());
+  assert.equal(wire.includes('"until"'), false, 'effect expiry timestamps reached the wire');
+  assert.equal(wire.includes('"elapsed"'), false, 'effect tick accumulators reached the wire');
+});

@@ -6,7 +6,7 @@ const { resolveMove } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc, hasLineOfSight } = require('./weapons');
 const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
-const { applyElementEffect } = require('./effects');
+const { applyElementEffect, activeEffectKeys } = require('./effects');
 
 const DIRS = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
@@ -236,13 +236,24 @@ class CreatureSim {
     return dropped;
   }
 
-  snapshotForNeighborhood(keys) {
+  // `now` is the world clock, threaded in for the same reason tick() takes it:
+  // deciding which status effects are still LIVE is a clock read, and this
+  // module must never read one of its own. A caller that omits it gets no
+  // effect keys rather than stale ones (every `until > 0` entry would look
+  // expired at now=0... which is why the default is deliberately 0 and the
+  // one real caller, broadcastCreatures, passes world.now).
+  snapshotForNeighborhood(keys, now = 0) {
     const set = keys instanceof Set ? keys : new Set(keys);
     const out = [];
     for (const c of this.creatures.values()) {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (set.has(CHUNK_KEY(cx, cy))) {
-        out.push({ id: c.id, type: c.type, x: c.x, y: c.y, facing: c.facing, hp: c.hp, maxHp: c.maxHp, mode: c.mode, color: c.color });
+        const row = { id: c.id, type: c.type, x: c.x, y: c.y, facing: c.facing, hp: c.hp, maxHp: c.maxHp, mode: c.mode, color: c.color };
+        // Effect KEYS only, omitted when empty — same contract as the player
+        // snapshot in world.js. Read on the client as `c.effects || []`.
+        const fx = activeEffectKeys(c, now);
+        if (fx) row.effects = fx;
+        out.push(row);
       }
     }
     return out;

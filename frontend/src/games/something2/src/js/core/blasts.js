@@ -54,8 +54,22 @@ export function blastScreenRadiusX(worldRadius) {
   return (Number.isFinite(worldRadius) ? worldRadius : 0) * Math.SQRT2 * ISO_K;
 }
 
-// Element tint, matching the projectile colours already used in RenderSystem
-// so a blast reads as belonging to the shot that caused it.
+// THE element palette. One function, used by the projectile draw, the blast
+// ring, and the status-effect tint (via statusEffects.js) — so a burn reads as
+// belonging to the fire bolt that caused it. Adding a second palette elsewhere
+// is how a fire projectile and a burn tint end up different colours.
+//
+// `lightning` deliberately resolves to the same yellow the default already
+// was, so this table adds fire and ice without restyling anything that was
+// already on screen.
+const ELEMENT_COLORS = {
+  arcane: "#9b5de5",     // violet
+  fire: "#f4763b",       // orange
+  ice: "#5bc0f8",        // blue
+  lightning: "#f4d35e",  // yellow
+};
+const DEFAULT_ELEMENT_COLOR = "#f4d35e";
+
 export function elementColor(element) {
-  return element === "arcane" ? "#9b5de5" : "#f4d35e";
+  return ELEMENT_COLORS[element] || DEFAULT_ELEMENT_COLOR;
 }

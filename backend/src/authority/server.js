@@ -205,7 +205,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (!p) continue;
       const { cx, cy } = chunkOf(p.x, p.y, N);
       const keys = neighborhoodKeys(cx, cy, 1);
-      send(ws, { type: 'creatures', creatures: entry.world.creatures.snapshotForNeighborhood(keys) });
+      // world.now, not Date.now(): the creature snapshot's effect keys are
+      // decided against the same clock that applied and ticks those effects.
+      send(ws, { type: 'creatures', creatures: entry.world.creatures.snapshotForNeighborhood(keys, entry.world.now) });
     }
   }
 

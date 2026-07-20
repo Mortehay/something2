@@ -4,7 +4,7 @@ const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION } = require('./damage');
 const {
-  tickEffects, effectMagnitude, applyElementEffect, canAct, clearInterrupt,
+  tickEffects, effectMagnitude, applyElementEffect, canAct, clearInterrupt, activeEffectKeys,
   BURN, CHILL, SHOCK, SHOCK_MANA_DRAIN,
 } = require('./effects');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
@@ -323,12 +323,19 @@ class World {
 
   snapshot() {
     return {
-      players: [...this.players.values()].map((p) => ({
-        id: p.userId, x: p.x, y: p.y, facing: p.facing,
-        hp: p.hp, maxHp: p.maxHp, mana: p.mana, maxMana: p.maxMana,
-        stamina: p.stamina, maxStamina: p.maxStamina, equipment: p.inv ? p.inv.equipment : {},
-        autoLoot: p.autoLoot,
-      })),
+      players: [...this.players.values()].map((p) => {
+        const out = {
+          id: p.userId, x: p.x, y: p.y, facing: p.facing,
+          hp: p.hp, maxHp: p.maxHp, mana: p.mana, maxMana: p.maxMana,
+          stamina: p.stamina, maxStamina: p.maxStamina, equipment: p.inv ? p.inv.equipment : {},
+          autoLoot: p.autoLoot,
+        };
+        // Effect KEYS only, and omitted entirely when nothing is active — see
+        // activeEffectKeys. Read on the client as `p.effects || []`.
+        const fx = activeEffectKeys(p, this.now);
+        if (fx) out.effects = fx;
+        return out;
+      }),
       projectiles: this.projectiles.snapshot(),
     };
   }

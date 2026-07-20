@@ -157,6 +157,33 @@ function tickEffects(target, dtMs, now, ctx) {
   return fired;
 }
 
+// The live effect KEYS on `target`, for broadcast to the client.
+//
+// KEYS ONLY, deliberately. The client needs to know WHAT is active so it can
+// tint the entity and list it on the HUD; it has no use for `until`, `elapsed`,
+// `magnitude` or `sourceId`, and shipping those would (a) put the server's
+// timing internals on the wire, where a client could read exactly when a slow
+// expires, and (b) grow the 20Hz state frame by an object per effect per actor.
+//
+// Expired-but-not-yet-evicted entries are filtered out here rather than trusted
+// to have been swept: tickEffects only evicts entries it walks, and an entity
+// that has not been ticked since its effect lapsed would otherwise broadcast a
+// tint that the server no longer applies to anything.
+//
+// Returns null (not []) when nothing is active, so callers can omit the field
+// from the frame entirely — the overwhelmingly common case is an actor with no
+// effects at all, and an `"effects":[]` on every player on every tick is pure
+// waste. Every consumer must therefore read it as `p.effects || []`.
+function activeEffectKeys(target, now) {
+  if (!target || !target.effects || target.effects.size === 0) return null;
+  let keys = null;
+  for (const [key, e] of target.effects) {
+    if (e.until <= now) continue;
+    (keys || (keys = [])).push(key);
+  }
+  return keys;
+}
+
 // Attempts to interrupt `target`. Returns true if the interrupt LANDED, false
 // if the target was still inside its immunity window.
 //
@@ -247,6 +274,7 @@ module.exports = {
   tickEffects,
   hasEffect,
   effectMagnitude,
+  activeEffectKeys,
   BURN,
   CHILL,
   SHOCK,

@@ -5,6 +5,7 @@ import { frameRect, staticFrameKey, animatedFrameKey, facingToDir } from "./spri
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
+import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffects.js";
 
 // Mirrors PICKUP_RADIUS in backend/src/authority/groundItems.js — used here
 // only to decide when a ground item's name label is shown (i.e. when the
@@ -89,7 +90,7 @@ export class RenderSystem {
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
     groundItems = [], autoLoot = false, toast = null,
-    blasts = [], ammo = null, noAmmoFlash = false,
+    blasts = [], ammo = null, noAmmoFlash = false, effects = null,
   }) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -149,7 +150,7 @@ export class RenderSystem {
     this.drawBlasts(blasts);
 
     camera.reset(this.ctx);
-    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash });
+    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash, effects });
     if (toast) this.renderToast(toast);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
@@ -266,6 +267,79 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // Status-effect rings at an affected actor's feet, one per active effect,
+  // coloured from the SAME element palette the projectiles and blast rings use
+  // (see statusEffects.js) so a burn reads as belonging to the fire bolt that
+  // caused it.
+  //
+  // COORDINATES: the caller passes (cx, feetY) taken straight off the values
+  // it has ALREADY computed for its sprite — cx is worldToScreen's x, feetY is
+  // `drawY + h`, which is the expression drawCreature/drawEntity already use to
+  // put an actor's feet on the diamond. Nothing is re-derived here.
+  //
+  // The trap this avoids: worldToScreen returns the tile diamond's CENTRE, and
+  // an actor's feet sit ISO_TILE_H/2 BELOW that (drawY = s.y - h + ISO_TILE_H/2
+  // => drawY + h = s.y + ISO_TILE_H/2). Drawing the aura at s.y instead — the
+  // convention drawGroundItem uses, since a dropped item really does rest at
+  // the diamond centre — puts the ring around the actor's waist rather than
+  // under their feet. It was written that way first and the browser pass caught
+  // it; do not "simplify" it back.
+  //
+  // The 2:1 ellipse (rx, rx/2) is the same ground-plane projection blastScreen-
+  // RadiusX documents. Rings are drawn OUTWARD (each successive effect larger)
+  // rather than stacked, so two effects stay individually readable instead of
+  // the second painting over the first.
+  _drawEffectRings(cx, feetY, w, effects) {
+    const active = normalizeEffects(effects);
+    if (active.length === 0) return;
+    this.ctx.save();
+    this.ctx.lineWidth = 2;
+    // A soft filled glow under the first (lowest-ordered) effect, so an
+    // affected actor reads as tinted at a glance rather than only on close
+    // inspection of a thin outline.
+    const glow = effectColor(active[0]);
+    if (glow) {
+      this.ctx.globalAlpha = 0.22;
+      this.ctx.fillStyle = glow;
+      this.ctx.beginPath();
+      this.ctx.ellipse(cx, feetY, w * 0.45, w * 0.225, 0, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
+    active.forEach((key, i) => {
+      const color = effectColor(key);
+      if (!color) return;
+      const rx = w * 0.45 + i * 5;
+      this.ctx.strokeStyle = color;
+      this.ctx.globalAlpha = 0.9;
+      this.ctx.beginPath();
+      this.ctx.ellipse(cx, feetY, rx, rx / 2, 0, 0, Math.PI * 2);
+      this.ctx.stroke();
+    });
+    this.ctx.restore();
+  }
+
+  // Colour pips above an affected actor, alongside the HP bar. The feet rings
+  // can be occluded by a sprite standing in front; the pips sit above the head
+  // where the HP bar already reads clearly, so an effect is never completely
+  // hidden. (drawX, drawY) is the sprite rect's TOP-LEFT, the same origin
+  // _drawHpBar takes.
+  _drawEffectPips(drawX, drawY, effects) {
+    const active = normalizeEffects(effects);
+    if (active.length === 0) return;
+    const size = 5, gap = 2;
+    // Sits above the HP bar's row (drawY - 8, height 4), so the two never
+    // overlap on an actor that is both damaged and affected.
+    const py = drawY - 16;
+    this.ctx.save();
+    active.forEach((key, i) => {
+      const color = effectColor(key);
+      if (!color) return;
+      this.ctx.fillStyle = color;
+      this.ctx.fillRect(drawX + i * (size + gap), py, size, size);
+    });
+    this.ctx.restore();
+  }
+
   // Small red/yellow/green bar above a damaged actor (creature or player).
   // (drawX, drawY) is the actor's screen draw origin (top-left of its sprite
   // rect); the bar sits just above it, spanning the sprite's width.
@@ -286,6 +360,10 @@ export class RenderSystem {
     const s = worldToScreen(obj.x + w / 2, obj.y + h / 2);
     const drawX = s.x - w / 2;
     const drawY = s.y - h + ISO_TILE_H / 2; // lift so feet rest on the diamond
+    // Effect rings go down FIRST, so the actor stands on top of its own aura
+    // rather than being obscured by it. `drawY + h` is the feet line this same
+    // method already computed — see _drawEffectRings on why not s.y.
+    this._drawEffectRings(s.x, drawY + h, w, obj.effects);
     const img = this.imageManager.get(imageKey);
     this.ctx.globalAlpha = alpha;
     if (img) {
@@ -300,6 +378,7 @@ export class RenderSystem {
     if (obj.maxHp && obj.hp != null && obj.hp < obj.maxHp) {
       this._drawHpBar(drawX, drawY, w, obj.hp, obj.maxHp);
     }
+    this._drawEffectPips(drawX, drawY, obj.effects);
     if (tag !== null) {
       this.ctx.fillStyle = "#fff";
       this.ctx.font = "12px sans-serif";
@@ -331,6 +410,11 @@ export class RenderSystem {
     const drawX = s.x - w / 2;
     const drawY = s.y - h + ISO_TILE_H / 2;
 
+    // Creatures render through this path in renderChunked (buildDrawables'
+    // "entity" kind), so their status rings belong here too. Map decorations
+    // never carry `effects`, so this is a no-op for them.
+    this._drawEffectRings(s.x, drawY + h, w, e.effects);
+
     const mode = RenderSystem.resolveRenderMode(e, this.renderModeOverride);
     // Preferred sprite path: crop a frame out of the generated atlas.
     const sprite = RenderSystem.resolveSprite(e, this.imageManager, mode, this.nowMs);
@@ -357,9 +441,10 @@ export class RenderSystem {
     if (e.maxHp && e.hp != null && e.hp < e.maxHp) {
       this._drawHpBar(drawX, drawY, w, e.hp, e.maxHp);
     }
+    this._drawEffectPips(drawX, drawY, e.effects);
   }
 
-  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false }) {
+  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null }) {
     const remoteCount = remotePlayers ? remotePlayers.size : 0;
     const lines = [
       `Players online: ${1 + remoteCount}`,
@@ -374,6 +459,17 @@ export class RenderSystem {
     }
     if (weaponName) {
       lines.push(`Weapon: ${weaponName}`);
+    }
+    // The player's OWN active effects, right under the resource bars they
+    // affect (chill slows, shock drains MP, burn drains HP). Drawn in its
+    // effect colour rather than the HUD grey, matching the ring at their feet.
+    // effectHudLine returns null when nothing is active, so no blank row is
+    // pushed and the panel does not jump a row taller on every hit.
+    const effectsLine = effectHudLine(effects);
+    let effectsLineIdx = -1;
+    if (effectsLine) {
+      effectsLineIdx = lines.length;
+      lines.push(effectsLine);
     }
     // Ammo line only when the equipped weapon actually consumes ammo — `ammo`
     // is null for every ammo-free weapon (the server's ammo_type_id == null),
@@ -393,7 +489,8 @@ export class RenderSystem {
       // The ammo line turns red while the flash is up, or whenever the stack
       // is empty, so the player sees why a shot did nothing.
       const alarm = i === ammoLine && (noAmmoFlash || ammo.count <= 0);
-      this.ctx.fillStyle = alarm ? "#ef4444" : "#e5e7eb";
+      const fx = i === effectsLineIdx ? effectColor(normalizeEffects(effects)[0]) : null;
+      this.ctx.fillStyle = alarm ? "#ef4444" : (fx || "#e5e7eb");
       this.ctx.fillText(t, 18, 16 + i * 18);
     });
     this.ctx.restore();

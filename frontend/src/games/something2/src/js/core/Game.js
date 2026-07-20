@@ -404,12 +404,16 @@ export class Game {
         let mine = null;
         for (const p of (msg.players || [])) {
             if (p.id === this.localUserId) { mine = p; continue; }
-            next.set(p.id, { x: p.x, y: p.y, facing: p.facing, hp: p.hp, maxHp: p.maxHp });
+            next.set(p.id, { x: p.x, y: p.y, facing: p.facing, hp: p.hp, maxHp: p.maxHp, effects: p.effects || null });
         }
         this.remotePlayers = next;
         if (mine) {
             this.player.hp = mine.hp;
             this.player.maxHp = mine.maxHp;
+            // Assigned on EVERY frame, including the (common) one where the
+            // server omits the field — otherwise a `if (mine.effects)` guard
+            // would leave the HUD reading "Burning" long after the burn ended.
+            this.player.effects = mine.effects || null;
             const out = reconcile(
                 { x: mine.x, y: mine.y },
                 msg.ackSeq || 0,
@@ -522,6 +526,9 @@ export class Game {
                 // then draws no ammo line at all.
                 ammo: resolveAmmoHud(this.inventory),
                 noAmmoFlash: nowMs < this.noAmmoUntil,
+                // The local player's own effects, for the HUD line. The rings
+                // at their feet come from this.player.effects via drawCreature.
+                effects: this.player.effects || null,
             });
         } else {
             this.renderSystem.render(this.player, this.camera, this.map, this.remotePlayers, this.localUserId);

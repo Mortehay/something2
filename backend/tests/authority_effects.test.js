@@ -5,7 +5,7 @@ const {
   BURN, CHILL, SHOCK, BURN_TICK_MS,
   BURN_DURATION_MS, BURN_MAGNITUDE,
   SHOCK_MAGNITUDE, SHOCK_TICK_MS,
-  applyShockInterrupt, canAct, clearInterrupt,
+  applyShockInterrupt, canAct, clearInterrupt, activeEffectKeys,
   SHOCK_INTERRUPT_MS, SHOCK_IMMUNITY_MS,
 } = require('../src/authority/effects.js');
 const { fastestCooldownMsForElement } = require('./fixtures/weapon_catalog.js');
@@ -358,4 +358,53 @@ test('clearInterrupt frees the target but deliberately KEEPS the immunity window
   assert.equal(applyShockInterrupt(t, 10), false,
     'clearing the interrupt also shed the immunity window — respawning would then be a way '
     + 'to eat a fresh interrupt immediately, i.e. a chain-lock at the spawn point');
+});
+
+// --- Task 9: the client-facing broadcast contract ---
+//
+// activeEffectKeys is the ONLY thing the client learns about status effects.
+// Two properties matter and both have failure modes that stay invisible in the
+// browser: leaking the server's timing internals onto the wire, and reporting
+// an effect that has already lapsed.
+
+test('activeEffectKeys reports KEYS ONLY — no timing internals reach the wire', () => {
+  const t = { effects: new Map() };
+  applyEffect(t, BURN, { durationMs: 1000, magnitude: 7, sourceId: 'u1', now: 0 });
+  applyEffect(t, CHILL, { durationMs: 1000, magnitude: 0.6, sourceId: 'u1', now: 0 });
+  const keys = activeEffectKeys(t, 500);
+  assert.deepEqual([...keys].sort(), [BURN, CHILL].sort());
+  // Every element must be a plain string. An entry object would carry `until`
+  // (letting a client compute exactly when a slow ends) and `sourceId`, and
+  // would grow the 20Hz state frame by an object per effect per actor.
+  for (const k of keys) {
+    assert.equal(typeof k, 'string',
+      'an effect entry, not a key, reached the snapshot — the server\'s timing internals must not be broadcast');
+  }
+  assert.ok(JSON.stringify(keys).indexOf('until') === -1
+    && JSON.stringify(keys).indexOf('magnitude') === -1
+    && JSON.stringify(keys).indexOf('sourceId') === -1,
+    'the serialized payload leaks effect internals');
+});
+
+test('activeEffectKeys omits an expired effect that has not been swept yet', () => {
+  const t = { effects: new Map() };
+  applyEffect(t, BURN, { durationMs: 1000, magnitude: 2, now: 0 });
+  applyEffect(t, CHILL, { durationMs: 3000, magnitude: 0.6, now: 0 });
+  // No tickEffects() call: the burn entry is still SITTING IN THE MAP at 1500,
+  // because tickEffects only evicts entries it walks. An entity that has not
+  // been ticked since its burn lapsed must not still broadcast a burn tint.
+  assert.equal(t.effects.size, 2, 'setup: the lapsed entry is deliberately still present');
+  assert.deepEqual(activeEffectKeys(t, 1500), [CHILL]);
+});
+
+test('activeEffectKeys returns null (not an empty array) for an unaffected target', () => {
+  // The frame omits the field entirely in this case, which is the common one —
+  // an `"effects":[]` on every player on every tick at 20Hz is pure waste.
+  assert.equal(activeEffectKeys({ effects: new Map() }, 0), null);
+  assert.equal(activeEffectKeys({}, 0), null);
+  assert.equal(activeEffectKeys(null, 0), null);
+  const allExpired = { effects: new Map() };
+  applyEffect(allExpired, BURN, { durationMs: 100, magnitude: 1, now: 0 });
+  assert.equal(activeEffectKeys(allExpired, 500), null,
+    'a target whose every effect has lapsed must omit the field, not send an empty array');
 });

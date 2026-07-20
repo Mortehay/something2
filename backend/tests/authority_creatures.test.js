@@ -67,3 +67,30 @@ test('snapshotForNeighborhood filters by current chunk and shape', () => {
   assert.equal(snap[0].id, 'near');
   assert.deepEqual(Object.keys(snap[0]).sort(), ['color', 'facing', 'hp', 'id', 'maxHp', 'mode', 'type', 'x', 'y']);
 });
+
+// --- Task 9: creature status effects reach the client ---
+
+test('snapshotForNeighborhood carries a chilled creature\'s effect keys, gated on the passed clock', () => {
+  const { applyElementEffect, CHILL } = require('../src/authority/effects.js');
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([
+    { id: 'a', type: 'Slime', x: 100, y: 100, hp: 10, maxHp: 10 },
+    { id: 'b', type: 'Wolf', x: 100, y: 100, hp: 10, maxHp: 10 },
+  ]);
+  const rowFor = (id, now) => s.snapshotForNeighborhood(['0,0'], now).find((r) => r.id === id);
+
+  assert.equal(rowFor('a', 0).effects, undefined,
+    'an unaffected creature must not carry an effects field at all');
+
+  applyElementEffect(s.all().find((c) => c.id === 'a'), 'ice', 0, 'u1');
+  assert.deepEqual(rowFor('a', 100).effects, [CHILL],
+    'a chilled creature broadcast no chill — the client cannot tint what it is never told about');
+  assert.equal(rowFor('b', 100).effects, undefined,
+    'the unaffected creature was tinted too — the effect keys are not per-creature');
+
+  // Gated on the clock the CALLER passes, not one this module reads: at a
+  // `now` past the chill's expiry the field must be gone even though the map
+  // entry has never been swept by a tick.
+  assert.equal(rowFor('a', 999999).effects, undefined,
+    'an expired chill is still broadcast — snapshotForNeighborhood ignored the clock it was given');
+});
