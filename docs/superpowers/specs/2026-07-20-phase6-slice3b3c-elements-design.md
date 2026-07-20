@@ -28,6 +28,43 @@ This is the same failure mode as 3b-3a's stamina economy: a complete, correct, f
 4. **Lightning carries all three riders** — vulnerability, interrupt, and mana drain. This was chosen deliberately over spreading them, with the cost understood and priced in (see "Balancing the storm staff").
 5. **Arcane gets no rider** and remains the pure-damage generalist.
 
+## Part 0 — There is only one creature, so the slice must add some
+
+Discovered while writing the plan: `entity_types` contains exactly **one** creature — `Wolf`. Everything else is scenery (`Tree`, `Stone`, `IceRock`) plus `Player`.
+
+This invalidates the original framing. With a single creature type, resistances create no matchup: giving Wolf ice resistance does not make element choice a decision, it just makes ice worse. An invariant asserting "several creature types carry resistances" would have been unsatisfiable.
+
+**Creature variety is therefore in scope**, and it is far cheaper than it first appears:
+
+- `spawnChunkCreatures` picks uniformly from the creature list by hash, so **a new row spawns in the world automatically** — no spawn-table wiring.
+- Creatures render from their `color` field, so **no sprite work is required**.
+- A creature type is any `entity_types` row with `is_creature = true`.
+
+So the cost is genuinely: insert rows, and make sure the loader reads the new columns.
+
+### The roster
+
+Four creatures, each with a distinct elemental profile so element choice becomes a real decision rather than a flat nerf:
+
+| name | hp | defense | resistances | the choice it creates |
+|---|---|---|---|---|
+| Wolf (existing) | 12 | 0 | `{}` | the neutral baseline — every element works |
+| Slime | 18 | 0 | `{ fire: 0.6, physical: 0.3 }` | tanky vs fire and melee; **ice and lightning are the answer** |
+| Skeleton | 14 | 2 | `{ ice: 0.6, physical: 0.2 }` | shrugs off frost; **fire is the answer** |
+| Bat | 8 | 0 | `{ lightning: 0.5 }` | fragile but shrugs off shock; fast to kill with anything else |
+
+No creature resists arcane, which is deliberate: arcane carries no status rider, so reliable unresisted damage is its identity — the generalist's compensation for having no effect.
+
+**Resistance cap is 0.8 in `applyDamage` and nothing here approaches it**, so no creature is ever close to immune, and the damage floor of 1 guarantees any weapon can eventually kill anything.
+
+### The loader trap this must not repeat
+
+`server.js:70` reads `SELECT id, name, color, hp FROM entity_types WHERE is_creature = true` and maps only `{name, hp, color}`. Adding `defense`/`resistances` columns without extending BOTH the SELECT and the mapping loads them as `undefined`, and every resistance is silently inert — the identical failure mode that a guard test was added for in 3b-3b (`loadItemTypes`). **That guard pattern must be applied here too**: a test asserting the SELECT names every column the mapping consumes.
+
+### Known inconsistency, noted not fixed
+
+`Wolf` has `hp = 12` and `max_hp = 0`, and `creatures.js` spawns with `hp: c.hp, maxHp: c.hp` — so `max_hp` is unused and wrong in the data. New rows should set both consistently, but repairing the column's meaning across the codebase is out of scope here.
+
 ## Part 1 — Creature damage must route through the one mitigation path
 
 This is the highest-value change in the slice and it is mostly the deletion of a divergence.
@@ -101,7 +138,8 @@ An invariant test asserts storm staff's damage-per-mana is strictly below every 
 
 This project has twice shipped a feature that was correct and inert. Each mechanic here gets a test that it can actually **engage**:
 
-- **Creature resistances are populated.** A resistance table nobody fills is the current inert state with more code. Assert that a meaningful number of creature types carry a non-empty `resistances`, and that at least one element choice measurably changes time-to-kill against some creature.
+- **Creature resistances are populated AND they create a real choice.** A resistance table nobody fills is the current inert state with more code — but so is a table where every creature resists the same thing. Assert that at least three creature types carry a non-empty `resistances`, **and** that no single element is the best choice against all of them (for each element, some creature resists it, and for each creature, some element is unresisted). That second half is what makes it a matchup rather than a set of flat nerfs, and it is the assertion that would fail if a future edit made every creature fire-resistant.
+- **Time-to-kill measurably differs by element.** Against Slime, an ice weapon must kill measurably faster than a fire weapon of equal raw damage. This is the end-to-end proof of the slice's premise, and it fails if any of the three creature-damage sites is still bypassing `applyDamage`.
 - **Burn is meaningful.** `burn_tick_damage × duration` must be a non-trivial fraction of the weapon's hit damage, or the DoT is decoration.
 - **Chill actually changes outcomes — but not the outcome you would first assume.** `PLAYER_SPEED` is 200 and `CREATURE_SPEED` is 40, so a chilled player at ×0.6 still moves at 120, **three times** creature speed. Creatures cannot catch any player, chilled or not, at any multiplier this slice would sanely use. Chill is therefore a **PvP and projectile-dodging** mechanic, not an anti-escape one, and its reachability test must say so: assert the chilled/unchilled speed differential is large enough to decide a player-versus-player chase (a 40% gap closes distance quickly), and assert the chilled speed against the real `PLAYER_SPEED` constant rather than a literal. A test written against creature pursuit would be vacuous — it can never fail, because the pursuit never succeeds either way.
 - **The interrupt immunity window limits something.** `IMMUNITY_MS > storm staff cooldown`, with a failure message that explains the chain-lock this prevents.
