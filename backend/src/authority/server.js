@@ -5,6 +5,7 @@ const { ServerMap } = require('./collision');
 const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
+const { loadCreatureTypes } = require('./creatures');
 const { spawnChunkCreatures } = require('../services/mapService');
 const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
 const { consumeAmmo, ammoCount } = require('./ammo');
@@ -67,9 +68,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
-        const cr = await pool.query('SELECT id, name, color, hp FROM entity_types WHERE is_creature = true ORDER BY id ASC');
-        const creatureTypes = cr.rows.map((r) => ({ name: r.name, hp: r.hp, color: r.color }));
-        const creatureTypeIds = new Map(cr.rows.map((r) => [r.name, r.id]));
+        const { creatureTypes, creatureTypeIds } = await loadCreatureTypes(pool);
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const map = new ServerMap({ seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes });
@@ -153,7 +152,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       }
       const span = N * 100;
       const rows = await pool.query(
-        `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, et.color
+        // et.defense/et.resistances feed CreatureSim's `mit`; dropping either
+        // from this SELECT loads it as undefined and silently makes every
+        // creature resistance inert.
+        `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, et.color, et.defense, et.resistances
          FROM world_creatures wc LEFT JOIN entity_types et ON et.name = wc.type
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
@@ -203,7 +205,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (!p) continue;
       const { cx, cy } = chunkOf(p.x, p.y, N);
       const keys = neighborhoodKeys(cx, cy, 1);
-      send(ws, { type: 'creatures', creatures: entry.world.creatures.snapshotForNeighborhood(keys) });
+      // world.now, not Date.now(): the creature snapshot's effect keys are
+      // decided against the same clock that applied and ticks those effects.
+      send(ws, { type: 'creatures', creatures: entry.world.creatures.snapshotForNeighborhood(keys, entry.world.now) });
     }
   }
 
@@ -511,7 +515,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const dt = tickMs / 1000;
     for (const entry of worlds.values()) {
       if (entry.world.isEmpty()) continue;
-      entry.world.tick(dt);
+      // Status effects tick inside world.tick. A creature killed by a burn
+      // tick is reported here and goes through the SAME death commit as a
+      // melee or projectile kill — burn must not become a fourth way to die
+      // that skips loot or deletes twice.
+      const { killedCreatureIds: killedByEffects } = entry.world.tick(dt);
+      for (const id of new Set(killedByEffects)) onCreatureDeath(entry, id);
       entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
       const { killedCreatureIds: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
       for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);
@@ -592,13 +601,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }, flushMs);
 
-  const heartbeatTimer = setInterval(() => {
+  // Named (rather than inlined into setInterval) so it can also be exposed as
+  // `_heartbeatSweep` below: a test seam that lets tests drive the reaper by
+  // explicit call instead of racing wall-clock heartbeatMs, the same way
+  // other modules take `now` as a parameter instead of reading the clock.
+  function heartbeatSweep() {
     for (const ws of wss.clients) {
       if (ws.isAlive === false) { ws.terminate(); continue; }
       ws.isAlive = false;
       ws.ping();
     }
-  }, heartbeatMs);
+  }
+  const heartbeatTimer = setInterval(heartbeatSweep, heartbeatMs);
 
   // Expired ground items: delete from the DB and evict from every live sim.
   // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
@@ -625,6 +639,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // does not carry (e.g. a player's attack cooldown). Read-only by
     // convention — the server owns every mutation.
     worlds,
+    // Test seam: run one reaper sweep synchronously instead of waiting for
+    // the real heartbeatTimer to fire. Boot with a very large heartbeatMs so
+    // the automatic interval never fires during the test, then call this to
+    // advance the reaper deterministically. The actual ping/pong round trip
+    // still crosses a real socket and event loop turn — that part cannot be
+    // faked without mocking the transport — so tests should await the real
+    // 'pong' event (observable via `worlds.get(id).sockets`) between calls
+    // rather than sleeping a guessed duration.
+    _heartbeatSweep: heartbeatSweep,
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);

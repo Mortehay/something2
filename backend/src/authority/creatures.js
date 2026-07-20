@@ -5,7 +5,8 @@
 const { resolveMove } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc, hasLineOfSight } = require('./weapons');
-const { applyDamage, NO_MITIGATION } = require('./damage');
+const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
+const { applyElementEffect, activeEffectKeys, canAct } = require('./effects');
 
 const DIRS = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
@@ -20,6 +21,37 @@ const LEASH_RADIUS = 800;            // px: drop a target beyond this
 const CONTACT_RANGE = 60;            // px: creature may hit its target within this
 const CREATURE_DAMAGE = 5;
 const CREATURE_ATTACK_COOLDOWN = 1.0; // s
+
+// Creature mitigation, built the same way a player's is built from equipment:
+// from the entity type's defense/resistances. A creature without `mit` falls
+// back to NO_MITIGATION inside applyDamage, which makes every resistance
+// inert — so this must never return undefined.
+function creatureMitigation(row) {
+  const d = Number(row.defense ?? 0);
+  return {
+    defense: Number.isFinite(d) ? d : 0,
+    resistances: row.resistances || {},
+  };
+}
+
+// Load the creature entity types. Named + exported (rather than inlined in
+// server.js) so a guard test can assert the SELECT names every column the
+// mapping consumes: a mapped column missing from the SELECT loads as
+// undefined and silently disables the feature it feeds.
+async function loadCreatureTypes(pool) {
+  const r = await pool.query(
+    `SELECT id, name, color, hp, defense, resistances
+     FROM entity_types WHERE is_creature = true ORDER BY id ASC`,
+  );
+  const creatureTypes = r.rows.map((row) => ({
+    name: row.name,
+    hp: row.hp,
+    color: row.color,
+    ...creatureMitigation(row),
+  }));
+  const creatureTypeIds = new Map(r.rows.map((row) => [row.name, row.id]));
+  return { creatureTypes, creatureTypeIds };
+}
 
 function center(o) { return { x: o.x + o.width / 2, y: o.y + o.height / 2 }; }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
@@ -46,6 +78,7 @@ class CreatureSim {
         id: c.id, type: c.type, x: c.x, y: c.y,
         width: CREATURE_SIZE, height: CREATURE_SIZE, speed: CREATURE_SPEED,
         facing: c.facing || 'S', hp: c.hp, maxHp: c.hp, color: c.color,
+        mit: creatureMitigation(c),
         _dir: dirIdx, dirty: false,
         _target: null, mode: 'roam', _attackCd: 0,
       });
@@ -56,7 +89,10 @@ class CreatureSim {
   count() { return this.creatures.size; }
   all() { return [...this.creatures.values()]; }
 
-  tick(dt, activeChunkKeys, players = []) {
+  // `now` is the world clock, threaded in for the same reason the attack
+  // resolvers take it: damage reads the target's live status effects (shock's
+  // vulnerability) and this module must never read a clock of its own.
+  tick(dt, activeChunkKeys, players = [], now = 0) {
     const active = activeChunkKeys instanceof Set ? activeChunkKeys : new Set(activeChunkKeys);
     const byId = new Map(players.map((p) => [p.userId, p]));
     for (const c of this.creatures.values()) {
@@ -91,9 +127,27 @@ class CreatureSim {
           const f = facingFor(vx, vy); if (f) c.facing = f;
           c.dirty = true;
         }
-        // Contact damage.
-        if (c._attackCd <= 0 && dist2(cc.x, cc.y, tc.x, tc.y) <= CONTACT_RANGE * CONTACT_RANGE) {
-          applyDamage(tp, CREATURE_DAMAGE, 'physical', tp.mit || NO_MITIGATION);
+        // Contact damage. Gated by canAct for the same reason the player
+        // attack paths are (world.js's canAttack/attack): a shocked creature
+        // must miss its bite.
+        //
+        // Without this check the interrupt was inert in PvE. applyElementEffect
+        // stamps _interruptedUntil and _shockImmuneUntil onto creatures from
+        // every lightning hit — the melee arc, the projectile, the AoE — and
+        // nothing read either field, so the storm staff paid the game's worst
+        // damage-per-mana (0.636) for three riders while delivering two of them
+        // against creatures. That is precisely the inert-mechanic failure mode
+        // this slice exists to remove.
+        //
+        // Refused like a cooldown, not eaten: the attack does not happen AND
+        // _attackCd is not stamped, so the creature bites as soon as it recovers
+        // rather than also serving a fresh cooldown for the swing it never took.
+        // The immunity window in applyShockInterrupt (stamped once, deliberately
+        // never refreshed) is what stops this becoming a perma-stun — it applies
+        // to creatures for free, because it lives on the target.
+        if (c._attackCd <= 0 && canAct(c, now)
+            && dist2(cc.x, cc.y, tc.x, tc.y) <= CONTACT_RANGE * CONTACT_RANGE) {
+          applyDamageWithEffects(tp, CREATURE_DAMAGE, 'physical', tp.mit || NO_MITIGATION, now);
           c._attackCd = CREATURE_ATTACK_COOLDOWN;
         }
         continue;
@@ -116,13 +170,15 @@ class CreatureSim {
   }
 
   // Player melee: damage creatures within `range` of (px,py); remove + return dead ids.
-  applyAttack(px, py, range, damage) {
+  // `now` is the world clock, needed to stamp the element's status rider.
+  applyAttack(px, py, range, damage, element, now = 0) {
     const killed = [];
     const r2 = range * range;
     for (const [id, c] of this.creatures) {
       const cc = center(c);
       if (dist2(cc.x, cc.y, px, py) > r2) continue;
-      c.hp -= damage;
+      applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
+      applyElementEffect(c, element, now);
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
     }
@@ -131,14 +187,18 @@ class CreatureSim {
 
   // Melee arc: damage every creature whose center is within reach AND inside the
   // aim cone; remove + return the dead ids. (nx,ny) must be normalized.
-  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage) {
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0) {
     const killed = [];
     for (const [id, c] of this.creatures) {
       const cc = center(c);
       if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth)) continue;
       // Terrain blocks the swing, exactly as it blocks a projectile.
       if (!hasLineOfSight(this.map, ox, oy, cc.x, cc.y)) continue;
-      c.hp -= damage;
+      applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
+      // The element's status rider is applied wherever the element already
+      // deals damage — one call adjacent to each applyDamage, never a second
+      // rider table.
+      applyElementEffect(c, element, now);
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
     }
@@ -147,10 +207,17 @@ class CreatureSim {
 
   // Point damage to one creature (used by projectile collision). Returns true
   // if it died (and was removed).
-  damageCreatureById(id, damage) {
+  //
+  // Deliberately does NOT apply the element's status rider, unlike the melee
+  // arc above: this is the generic creature-damage primitive, and burn's own
+  // damage tick routes through it with element 'fire'. A rider here would let
+  // burn refresh itself from its own tick and never expire. The projectile
+  // paths that DO carry a rider apply it at their call sites in projectiles.js,
+  // next to their own hit detection — a rider belongs to a HIT, not to damage.
+  damageCreatureById(id, damage, element, now) {
     const c = this.creatures.get(id);
     if (!c) return false;
-    c.hp -= damage;
+    applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
     c.dirty = true;
     if (c.hp <= 0) { this.creatures.delete(id); return true; }
     return false;
@@ -187,13 +254,24 @@ class CreatureSim {
     return dropped;
   }
 
-  snapshotForNeighborhood(keys) {
+  // `now` is the world clock, threaded in for the same reason tick() takes it:
+  // deciding which status effects are still LIVE is a clock read, and this
+  // module must never read one of its own. A caller that omits it gets no
+  // effect keys rather than stale ones (every `until > 0` entry would look
+  // expired at now=0... which is why the default is deliberately 0 and the
+  // one real caller, broadcastCreatures, passes world.now).
+  snapshotForNeighborhood(keys, now = 0) {
     const set = keys instanceof Set ? keys : new Set(keys);
     const out = [];
     for (const c of this.creatures.values()) {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (set.has(CHUNK_KEY(cx, cy))) {
-        out.push({ id: c.id, type: c.type, x: c.x, y: c.y, facing: c.facing, hp: c.hp, maxHp: c.maxHp, mode: c.mode, color: c.color });
+        const row = { id: c.id, type: c.type, x: c.x, y: c.y, facing: c.facing, hp: c.hp, maxHp: c.maxHp, mode: c.mode, color: c.color };
+        // Effect KEYS only, omitted when empty — same contract as the player
+        // snapshot in world.js. Read on the client as `c.effects || []`.
+        const fx = activeEffectKeys(c, now);
+        if (fx) row.effects = fx;
+        out.push(row);
       }
     }
     return out;
@@ -201,6 +279,7 @@ class CreatureSim {
 }
 
 module.exports = {
-  CreatureSim, CREATURE_SIZE, CREATURE_SPEED, REDIRECT_CHANCE,
+  CreatureSim, loadCreatureTypes, creatureMitigation,
+  CREATURE_SIZE, CREATURE_SPEED, REDIRECT_CHANCE,
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
 };

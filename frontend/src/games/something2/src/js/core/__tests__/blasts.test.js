@@ -83,7 +83,22 @@ describe('blastScreenRadiusX', () => {
 describe('elementColor', () => {
   it('matches the existing projectile colours', () => {
     expect(elementColor('arcane')).toBe('#9b5de5');
-    expect(elementColor('fire')).toBe('#f4d35e');
+    // lightning is the yellow the default already was, so adding the table
+    // restyled nothing that was previously on screen.
+    expect(elementColor('lightning')).toBe('#f4d35e');
     expect(elementColor(null)).toBe('#f4d35e');
+    expect(elementColor('nonsense')).toBe('#f4d35e');
+  });
+
+  it('gives fire and ice their own colours', () => {
+    // Task 9: status indicators need a per-element colour, and they route
+    // through THIS table rather than a second palette — so fire and ice stop
+    // sharing the default yellow. That is a deliberate change to projectile
+    // and blast colours too: a fire bolt, its blast ring and the burn it
+    // applies must all read as the same element.
+    expect(elementColor('fire')).toBe('#f4763b');
+    expect(elementColor('ice')).toBe('#5bc0f8');
+    const all = ['arcane', 'fire', 'ice', 'lightning'].map(elementColor);
+    expect(new Set(all).size).toBe(4);
   });
 });

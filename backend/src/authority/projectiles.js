@@ -3,8 +3,9 @@
 // players (never the owner). Ranged and magic share this one path; they differ
 // only by weapon data.
 
-const { applyDamage, NO_MITIGATION } = require('./damage');
+const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
 const { hasLineOfSight } = require('./weapons');
+const { applyElementEffect } = require('./effects');
 
 // Sub-step resolution for terrain sampling, shared with the melee
 // line-of-sight walk in weapons.js. Defined in subStep.js (see the note there
@@ -51,7 +52,7 @@ class ProjectileSim {
   //
   // The caster is exempt, matching the existing rule that a projectile never
   // collides with its owner — one rule, not two.
-  _detonate(p, bx, by, { creatureList, creatures, players, map }, killedCreatureIds) {
+  _detonate(p, bx, by, { creatureList, creatures, players, map, now }, killedCreatureIds) {
     const r = p.aoeRadius;
     for (const c of creatureList) {
       const half = c.width / 2;
@@ -59,10 +60,15 @@ class ProjectileSim {
       const d = Math.hypot(cx - bx, cy - by);
       if (d >= r) continue;
       if (!hasLineOfSight(map, bx, by, cx, cy)) continue;
-      // Creatures carry no mitigation, so falloff is the only scaling.
-      if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r))) {
+      // Falloff scales the RAW damage; the creature's own defense and
+      // resistances are applied on top, inside damageCreatureById.
+      if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r), p.element, now)) {
         killedCreatureIds.push(c.id);
       }
+      // The rider is applied at FULL duration: falloff scales damage only. A
+      // target clipped by the blast edge still burns for the full time —
+      // scaling the duration too would give it a burn too short to ever tick.
+      applyElementEffect(c, p.element, now, p.ownerId);
     }
     for (const pl of players) {
       if (pl.userId === p.ownerId) continue;
@@ -73,7 +79,8 @@ class ProjectileSim {
       if (!hasLineOfSight(map, bx, by, px, py)) continue;
       // Falloff scales the RAW damage; applyDamage still applies defense and
       // resistances on top. It floors at 1, so an edge hit still registers.
-      applyDamage(pl, p.damage * (1 - d / r), p.element, pl.mit || NO_MITIGATION);
+      applyDamageWithEffects(pl, p.damage * (1 - d / r), p.element, pl.mit || NO_MITIGATION, now);
+      applyElementEffect(pl, p.element, now, p.ownerId);
     }
     return { x: bx, y: by, radius: r, element: p.element };
   }
@@ -92,12 +99,12 @@ class ProjectileSim {
   // ~45 px per 20 Hz tick, larger than a creature's ~32 px capture radius, so a
   // single end-of-tick position check would miss. `pierceLeft` starts at the
   // weapon's `pierce` (targets it can hit); it despawns once that reaches 0.
-  step(dt, { creatures, players, map }) {
+  step(dt, { creatures, players, map, now = 0 }) {
     const killedCreatureIds = [];
     const detonations = [];
     const survivors = [];
     const creatureList = creatures.all(); // hoisted: creatures don't move during this step
-    const ctx = { creatureList, creatures, players, map };
+    const ctx = { creatureList, creatures, players, map, now };
     for (const p of this.projectiles) {
       const speed = Math.hypot(p.vx, p.vy);
       let dead = !(speed > 0) || !Number.isFinite(speed) || !Number.isFinite(p.x) || !Number.isFinite(p.y);
@@ -129,7 +136,8 @@ class ProjectileSim {
               dead = true; break;
             }
             p.hitIds.add(key);
-            if (creatures.damageCreatureById(c.id, p.damage)) killedCreatureIds.push(c.id);
+            if (creatures.damageCreatureById(c.id, p.damage, p.element, now)) killedCreatureIds.push(c.id);
+            applyElementEffect(c, p.element, now, p.ownerId);
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
           }
@@ -150,7 +158,8 @@ class ProjectileSim {
               dead = true; break;
             }
             p.hitIds.add(key);
-            applyDamage(pl, p.damage, p.element, pl.mit || NO_MITIGATION);
+            applyDamageWithEffects(pl, p.damage, p.element, pl.mit || NO_MITIGATION, now);
+            applyElementEffect(pl, p.element, now, p.ownerId);
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
           }

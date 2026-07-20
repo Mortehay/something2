@@ -302,40 +302,62 @@ function bootHeartbeat(heartbeatMs) {
   });
 }
 
+// A heartbeatMs large enough that the real setInterval inside attachAuthority
+// never fires during these tests. The reaper is instead driven by explicit
+// handle._heartbeatSweep() calls (see its doc comment in server.js) so these
+// tests assert the reap logic itself rather than racing wall-clock timing —
+// under CPU load, a real interval firing on a HB-of-40ms schedule can be
+// delayed enough to flip either test's outcome even though the reaper logic
+// is correct.
+const HB_DISABLED = 24 * 60 * 60 * 1000;
+
 test('reaps a dead socket that stops answering protocol pings', async () => {
-  const HB = 40;
-  const { url, handle, server } = await bootHeartbeat(HB);
-  // autoPong:false → this ws client does NOT auto-reply to server pings,
-  // so the server sees it as dead after one missed cycle and terminates it.
+  const { url, handle, server } = await bootHeartbeat(HB_DISABLED);
+  // autoPong:false → this ws client does NOT auto-reply to server pings, so
+  // the server sees it as dead after one missed sweep and terminates it on
+  // the next — exactly the production cadence, just triggered explicitly
+  // instead of by two real heartbeatMs ticks.
   const dead = new WebSocket(`${url}?token=${encodeURIComponent(token(1))}`, [], { autoPong: false });
   await new Promise((res) => dead.on('open', res));
   dead.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
   await nextMsg(dead, 'joined');
 
-  // Within ~2 heartbeat cycles the server should terminate the socket, which
-  // the client observes as a close event.
-  const closed = await new Promise((res) => {
-    const to = setTimeout(() => res(false), HB * 6);
-    dead.on('close', () => { clearTimeout(to); res(true); });
-  });
-  assert.ok(closed, 'dead (non-ponging) socket should be terminated by the reaper');
+  const closed = new Promise((res) => dead.on('close', () => res(true)));
+  handle._heartbeatSweep(); // 1st: isAlive true -> false, ping sent (never answered)
+  handle._heartbeatSweep(); // 2nd: still false from the 1st -> terminate
+  // 2s is a safety net against a genuine hang, not the pass condition: the
+  // terminate() above already happened synchronously, so this only bounds
+  // how long we wait for the client to observe the resulting close.
+  const result = await Promise.race([
+    closed,
+    new Promise((res) => setTimeout(() => res(false), 2000)),
+  ]);
+  assert.ok(result, 'dead (non-ponging) socket should be terminated by the reaper');
   handle.close(); server.close();
 });
 
 test('does not reap a live socket that answers protocol pings', async () => {
-  const HB = 40;
-  const { url, handle, server } = await bootHeartbeat(HB);
+  const { url, handle, server } = await bootHeartbeat(HB_DISABLED);
   const live = connect(url, 2); // default autoPong:true → auto-replies to pings
   await new Promise((res) => live.on('open', res));
   live.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
   await nextMsg(live, 'joined');
 
-  // Over several heartbeat cycles the live socket must NOT be closed.
-  const stillOpen = await new Promise((res) => {
-    const to = setTimeout(() => res(true), HB * 6);
-    live.on('close', () => { clearTimeout(to); res(false); });
-  });
-  assert.ok(stillOpen, 'live (ponging) socket must survive the reaper');
+  // The server-side socket for this session, reached via `worlds` (already
+  // exposed for test introspection — see its doc comment). Awaiting its real
+  // 'pong' event between sweeps — rather than sleeping a guessed duration —
+  // is what makes each cycle deterministic: the next sweep only runs once
+  // the previous ping/pong round trip has actually landed, so the test
+  // cannot outrun a slow (CPU-loaded) event loop the way a fixed wall-clock
+  // wait could.
+  const serverWs = handle.worlds.get('w1').sockets.get('2');
+  assert.ok(serverWs, 'server must have registered the joined socket');
+  for (let i = 0; i < 4; i++) {
+    const pong = new Promise((res) => serverWs.once('pong', res));
+    handle._heartbeatSweep();
+    await pong;
+  }
+  assert.equal(live.readyState, WebSocket.OPEN, 'live (ponging) socket must survive the reaper');
   live.close(); handle.close(); server.close();
 });
 

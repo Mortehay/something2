@@ -40,4 +40,33 @@ describe('CreatureManager (render-only)', () => {
     expect(a.maxHp).toBe(10);
     expect(a.mode).toBe('chase');
   });
+
+  // --- status effects (Task 9) ---
+
+  it('applySnapshot CLEARS a creature\'s effects when the server stops sending them', () => {
+    // The server OMITS the effects field entirely once nothing is active
+    // (activeEffectKeys returns null), so the common "effect ended" frame
+    // carries no field at all. A `if (c.effects)` guard here — the natural
+    // shape, and the one used for `color` two lines away — would leave the
+    // chill ring burning on the creature forever. That is exactly the class of
+    // bug that is invisible in a unit test of the renderer and only shows up
+    // as a permanently-tinted mob in the browser.
+    const m = new CreatureManager();
+    m.applySnapshot([{ id: 'a', type: 'Slime', x: 10, y: 10, facing: 'S', hp: 10, maxHp: 10, effects: ['chill'] }]);
+    expect(m.all()[0].effects).toEqual(['chill']);
+    m.applySnapshot([{ id: 'a', type: 'Slime', x: 10, y: 10, facing: 'S', hp: 10, maxHp: 10 }]);
+    expect(m.all()[0].effects).toBeNull();
+  });
+
+  it('applySnapshot keeps effects per-creature and carries them onto newly seen ones', () => {
+    const m = new CreatureManager();
+    m.applySnapshot([
+      { id: 'a', type: 'Slime', x: 10, y: 10, facing: 'S', hp: 10, maxHp: 10, effects: ['burn', 'shock'] },
+      { id: 'b', type: 'Wolf', x: 50, y: 50, facing: 'S', hp: 10, maxHp: 10 },
+    ]);
+    const byId = Object.fromEntries(m.all().map((c) => [c.id, c]));
+    expect(byId.a.effects).toEqual(['burn', 'shock']);
+    // The unaffected creature must not inherit the other's effects.
+    expect(byId.b.effects).toBeNull();
+  });
 });

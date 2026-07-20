@@ -23,6 +23,10 @@ export class CreatureManager {
       if (ex) {
         ex.tx = c.x; ex.ty = c.y;
         ex.facing = c.facing; ex.hp = c.hp; ex.maxHp = c.maxHp; ex.mode = c.mode;
+        // Assigned UNCONDITIONALLY (unlike color below): the server omits the
+        // field entirely once nothing is active, so a `if (c.effects)` guard
+        // would leave the last tint stuck on the creature forever.
+        ex.effects = c.effects || null;
         if (c.color) ex.color = c.color;
       } else {
         this.creatures.set(c.id, {
@@ -30,6 +34,7 @@ export class CreatureManager {
           x: c.x, y: c.y, tx: c.x, ty: c.y,
           width: CREATURE_SIZE, height: CREATURE_SIZE,
           facing: c.facing || 'S', hp: c.hp, maxHp: c.maxHp, mode: c.mode, color: c.color,
+          effects: c.effects || null,
         });
       }
     }

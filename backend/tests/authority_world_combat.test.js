@@ -325,3 +325,59 @@ test('canAttack reports false for an unknown player', () => {
   const w = armWorld();
   assert.equal(w.canAttack('nobody').ok, false);
 });
+
+// --- elemental riders on the melee path (Task 5) ----------------------------
+
+const { BURN, CHILL, BURN_DURATION_MS } = require('../src/authority/effects.js');
+
+// Elemental melee weapons, added to the shared catalog above.
+TYPES.set(6, { id: 6, name: 'flame-halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, element: 'fire' });
+TYPES.set(7, { id: 7, name: 'frost-halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, element: 'ice' });
+
+function elementalMeleeWorld(typeId) {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, { items: [{ id: 'e1', typeId }], equipment: { main_hand: 'e1' } });
+  w.addPlayer('u2', { x: 150, y: 100 }); // center 182,132 — east, inside reach 190
+  w.creatures.addCreatures([{ id: 'c1', type: 'wolf', x: 150, y: 108, hp: 500, facing: 'S', color: '#f00' }]);
+  return w;
+}
+
+test('a melee arc applies the weapon element to the creatures AND the players it hits', () => {
+  const w = elementalMeleeWorld(6); // fire
+  w.attack('u1', 1, 0);
+  const u2 = w.getPlayer('u2');
+  const c1 = w.creatures.creatures.get('c1');
+  assert.equal(u2.effects.has(BURN), true, 'melee applied no rider to the player it damaged');
+  assert.equal(u2.effects.size, 1, 'melee applied more than the weapon element rider');
+  assert.equal(c1.effects.has(BURN), true, 'melee applied no rider to the creature it damaged');
+  assert.equal(c1.effects.size, 1, 'melee applied more than the weapon element rider');
+});
+
+test('the melee rider follows the weapon element, not a hardcoded one', () => {
+  const w = elementalMeleeWorld(7); // ice
+  w.attack('u1', 1, 0);
+  assert.equal(w.getPlayer('u2').effects.has(CHILL), true);
+  assert.equal(w.getPlayer('u2').effects.size, 1);
+  assert.equal(w.creatures.creatures.get('c1').effects.has(CHILL), true);
+});
+
+test('a non-elemental melee weapon applies no rider', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, longReachInv()); // halberd, element null
+  w.addPlayer('u2', { x: 150, y: 100 });
+  w.creatures.addCreatures([{ id: 'c1', type: 'wolf', x: 150, y: 108, hp: 500, facing: 'S', color: '#f00' }]);
+  w.attack('u1', 1, 0);
+  assert.ok(w.getPlayer('u2').hp < w.getPlayer('u2').maxHp, 'the swing must still have landed');
+  assert.equal(w.getPlayer('u2').effects.size, 0);
+  const c1 = w.creatures.creatures.get('c1');
+  assert.equal(c1.effects ? c1.effects.size : 0, 0);
+});
+
+test('the melee rider is stamped with the world clock, so it expires on the world tick', () => {
+  const w = elementalMeleeWorld(6);
+  w.tick(0.5); // advance the world clock off zero first
+  w.attack('u1', 1, 0);
+  const u2 = w.getPlayer('u2');
+  assert.equal(u2.effects.get(BURN).until, w.now + BURN_DURATION_MS,
+    'the rider must use the world clock, not 0 — otherwise it is born expired');
+});
