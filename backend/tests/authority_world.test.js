@@ -5,7 +5,10 @@ const {
   applyEffect, hasEffect, BURN, CHILL, SHOCK,
   BURN_MAGNITUDE, BURN_TICK_MS, BURN_DURATION_MS,
   CHILL_MAGNITUDE, SHOCK_MAGNITUDE, SHOCK_MANA_DRAIN,
+  applyElementEffect, applyShockInterrupt, canAct,
+  SHOCK_INTERRUPT_MS, SHOCK_IMMUNITY_MS,
 } = require('../src/authority/effects.js');
+const { fastestCooldownMsForElement } = require('./fixtures/weapon_catalog.js');
 const { PLAYER_MANA_REGEN } = require('../src/authority/world.js');
 const { CREATURE_DAMAGE } = require('../src/authority/creatures.js');
 const { CHUNK_KEY } = require('../src/authority/coords.js');
@@ -326,4 +329,84 @@ test('chill is reachable as a PvP mechanic: the speed gap closes real distance',
     `an unchilled chaser closed only ${closed}px in one second — the chill differential is `
     + 'too small to decide a PvP chase');
   assert.equal(runner.speed, PLAYER_SPEED * CHILL_MAGNITUDE);
+});
+
+// --- Task 7: the interrupt, consumed by the attack path ---
+
+// mkWorld() carries NO weapon catalog, so canAttack() there returns false for
+// every player regardless of the interrupt — an interrupt test written against
+// it would pass without the feature existing at all. These tests arm the world
+// with a real weapon so the refusal they observe is the interrupt's.
+function mkArmedWorld() {
+  const weapon = {
+    id: 1, name: 'test staff', category: 'weapon', kind: 'melee',
+    damage: 5, cooldown: 0.5, reach: 80, arc_width: 1.0,
+    mana_cost: 10, stamina_cost: 4, element: null, resistances: {},
+  };
+  return new World(stubMap(), new Map([[1, weapon]]), 1);
+}
+
+test('the armed-world fixture really can attack, so the refusals below mean something', () => {
+  const w = mkArmedWorld(); w.addPlayer('u1', { x: 0, y: 0 });
+  assert.equal(w.canAttack('u1').ok, true,
+    'the fixture cannot attack even uninterrupted — every interrupt test using it is vacuous');
+});
+
+test('an interrupted player cannot attack, and the refusal costs neither mana nor cooldown', () => {
+  const w = mkArmedWorld(); w.addPlayer('u1', { x: 0, y: 0 });
+  const p = w.getPlayer('u1');
+  const mana0 = p.mana, stamina0 = p.stamina;
+  applyShockInterrupt(p, w.now);
+  assert.equal(w.canAttack('u1').ok, false, 'canAttack ignored the interrupt');
+  w.attack('u1', 1, 0);
+  assert.equal(p.mana, mana0, 'a refused attack must not spend mana');
+  assert.equal(p.stamina, stamina0, 'a refused attack must not spend stamina');
+  assert.equal(p._attackCd, 0,
+    'an interrupted attack started the cooldown — that punishes the player twice for one hit');
+});
+
+test('the player can attack again once the interrupt lapses, without waiting out the immunity window', () => {
+  const w = mkArmedWorld(); w.addPlayer('u1', { x: 0, y: 0 });
+  const p = w.getPlayer('u1');
+  applyShockInterrupt(p, w.now);
+  for (let i = 0; i < 10; i++) w.tick(0.05);   // 500ms > SHOCK_INTERRUPT_MS
+  assert.ok(SHOCK_INTERRUPT_MS < 500 && SHOCK_IMMUNITY_MS > 500,
+    'this test assumes it runs past the interrupt but INSIDE the immunity window');
+  assert.equal(canAct(p, w.now), true);
+  assert.equal(w.canAttack('u1').ok, true,
+    'control returned only after the immunity window, not after the interrupt');
+});
+
+// End-to-end: sustained storm-staff fire against a real World must not remove
+// the target's ability to act for most of the fight.
+test('a player under sustained lightning fire keeps the ability to attack for most of 10s', () => {
+  const w = mkArmedWorld();
+  w.addPlayer('victim', { x: 0, y: 0 });
+  const victim = w.getPlayer('victim');
+  const cd = fastestCooldownMsForElement('lightning');
+  let nextShot = 0, able = 0, samples = 0;
+  while (w.now < 10000) {
+    if (w.now >= nextShot) {
+      applyElementEffect(victim, 'lightning', w.now, 'attacker');
+      nextShot = w.now + cd;
+    }
+    samples += 1;
+    if (w.canAttack('victim').ok) able += 1;
+    w.tick(0.1);
+  }
+  assert.ok(able > samples * 0.5,
+    `the victim could act on only ${able}/${samples} ticks under sustained storm-staff fire`);
+});
+
+test('respawn restores control and clears lingering effects, but not the shock immunity window', () => {
+  const w = mkArmedWorld(); w.addPlayer('u1', { x: 0, y: 0 });
+  const p = w.getPlayer('u1');
+  applyEffect(p, BURN, { durationMs: 60000, magnitude: BURN_MAGNITUDE, now: w.now });
+  applyShockInterrupt(p, w.now);
+  p.hp = -1;
+  w.resolveDeaths();
+  assert.equal(canAct(p, w.now), true, 'a respawned player must not get up still staggered');
+  assert.equal(p.effects.size, 0, 'a status effect leaked across a respawn');
+  assert.equal(applyShockInterrupt(p, w.now), false,
+    'respawning shed the immunity window, making death a route to being chain-locked at spawn');
 });

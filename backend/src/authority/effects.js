@@ -19,11 +19,23 @@
 // rate (e.g. 20Hz -> 30Hz would make every fire weapon 50% stronger with no
 // test noticing).
 //
-// NOTE for a later task (shock interrupt, T7): that feature needs a
-// per-target immunity window stamped once and deliberately NOT refreshed —
-// the one exception to the refresh rule above. It does not live here yet,
-// but nothing in this module's shape (Map keyed by effectKey, entries with
-// their own `until`) prevents adding a second, non-refreshing Map for it.
+// THE ONE EXCEPTION TO THE REFRESH RULE ABOVE: shock's interrupt.
+//
+// "Refreshes rather than stacks" is the right rule for a DOT and a slow, but it
+// has a consequence that only bites for effects which remove player control:
+// under sustained fire, a REFRESHED effect is a PERMANENT effect. A storm staff
+// on a 1.10s cooldown re-applying a 2s shock every shot would hold a player
+// interrupted forever, and every test in this file would stay green while it
+// happened — refresh semantics would be working exactly as specified.
+//
+// So the interrupt does NOT live in the effects Map. It is gated by a separate
+// per-target immunity window that is stamped ONCE when an interrupt lands and
+// is deliberately NOT refreshed by later hits: it runs to completion, and only
+// then may the next shock interrupt again. See applyShockInterrupt.
+//
+// If you are reading this because the non-refreshing branch looks like a bug:
+// it is not. It is the entire point, and `shock cannot chain-lock` in
+// authority_effects.test.js fails if you "fix" it.
 
 const BURN = 'burn';
 const CHILL = 'chill';
@@ -61,6 +73,24 @@ const SHOCK_MAGNITUDE = 0.25;
 // rather than emptying the pool outright — mana becomes contested, not deleted.
 const SHOCK_MANA_DRAIN = 5;
 const SHOCK_TICK_MS = 1000;  // fixed interval between mana-drain ticks
+
+// How long a landed interrupt takes the target's actions away. Short by design:
+// the design spec calls it "a ~0.4s interrupt", and it is meant to read as a
+// stagger rather than a stun.
+const SHOCK_INTERRUPT_MS = 400;
+// How long after a landed interrupt the target cannot be interrupted again.
+//
+// This MUST exceed the fastest lightning weapon's cooldown (the storm staff's
+// 1100ms — lightning is exactly one weapon) or the exception is decorative:
+// every shot would land while the window had already lapsed, re-interrupting
+// forever, which is precisely the chain-lock the window exists to prevent.
+// `the immunity window exceeds the fastest lightning weapon cooldown` in
+// authority_effects.test.js ties this constant to the real catalog value so a
+// future rebalance of the storm staff cannot silently break it.
+//
+// At 3000ms against a 400ms interrupt, a target under perfectly sustained
+// lightning keeps control ~87% of the time.
+const SHOCK_IMMUNITY_MS = 3000;
 
 // Effect kinds that act on a fixed periodic interval rather than being read
 // passively by whatever consumes them. BURN deals damage; SHOCK drains mana.
@@ -127,6 +157,46 @@ function tickEffects(target, dtMs, now, ctx) {
   return fired;
 }
 
+// Attempts to interrupt `target`. Returns true if the interrupt LANDED, false
+// if the target was still inside its immunity window.
+//
+// Both windows live in plain numeric fields rather than the effects Map,
+// because they are governed by the opposite rule to everything in that Map:
+//
+//   _interruptedUntil  — when the target regains control.
+//   _shockImmuneUntil  — when the target may be interrupted again.
+//
+// THE NON-REFRESH IS DELIBERATE. A hit arriving inside the immunity window
+// returns early and stamps NOTHING — it does not extend the interrupt, and it
+// does not push the immunity window forward either. The window runs to
+// completion from the moment the interrupt landed, so the target is guaranteed
+// (SHOCK_IMMUNITY_MS - SHOCK_INTERRUPT_MS) of control per interrupt no matter
+// how fast it is being shot. Re-stamping either field here — the natural
+// "refresh like everything else" edit — restores the chain-lock.
+//
+// `now` is passed in, never read from a clock, like every other function here.
+function applyShockInterrupt(target, now) {
+  if (target._shockImmuneUntil > now) return false; // undefined > now is false
+  target._interruptedUntil = now + SHOCK_INTERRUPT_MS;
+  target._shockImmuneUntil = now + SHOCK_IMMUNITY_MS;
+  return true;
+}
+
+// True when `target` is free to act. Allocation-free, and safe on a target that
+// has never been interrupted (`undefined > now` is false).
+function canAct(target, now) {
+  return !(target._interruptedUntil > now);
+}
+
+// Clears an in-progress interrupt WITHOUT clearing the immunity window.
+// Used on respawn: a player who just died must not get up still staggered.
+// The immunity deliberately survives, so respawning cannot be used to shed the
+// window and eat a fresh interrupt immediately — that would make death a way to
+// be chain-locked at the spawn point.
+function clearInterrupt(target) {
+  target._interruptedUntil = 0;
+}
+
 // element -> the status rider it carries.
 //
 // `arcane` is DELIBERATELY absent, and so is `physical`. Arcane is the
@@ -160,6 +230,13 @@ function applyElementEffect(target, element, now, sourceId) {
   applyEffect(target, spec.key, {
     durationMs: spec.durationMs, magnitude: spec.magnitude, sourceId, now,
   });
+  // The interrupt attempt rides along HERE, in the one element->rider mapping,
+  // for the same reason the rider table itself does: every path that deals
+  // elemental damage already calls this, so no damage path can be riderless.
+  // Wiring it into the projectile direct hit alone would leave the storm
+  // staff's own AoE detonation — most of what it actually does — unable to
+  // interrupt. applyShockInterrupt itself decides whether it lands.
+  if (spec.key === SHOCK) applyShockInterrupt(target, now);
   return spec.key;
 }
 
@@ -182,4 +259,9 @@ module.exports = {
   SHOCK_MAGNITUDE,
   SHOCK_MANA_DRAIN,
   SHOCK_TICK_MS,
+  applyShockInterrupt,
+  canAct,
+  clearInterrupt,
+  SHOCK_INTERRUPT_MS,
+  SHOCK_IMMUNITY_MS,
 };

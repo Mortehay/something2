@@ -4,7 +4,7 @@ const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION } = require('./damage');
 const {
-  tickEffects, effectMagnitude, applyElementEffect,
+  tickEffects, effectMagnitude, applyElementEffect, canAct, clearInterrupt,
   BURN, CHILL, SHOCK, SHOCK_MANA_DRAIN,
 } = require('./effects');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
@@ -228,6 +228,9 @@ class World {
   canAttack(userId) {
     const p = this.players.get(userId);
     if (!p || p._attackCd > 0) return { ok: false, weapon: null };
+    // Interrupted: refused BEFORE the weapon is even resolved, so the caller
+    // never spends ammo on a swing the interrupt is about to eat.
+    if (!canAct(p, this.now)) return { ok: false, weapon: null };
     const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
     if (!w) return { ok: false, weapon: null };
     if (p.mana < (w.mana_cost || 0) || p.stamina < (w.stamina_cost || 0)) {
@@ -242,6 +245,11 @@ class World {
   attack(userId, ax, ay) {
     const p = this.players.get(userId);
     if (!p || p._attackCd > 0) return { killedCreatureIds: [] };
+    // Shock's interrupt. Checked alongside the cooldown and BEFORE any resource
+    // is deducted or any cooldown is stamped, matching the existing rule that a
+    // refused attack costs nothing: an interrupt that silently ate the mana or
+    // started the cooldown would punish the player twice for one hit.
+    if (!canAct(p, this.now)) return { killedCreatureIds: [] };
     const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
     if (!w) return { killedCreatureIds: [] };
 
@@ -304,6 +312,11 @@ class World {
         // Every resource is restored together. Leaving stamina out would
         // respawn a player fully healed but unable to swing a heavy weapon.
         p.hp = p.maxHp; p.mana = p.maxMana; p.stamina = p.maxStamina;
+        // Control is a resource too: a player must not get up still staggered.
+        // clearInterrupt deliberately leaves the immunity window intact — see
+        // effects.js — so dying cannot be used to shed it.
+        clearInterrupt(p);
+        p.effects.clear();
       }
     }
   }
