@@ -112,24 +112,39 @@ test('effects are applied before movement so a chill affects the same tick', () 
   assert.ok(p.x < PLAYER_SPEED, 'the chill did not apply until the following tick');
 });
 
-test('chill expiry restores the EXACT original speed', () => {
+test('chill expiry restores the EXACT original speed, over repeated apply/expire cycles', () => {
   const w = mkWorld(); w.addPlayer('u1', { x: 0, y: 0 });
   const p = w.getPlayer('u1');
-  for (let i = 0; i < 50; i++) {           // repeated apply/expire cycles
-    applyEffect(p, CHILL, { durationMs: 10, magnitude: 0.6, now: i * 100 });
-    w.tick(0.2);
+  // Each iteration must OBSERVE THE SLOW before observing the restore.
+  //
+  // This test previously applied at `now: i * 100` while the world clock ran at
+  // `200 * i`, so from i=1 every chill was already expired at the moment it was
+  // applied and stepEffects only ever took the `speed = baseSpeed` branch. It
+  // asserted that an untouched number had not changed: it passed with chill
+  // deleted from the codebase entirely. Applying at `w.now` is what makes the
+  // cycle real.
+  for (let i = 0; i < 50; i++) {
+    applyEffect(p, CHILL, { durationMs: 200, magnitude: 0.6, now: w.now });
+    w.tick(0.05); // +50ms: still well inside the 200ms chill
+    assert.equal(p.speed, PLAYER_SPEED * 0.6,
+      `cycle ${i}: the chill was not in effect — this test cannot prove a restore it never left`);
+    w.tick(0.3);  // +300ms: past expiry
+    assert.equal(p.speed, PLAYER_SPEED,
+      `cycle ${i}: speed did not return to EXACTLY the base after expiry`);
   }
   assert.equal(p.speed, PLAYER_SPEED,
     'speed drifted — chill must recompute from a stored base, not multiply/divide in place');
 });
 
-// NOTE on the test above: for every plausible chill magnitude, IEEE754 makes
-// `base * m / m === base` exactly, so a naive multiply-on-apply /
-// divide-on-expire implementation does NOT actually drift and that test alone
-// would not catch it. The two below are what hold the recompute-from-base
-// design in place: they cover the failure modes multiply-in-place really has —
-// compounding while the effect is sustained, and ignoring a refreshed
-// magnitude because the applied factor was already banked into `speed`.
+// NOTE on the test above: it now genuinely exercises both branches every cycle
+// (it fails if the chill branch is removed from stepEffects — verified by
+// mutation), but it still cannot catch multiply-in-place on its own: for every
+// plausible chill magnitude IEEE754 makes `base * m / m === base` exactly, so a
+// naive multiply-on-apply / divide-on-expire implementation does NOT actually
+// drift. The two below are what hold the recompute-from-base design in place:
+// they cover the failure modes multiply-in-place really has — compounding while
+// the effect is sustained, and ignoring a refreshed magnitude because the
+// applied factor was already banked into `speed`.
 
 test('a sustained chill does not compound tick over tick', () => {
   const w = mkWorld(); w.addPlayer('u1', { x: 0, y: 0 });

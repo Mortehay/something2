@@ -102,6 +102,74 @@ test('BURN total tick count over a fixed wall-clock duration is independent of t
   assert.equal(fired20, Math.floor(totalMs / BURN_TICK_MS));
 });
 
+// THE BLIND SPOT IN THE TEST ABOVE: it uses `durationMs = totalMs + 60000`, so
+// the effect outlives the observation window and the run NEVER CROSSES EXPIRY.
+// That is exactly the gap that let "every effect loses its final tick" ship —
+// the boundary tick is the one that was being dropped, and a test that stops
+// short of the boundary agrees that 3 == 3 no matter which value is right.
+//
+// The two tests below cross it, at 30Hz specifically.
+test('30Hz crosses the expiry boundary and still delivers the full BURN lifetime', () => {
+  const dt30 = 1000 / 30;
+  const t = { effects: new Map() };
+  applyEffect(t, BURN, { durationMs: BURN_DURATION_MS, magnitude: BURN_MAGNITUDE, now: 0 });
+  let ticks = 0;
+  let crossedExpiry = false;
+  for (let now = dt30; now <= BURN_DURATION_MS + 2000; now += dt30) {
+    ticks += tickEffects(t, dt30, now, {}).length;
+    if (now > BURN_DURATION_MS) crossedExpiry = true;
+  }
+  // Guard the guard: if the loop never passed `until`, this test is the same
+  // blind spot it was written to close.
+  assert.ok(crossedExpiry, 'the run must pass the expiry boundary or it proves nothing');
+  assert.ok(t.effects.size === 0, 'the entry must be evicted once its lifetime is over');
+
+  // 3, NOT 4 — and this literal is deliberate. See the sweep below: 30Hz has a
+  // dt of 33.333…ms, which is not representable in binary, and the accumulator
+  // lands a few ulps short of the fourth interval at the exact moment the
+  // effect expires. This is a REAL half-tick loss at fractional tick rates, not
+  // the boundary-eviction bug (which cost a tick at every rate, integer or
+  // not). It is pinned rather than fixed because production runs at an integer
+  // tickMs where the full lifetime is exact, and the fix — reconstructing the
+  // live window from `now`/`until` — costs accuracy on the sustained path that
+  // the comment in effects.js explains. If someone changes the tick rate to a
+  // fractional one, this literal is the thing that tells them what it costs.
+  assert.equal(ticks, 3,
+    'the 30Hz float knife-edge moved — if this is now 4 the fractional-rate loss was fixed '
+    + '(good: update this literal and the effects.js note); if it is fewer than 3 a real tick is being dropped');
+
+  // WORTH KNOWING, and the reason the sweep below exists rather than this test
+  // alone: 30Hz is the one rate that CANNOT witness the boundary-eviction bug.
+  // It loses its fourth tick to the float knife-edge either way, so it reports
+  // 3 both before and after that fix. Verified by mutation — reintroducing
+  // evict-before-advance leaves this test green and turns the sweep red. A
+  // boundary-crossing case at a fractional rate is necessary coverage but is
+  // not, on its own, a regression guard for the dropped final tick.
+});
+
+test('at every INTEGER tick rate a full BURN lifetime is exact — the real, bounded guarantee', () => {
+  // This is what the module actually guarantees, stated as a test rather than
+  // as a comment: exactness holds for integer millisecond tick intervals, which
+  // is every rate this server can be configured with (server.js takes an
+  // integer `tickMs`, default 50). The sweep is cheap and covers 1..100ms,
+  // i.e. 10Hz through 1000Hz.
+  const PRODUCTION_TICK_MS = 50; // server.js: `opts.tickMs || 50`
+  const defective = [];
+  for (let dtMs = 1; dtMs <= 100; dtMs++) {
+    const t = { effects: new Map() };
+    applyEffect(t, BURN, { durationMs: BURN_DURATION_MS, magnitude: BURN_MAGNITUDE, now: 0 });
+    let ticks = 0;
+    for (let now = dtMs; now <= BURN_DURATION_MS + 2000; now += dtMs) {
+      ticks += tickEffects(t, dtMs, now, {}).length;
+    }
+    if (ticks !== 4) defective.push(`${dtMs}ms -> ${ticks} ticks`);
+  }
+  assert.deepEqual(defective, [],
+    'an integer tick rate lost or gained a burn tick over a full lifetime');
+  assert.ok(Number.isInteger(PRODUCTION_TICK_MS),
+    'production must stay on an integer tickMs — the fractional-rate loss above is only survivable because it does');
+});
+
 // --- FULL-LIFETIME OBSERVATION (the class of test that was missing) ---------
 //
 // Everything above measures a RATE, or measures tick rates against EACH OTHER,

@@ -19,6 +19,18 @@
 // rate (e.g. 20Hz -> 30Hz would make every fire weapon 50% stronger with no
 // test noticing).
 //
+// THE PRECISE SCOPE OF THAT GUARANTEE. Accumulating elapsed time makes
+// throughput independent of dt for INTEGER millisecond tick intervals — which
+// is every rate this server can run at (server.js takes an integer `tickMs`,
+// default 50), and is enforced by a 1..100ms sweep in authority_effects.test.js.
+// It is NOT unconditional. At a tick interval that is not representable in
+// binary the accumulator can land a few ulps short of its final interval at the
+// exact moment the effect expires, losing that tick: a 30Hz dt of 33.333…ms
+// yields 3 burn ticks over a full lifetime rather than 4. This is a bounded,
+// pinned, sub-one-tick effect at fractional rates only, not the boundary bug
+// described below (which cost a tick at every rate). Do not read "tick-rate
+// independent" here as stronger than "exact at integer tickMs".
+//
 // THE ONE EXCEPTION TO THE REFRESH RULE ABOVE: shock's interrupt.
 //
 // "Refreshes rather than stacks" is the right rule for a DOT and a slow, but it
@@ -163,8 +175,13 @@ function tickEffects(target, dtMs, now, ctx) {
       // identical `Math.min(now, e.until) - (now - dtMs)`: at a tick rate whose
       // dt is not exact in binary (30Hz -> 33.333…ms) that round-trip loses a
       // few ulps every tick, and the accumulated drift is enough to lose a tick
-      // over a 2s window — which is exactly the tick-rate independence this
-      // module exists to guarantee.
+      // over a 2s window. Using dtMs unchanged keeps the SUSTAINED path exact
+      // at every rate; what it does not buy is exactness at the expiry boundary
+      // for fractional rates, where the tail clamp above reintroduces a single
+      // ulp-scale shortfall (30Hz: 3 burn ticks over a lifetime, not 4). That
+      // residue is pinned by test rather than fixed — see the scope note at the
+      // top of this file. Trading it back would make the far more common
+      // sustained case drift instead.
       const liveDtMs = expired ? dtMs - (now - e.until) : dtMs;
       if (liveDtMs > 0) {
         e.elapsed += liveDtMs;
