@@ -131,6 +131,22 @@ class World {
     return r;
   }
 
+  // The pure, side-effect-free half of `attack`'s gating: cooldown, mana and
+  // stamina. Exposed so a caller can check BEFORE spending something
+  // irreversible (ammo), since an attack refused for cooldown must not have
+  // already destroyed an arrow. `attack` keeps performing these same checks
+  // itself — this is additive, and attack() stays correct called directly.
+  canAttack(userId) {
+    const p = this.players.get(userId);
+    if (!p || p._attackCd > 0) return { ok: false, weapon: null };
+    const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
+    if (!w) return { ok: false, weapon: null };
+    if (p.mana < (w.mana_cost || 0) || p.stamina < (w.stamina_cost || 0)) {
+      return { ok: false, weapon: w };
+    }
+    return { ok: true, weapon: w };
+  }
+
   // Attack in the aim direction with the equipped weapon. Melee resolves an arc
   // hit against creatures + other players; projectile spawns a mana-gated
   // projectile. Returns killed creature ids for the caller to DELETE.
@@ -178,12 +194,15 @@ class World {
     return { killedCreatureIds: [] };
   }
 
+  // Returns the whole step result — { killedCreatureIds, detonations } — so
+  // AoE blasts reach the broadcast. Returning only the killed ids (as this
+  // used to) silently drops every detonation.
   tickProjectiles(dt) {
     return this.projectiles.step(dt, {
       creatures: this.creatures,
       players: [...this.players.values()],
       map: this.map,
-    }).killedCreatureIds;
+    });
   }
 
   // Respawn any player at <=0 hp (single place, after all damage sources).

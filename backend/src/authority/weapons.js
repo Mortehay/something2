@@ -1,7 +1,7 @@
 // Weapon geometry + aim helpers, shared by the attack resolver, the creature
 // arc hit-test, and their tests. Pure (no DB); the catalog loader is in items.js.
 
-const { MAX_SUB } = require('./projectiles');
+const { MAX_SUB } = require('./subStep');
 
 // Unit vector for an 8-way facing string ('n','s','e','w' and their combos,
 // e.g. 'se'). Used as the aim fallback when the client sends a zero vector.

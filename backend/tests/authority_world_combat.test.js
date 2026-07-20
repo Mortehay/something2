@@ -137,9 +137,10 @@ test('tickProjectiles returns killed creature ids', () => {
   w.creatures.addCreatures([{ id: 'c1', type: 'wolf', x: 40, y: 8, hp: 1, facing: 'S', color: '#f00' }]); // center 64,32
   w.attack('u1', 1, 0);                            // aim east from center (32,32)
   // Advance until the fast projectile reaches the creature.
-  let killed = [];
-  for (let i = 0; i < 20 && killed.length === 0; i++) killed = w.tickProjectiles(0.02);
-  assert.deepEqual(killed, ['c1']);
+  let out = { killedCreatureIds: [], detonations: [] };
+  for (let i = 0; i < 20 && out.killedCreatureIds.length === 0; i++) out = w.tickProjectiles(0.02);
+  assert.deepEqual(out.killedCreatureIds, ['c1']);
+  assert.deepEqual(out.detonations, [], 'a bow is not an AoE weapon');
 });
 
 test('snapshot includes mana/maxMana/equipment per player and a projectiles array', () => {
@@ -266,4 +267,61 @@ test('respawn restores stamina alongside hp and mana', () => {
   assert.strictEqual(p.hp, p.maxHp);
   assert.strictEqual(p.mana, p.maxMana);
   assert.strictEqual(p.stamina, p.maxStamina, 'respawning unable to swing is not a revival');
+});
+
+// canAttack: the pure, side-effect-free half of attack()'s gating
+// (cooldown/mana/stamina), exposed so a caller can check BEFORE spending
+// something irreversible (ammo, in a later task). attack() keeps its own
+// checks unchanged — these tests only cover the new read-only method.
+test('canAttack reports false while the cooldown is running', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 0, y: 0 });
+  w.attack('u1', 1, 0); // starts the cooldown
+  assert.equal(w.canAttack('u1').ok, false);
+});
+
+test('canAttack reports false with insufficient stamina', () => {
+  const w = armWorld();
+  // The default dagger costs 0 stamina, so it would pass regardless of the
+  // stamina pool — that would prove nothing. Equip the greatsword, which
+  // actually costs stamina, so the denial is caused by the gate under test.
+  w.addPlayer('u1', { x: 0, y: 0 }, heavyInv());
+  w.getPlayer('u1').stamina = 0;
+  const r = w.canAttack('u1');
+  assert.equal(r.ok, false);
+  assert.ok(r.weapon, 'still reports which weapon would have fired');
+  assert.equal(r.weapon.id, heavyWeapon.id);
+});
+
+test('canAttack reports false with insufficient mana', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 0, y: 0 }, { items: [{ id: 'i4', typeId: 4 }], equipment: { main_hand: 'i4' } }); // magic-bolt, cost 15
+  w.getPlayer('u1').mana = 5;
+  const r = w.canAttack('u1');
+  assert.equal(r.ok, false);
+  assert.equal(r.weapon.id, 4);
+});
+
+test('canAttack returns the active weapon when it can fire', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 0, y: 0 });
+  const r = w.canAttack('u1');
+  assert.equal(r.ok, true);
+  assert.ok(r.weapon);
+});
+
+test('canAttack does not mutate state or consume the cooldown', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 0, y: 0 }, heavyInv());
+  const p = w.getPlayer('u1');
+  const stamina = p.stamina, mana = p.mana, cd = p._attackCd;
+  w.canAttack('u1');
+  assert.strictEqual(p.stamina, stamina);
+  assert.strictEqual(p.mana, mana);
+  assert.strictEqual(p._attackCd, cd);
+});
+
+test('canAttack reports false for an unknown player', () => {
+  const w = armWorld();
+  assert.equal(w.canAttack('nobody').ok, false);
 });

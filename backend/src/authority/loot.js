@@ -60,11 +60,15 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
   const dropX = dead.x + CREATURE_SIZE / 2;
   const dropY = dead.y + CREATURE_SIZE / 2;
   for (const itemTypeId of rollDrops(dr.rows, rng)) {
+    // quantity named explicitly (not left to the column default): creature
+    // drops stay one-per-unit this slice, and being explicit here stops a
+    // future edit from silently inheriting whatever the default happens to
+    // be instead of deliberately choosing 1.
     const ins = await pool.query(
-      `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at)
-       VALUES ($1, $2, $3, $4, now() + ($5::int * interval '1 millisecond'))
-       RETURNING id, item_type_id, x, y, expires_at`,
-      [entry.worldId, itemTypeId, dropX, dropY, ttlMs],
+      `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
+       VALUES ($1, $2, $3, $4, now() + ($5::int * interval '1 millisecond'), $6)
+       RETURNING id, item_type_id, x, y, expires_at, quantity`,
+      [entry.worldId, itemTypeId, dropX, dropY, ttlMs, 1],
     );
     // Straight into the sim so it appears in the next AOI broadcast rather than
     // waiting for a chunk reload.
@@ -90,21 +94,29 @@ async function claimItem(pool, entry, userId, groundItemId) {
   entry.claiming.add(groundItemId);
   try {
     const r = await pool.query(
-      `WITH d AS (DELETE FROM world_items WHERE id = $1 RETURNING item_type_id)
-       INSERT INTO player_items (user_id, item_type_id)
-       SELECT $2, item_type_id FROM d
-       RETURNING id, item_type_id`,
+      `WITH d AS (DELETE FROM world_items WHERE id = $1 RETURNING item_type_id, quantity)
+       INSERT INTO player_items (user_id, item_type_id, quantity)
+       SELECT $2, item_type_id, quantity FROM d
+       RETURNING id, item_type_id, quantity`,
       [groundItemId, userId],
     );
     if (r.rowCount !== 1) {
       entry.world.groundItems.remove(groundItemId); // stale row, evict
       return null;
     }
-    const { id: instanceId, item_type_id: typeId } = r.rows[0];
+    const { id: instanceId, item_type_id: typeId, quantity } = r.rows[0];
+    // `quantity` is ALWAYS present and always a number. world_items.quantity is
+    // NOT NULL DEFAULT 1, so the `?? 1` is a floor for callers with partial
+    // rows (tests), not a real production branch. Deliberately NOT conditional:
+    // omitting the key when the row lacks one would let a future RETURNING that
+    // stopped selecting quantity silently produce stack-less items instead of
+    // failing — the same "loads as undefined" class of bug the catalog SELECT
+    // guard exists to prevent.
+    const qty = Number(quantity ?? 1);
     entry.world.groundItems.remove(groundItemId);
     const p = entry.world.getPlayer(userId);
-    if (p && p.inv) p.inv.items.push({ id: instanceId, typeId }); // so a later equip validates without a reload
-    return { id: instanceId, typeId };
+    if (p && p.inv) p.inv.items.push({ id: instanceId, typeId, quantity: qty }); // so a later equip validates without a reload
+    return { id: instanceId, typeId, quantity: qty };
   } finally {
     entry.claiming.delete(groundItemId);
   }
@@ -153,17 +165,17 @@ async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000, now = Dat
   // The user_id predicate IS the ownership check — a forged itemId naming
   // someone else's item deletes nothing.
   const del = await pool.query(
-    'DELETE FROM player_items WHERE id = $1 AND user_id = $2 RETURNING item_type_id',
+    'DELETE FROM player_items WHERE id = $1 AND user_id = $2 RETURNING item_type_id, quantity',
     [itemId, userId],
   );
   if (del.rowCount !== 1) return { ok: false, reason: 'you do not own that item' };
 
   const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
   const ins = await pool.query(
-    `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at)
-     VALUES ($1, $2, $3, $4, now() + ($5::int * interval '1 millisecond'))
-     RETURNING id, item_type_id, x, y, expires_at`,
-    [entry.worldId, del.rows[0].item_type_id, cx, cy, ttlMs],
+    `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
+     VALUES ($1, $2, $3, $4, now() + ($5::int * interval '1 millisecond'), $6)
+     RETURNING id, item_type_id, x, y, expires_at, quantity`,
+    [entry.worldId, del.rows[0].item_type_id, cx, cy, ttlMs, del.rows[0].quantity],
   );
   entry.world.groundItems.add(ins.rows);
   // Bound p.dropGrace: entries only get pruned opportunistically when looked

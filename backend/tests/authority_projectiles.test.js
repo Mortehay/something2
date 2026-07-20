@@ -122,3 +122,158 @@ test('a player with no mit field takes unmitigated damage (no crash)', () => {
   sim.step(0.12, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
   assert.equal(target.hp, 80);
 });
+
+// --- AoE detonation (slice 3b-3b, task 6) -----------------------------------
+// Geometry note for the tests below: the projectile spawns at (0,0) heading +x
+// at 100 px/s with dt=1, so it advances in MAX_SUB(16) px sub-steps. It
+// detonates at the FIRST sub-step position where it contacts something, NOT at
+// the target's centre — so the blast point is what the assertions are built on.
+
+const STAFF = { damage: 20, range: 200, projectile_speed: 100, projectile_radius: 4, pierce: 1, aoe_radius: 100, element: null };
+
+// A player whose CENTRE is at (cx, cy) — the sim damages by centre distance.
+function mkPlayer(userId, cx, cy, extra = {}) {
+  return { userId, x: cx - 32, y: cy - 32, width: 64, height: 64, hp: 100, maxHp: 100, ...extra };
+}
+// A creature whose CENTRE is at (cx, cy).
+function mkCreature(id, cx, cy, hp = 100) {
+  return { id, x: cx - 24, y: cy - 24, width: 48, height: 48, hp };
+}
+
+test('AoE: a blast damages a target in radius with clear terrain', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: STAFF });
+  const target = mkPlayer('u2', 60, 0);
+  sim.step(1, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
+  assert.ok(target.hp < target.maxHp, 'target in radius took no damage');
+});
+
+// The pair IS the test. Either half alone proves nothing: a "blast damages
+// target" test passes even with no LOS check at all.
+test('AoE: a blast does NOT damage the same target through a wall', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: STAFF });
+  const target = mkPlayer('u2', 60, 0);
+  // Wall spanning x in [30,55]: the projectile detonates on it at x=32, and the
+  // target at x=60 sits on the far side.
+  const blocked = { isWalkable: (x) => x < 30 || x > 55 };
+  sim.step(1, { creatures: creaturesStub([]), players: [target], map: blocked });
+  assert.equal(target.hp, target.maxHp, 'blast damaged a target through a wall');
+});
+
+test('AoE: a creature behind a wall is not damaged by the blast', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: STAFF });
+  const c = mkCreature('c1', 60, 0);
+  const creatures = creaturesStub([c]);
+  const blocked = { isWalkable: (x) => x < 30 || x > 55 };
+  const out = sim.step(1, { creatures, players: [], map: blocked });
+  assert.equal(c.hp, 100, 'blast damaged a creature through a wall');
+  assert.deepEqual(out.killedCreatureIds, []);
+});
+
+test('AoE: a creature in radius with clear terrain is damaged by the blast', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, damage: 500 } });
+  const c = mkCreature('c1', 60, 0);
+  const out = sim.step(1, { creatures: creaturesStub([c]), players: [], map: WALK_ALL });
+  assert.deepEqual(out.killedCreatureIds, ['c1']);
+});
+
+test('AoE: blast damage falls off with distance', () => {
+  const near = mkPlayer('near', 30, 0);
+  const far = mkPlayer('far', 90, 0);
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, damage: 40 } });
+  sim.step(1, { creatures: creaturesStub([]), players: [near, far], map: WALK_ALL });
+  assert.ok(near.maxHp - near.hp > far.maxHp - far.hp,
+    'a nearer target must take strictly more than a further one');
+});
+
+test('AoE: a target beyond the radius takes nothing', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, aoe_radius: 40 } });
+  const inside = mkPlayer('u2', 50, 0);   // blast at x=32 → d=18 < 40
+  const outside = mkPlayer('u3', 32, 300); // d=300 > 40
+  sim.step(1, { creatures: creaturesStub([]), players: [inside, outside], map: WALK_ALL });
+  assert.ok(inside.hp < inside.maxHp);
+  assert.equal(outside.hp, outside.maxHp);
+});
+
+test('AoE: the caster takes no damage from their own blast', () => {
+  const owner = mkPlayer('u1', 10, 0);
+  const sim = new ProjectileSim();
+  // range 40 → the projectile runs out of range at x=48 and detonates there;
+  // the owner at x=10 is 38 px away, well inside the 100 px radius.
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, damage: 40, range: 40 } });
+  const r = sim.step(1, { creatures: creaturesStub([]), players: [owner], map: WALK_ALL });
+  assert.equal(r.detonations.length, 1, 'the projectile must actually have detonated near the caster');
+  assert.equal(owner.hp, owner.maxHp);
+});
+
+test('AoE: a projectile that runs out of range still detonates', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, range: 40 } });
+  const r = sim.step(1, { creatures: creaturesStub([]), players: [], map: WALK_ALL });
+  assert.equal(r.detonations.length, 1);
+  assert.equal(sim.count(), 0);
+});
+
+test('AoE: a projectile that hits terrain detonates once', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: STAFF });
+  const r = sim.step(1, { creatures: creaturesStub([]), players: [], map: { isWalkable: (x) => x < 30 } });
+  assert.equal(r.detonations.length, 1);
+  assert.equal(sim.count(), 0);
+});
+
+test('AoE: an AoE projectile does not survive its detonation', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, range: 500, damage: 10, aoe_radius: 60 } });
+  const r = sim.step(1, { creatures: creaturesStub([]), players: [mkPlayer('u2', 50, 0)], map: WALK_ALL });
+  assert.equal(sim.count(), 0);
+  assert.equal(r.detonations.length, 1);
+});
+
+test('AoE: detonating on a player replaces the single-target hit, not adds to it', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, damage: 100, aoe_radius: 100 } });
+  const target = mkPlayer('u2', 32, 0);
+  sim.step(1, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
+  // First contact is at x=16 (capture radius 4+32=36 reaches the centre at 32),
+  // so the blast point is 16 px away: 100 * (1 - 16/100) = 84, no mitigation.
+  // If the direct hit were ALSO applied the target would be at -84, not 16.
+  assert.equal(target.hp, 16, 'the target must take the blast OR the direct hit, not both');
+});
+
+test('AoE: the detonation carries the blast point, radius and element', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, range: 40, element: 'fire' } });
+  const r = sim.step(1, { creatures: creaturesStub([]), players: [], map: WALK_ALL });
+  assert.deepEqual(r.detonations, [{ x: 48, y: 0, radius: 100, element: 'fire' }]);
+});
+
+test('AoE: the blast goes through the shared mitigation path', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, damage: 100, aoe_radius: 100 } });
+  const target = mkPlayer('u2', 32, 0, { mit: { defense: 10, resistances: {} } });
+  sim.step(1, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
+  // Blast at x=16, d=16 → 100 * 0.84 = 84 raw, then -10 defense = 74 dealt.
+  assert.equal(target.hp, 26, 'falloff scales the RAW damage, defense applies after');
+});
+
+test('AoE: a projectile with no aoe_radius reports no detonations', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, range: 500, damage: 10, aoe_radius: null } });
+  const r = sim.step(1, { creatures: creaturesStub([]), players: [mkPlayer('u2', 50, 0)], map: WALK_ALL });
+  assert.equal(r.detonations.length, 0);
+});
+
+test('AoE: aoe_radius of 0 behaves as a plain point-collision projectile', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, damage: 10, aoe_radius: 0 } });
+  const target = mkPlayer('u2', 50, 0);
+  const r = sim.step(1, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
+  assert.equal(r.detonations.length, 0);
+  assert.equal(target.hp, 90, 'a zero radius must fall back to the single-target hit, not divide by zero');
+});

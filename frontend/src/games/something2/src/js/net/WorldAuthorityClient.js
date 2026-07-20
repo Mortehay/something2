@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -17,6 +17,8 @@ export class WorldAuthorityClient {
     this.onItems = onItems || (() => {});
     this.onPicked = onPicked || (() => {});
     this.onDropped = onDropped || (() => {});
+    this.onNoAmmo = onNoAmmo || (() => {});
+    this.onAmmo = onAmmo || (() => {});
     this.inputIntervalMs = inputIntervalMs;
     this.now = now;
 
@@ -51,6 +53,14 @@ export class WorldAuthorityClient {
         case 'items': this.onItems(msg); break;
         case 'picked': this.onPicked(msg); break;
         case 'dropped': this.onDropped(msg); break;
+        // Sent to this socket alone when a shot was refused for an empty ammo
+        // stack. The server consumed NO cooldown, so this is purely a cue to
+        // the player — nothing local needs rolling back.
+        case 'noammo': this.onNoAmmo(msg); break;
+        // The authoritative ammo count for one type after a successful shot.
+        // The server's number always wins — never merge it with a
+        // locally-derived count or decrement on send, see core/ammo.js.
+        case 'ammo': this.onAmmo(msg); break;
         case 'error': {
           // Tag so callers can tell a server-issued protocol rejection (e.g.
           // "unequip it first") apart from a raw transport failure below —

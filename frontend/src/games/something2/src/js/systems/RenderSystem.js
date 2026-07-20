@@ -4,6 +4,7 @@ import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir } from "./spriteAtlas.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
+import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
 
 // Mirrors PICKUP_RADIUS in backend/src/authority/groundItems.js — used here
 // only to decide when a ground item's name label is shown (i.e. when the
@@ -88,6 +89,7 @@ export class RenderSystem {
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
     groundItems = [], autoLoot = false, toast = null,
+    blasts = [], ammo = null, noAmmoFlash = false,
   }) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -140,12 +142,14 @@ export class RenderSystem {
       const s = worldToScreen(pr.x, pr.y);
       this.ctx.beginPath();
       this.ctx.arc(s.x, s.y - ISO_TILE_H / 2, 6, 0, Math.PI * 2);
-      this.ctx.fillStyle = pr.element === 'arcane' ? '#9b5de5' : '#f4d35e';
+      this.ctx.fillStyle = elementColor(pr.element);
       this.ctx.fill();
     }
 
+    this.drawBlasts(blasts);
+
     camera.reset(this.ctx);
-    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName });
+    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash });
     if (toast) this.renderToast(toast);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
@@ -154,6 +158,36 @@ export class RenderSystem {
     if (inventoryOpen && inventory) {
       this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, autoLoot);
     }
+  }
+
+  // AoE detonation rings: each expands from nothing to its full world radius
+  // and fades out over its lifetime. Drawn inside the camera transform, right
+  // after the projectiles, so a blast sits where its shot ended.
+  drawBlasts(blasts) {
+    if (!blasts || blasts.length === 0) return;
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+    this.ctx.save();
+    for (const b of blasts) {
+      const t = blastProgress(b, now);
+      // Same conversion as the projectile draw above — worldToScreen returns
+      // the tile diamond's CENTRE, and the ISO_TILE_H/2 lift puts the ring at
+      // the chest height projectiles fly at rather than flat on the ground.
+      // Do not add any further offset: doing so is what put markers a tile
+      // away from their subject in an earlier slice.
+      const s = worldToScreen(b.x, b.y);
+      const cy = s.y - ISO_TILE_H / 2;
+      // A world circle projects to a 2:1 ellipse, not a circle — drawing an
+      // arc here would claim a blast reaches further north/south than it does.
+      const rx = blastScreenRadiusX(b.radius) * t;
+      if (rx <= 0) continue;
+      this.ctx.globalAlpha = 1 - t;
+      this.ctx.strokeStyle = elementColor(b.element);
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.ctx.ellipse(s.x, cy, rx, rx / 2, 0, 0, Math.PI * 2);
+      this.ctx.stroke();
+    }
+    this.ctx.restore();
   }
 
   // A small transient toast for server-rejected actions (e.g. "unequip it
@@ -325,7 +359,7 @@ export class RenderSystem {
     }
   }
 
-  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, stamina = null, maxStamina = null, weaponName = null }) {
+  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false }) {
     const remoteCount = remotePlayers ? remotePlayers.size : 0;
     const lines = [
       `Players online: ${1 + remoteCount}`,
@@ -341,14 +375,27 @@ export class RenderSystem {
     if (weaponName) {
       lines.push(`Weapon: ${weaponName}`);
     }
+    // Ammo line only when the equipped weapon actually consumes ammo — `ammo`
+    // is null for every ammo-free weapon (the server's ammo_type_id == null),
+    // and nothing at all should be drawn for those.
+    let ammoLine = -1;
+    if (ammo) {
+      ammoLine = lines.length;
+      lines.push(`${ammo.name}: ${ammo.count}${noAmmoFlash ? "  OUT OF AMMO" : ""}`);
+    }
     lines.push(`[i] Inventory`);
     this.ctx.save();
     this.ctx.fillStyle = "rgba(0,0,0,0.55)";
     this.ctx.fillRect(10, 10, 260, 18 * lines.length + 12);
-    this.ctx.fillStyle = "#e5e7eb";
     this.ctx.font = "13px monospace";
     this.ctx.textBaseline = "top";
-    lines.forEach((t, i) => this.ctx.fillText(t, 18, 16 + i * 18));
+    lines.forEach((t, i) => {
+      // The ammo line turns red while the flash is up, or whenever the stack
+      // is empty, so the player sees why a shot did nothing.
+      const alarm = i === ammoLine && (noAmmoFlash || ammo.count <= 0);
+      this.ctx.fillStyle = alarm ? "#ef4444" : "#e5e7eb";
+      this.ctx.fillText(t, 18, 16 + i * 18);
+    });
     this.ctx.restore();
   }
 

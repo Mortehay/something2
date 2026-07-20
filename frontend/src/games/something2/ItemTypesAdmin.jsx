@@ -73,7 +73,7 @@ const CategoryBadge = styled.div`
   font-size: 1.2rem;
   font-weight: bold;
   text-transform: uppercase;
-  background-color: ${props => props.$category === 'weapon' ? '#7f1d1d' : '#1e3a8a'};
+  background-color: ${props => props.$category === 'weapon' ? '#7f1d1d' : props.$category === 'ammo' ? '#14532d' : '#1e3a8a'};
   border: 2px solid rgba(255, 255, 255, 0.1);
 `;
 
@@ -311,6 +311,8 @@ const WEAPON_DEFAULTS = {
   projectile_speed: '',
   projectile_radius: '',
   pierce: '',
+  ammo_type_id: '',
+  aoe_radius: '',
 };
 
 const ARMOR_DEFAULTS = {
@@ -318,11 +320,19 @@ const ARMOR_DEFAULTS = {
   defense: 1,
 };
 
+// The backend rejects a non-stackable ammo type outright, so the form starts
+// ammo off already stackable rather than letting the user submit an invalid one.
+const AMMO_DEFAULTS = {
+  stackable: true,
+  kind: '',
+};
+
 function emptyForm() {
   return {
     name: '',
     category: 'weapon',
     element: '',
+    stackable: false,
     ...WEAPON_DEFAULTS,
     slot: '',
     defense: '',
@@ -348,6 +358,9 @@ function formFromType(t) {
     projectile_speed: t.projectile_speed ?? '',
     projectile_radius: t.projectile_radius ?? '',
     pierce: t.pierce ?? '',
+    stackable: !!t.stackable,
+    ammo_type_id: t.ammo_type_id ?? '',
+    aoe_radius: t.aoe_radius ?? '',
     slot: t.slot || '',
     defense: t.defense ?? '',
     resistanceRows: rows,
@@ -358,7 +371,7 @@ function formFromType(t) {
 // same problem before submitting instead of only on the 400 round-trip.
 function validateClient(f) {
   if (!f.name.trim()) return 'Name is required';
-  if (!['weapon', 'armor'].includes(f.category)) return "category must be 'weapon' or 'armor'";
+  if (!['weapon', 'armor', 'ammo'].includes(f.category)) return "category must be 'weapon', 'armor' or 'ammo'";
   if (f.element && !ELEMENTS.includes(f.element)) return `element must be one of ${ELEMENTS.join(', ')}`;
   if (f.category === 'armor' && f.slot && !SLOTS.includes(f.slot)) return `slot must be one of ${SLOTS.join(', ')}`;
 
@@ -370,6 +383,12 @@ function validateClient(f) {
     if (f.kind === 'projectile' && (f.range === '' || f.range == null || f.projectile_speed === '' || f.projectile_speed == null || f.projectile_radius === '' || f.projectile_radius == null)) {
       return 'projectile weapons need range, projectile_speed and projectile_radius';
     }
+    // Mirrors the DB CHECK: a detonating projectile cannot also pierce.
+    if (num(f.aoe_radius) != null && num(f.pierce, 0) > 1) {
+      return 'aoe_radius and pierce > 1 are mutually exclusive';
+    }
+  } else if (f.category === 'ammo') {
+    if (!f.stackable) return 'ammo must be stackable';
   } else {
     if (f.slot === '' || f.slot == null || f.defense === '' || f.defense == null) return 'armor needs slot and defense';
   }
@@ -402,6 +421,35 @@ function buildPayload(f) {
       projectile_speed: f.kind === 'projectile' ? num(f.projectile_speed) : null,
       projectile_radius: f.kind === 'projectile' ? num(f.projectile_radius) : null,
       pierce: f.kind === 'projectile' ? num(f.pierce) : null,
+      // Only a projectile weapon may consume ammo (backend + DB CHECK), and a
+      // blast radius is meaningless on a melee swing.
+      ammo_type_id: f.kind === 'projectile' ? num(f.ammo_type_id) : null,
+      aoe_radius: f.kind === 'projectile' ? num(f.aoe_radius) : null,
+      stackable: !!f.stackable,
+      slot: null,
+      defense: null,
+      resistances: {},
+    };
+  }
+
+  if (f.category === 'ammo') {
+    return {
+      ...base,
+      kind: null,
+      damage: 0,
+      cooldown: 0,
+      two_handed: false,
+      mana_cost: 0,
+      stamina_cost: 0,
+      reach: null,
+      arc_width: null,
+      range: null,
+      projectile_speed: null,
+      projectile_radius: null,
+      pierce: null,
+      ammo_type_id: null,
+      aoe_radius: null,
+      stackable: true,
       slot: null,
       defense: null,
       resistances: {},
@@ -426,6 +474,9 @@ function buildPayload(f) {
     projectile_speed: null,
     projectile_radius: null,
     pierce: null,
+    ammo_type_id: null,
+    aoe_radius: null,
+    stackable: !!f.stackable,
     slot: f.slot,
     defense: num(f.defense, 0),
     resistances,
@@ -441,6 +492,10 @@ function ItemTypesAdmin() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingType, setEditingType] = useState(null);
   const [formData, setFormData] = useState(emptyForm());
+
+  // A weapon's ammo can only be an existing ammo-category type, so the select
+  // is populated from the catalog we already loaded rather than free-typed.
+  const ammoTypes = (itemTypes || []).filter(t => t.category === 'ammo');
 
   useEffect(() => {
     if (editingType) {
@@ -463,11 +518,15 @@ function ItemTypesAdmin() {
   // Category switch clears the other category's fields back to sane
   // defaults so a stale `kind`/`slot` never lingers in state.
   const handleCategoryChange = (category) => {
-    setFormData(prev => ({
-      ...prev,
-      category,
-      ...(category === 'weapon' ? { ...WEAPON_DEFAULTS, slot: '', defense: '', resistanceRows: [] } : { ...ARMOR_DEFAULTS, kind: '', resistanceRows: prev.resistanceRows }),
-    }));
+    setFormData(prev => {
+      if (category === 'weapon') {
+        return { ...prev, category, ...WEAPON_DEFAULTS, stackable: false, slot: '', defense: '', resistanceRows: [] };
+      }
+      if (category === 'ammo') {
+        return { ...prev, category, ...AMMO_DEFAULTS, slot: '', defense: '', resistanceRows: [] };
+      }
+      return { ...prev, category, ...ARMOR_DEFAULTS, kind: '', stackable: false, resistanceRows: prev.resistanceRows };
+    });
   };
 
   // Melee <-> projectile switch clears the other kind's geometry fields.
@@ -542,7 +601,9 @@ function ItemTypesAdmin() {
           <EntityCard key={type.id}>
             <EntityHeader>
               <EntityInfo>
-                <CategoryBadge $category={type.category}>{type.category === 'weapon' ? 'W' : 'A'}</CategoryBadge>
+                <CategoryBadge $category={type.category}>
+                  {type.category === 'weapon' ? 'W' : type.category === 'ammo' ? 'M' : 'A'}
+                </CategoryBadge>
                 <EntityName>{type.name}</EntityName>
               </EntityInfo>
               <ActionButtons>
@@ -576,6 +637,13 @@ function ItemTypesAdmin() {
                       <StatItem><span>Proj. Speed</span>{type.projectile_speed}</StatItem>
                       <StatItem><span>Proj. Radius</span>{type.projectile_radius}</StatItem>
                       <StatItem><span>Pierce</span>{type.pierce ?? 0}</StatItem>
+                      <StatItem><span>AoE Radius</span>{type.aoe_radius ?? '—'}</StatItem>
+                      <StatItem>
+                        <span>Ammo</span>
+                        {type.ammo_type_id == null
+                          ? 'none'
+                          : (itemTypes?.find(t => t.id === type.ammo_type_id)?.name ?? `#${type.ammo_type_id}`)}
+                      </StatItem>
                     </>
                   )}
                 </EntityStats>
@@ -588,6 +656,11 @@ function ItemTypesAdmin() {
                   </TagCloud>
                 </SpawnList>
               </>
+            ) : type.category === 'ammo' ? (
+              <EntityStats>
+                <StatItem><span>Stackable</span>{type.stackable ? 'yes' : 'no'}</StatItem>
+                <StatItem><span>Element</span>{type.element || 'none'}</StatItem>
+              </EntityStats>
             ) : (
               <>
                 <EntityStats>
@@ -636,6 +709,7 @@ function ItemTypesAdmin() {
                 <select value={formData.category} onChange={e => handleCategoryChange(e.target.value)}>
                   <option value="weapon">weapon</option>
                   <option value="armor">armor</option>
+                  <option value="ammo">ammo</option>
                 </select>
               </FormGroup>
 
@@ -714,9 +788,29 @@ function ItemTypesAdmin() {
                         <label>Pierce (optional)</label>
                         <input type="number" step="1" value={formData.pierce} onChange={e => setFormData({ ...formData, pierce: e.target.value })} />
                       </FormGroup>
+                      <FormGroup>
+                        <label>AoE Radius (blank = none)</label>
+                        <input type="number" step="1" min="0" value={formData.aoe_radius} onChange={e => setFormData({ ...formData, aoe_radius: e.target.value })} />
+                      </FormGroup>
+                      <FormGroup>
+                        <label>Ammo Type</label>
+                        <select value={formData.ammo_type_id} onChange={e => setFormData({ ...formData, ammo_type_id: e.target.value })}>
+                          <option value="">none</option>
+                          {ammoTypes.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </select>
+                      </FormGroup>
                     </div>
                   )}
                 </>
+              ) : formData.category === 'ammo' ? (
+                <InlineCheck>
+                  <input
+                    type="checkbox"
+                    checked={formData.stackable}
+                    onChange={e => setFormData({ ...formData, stackable: e.target.checked })}
+                  />
+                  <label>Stackable (required for ammo)</label>
+                </InlineCheck>
               ) : (
                 <>
                   <FormGroup>

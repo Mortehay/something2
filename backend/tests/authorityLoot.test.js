@@ -138,7 +138,7 @@ test('two claims of one item: the loser actually issues its claim attempt and lo
   const first = await claimItem(pool, entry, 'u1', 'g1');
   const second = await claimItem(pool, entry, 'u1', 'g1');
 
-  assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7 });
+  assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7, quantity: 1 });
   assert.strictEqual(second, null, 'the loser gets nothing');
   // This is the invariant this slice exists to establish: not merely that
   // item counts come out right, but that the LOSER actually issued its claim
@@ -198,7 +198,7 @@ test('concurrent claims of the same item: the second is blocked by the claiming 
     claimItem(pool, entry, 'u1', 'g1'),
   ]);
 
-  assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7 });
+  assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7, quantity: 1 });
   assert.strictEqual(second, null, 'blocked by the claiming set, not a second DB round trip');
   assert.strictEqual(pool.matching(CLAIM_RE).length, 1, 'only one claim query was ever issued');
   assert.strictEqual(entry.claiming.size, 0, 'drains after both settle');
@@ -238,7 +238,7 @@ test('the claiming guard reserves an id SYNCHRONOUSLY, before any await: two con
 
   resolveQuery();
   const [first, second] = await Promise.all([p1, p2]);
-  assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7 });
+  assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7, quantity: 1 });
   assert.strictEqual(second, null, 'blocked by the claiming set');
 });
 
@@ -248,7 +248,7 @@ test('a successful claim adds the instance to the in-memory inventory', async ()
     [CLAIM_RE, { rows: [{ id: 'inst-1', item_type_id: 7 }], rowCount: 1 }],
   ]);
   await claimItem(pool, entry, 'u1', 'g1');
-  assert.deepStrictEqual(entry.world.getPlayer('u1').inv.items, [{ id: 'inst-1', typeId: 7 }]);
+  assert.deepStrictEqual(entry.world.getPlayer('u1').inv.items, [{ id: 'inst-1', typeId: 7, quantity: 1 }]);
 });
 
 function armDropEntry(equipment = {}) {
@@ -377,7 +377,7 @@ test('(c) manual pickup ignores the grace window entirely: claimItem succeeds ev
 
   const got = await claimItem(pool, entry, 'u1', 'g1');
 
-  assert.deepStrictEqual(got, { id: 'inst-1', typeId: 7 },
+  assert.deepStrictEqual(got, { id: 'inst-1', typeId: 7, quantity: 1 },
     'manual pickup (claimItem) is unaffected by an active grace window');
 });
 

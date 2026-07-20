@@ -7,6 +7,7 @@ const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoado
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { spawnChunkCreatures } = require('../services/mapService');
 const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
+const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
 
 const MAP_TILE_SIZE = 100;
@@ -332,10 +333,79 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
       if (msg.type === 'attack') {
         const entry = worlds.get(ws.worldId);
-        if (entry) {
-          const { killedCreatureIds } = entry.world.attack(ws.userId, finiteOr(msg.ax, 0), finiteOr(msg.ay, 0));
+        if (!entry) return;
+        const ax = finiteOr(msg.ax, 0), ay = finiteOr(msg.ay, 0);
+
+        // Cheap synchronous reject: cooldown / mana / stamina. Nothing has
+        // been spent, and a refused attack must not consume the cooldown.
+        const gate = entry.world.canAttack(ws.userId);
+        if (!gate.ok) return;
+
+        // Ammo-free weapons (all melee, all staves, darts) keep the fully
+        // synchronous path: no DB round trip on the hot path.
+        if (gate.weapon.ammo_type_id == null) {
+          const { killedCreatureIds } = entry.world.attack(ws.userId, ax, ay);
           for (const id of new Set(killedCreatureIds)) onCreatureDeath(entry, id);
+          return;
         }
+
+        // Ammo is spent LAST, after every other gate has passed, so a refused
+        // attack can never destroy a unit. Serialized on the op chain for the
+        // same reason as equip/pickup/drop, and with the same try/catch: an
+        // unhandled rejection out of this async handler kills the process.
+        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
+          try {
+            // Everything is re-read INSIDE the chain. The `entry`/`gate`
+            // captured above were computed when the frame was parsed, which
+            // can be arbitrarily long before this callback runs — and the
+            // stale gate is exactly the bug that loses arrows. Two attack
+            // frames in one socket read are both parsed (and both gated)
+            // before either chained callback runs, so both would see
+            // _attackCd === 0; the second would then consume a unit and hand
+            // it to an attack() that refuses for the cooldown the first one
+            // just started. Re-gating here keeps canAttack → consume →
+            // attack a true sequence under every interleaving. The world
+            // entry can also have been swapped/evicted (rejoin, world
+            // teardown) across the await, so re-read that too.
+            const cur = worlds.get(ws.worldId);
+            if (!cur) return;
+            const g = cur.world.canAttack(ws.userId);
+            if (!g.ok) return; // nothing spent
+            // The equipped weapon may have changed too (an equip frame can be
+            // chained between the two): always spend the CURRENT weapon's
+            // ammo, and fall back to the sync path if it now needs none.
+            const ammoTypeId = g.weapon.ammo_type_id;
+            if (ammoTypeId != null && !(await consumeAmmo(pool, ws.userId, ammoTypeId))) {
+              // The type id is carried so the client can zero ITS displayed
+              // count for exactly this ammo type. Without it the HUD keeps
+              // rendering whatever it last believed while the server refuses
+              // every shot, and the client would have to guess which type was
+              // refused from its own equipment state — which can already have
+              // moved on. A refusal is the server stating there is none of
+              // this type left; say which type.
+              send(ws, { type: 'noammo', item_type_id: ammoTypeId }); // no cooldown consumed
+              return;
+            }
+            const { killedCreatureIds } = cur.world.attack(ws.userId, ax, ay);
+            for (const id of new Set(killedCreatureIds)) onCreatureDeath(cur, id);
+            // The shot is already committed above (ammo spent, kills
+            // resolved) — pushing the client its new count is best-effort on
+            // top of that, not a condition of it. Isolated in its own
+            // try/catch so a failed COUNT query can never look like a failed
+            // attack, and placed after attack()/onCreatureDeath so it cannot
+            // delay or skip the resolution that already succeeded.
+            if (ammoTypeId != null) {
+              try {
+                const count = await ammoCount(pool, ws.userId, ammoTypeId);
+                send(ws, { type: 'ammo', item_type_id: ammoTypeId, count });
+              } catch (err) {
+                console.error('ammoCount failed:', err);
+              }
+            }
+          } catch (err) {
+            console.error('attack/ammo failed:', err);
+          }
+        });
         return;
       }
 
@@ -443,8 +513,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (entry.world.isEmpty()) continue;
       entry.world.tick(dt);
       entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
-      const killedByProjectiles = entry.world.tickProjectiles(dt);
+      const { killedCreatureIds: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
       for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);
+      // Stashed for this tick's broadcast (below). REPLACED, not appended, so
+      // an unconsumed stash can never grow without bound.
+      entry.pendingDetonations = detonations;
       entry.world.resolveDeaths();
       // Auto-loot: fire claims off-tick. The tick is synchronous and must never
       // await; `claiming` de-dups the repeats this produces across ticks while
@@ -480,9 +553,20 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }).catch((err) => console.error('auto-loot notify failed:', err));
       }
       const snap = entry.world.snapshot();
+      // Detonations are per-tick and the stash is REPLACED each tick, so they
+      // must ride out on THIS tick's broadcast or they are lost. Omitted from
+      // the frame entirely when empty (the common case) to keep it small.
+      const dets = entry.pendingDetonations;
+      // Cleared immediately after the read, not after the broadcast loop: if
+      // send() throws partway through, the stash must not survive to be
+      // re-broadcast (as stale, already-shown blasts) on the next tick.
+      entry.pendingDetonations = null;
+      const hasDets = Array.isArray(dets) && dets.length > 0;
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
-        send(ws, { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players, projectiles: snap.projectiles });
+        const frame = { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players, projectiles: snap.projectiles };
+        if (hasDets) frame.detonations = dets;
+        send(ws, frame);
       }
       if (tick % creatureBroadcastEvery === 0) {
         recomputeActive(entry);
@@ -536,6 +620,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
   }, itemSweepMs);
 
   return {
+    // Live world registry (worldId -> { world, sockets, row }). Exposed for
+    // introspection/tests that need to assert on authoritative state the wire
+    // does not carry (e.g. a player's attack cooldown). Read-only by
+    // convention — the server owns every mutation.
+    worlds,
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);

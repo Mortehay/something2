@@ -26,7 +26,7 @@ test('loadInventory returns owned instances and the equipment map', async () => 
     ] })],
   ]);
   const inv = await loadInventory(pool, 'u1');
-  assert.deepEqual(inv.items, [{ id: 'i1', typeId: 1 }, { id: 'i2', typeId: 5 }]);
+  assert.deepEqual(inv.items, [{ id: 'i1', typeId: 1, quantity: 1 }, { id: 'i2', typeId: 5, quantity: 1 }]);
   assert.deepEqual(inv.equipment, { main_hand: 'i1' });
 });
 

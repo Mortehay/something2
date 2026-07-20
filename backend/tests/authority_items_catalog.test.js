@@ -1,7 +1,29 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const { Pool } = require('pg');
 const { loadItemTypes, resolveDefaultWeaponId, SLOTS } = require('../src/authority/items.js');
 const { PLAYER_STAMINA_REGEN, PLAYER_MANA_REGEN } = require('../src/authority/world.js');
+
+// Same reachability pattern as backend/tests/authority_ammo_db.test.js: skip
+// (loudly) rather than fail when no database is reachable, so this suite
+// still runs on a machine without Postgres — except under CI, where a skip
+// is indistinguishable from a pass in the summary count and this is one of
+// the few tests standing between a rebalanced/rewired migration and five
+// guards below silently defending a copy instead of the catalog.
+const DB_URL = process.env.TEST_DATABASE_URL
+  || process.env.DATABASE_URL
+  || 'postgres://user:password@localhost:15432/game_db';
+
+async function openPool() {
+  const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 2000, max: 2 });
+  try {
+    await pool.query('SELECT 1');
+    return pool;
+  } catch (err) {
+    await pool.end().catch(() => {});
+    return { unreachable: err.message };
+  }
+}
 
 function fakePool(rows) {
   return { query: async (sql) => { assert.match(sql, /FROM item_types/i); return { rows }; } };
@@ -102,78 +124,243 @@ function catalogProblems(typesById) {
 // weapons from 1714440016000_create_weapon_types.js (with stamina_cost
 // backfilled per 1714440019000_weapon_catalog.js) plus the 18 new weapons
 // from 1714440019000_weapon_catalog.js, with stamina_cost rebalanced per
-// 1714440020000_rebalance_stamina.js. 22 weapons total. Keep in sync with
-// the migrations.
+// 1714440020000_rebalance_stamina.js, plus the ammo/aoe columns and the 3
+// ammo rows from 1714440021000_aoe_ammo.js. 22 weapons + 3 ammo = 25 rows.
+// Keep in sync with the migrations.
 const SEED_ROWS = [
   // --- original 4, from 1714440016000 (+ stamina backfill/rebalance) ---
   { id: 1, name: 'dagger', category: 'weapon', kind: 'melee', damage: 8, cooldown: 0.30,
     reach: 80, arc_width: 0.6, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 0, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 2, name: 'halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.90,
     reach: 190, arc_width: 1.8, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 15, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 15, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 3, name: 'bow', category: 'weapon', kind: 'projectile', damage: 12, cooldown: 0.60,
     reach: null, arc_width: null, range: 700, projectile_speed: 900, projectile_radius: 8,
-    pierce: 1, mana_cost: 0, stamina_cost: 8, element: null },
+    pierce: 1, mana_cost: 0, stamina_cost: 8, element: null,
+    stackable: false, ammo_type_id: 101, ammo_type_name: 'arrow', aoe_radius: null },
   { id: 4, name: 'magic-bolt', category: 'weapon', kind: 'projectile', damage: 14, cooldown: 0.70,
     reach: null, arc_width: null, range: 600, projectile_speed: 700, projectile_radius: 12,
-    pierce: 1, mana_cost: 15, stamina_cost: 0, element: 'arcane' },
+    pierce: 1, mana_cost: 15, stamina_cost: 0, element: 'arcane',
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   // --- 18 new, from 1714440019000 (stamina_cost rebalanced per 1714440020000) ---
   { id: 7, name: 'knife', category: 'weapon', kind: 'melee', damage: 6, cooldown: 0.25,
     reach: 70, arc_width: 0.5, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 0, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 8, name: 'stick', category: 'weapon', kind: 'melee', damage: 7, cooldown: 0.35,
     reach: 90, arc_width: 0.7, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 0, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 9, name: 'club', category: 'weapon', kind: 'melee', damage: 10, cooldown: 0.45,
     reach: 85, arc_width: 0.8, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 6, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 6, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 10, name: 'short sword', category: 'weapon', kind: 'melee', damage: 11, cooldown: 0.45,
     reach: 100, arc_width: 0.9, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 6, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 6, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 11, name: 'mid club', category: 'weapon', kind: 'melee', damage: 14, cooldown: 0.60,
     reach: 115, arc_width: 1.0, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 9, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 9, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 12, name: 'long sword', category: 'weapon', kind: 'melee', damage: 15, cooldown: 0.65,
     reach: 140, arc_width: 1.2, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 9, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 9, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 13, name: 'morning star', category: 'weapon', kind: 'melee', damage: 17, cooldown: 0.75,
     reach: 130, arc_width: 1.6, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 12, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 12, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 14, name: 'two-handed sword', category: 'weapon', kind: 'melee', damage: 22, cooldown: 1.00,
     reach: 170, arc_width: 1.4, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 18, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 18, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 15, name: 'scythe', category: 'weapon', kind: 'melee', damage: 20, cooldown: 0.95,
     reach: 175, arc_width: 2.0, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 16, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 16, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 16, name: 'pike', category: 'weapon', kind: 'melee', damage: 19, cooldown: 0.85,
     reach: 200, arc_width: 0.5, range: null, projectile_speed: null, projectile_radius: null,
-    pierce: null, mana_cost: 0, stamina_cost: 14, element: null },
+    pierce: null, mana_cost: 0, stamina_cost: 14, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
+  // darts deliberately get NO ammo — the weak-but-free option.
   { id: 17, name: 'darts', category: 'weapon', kind: 'projectile', damage: 7, cooldown: 0.35,
     reach: null, arc_width: null, range: 350, projectile_speed: 800, projectile_radius: 6,
-    pierce: 1, mana_cost: 0, stamina_cost: 4, element: null },
+    pierce: 1, mana_cost: 0, stamina_cost: 4, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 18, name: 'sling', category: 'weapon', kind: 'projectile', damage: 8, cooldown: 0.50,
     reach: null, arc_width: null, range: 450, projectile_speed: 700, projectile_radius: 8,
-    pierce: 1, mana_cost: 0, stamina_cost: 6, element: null },
+    pierce: 1, mana_cost: 0, stamina_cost: 6, element: null,
+    stackable: false, ammo_type_id: 103, ammo_type_name: 'stone', aoe_radius: null },
   { id: 19, name: 'arbalest', category: 'weapon', kind: 'projectile', damage: 20, cooldown: 1.20,
     reach: null, arc_width: null, range: 850, projectile_speed: 1100, projectile_radius: 8,
-    pierce: 2, mana_cost: 0, stamina_cost: 15, element: null },
+    pierce: 2, mana_cost: 0, stamina_cost: 15, element: null,
+    stackable: false, ammo_type_id: 102, ammo_type_name: 'bolt', aoe_radius: null },
   { id: 20, name: 'apprentice staff', category: 'weapon', kind: 'projectile', damage: 10, cooldown: 0.55,
     reach: null, arc_width: null, range: 500, projectile_speed: 650, projectile_radius: 10,
-    pierce: 1, mana_cost: 8, stamina_cost: 0, element: 'arcane' },
+    pierce: 1, mana_cost: 8, stamina_cost: 0, element: 'arcane',
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 21, name: 'frost staff', category: 'weapon', kind: 'projectile', damage: 13, cooldown: 0.70,
     reach: null, arc_width: null, range: 620, projectile_speed: 650, projectile_radius: 12,
-    pierce: 1, mana_cost: 16, stamina_cost: 0, element: 'ice' },
+    pierce: 1, mana_cost: 16, stamina_cost: 0, element: 'ice',
+    stackable: false, ammo_type_id: null, aoe_radius: null },
   { id: 22, name: 'flame staff', category: 'weapon', kind: 'projectile', damage: 16, cooldown: 0.80,
     reach: null, arc_width: null, range: 550, projectile_speed: 600, projectile_radius: 14,
-    pierce: 1, mana_cost: 18, stamina_cost: 0, element: 'fire' },
+    pierce: 1, mana_cost: 18, stamina_cost: 0, element: 'fire',
+    stackable: false, ammo_type_id: null, aoe_radius: 90 },
   { id: 23, name: 'storm staff', category: 'weapon', kind: 'projectile', damage: 19, cooldown: 0.95,
     reach: null, arc_width: null, range: 700, projectile_speed: 1000, projectile_radius: 10,
-    pierce: 1, mana_cost: 24, stamina_cost: 0, element: 'lightning' },
+    pierce: 1, mana_cost: 24, stamina_cost: 0, element: 'lightning',
+    stackable: false, ammo_type_id: null, aoe_radius: 70 },
   { id: 24, name: 'archmage staff', category: 'weapon', kind: 'projectile', damage: 24, cooldown: 1.10,
     reach: null, arc_width: null, range: 800, projectile_speed: 850, projectile_radius: 14,
-    pierce: 1, mana_cost: 32, stamina_cost: 0, element: 'arcane' },
+    pierce: 1, mana_cost: 32, stamina_cost: 0, element: 'arcane',
+    stackable: false, ammo_type_id: null, aoe_radius: 110 },
+  // --- 3 ammo rows, from 1714440021000_aoe_ammo.js ---
+  { id: 101, name: 'arrow', category: 'ammo', kind: null, damage: 0, cooldown: 0,
+    reach: null, arc_width: null, range: null, projectile_speed: null, projectile_radius: null,
+    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+    stackable: true, ammo_type_id: null, aoe_radius: null },
+  { id: 102, name: 'bolt', category: 'ammo', kind: null, damage: 0, cooldown: 0,
+    reach: null, arc_width: null, range: null, projectile_speed: null, projectile_radius: null,
+    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+    stackable: true, ammo_type_id: null, aoe_radius: null },
+  { id: 103, name: 'stone', category: 'ammo', kind: null, damage: 0, cooldown: 0,
+    reach: null, arc_width: null, range: null, projectile_speed: null, projectile_radius: null,
+    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+    stackable: true, ammo_type_id: null, aoe_radius: null },
 ];
+
+// THE test that makes SEED_ROWS mean anything. Every guard below — the
+// stamina gate, the mana gate, "every weapon with ammo_type_id points at an
+// ammo row", "no weapon has both aoe_radius and pierce > 1", and "AoE
+// falloff leaves a meaningful damage band" — iterates SEED_ROWS, a
+// hand-transcribed fixture, not the database. Without this test, all five
+// are transcription checks: they prove SEED_ROWS is internally consistent
+// with itself, never that it still describes what Postgres actually serves.
+// A migration that rebalances a cooldown or drops an ammo wiring, with
+// nobody remembering to update SEED_ROWS, leaves every one of those tests
+// green while the live catalog is inert. That shape has shipped twice
+// already in this project (the stamina gate, the stale duplicated mock) —
+// this closes it for the catalog fixture too.
+//
+// Same skip-if-unreachable discipline as authority_ammo_db.test.js,
+// including its instinct of pre-checking that the thing this test leans on
+// (the self-referencing ammo FK) actually exists, so the ammo-name
+// comparison below can't itself go vacuous.
+test('the live item_types catalog matches SEED_ROWS (name, category, kind, damage, cooldown, mana_cost, stamina_cost, pierce, projectile_radius, stackable, ammo reference, aoe_radius)', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — SEED_ROWS is UNVERIFIED against the live `
+      + 'catalog on this run, which means the stamina gate, mana gate, ammo-wiring, aoe/pierce, and aoe-falloff '
+      + 'guards below are only checking a hand-transcribed copy, not the real database';
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    const fk = await pool.query(
+      `SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'item_types'::regclass AND contype = 'f'
+          AND confrelid = 'item_types'::regclass`,
+    );
+    assert.equal(fk.rowCount, 1,
+      'item_types must still have its self-referencing ammo_type_id FK — without it, comparing ammo '
+      + 'references by name below would be checking nothing');
+
+    // SEED_ROWS is deliberately weapon+ammo only ("22 weapons + 3 ammo = 25
+    // rows" per its own comment) — the five guards it defends never look at
+    // armor. Fetch id+name for every row (armor included) so ammo_type_id
+    // can resolve to a referenced name even in the hypothetical case ammo
+    // ever pointed at a non-weapon/ammo row, but restrict the comparison set
+    // itself to weapon+ammo so armor rows aren't reported as false drift.
+    const all = await pool.query('SELECT id, name FROM item_types');
+    const r = await pool.query(
+      `SELECT id, name, category, kind, damage, cooldown, mana_cost, stamina_cost,
+              pierce, projectile_radius, stackable, ammo_type_id, aoe_radius
+         FROM item_types
+        WHERE category IN ('weapon', 'ammo')`,
+    );
+    assert.ok(r.rows.length > 0, 'item_types must have weapon/ammo rows for this comparison to mean anything');
+
+    const nameById = new Map(all.rows.map((row) => [row.id, row.name]));
+    const num = (v) => (v == null ? null : Number(v));
+    // Compared fields only — the ones the five guards above actually read.
+    // `id` is deliberately excluded: ids are not stable across environments
+    // (seed order, prior migrations, manual edits), only names are.
+    const FIELDS = ['category', 'kind', 'damage', 'cooldown', 'mana_cost', 'stamina_cost',
+      'pierce', 'projectile_radius', 'stackable', 'ammo_type_name', 'aoe_radius'];
+
+    function fromDbRow(row) {
+      return {
+        category: row.category,
+        kind: row.kind,
+        damage: num(row.damage),
+        cooldown: num(row.cooldown),
+        mana_cost: num(row.mana_cost),
+        stamina_cost: num(row.stamina_cost),
+        pierce: num(row.pierce),
+        projectile_radius: num(row.projectile_radius),
+        stackable: row.stackable,
+        ammo_type_name: row.ammo_type_id == null ? null : nameById.get(row.ammo_type_id),
+        aoe_radius: num(row.aoe_radius),
+      };
+    }
+    function fromSeedRow(w) {
+      return {
+        category: w.category,
+        kind: w.kind,
+        damage: num(w.damage),
+        cooldown: num(w.cooldown),
+        mana_cost: num(w.mana_cost),
+        stamina_cost: num(w.stamina_cost),
+        pierce: num(w.pierce),
+        projectile_radius: num(w.projectile_radius),
+        stackable: w.stackable,
+        ammo_type_name: w.ammo_type_name ?? null,
+        aoe_radius: num(w.aoe_radius),
+      };
+    }
+
+    const dbByName = new Map(r.rows.map((row) => [row.name, fromDbRow(row)]));
+    const seedByName = new Map(SEED_ROWS.map((w) => [w.name, fromSeedRow(w)]));
+
+    // Report BOTH directions of mismatch, not just the first one found: a
+    // drifted migration can add, remove, and rebalance rows all at once, and
+    // whoever reads this failure needs the whole list to fix SEED_ROWS in
+    // one pass rather than one test-run-per-field.
+    const problems = [];
+    for (const [name, dbRow] of dbByName) {
+      if (!seedByName.has(name)) {
+        problems.push(`DB has item type '${name}' with no entry in SEED_ROWS — add it to SEED_ROWS`);
+        continue;
+      }
+      const seedRow = seedByName.get(name);
+      for (const field of FIELDS) {
+        if (dbRow[field] !== seedRow[field]) {
+          problems.push(
+            `'${name}' field '${field}' drifted: DB has ${JSON.stringify(dbRow[field])}, SEED_ROWS has `
+            + `${JSON.stringify(seedRow[field])} — update SEED_ROWS to match the live catalog`,
+          );
+        }
+      }
+    }
+    for (const name of seedByName.keys()) {
+      if (!dbByName.has(name)) {
+        problems.push(`SEED_ROWS has item type '${name}' with no matching row in the DB — update SEED_ROWS `
+          + '(the migration may have renamed, dropped, or never inserted it)');
+      }
+    }
+
+    assert.ok(problems.length === 0,
+      `SEED_ROWS has drifted from the live item_types catalog:\n${problems.join('\n')}`);
+  } finally {
+    await pool.end().catch(() => {});
+  }
+});
 
 test('the seeded catalog has no structurally broken weapon', async () => {
   const pool = { query: async () => ({ rows: SEED_ROWS }) };
@@ -207,6 +394,20 @@ test('loadItemTypes actually SELECTs every column it maps', async () => {
   ]) {
     assert.ok(new RegExp(`\\b${col}\\b`).test(sql), `SELECT must name ${col}`);
   }
+  for (const col of ['stackable', 'ammo_type_id', 'aoe_radius']) {
+    assert.ok(sql.includes(col), `loadItemTypes SELECT must name ${col} — a mapped column missing from the SELECT loads as undefined, so ammo silently never depletes and AoE silently never fires`);
+  }
+});
+
+test('loadItemTypes exposes ammo and aoe fields', async () => {
+  const pool = { query: async () => ({ rows: [{
+    id: 1, name: 'bow', category: 'weapon', kind: 'projectile',
+    stackable: false, ammo_type_id: 7, aoe_radius: null,
+  }] }) };
+  const m = await loadItemTypes(pool);
+  assert.equal(m.get(1).stackable, false);
+  assert.equal(m.get(1).ammo_type_id, 7);
+  assert.equal(m.get(1).aoe_radius, null);
 });
 
 // A resource gate only ever "fires" (refuses an attack) if what a weapon
@@ -246,5 +447,41 @@ test('every mana-costed weapon\'s cost exceeds what regens during its own cooldo
       `${w.name}: mana cost ${w.mana_cost} <= regen ${PLAYER_MANA_REGEN} x cooldown ${w.cooldown} `
       + `= ${regenPerCast}, so the mana gate can never fire`,
     );
+  }
+});
+
+test('every weapon with ammo_type_id points at an ammo row', () => {
+  // Guards against a weapon wired to another weapon, which would make
+  // firing consume a sword.
+  for (const w of SEED_ROWS.filter((r) => r.ammo_type_id != null)) {
+    const target = SEED_ROWS.find((r) => r.name === w.ammo_type_name);
+    assert.ok(target, `${w.name} references a missing ammo type`);
+    assert.equal(target.category, 'ammo');
+  }
+});
+
+test('no weapon has both aoe_radius and pierce > 1', () => {
+  for (const w of SEED_ROWS) {
+    if (w.aoe_radius != null) {
+      assert.ok((w.pierce ?? 1) <= 1,
+        `${w.name} both detonates and pierces — impact behaviour is ambiguous`);
+    }
+  }
+});
+
+test('every ammo row is stackable and has no kind', () => {
+  for (const a of SEED_ROWS.filter((r) => r.category === 'ammo')) {
+    assert.equal(a.stackable, true);
+    assert.equal(a.kind, null);
+  }
+});
+
+test('AoE falloff leaves a meaningful damage band', () => {
+  // Reachability, not just correctness: if a staff's radius were smaller than
+  // its projectile_radius, the blast would be entirely inside the impact
+  // circle and falloff would never produce a visible gradient.
+  for (const w of SEED_ROWS.filter((r) => r.aoe_radius != null)) {
+    assert.ok(w.aoe_radius > w.projectile_radius * 2,
+      `${w.name}: aoe_radius ${w.aoe_radius} is not meaningfully larger than its projectile radius ${w.projectile_radius} — the blast adds nothing over a direct hit`);
   }
 });

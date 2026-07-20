@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
 const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const { attachAuthority } = require('../src/authority/server.js');
@@ -50,6 +52,25 @@ function token(userId) {
   return jwt.sign({ user_id: userId }, SECRET, { algorithm: 'HS256' });
 }
 
+// Everything a test opened, torn down after that test WHETHER IT PASSED OR
+// THREW. The per-test `handle.close(); server.close()` lines below are the
+// normal path and stay; this is the safety net for the failure path, and it
+// is not optional hygiene. attachAuthority runs five setInterval timers and
+// holds a listening http server, none of which are unref'd, so a test that
+// throws before reaching its own close() leaks all of them — and node:test
+// does not kill the process while a timer is armed. The visible symptom is
+// not a failed test but a suite that reports every result and then hangs
+// forever, which is how four assertion failures in this file turned into a
+// five-minute `npm test` that never exited. Registering teardown at boot
+// time means a new test cannot reintroduce that by forgetting a close().
+const openResources = [];
+test.afterEach(() => {
+  while (openResources.length) {
+    const r = openResources.pop();
+    try { r.close(); } catch { /* already closed: teardown is idempotent */ }
+  }
+});
+
 // Boot an http server with the authority attached; returns {url, handle, server}.
 function boot() {
   return bootWith(fakePool());
@@ -61,10 +82,23 @@ function bootWith(pool) {
   return new Promise((resolve) => {
     const server = http.createServer();
     const handle = attachAuthority(server, pool, { jwtSecret: SECRET, tickMs: 20 });
+    track(handle, server);
     server.listen(0, () => {
       const port = server.address().port;
       resolve({ url: `ws://127.0.0.1:${port}/authority`, handle, server });
     });
+  });
+}
+
+// Register an authority handle + its server for guaranteed teardown.
+// server.close() throws ERR_SERVER_NOT_RUNNING if the test already closed it,
+// hence the listening guard rather than a bare call.
+function track(handle, server) {
+  openResources.push({
+    close() {
+      handle.close();
+      if (server.listening) server.close();
+    },
   });
 }
 
@@ -95,7 +129,13 @@ function delayedFakePool(delayMs, opts = {}) {
 }
 
 function connect(url, uid) {
-  return new WebSocket(`${url}?token=${encodeURIComponent(token(uid))}`);
+  const ws = new WebSocket(`${url}?token=${encodeURIComponent(token(uid))}`);
+  // Client sockets are tracked for the same failure-path reason as the server:
+  // terminate(), not close(), so a socket still mid-handshake when the test
+  // threw is dropped outright instead of waiting on a close reply from a
+  // server that is already gone.
+  openResources.push({ close() { ws.terminate(); } });
+  return ws;
 }
 
 // Await the next JSON message of a given type.
@@ -254,6 +294,7 @@ function bootHeartbeat(heartbeatMs) {
     const handle = attachAuthority(server, fakePool(), {
       jwtSecret: SECRET, tickMs: 20, heartbeatMs,
     });
+    track(handle, server);
     server.listen(0, () => {
       const port = server.address().port;
       resolve({ url: `ws://127.0.0.1:${port}/authority`, handle, server });
@@ -489,6 +530,319 @@ test('a second join on the same socket is rejected (no free re-heal / no ghost)'
   const s = await nextMsg(ws, 'state');
   assert.ok(Array.isArray(s.players));
 
+  ws.close(); handle.close(); server.close();
+});
+
+// ---------------------------------------------------------------------------
+// Ammo: the attack handler's ordering invariant (canAttack → consume → attack)
+// ---------------------------------------------------------------------------
+
+const AMMO_TYPE_ID = 7;
+
+// The shape mkAttackHarness's pool.query uses to recognize consumeAmmo's
+// UPDATE-branch of the CTE. Pulled out to a named constant — not just a
+// literal inline in the query function below — so the "does this still match
+// ammo.js" test a few lines down is checking the SAME regex the harness
+// actually runs, not a hand-copied lookalike that could drift from it
+// unnoticed. See the "actually matches ammo.js" test for why this binding
+// matters: a stale copy of exactly this mock already cost a full round of
+// misdiagnosis in this slice.
+const AMMO_UPDATE_RE = /UPDATE player_items SET quantity/i;
+
+// A weapon type row with every optional column nulled out, so a test that
+// supplies a partial weapon (e.g. a melee one with no ammo) genuinely gets
+// ammo_type_id: null rather than inheriting the ammo bow's.
+const BLANK_WEAPON = {
+  id: 9, name: 'harness-weapon', category: 'weapon', slot: 'main_hand', two_handed: false,
+  kind: null, damage: 0, cooldown: 0, reach: null, arc_width: null, range: null,
+  projectile_speed: null, projectile_radius: null, pierce: null, mana_cost: 0,
+  stamina_cost: 0, element: null, defense: null, resistances: null,
+  stackable: false, ammo_type_id: null, aoe_radius: null,
+};
+
+// The default harness weapon: a bow that eats ammo and costs stamina, with a
+// long cooldown so `_attackCd > 0` after a successful shot is not a race with
+// the 20ms tick loop's cooldown decay.
+const AMMO_BOW = {
+  kind: 'projectile', damage: 12, cooldown: 5, range: 2000, projectile_speed: 4000,
+  projectile_radius: 40, pierce: 1, stamina_cost: 5, ammo_type_id: AMMO_TYPE_ID,
+};
+
+// Boot a world with one joined player holding `opts.weapon` in main_hand, and
+// route the real consumeAmmo() UPDATE through `opts.onConsume`.
+//
+// Nothing here reimplements the handler: frames go over a real websocket into
+// the real attachAuthority message handler, and the consume decision is made
+// at the pool boundary, so src/authority/ammo.js runs for real too. The only
+// thing the test injects is whether the DB had a unit to spend.
+async function mkAttackHarness(opts = {}) {
+  const weapon = { ...BLANK_WEAPON, ...(opts.weapon || AMMO_BOW) };
+  const onConsume = opts.onConsume || (() => true);
+  // What ammoCount()'s SELECT SUM should currently report; a function so a
+  // test can make it move (e.g. decrement in lockstep with onConsume) to
+  // simulate the summed-across-stacks total draining shot by shot.
+  const ammoCountFn = opts.ammoCountFn || (() => 5);
+  const base = fakePool();
+  const pool = {
+    query: async (sql, params) => {
+      // Must be matched BEFORE the generic /FROM player_items/ branch: the
+      // consume statement mentions player_items in its subquery too.
+      //
+      // The shape here IS the contract consumeAmmo reads, and it must track
+      // src/authority/ammo.js exactly. That statement is a single CTE whose
+      // final SELECT is `(count(*) FROM del) + (count(*) FROM upd) AS spent`,
+      // so it ALWAYS returns exactly one row, and "no unit was spent" is
+      // spent = 0 — never zero rows and never a bare rowCount. Returning the
+      // pre-CTE shape (rowCount plus an id/quantity row) makes consumeAmmo
+      // read `undefined` for spent and report every successful shot as out of
+      // ammo, which is silent: the four tests below then fail on the
+      // *cooldown* assertion with no hint that the mock is the liar. count(*)
+      // is a bigint, so node-pg hands back a STRING — modelled here so the
+      // Number() coercion in consumeAmmo stays exercised by this suite.
+      if (AMMO_UPDATE_RE.test(sql)) {
+        return { rowCount: 1, rows: [{ spent: onConsume(params) ? '1' : '0' }] };
+      }
+      // Also must precede the generic /FROM player_items/ branch below:
+      // ammoCount()'s SUM query mentions player_items too.
+      if (/SELECT COALESCE\(SUM\(quantity\)/i.test(sql)) {
+        return { rows: [{ n: ammoCountFn(params) }] };
+      }
+      if (/FROM item_types/i.test(sql)) return { rows: [weapon] };
+      if (/FROM player_items/i.test(sql)) {
+        return { rows: [{ id: 'i9', item_type_id: 9, quantity: 1 },
+                        { id: 'ammo1', item_type_id: AMMO_TYPE_ID, quantity: 5 }] };
+      }
+      if (/FROM player_equipment/i.test(sql)) return { rows: [{ slot: 'main_hand', item_id: 'i9' }] };
+      return base.query(sql, params);
+    },
+  };
+
+  const { url, handle, server } = await bootWith(pool);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  const sent = [];
+  ws.on('message', (data) => {
+    const m = JSON.parse(data);
+    if (m.type !== 'state' && m.type !== 'creatures') sent.push(m);
+  });
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const world = handle.worlds.get('w1').world;
+  const player = world.getPlayer('1');
+  assert.ok(player, 'harness player joined');
+  assert.equal(world.canAttack('1').weapon.id, 9, 'the harness weapon is the active one');
+
+  return {
+    ws, handle, server, world, player, sent,
+    // Send attack frames and wait until the server has finished processing
+    // them. The barrier is an unequip of a bogus slot: it is a pure no-op that
+    // still chains onto ws._opChain, so its reply cannot arrive until every
+    // attack queued before it has fully run (and the synchronous melee path is
+    // long done by the time the barrier frame is even parsed).
+    async sendAttack(ax = 1, ay = 0, times = 1) {
+      for (let i = 0; i < times; i++) ws.send(JSON.stringify({ type: 'attack', ax, ay }));
+      ws.send(JSON.stringify({ type: 'unequip', slot: '__barrier__' }));
+      const err = await nextMsg(ws, 'error');
+      assert.match(err.message, /unknown slot/i, 'barrier resolved');
+    },
+    close() { ws.close(); handle.close(); server.close(); },
+  };
+}
+
+// Nothing else binds AMMO_UPDATE_RE to production code. If the CTE in
+// ammo.js is reworded (e.g. the UPDATE clause's column list or spacing
+// changes), this mock's branch falls through silently to the generic
+// /FROM player_items/ branch further down, `spent` reads `undefined`, and
+// every test using mkAttackHarness fails on a misleading *cooldown*
+// assertion with no hint that the mock — not consumeAmmo — is the liar. This
+// is exactly the failure mode that cost a full round of misdiagnosis earlier
+// in this slice. Asserting against the real source text turns that into a
+// loud, correctly-attributed failure right here instead.
+test('mkAttackHarness ammo regex actually matches the real consumeAmmo SQL in ammo.js', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/authority/ammo.js'), 'utf8');
+  assert.match(src, AMMO_UPDATE_RE,
+    'AMMO_UPDATE_RE no longer matches src/authority/ammo.js — the consumeAmmo CTE was reworded. '
+    + 'Update AMMO_UPDATE_RE in this file to match the new SQL, or mkAttackHarness will silently '
+    + 'fall through to a generic branch and every test using it will fail on the wrong assertion.');
+});
+
+test('an attack refused for cooldown does not consume ammo', async () => {
+  const spent = [];
+  const h = await mkAttackHarness({ onConsume: () => { spent.push(1); return true; } });
+  h.player._attackCd = 1; // cooldown running
+  await h.sendAttack(1, 0);
+  assert.equal(spent.length, 0,
+    'ammo was spent on an attack that was refused for cooldown — the consume must come AFTER canAttack');
+  h.close();
+});
+
+test('an attack refused for stamina does not consume ammo', async () => {
+  const spent = [];
+  const h = await mkAttackHarness({ onConsume: () => { spent.push(1); return true; } });
+  h.player.stamina = 0;
+  await h.sendAttack(1, 0);
+  assert.equal(spent.length, 0, 'ammo was spent on an attack refused for stamina');
+  h.close();
+});
+
+test('firing with no ammo sends noammo and leaves the cooldown untouched', async () => {
+  const h = await mkAttackHarness({ onConsume: () => false });
+  await h.sendAttack(1, 0);
+  assert.equal(h.player._attackCd, 0,
+    'an ammo denial must not consume the cooldown, matching the mana/stamina rule');
+  const noammo = h.sent.find((m) => m.type === 'noammo');
+  assert.ok(noammo, 'the client is told it is out of ammo');
+  // The refusal must name the ammo type. It is the client's only authoritative
+  // signal that this type is at zero — without it the HUD keeps rendering its
+  // last believed count while every shot is being refused, and the client
+  // would have to guess the type from equipment state that may already have
+  // moved on.
+  assert.equal(noammo.item_type_id, AMMO_TYPE_ID,
+    'noammo must carry the ammo type it refused, so the client can zero exactly that count');
+  h.close();
+});
+
+test('a weapon with no ammo_type_id never touches player_items', async () => {
+  let consumed = false;
+  const h = await mkAttackHarness({
+    weapon: { kind: 'melee', reach: 80, arc_width: 1, damage: 5, cooldown: 0.3 },
+    onConsume: () => { consumed = true; return true; },
+  });
+  await h.sendAttack(1, 0);
+  assert.equal(consumed, false, 'the ammo-free hot path must not hit the DB');
+  h.close();
+});
+
+test('a successful ammo attack spends exactly one unit and fires', async () => {
+  let count = 0;
+  const h = await mkAttackHarness({ onConsume: () => { count += 1; return true; } });
+  await h.sendAttack(1, 0);
+  assert.equal(count, 1);
+  assert.ok(h.player._attackCd > 0, 'a successful attack starts the cooldown');
+  h.close();
+});
+
+test('two attack frames in one batch spend only one unit', async () => {
+  // Both frames are parsed (and would both be gated) before either chained
+  // callback runs, so a gate captured at parse time is already stale by the
+  // time the second consume happens: the second shot would burn a unit and
+  // then be refused by attack() for the cooldown the first one started. The
+  // handler must re-gate inside the chain, immediately before consuming.
+  let count = 0;
+  const h = await mkAttackHarness({ onConsume: () => { count += 1; return true; } });
+  await h.sendAttack(1, 0, 2);
+  assert.equal(count, 1, 'the cooldown-refused second shot must not consume a unit');
+  h.close();
+});
+
+// ---------------------------------------------------------------------------
+// The 'ammo' push frame: the HUD's whole reason for existing. consumeAmmo
+// succeeding is not enough — the shooter must actually be told the new
+// count, or the number on screen freezes after the first shot.
+// ---------------------------------------------------------------------------
+
+test('a successful ammo attack sends an ammo frame with the correct summed count', async () => {
+  // 43 stands in for two real, never-merged stacks (12 + 31) — ammoCount()
+  // sums across all of them, so the pushed number must reflect that sum
+  // minus the one unit this shot just spent, not a single row's quantity.
+  let remaining = 43;
+  const h = await mkAttackHarness({
+    onConsume: () => { remaining -= 1; return true; },
+    ammoCountFn: () => remaining,
+  });
+  await h.sendAttack(1, 0);
+  const frame = h.sent.find((m) => m.type === 'ammo');
+  assert.ok(frame, 'a successful shot must push an ammo frame to the shooter');
+  assert.equal(frame.item_type_id, AMMO_TYPE_ID);
+  assert.equal(frame.count, 42, 'the pushed count must be the post-consume summed total');
+  h.close();
+});
+
+test('firing twice reports a decreasing count', async () => {
+  let remaining = 10;
+  const h = await mkAttackHarness({
+    onConsume: () => { remaining -= 1; return true; },
+    ammoCountFn: () => remaining,
+  });
+  await h.sendAttack(1, 0);
+  h.player._attackCd = 0; // clear the cooldown so the second shot is not refused
+  await h.sendAttack(1, 0);
+  const frames = h.sent.filter((m) => m.type === 'ammo');
+  assert.equal(frames.length, 2, 'each successful shot pushes its own ammo frame');
+  assert.equal(frames[0].count, 9);
+  assert.equal(frames[1].count, 8);
+  assert.ok(frames[1].count < frames[0].count, 'the count must decrease, not stay frozen');
+  h.close();
+});
+
+test('firing with no ammo does not push an ammo frame', async () => {
+  const h = await mkAttackHarness({ onConsume: () => false });
+  await h.sendAttack(1, 0);
+  assert.ok(!h.sent.some((m) => m.type === 'ammo'), 'a refused shot spends nothing, so there is no new count to push');
+  h.close();
+});
+
+// ---------------------------------------------------------------------------
+// AoE: detonations must actually reach a connected client
+// ---------------------------------------------------------------------------
+
+// An ammo-free AoE bow with a very short range, so the projectile runs out of
+// flight (which counts as an impact) and detonates within a tick or two.
+const AOE_BOW = {
+  kind: 'projectile', damage: 12, cooldown: 5, range: 60, projectile_speed: 900,
+  projectile_radius: 8, pierce: null, aoe_radius: 96, element: 'arcane',
+  ammo_type_id: null,
+};
+
+test('a detonation reaches the client on the state frame, and only once', async () => {
+  // Regression guard for the open item left by the AoE tick work: the tick
+  // stashed entry.pendingDetonations and NOTHING ever read it. Because the
+  // stash is replaced (not appended to) every tick, an unconsumed detonation
+  // is silently overwritten ~20ms later and no blast ever renders. This test
+  // fails outright if the broadcast does not carry it.
+  const h = await mkAttackHarness({ weapon: AOE_BOW });
+
+  const frames = [];
+  h.ws.on('message', (data) => {
+    const m = JSON.parse(data);
+    if (m.type === 'state') frames.push(m);
+  });
+
+  await h.sendAttack(1, 0);
+
+  // Poll real state frames until one carries a detonation.
+  let det = null;
+  for (let i = 0; i < 30 && det == null; i++) {
+    const s = await nextMsg(h.ws, 'state');
+    if (Array.isArray(s.detonations) && s.detonations.length > 0) det = s.detonations[0];
+  }
+
+  assert.ok(det, 'a state frame must carry the detonation the tick produced');
+  assert.equal(det.radius, 96, 'the blast radius the client renders comes from the weapon');
+  assert.equal(det.element, 'arcane');
+  assert.ok(Number.isFinite(det.x) && Number.isFinite(det.y), 'world-space centre');
+
+  // The stash must be cleared after sending: a detonation repeated on every
+  // subsequent frame would leave a blast ring stuck on screen forever.
+  const before = frames.length;
+  for (let i = 0; i < 5; i++) await nextMsg(h.ws, 'state');
+  const later = frames.slice(before).filter((f) => Array.isArray(f.detonations) && f.detonations.length);
+  assert.equal(later.length, 0, 'detonations must not repeat on later frames');
+
+  h.close();
+});
+
+test('a state frame with no detonations omits the field entirely', async () => {
+  // Keeps the common-case frame small; the client treats a missing field as
+  // "no blasts this tick".
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+  const s = await nextMsg(ws, 'state');
+  assert.equal(s.detonations, undefined);
   ws.close(); handle.close(); server.close();
 });
 

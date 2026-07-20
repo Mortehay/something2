@@ -263,7 +263,7 @@ const ITEM_SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', '
 // Mirror the DB CHECKs so the API returns 400 instead of a constraint error.
 function validateItemType(b) {
   if (!b.name) return 'Name is required';
-  if (!['weapon', 'armor'].includes(b.category)) return "category must be 'weapon' or 'armor'";
+  if (!['weapon', 'armor', 'ammo'].includes(b.category)) return "category must be 'weapon', 'armor' or 'ammo'";
   if (b.element != null && !ITEM_ELEMENTS.includes(b.element)) return `element must be one of ${ITEM_ELEMENTS.join(', ')}`;
   if (b.slot != null && !ITEM_SLOTS.includes(b.slot)) return `slot must be one of ${ITEM_SLOTS.join(', ')}`;
   if (b.resistances) {
@@ -283,6 +283,9 @@ function validateItemType(b) {
     if (b.kind === 'projectile' && (b.range == null || b.projectile_speed == null || b.projectile_radius == null)) {
       return 'projectile weapons need range, projectile_speed and projectile_radius';
     }
+  } else if (b.category === 'ammo') {
+    if (b.stackable !== true) return 'ammo must be stackable';
+    if (b.kind != null) return 'ammo must not have a kind';
   } else {
     if (b.slot == null || b.defense == null) return 'armor needs slot and defense';
   }
@@ -290,6 +293,24 @@ function validateItemType(b) {
     if (typeof b.stamina_cost !== 'number' || !Number.isFinite(b.stamina_cost) || b.stamina_cost < 0) {
       return 'stamina_cost must be a non-negative finite number';
     }
+  }
+  if (b.aoe_radius != null) {
+    if (typeof b.aoe_radius !== 'number' || !Number.isFinite(b.aoe_radius) || b.aoe_radius < 0) {
+      return 'aoe_radius must be a non-negative finite number';
+    }
+  }
+  if (b.ammo_type_id != null) {
+    if (typeof b.ammo_type_id !== 'number' || !Number.isFinite(b.ammo_type_id) || b.ammo_type_id < 0) {
+      return 'ammo_type_id must be a non-negative finite number';
+    }
+  }
+  // Mirror the DB CHECKs: a detonating projectile can't also pierce, and only
+  // a projectile weapon can consume ammo.
+  if (b.aoe_radius != null && b.pierce > 1) {
+    return 'aoe_radius and pierce > 1 are mutually exclusive';
+  }
+  if (b.ammo_type_id != null && b.kind !== 'projectile') {
+    return 'ammo_type_id is only valid on a projectile weapon';
   }
   return null;
 }
@@ -312,13 +333,15 @@ app.post('/api/item-types', async (req, res) => {
     const result = await pool.query(
       `INSERT INTO item_types
         (name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
-         range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element, defense, resistances, icon)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
+         range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element, defense, resistances, icon,
+         stackable, ammo_type_id, aoe_radius)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
        b.mana_cost ?? 0, b.stamina_cost ?? 0, b.element ?? null, b.defense ?? null,
-       JSON.stringify(b.resistances ?? {}), b.icon ?? null],
+       JSON.stringify(b.resistances ?? {}), b.icon ?? null,
+       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null],
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -337,13 +360,15 @@ app.put('/api/item-types/:id', async (req, res) => {
         name=$1, category=$2, slot=$3, two_handed=$4, kind=$5, damage=$6, cooldown=$7,
         reach=$8, arc_width=$9, range=$10, projectile_speed=$11, projectile_radius=$12,
         pierce=$13, mana_cost=$14, stamina_cost=$15, element=$16, defense=$17, resistances=$18, icon=$19,
+        stackable=$20, ammo_type_id=$21, aoe_radius=$22,
         updated_at=now()
-       WHERE id=$20 RETURNING *`,
+       WHERE id=$23 RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
        b.mana_cost ?? 0, b.stamina_cost ?? 0, b.element ?? null, b.defense ?? null,
-       JSON.stringify(b.resistances ?? {}), b.icon ?? null, req.params.id],
+       JSON.stringify(b.resistances ?? {}), b.icon ?? null,
+       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, req.params.id],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
     res.json(result.rows[0]);
