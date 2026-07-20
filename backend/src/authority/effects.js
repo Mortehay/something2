@@ -34,12 +34,14 @@ const BURN_MAGNITUDE = 2;    // damage dealt per burn tick (pre-mitigation)
 const BURN_TICK_MS = 1000;   // fixed interval between burn damage ticks
 
 const CHILL_DURATION_MS = 3000;
-// Consumed by world.js's stepEffects as a MULTIPLIER on the entity's base
-// move speed (speed = base * magnitude while chilled), not as the fraction
-// subtracted. At 0.3 that is a 70% slow. See the note in task-5-report.md:
-// if a ~30-40% slow was the intent, this constant wants to be ~0.6-0.7 — the
-// semantics are now unambiguous either way.
-const CHILL_MAGNITUDE = 0.3;
+// This is a MULTIPLIER on the entity's base move speed, consumed by world.js's
+// stepEffects as `speed = baseSpeed * magnitude` while chilled — it is NOT the
+// fraction subtracted. 0.6 means a chilled entity moves at 60% of base speed,
+// i.e. a 40% slow (per the elements design spec's "movement speed × 0.6").
+// Do not read this as "0.6 = a 60% slow": that reduction/multiplier mixup is
+// exactly how this constant previously shipped at 0.3 (a 70% slow) while
+// every doc and design intent said 40%.
+const CHILL_MAGNITUDE = 0.6;
 
 const SHOCK_DURATION_MS = 2000;
 const SHOCK_MAGNITUDE = 1;   // shock's effect is an interrupt, not a scalar
