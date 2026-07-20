@@ -110,9 +110,13 @@ const SEED_ROWS = [
   // (vulnerability, interrupt, mana drain), so the storm staff pays for them by
   // becoming the worst staff in the game by damage-per-mana. An invariant test
   // enforces that ordering — see the elemental invariants suite.
+  // mana_cost then relaxed 34 -> 22 by 1714440023000_storm_staff_mana.js: at 34,
+  // mana permitted 0.29 shots/s against a cooldown implying 0.91, so the
+  // cooldown was decorative and sustained DPS was a third of the field. Still
+  // strictly the worst dmg/mana (0.64 vs archmage's 0.75).
   { id: 23, name: 'storm staff', category: 'weapon', kind: 'projectile', damage: 14, cooldown: 1.10,
     reach: null, arc_width: null, range: 700, projectile_speed: 1000, projectile_radius: 10,
-    pierce: 1, mana_cost: 34, stamina_cost: 0, element: 'lightning',
+    pierce: 1, mana_cost: 22, stamina_cost: 0, element: 'lightning',
     stackable: false, ammo_type_id: null, aoe_radius: 70 },
   { id: 24, name: 'archmage staff', category: 'weapon', kind: 'projectile', damage: 24, cooldown: 1.10,
     reach: null, arc_width: null, range: 800, projectile_speed: 850, projectile_radius: 14,
