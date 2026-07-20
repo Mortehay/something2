@@ -6,7 +6,7 @@ const { resolveMove } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc, hasLineOfSight } = require('./weapons');
 const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
-const { applyElementEffect, activeEffectKeys } = require('./effects');
+const { applyElementEffect, activeEffectKeys, canAct } = require('./effects');
 
 const DIRS = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
@@ -127,8 +127,26 @@ class CreatureSim {
           const f = facingFor(vx, vy); if (f) c.facing = f;
           c.dirty = true;
         }
-        // Contact damage.
-        if (c._attackCd <= 0 && dist2(cc.x, cc.y, tc.x, tc.y) <= CONTACT_RANGE * CONTACT_RANGE) {
+        // Contact damage. Gated by canAct for the same reason the player
+        // attack paths are (world.js's canAttack/attack): a shocked creature
+        // must miss its bite.
+        //
+        // Without this check the interrupt was inert in PvE. applyElementEffect
+        // stamps _interruptedUntil and _shockImmuneUntil onto creatures from
+        // every lightning hit — the melee arc, the projectile, the AoE — and
+        // nothing read either field, so the storm staff paid the game's worst
+        // damage-per-mana (0.636) for three riders while delivering two of them
+        // against creatures. That is precisely the inert-mechanic failure mode
+        // this slice exists to remove.
+        //
+        // Refused like a cooldown, not eaten: the attack does not happen AND
+        // _attackCd is not stamped, so the creature bites as soon as it recovers
+        // rather than also serving a fresh cooldown for the swing it never took.
+        // The immunity window in applyShockInterrupt (stamped once, deliberately
+        // never refreshed) is what stops this becoming a perma-stun — it applies
+        // to creatures for free, because it lives on the target.
+        if (c._attackCd <= 0 && canAct(c, now)
+            && dist2(cc.x, cc.y, tc.x, tc.y) <= CONTACT_RANGE * CONTACT_RANGE) {
           applyDamageWithEffects(tp, CREATURE_DAMAGE, 'physical', tp.mit || NO_MITIGATION, now);
           c._attackCd = CREATURE_ATTACK_COOLDOWN;
         }

@@ -5,6 +5,9 @@ const {
   CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN, loadCreatureTypes,
 } = require('../src/authority/creatures.js');
 const { spawnChunkCreatures } = require('../src/services/mapService.js');
+const {
+  applyElementEffect, SHOCK_INTERRUPT_MS, SHOCK_IMMUNITY_MS,
+} = require('../src/authority/effects.js');
 
 function stubMap() { return { isWalkable: () => true, speedAt: () => 1, chunkSize: 8 }; }
 const rng = () => 0.5; // no redirect, deterministic roam dir
@@ -278,4 +281,76 @@ test('creature contact damage on player with no mit falls back to NO_MITIGATION 
   };
   s.tick(0.05, new Set(['0,0']), [unarmored]); // acquire + first hit
   assert.equal(unarmored.hp, 100 - CREATURE_DAMAGE, 'unarmored player took full damage (no crash)');
+});
+
+// --- SHOCK'S INTERRUPT AGAINST CREATURES ------------------------------------
+//
+// canAct was read at exactly two sites, world.js's canAttack and attack — both
+// PLAYER attack paths. Creature contact damage never consulted it, so
+// applyElementEffect stamped _interruptedUntil and _shockImmuneUntil onto every
+// creature hit by lightning and nothing anywhere read either field. The
+// interrupt was live in PvP and inert in PvE.
+//
+// That is a balance defect, not just an untidy one: the storm staff is priced
+// at the worst damage-per-mana in the game (0.636) specifically for carrying
+// three riders, and against creatures — which is most of the game — it was
+// delivering two. The design doc's own text says vulnerability AND interrupt
+// are what land in PvE.
+//
+// These tests drive the real tick loop rather than calling canAct directly, so
+// they fail if the guard is removed from the contact-damage site even while
+// effects.js keeps working perfectly.
+test('a SHOCKED creature misses its bite (the interrupt is not PvE-inert)', () => {
+  const s = new CreatureSim(stubMap(), rng);
+  s.addCreatures([creatureAt('a', 100, 100)]);
+  const c = s.creatures.get('a');
+  const p = player('u1', 110, 100);
+
+  // Land the interrupt the way a lightning weapon does — through the one
+  // element->rider mapping, not by setting the field by hand, so this also
+  // proves the rider actually reaches a creature.
+  applyElementEffect(c, 'lightning', 1000);
+  assert.ok(c._interruptedUntil > 1000, 'setup: the lightning hit must have stamped an interrupt');
+
+  // Inside the interrupt window: in contact range, off cooldown, and still
+  // must not land a hit.
+  s.tick(0.05, new Set(['0,0']), [p], 1000 + SHOCK_INTERRUPT_MS / 2);
+  assert.equal(p.hp, 100, 'a shocked creature bit anyway — canAct is not gating contact damage');
+
+  // The refusal must not have burned the cooldown either: once the stagger
+  // ends the creature bites immediately, exactly as if it had been waiting.
+  s.tick(0.05, new Set(['0,0']), [p], 1000 + SHOCK_INTERRUPT_MS + 1);
+  assert.equal(p.hp, 100 - CREATURE_DAMAGE,
+    'the creature did not recover its bite after the interrupt lapsed');
+});
+
+test('a shocked creature cannot be PERMA-stunned: the immunity window is not refreshed', () => {
+  const s = new CreatureSim(stubMap(), rng);
+  s.addCreatures([creatureAt('a', 100, 100)]);
+  const c = s.creatures.get('a');
+  const p = player('u1', 110, 100);
+
+  // Sustained lightning, re-applied far faster than the storm staff's real
+  // 1100ms cooldown — the worst case the immunity window exists to survive.
+  // If applyShockInterrupt ever starts re-stamping on a hit that arrives
+  // inside the window, this creature never acts again and this test goes red.
+  for (let now = 1000; now <= 1000 + SHOCK_IMMUNITY_MS * 2; now += 100) {
+    applyElementEffect(c, 'lightning', now);
+    s.tick(0.05, new Set(['0,0']), [p], now);
+  }
+  assert.ok(p.hp < 100,
+    'under sustained lightning the creature never got a single bite in — that is a chain-lock, '
+    + 'which means the immunity window is being refreshed instead of running to completion');
+
+  // And the gate is real in the other direction too: the creature is NOT
+  // simply ignoring the interrupt. It landed once, so it cost the creature
+  // strictly fewer bites than an un-shocked one over the same span.
+  const s2 = new CreatureSim(stubMap(), rng);
+  s2.addCreatures([creatureAt('b', 100, 100)]);
+  const p2 = player('u2', 110, 100);
+  for (let now = 1000; now <= 1000 + SHOCK_IMMUNITY_MS * 2; now += 100) {
+    s2.tick(0.05, new Set(['0,0']), [p2], now);
+  }
+  assert.ok(p2.hp < p.hp,
+    'the shocked creature dealt as much damage as an un-shocked one — the interrupt bought nothing');
 });
