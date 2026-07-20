@@ -211,9 +211,13 @@ const SEED_ROWS = [
     reach: null, arc_width: null, range: 550, projectile_speed: 600, projectile_radius: 14,
     pierce: 1, mana_cost: 18, stamina_cost: 0, element: 'fire',
     stackable: false, ammo_type_id: null, aoe_radius: 90 },
-  { id: 23, name: 'storm staff', category: 'weapon', kind: 'projectile', damage: 19, cooldown: 0.95,
+  // Rebalanced in 3b-3c: lightning carries all three status riders
+  // (vulnerability, interrupt, mana drain), so the storm staff pays for them by
+  // becoming the worst staff in the game by damage-per-mana. An invariant test
+  // enforces that ordering — see the elemental invariants suite.
+  { id: 23, name: 'storm staff', category: 'weapon', kind: 'projectile', damage: 14, cooldown: 1.10,
     reach: null, arc_width: null, range: 700, projectile_speed: 1000, projectile_radius: 10,
-    pierce: 1, mana_cost: 24, stamina_cost: 0, element: 'lightning',
+    pierce: 1, mana_cost: 34, stamina_cost: 0, element: 'lightning',
     stackable: false, ammo_type_id: null, aoe_radius: 70 },
   { id: 24, name: 'archmage staff', category: 'weapon', kind: 'projectile', damage: 24, cooldown: 1.10,
     reach: null, arc_width: null, range: 800, projectile_speed: 850, projectile_radius: 14,
