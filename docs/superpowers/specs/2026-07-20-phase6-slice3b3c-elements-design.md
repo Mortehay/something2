@@ -106,7 +106,11 @@ Burn routing through `applyDamage` matters: a burn on a fire-resistant target mu
 
 ### Shock's interrupt is the one exception to refresh semantics
 
-Refresh-stacking means that under sustained fire, **a refreshed effect is a permanent effect**. That is acceptable for damage over time and for a partial slow. It is NOT acceptable for anything that removes player control: a storm staff on a 0.95s cooldown would hold a target interrupted indefinitely.
+Refresh-stacking means that under sustained fire, **a refreshed effect is a permanent effect**. That is acceptable for damage over time and for a partial slow. It is NOT acceptable for anything that removes player control.
+
+**Corrected during implementation — the original justification here was arithmetically wrong.** This spec claimed a single storm staff would chain-lock a target. It cannot: a 400ms interrupt against an 1100ms cooldown leaves 700ms of control between shots, so one caster tops out near 36% lockout *even with the immunity window removed entirely*. A test written against the single-caster case is therefore **vacuous** — it stays green under the exact mutation it exists to catch.
+
+The chain-lock is real at **two casters**: an effective 550ms interval against a 400ms interrupt is roughly 73% locked, and that requires nothing beyond the shipped catalog. The immunity window is still necessary; the reason is multi-caster focus fire, not a single weapon's fire rate. The load-bearing tests assert the two-caster case and a pathological every-100ms case; the single-caster test is retained only as a floor, carrying a comment stating what it does not prove.
 
 So the interrupt gets a **separate per-target immunity window (3s)**, stamped when the interrupt lands and **deliberately not refreshed by later hits** — it runs to completion, then the next shock may interrupt again.
 
