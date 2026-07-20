@@ -449,7 +449,12 @@ export class RenderSystem {
     const lines = [
       `Players online: ${1 + remoteCount}`,
       `You: #${localUserId ?? "?"}  pos=(${Math.round(player.x)}, ${Math.round(player.y)})`,
-      `HP: ${player.hp ?? "-"} / ${player.maxHp ?? "-"}`,
+      // Rounded like MP/SP below. HP used to be integral in practice, so the raw
+      // value read fine; resistances, shock's +25% vulnerability and AoE falloff
+      // now all produce fractions, and the HUD was printing
+      // `HP: 23.199992642145737 / 100`. Round for display only — the authority's
+      // value stays exact.
+      `HP: ${player.hp != null ? Math.round(player.hp) : "-"} / ${player.maxHp != null ? Math.round(player.maxHp) : "-"}`,
     ];
     if (mana != null && maxMana != null) {
       lines.push(`MP: ${Math.round(mana)} / ${Math.round(maxMana)}`);
