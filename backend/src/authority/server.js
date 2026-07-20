@@ -513,7 +513,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
     const dt = tickMs / 1000;
     for (const entry of worlds.values()) {
       if (entry.world.isEmpty()) continue;
-      entry.world.tick(dt);
+      // Status effects tick inside world.tick. A creature killed by a burn
+      // tick is reported here and goes through the SAME death commit as a
+      // melee or projectile kill — burn must not become a fourth way to die
+      // that skips loot or deletes twice.
+      const { killedCreatureIds: killedByEffects } = entry.world.tick(dt);
+      for (const id of new Set(killedByEffects)) onCreatureDeath(entry, id);
       entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
       const { killedCreatureIds: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
       for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);

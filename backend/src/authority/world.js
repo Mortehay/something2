@@ -3,6 +3,7 @@ const { CreatureSim } = require('./creatures');
 const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamage, NO_MITIGATION } = require('./damage');
+const { tickEffects, effectMagnitude, BURN, CHILL } = require('./effects');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
 const { GroundItemSim } = require('./groundItems');
 
@@ -17,6 +18,41 @@ const PLAYER_STAMINA_REGEN = 10; // per second
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function sign(v) { return v > 0.3 ? 1 : v < -0.3 ? -1 : 0; }
+
+// Burn is fire damage, so a fire resistance mitigates the DOT exactly as it
+// mitigates the hit that applied it. Routing it through applyDamage (rather
+// than subtracting hp directly) keeps damage.js the single mitigation path.
+const BURN_ELEMENT = 'fire';
+
+// The ONE per-entity effect step, shared by players AND creatures. Two
+// implementations would drift the way melee and ranged line-of-sight drifted
+// before MAX_SUB was unified.
+//
+// `dealBurn(target, magnitude)` is the only thing that differs between the two
+// entity kinds, and it returns true when the target died: a player's burn
+// damage is applied in place and their death is left to resolveDeaths(), while
+// a creature's must go through the creature sim so the creature is removed
+// exactly once and its id can be reported to the caller for the death commit
+// (loot). Burn must not become a fourth way to die that skips that path.
+function stepEffects(target, dtMs, now, dealBurn) {
+  let died = false;
+  for (const ev of tickEffects(target, dtMs, now)) {
+    if (ev.key !== BURN) continue;
+    if (dealBurn(target, ev.magnitude)) died = true;
+  }
+  // Chill RECOMPUTES the effective speed from a stored base every tick. It
+  // must never multiply on apply and divide on expire: that accumulates float
+  // drift and leaves an entity permanently a fraction slower after enough
+  // apply/expire cycles. Recomputing also makes a refresh idempotent for free.
+  //
+  // The base is captured lazily so this one function serves both entity kinds
+  // without either constructor having to opt in (and therefore without either
+  // being able to forget).
+  if (target.baseSpeed === undefined) target.baseSpeed = target.speed;
+  const chill = effectMagnitude(target, CHILL, now);
+  target.speed = chill ? target.baseSpeed * chill : target.baseSpeed;
+  return died;
+}
 
 // 8-way facing string from an input vector; null when idle (keep last facing).
 function facingFromInput(dx, dy) {
@@ -35,6 +71,10 @@ class World {
     this.defaultWeaponId = defaultWeaponId;
     this.projectiles = new ProjectileSim();
     this.groundItems = new GroundItemSim(chunkSize);
+    // Monotonic world clock in ms, advanced only by tick(). effects.js is pure
+    // and never reads a clock itself, so this is the single source of `now`
+    // for every effect apply/expiry in the world.
+    this.now = 0;
   }
 
   addPlayer(userId, spawn, inv = { items: [], equipment: {} }) {
@@ -45,6 +85,10 @@ class World {
       width: PLAYER_W,
       height: PLAYER_H,
       speed: PLAYER_SPEED,
+      // Chill scales `speed` down from this base and back up to it; `speed` is
+      // derived state from here on, recomputed every tick in stepEffects.
+      baseSpeed: PLAYER_SPEED,
+      effects: new Map(),
       facing: 's',
       input: { dx: 0, dy: 0 },
       pendingSeq: 0,
@@ -88,7 +132,34 @@ class World {
     p.autoLoot = on === true;
   }
 
+  // Advances the world clock, ticks status effects for every entity, then
+  // resolves movement. Returns the creature ids killed by a burn tick, in the
+  // same shape attack() and tickProjectiles() already use, so the caller can
+  // route them through the one creature death commit (loot + delete).
   tick(dt) {
+    const dtMs = dt * 1000;
+    this.now += dtMs;
+    const killedCreatureIds = [];
+
+    // Effects resolve BEFORE movement so a chill applied during this tick
+    // slows THIS tick's movement rather than lagging a frame behind.
+    for (const p of this.players.values()) {
+      // A player killed by burn is deliberately left at hp<=0 for
+      // resolveDeaths(), the single player-death path.
+      stepEffects(p, dtMs, this.now, (t, m) => {
+        applyDamage(t, m, BURN_ELEMENT, t.mit || NO_MITIGATION);
+        return false;
+      });
+    }
+    // Snapshot: damageCreatureById deletes from the live map on a kill.
+    for (const c of this.creatures.all()) {
+      stepEffects(c, dtMs, this.now, (t, m) => {
+        if (!this.creatures.damageCreatureById(t.id, m, BURN_ELEMENT)) return false;
+        killedCreatureIds.push(t.id);
+        return true;
+      });
+    }
+
     for (const p of this.players.values()) {
       if (p._attackCd > 0) p._attackCd = Math.max(0, p._attackCd - dt);
       if (p.mana < p.maxMana) p.mana = Math.min(p.maxMana, p.mana + PLAYER_MANA_REGEN * dt);
@@ -100,6 +171,7 @@ class World {
       if (f) p.facing = f;
       p.ackSeq = p.pendingSeq;
     }
+    return { killedCreatureIds };
   }
 
   // Tick creatures with the live players (aggro/chase/contact damage). Death
