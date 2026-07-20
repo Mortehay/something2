@@ -111,6 +111,31 @@ test('a joined player receives its neighborhood creatures and they roam', async 
   ws.close(); handle.close(); server.close();
 });
 
+// The second half of the loader trap: loadCreatureTypes has its own guard
+// test, but the per-chunk world_creatures join is what actually feeds
+// CreatureSim.addCreatures. Dropping et.defense/et.resistances from it loads
+// them as undefined, every creature spawns with an inert `mit`, and every
+// maths test still passes. The fake pool ignores the SQL text, so assert on it.
+test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`', async () => {
+  const sqls = [];
+  const base = fakePool();
+  const pool = { query: async (sql, params) => { sqls.push(sql); return base.query(sql, params); } };
+  const { url, handle, server } = await bootWith(pool);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+  await nextMsg(ws, 'creatures');
+
+  const sel = sqls.find((s) => /SELECT/i.test(s) && /FROM world_creatures/i.test(s));
+  assert.ok(sel, 'chunk activation must SELECT from world_creatures');
+  for (const col of ['defense', 'resistances']) {
+    assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
+      `the world_creatures load must SELECT ${col} — without it every creature's mit is inert`);
+  }
+  ws.close(); handle.close(); server.close();
+});
+
 test('AOI: a far player does not receive the wolf', async () => {
   const { url, handle, server } = await bootWith(fakePool());
   const ws = connect(url, 2); // persisted far away

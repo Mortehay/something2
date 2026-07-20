@@ -340,6 +340,10 @@ function spawnChunkCreatures(world, cx, cy, creatureTypes) {
         y: gRow * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
         hp: t.hp || 10,
         facing: 'S',
+        // Carried from the entity type so a spawned creature arrives with the
+        // data CreatureSim builds its `mit` from.
+        defense: Number(t.defense ?? 0) || 0,
+        resistances: t.resistances || {},
       });
     }
   }

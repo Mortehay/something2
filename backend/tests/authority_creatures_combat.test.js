@@ -2,8 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   CreatureSim, AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE,
-  CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
+  CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN, loadCreatureTypes,
 } = require('../src/authority/creatures.js');
+const { spawnChunkCreatures } = require('../src/services/mapService.js');
 
 function stubMap() { return { isWalkable: () => true, speedAt: () => 1, chunkSize: 8 }; }
 const rng = () => 0.5; // no redirect, deterministic roam dir
@@ -124,6 +125,132 @@ test('damageCreatureById reduces hp and reports death', () => {
   assert.equal(sim.damageCreatureById('a', 6), true);  // 6→0, dead
   assert.ok(!sim.has('a'));
   assert.equal(sim.damageCreatureById('missing', 5), false); // no-op
+});
+
+// ---------------------------------------------------------------------------
+// Creature-side mitigation. Creatures used to take damage via a raw
+// `c.hp -= damage` at three sites while DEALING damage through applyDamage,
+// which made weapon elements inert in PvE. Each of the three tests below
+// pins ONE of those sites; reverting any single site to `c.hp -= damage`
+// must turn exactly one of them RED.
+// ---------------------------------------------------------------------------
+
+// Two creatures at the same spot-ish with lots of hp so nothing dies mid-test:
+// one fire-resistant, one with no resistances at all. The control is
+// load-bearing — a resistant creature taking "less than 20" proves nothing on
+// its own, because a bug that halves ALL damage would satisfy it too.
+function mitSim() {
+  const map = { chunkSize: 8, isWalkable: () => true, speedAt: () => 1 };
+  const sim = new CreatureSim(map, () => 0.5);
+  sim.addCreatures([
+    { id: 'resistant', type: 'Slime', x: 100, y: 100, hp: 200, facing: 'S', color: '#f00', defense: 0, resistances: { fire: 0.5 } },
+    { id: 'plain', type: 'Wolf', x: 100, y: 100, hp: 200, facing: 'S', color: '#f00', defense: 0, resistances: {} },
+  ]);
+  return sim;
+}
+
+test('damageCreatureById: a fire-resistant creature takes less from a fire hit than an equal-damage physical one', () => {
+  const sim = mitSim();
+  const resistant = sim.creatures.get('resistant');
+  const plain = sim.creatures.get('plain');
+
+  sim.damageCreatureById('resistant', 20, 'fire');
+  sim.damageCreatureById('plain', 20, 'fire');
+
+  const rDelta = 200 - resistant.hp;
+  const pDelta = 200 - plain.hp;
+  assert.equal(pDelta, 20, 'the non-resistant control must take the full 20 (element-blind baseline)');
+  assert.equal(rDelta, 10, 'fire 0.5 must halve a fire hit');
+  assert.ok(rDelta < pDelta,
+    'creature resistances are not being applied — damage is bypassing applyDamage');
+
+  // And the same creature must take FULL damage from a physical hit of the
+  // same size: this is what proves the ELEMENT is what varied, not the target.
+  sim.damageCreatureById('resistant', 20, 'physical');
+  assert.equal(200 - resistant.hp, 10 + 20, 'fire resistance must not reduce physical damage');
+});
+
+test('applyMeleeArc threads its element through to applyDamage', () => {
+  const sim = mitSim();
+  const resistant = sim.creatures.get('resistant');
+  const plain = sim.creatures.get('plain');
+  // Origin west of both centers (124,124), aim east, wide reach + cone: both hit.
+  sim.applyMeleeArc(60, 124, 1, 0, 200, 3.0, 20, 'fire');
+  assert.equal(200 - plain.hp, 20, 'control took the full swing');
+  assert.equal(200 - resistant.hp, 10,
+    'applyMeleeArc did not pass the element through to applyDamage');
+});
+
+test('applyAttack threads its element through to applyDamage', () => {
+  const sim = mitSim();
+  const resistant = sim.creatures.get('resistant');
+  const plain = sim.creatures.get('plain');
+  sim.applyAttack(124, 124, 90, 20, 'fire');
+  assert.equal(200 - plain.hp, 20, 'control took the full hit');
+  assert.equal(200 - resistant.hp, 10,
+    'applyAttack did not pass the element through to applyDamage');
+});
+
+test('creature defense is applied alongside resistance', () => {
+  const map = { chunkSize: 8, isWalkable: () => true, speedAt: () => 1 };
+  const sim = new CreatureSim(map, () => 0.5);
+  sim.addCreatures([{ id: 'sk', type: 'Skeleton', x: 100, y: 100, hp: 200, facing: 'S', color: '#fff', defense: 2, resistances: { ice: 0.5 } }]);
+  sim.damageCreatureById('sk', 20, 'ice'); // (20 - 2) * 0.5 = 9
+  assert.equal(200 - sim.creatures.get('sk').hp, 9);
+});
+
+test('creature mitigation is built at spawn from its entity type', () => {
+  // Guards the wiring, not just the maths: a creature spawned without `mit`
+  // silently falls back to NO_MITIGATION and every resistance is inert.
+  const map = { chunkSize: 8, isWalkable: () => true, speedAt: () => 1 };
+  const sim = new CreatureSim(map, () => 0.5);
+  sim.addCreatures([{ id: 's1', type: 'Slime', x: 0, y: 0, hp: 10, facing: 'S', color: '#0f0', defense: 1, resistances: { fire: 0.6 } }]);
+  assert.deepEqual(sim.creatures.get('s1').mit, { defense: 1, resistances: { fire: 0.6 } });
+});
+
+test('a creature row with no defense/resistances still gets an inert mit (never undefined)', () => {
+  const map = { chunkSize: 8, isWalkable: () => true, speedAt: () => 1 };
+  const sim = new CreatureSim(map, () => 0.5);
+  sim.addCreatures([{ id: 'w1', type: 'Wolf', x: 0, y: 0, hp: 10, facing: 'S', color: '#c00' }]);
+  assert.deepEqual(sim.creatures.get('w1').mit, { defense: 0, resistances: {} });
+});
+
+test('spawnChunkCreatures carries defense and resistances from the entity type', () => {
+  const world = { seed: 1, chunkSize: 8, tileTypes: { grass: { walkable: true, speed: 1 } } };
+  const types = [{ name: 'Slime', hp: 12, color: '#0f0', defense: 1, resistances: { fire: 0.6 } }];
+  const spawned = spawnChunkCreatures(world, 0, 0, types);
+  assert.ok(spawned.length > 0, 'chunk (0,0) must spawn at least one creature for this to prove anything');
+  for (const c of spawned) {
+    assert.equal(c.defense, 1);
+    assert.deepEqual(c.resistances, { fire: 0.6 });
+  }
+});
+
+// The mock pools elsewhere ignore the SQL string, so every maths test above
+// would still pass with `resistances` dropped from the SELECT — while against
+// a real DB it would load as undefined and every creature resistance would be
+// silently inert. Assert on the query text itself. (Same failure mode
+// loadItemTypes needed this guard for.)
+test('loadCreatureTypes actually SELECTs every column it maps', async () => {
+  let sql = '';
+  const pool = { query: async (q) => { sql = q; return { rows: [] }; } };
+  await loadCreatureTypes(pool);
+  for (const col of ['id', 'name', 'color', 'hp', 'defense', 'resistances']) {
+    assert.ok(new RegExp(`\\b${col}\\b`).test(sql),
+      `loadCreatureTypes SELECT must name ${col} — a mapped column missing from the SELECT loads as undefined, so creature resistances are silently inert`);
+  }
+});
+
+test('loadCreatureTypes maps defense/resistances and defaults them', async () => {
+  const pool = { query: async () => ({ rows: [
+    { id: 1, name: 'Slime', color: '#0f0', hp: 12, defense: '1', resistances: { fire: 0.6 } },
+    { id: 2, name: 'Wolf', color: '#c00', hp: 10, defense: null, resistances: null },
+  ] }) };
+  const { creatureTypes, creatureTypeIds } = await loadCreatureTypes(pool);
+  assert.deepEqual(creatureTypes[0], { name: 'Slime', hp: 12, color: '#0f0', defense: 1, resistances: { fire: 0.6 } });
+  assert.deepEqual(creatureTypes[1], { name: 'Wolf', hp: 10, color: '#c00', defense: 0, resistances: {} });
+  assert.equal(creatureTypeIds.get('Slime'), 1);
+  assert.equal(creatureTypeIds.get('Wolf'), 2);
 });
 
 test('creature contact damage is mitigated by player armor (defense)', () => {

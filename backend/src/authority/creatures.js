@@ -21,6 +21,37 @@ const CONTACT_RANGE = 60;            // px: creature may hit its target within t
 const CREATURE_DAMAGE = 5;
 const CREATURE_ATTACK_COOLDOWN = 1.0; // s
 
+// Creature mitigation, built the same way a player's is built from equipment:
+// from the entity type's defense/resistances. A creature without `mit` falls
+// back to NO_MITIGATION inside applyDamage, which makes every resistance
+// inert — so this must never return undefined.
+function creatureMitigation(row) {
+  const d = Number(row.defense ?? 0);
+  return {
+    defense: Number.isFinite(d) ? d : 0,
+    resistances: row.resistances || {},
+  };
+}
+
+// Load the creature entity types. Named + exported (rather than inlined in
+// server.js) so a guard test can assert the SELECT names every column the
+// mapping consumes: a mapped column missing from the SELECT loads as
+// undefined and silently disables the feature it feeds.
+async function loadCreatureTypes(pool) {
+  const r = await pool.query(
+    `SELECT id, name, color, hp, defense, resistances
+     FROM entity_types WHERE is_creature = true ORDER BY id ASC`,
+  );
+  const creatureTypes = r.rows.map((row) => ({
+    name: row.name,
+    hp: row.hp,
+    color: row.color,
+    ...creatureMitigation(row),
+  }));
+  const creatureTypeIds = new Map(r.rows.map((row) => [row.name, row.id]));
+  return { creatureTypes, creatureTypeIds };
+}
+
 function center(o) { return { x: o.x + o.width / 2, y: o.y + o.height / 2 }; }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 // Nearest DIRS index for a movement vector's signs → facing.
@@ -46,6 +77,7 @@ class CreatureSim {
         id: c.id, type: c.type, x: c.x, y: c.y,
         width: CREATURE_SIZE, height: CREATURE_SIZE, speed: CREATURE_SPEED,
         facing: c.facing || 'S', hp: c.hp, maxHp: c.hp, color: c.color,
+        mit: creatureMitigation(c),
         _dir: dirIdx, dirty: false,
         _target: null, mode: 'roam', _attackCd: 0,
       });
@@ -116,13 +148,13 @@ class CreatureSim {
   }
 
   // Player melee: damage creatures within `range` of (px,py); remove + return dead ids.
-  applyAttack(px, py, range, damage) {
+  applyAttack(px, py, range, damage, element) {
     const killed = [];
     const r2 = range * range;
     for (const [id, c] of this.creatures) {
       const cc = center(c);
       if (dist2(cc.x, cc.y, px, py) > r2) continue;
-      c.hp -= damage;
+      applyDamage(c, damage, element, c.mit || NO_MITIGATION);
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
     }
@@ -131,14 +163,14 @@ class CreatureSim {
 
   // Melee arc: damage every creature whose center is within reach AND inside the
   // aim cone; remove + return the dead ids. (nx,ny) must be normalized.
-  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage) {
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element) {
     const killed = [];
     for (const [id, c] of this.creatures) {
       const cc = center(c);
       if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth)) continue;
       // Terrain blocks the swing, exactly as it blocks a projectile.
       if (!hasLineOfSight(this.map, ox, oy, cc.x, cc.y)) continue;
-      c.hp -= damage;
+      applyDamage(c, damage, element, c.mit || NO_MITIGATION);
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
     }
@@ -147,10 +179,10 @@ class CreatureSim {
 
   // Point damage to one creature (used by projectile collision). Returns true
   // if it died (and was removed).
-  damageCreatureById(id, damage) {
+  damageCreatureById(id, damage, element) {
     const c = this.creatures.get(id);
     if (!c) return false;
-    c.hp -= damage;
+    applyDamage(c, damage, element, c.mit || NO_MITIGATION);
     c.dirty = true;
     if (c.hp <= 0) { this.creatures.delete(id); return true; }
     return false;
@@ -201,6 +233,7 @@ class CreatureSim {
 }
 
 module.exports = {
-  CreatureSim, CREATURE_SIZE, CREATURE_SPEED, REDIRECT_CHANCE,
+  CreatureSim, loadCreatureTypes, creatureMitigation,
+  CREATURE_SIZE, CREATURE_SPEED, REDIRECT_CHANCE,
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
 };

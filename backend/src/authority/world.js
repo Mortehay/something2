@@ -171,7 +171,7 @@ class World {
       if (f) p.facing = f;
       if (manaCost) p.mana -= manaCost;
       if (staminaCost) p.stamina -= staminaCost;
-      const killed = this.creatures.applyMeleeArc(cx, cy, nx, ny, w.reach, w.arc_width, w.damage);
+      const killed = this.creatures.applyMeleeArc(cx, cy, nx, ny, w.reach, w.arc_width, w.damage, w.element);
       for (const other of this.players.values()) {
         if (other.userId === userId) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;

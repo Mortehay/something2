@@ -59,8 +59,9 @@ class ProjectileSim {
       const d = Math.hypot(cx - bx, cy - by);
       if (d >= r) continue;
       if (!hasLineOfSight(map, bx, by, cx, cy)) continue;
-      // Creatures carry no mitigation, so falloff is the only scaling.
-      if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r))) {
+      // Falloff scales the RAW damage; the creature's own defense and
+      // resistances are applied on top, inside damageCreatureById.
+      if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r), p.element)) {
         killedCreatureIds.push(c.id);
       }
     }
@@ -129,7 +130,7 @@ class ProjectileSim {
               dead = true; break;
             }
             p.hitIds.add(key);
-            if (creatures.damageCreatureById(c.id, p.damage)) killedCreatureIds.push(c.id);
+            if (creatures.damageCreatureById(c.id, p.damage, p.element)) killedCreatureIds.push(c.id);
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
           }
