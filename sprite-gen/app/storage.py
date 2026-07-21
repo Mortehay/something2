@@ -32,6 +32,21 @@ class SpriteStore:
                                content_type="application/json")
         return {"atlas_key": atlas_key, "manifest_key": manifest_key, "frame_keys": frame_keys}
 
+    def put_tile(self, tile: str, result: dict) -> dict:
+        self.ensure_bucket()
+        image_key = f"{self.bucket}/tiles/{tile}/static.png"
+        data, length = _png_bytes(result["static"])
+        self.client.put_object(self.bucket, image_key, data, length, content_type="image/png")
+        atlas_key = f"{self.bucket}/tiles/{tile}/atlas.png"
+        data, length = _png_bytes(result["atlas"])
+        self.client.put_object(self.bucket, atlas_key, data, length, content_type="image/png")
+        manifest_key = f"{self.bucket}/tiles/{tile}/atlas.json"
+        mbytes = json.dumps(result["manifest"]).encode()
+        self.client.put_object(self.bucket, manifest_key, io.BytesIO(mbytes), len(mbytes),
+                               content_type="application/json")
+        return {"image_key": image_key, "atlas_key": atlas_key,
+                "manifest_key": manifest_key, "frames": len(result["frames"])}
+
 def default_store():
     from minio import Minio
     from .config import settings

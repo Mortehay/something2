@@ -4,7 +4,7 @@ from typing import Optional, List
 from .config import settings
 from . import backends
 from .jobs import JobManager
-from .orchestrator import generate_creature
+from .orchestrator import generate_creature, generate_tile
 from .recipe import recipe_for
 
 app = FastAPI(title="something2 sprite-gen")
@@ -13,6 +13,7 @@ job_manager = JobManager()
 class GenerateRequest(BaseModel):
     creature: str
     base_prompt: str
+    kind: str = "creature"  # "creature" | "tile"
     backend: Optional[str] = None
     seed: int = 0
     frames: Optional[int] = None
@@ -48,9 +49,18 @@ def generate(req: GenerateRequest):
         raise HTTPException(status_code=400, detail=f"unknown backend '{backend_name}'")
     frames = req.frames or recipe.n_frames
     steps = req.steps if req.steps is not None else recipe.steps
-    size = tuple(req.size) if req.size else (128, 160)
+    size = tuple(req.size) if req.size else ((128, 128) if req.kind == "tile" else (128, 160))
 
     def work(progress):
+        if req.kind == "tile":
+            out = generate_tile(
+                tile=req.creature, base_prompt=req.base_prompt, backend_name=backend_name,
+                seed=req.seed, n_frames=frames, size=size, steps=steps, progress=progress,
+            )
+            if _STORE_ENABLED:
+                from .storage import default_store
+                return default_store().put_tile(req.creature, out)
+            return {"frames": len(out["frames"]), "manifest": out["manifest"]}
         out = generate_creature(
             creature=req.creature, base_prompt=req.base_prompt, backend_name=backend_name,
             seed=req.seed, n_frames=frames, size=size, steps=steps, progress=progress,
