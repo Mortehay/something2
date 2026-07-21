@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
-import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube } from "react-icons/hi2";
+import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
 import { EngineClient, getStoredToken, parseJwt, clearToken } from "./src/js/net/EngineClient.js";
 import Login from "../../pages/Login.jsx";
@@ -190,6 +190,28 @@ const UIOverlay = styled.div`
   z-index: 10;
 `;
 
+const FullscreenToggle = styled.button`
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid #2e2e3e;
+  background: rgba(26, 26, 46, 0.8);
+  backdrop-filter: blur(8px);
+  color: #e6e6f0;
+  cursor: pointer;
+  font-size: 20px;
+  transition: background 0.15s, color 0.15s;
+
+  &:hover { background: rgba(46, 46, 74, 0.95); color: #4a9eff; }
+`;
+
 const Panel = styled.div`
   background: rgba(26, 26, 46, 0.9);
   backdrop-filter: blur(8px);
@@ -305,6 +327,7 @@ export default function Something2() {
   const canvasRef = useRef(null);
   const gameRef = useRef(null);
   const engineRef = useRef(null);
+  const contentRef = useRef(null); // fullscreen target (wraps the game canvas)
   const [activeTab, setActiveTab] = useState('game');
   const [helpOpen, setHelpOpen] = useState(false);
   const [selectedMapId, setSelectedMapId] = useState(null);
@@ -314,6 +337,7 @@ export default function Something2() {
   const [newWorldChunkSize, setNewWorldChunkSize] = useState('64');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   // Authed = there is a stored token that still parses as unexpired. Checked at
   // mount so a page reload keeps the session instead of minting a new anonymous
   // user (SOMET-97). getStoredToken() clears an expired/malformed token itself.
@@ -363,7 +387,44 @@ export default function Something2() {
     if (gameRef.current) gameRef.current.resume();
   };
 
+  // --- Fullscreen (game canvas) ---
+  const enterGameFullscreen = () => {
+    const el = contentRef.current;
+    // requestFullscreen must run within the user gesture that started the game.
+    // The auto-join path has no gesture, so the promise rejects harmlessly and
+    // the game just plays windowed until the player clicks the toggle button.
+    if (el?.requestFullscreen) el.requestFullscreen().catch(() => {});
+  };
+
+  const exitGameFullscreen = () => {
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+  };
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) exitGameFullscreen();
+    else enterGameFullscreen();
+  };
+
+  // Keep the toggle button in sync with the real fullscreen state — including the
+  // user pressing Esc, which exits fullscreen without going through our button.
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // Enter fullscreen when the game starts. Driven off the isPlaying transition so
+  // the explicit "Enter World" click and the auto-join share one path; the click's
+  // transient activation is still valid through the quick world join.
+  useEffect(() => {
+    if (isPlaying) enterGameFullscreen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying]);
+
   const handleExit = () => {
+    exitGameFullscreen();
     setIsPlaying(false);
     setIsPaused(false);
     if (gameRef.current) {
@@ -665,10 +726,19 @@ export default function Something2() {
         </TabButton>
       </TabBar>
 
-      <ContentArea>
+      <ContentArea ref={contentRef}>
         {activeTab === 'game' && (
           <>
-         
+          {isPlaying && (
+            <FullscreenToggle
+              type="button"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Enter fullscreen'}
+              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            >
+              {isFullscreen ? <HiArrowsPointingIn /> : <HiArrowsPointingOut />}
+            </FullscreenToggle>
+          )}
           {!isPlaying && (
             <UIOverlay>
                 <Panel>

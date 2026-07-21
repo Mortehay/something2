@@ -440,8 +440,13 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
     const { id } = req.params;
     const { name, color, walkable, speed, image, valid_neighbors, prompt } = req.body;
 
+    // image/render_mode/sprite are owned by the generate+approve flow, NOT this
+    // property-edit form. The form captures `image` at modal-open (often empty,
+    // before the user approves a texture), so writing it verbatim would clobber a
+    // just-approved texture back to ''. COALESCE(NULLIF(...)) preserves the stored
+    // image when the form sends '' or nothing; an explicit key still updates it.
     const result = await pool.query(
-      'UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4, image = $5, valid_neighbors = $6, prompt = $7, updated_at = CURRENT_TIMESTAMP WHERE id = $8 RETURNING *',
+      "UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4, image = COALESCE(NULLIF($5, ''), image), valid_neighbors = $6, prompt = $7, updated_at = CURRENT_TIMESTAMP WHERE id = $8 RETURNING *",
       [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '', id]
     );
     
