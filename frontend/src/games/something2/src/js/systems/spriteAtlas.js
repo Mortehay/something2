@@ -43,3 +43,46 @@ export function animatedFrameKey(manifest, dir, timeMs, fps = 6) {
   const i = Math.floor((timeMs / 1000) * fps) % idxs.length;
   return `${dir}/${idxs[i]}`;
 }
+
+// --- Tiles -----------------------------------------------------------------
+// Tile atlases are keyed by bare frame index ("0","1",...), not "DIR/idx".
+
+// The current tile animation frame key at `timeMs`, cycling at `fps`. Null if
+// the manifest has no frames.
+export function tileFrameKey(manifest, timeMs, fps = 4) {
+  const frames = (manifest && manifest.frames) || {};
+  const idxs = Object.keys(frames)
+    .map((k) => parseInt(k, 10))
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+  if (!idxs.length) return null;
+  const i = Math.floor((timeMs / 1000) * fps) % idxs.length;
+  return String(idxs[i]);
+}
+
+// Decide what to draw for a tile: the animated atlas frame, the static image,
+// or nothing (draw the flat color). Returns { img, crop, cacheKey } or null.
+// `crop` is an [x,y,w,h] rect into `img`, or null to use the whole image.
+// Pure: reads imageManager.get(key) (null until loaded) so a not-yet-loaded
+// texture degrades to color rather than a hole.
+export function resolveTileVisual(tileName, def, imageManager, nowMs, override = null) {
+  if (!def || !imageManager) return null;
+  const mode = override || def.render_mode || def.renderMode || 'color';
+  if (mode === 'color') return null;
+
+  if (mode === 'animated' && def.sprite && def._manifest) {
+    const fkey = tileFrameKey(def._manifest, nowMs);
+    const rect = fkey ? frameRect(def._manifest, fkey) : null;
+    const atlas = def.sprite.atlas_key ? imageManager.get(def.sprite.atlas_key) : null;
+    if (atlas && rect) {
+      return { img: atlas, crop: rect, cacheKey: `${tileName}|animated|${fkey}` };
+    }
+    // fall through to the static image if the atlas/manifest isn't usable
+  }
+
+  if (def.image) {
+    const img = imageManager.get(def.image);
+    if (img) return { img, crop: null, cacheKey: `${tileName}|image` };
+  }
+  return null;
+}
