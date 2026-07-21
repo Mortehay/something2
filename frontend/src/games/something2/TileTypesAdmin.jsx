@@ -3,6 +3,8 @@ import styled from 'styled-components';
 import { useTileTypes, useCreateTileType, useUpdateTileType, useDeleteTileType } from './useMaps.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
 import toast from 'react-hot-toast';
+import { useGenerateTileJob, useTileJob, useApproveTileImage, useApproveTileSprite, assetUrl } from './useTileSprites.js';
+import { useSpriteCapability } from './useSprites.js';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -259,6 +261,67 @@ const SecondaryButton = styled.button`
   &:hover { background: rgba(255, 255, 255, 0.05); }
 `;
 
+function TileSpritePanel({ tile }) {
+  const [mode, setMode] = useState(null);     // 'image' | 'animated' while a job runs
+  const [jobId, setJobId] = useState(null);
+  const { data: capability } = useSpriteCapability();
+  const generate = useGenerateTileJob();
+  const { data: job } = useTileJob(jobId);
+  const approveImage = useApproveTileImage();
+  const approveSprite = useApproveTileSprite();
+
+  const start = (which) => {
+    setMode(which);
+    setJobId(null);
+    generate.mutate(
+      { tile_type: tile.name, base_prompt: tile.prompt || tile.name, frames: which === 'animated' ? 4 : 1 },
+      { onSuccess: (data) => setJobId(data.job_id) }
+    );
+  };
+
+  const status = job?.status;
+  const result = job?.result;
+  const previewKey = mode === 'animated' ? result?.atlas_key : result?.image_key;
+  const previewUrl = assetUrl(previewKey);
+
+  const approve = () => {
+    if (!result) return;
+    if (mode === 'animated') {
+      approveSprite.mutate({ tileId: tile.id, atlas_key: result.atlas_key, manifest_key: result.manifest_key, frames: result.frames, job_id: jobId });
+    } else {
+      approveImage.mutate({ tileId: tile.id, image_key: result.image_key, job_id: jobId });
+    }
+  };
+
+  return (
+    <FormGroup>
+      <label>AI Texture / Animation</label>
+      <div style={{ fontSize: '1rem', opacity: 0.7, marginBottom: '0.5rem' }}>
+        {capability ? `Backend tier: ${capability.tier} (${capability.recommended_backend})` : 'Sprite service…'}
+        {' · '}render mode: {tile.render_mode || 'color'}
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <SecondaryButton type="button" onClick={() => start('image')} disabled={generate.isPending}>Generate texture</SecondaryButton>
+        <SecondaryButton type="button" onClick={() => start('animated')} disabled={generate.isPending}>Generate animation</SecondaryButton>
+      </div>
+      {jobId && (
+        <div style={{ marginTop: '0.75rem', fontSize: '1.1rem' }}>
+          {status && status !== 'done' && status !== 'error' && <span>Generating… ({job?.progress?.done ?? 0}/{job?.progress?.total ?? 0})</span>}
+          {status === 'error' && <span style={{ color: '#ef4444' }}>Generation failed: {job?.error}</span>}
+          {status === 'done' && result && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
+              {previewUrl && <img src={previewUrl} alt="preview" style={{ width: 64, height: 64, imageRendering: 'pixelated', background: '#0f0f1a', borderRadius: 6 }} />}
+              <MainButton type="button" onClick={approve} disabled={approveImage.isPending || approveSprite.isPending}>
+                Approve {mode === 'animated' ? 'animation' : 'texture'}
+              </MainButton>
+            </div>
+          )}
+        </div>
+      )}
+    </FormGroup>
+  );
+}
+
 function TileTypesAdmin() {
   const { tileTypes, isLoadingTileTypes } = useTileTypes();
   const createMutation = useCreateTileType();
@@ -448,6 +511,8 @@ function TileTypesAdmin() {
                   placeholder="e.g. molten glowing lava, cracked crust"
                 />
               </FormGroup>
+
+              {editingTile && <TileSpritePanel tile={editingTile} />}
 
               <div style={{ display: 'flex', gap: '2rem' }}>
                 <CheckboxGroup>

@@ -38,6 +38,7 @@ const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path g
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
 let spriteGen = require('./services/spriteGen');
 const __setSpriteGen = (impl) => { spriteGen = impl; };
+const assetStore = require('./services/assetStore');
 
 const runner = require('node-pg-migrate').default;
 
@@ -705,6 +706,23 @@ app.get('/api/sprite-jobs/:jobId', async (req, res) => {
   }
 });
 
+// Stream a generated asset (sprite/tile texture, atlas, manifest) from MinIO to
+// the browser. Read-only; the object key is the path after /api/assets/.
+app.get('/api/assets/*', async (req, res) => {
+  const key = req.params[0];
+  if (!key) return res.status(400).json({ error: 'asset key required' });
+  try {
+    const stream = await assetStore.getObjectStream(key);
+    if (/\.png$/i.test(key)) res.type('image/png');
+    else if (/\.json$/i.test(key)) res.type('application/json');
+    res.set('Cache-Control', 'public, max-age=300');
+    stream.on('error', () => { if (!res.headersSent) res.status(404).json({ error: 'asset not found' }); });
+    stream.pipe(res);
+  } catch (err) {
+    res.status(404).json({ error: 'asset not found' });
+  }
+});
+
 // Approve a generated sprite set and link it to an entity type.
 // :id is entity_types.id (integer); pg casts the string param automatically.
 app.post('/api/entity-types/:id/sprite', adminGuard, async (req, res) => {
@@ -729,6 +747,84 @@ app.post('/api/entity-types/:id/sprite', adminGuard, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to save sprite' });
+  }
+});
+
+// Tile generation bridge: mirror /api/sprite-jobs but with kind:'tile' so
+// sprite-gen produces a seamless texture (+ optional loop), not a directional set.
+app.post('/api/tile-jobs', adminGuard, async (req, res) => {
+  try {
+    const { tile_type, base_prompt, backend, frames, seed = 0, tier } = req.body;
+    let effectiveTier = tier;
+    if (!effectiveTier && !backend) {
+      try { effectiveTier = (await spriteGen.getCapability()).tier; } catch (_) { /* ignore */ }
+    }
+    const gen = await spriteGen.postGenerate({
+      creature: tile_type, base_prompt, kind: 'tile', backend, frames, seed, tier: effectiveTier,
+    });
+    const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
+    const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || 1;
+    const row = await pool.query(
+      `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
+       VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
+      [tile_type, chosenBackend, seed, chosenFrames, gen.job_id]
+    );
+    res.status(201).json({ ...row.rows[0], job_id: gen.job_id, recipe: gen.recipe });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to start tile job' });
+  }
+});
+
+// Proxy tile job status (job ids are global to the sprite-gen job manager).
+app.get('/api/tile-jobs/:jobId', async (req, res) => {
+  try {
+    res.json(await spriteGen.getJob(req.params.jobId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch job' });
+  }
+});
+
+// Approve a generated static texture and link it to a tile type.
+app.post('/api/tile-types/:id/image', adminGuard, async (req, res) => {
+  try {
+    const { image_key, job_id } = req.body;
+    if (job_id) {
+      await pool.query(`UPDATE sprite_sets SET status = 'approved' WHERE job_id = $1`, [job_id]);
+    }
+    const result = await pool.query(
+      `UPDATE tile_types SET image = $1, render_mode = 'image', updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+      [image_key, req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Tile type not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save tile image' });
+  }
+});
+
+// Approve a generated animation atlas and link it to a tile type.
+app.post('/api/tile-types/:id/sprite', adminGuard, async (req, res) => {
+  try {
+    const { atlas_key, manifest_key, frames, job_id } = req.body;
+    if (job_id) {
+      await pool.query(
+        `UPDATE sprite_sets SET atlas_key = $1, manifest_key = $2, status = 'approved' WHERE job_id = $3`,
+        [atlas_key, manifest_key, job_id]
+      );
+    }
+    const sprite = { atlas_key, manifest_key, frames: frames || 1 };
+    const result = await pool.query(
+      `UPDATE tile_types SET sprite = $1, render_mode = 'animated', updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+      [JSON.stringify(sprite), req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Tile type not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save tile sprite' });
   }
 });
 

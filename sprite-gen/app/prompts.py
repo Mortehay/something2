@@ -12,3 +12,11 @@ def build_prompt(base: str, direction: str, frame: int) -> str:
         f"walk cycle frame {frame}, full body, centered, plain background, "
         f"crisp pixel-art style, high detail"
     )
+
+def build_tile_prompt(base: str) -> str:
+    # Tile styling only — deliberately NO facing/walk words. A tile is one
+    # seamless top-down texture, not a directional character sprite.
+    return (
+        f"{base}, seamless top-down isometric ground tile, tileable texture, "
+        f"flat even lighting, no shadows, centered, crisp pixel-art style, high detail"
+    )
