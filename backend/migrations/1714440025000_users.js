@@ -27,9 +27,15 @@ exports.up = async (pgm) => {
   // it and fails against the live schema. Follow the app's own convention
   // for picking a seed when none is supplied (src/index.js's world-create
   // route: a random 31-bit value) rather than inventing a new one here.
+  //
+  // Idempotency MUST be a WHERE NOT EXISTS, not `ON CONFLICT DO NOTHING`:
+  // worlds has no unique constraint on `name` (only the PK), so a bare
+  // ON CONFLICT never fires against a fresh gen_random_uuid() id and every
+  // migration re-run would insert ANOTHER 'Overworld'. The client auto-joins
+  // "the Overworld", so duplicates would split players across worlds.
   pgm.sql(`INSERT INTO worlds (id, name, seed)
-           VALUES (gen_random_uuid(), 'Overworld', floor(random() * 2147483647)::bigint)
-           ON CONFLICT DO NOTHING;`);
+           SELECT gen_random_uuid(), 'Overworld', floor(random() * 2147483647)::bigint
+           WHERE NOT EXISTS (SELECT 1 FROM worlds WHERE name = 'Overworld');`);
 
   // First admin from env. With no env set, NOTHING is created — no default
   // credentials. The hash is computed in JS (bcryptjs) and injected as a
