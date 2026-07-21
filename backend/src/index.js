@@ -75,6 +75,8 @@ async function getTileTypesMap() {
       walkable: row.walkable,
       speed: row.speed,
       image: row.image,
+      sprite: row.sprite || null,
+      render_mode: row.render_mode || 'color',
       validNeighbors: row.valid_neighbors || []
     };
   });
