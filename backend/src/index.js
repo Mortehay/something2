@@ -23,6 +23,12 @@ let pool = new Pool({
 // Test seam: lets tests swap in a mock pool so routes don't need a live DB.
 const __setPool = (impl) => { pool = impl; };
 
+// Guards and auth routes must see the CURRENT pool (tests swap it via
+// __setPool), so hand them a proxy that forwards to the live `pool` binding
+// rather than whatever value existed at module-load time.
+const guardPool = { query: (sql, params) => pool.query(sql, params) };
+const authRouter = require('./auth/routes.js');
+
 // World preview memo
 const PREVIEW_DIM = 64;
 const PREVIEW_STRIDE = 8;
@@ -111,6 +117,9 @@ async function getEntityTypesMap() {
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Authentication routes: register / login / logout-all / me / admin role.
+app.use('/api/auth', authRouter(guardPool));
 
 // Dev-only: mints a short-lived JWT signed with the engine's shared secret so
 // the frontend can connect to the WS engine without a real auth flow yet.
