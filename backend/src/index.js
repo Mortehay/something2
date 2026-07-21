@@ -750,6 +750,84 @@ app.post('/api/entity-types/:id/sprite', adminGuard, async (req, res) => {
   }
 });
 
+// Tile generation bridge: mirror /api/sprite-jobs but with kind:'tile' so
+// sprite-gen produces a seamless texture (+ optional loop), not a directional set.
+app.post('/api/tile-jobs', adminGuard, async (req, res) => {
+  try {
+    const { tile_type, base_prompt, backend, frames, seed = 0, tier } = req.body;
+    let effectiveTier = tier;
+    if (!effectiveTier && !backend) {
+      try { effectiveTier = (await spriteGen.getCapability()).tier; } catch (_) { /* ignore */ }
+    }
+    const gen = await spriteGen.postGenerate({
+      creature: tile_type, base_prompt, kind: 'tile', backend, frames, seed, tier: effectiveTier,
+    });
+    const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
+    const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || 1;
+    const row = await pool.query(
+      `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
+       VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
+      [tile_type, chosenBackend, seed, chosenFrames, gen.job_id]
+    );
+    res.status(201).json({ ...row.rows[0], job_id: gen.job_id, recipe: gen.recipe });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to start tile job' });
+  }
+});
+
+// Proxy tile job status (job ids are global to the sprite-gen job manager).
+app.get('/api/tile-jobs/:jobId', async (req, res) => {
+  try {
+    res.json(await spriteGen.getJob(req.params.jobId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch job' });
+  }
+});
+
+// Approve a generated static texture and link it to a tile type.
+app.post('/api/tile-types/:id/image', adminGuard, async (req, res) => {
+  try {
+    const { image_key, job_id } = req.body;
+    if (job_id) {
+      await pool.query(`UPDATE sprite_sets SET status = 'approved' WHERE job_id = $1`, [job_id]);
+    }
+    const result = await pool.query(
+      `UPDATE tile_types SET image = $1, render_mode = 'image', updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+      [image_key, req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Tile type not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save tile image' });
+  }
+});
+
+// Approve a generated animation atlas and link it to a tile type.
+app.post('/api/tile-types/:id/sprite', adminGuard, async (req, res) => {
+  try {
+    const { atlas_key, manifest_key, frames, job_id } = req.body;
+    if (job_id) {
+      await pool.query(
+        `UPDATE sprite_sets SET atlas_key = $1, manifest_key = $2, status = 'approved' WHERE job_id = $3`,
+        [atlas_key, manifest_key, job_id]
+      );
+    }
+    const sprite = { atlas_key, manifest_key, frames: frames || 1 };
+    const result = await pool.query(
+      `UPDATE tile_types SET sprite = $1, render_mode = 'animated', updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+      [JSON.stringify(sprite), req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Tile type not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save tile sprite' });
+  }
+});
+
 // --- Worlds (chunked overworld) -------------------------------------------
 
 app.post('/api/worlds', adminGuard, async (req, res) => {
