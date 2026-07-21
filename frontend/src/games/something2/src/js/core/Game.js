@@ -236,6 +236,7 @@ export class Game {
         this.chunked = true;
         this.renderSystem = new RenderSystem(this.canvas, this.imageManager);
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
+        this._preloadTileAssets(tileTypes);
         this.streamer = new ChunkStreamer(this.chunkedMap, makeChunkFetcher(worldId, API_URL), 1);
 
         this.creatures = new CreatureManager();
@@ -326,6 +327,30 @@ export class Game {
         console.log(`chunked game loop started (world ${worldId})`);
     }
 
+    // Preload approved tile textures/atlases so the renderer can draw them.
+    // Fire-and-forget image loads (the renderer falls back to color until they
+    // arrive); animated tiles also need their atlas manifest, fetched inline
+    // and attached to the shared def so RenderSystem can crop frames.
+    async _preloadTileAssets(tileTypes) {
+        if (!tileTypes) return;
+        for (const def of Object.values(tileTypes)) {
+            const mode = def.render_mode || def.renderMode;
+            if (def.image) {
+                this.imageManager.load(def.image, `${API_URL}/api/assets/${def.image}`);
+            }
+            if (mode === 'animated' && def.sprite) {
+                if (def.sprite.atlas_key) {
+                    this.imageManager.load(def.sprite.atlas_key, `${API_URL}/api/assets/${def.sprite.atlas_key}`);
+                }
+                if (def.sprite.manifest_key && !def._manifest) {
+                    try {
+                        const r = await fetch(`${API_URL}/api/assets/${def.sprite.manifest_key}`);
+                        if (r.ok) def._manifest = await r.json();
+                    } catch (_) { /* leave unset → renderer uses the static image or color */ }
+                }
+            }
+        }
+    }
 
     destroy() {
         if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
@@ -637,6 +662,12 @@ export class Game {
             if(key === 'm' && this.state === 'playing'){
                 const mode = this.renderSystem.cycleRenderModeOverride();
                 console.log(`Render-mode override: ${mode ?? 'off (per-entity)'}`);
+            }
+
+            // Dev: toggle tile textures on/off (falls back to flat color).
+            if (key === 't' && this.renderSystem && this.chunked) {
+                const on = this.renderSystem.toggleTileTextures();
+                this._showToast(`Tile textures ${on ? 'on' : 'off'}`);
             }
         };
 
