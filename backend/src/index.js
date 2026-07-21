@@ -414,16 +414,16 @@ app.get('/api/tile-types', async (req, res) => {
 
 app.post('/api/tile-types', adminGuard, async (req, res) => {
   try {
-    const { name, color, walkable, speed, image, valid_neighbors } = req.body;
-    
+    const { name, color, walkable, speed, image, valid_neighbors, prompt } = req.body;
+
     // Simple validation
     if (!name || !color) {
       return res.status(400).json({ error: 'Name and color are required' });
     }
 
     const result = await pool.query(
-      'INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [name, color, walkable ?? true, speed ?? 1.0, image || '', JSON.stringify(valid_neighbors || [])]
+      'INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors, prompt) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [name, color, walkable ?? true, speed ?? 1.0, image || '', JSON.stringify(valid_neighbors || []), prompt || '']
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -435,11 +435,11 @@ app.post('/api/tile-types', adminGuard, async (req, res) => {
 app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, color, walkable, speed, image, valid_neighbors } = req.body;
-    
+    const { name, color, walkable, speed, image, valid_neighbors, prompt } = req.body;
+
     const result = await pool.query(
-      'UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4, image = $5, valid_neighbors = $6, updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
-      [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), id]
+      'UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4, image = $5, valid_neighbors = $6, prompt = $7, updated_at = CURRENT_TIMESTAMP WHERE id = $8 RETURNING *',
+      [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '', id]
     );
     
     if (result.rows.length === 0) {
