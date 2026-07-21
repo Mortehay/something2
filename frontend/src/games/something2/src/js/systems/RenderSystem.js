@@ -1,7 +1,8 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
-import { frameRect, staticFrameKey, animatedFrameKey, facingToDir } from "./spriteAtlas.js";
+import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, resolveTileVisual } from "./spriteAtlas.js";
+import { TileDiamondCache } from "./tileTexture.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
@@ -22,6 +23,8 @@ export class RenderSystem {
     // Global render-mode override (dev toggle). null = use each entity's own
     // renderMode; a mode string forces every entity to that mode.
     this.renderModeOverride = null;
+    this.tileTexturesOff = false;
+    this._tileCache = new TileDiamondCache();
     // Hit-test rects for the inventory panel, recorded while drawing it and
     // read back by Game on click. Empty whenever the panel isn't open.
     this._invHitAreas = [];
@@ -39,6 +42,12 @@ export class RenderSystem {
     const next = order[(order.indexOf(this.renderModeOverride) + 1) % order.length];
     this.renderModeOverride = next;
     return next;
+  }
+
+  // Dev toggle: textured tiles on/off (falls back to flat color when off).
+  toggleTileTextures() {
+    this.tileTexturesOff = !this.tileTexturesOff;
+    return !this.tileTexturesOff;
   }
 
   // Pure, canvas-free: collect every world object into one list tagged with a
@@ -94,6 +103,10 @@ export class RenderSystem {
   }) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    // Timestamp for this frame; animated tile textures advance off it (unlike
+    // render(), renderChunked never set this before, so tile animation had no
+    // time source).
+    this.nowMs = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
     camera.apply(this.ctx);
 
     const halfW = ISO_TILE_W / 2;
@@ -105,14 +118,21 @@ export class RenderSystem {
       const relY = s.y - camera.screenY;
       if (relX < -camera.width || relX > camera.width || relY < -camera.height || relY > camera.height) continue;
       const def = mapTiles ? (mapTiles[cell.tile] || (Array.isArray(mapTiles) ? mapTiles.find(t => t.name === cell.tile || t.type === cell.tile) : null)) : null;
-      this.ctx.fillStyle = def ? def.color : "#123";
-      this.ctx.beginPath();
-      this.ctx.moveTo(s.x, s.y - halfH);
-      this.ctx.lineTo(s.x + halfW, s.y);
-      this.ctx.lineTo(s.x, s.y + halfH);
-      this.ctx.lineTo(s.x - halfW, s.y);
-      this.ctx.closePath();
-      this.ctx.fill();
+      const visual = this.tileTexturesOff ? null
+        : resolveTileVisual(cell.tile, def, this.imageManager, this.nowMs);
+      if (visual) {
+        const cv = this._tileCache.get(visual.cacheKey, visual.img, visual.crop);
+        this.ctx.drawImage(cv, s.x - halfW, s.y - halfH);
+      } else {
+        this.ctx.fillStyle = def ? def.color : "#123";
+        this.ctx.beginPath();
+        this.ctx.moveTo(s.x, s.y - halfH);
+        this.ctx.lineTo(s.x + halfW, s.y);
+        this.ctx.lineTo(s.x, s.y + halfH);
+        this.ctx.lineTo(s.x - halfW, s.y);
+        this.ctx.closePath();
+        this.ctx.fill();
+      }
     }
 
     // Players + creatures + ground items, all depth-sorted together — ground
