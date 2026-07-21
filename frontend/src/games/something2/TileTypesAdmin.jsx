@@ -187,14 +187,15 @@ const FormGroup = styled.div`
     font-weight: bold;
   }
   
-  input, select {
+  input, select, textarea {
     background: #0f0f1a;
     border: 1px solid rgba(74, 158, 255, 0.3);
     color: white;
     padding: 1rem;
     border-radius: 8px;
     font-size: 1.4rem;
-    
+    font-family: inherit;
+
     &:focus {
       outline: none;
       border-color: #4a9eff;
@@ -273,6 +274,7 @@ function TileTypesAdmin() {
     walkable: true,
     speed: 1.0,
     image: '',
+    prompt: '',
     valid_neighbors: []
   });
 
@@ -284,6 +286,7 @@ function TileTypesAdmin() {
         walkable: editingTile.walkable,
         speed: editingTile.speed,
         image: editingTile.image || '',
+        prompt: editingTile.prompt || '',
         valid_neighbors: editingTile.valid_neighbors || []
       });
     } else {
@@ -293,6 +296,7 @@ function TileTypesAdmin() {
         walkable: true,
         speed: 1.0,
         image: '',
+        prompt: '',
         valid_neighbors: []
       });
     }
@@ -383,7 +387,13 @@ function TileTypesAdmin() {
                 {tile.speed}x
               </StatItem>
             </TileStats>
-            
+
+            {tile.prompt ? (
+              <div style={{ fontSize: '1.1rem', opacity: 0.7, marginBottom: '1rem', fontStyle: 'italic' }}>
+                “{tile.prompt.length > 60 ? tile.prompt.slice(0, 60) + '…' : tile.prompt}”
+              </div>
+            ) : null}
+
             <NeighborsList>
               <span>Valid Neighbors</span>
               <TagCloud>
@@ -426,6 +436,16 @@ function TileTypesAdmin() {
                   value={formData.color}
                   onChange={e => setFormData({...formData, color: e.target.value})}
                   style={{ height: '40px', cursor: 'pointer' }}
+                />
+              </FormGroup>
+
+              <FormGroup>
+                <label>Prompt (for AI texture generation)</label>
+                <textarea
+                  rows={3}
+                  value={formData.prompt}
+                  onChange={e => setFormData({ ...formData, prompt: e.target.value })}
+                  placeholder="e.g. molten glowing lava, cracked crust"
                 />
               </FormGroup>
 
