@@ -38,6 +38,7 @@ const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path g
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
 let spriteGen = require('./services/spriteGen');
 const __setSpriteGen = (impl) => { spriteGen = impl; };
+const assetStore = require('./services/assetStore');
 
 const runner = require('node-pg-migrate').default;
 
@@ -702,6 +703,23 @@ app.get('/api/sprite-jobs/:jobId', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch job' });
+  }
+});
+
+// Stream a generated asset (sprite/tile texture, atlas, manifest) from MinIO to
+// the browser. Read-only; the object key is the path after /api/assets/.
+app.get('/api/assets/*', async (req, res) => {
+  const key = req.params[0];
+  if (!key) return res.status(400).json({ error: 'asset key required' });
+  try {
+    const stream = await assetStore.getObjectStream(key);
+    if (/\.png$/i.test(key)) res.type('image/png');
+    else if (/\.json$/i.test(key)) res.type('application/json');
+    res.set('Cache-Control', 'public, max-age=300');
+    stream.on('error', () => { if (!res.headersSent) res.status(404).json({ error: 'asset not found' }); });
+    stream.pipe(res);
+  } catch (err) {
+    res.status(404).json({ error: 'asset not found' });
   }
 });
 
