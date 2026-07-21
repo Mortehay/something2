@@ -4,10 +4,30 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const jwt = require('jsonwebtoken');
+const { Pool } = require('pg');
 const WebSocket = require('ws');
 const { attachAuthority } = require('../src/authority/server.js');
 
 const SECRET = 'test-secret';
+
+// Real DB, used only by the stale-token_version test below: the version check
+// reads token_version off a real users row (the user_id FK is enforced now).
+// Same skip-if-unreachable contract as authority_ammo_db.test.js — a skip means
+// the rejection was NOT verified this run, so it fails loudly under CI.
+const DB_URL = process.env.TEST_DATABASE_URL
+  || process.env.DATABASE_URL
+  || 'postgres://user:password@localhost:15432/game_db';
+
+async function openPool() {
+  const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 2000, max: 2 });
+  try {
+    await pool.query('SELECT 1');
+    return pool;
+  } catch (err) {
+    await pool.end().catch(() => {});
+    return { unreachable: err.message };
+  }
+}
 
 // Minimal pool: one world row, a couple of walkable tile types, no persisted
 // player rows, and a no-op upsert.
@@ -23,6 +43,9 @@ function fakePool() {
           { name: 'path', walkable: true, speed: 1 },
         ] };
       }
+      // token_version lookup done on every upgrade: return the same version
+      // token() signs with (1) so the fakePool sessions pass the version check.
+      if (/token_version FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
       if (/FROM item_types/i.test(sql)) {
@@ -48,8 +71,10 @@ function fakePool() {
   };
 }
 
-function token(userId) {
-  return jwt.sign({ user_id: userId }, SECRET, { algorithm: 'HS256' });
+// Signs tv:1 to match the token_version the fakePool users lookup reports, so
+// these mock-pool sessions clear the on-connect version check.
+function token(userId, tv = 1) {
+  return jwt.sign({ user_id: userId, tv }, SECRET, { algorithm: 'HS256' });
 }
 
 // Everything a test opened, torn down after that test WHETHER IT PASSED OR
@@ -285,6 +310,48 @@ test('accepts a valid HS256 token', async () => {
   });
   assert.ok(opened, 'a valid HS256 token should connect');
   ws.close(); handle.close(); server.close();
+});
+
+test('the authority rejects a connect whose token_version is stale', async (t) => {
+  // Issue a token at tv=1, bump the users row to token_version=2, attempt to
+  // connect -> refused. This is what makes a logout-all/ban also kill a LIVE
+  // game socket, not just future HTTP requests. Mutation-checked: removing the
+  // version check in server.js flips the outcome to 'open' and this goes RED.
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — stale token_version rejection is UNVERIFIED on this run`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  let userId;
+  try {
+    // A real users row (user_id FK is enforced), created at token_version=2 —
+    // i.e. a revocation already happened after the stale token was minted.
+    const username = `authtv-${process.pid}-${Date.now()}`;
+    const ins = await pool.query(
+      `INSERT INTO users (username, password_hash, role, token_version)
+       VALUES ($1, 'x', 'player', 2) RETURNING id`,
+      [username],
+    );
+    userId = ins.rows[0].id;
+
+    const { url } = await bootWith(pool);
+    // Valid HS256 signature, but tv=1 is behind the row's token_version=2.
+    const stale = jwt.sign({ user_id: userId, tv: 1 }, SECRET, { algorithm: 'HS256' });
+    const ws = new WebSocket(`${url}?token=${encodeURIComponent(stale)}`);
+    openResources.push({ close() { ws.terminate(); } });
+    const outcome = await new Promise((res) => {
+      ws.on('error', () => res('error'));
+      ws.on('close', () => res('close'));
+      ws.on('open', () => res('open'));
+    });
+    assert.ok(outcome === 'error' || outcome === 'close',
+      `a stale token_version must be refused at upgrade, got ${outcome}`);
+  } finally {
+    if (userId != null) await pool.query('DELETE FROM users WHERE id = $1', [userId]).catch(() => {});
+    await pool.end().catch(() => {});
+  }
 });
 
 // Boot with a caller-supplied heartbeat interval (ms) for the reaper tests.

@@ -37,10 +37,20 @@ async function openPool() {
   }
 }
 
-// A user id no other test or real player can collide with, and an ammo item
-// type that actually exists (player_items.item_type_id is a FK — another rule
-// only a real schema enforces).
-function testUser(tag) { return `ammo-db-test-${tag}-${process.pid}-${Date.now()}`; }
+// player_items.user_id is now `integer NOT NULL REFERENCES users(id)` (the
+// auth slice reconciled the column type), so a synthetic string id no longer
+// inserts — the FK and the integer type both reject it. Create a real throwaway
+// user per test and return its integer id; the caller deletes it in `finally`.
+// The ON DELETE CASCADE from player_items means removing the user also clears
+// any rows a test failed to clean up.
+async function createTestUser(pool, tag) {
+  const username = `ammo-db-test-${tag}-${process.pid}-${Date.now()}`;
+  const r = await pool.query(
+    `INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'player') RETURNING id`,
+    [username],
+  );
+  return r.rows[0].id;
+}
 
 async function anItemTypeId(pool) {
   const r = await pool.query('SELECT id FROM item_types ORDER BY id ASC LIMIT 1');
@@ -67,8 +77,9 @@ test('consumeAmmo against a REAL database: a stack drains through its last unit 
     t.skip(msg);
     return;
   }
-  const user = testUser('drain');
+  let user;
   try {
+    user = await createTestUser(pool, 'drain');
     const typeId = await anItemTypeId(pool);
 
     // The CHECK constraint must actually be present, or this test proves
@@ -109,7 +120,9 @@ test('consumeAmmo against a REAL database: a stack drains through its last unit 
       'with no stacks left the spend refuses cleanly');
     assert.deepEqual(await stacks(pool, user), []);
   } finally {
-    await pool.query('DELETE FROM player_items WHERE user_id = $1', [user]).catch(() => {});
+    // Deleting the user cascades to player_items (ON DELETE CASCADE), so this
+    // cleans the stacks too even if the test bailed mid-setup.
+    if (user != null) await pool.query('DELETE FROM users WHERE id = $1', [user]).catch(() => {});
     await pool.end().catch(() => {});
   }
 });
@@ -122,8 +135,9 @@ test('consumeAmmo against a REAL database: one shot touches exactly one stack, o
     t.skip(msg);
     return;
   }
-  const user = testUser('stacks');
+  let user;
   try {
+    user = await createTestUser(pool, 'stacks');
     const typeId = await anItemTypeId(pool);
 
     // Two stacks of the same type — the state the mocked tests can only
@@ -148,7 +162,9 @@ test('consumeAmmo against a REAL database: one shot touches exactly one stack, o
     assert.equal(await ammoCount(pool, user, typeId), 3,
       'total across stacks fell by exactly one unit');
   } finally {
-    await pool.query('DELETE FROM player_items WHERE user_id = $1', [user]).catch(() => {});
+    // Deleting the user cascades to player_items (ON DELETE CASCADE), so this
+    // cleans the stacks too even if the test bailed mid-setup.
+    if (user != null) await pool.query('DELETE FROM users WHERE id = $1', [user]).catch(() => {});
     await pool.end().catch(() => {});
   }
 });

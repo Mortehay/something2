@@ -11,7 +11,7 @@ import { CreatureManager } from "../entities/CreatureManager.js";
 import { ProjectileManager } from "../entities/ProjectileManager.js";
 import { GroundItemManager } from "../entities/GroundItemManager.js";
 import { WorldAuthorityClient } from "../net/WorldAuthorityClient.js";
-import { fetchDevToken } from "../net/EngineClient.js";
+import { getStoredToken, parseJwt } from "../net/EngineClient.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
@@ -252,9 +252,14 @@ export class Game {
         this.noAmmoUntil = 0;
 
         this._inputBuffer = [];
-        // Connect to the authoritative sim; spawn comes from the server.
-        const { token, user_id } = await fetchDevToken(API_URL);
-        this.localUserId = String(user_id);
+        // Connect to the authoritative sim; spawn comes from the server. The
+        // token comes from the login the player already completed (stored in
+        // localStorage + memory); user_id is read off the token's own claims.
+        const token = getStoredToken();
+        if (!token) throw new Error('not signed in');
+        const claims = parseJwt(token);
+        if (!claims || claims.user_id == null) throw new Error('invalid session token');
+        this.localUserId = String(claims.user_id);
         const wsUrl = API_URL.replace(/^http/, 'ws') + '/authority';
         const spawn = await new Promise((resolve, reject) => {
             this.authorityClient = new WorldAuthorityClient({

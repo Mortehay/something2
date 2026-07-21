@@ -3,7 +3,8 @@ import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
-import { EngineClient, fetchDevToken } from "./src/js/net/EngineClient.js";
+import { EngineClient, getStoredToken, parseJwt, clearToken } from "./src/js/net/EngineClient.js";
+import Login from "../../pages/Login.jsx";
 import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap, fetchMapEntities, useSaveEntities, useEntityTypes, useGenerateEntities } from "./useMaps.js";
 import { useWorlds, useCreateWorld } from "./useWorlds";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
@@ -199,6 +200,15 @@ export default function Something2() {
   const [newWorldChunkSize, setNewWorldChunkSize] = useState('64');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  // Authed = there is a stored token that still parses as unexpired. Checked at
+  // mount so a page reload keeps the session instead of minting a new anonymous
+  // user (SOMET-97). getStoredToken() clears an expired/malformed token itself.
+  const [authed, setAuthed] = useState(() => !!getStoredToken());
+  // Admin-only tabs (tile/entity/item registries) are gated on the JWT role
+  // claim so non-admin players don't see controls that only 403 when used. The
+  // server's adminGuard remains the real enforcement — this is UX/defense-in-
+  // depth. Recomputed when `authed` flips (sign in/out swaps the stored token).
+  const isAdmin = useMemo(() => parseJwt(getStoredToken())?.role === 'admin', [authed]);
 
   const { maps, isLoadingMaps } = useMaps();
   const { mapTiles, isLoadingMapTiles } = useMapTiles();
@@ -326,7 +336,9 @@ export default function Something2() {
           engineRef.current.disconnect();
           engineRef.current = null;
         }
-        const { token, user_id } = await fetchDevToken(API_URL);
+        const token = getStoredToken();
+        if (!token) { setAuthed(false); throw new Error('Please sign in'); }
+        const user_id = parseJwt(token)?.user_id;
         const client = new EngineClient({
           url: ENGINE_WS_URL,
           token,
@@ -356,26 +368,48 @@ export default function Something2() {
 
   const handlePlay = () => handleEnterWorld(false);
 
-  const handleEnterChunkedWorld = async () => {
-    if (!selectedWorldId || !gameRef.current) return;
+  const handleEnterChunkedWorld = async (worldId = selectedWorldId) => {
+    if (!worldId || !gameRef.current) return;
 
     try {
-      const world = worlds?.find(w => w.id === selectedWorldId);
+      const world = worlds?.find(w => w.id === worldId);
       const chunkSize = world?.chunk_size || 64;
       const spawn = (chunkSize * MAP_TILE_SIZE) / 2;
 
       await gameRef.current.initChunked({
-        worldId: selectedWorldId,
+        worldId,
         chunkSize,
         tileTypes: mapTiles,
         spawnX: spawn,
         spawnY: spawn,
       });
+      setSelectedWorldId(worldId);
       setIsPlaying(true);
     } catch (err) {
       toast.error(err.message);
     }
   };
+
+  // MISMATCH fix: a logged-in player should spawn straight into the canonical
+  // Overworld, not a world-picker. Auto-join the migration-seeded world named
+  // "Overworld" (lowest id if test duplicates exist) once worlds + the Game
+  // instance are ready. Admins keep the picker (they manage worlds). If the
+  // join throws, handleEnterChunkedWorld toasts and isPlaying stays false, so
+  // the picker remains as a safe fallback. autoJoinedRef guards against retries.
+  const autoJoinedRef = useRef(false);
+  useEffect(() => {
+    if (isAdmin || isPlaying || autoJoinedRef.current) return;
+    if (!gameRef.current || !worlds || worlds.length === 0) return;
+    const overworld = worlds
+      .filter(w => w.name === 'Overworld')
+      .sort((a, b) => a.id - b.id)[0];
+    if (!overworld) return;
+    autoJoinedRef.current = true;
+    handleEnterChunkedWorld(overworld.id);
+    // handleEnterChunkedWorld is stable enough for this one-shot; deps kept
+    // minimal so it fires once when worlds/game become ready.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worlds, isAdmin, isPlaying, activeTab]);
 
   const handleCreateWorld = () => {
     if (!newWorldName.trim()) return;
@@ -436,20 +470,45 @@ export default function Something2() {
     }
   };
 
+  // No valid stored token → gate the whole surface behind the login screen.
+  // On success we store the token and flip authed; the game then renders.
+  if (!authed) {
+    return (
+      <Login
+        apiUrl={API_URL}
+        onAuthed={() => setAuthed(true)}
+      />
+    );
+  }
+
   return (
     <StyledGameContainer>
       <TabBar>
         <TabButton $active={activeTab === 'game'} onClick={() => setActiveTab('game')}>
           <HiOutlinePuzzlePiece /> Game View
         </TabButton>
-        <TabButton $active={activeTab === 'tiles'} onClick={() => setActiveTab('tiles')}>
-          <HiOutlineWrenchScrewdriver /> TILE_TYPES Admin
-        </TabButton>
-        <TabButton $active={activeTab === 'entity'} $adminType="entity" onClick={() => setActiveTab('entity')}>
-          <HiOutlineBeaker /> Entity Admin
-        </TabButton>
-        <TabButton $active={activeTab === 'items'} $adminType="items" onClick={() => setActiveTab('items')}>
-          <HiOutlineCube /> Items
+        {isAdmin && (
+          <>
+            <TabButton $active={activeTab === 'tiles'} onClick={() => setActiveTab('tiles')}>
+              <HiOutlineWrenchScrewdriver /> TILE_TYPES Admin
+            </TabButton>
+            <TabButton $active={activeTab === 'entity'} $adminType="entity" onClick={() => setActiveTab('entity')}>
+              <HiOutlineBeaker /> Entity Admin
+            </TabButton>
+            <TabButton $active={activeTab === 'items'} $adminType="items" onClick={() => setActiveTab('items')}>
+              <HiOutlineCube /> Items
+            </TabButton>
+          </>
+        )}
+        <TabButton
+          style={{ marginLeft: 'auto' }}
+          onClick={() => {
+            if (engineRef.current) { engineRef.current.disconnect(); engineRef.current = null; }
+            clearToken();
+            setAuthed(false);
+          }}
+        >
+          Sign out
         </TabButton>
       </TabBar>
 
@@ -513,7 +572,7 @@ export default function Something2() {
                   </div>
 
                   <Button
-                    onClick={handleEnterChunkedWorld}
+                    onClick={() => handleEnterChunkedWorld()}
                     disabled={!selectedWorldId}
                     style={{ width: '100%', marginTop: '10px', background: '#10b981' }}
                   >
@@ -613,9 +672,9 @@ export default function Something2() {
           <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: isPlaying ? 'block' : 'none' }} />
           </>
         )}
-        {activeTab === 'tiles' && <TileTypesAdmin />}
-        {activeTab === 'entity' && <EntityTypesAdmin />}
-        {activeTab === 'items' && <ItemTypesAdmin />}
+        {isAdmin && activeTab === 'tiles' && <TileTypesAdmin />}
+        {isAdmin && activeTab === 'entity' && <EntityTypesAdmin />}
+        {isAdmin && activeTab === 'items' && <ItemTypesAdmin />}
       </ContentArea>
     </StyledGameContainer>
   );

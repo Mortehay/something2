@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from 'react-hot-toast';
+import { authHeaders } from "./src/js/net/EngineClient.js";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
 
@@ -33,7 +34,7 @@ export function useGenerateMap(onSuccessCallback) {
     mutationFn: async () => {
       const res = await fetch(`${API_URL}/api/maps/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ name: `World ${new Date().toLocaleTimeString()}` })
       });
       if (!res.ok) throw new Error('Failed to generate map');
@@ -68,7 +69,7 @@ export function useSaveEntities(onSuccessCallback) {
     mutationFn: async ({ id, entities }) => {
       const res = await fetch(`${API_URL}/api/maps/${id}/entities`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ entities })
       });
       if (!res.ok) throw new Error('Failed to save entities');
@@ -88,6 +89,7 @@ export function useDeleteMap(onSuccessCallback) {
     mutationFn: async (id) => {
       const res = await fetch(`${API_URL}/api/maps/${id}`, {
         method: 'DELETE',
+        headers: authHeaders(),
       });
       if (!res.ok) throw new Error('Failed to delete map');
       return res.json();
@@ -121,7 +123,7 @@ export function useCreateTileType() {
     mutationFn: async (newTileType) => {
       const res = await fetch(`${API_URL}/api/tile-types`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(newTileType)
       });
       if (!res.ok) throw new Error('Failed to create tile type');
@@ -143,7 +145,7 @@ export function useUpdateTileType() {
       const { id, ...data } = updatedTileType;
       const res = await fetch(`${API_URL}/api/tile-types/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(data)
       });
       if (!res.ok) throw new Error('Failed to update tile type');
@@ -164,6 +166,7 @@ export function useDeleteTileType() {
     mutationFn: async (id) => {
       const res = await fetch(`${API_URL}/api/tile-types/${id}`, {
         method: 'DELETE',
+        headers: authHeaders(),
       });
       if (!res.ok) throw new Error('Failed to delete tile type');
       return res.json();
@@ -207,7 +210,7 @@ export function useCreateEntityType() {
     mutationFn: async (newEntityType) => {
       const res = await fetch(`${API_URL}/api/entity-types`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(newEntityType)
       });
       if (!res.ok) throw new Error('Failed to create entity type');
@@ -229,7 +232,7 @@ export function useUpdateEntityType() {
       const { id, ...data } = updatedEntityType;
       const res = await fetch(`${API_URL}/api/entity-types/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(data)
       });
       if (!res.ok) throw new Error('Failed to update entity type');
@@ -250,6 +253,7 @@ export function useDeleteEntityType() {
     mutationFn: async (id) => {
       const res = await fetch(`${API_URL}/api/entity-types/${id}`, {
         method: 'DELETE',
+        headers: authHeaders(),
       });
       if (!res.ok) throw new Error('Failed to delete entity type');
       return res.json();
@@ -281,7 +285,7 @@ export function useCreateItemType() {
     mutationFn: async (newItemType) => {
       const res = await fetch(`${API_URL}/api/item-types`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(newItemType)
       });
       if (!res.ok) {
@@ -305,7 +309,7 @@ export function useUpdateItemType() {
       const { id, ...data } = updatedItemType;
       const res = await fetch(`${API_URL}/api/item-types/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(data)
       });
       if (!res.ok) {
@@ -328,6 +332,7 @@ export function useDeleteItemType() {
     mutationFn: async (id) => {
       const res = await fetch(`${API_URL}/api/item-types/${id}`, {
         method: 'DELETE',
+        headers: authHeaders(),
       });
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
@@ -349,6 +354,7 @@ export function useGenerateEntities(onSuccessCallback) {
     mutationFn: async (id) => {
       const res = await fetch(`${API_URL}/api/maps/${id}/generate-entities`, {
         method: 'POST',
+        headers: authHeaders(),
       });
       if (!res.ok) {
         const error = await res.json();

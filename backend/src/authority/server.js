@@ -37,22 +37,44 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const sessionsByUser = new Map(); // userId -> ws (exactly one live authority session per account)
 
   httpServer.on('upgrade', (req, socket, head) => {
-    let userId;
-    try {
-      const u = new URL(req.url, 'http://localhost');
-      if (u.pathname !== path) { socket.destroy(); return; }
-      const token = u.searchParams.get('token');
-      const payload = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] });
-      userId = String(payload.user_id);
-    } catch {
-      socket.destroy();
-      return;
-    }
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      ws.userId = userId;
-      ws.worldId = null;
-      wss.emit('connection', ws, req);
-    });
+    // The whole handler is wrapped so an async rejection (a DB error from the
+    // token_version lookup below) can never escape as an unhandled rejection —
+    // Node exits by default on that, and this codebase has hit it before. Any
+    // failure path destroys the socket instead.
+    (async () => {
+      let userId;
+      let payload;
+      try {
+        const u = new URL(req.url, 'http://localhost');
+        if (u.pathname !== path) { socket.destroy(); return; }
+        const token = u.searchParams.get('token');
+        payload = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] });
+        userId = String(payload.user_id);
+      } catch {
+        socket.destroy();
+        return;
+      }
+
+      // Signature-valid is not enough: reject a token whose tv is behind the
+      // account's CURRENT token_version, mirroring the HTTP middleware. This is
+      // what makes logout-all / bans also kill a live game socket instead of
+      // only future HTTP requests. One indexed query per CONNECT (not per tick).
+      // A DB error or a missing user must destroy the socket, never throw out.
+      try {
+        const r = await pool.query('SELECT token_version FROM users WHERE id = $1', [payload.user_id]);
+        const row = r.rows[0];
+        if (!row || row.token_version !== payload.tv) { socket.destroy(); return; }
+      } catch {
+        socket.destroy();
+        return;
+      }
+
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.userId = userId;
+        ws.worldId = null;
+        wss.emit('connection', ws, req);
+      });
+    })().catch(() => { try { socket.destroy(); } catch { /* already gone */ } });
   });
 
   async function loadWorld(worldId) {
