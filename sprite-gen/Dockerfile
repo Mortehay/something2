@@ -6,7 +6,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2
 
 COPY sprite-gen/requirements.txt sprite-gen/requirements-dev.txt ./
 # CPU-only torch wheels by default; swap the index for CUDA when a GPU lands.
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.3.* \
+# torch and torchvision MUST come from the same index and be ABI-matched
+# (torch 2.3.x <-> torchvision 0.18.x) — otherwise controlnet-aux/rembg pull a
+# mismatched torchvision from PyPI and every SD backend dies on import with
+# "operator torchvision::nms does not exist".
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.3.* torchvision==0.18.* \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY sprite-gen/ .

@@ -1,5 +1,9 @@
 -r requirements-dev.txt
 torch==2.3.*
+# Pinned to match torch 2.3.x; installed from the CPU index in the Dockerfile.
+# Present here so controlnet-aux/rembg see it as already-satisfied and don't
+# resolve an incompatible torchvision from PyPI (torchvision::nms ABI break).
+torchvision==0.18.*
 diffusers==0.29.*
 transformers==4.42.*
 controlnet-aux==0.0.9
