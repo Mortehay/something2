@@ -356,6 +356,45 @@ function spawnChunkCreatures(world, cx, cy, creatureTypes) {
   return out;
 }
 
+// Count-based creature placement for a BOUNDED map. Rejection-samples `count`
+// interior tiles (strictly inside the wall ring), keeping only walkable,
+// non-wall, non-doorway tiles, and assigns a random allowed type. Pure and
+// deterministic given `rngSeed`. Returns rows shaped like spawnChunkCreatures.
+// Unbounded worlds return [] (they keep the per-chunk roll).
+function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40) {
+  const cfg = worldConfig(world);
+  if (!cfg.bounds) return [];
+  if (!count || count < 1) return [];
+  if (!allowedTypes || allowedTypes.length === 0) return [];
+  const { width, height, wallTile, doorwayTile } = cfg.bounds;
+  const rLo = 1, rHi = height - 2, cLo = 1, cHi = width - 2;
+  if (rHi < rLo || cHi < cLo) return [];
+  const rng = makeRng(rngSeed >>> 0);
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    for (let a = 0; a < maxAttempts; a++) {
+      const row = rLo + Math.floor(rng() * (rHi - rLo + 1));
+      const col = cLo + Math.floor(rng() * (cHi - cLo + 1));
+      const name = generateRegion(world, row, col, 1, 1)[0][0];
+      if (name === wallTile || name === doorwayTile) continue;
+      const def = world.tileTypes && world.tileTypes[name];
+      if (def && def.walkable === false) continue;
+      const t = allowedTypes[Math.floor(rng() * allowedTypes.length)];
+      out.push({
+        type: t.name,
+        x: col * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
+        y: row * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
+        hp: t.hp || 10,
+        facing: 'S',
+        defense: Number(t.defense ?? 0) || 0,
+        resistances: t.resistances || {},
+      });
+      break;
+    }
+  }
+  return out;
+}
+
 // --- Bounded-world boundary overlay ---------------------------------------
 //
 // A bounded world is a width x height tile rectangle. Its outer ring is a solid
@@ -575,6 +614,7 @@ module.exports = {
     collectPathCells,
     densityAt,
     spawnChunkCreatures,
+    placeMapCreatures,
     stampBounds,
     doorwaysForWorld,
     DOORWAY_TILES,
