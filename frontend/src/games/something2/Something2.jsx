@@ -368,26 +368,48 @@ export default function Something2() {
 
   const handlePlay = () => handleEnterWorld(false);
 
-  const handleEnterChunkedWorld = async () => {
-    if (!selectedWorldId || !gameRef.current) return;
+  const handleEnterChunkedWorld = async (worldId = selectedWorldId) => {
+    if (!worldId || !gameRef.current) return;
 
     try {
-      const world = worlds?.find(w => w.id === selectedWorldId);
+      const world = worlds?.find(w => w.id === worldId);
       const chunkSize = world?.chunk_size || 64;
       const spawn = (chunkSize * MAP_TILE_SIZE) / 2;
 
       await gameRef.current.initChunked({
-        worldId: selectedWorldId,
+        worldId,
         chunkSize,
         tileTypes: mapTiles,
         spawnX: spawn,
         spawnY: spawn,
       });
+      setSelectedWorldId(worldId);
       setIsPlaying(true);
     } catch (err) {
       toast.error(err.message);
     }
   };
+
+  // MISMATCH fix: a logged-in player should spawn straight into the canonical
+  // Overworld, not a world-picker. Auto-join the migration-seeded world named
+  // "Overworld" (lowest id if test duplicates exist) once worlds + the Game
+  // instance are ready. Admins keep the picker (they manage worlds). If the
+  // join throws, handleEnterChunkedWorld toasts and isPlaying stays false, so
+  // the picker remains as a safe fallback. autoJoinedRef guards against retries.
+  const autoJoinedRef = useRef(false);
+  useEffect(() => {
+    if (isAdmin || isPlaying || autoJoinedRef.current) return;
+    if (!gameRef.current || !worlds || worlds.length === 0) return;
+    const overworld = worlds
+      .filter(w => w.name === 'Overworld')
+      .sort((a, b) => a.id - b.id)[0];
+    if (!overworld) return;
+    autoJoinedRef.current = true;
+    handleEnterChunkedWorld(overworld.id);
+    // handleEnterChunkedWorld is stable enough for this one-shot; deps kept
+    // minimal so it fires once when worlds/game become ready.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worlds, isAdmin, isPlaying, activeTab]);
 
   const handleCreateWorld = () => {
     if (!newWorldName.trim()) return;
@@ -550,7 +572,7 @@ export default function Something2() {
                   </div>
 
                   <Button
-                    onClick={handleEnterChunkedWorld}
+                    onClick={() => handleEnterChunkedWorld()}
                     disabled={!selectedWorldId}
                     style={{ width: '100%', marginTop: '10px', background: '#10b981' }}
                   >
