@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
+import { authHeaders } from "./src/js/net/EngineClient.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
 
@@ -23,7 +24,7 @@ export function useCreateWorld() {
     mutationFn: async ({ name, seed, chunk_size }) => {
       const res = await fetch(`${API_URL}/api/worlds`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({ name, seed, chunk_size }),
       });
       if (!res.ok) throw new Error("Failed to create world");

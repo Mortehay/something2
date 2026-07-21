@@ -220,6 +220,18 @@ export function getStoredToken(nowSec = Date.now() / 1000) {
   return stored;
 }
 
+// Standard headers for an /api request. Attaches the stored JWT as a Bearer
+// token when one is present so admin mutations (POST/PUT/DELETE) authenticate;
+// omits Authorization when signed out. Every mutating fetch in the data hooks
+// funnels through this one helper so the token wiring can't drift per-call-site.
+export function authHeaders() {
+  const token = getStoredToken();
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
 async function postAuth(apiUrl, path, username, password) {
   const res = await fetch(`${apiUrl}${path}`, {
     method: "POST",

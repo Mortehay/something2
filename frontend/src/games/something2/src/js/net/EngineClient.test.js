@@ -5,6 +5,7 @@ import {
   storeToken,
   getStoredToken,
   clearToken,
+  authHeaders,
 } from "./EngineClient.js";
 
 // A minimal in-memory localStorage stand-in — the vitest env is `node`, which
@@ -83,5 +84,37 @@ describe("token helpers", () => {
     const t = makeJwt({ user_id: 9, exp: NOW + HOUR });
     globalThis.localStorage.setItem("something2.authToken", t);
     expect(getStoredToken(NOW)).toBe(t);
+  });
+});
+
+// DEFENDS DEFECT 1: admin mutations broke because their fetch headers never
+// carried the JWT. Every mutating data-hook now routes through authHeaders();
+// this pins that it attaches `Authorization: Bearer <token>` when signed in and
+// omits it when signed out. Uses a fixed future exp so getStoredToken() (which
+// authHeaders calls) does not discard the token as expired under the node env.
+describe("authHeaders", () => {
+  const FAR_FUTURE = Math.floor(Date.now() / 1000) + HOUR;
+
+  beforeEach(() => {
+    globalThis.localStorage = fakeLocalStorage();
+    clearToken();
+  });
+  afterEach(() => {
+    clearToken();
+    delete globalThis.localStorage;
+  });
+
+  it("includes Authorization: Bearer <token> when a token is stored", () => {
+    const t = makeJwt({ user_id: 7, role: "admin", exp: FAR_FUTURE });
+    storeToken(t);
+    const headers = authHeaders();
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers.Authorization).toBe(`Bearer ${t}`);
+  });
+
+  it("omits Authorization when no token is stored", () => {
+    const headers = authHeaders();
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers.Authorization).toBeUndefined();
   });
 });
