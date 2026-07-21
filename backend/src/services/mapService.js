@@ -392,6 +392,15 @@ function stampBounds(grid, rMin, cMin, rows, cols, bounds) {
   return grid;
 }
 
+// Which edges of a bounded world have a doorway. Slice 1: every edge, so a
+// bounded world is traversable for testing. Slice 3 replaces the body with a
+// lookup of map_links (only linked edges get a doorway). Callers pass the raw
+// `worlds` DB row.
+function doorwaysForWorld(worldRow) {
+  if (!worldRow || !worldRow.width || !worldRow.height) return new Set();
+  return new Set(['N', 'E', 'S', 'W']);
+}
+
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 // Biased random walk from `from` to `to`, stamping pathTile. Mostly steps
@@ -567,6 +576,7 @@ module.exports = {
     densityAt,
     spawnChunkCreatures,
     stampBounds,
+    doorwaysForWorld,
     DOORWAY_TILES,
 };
 

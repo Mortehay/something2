@@ -135,3 +135,20 @@ test('POST /api/worlds rejects chunk_size out of range', async () => {
   const neg = await request(app).post('/api/worlds').set(...AUTH).send({ name: 'N', seed: 1, chunk_size: -5 });
   assert.equal(neg.status, 400);
 });
+
+test('POST /api/worlds persists width/height together or 400s on one', async () => {
+  const pool = mockPool([
+    [/INSERT INTO worlds/i, (p) => ({ rows: [{ id: 'w1', name: p[0], width: p[3], height: p[4] }] })],
+  ]);
+  __setPool(pool);
+  const ok = await request(app).post('/api/worlds').set(...AUTH)
+    .send({ name: 'arena', seed: 1, width: 40, height: 30 });
+  assert.equal(ok.status, 201);
+  const call = pool.calls.find((c) => /INSERT INTO worlds/i.test(c.sql));
+  assert.equal(Number(call.params[3]), 40);
+  assert.equal(Number(call.params[4]), 30);
+
+  const bad = await request(app).post('/api/worlds').set(...AUTH)
+    .send({ name: 'x', seed: 1, width: 40 }); // height missing
+  assert.equal(bad.status, 400);
+});
