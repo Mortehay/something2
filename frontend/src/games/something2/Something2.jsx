@@ -329,8 +329,9 @@ export default function Something2() {
       gameRef.current.init(tiles, mapTiles, entities, entityTypesMap);
       setIsPlaying(true);
 
-      // Connect to the Go engine. Dev path: pull a JWT from /api/dev-token,
-      // open WS, send `join`. Game pushes moves and reconciles incoming ticks.
+      // Connect to the Go engine using the JWT stored at login (dev-token was
+      // removed in slice 4a), open WS, send `join`. Game pushes moves and
+      // reconciles incoming ticks.
       try {
         if (engineRef.current) {
           engineRef.current.disconnect();
