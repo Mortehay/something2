@@ -3,7 +3,8 @@ import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
-import { EngineClient, fetchDevToken } from "./src/js/net/EngineClient.js";
+import { EngineClient, getStoredToken, parseJwt, clearToken } from "./src/js/net/EngineClient.js";
+import Login from "../../pages/Login.jsx";
 import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap, fetchMapEntities, useSaveEntities, useEntityTypes, useGenerateEntities } from "./useMaps.js";
 import { useWorlds, useCreateWorld } from "./useWorlds";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
@@ -199,6 +200,10 @@ export default function Something2() {
   const [newWorldChunkSize, setNewWorldChunkSize] = useState('64');
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  // Authed = there is a stored token that still parses as unexpired. Checked at
+  // mount so a page reload keeps the session instead of minting a new anonymous
+  // user (SOMET-97). getStoredToken() clears an expired/malformed token itself.
+  const [authed, setAuthed] = useState(() => !!getStoredToken());
 
   const { maps, isLoadingMaps } = useMaps();
   const { mapTiles, isLoadingMapTiles } = useMapTiles();
@@ -326,7 +331,9 @@ export default function Something2() {
           engineRef.current.disconnect();
           engineRef.current = null;
         }
-        const { token, user_id } = await fetchDevToken(API_URL);
+        const token = getStoredToken();
+        if (!token) { setAuthed(false); throw new Error('Please sign in'); }
+        const user_id = parseJwt(token)?.user_id;
         const client = new EngineClient({
           url: ENGINE_WS_URL,
           token,
@@ -436,6 +443,17 @@ export default function Something2() {
     }
   };
 
+  // No valid stored token → gate the whole surface behind the login screen.
+  // On success we store the token and flip authed; the game then renders.
+  if (!authed) {
+    return (
+      <Login
+        apiUrl={API_URL}
+        onAuthed={() => setAuthed(true)}
+      />
+    );
+  }
+
   return (
     <StyledGameContainer>
       <TabBar>
@@ -450,6 +468,16 @@ export default function Something2() {
         </TabButton>
         <TabButton $active={activeTab === 'items'} $adminType="items" onClick={() => setActiveTab('items')}>
           <HiOutlineCube /> Items
+        </TabButton>
+        <TabButton
+          style={{ marginLeft: 'auto' }}
+          onClick={() => {
+            if (engineRef.current) { engineRef.current.disconnect(); engineRef.current = null; }
+            clearToken();
+            setAuthed(false);
+          }}
+        >
+          Sign out
         </TabButton>
       </TabBar>
 
