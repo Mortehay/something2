@@ -204,6 +204,11 @@ export default function Something2() {
   // mount so a page reload keeps the session instead of minting a new anonymous
   // user (SOMET-97). getStoredToken() clears an expired/malformed token itself.
   const [authed, setAuthed] = useState(() => !!getStoredToken());
+  // Admin-only tabs (tile/entity/item registries) are gated on the JWT role
+  // claim so non-admin players don't see controls that only 403 when used. The
+  // server's adminGuard remains the real enforcement — this is UX/defense-in-
+  // depth. Recomputed when `authed` flips (sign in/out swaps the stored token).
+  const isAdmin = useMemo(() => parseJwt(getStoredToken())?.role === 'admin', [authed]);
 
   const { maps, isLoadingMaps } = useMaps();
   const { mapTiles, isLoadingMapTiles } = useMapTiles();
@@ -460,15 +465,19 @@ export default function Something2() {
         <TabButton $active={activeTab === 'game'} onClick={() => setActiveTab('game')}>
           <HiOutlinePuzzlePiece /> Game View
         </TabButton>
-        <TabButton $active={activeTab === 'tiles'} onClick={() => setActiveTab('tiles')}>
-          <HiOutlineWrenchScrewdriver /> TILE_TYPES Admin
-        </TabButton>
-        <TabButton $active={activeTab === 'entity'} $adminType="entity" onClick={() => setActiveTab('entity')}>
-          <HiOutlineBeaker /> Entity Admin
-        </TabButton>
-        <TabButton $active={activeTab === 'items'} $adminType="items" onClick={() => setActiveTab('items')}>
-          <HiOutlineCube /> Items
-        </TabButton>
+        {isAdmin && (
+          <>
+            <TabButton $active={activeTab === 'tiles'} onClick={() => setActiveTab('tiles')}>
+              <HiOutlineWrenchScrewdriver /> TILE_TYPES Admin
+            </TabButton>
+            <TabButton $active={activeTab === 'entity'} $adminType="entity" onClick={() => setActiveTab('entity')}>
+              <HiOutlineBeaker /> Entity Admin
+            </TabButton>
+            <TabButton $active={activeTab === 'items'} $adminType="items" onClick={() => setActiveTab('items')}>
+              <HiOutlineCube /> Items
+            </TabButton>
+          </>
+        )}
         <TabButton
           style={{ marginLeft: 'auto' }}
           onClick={() => {
@@ -641,9 +650,9 @@ export default function Something2() {
           <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: isPlaying ? 'block' : 'none' }} />
           </>
         )}
-        {activeTab === 'tiles' && <TileTypesAdmin />}
-        {activeTab === 'entity' && <EntityTypesAdmin />}
-        {activeTab === 'items' && <ItemTypesAdmin />}
+        {isAdmin && activeTab === 'tiles' && <TileTypesAdmin />}
+        {isAdmin && activeTab === 'entity' && <EntityTypesAdmin />}
+        {isAdmin && activeTab === 'items' && <ItemTypesAdmin />}
       </ContentArea>
     </StyledGameContainer>
   );
