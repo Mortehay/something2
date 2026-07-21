@@ -9,6 +9,12 @@ function fakePool(rows) {
   return { query: async () => ({ rows }) };
 }
 
+// A pool whose query always rejects — models a transient DB failure (pool
+// exhaustion, statement timeout, a DB restart) during the token_version lookup.
+function failingPool() {
+  return { query: async () => { throw new Error('connection terminated'); } };
+}
+
 function fakeReq(token) {
   return { headers: token ? { authorization: `Bearer ${token}` } : {} };
 }
@@ -42,6 +48,26 @@ test('requireAuth rejects a valid token with a stale token_version', async () =>
   await mw(req, res, () => { nextCalled = true; });
   assert.equal(res.statusCode, 401);
   assert.equal(nextCalled, false);
+});
+
+test('requireAuth responds 500 on a DB error instead of letting the rejection escape', async () => {
+  // Express 4.x does not catch async middleware rejections; an unguarded pool
+  // failure here would become an unhandledRejection and crash the process,
+  // taking the co-hosted WS authority down. The guard must convert it to a 500.
+  const token = signToken({ userId: 5, username: 'x', role: 'player', tokenVersion: 1 });
+  const mw = requireAuth(failingPool());
+  const req = fakeReq(token);
+  const res = fakeRes();
+  let nextCalled = false;
+  let threw = false;
+  try {
+    await mw(req, res, () => { nextCalled = true; });
+  } catch {
+    threw = true; // this is the crash path — the middleware rejected
+  }
+  assert.equal(threw, false, 'the middleware must not reject — that is the process-crash path');
+  assert.equal(res.statusCode, 500);
+  assert.equal(nextCalled, false, 'a failed auth check must not fall through to the handler');
 });
 
 test('requireAuth attaches req.user and calls next() when token_version matches', async () => {
