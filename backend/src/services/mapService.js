@@ -179,6 +179,13 @@ function worldConfig(world = {}) {
     pathTile,
     names,
     biomeNames,
+    bounds: (world.width && world.height) ? {
+      width: world.width,
+      height: world.height,
+      wallTile: world.wallTile || 'map_wall',
+      doorwayTile: world.doorwayTile || 'map_doorway',
+      doorways: world.doorways instanceof Set ? world.doorways : new Set(world.doorways || []),
+    } : null,
   };
 }
 
@@ -223,6 +230,7 @@ function generateRegion(world, rMin, cMin, rows, cols) {
     }
     grid[r] = row;
   }
+  if (cfg.bounds) stampBounds(grid, rMin, cMin, rows, cols, cfg.bounds);
   return grid;
 }
 
