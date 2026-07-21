@@ -6,7 +6,7 @@ import { Game } from "./src/js/main.js";
 import { EngineClient, getStoredToken, parseJwt, clearToken } from "./src/js/net/EngineClient.js";
 import Login from "../../pages/Login.jsx";
 import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap, fetchMapEntities, useSaveEntities, useEntityTypes, useGenerateEntities } from "./useMaps.js";
-import { useWorlds, useCreateWorld } from "./useWorlds";
+import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
@@ -329,6 +329,7 @@ export default function Something2() {
   const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
   const { worlds, isLoadingWorlds, worldsError } = useWorlds();
   const createWorldMutation = useCreateWorld();
+  const deleteWorldMutation = useDeleteWorld();
 
   useEffect(() => {
     if (worldsError) toast.error(`Failed to load worlds: ${worldsError.message}`);
@@ -681,7 +682,7 @@ export default function Something2() {
                         <MapItem
                           key={world.id}
                           selected={selectedWorldId === world.id}
-                          onClick={() => setSelectedWorldId(world.id)}
+                          onClick={() => { setSelectedWorldId(world.id); setSelectedMapId(null); }}
                         >
                           <div>
                             <div style={{ color: 'white', fontWeight: 'bold' }}>{world.name}</div>
@@ -689,6 +690,17 @@ export default function Something2() {
                               chunk_size {world.chunk_size || 64}{world.seed != null ? ` · seed ${world.seed}` : ''}
                             </div>
                           </div>
+                          <HiOutlineTrash
+                            style={{ color: '#ef4444', cursor: 'pointer', flexShrink: 0 }}
+                            title="Delete world"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm(`Delete world "${world.name}"? This removes its chunks, creatures, and loot.`)) {
+                                if (selectedWorldId === world.id) setSelectedWorldId(null);
+                                deleteWorldMutation.mutate(world.id);
+                              }
+                            }}
+                          />
                         </MapItem>
                       ))}
                       {worlds?.length === 0 && (
@@ -746,7 +758,7 @@ export default function Something2() {
                         <MapItem
                           key={map.id}
                           selected={selectedMapId === map.id}
-                          onClick={() => setSelectedMapId(map.id)}
+                          onClick={() => { setSelectedMapId(map.id); setSelectedWorldId(null); }}
                         >
                           <div>
                             <div style={{ color: 'white', fontWeight: 'bold' }}>{map.name}</div>

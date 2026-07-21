@@ -37,3 +37,22 @@ export function useCreateWorld() {
     onError: (e) => toast.error(e.message),
   });
 }
+
+export function useDeleteWorld() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id) => {
+      const res = await fetch(`${API_URL}/api/worlds/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (!res.ok) throw new Error("Failed to delete world");
+      return id;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["worlds"] });
+      toast.success("World deleted");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+}

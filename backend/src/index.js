@@ -33,8 +33,7 @@ const adminGuard = requireAdmin(guardPool);
 
 // World preview memo
 const PREVIEW_DIM = 64;
-const PREVIEW_STRIDE = 8;
-const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome grid)
+const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path grid)
 
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
 let spriteGen = require('./services/spriteGen');
@@ -767,6 +766,19 @@ app.get('/api/worlds', async (req, res) => {
   }
 });
 
+app.delete('/api/worlds/:id', adminGuard, async (req, res) => {
+  try {
+    // FK dependents (chunks, world_creatures, world_items, world_players) are
+    // all declared ON DELETE CASCADE, so a single delete removes the world tree.
+    const result = await pool.query('DELETE FROM worlds WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'world not found' });
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete world' });
+  }
+});
+
 app.get('/api/worlds/:id', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM worlds WHERE id = $1', [req.params.id]);
@@ -830,7 +842,7 @@ app.get('/api/worlds/:id/preview', async (req, res) => {
     const tileTypes = await getTileTypesMap();
     const data = generateWorldPreview(
       { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes },
-      PREVIEW_DIM, PREVIEW_STRIDE,
+      PREVIEW_DIM,
     );
     worldPreviewCache.set(worldId, data);
     res.json({ world_id: worldId, data });

@@ -190,22 +190,20 @@ function sampleBiome(cfg, gRow, gCol) {
   return cfg.biomeNames[idx];
 }
 
-// Downsampled biome overview for a world preview: a dim x dim grid sampled at
-// `stride` world tiles per cell, centered on origin. Biomes only (sampleBiome
-// excludes the path tile). Pure + deterministic — cost is fixed at dim*dim
-// samples regardless of the covered extent.
-function generateWorldPreview(world, dim, stride) {
-  const cfg = worldConfig(world);
-  const start = -Math.floor(dim / 2) * stride;
-  const grid = [];
-  for (let pr = 0; pr < dim; pr++) {
-    const row = new Array(dim);
-    for (let pc = 0; pc < dim; pc++) {
-      row[pc] = sampleBiome(cfg, start + pr * stride, start + pc * stride);
-    }
-    grid[pr] = row;
-  }
-  return grid;
+// Coherent overview grid for a world preview: a dim x dim CONTIGUOUS window of
+// the world centered on origin, rendered at full resolution the same way
+// generateRegion builds gameplay chunks — so it carries both biomes and carved
+// paths and reads like a hand-authored map.
+//
+// The previous implementation point-sampled one biome value every `stride`
+// world tiles. With stride equal to the biome noise cellSize (both 8), every
+// preview cell landed in a different lattice cell and the smooth interpolation
+// was skipped entirely, aliasing the field into per-tile confetti. A contiguous
+// window samples the same smooth field at full resolution instead. Pure +
+// deterministic.
+function generateWorldPreview(world, dim) {
+  const origin = -Math.floor(dim / 2);
+  return generateRegion(world, origin, origin, dim, dim);
 }
 
 // Generate an arbitrary rows x cols window of the world. Cell [r][c] is the
