@@ -18,6 +18,7 @@ import MapPreview from "./MapPreview.jsx";
 import WorldPreview from "./WorldPreview.jsx";
 
 const StyledGameContainer = styled.div`
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -25,6 +26,118 @@ const StyledGameContainer = styled.div`
   background-color: #0f0f1a;
   overflow: hidden;
 `;
+
+// Small circular "?" button pinned to the top-right corner, above everything.
+const HelpButton = styled.button`
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 300;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid #4a9eff;
+  background: rgba(26, 26, 46, 0.85);
+  color: #4a9eff;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: all 0.15s;
+  &:hover { background: #4a9eff; color: #fff; }
+`;
+
+// Full-screen dim backdrop; clicking it closes the panel.
+const HelpBackdrop = styled.div`
+  position: absolute;
+  inset: 0;
+  z-index: 400;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`;
+
+const HelpCard = styled.div`
+  background: #1a1a2e;
+  border: 1px solid #2e2e3e;
+  border-radius: 10px;
+  padding: 24px 28px;
+  width: min(560px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  color: #ddd;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+
+  h2 { margin: 0 0 4px; color: #fff; font-size: 1.5rem; }
+  h3 { margin: 20px 0 8px; color: #4a9eff; font-size: 1.05rem; }
+  p.sub { margin: 0 0 8px; color: #888; font-size: 0.9rem; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 5px 0; vertical-align: top; font-size: 0.95rem; }
+  td.k { width: 130px; white-space: nowrap; }
+  kbd {
+    display: inline-block;
+    min-width: 18px;
+    padding: 2px 7px;
+    margin: 0 2px 2px 0;
+    background: #0f0f1a;
+    border: 1px solid #3a3a4e;
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    color: #eee;
+    font-size: 0.85rem;
+    font-family: monospace;
+    text-align: center;
+  }
+`;
+
+const HelpCloseButton = styled.button`
+  float: right;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  &:hover { color: #fff; }
+`;
+
+// One place to describe the controls, so the panel can't drift from reality.
+// Keyboard/mouse bindings mirror core/Game.js and entities/Player.js.
+const HELP_SECTIONS = [
+  {
+    title: 'Movement & combat',
+    rows: [
+      { k: [['W'], ['A'], ['S'], ['D']], d: 'Move (arrow keys also work)' },
+      { k: [['Left-click']], d: 'Attack — fires toward the cursor with your equipped weapon' },
+    ],
+  },
+  {
+    title: 'Items & loot',
+    rows: [
+      { k: [['G']], d: 'Pick up the nearest ground item you are standing near' },
+      { k: [['Auto-loot']], d: 'Toggle in the HUD — walk over items to collect them without pressing G' },
+      { k: [['I']], d: 'Open the inventory / paper-doll: click an item then a slot to equip, click an equipped slot to unequip, and drop from the panel' },
+    ],
+  },
+  {
+    title: 'Session',
+    rows: [
+      { k: [['Esc']], d: 'Pause / resume' },
+      { k: [['Sign out']], d: 'Top-right of the tab bar — clears your session and returns to the login screen' },
+    ],
+  },
+  {
+    title: 'Worlds & admin (tabs at the top)',
+    rows: [
+      { k: [['Game View']], d: 'Select a world in the right-hand list, then "Enter World (chunked)" to play it' },
+      { k: [['Admin tabs']], d: 'TILE_TYPES / Entity / Items editors — visible to admin accounts only' },
+    ],
+  },
+];
 
 const TabBar = styled.div`
   display: flex;
@@ -193,6 +306,7 @@ export default function Something2() {
   const gameRef = useRef(null);
   const engineRef = useRef(null);
   const [activeTab, setActiveTab] = useState('game');
+  const [helpOpen, setHelpOpen] = useState(false);
   const [selectedMapId, setSelectedMapId] = useState(null);
   const [selectedWorldId, setSelectedWorldId] = useState(null);
   const [newWorldName, setNewWorldName] = useState('');
@@ -484,6 +598,43 @@ export default function Something2() {
 
   return (
     <StyledGameContainer>
+      <HelpButton
+        title="Help — controls & operations"
+        aria-label="Help"
+        onClick={() => setHelpOpen(true)}
+      >
+        ?
+      </HelpButton>
+
+      {helpOpen && (
+        <HelpBackdrop onClick={() => setHelpOpen(false)}>
+          <HelpCard onClick={(e) => e.stopPropagation()}>
+            <HelpCloseButton aria-label="Close help" onClick={() => setHelpOpen(false)}>×</HelpCloseButton>
+            <h2>Help</h2>
+            <p className="sub">Controls and main operations.</p>
+            {HELP_SECTIONS.map((section) => (
+              <div key={section.title}>
+                <h3>{section.title}</h3>
+                <table>
+                  <tbody>
+                    {section.rows.map((row, i) => (
+                      <tr key={i}>
+                        <td className="k">
+                          {row.k.map((keyGroup, gi) => (
+                            <kbd key={gi}>{keyGroup[0]}</kbd>
+                          ))}
+                        </td>
+                        <td>{row.d}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </HelpCard>
+        </HelpBackdrop>
+      )}
+
       <TabBar>
         <TabButton $active={activeTab === 'game'} onClick={() => setActiveTab('game')}>
           <HiOutlinePuzzlePiece /> Game View
