@@ -69,6 +69,27 @@ const ColorBadge = styled.div`
   border: 2px solid rgba(255, 255, 255, 0.1);
 `;
 
+const TextureBadge = styled.img`
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+  image-rendering: pixelated;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+`;
+
+// URL of a tile's rendered texture (static image or animation atlas), or null
+// when the tile is plain color. Asset keys are stable, so a `?v=updated_at`
+// cache-buster ensures a freshly-approved texture replaces the cached one.
+function tileTextureUrl(tile) {
+  const key = tile.render_mode === 'animated'
+    ? tile.sprite?.atlas_key
+    : tile.render_mode === 'image'
+      ? tile.image
+      : null;
+  return key ? `${assetUrl(key)}?v=${encodeURIComponent(tile.updated_at || '')}` : null;
+}
+
 const TileName = styled.h3`
   font-size: 1.8rem;
   margin: 0;
@@ -282,7 +303,14 @@ function TileSpritePanel({ tile }) {
   const status = job?.status;
   const result = job?.result;
   const previewKey = mode === 'animated' ? result?.atlas_key : result?.image_key;
-  const previewUrl = assetUrl(previewKey);
+  // Asset keys are stable (e.g. sprites/tiles/grass/static.png), so the browser
+  // caches them across regenerations. Bust the cache with a per-generation /
+  // per-save version so a fresh texture actually shows instead of the stale one.
+  const previewUrl = previewKey ? `${assetUrl(previewKey)}?v=${jobId}` : null;
+
+  // The tile's currently-saved texture (persisted via a previous Approve), shown
+  // whenever render mode isn't plain color — independent of any live job.
+  const savedUrl = tileTextureUrl(tile);
 
   const approve = () => {
     if (!result) return;
@@ -304,6 +332,12 @@ function TileSpritePanel({ tile }) {
         <SecondaryButton type="button" onClick={() => start('image')} disabled={generate.isPending}>Generate texture</SecondaryButton>
         <SecondaryButton type="button" onClick={() => start('animated')} disabled={generate.isPending}>Generate animation</SecondaryButton>
       </div>
+      {savedUrl && status !== 'done' && (
+        <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <img src={savedUrl} alt="current texture" style={{ width: 64, height: 64, imageRendering: 'pixelated', background: '#0f0f1a', borderRadius: 6 }} />
+          <span style={{ fontSize: '1rem', opacity: 0.7 }}>Current {tile.render_mode} texture</span>
+        </div>
+      )}
       {jobId && (
         <div style={{ marginTop: '0.75rem', fontSize: '1.1rem' }}>
           {status && status !== 'done' && status !== 'error' && <span>Generating… ({job?.progress?.done ?? 0}/{job?.progress?.total ?? 0})</span>}
@@ -427,7 +461,9 @@ function TileTypesAdmin() {
           <TileCard key={tile.id}>
             <TileHeader>
               <TileInfo>
-                <ColorBadge color={tile.color} />
+                {tileTextureUrl(tile)
+                  ? <TextureBadge src={tileTextureUrl(tile)} alt={`${tile.name} texture`} />
+                  : <ColorBadge color={tile.color} />}
                 <TileName>{tile.name}</TileName>
               </TileInfo>
               <ActionButtons>

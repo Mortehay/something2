@@ -69,7 +69,7 @@ services:
       - "18100:8100"
     environment:
       - DEVICE=cpu
-      - SPRITE_BACKEND=stub
+      - SPRITE_BACKEND=sd-turbo
       - SPRITE_STORE_ENABLED=true
       - N_FRAMES=4
       - MINIO_ENDPOINT=minio:9000
