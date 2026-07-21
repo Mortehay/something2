@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const jwt = require('jsonwebtoken');
 const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
@@ -27,7 +26,10 @@ const __setPool = (impl) => { pool = impl; };
 // __setPool), so hand them a proxy that forwards to the live `pool` binding
 // rather than whatever value existed at module-load time.
 const guardPool = { query: (sql, params) => pool.query(sql, params) };
+const { requireAdmin } = require('./auth/middleware.js');
 const authRouter = require('./auth/routes.js');
+// Single admin guard applied to every mutating admin route below.
+const adminGuard = requireAdmin(guardPool);
 
 // World preview memo
 const PREVIEW_DIM = 64;
@@ -121,23 +123,9 @@ app.get('/api/health', (req, res) => {
 // Authentication routes: register / login / logout-all / me / admin role.
 app.use('/api/auth', authRouter(guardPool));
 
-// Dev-only: mints a short-lived JWT signed with the engine's shared secret so
-// the frontend can connect to the WS engine without a real auth flow yet.
-// Replace with a proper login endpoint when auth lands.
-app.get('/api/dev-token', (req, res) => {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    return res.status(500).json({ error: 'JWT_SECRET not configured' });
-  }
-  const userId = parseInt(req.query.user_id, 10) || Math.floor(Math.random() * 1e9) + 1;
-  const username = req.query.username || `dev-${userId}`;
-  const token = jwt.sign(
-    { user_id: userId, username, sub: String(userId) },
-    secret,
-    { algorithm: 'HS256', expiresIn: '24h' }
-  );
-  res.json({ token, user_id: userId, username });
-});
+// The /api/dev-token endpoint was removed: it minted a correctly-signed JWT for
+// any user_id with no credentials — a verified account-takeover primitive.
+// Use POST /api/auth/login instead.
 
 // List all maps
 app.get('/api/maps', async (req, res) => {
@@ -190,7 +178,7 @@ app.get('/api/entity-types', async (req, res) => {
   }
 });
 
-app.post('/api/entity-types', async (req, res) => {
+app.post('/api/entity-types', adminGuard, async (req, res) => {
   try {
     const {
       name, color, walkable, spawn_tiles, chance,
@@ -221,7 +209,7 @@ app.post('/api/entity-types', async (req, res) => {
   }
 });
 
-app.put('/api/entity-types/:id', async (req, res) => {
+app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -252,7 +240,7 @@ app.put('/api/entity-types/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/entity-types/:id', async (req, res) => {
+app.delete('/api/entity-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('DELETE FROM entity_types WHERE id = $1 RETURNING id', [id]);
@@ -334,7 +322,7 @@ app.get('/api/item-types', async (req, res) => {
   }
 });
 
-app.post('/api/item-types', async (req, res) => {
+app.post('/api/item-types', adminGuard, async (req, res) => {
   try {
     const b = req.body;
     const bad = validateItemType(b);
@@ -359,7 +347,7 @@ app.post('/api/item-types', async (req, res) => {
   }
 });
 
-app.put('/api/item-types/:id', async (req, res) => {
+app.put('/api/item-types/:id', adminGuard, async (req, res) => {
   try {
     const b = req.body;
     const bad = validateItemType(b);
@@ -387,7 +375,7 @@ app.put('/api/item-types/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/item-types/:id', async (req, res) => {
+app.delete('/api/item-types/:id', adminGuard, async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM item_types WHERE id = $1 RETURNING id', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
@@ -399,7 +387,7 @@ app.delete('/api/item-types/:id', async (req, res) => {
 });
 
 // Admin grant: give a user an instance of an item type.
-app.post('/api/players/:userId/items', async (req, res) => {
+app.post('/api/players/:userId/items', adminGuard, async (req, res) => {
   try {
     const { item_type_id } = req.body;
     if (item_type_id == null) return res.status(400).json({ error: 'item_type_id is required' });
@@ -425,7 +413,7 @@ app.get('/api/tile-types', async (req, res) => {
   }
 });
 
-app.post('/api/tile-types', async (req, res) => {
+app.post('/api/tile-types', adminGuard, async (req, res) => {
   try {
     const { name, color, walkable, speed, image, valid_neighbors } = req.body;
     
@@ -445,7 +433,7 @@ app.post('/api/tile-types', async (req, res) => {
   }
 });
 
-app.put('/api/tile-types/:id', async (req, res) => {
+app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, color, walkable, speed, image, valid_neighbors } = req.body;
@@ -466,7 +454,7 @@ app.put('/api/tile-types/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/tile-types/:id', async (req, res) => {
+app.delete('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('DELETE FROM tile_types WHERE id = $1 RETURNING id', [id]);
@@ -498,7 +486,7 @@ app.get('/api/maps/:id', async (req, res) => {
 });
 
 // Generate a new map
-app.post('/api/maps/generate', async (req, res) => {
+app.post('/api/maps/generate', adminGuard, async (req, res) => {
   try {
     const { name, description, rows = 100, cols = 100, seed } = req.body;
 
@@ -523,7 +511,7 @@ app.post('/api/maps/generate', async (req, res) => {
 
 
 // Delete a map
-app.delete('/api/maps/:id', async (req, res) => {
+app.delete('/api/maps/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('DELETE FROM maps WHERE id = $1 RETURNING id', [id]);
@@ -542,7 +530,7 @@ app.delete('/api/maps/:id', async (req, res) => {
 // Save map entities. Frontend payload: [{ type: "Tree"|"Stone"|..., row, col, name }, ...].
 // Persisted as row-per-entity in map_entities (type='obstacle', entity_type_id resolved by name,
 // x = col + 0.5, y = row + 0.5 in tile coords).
-app.post('/api/maps/:id/entities', async (req, res) => {
+app.post('/api/maps/:id/entities', adminGuard, async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
@@ -614,7 +602,7 @@ app.get('/api/maps/:id/entities', async (req, res) => {
 });
 
 // Generate static obstacles (type='obstacle') from entity_types.spawn_tiles + chance.
-app.post('/api/maps/:id/generate-entities', async (req, res) => {
+app.post('/api/maps/:id/generate-entities', adminGuard, async (req, res) => {
   const { id } = req.params;
   const client = await pool.connect();
   try {
@@ -681,7 +669,7 @@ app.get('/api/sprite-capability', async (req, res) => {
 // service and record it as a queued sprite_sets row. When the caller doesn't
 // pin a backend/tier we auto-select the tier from detected hardware; the
 // sprite-gen recipe then fills backend/frames/steps for that tier.
-app.post('/api/sprite-jobs', async (req, res) => {
+app.post('/api/sprite-jobs', adminGuard, async (req, res) => {
   try {
     const { entity_type, base_prompt, backend, frames, seed = 0, tier } = req.body;
     let effectiveTier = tier;
@@ -720,7 +708,7 @@ app.get('/api/sprite-jobs/:jobId', async (req, res) => {
 
 // Approve a generated sprite set and link it to an entity type.
 // :id is entity_types.id (integer); pg casts the string param automatically.
-app.post('/api/entity-types/:id/sprite', async (req, res) => {
+app.post('/api/entity-types/:id/sprite', adminGuard, async (req, res) => {
   try {
     const { atlas_key, manifest_key, job_id, static_frame } = req.body;
     const result = await pool.query(
@@ -747,7 +735,7 @@ app.post('/api/entity-types/:id/sprite', async (req, res) => {
 
 // --- Worlds (chunked overworld) -------------------------------------------
 
-app.post('/api/worlds', async (req, res) => {
+app.post('/api/worlds', adminGuard, async (req, res) => {
   try {
     const { name, seed, chunk_size } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {

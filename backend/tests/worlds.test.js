@@ -1,16 +1,22 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const { adminToken, isUserLookup, ADMIN_USER_ROW } = require('./helpers/auth.js');
 const request = require('supertest');
 
 const { app, __setPool } = require('../src/index.js');
 
+// POST /api/worlds is behind requireAdmin now.
+const AUTH = ['Authorization', `Bearer ${adminToken()}`];
+
 // A pool mock whose query() dispatches on the SQL text. `handlers` is an array
-// of [regex, (params) => ({ rows }|Promise)] pairs, tried in order.
+// of [regex, (params) => ({ rows }|Promise)] pairs, tried in order. The auth
+// middleware's user lookup is answered automatically with an admin row.
 function mockPool(handlers) {
   const calls = [];
   return {
     calls,
     query: async (sql, params) => {
+      if (isUserLookup(sql)) return ADMIN_USER_ROW;
       calls.push({ sql, params });
       for (const [re, fn] of handlers) {
         if (re.test(sql)) return fn(params);
@@ -22,7 +28,7 @@ function mockPool(handlers) {
 
 test('POST /api/worlds rejects a missing name', async () => {
   __setPool(mockPool([]));
-  const res = await request(app).post('/api/worlds').send({ seed: 5 });
+  const res = await request(app).post('/api/worlds').set(...AUTH).send({ seed: 5 });
   assert.equal(res.status, 400);
 });
 
@@ -33,7 +39,7 @@ test('POST /api/worlds creates and returns the row', async () => {
     })],
   ]));
   const res = await request(app)
-    .post('/api/worlds')
+    .post('/api/worlds').set(...AUTH)
     .send({ name: 'Test World', seed: 42, chunk_size: 32 });
   assert.equal(res.status, 201);
   assert.equal(res.body.id, 'w1');
@@ -122,10 +128,10 @@ test('POST /api/worlds rejects chunk_size out of range', async () => {
   __setPool(mockPool([
     [/INSERT INTO worlds/i, (p) => ({ rows: [{ id: 'w', name: p[0], seed: String(p[1]), chunk_size: p[2] }] })],
   ]));
-  const zero = await request(app).post('/api/worlds').send({ name: 'Z', seed: 1, chunk_size: 0 });
+  const zero = await request(app).post('/api/worlds').set(...AUTH).send({ name: 'Z', seed: 1, chunk_size: 0 });
   assert.equal(zero.status, 400);
-  const huge = await request(app).post('/api/worlds').send({ name: 'H', seed: 1, chunk_size: 1000000 });
+  const huge = await request(app).post('/api/worlds').set(...AUTH).send({ name: 'H', seed: 1, chunk_size: 1000000 });
   assert.equal(huge.status, 400);
-  const neg = await request(app).post('/api/worlds').send({ name: 'N', seed: 1, chunk_size: -5 });
+  const neg = await request(app).post('/api/worlds').set(...AUTH).send({ name: 'N', seed: 1, chunk_size: -5 });
   assert.equal(neg.status, 400);
 });
