@@ -44,7 +44,11 @@ def generate(req: GenerateRequest):
     # let any explicit request field win over the recipe default.
     tier = req.tier or settings.capability()["tier"]
     recipe = recipe_for(tier)
-    backend_name = req.backend or recipe.backend
+    # SPRITE_BACKEND is an explicit override so the "stub now / real SD later"
+    # switch is config, not code: set it (e.g. `stub`) to force a backend; unset
+    # it to let the hardware-tier recipe choose. An explicit request backend
+    # still wins over both.
+    backend_name = req.backend or os.getenv("SPRITE_BACKEND") or recipe.backend
     if backend_name not in backends.available():
         raise HTTPException(status_code=400, detail=f"unknown backend '{backend_name}'")
     frames = req.frames or recipe.n_frames
