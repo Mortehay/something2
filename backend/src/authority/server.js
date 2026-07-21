@@ -6,7 +6,7 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
-const { spawnChunkCreatures } = require('../services/mapService');
+const { spawnChunkCreatures, doorwaysForWorld } = require('../services/mapService');
 const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -84,7 +84,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     let pending = loading.get(worldId);
     if (!pending) {
       pending = (async () => {
-        const wr = await pool.query('SELECT id, seed, chunk_size FROM worlds WHERE id = $1', [worldId]);
+        const wr = await pool.query('SELECT id, seed, chunk_size, width, height FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
@@ -93,7 +93,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const { creatureTypes, creatureTypeIds } = await loadCreatureTypes(pool);
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
-        const map = new ServerMap({ seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes });
+        const map = new ServerMap({
+          seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes,
+          width: row.width, height: row.height, doorways: doorwaysForWorld(row),
+        });
         const entry = {
           worldId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
           tileTypes, creatureTypes, creatureTypeIds,

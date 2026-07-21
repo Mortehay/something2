@@ -179,6 +179,13 @@ function worldConfig(world = {}) {
     pathTile,
     names,
     biomeNames,
+    bounds: (world.width && world.height) ? {
+      width: world.width,
+      height: world.height,
+      wallTile: world.wallTile || 'map_wall',
+      doorwayTile: world.doorwayTile || 'map_doorway',
+      doorways: world.doorways instanceof Set ? world.doorways : new Set(world.doorways || []),
+    } : null,
   };
 }
 
@@ -223,6 +230,7 @@ function generateRegion(world, rMin, cMin, rows, cols) {
     }
     grid[r] = row;
   }
+  if (cfg.bounds) stampBounds(grid, rMin, cMin, rows, cols, cfg.bounds);
   return grid;
 }
 
@@ -346,6 +354,51 @@ function spawnChunkCreatures(world, cx, cy, creatureTypes) {
     }
   }
   return out;
+}
+
+// --- Bounded-world boundary overlay ---------------------------------------
+//
+// A bounded world is a width x height tile rectangle. Its outer ring is a solid
+// wall; each edge listed in `doorways` gets a centered DOORWAY_TILES-wide
+// passable gap. Cells outside the rectangle are wall too, so a chunk fetched
+// beyond the bound reads as solid. Pure overlay applied after biome+path fill.
+
+const DOORWAY_TILES = 3; // width of a doorway gap, in tiles (centered on its edge)
+
+function isDoorwayCell(gRow, gCol, width, height, doorways) {
+  const half = Math.floor(DOORWAY_TILES / 2);
+  const midCol = Math.floor(width / 2);
+  const midRow = Math.floor(height / 2);
+  if (doorways.has('N') && gRow === 0 && gCol >= midCol - half && gCol <= midCol + half) return true;
+  if (doorways.has('S') && gRow === height - 1 && gCol >= midCol - half && gCol <= midCol + half) return true;
+  if (doorways.has('W') && gCol === 0 && gRow >= midRow - half && gRow <= midRow + half) return true;
+  if (doorways.has('E') && gCol === width - 1 && gRow >= midRow - half && gRow <= midRow + half) return true;
+  return false;
+}
+
+function stampBounds(grid, rMin, cMin, rows, cols, bounds) {
+  const { width, height, wallTile, doorwayTile, doorways } = bounds;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const gRow = rMin + r, gCol = cMin + c;
+      const outside = gRow < 0 || gRow >= height || gCol < 0 || gCol >= width;
+      if (outside) { grid[r][c] = wallTile; continue; }
+      const onRing = gRow === 0 || gRow === height - 1 || gCol === 0 || gCol === width - 1;
+      if (onRing) {
+        grid[r][c] = isDoorwayCell(gRow, gCol, width, height, doorways) ? doorwayTile : wallTile;
+      }
+    }
+  }
+  return grid;
+}
+
+// Which edges of a bounded world have a doorway. Slice 1: every edge, so a
+// bounded world is traversable for testing. Slice 3 replaces the body with a
+// lookup of map_links (only linked edges get a doorway). Callers pass the raw
+// `worlds` DB row.
+function doorwaysForWorld(worldRow) {
+  if (!worldRow || !worldRow.width || !worldRow.height) return new Set();
+  return new Set(['N', 'E', 'S', 'W']);
 }
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -522,5 +575,8 @@ module.exports = {
     collectPathCells,
     densityAt,
     spawnChunkCreatures,
+    stampBounds,
+    doorwaysForWorld,
+    DOORWAY_TILES,
 };
 

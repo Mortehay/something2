@@ -4,7 +4,7 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, doorwaysForWorld } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -839,7 +839,7 @@ app.post('/api/tile-types/:id/sprite', adminGuard, async (req, res) => {
 
 app.post('/api/worlds', adminGuard, async (req, res) => {
   try {
-    const { name, seed, chunk_size } = req.body;
+    const { name, seed, chunk_size, width, height } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'name is required' });
     }
@@ -848,9 +848,18 @@ app.post('/api/worlds', adminGuard, async (req, res) => {
     if (chunkSize < 1 || chunkSize > 256) {
       return res.status(400).json({ error: 'chunk_size must be an integer between 1 and 256' });
     }
+    // Optional rectangular bound (tiles). Both or neither. NULL => infinite.
+    const w = Number.isFinite(width) ? Math.floor(width) : null;
+    const h = Number.isFinite(height) ? Math.floor(height) : null;
+    if ((w === null) !== (h === null)) {
+      return res.status(400).json({ error: 'width and height must be provided together' });
+    }
+    if (w !== null && (w < 8 || w > 4096 || h < 8 || h > 4096)) {
+      return res.status(400).json({ error: 'width and height must be between 8 and 4096 tiles' });
+    }
     const result = await pool.query(
-      'INSERT INTO worlds (name, seed, chunk_size) VALUES ($1, $2, $3) RETURNING *',
-      [name.trim(), worldSeed, chunkSize],
+      'INSERT INTO worlds (name, seed, chunk_size, width, height) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [name.trim(), worldSeed, chunkSize, w, h],
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -921,7 +930,8 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
 
     const tileTypes = await getTileTypesMap();
     const data = generateChunk(
-      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes },
+      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
+        width: world.width, height: world.height, doorways: doorwaysForWorld(world) },
       cx, cy,
     );
 
@@ -944,7 +954,8 @@ app.get('/api/worlds/:id/preview', async (req, res) => {
 
     const tileTypes = await getTileTypesMap();
     const data = generateWorldPreview(
-      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes },
+      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
+        width: world.width, height: world.height, doorways: doorwaysForWorld(world) },
       PREVIEW_DIM,
     );
     worldPreviewCache.set(worldId, data);
