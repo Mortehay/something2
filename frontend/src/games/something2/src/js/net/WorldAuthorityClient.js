@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -19,6 +19,7 @@ export class WorldAuthorityClient {
     this.onDropped = onDropped || (() => {});
     this.onNoAmmo = onNoAmmo || (() => {});
     this.onAmmo = onAmmo || (() => {});
+    this.onTransition = onTransition || (() => {});
     this.inputIntervalMs = inputIntervalMs;
     this.now = now;
 
@@ -44,40 +45,45 @@ export class WorldAuthorityClient {
     this.ws.addEventListener('message', (event) => {
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
-      switch (msg.type) {
-        case 'joined': this.joined = true; this.onJoined(msg); break;
-        case 'state': this.onState(msg); break;
-        case 'pong': break;
-        case 'creatures': this.onCreatures(msg); break;
-        case 'kicked': this.onKicked(msg); break;
-        case 'items': this.onItems(msg); break;
-        case 'picked': this.onPicked(msg); break;
-        case 'dropped': this.onDropped(msg); break;
-        // Sent to this socket alone when a shot was refused for an empty ammo
-        // stack. The server consumed NO cooldown, so this is purely a cue to
-        // the player — nothing local needs rolling back.
-        case 'noammo': this.onNoAmmo(msg); break;
-        // The authoritative ammo count for one type after a successful shot.
-        // The server's number always wins — never merge it with a
-        // locally-derived count or decrement on send, see core/ammo.js.
-        case 'ammo': this.onAmmo(msg); break;
-        case 'error': {
-          // Tag so callers can tell a server-issued protocol rejection (e.g.
-          // "unequip it first") apart from a raw transport failure below —
-          // only the former carries a message worth showing the player.
-          const err = new Error(msg.message || 'authority error');
-          err.isServerRejection = true;
-          err.serverMessage = msg.message || null;
-          this.onError(err);
-          break;
-        }
-        default: console.warn('WorldAuthorityClient: unknown msg', msg.type);
-      }
+      this._handleMessage(msg);
     });
     this.ws.addEventListener('error', () => this.onError(new Error('websocket error')));
     this.ws.addEventListener('close', (ev) => {
       this.connected = false; this.joined = false; this.onClose(ev);
     });
+  }
+
+  _handleMessage(msg) {
+    switch (msg.type) {
+      case 'joined': this.joined = true; this.onJoined(msg); break;
+      case 'state': this.onState(msg); break;
+      case 'pong': break;
+      case 'creatures': this.onCreatures(msg); break;
+      case 'kicked': this.onKicked(msg); break;
+      case 'items': this.onItems(msg); break;
+      case 'picked': this.onPicked(msg); break;
+      case 'dropped': this.onDropped(msg); break;
+      // Sent to this socket alone when a shot was refused for an empty ammo
+      // stack. The server consumed NO cooldown, so this is purely a cue to
+      // the player — nothing local needs rolling back.
+      case 'noammo': this.onNoAmmo(msg); break;
+      // The authoritative ammo count for one type after a successful shot.
+      // The server's number always wins — never merge it with a
+      // locally-derived count or decrement on send, see core/ammo.js.
+      case 'ammo': this.onAmmo(msg); break;
+      case 'transition': this.onTransition(msg); break;
+      case 'error': {
+        // Tag so callers can tell a server-issued protocol rejection (e.g.
+        // "unequip it first") apart from a raw transport failure below —
+        // only the former carries a message worth showing the player.
+        const err = new Error(msg.message || 'authority error');
+        err.isServerRejection = true;
+        err.serverMessage = msg.message || null;
+        this.onError(err);
+        break;
+      }
+      default: console.warn('WorldAuthorityClient: unknown msg', msg.type);
+    }
   }
 
   // Returns {sent, seq?, dx?, dy?, dt?}. dt is the seconds accumulated since the
