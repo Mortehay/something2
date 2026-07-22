@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { HiOutlinePlus, HiOutlineTrash, HiOutlineArrowPath, HiOutlineSparkles, HiOutlineStar } from 'react-icons/hi2';
@@ -39,6 +39,8 @@ function MapCard({ world, creatureTypes }) {
   const cy = world.height ? Math.floor((world.height * 100) / 2) : 0;
   const [spawnX, setSpawnX] = useState(world.entry_spawn?.x ?? cx);
   const [spawnY, setSpawnY] = useState(world.entry_spawn?.y ?? cy);
+
+  useEffect(() => { setIsEntry(!!world.is_entry); }, [world.is_entry]);
 
   const toggle = (n) => setAllowed(prev => {
     const next = new Set(prev); next.has(n) ? next.delete(n) : next.add(n); return next;
