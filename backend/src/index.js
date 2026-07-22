@@ -1007,7 +1007,7 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
 
     // Spare guards — they aren't rolled, they're re-derived from villages below.
     await pool.query(
-      `DELETE FROM world_creatures WHERE world_id = $1 AND type <> $2 /* spare Village Guard rows */`,
+      `DELETE FROM world_creatures WHERE world_id = $1 AND type <> $2`,
       [id, GUARD_TYPE],
     );
 
