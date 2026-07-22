@@ -56,7 +56,15 @@ async function loadCreatureTypes(pool) {
     ...creatureMitigation(row),
   }));
   const creatureTypeIds = new Map(r.rows.map((row) => [row.name, row.id]));
-  return { creatureTypes, creatureTypeIds };
+  // Wild-spawn pool: guard-faction types are placed exclusively via
+  // insertVillageGuards (anchored to a village gate post), never by the
+  // per-chunk random roll. A guard rolled into that pool has no home_x/home_y
+  // — withinLeash treats a null home as unconstrained — so it would come out
+  // as a world-roaming, undroppable, unleashed creature-hunter. creatureTypes
+  // and creatureTypeIds stay COMPLETE: drops and name→id lookups must still
+  // see guards.
+  const hostileCreatureTypes = creatureTypes.filter((t) => (t.faction || 'hostile') !== 'guard');
+  return { creatureTypes, creatureTypeIds, hostileCreatureTypes };
 }
 
 function center(o) { return { x: o.x + o.width / 2, y: o.y + o.height / 2 }; }

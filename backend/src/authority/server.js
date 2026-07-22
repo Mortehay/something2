@@ -117,7 +117,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
-        const { creatureTypes, creatureTypeIds } = await loadCreatureTypes(pool);
+        const { creatureTypes, creatureTypeIds, hostileCreatureTypes } = await loadCreatureTypes(pool);
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const linkRows = await fetchLinks(pool, worldId);
@@ -130,7 +130,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         const entry = {
           worldId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
-          tileTypes, creatureTypes, creatureTypeIds, links, villages,
+          tileTypes, creatureTypes, creatureTypeIds, hostileCreatureTypes, links, villages,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -215,10 +215,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Bounded maps use count-based placement (placeMapCreatures, written to
       // world_creatures by the admin re-roll route); they must NOT run the
       // per-tile roll here, which would scatter creatures onto the wall ring.
-      if (ins.rowCount > 0 && entry.creatureTypes.length && !isBoundedWorld(entry.row)) {
+      if (ins.rowCount > 0 && entry.hostileCreatureTypes.length && !isBoundedWorld(entry.row)) {
         const spawned = spawnChunkCreatures(
           { seed: Number(entry.row.seed), chunkSize: N, tileTypes: entry.tileTypes },
-          cx, cy, entry.creatureTypes,
+          cx, cy, entry.hostileCreatureTypes,
         );
         for (const c of spawned) {
           await pool.query(

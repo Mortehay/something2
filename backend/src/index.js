@@ -980,6 +980,10 @@ app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
     const newSeed = Math.floor(Math.random() * 2 ** 31);
     await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [id]);
     await pool.query('DELETE FROM world_creatures WHERE world_id = $1', [id]);
+    // Villages live in a separate table and survive a regenerate — without
+    // this, a regenerated world keeps its gated villages but loses their
+    // guards, since the wipe above has no village_id to spare them by.
+    await insertVillageGuards(id, await fetchVillages(pool, id));
     worldPreviewCache.delete(id);
     const result = await pool.query(
       'UPDATE worlds SET seed = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
@@ -1161,6 +1165,14 @@ app.delete('/api/worlds/:id/villages/:villageId', adminGuard, async (req, res) =
   try {
     const { id, villageId } = req.params;
     await pool.query('DELETE FROM villages WHERE id = $1 AND world_id = $2', [villageId, id]);
+    // Guards have no FK cascade to their village (world_creatures rows carry
+    // no village_id) — re-derive the whole guard set from the villages that
+    // survive the delete, the same pattern the re-roll route uses. This
+    // deletes every guard for the world, then re-inserts exactly two per
+    // surviving village, so a village deleted alongside others leaves the
+    // rest's guards intact, and deleting the last village leaves zero.
+    await pool.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`, [id, GUARD_TYPE]);
+    await insertVillageGuards(id, await fetchVillages(pool, id));
     await invalidateWorld(id);
     res.status(204).end();
   } catch (err) {
