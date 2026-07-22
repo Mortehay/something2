@@ -6,8 +6,9 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
-const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint } = require('../services/mapService');
+const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
+const { fetchVillages } = require('../services/villages');
 const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -29,6 +30,17 @@ function planTransition({ tileName, gRow, gCol, worldRow, links, now, cdUntil })
   if (!link) return null;
   const { x, y } = arrivalPoint(link.toWidth, link.toHeight, oppositeEdge(edge));
   return { toWorldId: link.toWorldId, arriveX: x, arriveY: y };
+}
+
+// Pure: given a player's current tile + this world's villages, decide whether
+// to (re)bind them to a village. Returns the village to bind to, or null when
+// already bound to the village covering this point or when outside every
+// village.
+function planBind({ villages, gRow, gCol, boundVillageId }) {
+  const v = villageContaining(gRow, gCol, villages);
+  if (!v) return null;
+  if (v.id === boundVillageId) return null;
+  return v;
 }
 
 // Attach the authoritative WebSocket simulation to an existing http server.
@@ -110,13 +122,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const linkRows = await fetchLinks(pool, worldId);
         const links = new Map(linkRows.map((l) => [l.edge, { toWorldId: l.to_world_id, toWidth: l.to_width, toHeight: l.to_height }]));
+        const villages = await fetchVillages(pool, worldId);
         const map = new ServerMap({
           seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes,
           width: row.width, height: row.height, doorways: [...links.keys()],
+          villages,
         });
         const entry = {
           worldId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
-          tileTypes, creatureTypes, creatureTypeIds, links,
+          tileTypes, creatureTypes, creatureTypeIds, links, villages,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -145,7 +159,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
       [worldId, userId]
     );
     if (r.rows.length) persisted = { x: r.rows[0].x, y: r.rows[0].y };
-    return chooseSpawn({ pending, persisted, worldRow, chunkSize });
+    const spawn = chooseSpawn({ pending, persisted, worldRow, chunkSize });
+    const b = await pool.query(
+      'SELECT x, y FROM player_binds WHERE user_id = $1 AND world_id = $2',
+      [userId, worldId],
+    );
+    spawn.respawn = b.rows.length ? { x: b.rows[0].x, y: b.rows[0].y } : { x: spawn.x, y: spawn.y };
+    return spawn;
   }
 
   // Single fire-and-forget entry point for a killed creature id: named once
@@ -167,6 +187,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
        VALUES ($1, $2, $3, $4, now())
        ON CONFLICT (world_id, user_id) DO UPDATE SET x = $3, y = $4, updated_at = now()`,
       [worldId, userId, p.x, p.y]
+    );
+  }
+
+  async function upsertBind(userId, worldId, x, y) {
+    await pool.query(
+      `INSERT INTO player_binds (user_id, world_id, x, y, updated_at)
+         VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (user_id) DO UPDATE SET world_id = $2, x = $3, y = $4, updated_at = now()`,
+      [userId, worldId, x, y],
     );
   }
 
@@ -356,7 +385,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           }
 
           ws.worldId = msg.world_id;
-          entry.world.addPlayer(ws.userId, spawn, inv);
+          entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn);
           if (spawn.viaDoorway) {
             const p = entry.world.getPlayer(ws.userId);
             if (p) p._doorwayCdUntil = Date.now() + 1500;
@@ -590,6 +619,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
           }
         }
       }
+      if (entry.villages && entry.villages.length) {
+        for (const p of entry.world.players.values()) {
+          const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+          const gRow = Math.floor(cy / MAP_TILE_SIZE), gCol = Math.floor(cx / MAP_TILE_SIZE);
+          const v = planBind({ villages: entry.villages, gRow, gCol, boundVillageId: p._boundVillageId });
+          if (v) {
+            p._boundVillageId = v.id;
+            p.spawn = { x: v.spawnX, y: v.spawnY };
+            upsertBind(p.userId, entry.worldId, v.spawnX, v.spawnY).catch((e) => console.error('upsertBind', e));
+          }
+        }
+      }
       entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
       const { killedCreatureIds: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
       for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);
@@ -743,4 +784,4 @@ function attachAuthority(httpServer, pool, opts = {}) {
   };
 }
 
-module.exports = { attachAuthority, planTransition };
+module.exports = { attachAuthority, planTransition, planBind };

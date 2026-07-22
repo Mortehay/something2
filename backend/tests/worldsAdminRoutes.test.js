@@ -137,6 +137,7 @@ test('POST /api/worlds/:id/creatures places creatures and reports the count', as
     [/FROM map_links/i, () => ({ rows: [] })],
     [/SELECT .*FROM entity_types WHERE is_creature/i, () => ({
       rows: [{ id: 1, name: 'goblin', hp: 12, defense: 1, resistances: {} }] })],
+    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
     [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],
     [/INSERT INTO world_creatures/i, (p) => { inserted.push(p); return { rows: [], rowCount: 1 }; }],
   ]);

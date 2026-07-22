@@ -91,7 +91,7 @@ class World {
     this.now = 0;
   }
 
-  addPlayer(userId, spawn, inv = { items: [], equipment: {} }) {
+  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn) {
     this.players.set(userId, {
       userId,
       x: spawn.x,
@@ -115,7 +115,7 @@ class World {
       maxStamina: PLAYER_MAX_STAMINA,
       inv,
       mit: mitigation(inv, this.weapons),
-      spawn: { x: spawn.x, y: spawn.y },
+      spawn: { x: respawn.x, y: respawn.y },
       _attackCd: 0,
       _doorwayCdUntil: 0,
       autoLoot: false,

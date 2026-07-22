@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
+const { fetchVillages } = require('./services/villages');
 require('dotenv').config();
 
 const app = express();
@@ -1014,9 +1015,12 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
       );
       if (et.rows.length > 0) {
         const tileTypes = await getTileTypesMap();
+        const villages = await fetchVillages(pool, world.id);
         const rows = placeMapCreatures(
           { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-            width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge) },
+            width: world.width, height: world.height,
+            doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
+            villages },
           count, et.rows, Math.floor(Math.random() * 2 ** 31),
         );
         for (const c of rows) {
@@ -1056,6 +1060,84 @@ async function invalidateWorld(worldId) {
   worldPreviewCache.delete(worldId);
   evictAuthorityWorld(worldId);
 }
+
+function validateVillageBody(body, worldRow, existing) {
+  const { min_row, min_col, width, height, gate_edge, spawn_x, spawn_y } = body || {};
+  const ints = [min_row, min_col, width, height].every((n) => Number.isInteger(n));
+  if (!ints) return 'min_row, min_col, width, height must be integers';
+  if (width < 3 || width > 8) return 'width must be between 3 and 8 tiles';
+  if (height < 3 || height > 6) return 'height must be between 3 and 6 tiles';
+  if (!['N', 'E', 'S', 'W'].includes(gate_edge)) return 'gate_edge must be one of N,E,S,W';
+  if (!Number.isFinite(spawn_x) || !Number.isFinite(spawn_y)) return 'spawn_x and spawn_y are required';
+  if (min_row < 0 || min_col < 0) return 'min_row and min_col must be >= 0';
+  if (worldRow.width && (min_col + width > worldRow.width || min_row + height > worldRow.height)) {
+    return 'village box must fit inside the world bounds';
+  }
+  // spawn must land on an interior tile of the box
+  const sCol = Math.floor(spawn_x / 100), sRow = Math.floor(spawn_y / 100);
+  const inInterior = sRow > min_row && sRow < min_row + height - 1 && sCol > min_col && sCol < min_col + width - 1;
+  if (!inInterior) return 'spawn point must be inside the village interior';
+  // no overlap with an existing village box
+  for (const v of existing) {
+    const overlap = min_col <= v.min_col + v.width - 1 && min_col + width - 1 >= v.min_col &&
+                    min_row <= v.min_row + v.height - 1 && min_row + height - 1 >= v.min_row;
+    if (overlap) return 'village overlaps an existing village';
+  }
+  return null;
+}
+
+app.get('/api/worlds/:id/villages', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y
+         FROM villages WHERE world_id = $1 ORDER BY created_at ASC`,
+      [req.params.id],
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to list villages' });
+  }
+});
+
+app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const wr = await pool.query('SELECT id, width, height FROM worlds WHERE id = $1', [id]);
+    if (wr.rows.length === 0) return res.status(404).json({ error: 'world not found' });
+    if (!isBoundedWorld(wr.rows[0])) {
+      return res.status(400).json({ error: 'villages require a bounded world' });
+    }
+    const existing = (await pool.query(
+      'SELECT min_row, min_col, width, height FROM villages WHERE world_id = $1', [id],
+    )).rows;
+    const err = validateVillageBody(req.body, wr.rows[0], existing);
+    if (err) return res.status(400).json({ error: err });
+    const { min_row, min_col, width, height, gate_edge, spawn_x, spawn_y } = req.body;
+    const ins = await pool.query(
+      `INSERT INTO villages (world_id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y],
+    );
+    await invalidateWorld(id);
+    res.json(ins.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create village' });
+  }
+});
+
+app.delete('/api/worlds/:id/villages/:villageId', adminGuard, async (req, res) => {
+  try {
+    const { id, villageId } = req.params;
+    await pool.query('DELETE FROM villages WHERE id = $1 AND world_id = $2', [villageId, id]);
+    await invalidateWorld(id);
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete village' });
+  }
+});
 
 app.post('/api/worlds/:id/links', adminGuard, async (req, res) => {
   try {
@@ -1125,7 +1207,8 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
     const tileTypes = await getTileTypesMap();
     const data = generateChunk(
       { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge) },
+        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
+        villages: await fetchVillages(pool, world.id) },
       cx, cy,
     );
 
@@ -1149,7 +1232,8 @@ app.get('/api/worlds/:id/preview', async (req, res) => {
     const tileTypes = await getTileTypesMap();
     const data = generateWorldPreview(
       { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge) },
+        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
+        villages: await fetchVillages(pool, world.id) },
       PREVIEW_DIM,
     );
     worldPreviewCache.set(worldId, data);

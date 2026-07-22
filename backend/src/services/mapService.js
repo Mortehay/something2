@@ -153,6 +153,12 @@ function valueNoise(rows, cols, cellSize, rng) {
 // Pick a tile to use for carved paths: honor an explicit option, else the
 // first tile whose name looks path-like, else null (skip path carving).
 const PATH_NAME_RE = /path|dirt|road|trail|earth|sand/i;
+
+// Structural overlay tiles are stamped explicitly (stampBounds / stampVillage),
+// never sampled as biome terrain. Excluded from biome bands so they don't leak
+// into generated terrain as random impassable blobs.
+const STRUCTURAL_TILES = new Set(['map_wall', 'map_doorway', 'wooden_wall', 'village_gate']);
+
 function detectPathTile(tileNames, override) {
     if (override && tileNames.includes(override)) return override;
     return tileNames.find((n) => PATH_NAME_RE.test(n)) || null;
@@ -167,9 +173,11 @@ function worldConfig(world = {}) {
   const pathTile = world.pathTile !== undefined
     ? world.pathTile
     : detectPathTile(names);
-  const biomeNames = pathTile && names.length > 1
-    ? names.filter((n) => n !== pathTile)
-    : names;
+  const nonStructural = names.filter((n) => !STRUCTURAL_TILES.has(n));
+  const biomeSource = nonStructural.length > 0 ? nonStructural : names;
+  const biomeNames = pathTile && biomeSource.length > 1
+    ? biomeSource.filter((n) => n !== pathTile)
+    : biomeSource;
   return {
     seed: world.seed || 0,
     chunkSize: world.chunkSize || 64,
@@ -186,6 +194,16 @@ function worldConfig(world = {}) {
       doorwayTile: world.doorwayTile || 'map_doorway',
       doorways: world.doorways instanceof Set ? world.doorways : new Set(world.doorways || []),
     } : null,
+    villages: Array.isArray(world.villages) && world.villages.length
+      ? world.villages.map((v) => ({
+          id: v.id,
+          minRow: v.minRow, minCol: v.minCol,
+          width: v.width, height: v.height,
+          gateEdge: v.gateEdge,
+          spawnX: v.spawnX, spawnY: v.spawnY,
+          wallTile: 'wooden_wall', gateTile: 'village_gate',
+        }))
+      : null,
   };
 }
 
@@ -231,6 +249,9 @@ function generateRegion(world, rMin, cMin, rows, cols) {
     grid[r] = row;
   }
   if (cfg.bounds) stampBounds(grid, rMin, cMin, rows, cols, cfg.bounds);
+  if (cfg.villages) {
+    for (const v of cfg.villages) stampVillage(grid, rMin, cMin, rows, cols, v);
+  }
   return grid;
 }
 
@@ -367,6 +388,7 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
   if (!count || count < 1) return [];
   if (!allowedTypes || allowedTypes.length === 0) return [];
   const { width, height, wallTile, doorwayTile } = cfg.bounds;
+  const villages = cfg.villages;
   const rLo = 1, rHi = height - 2, cLo = 1, cHi = width - 2;
   if (rHi < rLo || cHi < cLo) return [];
   const rng = makeRng(rngSeed >>> 0);
@@ -379,6 +401,7 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
       if (name === wallTile || name === doorwayTile) continue;
       const def = world.tileTypes && world.tileTypes[name];
       if (def && def.walkable === false) continue;
+      if (villageContaining(row, col, villages)) continue;
       const t = allowedTypes[Math.floor(rng() * allowedTypes.length)];
       out.push({
         type: t.name,
@@ -436,6 +459,53 @@ function stampBounds(grid, rMin, cMin, rows, cols, bounds) {
 // worlds keep the per-chunk spawn roll.
 function isBoundedWorld(row) {
   return !!(row && row.width && row.height);
+}
+
+// --- Villages Slice A: interior wall box + single gate overlay ------------
+//
+// A village is a small walled rectangle stamped INSIDE a region (unlike
+// stampBounds, which walls the outer edge of the whole map). One edge carries
+// a centered single-tile gate gap. Pure overlay applied after bounds.
+
+function pointInVillageBox(gRow, gCol, v) {
+  return gRow >= v.minRow && gRow <= v.minRow + v.height - 1 &&
+         gCol >= v.minCol && gCol <= v.minCol + v.width - 1;
+}
+
+function villageContaining(gRow, gCol, villages) {
+  if (!villages) return null;
+  for (const v of villages) {
+    if (pointInVillageBox(gRow, gCol, v)) return v;
+  }
+  return null;
+}
+
+function villageGateCell(gRow, gCol, v) {
+  const midCol = v.minCol + Math.floor(v.width / 2);
+  const midRow = v.minRow + Math.floor(v.height / 2);
+  const rMax = v.minRow + v.height - 1;
+  const cMax = v.minCol + v.width - 1;
+  if (v.gateEdge === 'N' && gRow === v.minRow && gCol === midCol) return true;
+  if (v.gateEdge === 'S' && gRow === rMax && gCol === midCol) return true;
+  if (v.gateEdge === 'W' && gCol === v.minCol && gRow === midRow) return true;
+  if (v.gateEdge === 'E' && gCol === cMax && gRow === midRow) return true;
+  return false;
+}
+
+function stampVillage(grid, rMin, cMin, rows, cols, village) {
+  const { minRow, minCol, width, height, wallTile, gateTile } = village;
+  const rMax = minRow + height - 1;
+  const cMax = minCol + width - 1;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const gRow = rMin + r, gCol = cMin + c;
+      if (gRow < minRow || gRow > rMax || gCol < minCol || gCol > cMax) continue;
+      const onRing = gRow === minRow || gRow === rMax || gCol === minCol || gCol === cMax;
+      if (!onRing) continue;
+      grid[r][c] = villageGateCell(gRow, gCol, village) ? gateTile : wallTile;
+    }
+  }
+  return grid;
 }
 
 // --- Slice 3: edge geometry + spawn selection (pure) ---
@@ -538,9 +608,11 @@ function generateWorld(rows, cols, tileTypes, options = {}) {
     // Stage A: biome field -> map each tile's noise value to a tile-type band.
     // Exclude the path tile from the biome bands (when other tiles exist) so
     // carved paths read as distinct trails rather than blending into a biome.
-    const biomeNames = pathTile && names.length > 1
-        ? names.filter((n) => n !== pathTile)
-        : names;
+    const nonStructural = names.filter((n) => !STRUCTURAL_TILES.has(n));
+    const biomeSource = nonStructural.length > 0 ? nonStructural : names;
+    const biomeNames = pathTile && biomeSource.length > 1
+        ? biomeSource.filter((n) => n !== pathTile)
+        : biomeSource;
     const field = valueNoise(rows, cols, cellSize, rng);
     const grid = field.map((row) => row.map((v) => {
         const idx = Math.min(biomeNames.length - 1, Math.floor(v * biomeNames.length));
@@ -665,6 +737,9 @@ module.exports = {
     placeMapCreatures,
     stampBounds,
     isBoundedWorld,
+    stampVillage,
+    pointInVillageBox,
+    villageContaining,
     DOORWAY_TILES,
     oppositeEdge,
     edgeOfDoorwayTile,
