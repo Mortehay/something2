@@ -153,6 +153,12 @@ function valueNoise(rows, cols, cellSize, rng) {
 // Pick a tile to use for carved paths: honor an explicit option, else the
 // first tile whose name looks path-like, else null (skip path carving).
 const PATH_NAME_RE = /path|dirt|road|trail|earth|sand/i;
+
+// Structural overlay tiles are stamped explicitly (stampBounds / stampVillage),
+// never sampled as biome terrain. Excluded from biome bands so they don't leak
+// into generated terrain as random impassable blobs.
+const STRUCTURAL_TILES = new Set(['map_wall', 'map_doorway', 'wooden_wall', 'village_gate']);
+
 function detectPathTile(tileNames, override) {
     if (override && tileNames.includes(override)) return override;
     return tileNames.find((n) => PATH_NAME_RE.test(n)) || null;
@@ -167,9 +173,11 @@ function worldConfig(world = {}) {
   const pathTile = world.pathTile !== undefined
     ? world.pathTile
     : detectPathTile(names);
-  const biomeNames = pathTile && names.length > 1
-    ? names.filter((n) => n !== pathTile)
-    : names;
+  const nonStructural = names.filter((n) => !STRUCTURAL_TILES.has(n));
+  const biomeSource = nonStructural.length > 0 ? nonStructural : names;
+  const biomeNames = pathTile && biomeSource.length > 1
+    ? biomeSource.filter((n) => n !== pathTile)
+    : biomeSource;
   return {
     seed: world.seed || 0,
     chunkSize: world.chunkSize || 64,
@@ -600,9 +608,11 @@ function generateWorld(rows, cols, tileTypes, options = {}) {
     // Stage A: biome field -> map each tile's noise value to a tile-type band.
     // Exclude the path tile from the biome bands (when other tiles exist) so
     // carved paths read as distinct trails rather than blending into a biome.
-    const biomeNames = pathTile && names.length > 1
-        ? names.filter((n) => n !== pathTile)
-        : names;
+    const nonStructural = names.filter((n) => !STRUCTURAL_TILES.has(n));
+    const biomeSource = nonStructural.length > 0 ? nonStructural : names;
+    const biomeNames = pathTile && biomeSource.length > 1
+        ? biomeSource.filter((n) => n !== pathTile)
+        : biomeSource;
     const field = valueNoise(rows, cols, cellSize, rng);
     const grid = field.map((row) => row.map((v) => {
         const idx = Math.min(biomeNames.length - 1, Math.floor(v * biomeNames.length));
