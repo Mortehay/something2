@@ -438,6 +438,19 @@ export default function Something2() {
           setIsPaused(false);
         }
       });
+
+      // Server-driven map transition (e.g. walking through a portal tile):
+      // the authority sends {type:'transition', toWorldId, arriveX, arriveY}
+      // and Game surfaces it here. Re-running handleEnterChunkedWorld tears
+      // down the old authority connection and reconnects to the destination
+      // world; the server spawns the rejoining player at the pending arrival.
+      // handleEnterChunkedWorld is a component-scope const defined later in
+      // this same render — safe to reference here because this callback is
+      // only invoked later (on a transition frame), long after the const is
+      // assigned, not during this effect's synchronous execution.
+      gameRef.current.setOnTransition((msg) => {
+        if (msg?.toWorldId) handleEnterChunkedWorld(msg.toWorldId);
+      });
     }
     return () => {
       if (engineRef.current) {
@@ -481,21 +494,25 @@ export default function Something2() {
   };
 
   // MISMATCH fix: a logged-in player should spawn straight into the canonical
-  // Overworld, not a world-picker. Auto-join the migration-seeded world named
-  // "Overworld" (lowest id if test duplicates exist) once worlds + the Game
-  // instance are ready. Admins keep the picker (they manage worlds). If the
-  // join throws, handleEnterChunkedWorld toasts and isPlaying stays false, so
-  // the picker remains as a safe fallback. autoJoinedRef guards against retries.
+  // entry world, not a world-picker. Prefer the world flagged `is_entry`
+  // (Linked Maps); fall back to the migration-seeded world named "Overworld"
+  // (lowest id if test duplicates exist) for worlds without an entry flag set.
+  // Fires once worlds + the Game instance are ready. Admins keep the picker
+  // (they manage worlds). If the join throws, handleEnterChunkedWorld toasts
+  // and isPlaying stays false, so the picker remains as a safe fallback.
+  // autoJoinedRef guards against retries.
   const autoJoinedRef = useRef(false);
   useEffect(() => {
     if (isAdmin || isPlaying || autoJoinedRef.current) return;
     if (!gameRef.current || !worlds || worlds.length === 0) return;
+    const entry = worlds.find(w => w.is_entry);
     const overworld = worlds
       .filter(w => w.name === 'Overworld')
       .sort((a, b) => a.id - b.id)[0];
-    if (!overworld) return;
+    const target = entry || overworld;
+    if (!target) return;
     autoJoinedRef.current = true;
-    handleEnterChunkedWorld(overworld.id);
+    handleEnterChunkedWorld(target.id);
     // handleEnterChunkedWorld is stable enough for this one-shot; deps kept
     // minimal so it fires once when worlds/game become ready.
     // eslint-disable-next-line react-hooks/exhaustive-deps

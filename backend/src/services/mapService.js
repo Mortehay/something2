@@ -438,13 +438,54 @@ function isBoundedWorld(row) {
   return !!(row && row.width && row.height);
 }
 
-// Which edges of a bounded world have a doorway. Slice 1: every edge, so a
-// bounded world is traversable for testing. Slice 3 replaces the body with a
-// lookup of map_links (only linked edges get a doorway). Callers pass the raw
-// `worlds` DB row.
-function doorwaysForWorld(worldRow) {
-  if (!worldRow || !worldRow.width || !worldRow.height) return new Set();
-  return new Set(['N', 'E', 'S', 'W']);
+// --- Slice 3: edge geometry + spawn selection (pure) ---
+const PLAYER_HALF = 32; // player is 64px; center offset from top-left
+
+function oppositeEdge(edge) {
+  return { N: 'S', S: 'N', E: 'W', W: 'E' }[edge] || null;
+}
+
+// Which ring edge a tile (gRow,gCol) sits on for a width x height bounded map;
+// null if it is not on the ring. Corners resolve to a vertical edge first (N/S).
+function edgeOfDoorwayTile(gRow, gCol, width, height) {
+  if (gRow === 0) return 'N';
+  if (gRow === height - 1) return 'S';
+  if (gCol === 0) return 'W';
+  if (gCol === width - 1) return 'E';
+  return null;
+}
+
+// Player top-left pixel just INSIDE the destination's arriveEdge doorway.
+// Doorway center tile is midCol/midRow (Slice-1 geometry); step one tile inward.
+function arrivalPoint(width, height, arriveEdge) {
+  const midCol = Math.floor(width / 2);
+  const midRow = Math.floor(height / 2);
+  let col, row;
+  if (arriveEdge === 'N') { row = 1; col = midCol; }
+  else if (arriveEdge === 'S') { row = height - 2; col = midCol; }
+  else if (arriveEdge === 'W') { col = 1; row = midRow; }
+  else { col = width - 2; row = midRow; } // 'E'
+  return { x: col * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF,
+           y: row * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF };
+}
+
+// Decide a join spawn. Priority: doorway arrival > persisted position >
+// entry_spawn (entry world, first join) > bounded interior center > chunk center.
+function chooseSpawn({ pending, persisted, worldRow, chunkSize }) {
+  if (pending) return { x: pending.x, y: pending.y, viaDoorway: true };
+  if (persisted) return { x: persisted.x, y: persisted.y, viaDoorway: false };
+  if (worldRow && worldRow.is_entry && worldRow.entry_spawn &&
+      Number.isFinite(worldRow.entry_spawn.x) && Number.isFinite(worldRow.entry_spawn.y)) {
+    return { x: worldRow.entry_spawn.x, y: worldRow.entry_spawn.y, viaDoorway: false };
+  }
+  if (isBoundedWorld(worldRow)) {
+    const col = Math.floor(worldRow.width / 2);
+    const row = Math.floor(worldRow.height / 2);
+    return { x: col * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF,
+             y: row * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF, viaDoorway: false };
+  }
+  const center = (chunkSize * CREATURE_TILE_PX) / 2;
+  return { x: center, y: center, viaDoorway: false };
 }
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -623,8 +664,11 @@ module.exports = {
     spawnChunkCreatures,
     placeMapCreatures,
     stampBounds,
-    doorwaysForWorld,
     isBoundedWorld,
     DOORWAY_TILES,
+    oppositeEdge,
+    edgeOfDoorwayTile,
+    arrivalPoint,
+    chooseSpawn,
 };
 

@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { HiOutlinePlus, HiOutlineTrash, HiOutlineArrowPath, HiOutlineSparkles, HiOutlineStar } from 'react-icons/hi2';
 import { useWorlds, useCreateWorld, useDeleteWorld } from './useWorlds.js';
 import { useEntityTypes } from './useMaps.js';
-import { useUpdateWorld, useRegenerateWorld, useRerollCreatures } from './useMapsAdmin.js';
+import { useUpdateWorld, useRegenerateWorld, useRerollCreatures, useWorldLinks, useSetLink, useClearLink } from './useMapsAdmin.js';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: #eee; max-width: 1200px; margin: 0 auto;
@@ -26,11 +26,16 @@ const CheckGrid = styled.div`display: flex; flex-wrap: wrap; gap: 0.75rem; margi
 
 function bounded(w) { return !!(w.width && w.height); }
 
-function MapCard({ world, creatureTypes }) {
+function MapCard({ world, creatureTypes, allMaps }) {
   const update = useUpdateWorld();
   const regen = useRegenerateWorld();
   const reroll = useRerollCreatures();
   const del = useDeleteWorld();
+  const links = useWorldLinks(world.id);
+  const setLink = useSetLink();
+  const clearLink = useClearLink();
+  const others = (allMaps || []).filter(m => m.id !== world.id);
+  const linkFor = (edge) => links.find(l => l.edge === edge)?.to_world_id || '';
   const [name, setName] = useState(world.name);
   const [count, setCount] = useState(world.creature_count ?? 0);
   const [allowed, setAllowed] = useState(new Set(world.allowed_creature_types || []));
@@ -94,6 +99,22 @@ function MapCard({ world, creatureTypes }) {
           <HiOutlineSparkles /> Re-roll creatures
         </Button>
       </Row>
+      <Row>
+        <span style={{ color: '#aaa' }}>Links:</span>
+        {['N', 'E', 'S', 'W'].map(edge => (
+          <label key={edge} style={{ color: '#ccc' }}>
+            {edge}{' '}
+            <select value={linkFor(edge)} onChange={e => {
+              const to = e.target.value;
+              if (to) setLink.mutate({ id: world.id, edge, to_world_id: to });
+              else clearLink.mutate({ id: world.id, edge });
+            }}>
+              <option value="">—</option>
+              {others.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </label>
+        ))}
+      </Row>
     </Card>
   );
 }
@@ -131,7 +152,7 @@ function MapsAdmin() {
         </Row>
       </Card>
       {boundedMaps.length === 0 && <p style={{ color: '#888' }}>No bounded maps yet. Generate one above.</p>}
-      {boundedMaps.map(w => <MapCard key={w.id} world={w} creatureTypes={creatureTypes} />)}
+      {boundedMaps.map(w => <MapCard key={w.id} world={w} creatureTypes={creatureTypes} allMaps={boundedMaps} />)}
     </AdminContainer>
   );
 }

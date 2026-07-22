@@ -117,6 +117,7 @@ class World {
       mit: mitigation(inv, this.weapons),
       spawn: { x: spawn.x, y: spawn.y },
       _attackCd: 0,
+      _doorwayCdUntil: 0,
       autoLoot: false,
       // Recently-dropped GROUND ITEM ids -> grace expiry (ms, same clock as
       // the `now` passed to dropItem/dropGraceActive). Lets the auto-loot

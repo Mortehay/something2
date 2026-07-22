@@ -123,6 +123,10 @@ export class Game {
         this.onStateChange = callback;
     }
 
+    setOnTransition(cb) {
+        this.onTransition = cb;
+    }
+
     setState(newState) {
         if (this.state !== newState) {
             this.state = newState;
@@ -304,6 +308,7 @@ export class Game {
                     this.setState('kicked');
                     if (this.authorityClient) this.authorityClient.disconnect();
                 },
+                onTransition: (msg) => { if (this.onTransition) this.onTransition(msg); },
             });
             this.authorityClient.connect(worldId);
             setTimeout(() => reject(new Error('authority join timeout')), 5000);
