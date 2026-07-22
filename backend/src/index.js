@@ -1105,6 +1105,9 @@ app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
     const { id } = req.params;
     const wr = await pool.query('SELECT id, width, height FROM worlds WHERE id = $1', [id]);
     if (wr.rows.length === 0) return res.status(404).json({ error: 'world not found' });
+    if (!isBoundedWorld(wr.rows[0])) {
+      return res.status(400).json({ error: 'villages require a bounded world' });
+    }
     const existing = (await pool.query(
       'SELECT min_row, min_col, width, height FROM villages WHERE world_id = $1', [id],
     )).rows;
@@ -1204,7 +1207,8 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
     const tileTypes = await getTileTypesMap();
     const data = generateChunk(
       { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge) },
+        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
+        villages: await fetchVillages(pool, world.id) },
       cx, cy,
     );
 
@@ -1228,7 +1232,8 @@ app.get('/api/worlds/:id/preview', async (req, res) => {
     const tileTypes = await getTileTypesMap();
     const data = generateWorldPreview(
       { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge) },
+        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
+        villages: await fetchVillages(pool, world.id) },
       PREVIEW_DIM,
     );
     worldPreviewCache.set(worldId, data);

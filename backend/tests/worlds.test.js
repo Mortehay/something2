@@ -85,6 +85,7 @@ test('GET chunk cache MISS generates and returns an NxN grid WITHOUT inserting',
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42', chunk_size: 8 }] })],
     [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
     [/FROM map_links/i, () => ({ rows: [] })],
+    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
     // NO INSERT INTO world_chunks / entity_types / world_creatures handlers:
     // the authority alone materializes chunks and spawns creatures now, so if
     // the route issues any of those queries, mockPool throws.
@@ -100,6 +101,10 @@ test('GET chunk cache MISS generates and returns an NxN grid WITHOUT inserting',
   assert.ok(
     !pool.calls.some((c) => /INSERT INTO world_chunks/i.test(c.sql)),
     'GET /chunk must not insert into world_chunks',
+  );
+  assert.ok(
+    pool.calls.some((c) => /FROM villages WHERE world_id/i.test(c.sql)),
+    'GET /chunk must thread villages into the terrain config',
   );
 });
 

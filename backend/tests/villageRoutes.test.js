@@ -55,6 +55,17 @@ test('POST village rejects a box that does not fit in world bounds', async () =>
   assert.equal(res.status, 400);
 });
 
+test('POST village rejects creation on an unbounded world', async () => {
+  const pool = mockPool([
+    [/SELECT id, width, height FROM worlds WHERE id = \$1/i, (p) => ({ rows: [{ id: p[0], width: null, height: null }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).post('/api/worlds/w1/villages').set(...AUTH)
+    .send({ min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });
+  assert.equal(res.status, 400);
+  assert.equal(pool.calls.filter((c) => /INSERT INTO villages/i.test(c.sql)).length, 0);
+});
+
 test('DELETE village removes the row and invalidates the world', async () => {
   const pool = mockPool([
     [/DELETE FROM villages WHERE id = \$1/i, () => ({ rows: [], rowCount: 1 })],
