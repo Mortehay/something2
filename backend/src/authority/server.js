@@ -6,7 +6,7 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
-const { spawnChunkCreatures, isBoundedWorld, chooseSpawn } = require('../services/mapService');
+const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
 const { consumeAmmo, ammoCount } = require('./ammo');
@@ -17,6 +17,19 @@ const MAP_TILE_SIZE = 100;
 // Coerce a wire-provided number to a finite value (clients can send NaN/Infinity
 // via JSON, e.g. 1e999 parses to Infinity).
 function finiteOr(v, fallback) { return Number.isFinite(v) ? v : fallback; }
+
+// Pure: given a player's current tile + this world's links, decide whether to
+// teleport. Returns { toWorldId, arriveX, arriveY } or null.
+function planTransition({ tileName, gRow, gCol, worldRow, links, now, cdUntil }) {
+  if (tileName !== 'map_doorway') return null;
+  if (now < cdUntil) return null;
+  const edge = edgeOfDoorwayTile(gRow, gCol, worldRow.width, worldRow.height);
+  if (!edge) return null;
+  const link = links.get(edge);
+  if (!link) return null;
+  const { x, y } = arrivalPoint(link.toWidth, link.toHeight, oppositeEdge(edge));
+  return { toWorldId: link.toWorldId, arriveX: x, arriveY: y };
+}
 
 // Attach the authoritative WebSocket simulation to an existing http server.
 // Returns { close() } so callers/tests can tear it down.
@@ -560,6 +573,23 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // that skips loot or deletes twice.
       const { killedCreatureIds: killedByEffects } = entry.world.tick(dt);
       for (const id of new Set(killedByEffects)) onCreatureDeath(entry, id);
+      if (entry.links && entry.links.size > 0) {
+        const now = Date.now();
+        for (const p of entry.world.players.values()) {
+          const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+          const tileName = entry.world.map.getTileAt(cx, cy);
+          const t = planTransition({
+            tileName, gRow: Math.floor(cy / MAP_TILE_SIZE), gCol: Math.floor(cx / MAP_TILE_SIZE),
+            worldRow: entry.row, links: entry.links, now, cdUntil: p._doorwayCdUntil,
+          });
+          if (t) {
+            p._doorwayCdUntil = now + 1500;                       // suppress duplicate sends during reconnect
+            pendingArrivals.set(p.userId, { worldId: t.toWorldId, x: t.arriveX, y: t.arriveY });
+            const ws = entry.sockets.get(p.userId);
+            if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
+          }
+        }
+      }
       entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
       const { killedCreatureIds: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
       for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);
@@ -713,4 +743,4 @@ function attachAuthority(httpServer, pool, opts = {}) {
   };
 }
 
-module.exports = { attachAuthority };
+module.exports = { attachAuthority, planTransition };
