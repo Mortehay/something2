@@ -634,7 +634,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
           }
         }
       }
-      entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
+      // aggro/chase/contact damage + respawns (before state). Guard kills route
+      // through onCreatureDeath like every other kill site, so the DELETE +
+      // drop roll stay authoritative.
+      const { killedCreatureIds: killedByGuards } = entry.world.tickCreatures(dt, entry.activeChunks);
+      for (const id of new Set(killedByGuards)) onCreatureDeath(entry, id);
       const { killedCreatureIds: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
       for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);
       // Stashed for this tick's broadcast (below). REPLACED, not appended, so

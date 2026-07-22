@@ -196,7 +196,8 @@ class World {
     // `this.now` is threaded through so contact damage reads the same clock
     // every other damage site does — a shocked player must take +25% from a
     // creature's bite too, not only from weapons.
-    this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now);
+    const killedCreatureIds = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now);
+    return { killedCreatureIds: killedCreatureIds || [] };
   }
 
   activeWeapon(userId) {
