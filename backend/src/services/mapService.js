@@ -186,6 +186,16 @@ function worldConfig(world = {}) {
       doorwayTile: world.doorwayTile || 'map_doorway',
       doorways: world.doorways instanceof Set ? world.doorways : new Set(world.doorways || []),
     } : null,
+    villages: Array.isArray(world.villages) && world.villages.length
+      ? world.villages.map((v) => ({
+          id: v.id,
+          minRow: v.minRow, minCol: v.minCol,
+          width: v.width, height: v.height,
+          gateEdge: v.gateEdge,
+          spawnX: v.spawnX, spawnY: v.spawnY,
+          wallTile: 'wooden_wall', gateTile: 'village_gate',
+        }))
+      : null,
   };
 }
 
@@ -231,6 +241,9 @@ function generateRegion(world, rMin, cMin, rows, cols) {
     grid[r] = row;
   }
   if (cfg.bounds) stampBounds(grid, rMin, cMin, rows, cols, cfg.bounds);
+  if (cfg.villages) {
+    for (const v of cfg.villages) stampVillage(grid, rMin, cMin, rows, cols, v);
+  }
   return grid;
 }
 
@@ -436,6 +449,53 @@ function stampBounds(grid, rMin, cMin, rows, cols, bounds) {
 // worlds keep the per-chunk spawn roll.
 function isBoundedWorld(row) {
   return !!(row && row.width && row.height);
+}
+
+// --- Villages Slice A: interior wall box + single gate overlay ------------
+//
+// A village is a small walled rectangle stamped INSIDE a region (unlike
+// stampBounds, which walls the outer edge of the whole map). One edge carries
+// a centered single-tile gate gap. Pure overlay applied after bounds.
+
+function pointInVillageBox(gRow, gCol, v) {
+  return gRow >= v.minRow && gRow <= v.minRow + v.height - 1 &&
+         gCol >= v.minCol && gCol <= v.minCol + v.width - 1;
+}
+
+function villageContaining(gRow, gCol, villages) {
+  if (!villages) return null;
+  for (const v of villages) {
+    if (pointInVillageBox(gRow, gCol, v)) return v;
+  }
+  return null;
+}
+
+function villageGateCell(gRow, gCol, v) {
+  const midCol = v.minCol + Math.floor(v.width / 2);
+  const midRow = v.minRow + Math.floor(v.height / 2);
+  const rMax = v.minRow + v.height - 1;
+  const cMax = v.minCol + v.width - 1;
+  if (v.gateEdge === 'N' && gRow === v.minRow && gCol === midCol) return true;
+  if (v.gateEdge === 'S' && gRow === rMax && gCol === midCol) return true;
+  if (v.gateEdge === 'W' && gCol === v.minCol && gRow === midRow) return true;
+  if (v.gateEdge === 'E' && gCol === cMax && gRow === midRow) return true;
+  return false;
+}
+
+function stampVillage(grid, rMin, cMin, rows, cols, village) {
+  const { minRow, minCol, width, height, wallTile, gateTile } = village;
+  const rMax = minRow + height - 1;
+  const cMax = minCol + width - 1;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const gRow = rMin + r, gCol = cMin + c;
+      if (gRow < minRow || gRow > rMax || gCol < minCol || gCol > cMax) continue;
+      const onRing = gRow === minRow || gRow === rMax || gCol === minCol || gCol === cMax;
+      if (!onRing) continue;
+      grid[r][c] = villageGateCell(gRow, gCol, village) ? gateTile : wallTile;
+    }
+  }
+  return grid;
 }
 
 // --- Slice 3: edge geometry + spawn selection (pure) ---
@@ -665,6 +725,9 @@ module.exports = {
     placeMapCreatures,
     stampBounds,
     isBoundedWorld,
+    stampVillage,
+    pointInVillageBox,
+    villageContaining,
     DOORWAY_TILES,
     oppositeEdge,
     edgeOfDoorwayTile,
