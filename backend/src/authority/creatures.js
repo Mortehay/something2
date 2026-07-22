@@ -56,6 +56,29 @@ async function loadCreatureTypes(pool) {
 
 function center(o) { return { x: o.x + o.width / 2, y: o.y + o.height / 2 }; }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
+
+// A guard with no home anchor is unconstrained (matches a hostile's
+// leash-from-self behavior for creatures that predate the anchor column).
+function withinLeash(x, y, home, radius) {
+  if (!home) return true;
+  return dist2(x, y, home.x, home.y) <= radius * radius;
+}
+
+// Nearest hostile-faction creature a guard may engage: within aggroRadius of
+// the guard AND within leashRadius of the guard's post, so a guard never locks
+// onto something it is not allowed to chase.
+function selectGuardTarget({ guard, creatures, aggroRadius, leashRadius }) {
+  const gc = center(guard);
+  let best = null, bd2 = aggroRadius * aggroRadius;
+  for (const o of creatures) {
+    if (o === guard || o.faction !== 'hostile') continue;
+    const oc = center(o);
+    if (!withinLeash(oc.x, oc.y, guard.home, leashRadius)) continue;
+    const d2 = dist2(gc.x, gc.y, oc.x, oc.y);
+    if (d2 <= bd2) { bd2 = d2; best = o; }
+  }
+  return best;
+}
 // Nearest DIRS index for a movement vector's signs → facing.
 function facingFor(vx, vy) {
   const sx = Math.sign(vx), sy = Math.sign(vy);
@@ -287,4 +310,5 @@ module.exports = {
   CreatureSim, loadCreatureTypes, creatureMitigation,
   CREATURE_SIZE, CREATURE_SPEED, REDIRECT_CHANCE,
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
+  withinLeash, selectGuardTarget,
 };

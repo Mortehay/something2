@@ -492,6 +492,27 @@ function villageGateCell(gRow, gCol, v) {
   return false;
 }
 
+// Pixel centers of the two INTERIOR tiles flanking a village's gate — where the
+// gate guards stand. Clamped into the interior box, so a minimum-size village
+// (3x3, interior = one tile) yields two identical posts rather than posts on
+// the wall ring.
+function villageGatePosts(v) {
+  const rMax = v.minRow + v.height - 1;
+  const cMax = v.minCol + v.width - 1;
+  const midCol = v.minCol + Math.floor(v.width / 2);
+  const midRow = v.minRow + Math.floor(v.height / 2);
+  const loR = v.minRow + 1, hiR = rMax - 1;
+  const loC = v.minCol + 1, hiC = cMax - 1;
+  const clampR = (r) => Math.min(hiR, Math.max(loR, r));
+  const clampC = (c) => Math.min(hiC, Math.max(loC, c));
+  let cells;
+  if (v.gateEdge === 'S')      cells = [[hiR, clampC(midCol - 1)], [hiR, clampC(midCol + 1)]];
+  else if (v.gateEdge === 'N') cells = [[loR, clampC(midCol - 1)], [loR, clampC(midCol + 1)]];
+  else if (v.gateEdge === 'W') cells = [[clampR(midRow - 1), loC], [clampR(midRow + 1), loC]];
+  else                         cells = [[clampR(midRow - 1), hiC], [clampR(midRow + 1), hiC]];
+  return cells.map(([r, c]) => ({ x: c * 100 + 50, y: r * 100 + 50 }));
+}
+
 function stampVillage(grid, rMin, cMin, rows, cols, village) {
   const { minRow, minCol, width, height, wallTile, gateTile } = village;
   const rMax = minRow + height - 1;
@@ -740,6 +761,7 @@ module.exports = {
     stampVillage,
     pointInVillageBox,
     villageContaining,
+    villageGatePosts,
     DOORWAY_TILES,
     oppositeEdge,
     edgeOfDoorwayTile,
