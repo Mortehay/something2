@@ -438,15 +438,6 @@ function isBoundedWorld(row) {
   return !!(row && row.width && row.height);
 }
 
-// Which edges of a bounded world have a doorway. Slice 1: every edge, so a
-// bounded world is traversable for testing. Slice 3 replaces the body with a
-// lookup of map_links (only linked edges get a doorway). Callers pass the raw
-// `worlds` DB row.
-function doorwaysForWorld(worldRow) {
-  if (!worldRow || !worldRow.width || !worldRow.height) return new Set();
-  return new Set(['N', 'E', 'S', 'W']);
-}
-
 // --- Slice 3: edge geometry + spawn selection (pure) ---
 const PLAYER_HALF = 32; // player is 64px; center offset from top-left
 
@@ -673,7 +664,6 @@ module.exports = {
     spawnChunkCreatures,
     placeMapCreatures,
     stampBounds,
-    doorwaysForWorld,
     isBoundedWorld,
     DOORWAY_TILES,
     oppositeEdge,

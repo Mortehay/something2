@@ -6,7 +6,8 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
-const { spawnChunkCreatures, doorwaysForWorld, isBoundedWorld } = require('../services/mapService');
+const { spawnChunkCreatures, isBoundedWorld, chooseSpawn } = require('../services/mapService');
+const { fetchLinks } = require('../services/mapLinks');
 const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -35,6 +36,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const worlds = new Map(); // world_id -> { world, row, sockets: Map<userId, ws> }
   const loading = new Map(); // world_id -> in-flight loadWorld promise (cold-start dedupe)
   const sessionsByUser = new Map(); // userId -> ws (exactly one live authority session per account)
+  const pendingArrivals = new Map(); // userId -> { worldId, x, y } : a doorway-arrival spawn override
 
   httpServer.on('upgrade', (req, socket, head) => {
     // The whole handler is wrapped so an async rejection (a DB error from the
@@ -84,7 +86,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     let pending = loading.get(worldId);
     if (!pending) {
       pending = (async () => {
-        const wr = await pool.query('SELECT id, seed, chunk_size, width, height FROM worlds WHERE id = $1', [worldId]);
+        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
@@ -93,13 +95,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const { creatureTypes, creatureTypeIds } = await loadCreatureTypes(pool);
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
+        const linkRows = await fetchLinks(pool, worldId);
+        const links = new Map(linkRows.map((l) => [l.edge, { toWorldId: l.to_world_id, toWidth: l.to_width, toHeight: l.to_height }]));
         const map = new ServerMap({
           seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes,
-          width: row.width, height: row.height, doorways: doorwaysForWorld(row),
+          width: row.width, height: row.height, doorways: [...links.keys()],
         });
         const entry = {
           worldId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
-          tileTypes, creatureTypes, creatureTypeIds,
+          tileTypes, creatureTypes, creatureTypeIds, links,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -118,14 +122,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }
 
-  async function loadSpawn(worldId, userId, chunkSize) {
+  async function loadSpawn(worldId, userId, chunkSize, worldRow) {
+    const pend = pendingArrivals.get(userId);
+    const pending = (pend && pend.worldId === worldId) ? { x: pend.x, y: pend.y } : null;
+    if (pending) pendingArrivals.delete(userId);
+    let persisted = null;
     const r = await pool.query(
       'SELECT x, y FROM world_players WHERE world_id = $1 AND user_id = $2',
       [worldId, userId]
     );
-    if (r.rows.length) return { x: r.rows[0].x, y: r.rows[0].y };
-    const center = (chunkSize * MAP_TILE_SIZE) / 2;
-    return { x: center, y: center };
+    if (r.rows.length) persisted = { x: r.rows[0].x, y: r.rows[0].y };
+    return chooseSpawn({ pending, persisted, worldRow, chunkSize });
   }
 
   // Single fire-and-forget entry point for a killed creature id: named once
@@ -293,7 +300,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!entry) { send(ws, { type: 'error', message: 'unknown world' }); return; }
 
         try {
-          const spawn = await loadSpawn(msg.world_id, ws.userId, entry.row.chunk_size);
+          const spawn = await loadSpawn(msg.world_id, ws.userId, entry.row.chunk_size, entry.row);
           if (ws.readyState !== ws.OPEN) return; // client vanished while we awaited spawn
 
           // One live session per account: the newest join wins. (Refusing instead
@@ -337,6 +344,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
           ws.worldId = msg.world_id;
           entry.world.addPlayer(ws.userId, spawn, inv);
+          if (spawn.viaDoorway) {
+            const p = entry.world.getPlayer(ws.userId);
+            if (p) p._doorwayCdUntil = Date.now() + 1500;
+          }
           send(ws, {
             type: 'joined', user_id: ws.userId, spawn, tickRate: 1000 / tickMs,
             itemTypes: [...entry.world.weapons.values()],
