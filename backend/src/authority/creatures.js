@@ -22,6 +22,11 @@ const CONTACT_RANGE = 60;            // px: creature may hit its target within t
 const CREATURE_DAMAGE = 5;
 const CREATURE_ATTACK_COOLDOWN = 1.0; // s
 
+const GUARD_AGGRO_RADIUS = 400;   // px: a guard engages a hostile within this
+const GUARD_LEASH_RADIUS = 300;   // px from HOME: guards hold the gate, they do not roam
+const GUARD_DAMAGE = 25;
+const GUARD_HOME_EPSILON = 24;    // px: close enough to the post to stand still
+
 // Creature mitigation, built the same way a player's is built from equipment:
 // from the entity type's defense/resistances. A creature without `mit` falls
 // back to NO_MITIGATION inside applyDamage, which makes every resistance
@@ -71,7 +76,11 @@ function selectGuardTarget({ guard, creatures, aggroRadius, leashRadius }) {
   const gc = center(guard);
   let best = null, bd2 = aggroRadius * aggroRadius;
   for (const o of creatures) {
-    if (o === guard || o.faction !== 'hostile') continue;
+    // `creatures` may be a pre-loop snapshot: a candidate killed earlier this
+    // same tick (by another guard) is still present in the array but its hp
+    // was already driven to <=0 in place before removal from the sim, so
+    // this guards against handing back a dead target.
+    if (o === guard || o.faction !== 'hostile' || o.hp <= 0) continue;
     const oc = center(o);
     if (!withinLeash(oc.x, oc.y, guard.home, leashRadius)) continue;
     const d2 = dist2(gc.x, gc.y, oc.x, oc.y);
@@ -123,12 +132,79 @@ class CreatureSim {
   tick(dt, activeChunkKeys, players = [], now = 0) {
     const active = activeChunkKeys instanceof Set ? activeChunkKeys : new Set(activeChunkKeys);
     const byId = new Map(players.map((p) => [p.userId, p]));
+    const killed = [];
+    const all = [...this.creatures.values()];
     for (const c of this.creatures.values()) {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (!active.has(CHUNK_KEY(cx, cy))) continue; // frozen (out of active set)
       if (c._attackCd > 0) c._attackCd = Math.max(0, c._attackCd - dt);
 
       const cc = center(c);
+
+      // --- Guard faction: defend the post against hostile creatures. Guards
+      // never target players and are never targeted by hostiles.
+      if (c.faction === 'guard') {
+        let tgt = c._target ? this.creatures.get(c._target) : null;
+        if (tgt && (tgt.hp <= 0 || tgt.faction !== 'hostile'
+            || !withinLeash(center(tgt).x, center(tgt).y, c.home, GUARD_LEASH_RADIUS))) {
+          tgt = null;
+        }
+        if (!tgt) {
+          // `all` is a pre-loop snapshot; selectGuardTarget skips any
+          // candidate already killed earlier this tick (hp <= 0), so a
+          // creature removed from this.creatures by an earlier guard in this
+          // same loop is never handed back as a live target.
+          tgt = selectGuardTarget({
+            guard: c, creatures: all,
+            aggroRadius: GUARD_AGGRO_RADIUS, leashRadius: GUARD_LEASH_RADIUS,
+          });
+        }
+        c._target = tgt ? tgt.id : null;
+        c._targetKind = tgt ? 'creature' : null;
+
+        if (tgt) {
+          c.mode = 'chase';
+          const tc = center(tgt);
+          const vx = tc.x - cc.x, vy = tc.y - cc.y;
+          const r = resolveMove(this.map, c, vx, vy, dt);
+          // Leash clamp: a step that would leave the post's radius is refused.
+          if ((r.x !== c.x || r.y !== c.y)
+              && withinLeash(r.x + c.width / 2, r.y + c.height / 2, c.home, GUARD_LEASH_RADIUS)) {
+            c.x = r.x; c.y = r.y;
+            const f = facingFor(vx, vy); if (f) c.facing = f;
+            c.dirty = true;
+          }
+          if (c._attackCd <= 0 && canAct(c, now)
+              && dist2(cc.x, cc.y, tc.x, tc.y) <= CONTACT_RANGE * CONTACT_RANGE) {
+            applyDamageWithEffects(tgt, GUARD_DAMAGE, 'physical', tgt.mit || NO_MITIGATION, now);
+            tgt.dirty = true;
+            c._attackCd = CREATURE_ATTACK_COOLDOWN;
+            if (tgt.hp <= 0) { this.creatures.delete(tgt.id); killed.push(tgt.id); }
+          }
+          continue;
+        }
+
+        // No target: walk back to the post, then stand still.
+        if (c.home) {
+          const dx = c.home.x - cc.x, dy = c.home.y - cc.y;
+          if (Math.hypot(dx, dy) > GUARD_HOME_EPSILON) {
+            c.mode = 'return';
+            const r = resolveMove(this.map, c, dx, dy, dt);
+            if (r.x !== c.x || r.y !== c.y) {
+              c.x = r.x; c.y = r.y;
+              const f = facingFor(dx, dy); if (f) c.facing = f;
+              c.dirty = true;
+            }
+          } else {
+            c.mode = 'guard';
+          }
+        } else {
+          c.mode = 'guard';
+        }
+        continue;
+      }
+      // --- end guard branch; hostile path below is unchanged ---
+
       // Target resolution: keep current target unless it left leash; else acquire nearest in aggro.
       if (c._target) {
         const tp = byId.get(c._target);
@@ -195,6 +271,7 @@ class CreatureSim {
         c._dir = (c._dir + 1) % DIRS.length; // blocked → turn
       }
     }
+    return killed;
   }
 
   // Player melee: damage creatures within `range` of (px,py); remove + return dead ids.
@@ -310,5 +387,6 @@ module.exports = {
   CreatureSim, loadCreatureTypes, creatureMitigation,
   CREATURE_SIZE, CREATURE_SPEED, REDIRECT_CHANCE,
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
+  GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE, GUARD_HOME_EPSILON,
   withinLeash, selectGuardTarget,
 };
