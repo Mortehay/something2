@@ -1,21 +1,19 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
-import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineMap } from "react-icons/hi2";
+import { HiOutlineTrash, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineMap } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
-import { EngineClient, getStoredToken, parseJwt, clearToken } from "./src/js/net/EngineClient.js";
+import { getStoredToken, parseJwt, clearToken } from "./src/js/net/EngineClient.js";
 import Login from "../../pages/Login.jsx";
-import { useMaps, useMapTiles, useGenerateMap, useDeleteMap, fetchMap, fetchMapEntities, useSaveEntities, useEntityTypes, useGenerateEntities } from "./useMaps.js";
+import { useMapTiles } from "./useMaps.js";
 import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
-const ENGINE_WS_URL = import.meta.env.VITE_ENGINE_WS_URL || 'ws://localhost:18080/ws';
 import TileTypesAdmin from "./TileTypesAdmin";
 import EntityTypesAdmin from "./EntityTypesAdmin";
 import ItemTypesAdmin from "./ItemTypesAdmin";
 import MapsAdmin from "./MapsAdmin";
-import MapPreview from "./MapPreview.jsx";
 import WorldPreview from "./WorldPreview.jsx";
 
 const StyledGameContainer = styled.div`
@@ -331,7 +329,6 @@ export default function Something2() {
   const contentRef = useRef(null); // fullscreen target (wraps the game canvas)
   const [activeTab, setActiveTab] = useState('game');
   const [helpOpen, setHelpOpen] = useState(false);
-  const [selectedMapId, setSelectedMapId] = useState(null);
   const [selectedWorldId, setSelectedWorldId] = useState(null);
   const [newWorldName, setNewWorldName] = useState('');
   const [newWorldSeed, setNewWorldSeed] = useState('');
@@ -349,9 +346,7 @@ export default function Something2() {
   // depth. Recomputed when `authed` flips (sign in/out swaps the stored token).
   const isAdmin = useMemo(() => parseJwt(getStoredToken())?.role === 'admin', [authed]);
 
-  const { maps, isLoadingMaps } = useMaps();
   const { mapTiles, isLoadingMapTiles } = useMapTiles();
-  const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
   const { worlds, isLoadingWorlds, worldsError } = useWorlds();
   const createWorldMutation = useCreateWorld();
   const deleteWorldMutation = useDeleteWorld();
@@ -370,19 +365,6 @@ export default function Something2() {
     }
     return m;
   }, [mapTiles]);
-
-  const generateMapMutation = useGenerateMap((newMap) => {
-    setSelectedMapId(newMap.id);
-  });
-  const deleteMapMutation = useDeleteMap((deletedId) => {
-    if (selectedMapId === deletedId) {
-      setSelectedMapId(null);
-      setIsPlaying(false);
-    }
-  });
-  const saveEntitiesMutation = useSaveEntities(() => {
-    toast.success('Entities saved successfully!');
-  });
 
   const handleResume = () => {
     if (gameRef.current) gameRef.current.resume();
@@ -476,76 +458,6 @@ export default function Something2() {
     };
   }, []);
 
-  const handleEnterWorld = async (shouldGenerate = false) => {
-    console.log("handleEnterWorld called", { selectedMapId, gameRef: !!gameRef.current });
-    if (!selectedMapId || !gameRef.current) return;
-
-    try {
-      const mapData = await fetchMap(selectedMapId);
-      const entities = await fetchMapEntities(selectedMapId);
-      console.log("Map data loaded:", { tilesFound: !!mapData?.data, entitiesCount: entities?.length });
-
-      const tiles = typeof mapData.data === 'string' ? JSON.parse(mapData.data) : mapData.data;
-
-      // Convert entityTypes array to map for the engine
-      const entityTypesMap = {};
-      if (entityTypes) {
-        entityTypes.forEach(t => {
-          entityTypesMap[t.name] = {
-            color: t.color,
-            walkable: t.walkable,
-            spawnTiles: t.spawn_tiles,
-            chance: t.chance,
-            render_mode: t.render_mode,
-            image: t.image,
-            sprite: t.sprite
-          };
-        });
-      }
-
-      gameRef.current.init(tiles, mapTiles, entities, entityTypesMap);
-      setIsPlaying(true);
-
-      // Connect to the Go engine using the JWT stored at login (dev-token was
-      // removed in slice 4a), open WS, send `join`. Game pushes moves and
-      // reconciles incoming ticks.
-      try {
-        if (engineRef.current) {
-          engineRef.current.disconnect();
-          engineRef.current = null;
-        }
-        const token = getStoredToken();
-        if (!token) { setAuthed(false); throw new Error('Please sign in'); }
-        const user_id = parseJwt(token)?.user_id;
-        const client = new EngineClient({
-          url: ENGINE_WS_URL,
-          token,
-          onJoined: (m) => console.log("engine joined:", m),
-          onError: (err) => toast.error(`Engine: ${err.message}`),
-          onClose: () => console.log("engine ws closed"),
-        });
-        gameRef.current.setEngineClient(client, user_id);
-        client.connect(selectedMapId);
-        engineRef.current = client;
-      } catch (err) {
-        toast.error(`Engine connect failed: ${err.message}`);
-      }
-
-      if (shouldGenerate) {
-        if (Object.keys(entityTypesMap).length === 0) {
-          toast.error("No entity types defined! Create some in Entity Admin first.");
-          return;
-        }
-        gameRef.current.map.generateEntities(entityTypesMap);
-        toast.success('Entities generated!');
-      }
-    } catch (err) {
-      toast.error(err.message);
-    }
-  };
-
-  const handlePlay = () => handleEnterWorld(false);
-
   const handleEnterChunkedWorld = async (worldId = selectedWorldId) => {
     if (!worldId || !gameRef.current) return;
 
@@ -604,48 +516,6 @@ export default function Something2() {
         if (world?.id) setSelectedWorldId(world.id);
       }
     });
-  };
-
-  const handleSaveEntities = () => {
-    if (!selectedMapId || !gameRef.current) return;
-    const entities = gameRef.current.map.entities.map(e => ({
-      type: e.constructor.name,
-      row: e.row,
-      col: e.col,
-      name: e.name || e.constructor.name
-    }));
-    saveEntitiesMutation.mutate({ id: selectedMapId, entities });
-  };
-
-  const generateEntitiesMutation = useGenerateEntities();
-
-  const handleGenerateEntities = () => {
-    if (!selectedMapId) return;
-
-    if (isPlaying) {
-      // Already in world, regenerate via backend
-      generateEntitiesMutation.mutate(selectedMapId, {
-        onSuccess: (data) => {
-          // Re-load entities from DB to show in game
-          fetchMapEntities(selectedMapId).then(loadedEntities => {
-            // Re-initialize map with new entities but keep current tiles
-            if (gameRef.current && gameRef.current.map) {
-              // gameRef.current.map.init already exists but we just want to replace entities
-              // We'll call init again with same tiles but new entities
-              const tiles = gameRef.current.map.tiles;
-              const mapTiles = gameRef.current.map.mapTiles;
-              const entityTypesMap = gameRef.current.map.entityTypes;
-              gameRef.current.init(tiles, mapTiles, loadedEntities, entityTypesMap);
-            }
-          });
-        }
-      });
-    } else {
-      // Not in world, generate and then enter
-      generateEntitiesMutation.mutate(selectedMapId, {
-        onSuccess: () => handleEnterWorld(false) // Don't shouldGenerate again
-      });
-    }
   };
 
   // No valid stored token → gate the whole surface behind the login screen.
@@ -756,7 +626,7 @@ export default function Something2() {
                         <MapItem
                           key={world.id}
                           selected={selectedWorldId === world.id}
-                          onClick={() => { setSelectedWorldId(world.id); setSelectedMapId(null); }}
+                          onClick={() => setSelectedWorldId(world.id)}
                         >
                           <div>
                             <div style={{ color: 'white', fontWeight: 'bold' }}>{world.name}</div>
@@ -817,63 +687,6 @@ export default function Something2() {
                     Enter World (chunked)
                   </Button>
                 </Panel>
-
-                <Panel>
-                  <h2 style={{ color: 'white', margin: '0 0 15px 0', fontSize: '20px' }}>World Browser</h2>
-                  <Button onClick={() => generateMapMutation.mutate()} disabled={generateMapMutation.isPending} style={{ width: '100%' }}>
-                    Generate New World
-                  </Button>
-
-                  {isLoadingMaps ? (
-                    <p style={{ color: '#aaa', marginTop: '15px' }}>Loading worlds...</p>
-                  ) : (
-                    <MapList>
-                      {maps?.map(map => (
-                        <MapItem
-                          key={map.id}
-                          selected={selectedMapId === map.id}
-                          onClick={() => { setSelectedMapId(map.id); setSelectedWorldId(null); }}
-                        >
-                          <div>
-                            <div style={{ color: 'white', fontWeight: 'bold' }}>{map.name}</div>
-                            <div style={{ color: '#888', fontSize: '12px' }}>{new Date(map.created_at).toLocaleDateString()}</div>
-                          </div>
-                          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                            {map.has_entities && <HiOutlineSparkles style={{ color: '#facc15' }} title="Has entities" />}
-                            <HiOutlineTrash
-                              style={{ color: '#ef4444', cursor: 'pointer' }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (window.confirm('Delete this world?')) deleteMapMutation.mutate(map.id);
-                              }}
-                            />
-                          </div>
-                        </MapItem>
-                      ))}
-                    </MapList>
-                  )}
-                </Panel>
-
-              {selectedMapId && (
-                <Panel>
-                  <h3 style={{ color: 'white', margin: '0 0 15px 0', fontSize: '18px' }}>World Controls</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {!isPlaying ? (
-                      <Button onClick={handlePlay} style={{ background: '#10b981' }}>Enter World</Button>
-                    ) : (
-                      <Button onClick={handlePlay} style={{ background: '#10b981' }}>Reset/Respawn</Button>
-                    )}
-
-                    <Button onClick={handleGenerateEntities} style={{ background: '#8b5cf6' }}>
-                      {maps?.find(m => m.id === selectedMapId)?.has_entities ? 'Regenerate Entities' : 'Generate Entities'}
-                    </Button>
-
-                    {isPlaying && (
-                      <Button onClick={handleSaveEntities} disabled={saveEntitiesMutation.isPending}>Save Entities</Button>
-                    )}
-                  </div>
-                </Panel>
-              )}
             </UIOverlay>
           )}
 
@@ -893,13 +706,10 @@ export default function Something2() {
             </PauseOverlay>
           )}
 
-          {!isPlaying && selectedMapId && (
-            <MapPreview mapId={selectedMapId} tileColors={tileColors} />
-          )}
-          {!isPlaying && !selectedMapId && selectedWorldId && (
+          {!isPlaying && selectedWorldId && (
             <WorldPreview worldId={selectedWorldId} tileColors={tileColors} />
           )}
-          {!isPlaying && !selectedMapId && !selectedWorldId && (
+          {!isPlaying && !selectedWorldId && (
             <div style={{
               width: '100%', height: '100%', display: 'flex', alignItems: 'center',
               justifyContent: 'center', color: 'rgba(255,255,255,0.35)', fontSize: '15px'
