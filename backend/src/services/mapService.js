@@ -380,6 +380,7 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
   if (!count || count < 1) return [];
   if (!allowedTypes || allowedTypes.length === 0) return [];
   const { width, height, wallTile, doorwayTile } = cfg.bounds;
+  const villages = cfg.villages;
   const rLo = 1, rHi = height - 2, cLo = 1, cHi = width - 2;
   if (rHi < rLo || cHi < cLo) return [];
   const rng = makeRng(rngSeed >>> 0);
@@ -392,6 +393,7 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
       if (name === wallTile || name === doorwayTile) continue;
       const def = world.tileTypes && world.tileTypes[name];
       if (def && def.walkable === false) continue;
+      if (villageContaining(row, col, villages)) continue;
       const t = allowedTypes[Math.floor(rng() * allowedTypes.length)];
       out.push({
         type: t.name,
