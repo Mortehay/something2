@@ -4,7 +4,7 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages } = require('./services/villages');
 require('dotenv').config();
@@ -1005,23 +1005,29 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
     const allowed = Array.isArray(world.allowed_creature_types) ? world.allowed_creature_types : [];
     const count = Number(world.creature_count) || 0;
 
-    await pool.query('DELETE FROM world_creatures WHERE world_id = $1', [id]);
+    // Spare guards — they aren't rolled, they're re-derived from villages below.
+    await pool.query(
+      `DELETE FROM world_creatures WHERE world_id = $1 AND type <> $2 /* spare Village Guard rows */`,
+      [id, GUARD_TYPE],
+    );
+
+    const villages = await fetchVillages(pool, world.id);
 
     let placed = 0;
     if (count > 0 && allowed.length > 0) {
       const et = await pool.query(
-        `SELECT name, hp, defense, resistances FROM entity_types WHERE is_creature = true AND name = ANY($1::text[])`,
+        `SELECT name, hp, defense, resistances, faction FROM entity_types WHERE is_creature = true AND name = ANY($1::text[])`,
         [allowed],
       );
-      if (et.rows.length > 0) {
+      const hostileTypes = et.rows.filter((t) => (t.faction || 'hostile') !== 'guard');
+      if (hostileTypes.length > 0) {
         const tileTypes = await getTileTypesMap();
-        const villages = await fetchVillages(pool, world.id);
         const rows = placeMapCreatures(
           { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
             width: world.width, height: world.height,
             doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
             villages },
-          count, et.rows, Math.floor(Math.random() * 2 ** 31),
+          count, hostileTypes, Math.floor(Math.random() * 2 ** 31),
         );
         for (const c of rows) {
           await pool.query(
@@ -1032,6 +1038,10 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
         placed = rows.length;
       }
     }
+
+    await pool.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`, [id, GUARD_TYPE]);
+    await insertVillageGuards(id, villages);
+
     evictAuthorityWorld(id);
     res.json({ placed });
   } catch (err) {
@@ -1059,6 +1069,21 @@ async function invalidateWorld(worldId) {
   await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [worldId]);
   worldPreviewCache.delete(worldId);
   evictAuthorityWorld(worldId);
+}
+
+// Two guards per village, standing on the interior tiles flanking the gate.
+// home_x/home_y is the post: the authority leashes a guard to it.
+const GUARD_TYPE = 'Village Guard';
+async function insertVillageGuards(worldId, villages) {
+  for (const v of villages) {
+    for (const post of villageGatePosts(v)) {
+      await pool.query(
+        `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, home_x, home_y)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [worldId, GUARD_TYPE, post.x, post.y, 300, 'S', post.x, post.y],
+      );
+    }
+  }
 }
 
 function validateVillageBody(body, worldRow, existing) {
@@ -1119,6 +1144,11 @@ app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
       [id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y],
     );
+    const row = ins.rows[0];
+    await insertVillageGuards(id, [{
+      minRow: row.min_row, minCol: row.min_col,
+      width: row.width, height: row.height, gateEdge: row.gate_edge,
+    }]);
     await invalidateWorld(id);
     res.json(ins.rows[0]);
   } catch (err) {
