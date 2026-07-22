@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { CreatureSim, GUARD_LEASH_RADIUS, GUARD_DAMAGE } = require('../src/authority/creatures');
+const { CreatureSim, GUARD_LEASH_RADIUS, GUARD_DAMAGE, GUARD_HOME_EPSILON } = require('../src/authority/creatures');
 
 const MAP = { chunkSize: 64, isWalkable: () => true, speedAt: () => 1 };
 const KEYS = new Set(['0,0']);
@@ -68,6 +68,82 @@ test('a guard walks back home when its target is gone and idles at post', () => 
   for (let i = 0; i < 200; i++) s.tick(0.1, KEYS, [], 1000 + i);
   const g = s.creatures.get('g');
   assert.ok(Math.hypot(g.x - HOME.x, g.y - HOME.y) < 40, `guard did not return home (at ${g.x},${g.y})`);
+  assert.equal(g.mode, 'guard');
+});
+
+test('a displaced guard with a valid target still walks home instead of freezing', () => {
+  const s = sim();
+  const H = { x: 100, y: 100 };
+  s.addCreatures([
+    // 500px from home, per the reviewer's repro.
+    mk({ id: 'g', type: 'Village Guard', x: H.x + 500, y: H.y, hp: 300, faction: 'guard', home_x: H.x, home_y: H.y }),
+    // A hostile that would be a perfectly valid target if the guard were at
+    // home: 250px from home (per the reviewer's repro), so the held-target
+    // leash check (which only tests leash-from-home, never aggro-to-guard)
+    // never invalidates it. Placed at x < 0, which this mock map's chunking
+    // puts outside the only active chunk ('0,0') — so unlike a normal
+    // hostile it never roams and stays exactly this "valid" the whole test.
+    // That is deliberate: it is the version of the bug the reviewer actually
+    // hit, where nothing external ever frees the guard from its target.
+    mk({ id: 'h', type: 'Slime', x: H.x - 250, y: H.y, hp: 100 }),
+  ]);
+  const g = s.creatures.get('g');
+  // Simulate the guard already holding that target (e.g. acquired before a
+  // knockback/teleport displaced it), which is exactly the state the frozen
+  // guard gets stuck in: a target it can never step towards without leaving
+  // the leash, so the step is refused every tick forever.
+  g._target = 'h';
+  g._targetKind = 'creature';
+  const distStart = Math.hypot(g.x - H.x, g.y - H.y);
+  assert.ok(distStart > GUARD_LEASH_RADIUS, 'precondition: guard must start outside its leash');
+
+  // The fix takes effect on the very first tick: a displaced guard drops its
+  // target immediately, rather than only "eventually" via some other path.
+  s.tick(0.1, KEYS, [], 1000);
+  assert.equal(g._target, null, 'a displaced guard must drop its target rather than chase');
+  assert.equal(g.mode, 'return');
+  assert.ok(g.x < H.x + 500, 'guard must move toward home on the very first tick');
+
+  // Exactly the reviewer's repro window: 100 ticks of 0.1s (10s). Against the
+  // shipped code this produces 0px of movement (g.x stays 600, dist stays
+  // 500) forever — the chase step always lands outside the leash and is
+  // refused, so the identical step is recomputed and refused every tick.
+  for (let i = 1; i < 100; i++) s.tick(0.1, KEYS, [], 1000 + i);
+
+  const distEnd = Math.hypot(g.x - H.x, g.y - H.y);
+  // The guard is NOT required to fully idle at home by the end of this
+  // window: 'h' remains a legitimately valid target (within both
+  // GUARD_AGGRO_RADIUS and GUARD_LEASH_RADIUS of the post) for as long as the
+  // guard is close enough to notice it, and re-engaging a real threat near
+  // the post once back on duty is correct, separate behavior — not the bug
+  // under test. What must be true is that the guard is no longer frozen: it
+  // makes real, substantial progress toward home instead of refusing the
+  // identical step forever.
+  assert.ok(distEnd <= distStart - 200,
+    `guard barely moved: ${distStart} -> ${distEnd} (was frozen solid at ${distStart} pre-fix)`);
+});
+
+test('a guard displaced just past the leash boundary recovers', () => {
+  const s = sim();
+  const H = { x: 1000, y: 1000 };
+  s.addCreatures([
+    // 320px from home: just beyond the 300px leash, the subtler case.
+    mk({ id: 'g', type: 'Village Guard', x: H.x + 320, y: H.y, hp: 300, faction: 'guard', home_x: H.x, home_y: H.y }),
+    // Same roaming-hostile setup and reasoning as the previous test.
+    mk({ id: 'h', type: 'Slime', x: H.x - 200, y: H.y, hp: 100 }),
+  ]);
+  const g = s.creatures.get('g');
+  g._target = 'h';
+  g._targetKind = 'creature';
+  const distStart = Math.hypot(g.x - H.x, g.y - H.y);
+  assert.ok(distStart > GUARD_LEASH_RADIUS, 'precondition: guard must start outside its leash');
+
+  for (let i = 0; i < 100; i++) s.tick(0.1, KEYS, [], 1000 + i);
+
+  const distEnd = Math.hypot(g.x - H.x, g.y - H.y);
+  assert.ok(distEnd < distStart - 200,
+    `guard barely moved: ${distStart} -> ${distEnd} (was frozen if unchanged)`);
+  assert.ok(distEnd <= GUARD_HOME_EPSILON, `guard did not settle at home: ${distEnd}px away`);
   assert.equal(g.mode, 'guard');
 });
 

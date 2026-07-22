@@ -144,12 +144,20 @@ class CreatureSim {
       // --- Guard faction: defend the post against hostile creatures. Guards
       // never target players and are never targeted by hostiles.
       if (c.faction === 'guard') {
-        let tgt = c._target ? this.creatures.get(c._target) : null;
+        // A displaced guard abandons its target and walks home. Without this,
+        // a guard holding a target while outside its post radius freezes:
+        // every chase step lands outside the leash and is refused by the
+        // clamp below, so its position never changes and the identical step
+        // is refused forever. A guard outside its own leash must be going
+        // home, not chasing — this guarantees recovery from any displacement
+        // (knockback, teleport, a bad spawn, terrain shove).
+        const displaced = !withinLeash(cc.x, cc.y, c.home, GUARD_LEASH_RADIUS);
+        let tgt = (!displaced && c._target) ? this.creatures.get(c._target) : null;
         if (tgt && (tgt.hp <= 0 || tgt.faction !== 'hostile'
             || !withinLeash(center(tgt).x, center(tgt).y, c.home, GUARD_LEASH_RADIUS))) {
           tgt = null;
         }
-        if (!tgt) {
+        if (!displaced && !tgt) {
           // `all` is a pre-loop snapshot; selectGuardTarget skips any
           // candidate already killed earlier this tick (hp <= 0), so a
           // creature removed from this.creatures by an earlier guard in this
