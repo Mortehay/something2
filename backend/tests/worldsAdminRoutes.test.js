@@ -89,3 +89,59 @@ test('PUT /api/worlds/:id deletes chunks + clears cache when bounds change', asy
   const deleted = pool.calls.some(c => /DELETE FROM world_chunks WHERE world_id/i.test(c.sql));
   assert.ok(deleted, 'chunks invalidated on bounds change');
 });
+
+const TILE_ROWS = [
+  { id: 1, name: 'grass', color: '#0a0', walkable: true, speed: 1, image: null, valid_neighbors: [] },
+  { id: 2, name: 'map_wall', color: '#2b2b2b', walkable: false, speed: 1, image: null, valid_neighbors: [] },
+  { id: 3, name: 'map_doorway', color: '#6b4f2a', walkable: true, speed: 1, image: null, valid_neighbors: [] },
+];
+
+test('POST /api/worlds/:id/regenerate reseeds and clears chunks+creatures', async () => {
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42' }] })],
+    [/DELETE FROM world_chunks WHERE world_id/i, () => ({ rows: [], rowCount: 2 })],
+    [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 5 })],
+    [/UPDATE worlds SET seed/i, (p) => ({ rows: [{ id: 'w1', seed: String(p[0]) }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).post('/api/worlds/w1/regenerate').set(...AUTH).send({});
+  assert.equal(res.status, 200);
+  const deletedChunks = pool.calls.some(c => /DELETE FROM world_chunks/i.test(c.sql));
+  const deletedCreatures = pool.calls.some(c => /DELETE FROM world_creatures/i.test(c.sql));
+  assert.ok(deletedChunks && deletedCreatures);
+});
+
+test('POST /api/worlds/:id/regenerate 404 when absent', async () => {
+  __setPool(mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [] })],
+  ]));
+  const res = await request(app).post('/api/worlds/nope/regenerate').set(...AUTH).send({});
+  assert.equal(res.status, 404);
+});
+
+test('POST /api/worlds/:id/creatures rejects an unbounded world', async () => {
+  __setPool(mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: null, height: null }] })],
+  ]));
+  const res = await request(app).post('/api/worlds/w1/creatures').set(...AUTH).send({});
+  assert.equal(res.status, 400);
+});
+
+test('POST /api/worlds/:id/creatures places creatures and reports the count', async () => {
+  const world = { id: 'w1', seed: '42', chunk_size: 64, width: 24, height: 24,
+    creature_count: 8, allowed_creature_types: ['goblin'] };
+  const inserted = [];
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [world] })],
+    [/SELECT .*FROM tile_types/i, () => ({ rows: TILE_ROWS })],
+    [/SELECT .*FROM entity_types WHERE is_creature/i, () => ({
+      rows: [{ id: 1, name: 'goblin', hp: 12, defense: 1, resistances: {} }] })],
+    [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],
+    [/INSERT INTO world_creatures/i, (p) => { inserted.push(p); return { rows: [], rowCount: 1 }; }],
+  ]);
+  __setPool(pool);
+  const res = await request(app).post('/api/worlds/w1/creatures').set(...AUTH).send({});
+  assert.equal(res.status, 200);
+  assert.equal(res.body.placed, 8);
+  assert.equal(inserted.length, 8);
+});

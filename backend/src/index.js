@@ -4,7 +4,7 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, doorwaysForWorld } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, doorwaysForWorld, placeMapCreatures, isBoundedWorld } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -967,6 +967,71 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update world' });
+  }
+});
+
+app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const cur = await pool.query('SELECT id FROM worlds WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'world not found' });
+    const newSeed = Math.floor(Math.random() * 2 ** 31);
+    await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [id]);
+    await pool.query('DELETE FROM world_creatures WHERE world_id = $1', [id]);
+    worldPreviewCache.delete(id);
+    const result = await pool.query(
+      'UPDATE worlds SET seed = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+      [newSeed, id],
+    );
+    evictAuthorityWorld(id);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to regenerate world' });
+  }
+});
+
+app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const wr = await pool.query('SELECT * FROM worlds WHERE id = $1', [id]);
+    if (wr.rows.length === 0) return res.status(404).json({ error: 'world not found' });
+    const world = wr.rows[0];
+    if (!isBoundedWorld(world)) {
+      return res.status(400).json({ error: 'creature control is only available for bounded maps' });
+    }
+    const allowed = Array.isArray(world.allowed_creature_types) ? world.allowed_creature_types : [];
+    const count = Number(world.creature_count) || 0;
+
+    await pool.query('DELETE FROM world_creatures WHERE world_id = $1', [id]);
+
+    let placed = 0;
+    if (count > 0 && allowed.length > 0) {
+      const et = await pool.query(
+        `SELECT name, hp, defense, resistances FROM entity_types WHERE is_creature = true AND name = ANY($1::text[])`,
+        [allowed],
+      );
+      if (et.rows.length > 0) {
+        const tileTypes = await getTileTypesMap();
+        const rows = placeMapCreatures(
+          { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
+            width: world.width, height: world.height, doorways: doorwaysForWorld(world) },
+          count, et.rows, Math.floor(Math.random() * 2 ** 31),
+        );
+        for (const c of rows) {
+          await pool.query(
+            `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
+            [id, c.type, c.x, c.y, c.hp, c.facing],
+          );
+        }
+        placed = rows.length;
+      }
+    }
+    evictAuthorityWorld(id);
+    res.json({ placed });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to re-roll creatures' });
   }
 });
 
