@@ -431,6 +431,13 @@ function stampBounds(grid, rMin, cMin, rows, cols, bounds) {
   return grid;
 }
 
+// A world is "bounded" (a Slice-2 map) when it has a finite width AND height.
+// Bounded worlds use count-based placement (placeMapCreatures); unbounded
+// worlds keep the per-chunk spawn roll.
+function isBoundedWorld(row) {
+  return !!(row && row.width && row.height);
+}
+
 // Which edges of a bounded world have a doorway. Slice 1: every edge, so a
 // bounded world is traversable for testing. Slice 3 replaces the body with a
 // lookup of map_links (only linked edges get a doorway). Callers pass the raw
@@ -617,6 +624,7 @@ module.exports = {
     placeMapCreatures,
     stampBounds,
     doorwaysForWorld,
+    isBoundedWorld,
     DOORWAY_TILES,
 };
 

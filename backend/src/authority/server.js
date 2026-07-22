@@ -6,7 +6,7 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
-const { spawnChunkCreatures, doorwaysForWorld } = require('../services/mapService');
+const { spawnChunkCreatures, doorwaysForWorld, isBoundedWorld } = require('../services/mapService');
 const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -163,7 +163,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
          ON CONFLICT (world_id, cx, cy) DO NOTHING RETURNING id`,
         [entry.worldId, cx, cy, JSON.stringify(grid)],
       );
-      if (ins.rowCount > 0 && entry.creatureTypes.length) {
+      // Bounded maps use count-based placement (placeMapCreatures, written to
+      // world_creatures by the admin re-roll route); they must NOT run the
+      // per-tile roll here, which would scatter creatures onto the wall ring.
+      if (ins.rowCount > 0 && entry.creatureTypes.length && !isBoundedWorld(entry.row)) {
         const spawned = spawnChunkCreatures(
           { seed: Number(entry.row.seed), chunkSize: N, tileTypes: entry.tileTypes },
           cx, cy, entry.creatureTypes,
