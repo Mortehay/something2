@@ -134,6 +134,7 @@ test('POST /api/worlds/:id/creatures places creatures and reports the count', as
   const pool = mockPool([
     [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [world] })],
     [/SELECT .*FROM tile_types/i, () => ({ rows: TILE_ROWS })],
+    [/FROM map_links/i, () => ({ rows: [] })],
     [/SELECT .*FROM entity_types WHERE is_creature/i, () => ({
       rows: [{ id: 1, name: 'goblin', hp: 12, defense: 1, resistances: {} }] })],
     [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],

@@ -24,6 +24,7 @@ test('GET /preview returns a 64x64 grid for a known world', async () => {
   __setPool(mockPool([
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '7', chunk_size: 64 }] })],
     [/FROM tile_types/i, () => tileRows],
+    [/FROM map_links/i, () => ({ rows: [] })],
   ]));
   const res = await request(app).get('/api/worlds/w1/preview');
   assert.equal(res.status, 200);
@@ -44,6 +45,7 @@ test('GET /preview memoizes: a second request does not re-query the world', asyn
   const pool = mockPool([
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'memo1', seed: '9', chunk_size: 64 }] })],
     [/FROM tile_types/i, () => tileRows],
+    [/FROM map_links/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);
   const a = await request(app).get('/api/worlds/memo1/preview');

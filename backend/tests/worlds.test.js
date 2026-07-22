@@ -84,6 +84,7 @@ test('GET chunk cache MISS generates and returns an NxN grid WITHOUT inserting',
     [/SELECT .* FROM world_chunks/i, () => ({ rows: [] })],               // cache miss
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42', chunk_size: 8 }] })],
     [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
+    [/FROM map_links/i, () => ({ rows: [] })],
     // NO INSERT INTO world_chunks / entity_types / world_creatures handlers:
     // the authority alone materializes chunks and spawns creatures now, so if
     // the route issues any of those queries, mockPool throws.

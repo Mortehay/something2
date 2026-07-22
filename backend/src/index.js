@@ -4,7 +4,8 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, doorwaysForWorld, placeMapCreatures, isBoundedWorld } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld } = require('./services/mapService');
+const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 require('dotenv').config();
 
 const app = express();
@@ -1015,7 +1016,7 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
         const tileTypes = await getTileTypesMap();
         const rows = placeMapCreatures(
           { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-            width: world.width, height: world.height, doorways: doorwaysForWorld(world) },
+            width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge) },
           count, et.rows, Math.floor(Math.random() * 2 ** 31),
         );
         for (const c of rows) {
@@ -1032,6 +1033,57 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to re-roll creatures' });
+  }
+});
+
+const EDGES = new Set(['N', 'E', 'S', 'W']);
+
+app.get('/api/worlds/:id/links', async (req, res) => {
+  try {
+    const rows = await fetchLinks(pool, req.params.id);
+    res.json(rows.map((r) => ({ edge: r.edge, to_world_id: r.to_world_id })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to list links' });
+  }
+});
+
+app.post('/api/worlds/:id/links', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { edge, to_world_id } = req.body;
+    if (!EDGES.has(edge)) return res.status(400).json({ error: 'edge must be one of N,E,S,W' });
+    if (!to_world_id || to_world_id === id) return res.status(400).json({ error: 'to_world_id must be a different world' });
+    const fromRes = await pool.query('SELECT id, width, height FROM worlds WHERE id = $1', [id]);
+    const toRes = await pool.query('SELECT id, width, height FROM worlds WHERE id = $1', [to_world_id]);
+    const from = fromRes.rows[0];
+    const to = toRes.rows[0];
+    if (!from || !to) return res.status(404).json({ error: 'world not found' });
+    if (!isBoundedWorld(from) || !isBoundedWorld(to)) {
+      return res.status(400).json({ error: 'both worlds must be bounded maps' });
+    }
+    await setLink(pool, id, edge, to_world_id);
+    evictAuthorityWorld(id);
+    evictAuthorityWorld(to_world_id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to set link' });
+  }
+});
+
+app.delete('/api/worlds/:id/links/:edge', adminGuard, async (req, res) => {
+  try {
+    const { id, edge } = req.params;
+    if (!EDGES.has(edge)) return res.status(400).json({ error: 'edge must be one of N,E,S,W' });
+    const cur = await pool.query('SELECT to_world_id FROM map_links WHERE from_world_id = $1 AND edge = $2', [id, edge]);
+    await clearLink(pool, id, edge);
+    evictAuthorityWorld(id);
+    if (cur.rows[0]) evictAuthorityWorld(cur.rows[0].to_world_id);
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to clear link' });
   }
 });
 
@@ -1064,7 +1116,7 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
     const tileTypes = await getTileTypesMap();
     const data = generateChunk(
       { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-        width: world.width, height: world.height, doorways: doorwaysForWorld(world) },
+        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge) },
       cx, cy,
     );
 
@@ -1088,7 +1140,7 @@ app.get('/api/worlds/:id/preview', async (req, res) => {
     const tileTypes = await getTileTypesMap();
     const data = generateWorldPreview(
       { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-        width: world.width, height: world.height, doorways: doorwaysForWorld(world) },
+        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge) },
       PREVIEW_DIM,
     );
     worldPreviewCache.set(worldId, data);
