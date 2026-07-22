@@ -35,6 +35,14 @@ const adminGuard = requireAdmin(guardPool);
 const PREVIEW_DIM = 64;
 const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path grid)
 
+// Handle to the running authority (set only when this module is the entrypoint;
+// null under tests). Lets admin mutations evict an idle cached world so its next
+// load re-reads regenerated terrain/creatures from the DB.
+let authorityHandle = null;
+function evictAuthorityWorld(worldId) {
+  return authorityHandle?.evictWorld?.(worldId) ?? false;
+}
+
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
 let spriteGen = require('./services/spriteGen');
 const __setSpriteGen = (impl) => { spriteGen = impl; };
@@ -970,7 +978,7 @@ if (require.main === module) {
   const server = app.listen(port, () => {
     console.log(`Backend server running on port ${port}`);
   });
-  attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
+  authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
   console.log('Authority WS attached at /authority');
 }
 

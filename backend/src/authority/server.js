@@ -676,6 +676,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // 'pong' event (observable via `worlds.get(id).sockets`) between calls
     // rather than sleeping a guessed duration.
     _heartbeatSweep: heartbeatSweep,
+    // Evict an IDLE world from the in-memory cache so the next entry reloads it
+    // from the DB (fresh seed + creatures). Refuses to evict a world with live
+    // sockets to avoid tearing down active sessions.
+    evictWorld(worldId) {
+      const entry = worlds.get(worldId);
+      if (!entry) return false;
+      if (entry.sockets && entry.sockets.size > 0) return false;
+      worlds.delete(worldId);
+      return true;
+    },
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);
