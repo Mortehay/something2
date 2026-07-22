@@ -93,3 +93,45 @@ export function useClearLink() {
     onError: (err) => toast.error(err.message),
   });
 }
+
+export function useWorldVillages(worldId) {
+  const { data } = useQuery({
+    queryKey: ["worldVillages", worldId],
+    enabled: !!worldId,
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/worlds/${worldId}/villages`, { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to load villages");
+      return res.json();
+    },
+  });
+  return data || [];
+}
+
+export function useAddVillage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...body }) => {
+      const res = await fetch(`${API_URL}/api/worlds/${id}/villages`, {
+        method: "POST", headers: authHeaders(), body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to add village");
+      return res.json();
+    },
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ["worldVillages", v.id] }); toast.success("Village added"); },
+    onError: (err) => toast.error(err.message),
+  });
+}
+
+export function useDeleteVillage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, villageId }) => {
+      const res = await fetch(`${API_URL}/api/worlds/${id}/villages/${villageId}`, {
+        method: "DELETE", headers: authHeaders(),
+      });
+      if (!res.ok) throw new Error("Failed to delete village");
+    },
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ["worldVillages", v.id] }); toast.success("Village deleted"); },
+    onError: (err) => toast.error(err.message),
+  });
+}

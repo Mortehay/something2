@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { HiOutlinePlus, HiOutlineTrash, HiOutlineArrowPath, HiOutlineSparkles, HiOutlineStar } from 'react-icons/hi2';
 import { useWorlds, useCreateWorld, useDeleteWorld } from './useWorlds.js';
 import { useEntityTypes } from './useMaps.js';
-import { useUpdateWorld, useRegenerateWorld, useRerollCreatures, useWorldLinks, useSetLink, useClearLink } from './useMapsAdmin.js';
+import { useUpdateWorld, useRegenerateWorld, useRerollCreatures, useWorldLinks, useSetLink, useClearLink, useWorldVillages, useAddVillage, useDeleteVillage } from './useMapsAdmin.js';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: #eee; max-width: 1200px; margin: 0 auto;
@@ -34,6 +34,14 @@ function MapCard({ world, creatureTypes, allMaps }) {
   const links = useWorldLinks(world.id);
   const setLink = useSetLink();
   const clearLink = useClearLink();
+  const villages = useWorldVillages(world.id);
+  const addVillage = useAddVillage();
+  const delVillage = useDeleteVillage();
+  const [vMinRow, setVMinRow] = useState(1);
+  const [vMinCol, setVMinCol] = useState(1);
+  const [vW, setVW] = useState(6);
+  const [vH, setVH] = useState(5);
+  const [vGate, setVGate] = useState('S');
   const others = (allMaps || []).filter(m => m.id !== world.id);
   const linkFor = (edge) => links.find(l => l.edge === edge)?.to_world_id || '';
   const [name, setName] = useState(world.name);
@@ -114,6 +122,28 @@ function MapCard({ world, creatureTypes, allMaps }) {
             </select>
           </label>
         ))}
+      </Row>
+      <Row style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+        <span style={{ color: '#aaa' }}>Villages:</span>
+        {villages.map((v) => (
+          <div key={v.id} style={{ color: '#ccc', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span>({v.min_row},{v.min_col}) {v.width}×{v.height} gate {v.gate_edge}</span>
+            <button onClick={() => delVillage.mutate({ id: world.id, villageId: v.id })}>Delete</button>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          row <Input type="number" value={vMinRow} onChange={(e) => setVMinRow(+e.target.value)} style={{ width: 52 }} />
+          col <Input type="number" value={vMinCol} onChange={(e) => setVMinCol(+e.target.value)} style={{ width: 52 }} />
+          w <Input type="number" min={3} max={8} value={vW} onChange={(e) => setVW(+e.target.value)} style={{ width: 44 }} />
+          h <Input type="number" min={3} max={6} value={vH} onChange={(e) => setVH(+e.target.value)} style={{ width: 44 }} />
+          gate <select value={vGate} onChange={(e) => setVGate(e.target.value)}>
+            {['N', 'E', 'S', 'W'].map((x) => <option key={x} value={x}>{x}</option>)}
+          </select>
+          <Button onClick={() => addVillage.mutate({
+            id: world.id, min_row: vMinRow, min_col: vMinCol, width: vW, height: vH, gate_edge: vGate,
+            spawn_x: (vMinCol + vW / 2) * 100, spawn_y: (vMinRow + vH / 2) * 100,
+          })} disabled={addVillage.isPending}>Add village</Button>
+        </div>
       </Row>
     </Card>
   );
