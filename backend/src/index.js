@@ -1048,6 +1048,15 @@ app.get('/api/worlds/:id/links', async (req, res) => {
   }
 });
 
+// A link change flips an edge between a doorway gap and a solid wall, reshaping
+// the wall ring exactly like a bounds change: invalidate persisted + preview
+// terrain and evict the idle authority copy for the given world.
+async function invalidateWorld(worldId) {
+  await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [worldId]);
+  worldPreviewCache.delete(worldId);
+  evictAuthorityWorld(worldId);
+}
+
 app.post('/api/worlds/:id/links', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1063,8 +1072,8 @@ app.post('/api/worlds/:id/links', adminGuard, async (req, res) => {
       return res.status(400).json({ error: 'both worlds must be bounded maps' });
     }
     await setLink(pool, id, edge, to_world_id);
-    evictAuthorityWorld(id);
-    evictAuthorityWorld(to_world_id);
+    await invalidateWorld(id);
+    await invalidateWorld(to_world_id);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -1078,8 +1087,8 @@ app.delete('/api/worlds/:id/links/:edge', adminGuard, async (req, res) => {
     if (!EDGES.has(edge)) return res.status(400).json({ error: 'edge must be one of N,E,S,W' });
     const cur = await pool.query('SELECT to_world_id FROM map_links WHERE from_world_id = $1 AND edge = $2', [id, edge]);
     await clearLink(pool, id, edge);
-    evictAuthorityWorld(id);
-    if (cur.rows[0]) evictAuthorityWorld(cur.rows[0].to_world_id);
+    await invalidateWorld(id);
+    if (cur.rows[0]) await invalidateWorld(cur.rows[0].to_world_id);
     res.status(204).end();
   } catch (err) {
     console.error(err);
