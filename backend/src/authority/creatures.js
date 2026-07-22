@@ -40,13 +40,14 @@ function creatureMitigation(row) {
 // undefined and silently disables the feature it feeds.
 async function loadCreatureTypes(pool) {
   const r = await pool.query(
-    `SELECT id, name, color, hp, defense, resistances
+    `SELECT id, name, color, hp, defense, resistances, faction
      FROM entity_types WHERE is_creature = true ORDER BY id ASC`,
   );
   const creatureTypes = r.rows.map((row) => ({
     name: row.name,
     hp: row.hp,
     color: row.color,
+    faction: row.faction || 'hostile',
     ...creatureMitigation(row),
   }));
   const creatureTypeIds = new Map(r.rows.map((row) => [row.name, row.id]));
@@ -80,7 +81,11 @@ class CreatureSim {
         facing: c.facing || 'S', hp: c.hp, maxHp: c.hp, color: c.color,
         mit: creatureMitigation(c),
         _dir: dirIdx, dirty: false,
-        _target: null, mode: 'roam', _attackCd: 0,
+        faction: c.faction || 'hostile',
+        home: (Number.isFinite(c.home_x) && Number.isFinite(c.home_y))
+          ? { x: c.home_x, y: c.home_y }
+          : null,
+        _target: null, _targetKind: null, mode: 'roam', _attackCd: 0,
       });
     }
   }

@@ -231,8 +231,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const rows = await pool.query(
         // et.defense/et.resistances feed CreatureSim's `mit`; dropping either
         // from this SELECT loads it as undefined and silently makes every
-        // creature resistance inert.
-        `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, et.color, et.defense, et.resistances
+        // creature resistance inert. et.faction/wc.home_x/wc.home_y are the
+        // same kind of column: drop them and guards silently revert to
+        // ordinary roaming hostiles with no anchor.
+        `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
+                et.color, et.defense, et.resistances, et.faction
          FROM world_creatures wc LEFT JOIN entity_types et ON et.name = wc.type
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
