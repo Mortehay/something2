@@ -4,7 +4,7 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, doorwaysForWorld } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, doorwaysForWorld, placeMapCreatures, isBoundedWorld } = require('./services/mapService');
 require('dotenv').config();
 
 const app = express();
@@ -34,6 +34,14 @@ const adminGuard = requireAdmin(guardPool);
 // World preview memo
 const PREVIEW_DIM = 64;
 const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path grid)
+
+// Handle to the running authority (set only when this module is the entrypoint;
+// null under tests). Lets admin mutations evict an idle cached world so its next
+// load re-reads regenerated terrain/creatures from the DB.
+let authorityHandle = null;
+function evictAuthorityWorld(worldId) {
+  return authorityHandle?.evictWorld?.(worldId) ?? false;
+}
 
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
 let spriteGen = require('./services/spriteGen');
@@ -902,6 +910,131 @@ app.get('/api/worlds/:id', async (req, res) => {
   }
 });
 
+app.put('/api/worlds/:id', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, width, height, creature_count, allowed_creature_types, is_entry, entry_spawn } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    const w = Number.isFinite(width) ? Math.floor(width) : null;
+    const h = Number.isFinite(height) ? Math.floor(height) : null;
+    if ((w === null) !== (h === null)) {
+      return res.status(400).json({ error: 'width and height must be provided together' });
+    }
+    if (w !== null && (w < 8 || w > 4096 || h < 8 || h > 4096)) {
+      return res.status(400).json({ error: 'width and height must be between 8 and 4096 tiles' });
+    }
+    const count = Number.isFinite(creature_count) ? Math.max(0, Math.floor(creature_count)) : 0;
+    const allowed = Array.isArray(allowed_creature_types)
+      ? allowed_creature_types.filter((t) => typeof t === 'string')
+      : [];
+    const entry = is_entry === true;
+    const spawn = entry_spawn && typeof entry_spawn === 'object' ? entry_spawn : null;
+
+    const cur = await pool.query('SELECT id, width, height FROM worlds WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'world not found' });
+    const before = cur.rows[0];
+    // Bounds are omitted entirely on updates that only touch other fields (e.g.
+    // toggling is_entry) — default to the existing bounds rather than nulling
+    // them out, so an unrelated PUT can't accidentally make a bounded world
+    // infinite and re-trigger a chunk wipe.
+    const boundsProvided = width !== undefined || height !== undefined;
+    const nextW = boundsProvided ? w : (before.width ?? null);
+    const nextH = boundsProvided ? h : (before.height ?? null);
+    const boundsChanged = (before.width ?? null) !== nextW || (before.height ?? null) !== nextH;
+
+    // Enforce a single entry world.
+    if (entry) {
+      await pool.query('UPDATE worlds SET is_entry = false WHERE is_entry = true AND id <> $1', [id]);
+    }
+    // A bounds change reshapes the wall ring: invalidate persisted + preview terrain.
+    if (boundsChanged) {
+      await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [id]);
+      worldPreviewCache.delete(id);
+    }
+
+    const result = await pool.query(
+      `UPDATE worlds SET name = $1, width = $2, height = $3, creature_count = $4,
+         allowed_creature_types = $5::jsonb, is_entry = $6, entry_spawn = $7::jsonb,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE id = $8 RETURNING *`,
+      [name.trim(), nextW, nextH, count, JSON.stringify(allowed), entry, spawn ? JSON.stringify(spawn) : null, id],
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'world not found' });
+    if (boundsChanged) evictAuthorityWorld(id);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update world' });
+  }
+});
+
+app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const cur = await pool.query('SELECT id FROM worlds WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'world not found' });
+    const newSeed = Math.floor(Math.random() * 2 ** 31);
+    await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [id]);
+    await pool.query('DELETE FROM world_creatures WHERE world_id = $1', [id]);
+    worldPreviewCache.delete(id);
+    const result = await pool.query(
+      'UPDATE worlds SET seed = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+      [newSeed, id],
+    );
+    evictAuthorityWorld(id);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to regenerate world' });
+  }
+});
+
+app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const wr = await pool.query('SELECT * FROM worlds WHERE id = $1', [id]);
+    if (wr.rows.length === 0) return res.status(404).json({ error: 'world not found' });
+    const world = wr.rows[0];
+    if (!isBoundedWorld(world)) {
+      return res.status(400).json({ error: 'creature control is only available for bounded maps' });
+    }
+    const allowed = Array.isArray(world.allowed_creature_types) ? world.allowed_creature_types : [];
+    const count = Number(world.creature_count) || 0;
+
+    await pool.query('DELETE FROM world_creatures WHERE world_id = $1', [id]);
+
+    let placed = 0;
+    if (count > 0 && allowed.length > 0) {
+      const et = await pool.query(
+        `SELECT name, hp, defense, resistances FROM entity_types WHERE is_creature = true AND name = ANY($1::text[])`,
+        [allowed],
+      );
+      if (et.rows.length > 0) {
+        const tileTypes = await getTileTypesMap();
+        const rows = placeMapCreatures(
+          { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
+            width: world.width, height: world.height, doorways: doorwaysForWorld(world) },
+          count, et.rows, Math.floor(Math.random() * 2 ** 31),
+        );
+        for (const c of rows) {
+          await pool.query(
+            `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
+            [id, c.type, c.x, c.y, c.hp, c.facing],
+          );
+        }
+        placed = rows.length;
+      }
+    }
+    evictAuthorityWorld(id);
+    res.json({ placed });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to re-roll creatures' });
+  }
+});
+
 app.get('/api/worlds/:id/chunk', async (req, res) => {
   try {
     const cx = Number(req.query.cx);
@@ -970,7 +1103,7 @@ if (require.main === module) {
   const server = app.listen(port, () => {
     console.log(`Backend server running on port ${port}`);
   });
-  attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
+  authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
   console.log('Authority WS attached at /authority');
 }
 

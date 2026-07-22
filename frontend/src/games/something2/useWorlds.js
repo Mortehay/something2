@@ -21,11 +21,11 @@ export function useWorlds() {
 export function useCreateWorld() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ name, seed, chunk_size }) => {
+    mutationFn: async (body) => {
       const res = await fetch(`${API_URL}/api/worlds`, {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ name, seed, chunk_size }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("Failed to create world");
       return res.json();
