@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
-import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn } from "react-icons/hi2";
+import { HiOutlineTrash, HiOutlineSparkles, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineMap } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
 import { EngineClient, getStoredToken, parseJwt, clearToken } from "./src/js/net/EngineClient.js";
 import Login from "../../pages/Login.jsx";
@@ -14,6 +14,7 @@ const ENGINE_WS_URL = import.meta.env.VITE_ENGINE_WS_URL || 'ws://localhost:1808
 import TileTypesAdmin from "./TileTypesAdmin";
 import EntityTypesAdmin from "./EntityTypesAdmin";
 import ItemTypesAdmin from "./ItemTypesAdmin";
+import MapsAdmin from "./MapsAdmin";
 import MapPreview from "./MapPreview.jsx";
 import WorldPreview from "./WorldPreview.jsx";
 
@@ -147,7 +148,7 @@ const TabBar = styled.div`
   z-index: 100;
 `;
 
-const ADMIN_TAB_COLORS = { entity: '#facc15', items: '#f472b6' };
+const ADMIN_TAB_COLORS = { entity: '#facc15', items: '#f472b6', maps: '#34d399' };
 
 const TabButton = styled.button`
   background: ${props => props.$active ? 'rgba(74, 158, 255, 0.1)' : 'transparent'};
@@ -712,6 +713,9 @@ export default function Something2() {
             <TabButton $active={activeTab === 'items'} $adminType="items" onClick={() => setActiveTab('items')}>
               <HiOutlineCube /> Items
             </TabButton>
+            <TabButton $active={activeTab === 'maps'} $adminType="maps" onClick={() => setActiveTab('maps')}>
+              <HiOutlineMap /> Maps
+            </TabButton>
           </>
         )}
         <TabButton
@@ -909,6 +913,7 @@ export default function Something2() {
         {isAdmin && activeTab === 'tiles' && <TileTypesAdmin />}
         {isAdmin && activeTab === 'entity' && <EntityTypesAdmin />}
         {isAdmin && activeTab === 'items' && <ItemTypesAdmin />}
+        {isAdmin && activeTab === 'maps' && <MapsAdmin />}
       </ContentArea>
     </StyledGameContainer>
   );
