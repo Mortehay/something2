@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
+const { fetchVillages } = require('./services/villages');
 require('dotenv').config();
 
 const app = express();
@@ -1014,9 +1015,12 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
       );
       if (et.rows.length > 0) {
         const tileTypes = await getTileTypesMap();
+        const villages = await fetchVillages(pool, world.id);
         const rows = placeMapCreatures(
           { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-            width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge) },
+            width: world.width, height: world.height,
+            doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
+            villages },
           count, et.rows, Math.floor(Math.random() * 2 ** 31),
         );
         for (const c of rows) {

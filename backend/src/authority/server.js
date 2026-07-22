@@ -8,6 +8,7 @@ const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
 const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
+const { fetchVillages } = require('../services/villages');
 const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -110,13 +111,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const linkRows = await fetchLinks(pool, worldId);
         const links = new Map(linkRows.map((l) => [l.edge, { toWorldId: l.to_world_id, toWidth: l.to_width, toHeight: l.to_height }]));
+        const villages = await fetchVillages(pool, worldId);
         const map = new ServerMap({
           seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes,
           width: row.width, height: row.height, doorways: [...links.keys()],
+          villages,
         });
         const entry = {
           worldId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
-          tileTypes, creatureTypes, creatureTypeIds, links,
+          tileTypes, creatureTypes, creatureTypeIds, links, villages,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
