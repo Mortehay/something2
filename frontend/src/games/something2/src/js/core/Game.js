@@ -501,6 +501,12 @@ export class Game {
         if (msg.detonations && msg.detonations.length) {
             addBlasts(this.blasts, msg.detonations, performance.now());
         }
+        // Attacks are present only on the tick they happened (the server
+        // clears its stash after this broadcast), so they must be taken off
+        // THIS frame — there is no snapshot to re-read them from later.
+        if (msg.attacks && msg.attacks.length) {
+            addEffects(this.vfx, msg.attacks, performance.now(), this.vfxDefs);
+        }
     }
 
     _reconcileSelf(serverPlayer) {
@@ -558,6 +564,7 @@ export class Game {
             // ring animation reads.
             const nowMs = performance.now();
             this.blasts = pruneBlasts(this.blasts, nowMs);
+            this.vfx = pruneEffects(this.vfx, nowMs);
             this.renderSystem.renderChunked({
                 player: this.player,
                 camera: this.camera,
@@ -579,6 +586,7 @@ export class Game {
                 gold: this.gold,
                 toast: this.toast,
                 blasts: this.blasts,
+                vfx: this.vfx,
                 // null whenever the equipped weapon needs no ammo — the HUD
                 // then draws no ammo line at all.
                 ammo: resolveAmmoHud(this.inventory),
