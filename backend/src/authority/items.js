@@ -12,7 +12,7 @@ async function loadItemTypes(pool) {
   const r = await pool.query(
     `SELECT id, name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
             range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element,
-            defense, resistances, stackable, ammo_type_id, aoe_radius
+            defense, resistances, stackable, ammo_type_id, aoe_radius, vfx
      FROM item_types ORDER BY id ASC`,
   );
   const m = new Map();
@@ -40,6 +40,9 @@ async function loadItemTypes(pool) {
       stackable: row.stackable === true,
       ammo_type_id: num(row.ammo_type_id),
       aoe_radius: num(row.aoe_radius),
+      // Effect-name bindings per moment, e.g. { attack: 'sweep_arc' }.
+      // Normalized to null so `weapon.vfx` is never undefined downstream.
+      vfx: row.vfx || null,
     });
   }
   return m;

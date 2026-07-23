@@ -5,7 +5,7 @@ import { HiOutlineTrash, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOut
 import { Game } from "./src/js/main.js";
 import { getStoredToken, parseJwt, clearToken } from "./src/js/net/EngineClient.js";
 import Login from "../../pages/Login.jsx";
-import { useMapTiles } from "./useMaps.js";
+import { useMapTiles, useVfxEffects } from "./useMaps.js";
 import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 
@@ -347,6 +347,7 @@ export default function Something2() {
   const isAdmin = useMemo(() => parseJwt(getStoredToken())?.role === 'admin', [authed]);
 
   const { mapTiles, isLoadingMapTiles } = useMapTiles();
+  const { vfxEffects } = useVfxEffects();
   const { worlds, isLoadingWorlds, worldsError } = useWorlds();
   const createWorldMutation = useCreateWorld();
   const deleteWorldMutation = useDeleteWorld();
@@ -483,6 +484,7 @@ export default function Something2() {
         worldId,
         chunkSize,
         tileTypes: mapTiles,
+        vfxEffects: vfxEffects || null,
         spawnX: spawn,
         spawnY: spawn,
       });

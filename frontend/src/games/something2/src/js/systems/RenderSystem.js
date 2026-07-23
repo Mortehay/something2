@@ -6,6 +6,7 @@ import { TileDiamondCache } from "./tileTexture.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
+import { effectProgress, effectAlpha, isoArcAngle } from "../core/vfx.js";
 import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffects.js";
 
 // Mirrors PICKUP_RADIUS in backend/src/authority/groundItems.js — used here
@@ -99,7 +100,7 @@ export class RenderSystem {
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
     groundItems = [], autoLoot = false, gold = null, toast = null,
-    blasts = [], ammo = null, noAmmoFlash = false, effects = null,
+    blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
   }) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -168,6 +169,7 @@ export class RenderSystem {
     }
 
     this.drawBlasts(blasts);
+    this.drawVfx(vfx);
 
     camera.reset(this.ctx);
     this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash, effects, gold });
@@ -206,6 +208,57 @@ export class RenderSystem {
       this.ctx.lineWidth = 3;
       this.ctx.beginPath();
       this.ctx.ellipse(s.x, cy, rx, rx / 2, 0, 0, Math.PI * 2);
+      this.ctx.stroke();
+    }
+    this.ctx.restore();
+  }
+
+  // Attack effects. Slice A draws one shape — `arc`, the melee swing: a wedge
+  // on the iso ground plane that sweeps open from one edge of the weapon's
+  // cone to the other and fades out. Radius and angular width come from the
+  // EVENT (the weapon's real reach/arc_width), which is what makes a halberd
+  // and a knife look different while sharing one effect row.
+  //
+  // Anything that is not an arc is skipped rather than drawn wrong: the other
+  // four shapes are constrained in the schema now but implemented in slice B.
+  drawVfx(effects) {
+    if (!effects || effects.length === 0) return;
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+    this.ctx.save();
+    for (const fx of effects) {
+      if (!fx.def || fx.def.shape !== "arc") continue;
+      const t = effectProgress(fx, now);
+      // Same conversion as drawBlasts above — worldToScreen gives the tile
+      // diamond's CENTRE, and the ISO_TILE_H/2 lift puts the swing at chest
+      // height rather than flat on the ground. Do not add a further offset.
+      const s = worldToScreen(fx.x, fx.y);
+      const cy = s.y - ISO_TILE_H / 2;
+      // A world circle projects to a 2:1 ellipse, not a circle — the same
+      // ground-plane projection the blast ring uses, reused rather than
+      // re-derived so the two can never disagree.
+      const rx = blastScreenRadiusX(fx.reach);
+      if (rx <= 0) continue;
+      const half = (fx.arc || 0) / 2;
+      // PARAMETRIC angle, not the world angle: see isoArcAngle.
+      const phi = isoArcAngle(fx.nx, fx.ny);
+      const from = phi - half;
+      const to = from + (fx.arc || 0) * t;      // the sweep opens over the lifetime
+
+      this.ctx.globalAlpha = effectAlpha(fx, now);
+      this.ctx.strokeStyle = fx.def.color || "#dddddd";
+      this.ctx.lineWidth = Number(fx.def.width) || 2;
+      this.ctx.beginPath();
+      this.ctx.ellipse(s.x, cy, rx, rx / 2, 0, from, to);
+      this.ctx.stroke();
+      // The leading radial edge (centre -> the sweeping edge). Without it a
+      // narrow swing (a dagger: 0.6 rad at reach 80) is a short stub of arc
+      // that barely reads as an attack; the spoke gives it a direction. The
+      // trailing edge is intentionally omitted — an open wedge reads as a
+      // moving swipe rather than a static pie slice (verified in a real world;
+      // closing it into a filled wedge is deferred to the slice B polish).
+      this.ctx.beginPath();
+      this.ctx.moveTo(s.x, cy);
+      this.ctx.lineTo(s.x + rx * Math.cos(to), cy + (rx / 2) * Math.sin(to));
       this.ctx.stroke();
     }
     this.ctx.restore();

@@ -48,8 +48,8 @@ test('attack from an unknown player returns no kills', () => {
 
 // Weapon catalog shared by this file's World combat tests.
 const TYPES = new Map([
-  [1, { id: 1, name: 'dagger', category: 'weapon', kind: 'melee', damage: 8, cooldown: 0.3, reach: 80, arc_width: 0.6, mana_cost: 0, element: null }],
-  [2, { id: 2, name: 'halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, element: null }],
+  [1, { id: 1, name: 'dagger', category: 'weapon', kind: 'melee', damage: 8, cooldown: 0.3, reach: 80, arc_width: 0.6, mana_cost: 0, element: null, vfx: { attack: 'sweep_arc' } }],
+  [2, { id: 2, name: 'halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, element: null, vfx: { attack: 'sweep_arc' } }],
   [3, { id: 3, name: 'bow', category: 'weapon', kind: 'projectile', damage: 12, cooldown: 0.6, range: 700, projectile_speed: 900, projectile_radius: 8, pierce: 1, mana_cost: 0, element: null }],
   [4, { id: 4, name: 'magic-bolt', category: 'weapon', kind: 'projectile', damage: 14, cooldown: 0.7, range: 600, projectile_speed: 700, projectile_radius: 12, pierce: 1, mana_cost: 15, element: 'arcane' }],
   [5, { id: 5, name: 'greatsword', category: 'weapon', kind: 'melee', damage: 25, cooldown: 0.5, reach: 90, arc_width: 0.7, mana_cost: 0, stamina_cost: 20, element: null }],
@@ -380,4 +380,104 @@ test('the melee rider is stamped with the world clock, so it expires on the worl
   const u2 = w.getPlayer('u2');
   assert.equal(u2.effects.get(BURN).until, w.now + BURN_DURATION_MS,
     'the rider must use the world clock, not 0 — otherwise it is born expired');
+});
+
+test('a melee attack returns one descriptor carrying the real weapon geometry', () => {
+  const w = armWorld();
+  // Inventory is addPlayer's THIRD argument (see world.js addPlayer) — the
+  // rest of this file passes it the same way. Assigning p.inv afterwards
+  // would work too, but stay consistent with the file.
+  w.addPlayer('u1', { x: 100, y: 100 }, longReachInv());  // centre 132,132; halberd reach 190, arc 1.8
+  const { attacks } = w.attack('u1', 1, 0);               // aim due east
+
+  assert.equal(attacks.length, 1);
+  const a = attacks[0];
+  assert.equal(a.a, 'p:u1');
+  assert.equal(a.v, 'sweep_arc');
+  assert.equal(a.x, 132);
+  assert.equal(a.y, 132);
+  assert.equal(a.nx, 1);
+  assert.equal(a.ny, 0);
+  // Geometry comes from the CATALOG, not from constants in the descriptor —
+  // this is what makes a halberd and a knife look different.
+  assert.equal(a.reach, 190);
+  assert.equal(a.arc, 1.8);
+});
+
+test('the descriptor geometry tracks the equipped weapon', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 });           // no inv override -> default dagger
+  const a = w.attack('u1', 1, 0).attacks[0];
+  assert.equal(a.reach, 80);
+  assert.equal(a.arc, 0.6);
+  assert.notEqual(a.reach, 190, 'a dagger must not report the halberd reach');
+});
+
+test('the aim vector in the descriptor is normalized', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 });
+  const a = w.attack('u1', 3, 4).attacks[0];       // length 5
+  assert.ok(Math.abs(Math.hypot(a.nx, a.ny) - 1) < 1e-9, 'nx/ny must be a unit vector');
+  assert.ok(Math.abs(a.nx - 0.6) < 1e-9);
+  assert.ok(Math.abs(a.ny - 0.8) < 1e-9);
+});
+
+test('hit is true for a connected swing that kills nothing', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, longReachInv());
+  // Same coordinates the file's proven in-arc dagger test uses (x 150, y 108
+  // against a player centred 132,132 aiming east), so an arc-geometry change
+  // cannot be what makes this test go red.
+  w.creatures.addCreatures([{ id: 'tough', type: 'Wolf', x: 150, y: 108, hp: 9999, facing: 'S', color: '#c00' }]);
+  const { killedCreatureIds, attacks } = w.attack('u1', 1, 0);
+  assert.deepEqual(killedCreatureIds, [], 'nothing died');
+  assert.equal(attacks[0].hit, true, 'a non-lethal connection is still a hit, not a whiff');
+});
+
+test('hit is false when the swing connects with nothing', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, longReachInv());
+  assert.equal(w.attack('u1', 1, 0).attacks[0].hit, false);
+});
+
+test('hit is true when only another player is caught in the arc', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, longReachInv());  // centre 132,132
+  w.addPlayer('u2', { x: 200, y: 100 }, emptyInv());      // centre 232,132 — 100px east, inside reach 190
+  assert.equal(w.attack('u1', 1, 0).attacks[0].hit, true);
+});
+
+test('an unbound weapon emits a descriptor with a null name', () => {
+  // The swing still happened; slice B gives it a kind-level default. It must
+  // NOT be swallowed here — a missing descriptor and a null name are
+  // different bugs and must stay distinguishable.
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, heavyInv());   // greatsword, no vfx binding
+  const a = w.attack('u1', 1, 0).attacks[0];
+  assert.equal(a.v, null);
+  assert.equal(a.reach, 90);
+});
+
+test('a projectile attack emits no descriptor in slice A', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, { items: [{ id: 'b3', typeId: 3 }], equipment: { main_hand: 'b3' } });
+  assert.deepEqual(w.attack('u1', 1, 0).attacks, [], 'projectile trails are slice D');
+});
+
+test('every refused attack still returns an attacks array', () => {
+  // server.js destructures `attacks` unconditionally; an undefined on any
+  // rejection path would throw inside the socket handler.
+  const w = armWorld();
+  assert.deepEqual(w.attack('nobody', 1, 0).attacks, []);   // unknown player
+  w.addPlayer('u1', { x: 100, y: 100 });
+  w.attack('u1', 1, 0);                                      // starts the cooldown
+  assert.deepEqual(w.attack('u1', 1, 0).attacks, [], 'cooldown-refused');
+});
+
+test('a refused attack emits no descriptor at all', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, heavyInv());   // greatsword, stamina_cost 20
+  w.getPlayer('u1').stamina = 0;
+  assert.deepEqual(w.attack('u1', 1, 0).attacks, [],
+    'a swing that never happened must not draw one');
 });

@@ -312,15 +312,32 @@ class CreatureSim {
     return killed;
   }
 
-  // Melee arc: damage every creature whose center is within reach AND inside the
-  // aim cone; remove + return the dead ids. (nx,ny) must be normalized.
-  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0) {
-    const killed = [];
+  // Ids of every live creature a melee swing would connect with: inside the
+  // arc AND with line of sight. Damages nothing.
+  //
+  // Split out of applyMeleeArc so an attack can report whether it CONNECTED
+  // (frame.attacks `hit`) — killed ids alone cannot answer that, since a
+  // creature hit for non-lethal damage appears in neither list. applyMeleeArc
+  // iterates this, so both share ONE arc rule and cannot drift apart.
+  meleeArcTargets(ox, oy, nx, ny, reach, arcWidth) {
+    const ids = [];
     for (const [id, c] of this.creatures) {
       const cc = center(c);
       if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth)) continue;
       // Terrain blocks the swing, exactly as it blocks a projectile.
       if (!hasLineOfSight(this.map, ox, oy, cc.x, cc.y)) continue;
+      ids.push(id);
+    }
+    return ids;
+  }
+
+  // Melee arc: damage every creature whose center is within reach AND inside the
+  // aim cone; remove + return the dead ids. (nx,ny) must be normalized.
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0) {
+    const killed = [];
+    for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth)) {
+      const c = this.creatures.get(id);
+      if (!c) continue;
       applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
       // The element's status rider is applied wherever the element already
       // deals damage — one call adjacent to each applyDamage, never a second

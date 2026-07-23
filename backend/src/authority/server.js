@@ -43,6 +43,31 @@ function planBind({ villages, gRow, gCol, boundVillageId }) {
   return v;
 }
 
+// Cap on a single world's un-broadcast attack batch. Attacks arrive from the
+// socket handler BETWEEN ticks, so unlike pendingDetonations (produced inside
+// the tick and replaced wholesale) this stash must ACCUMULATE — replacing it
+// would drop every swing but the last one in a tick interval. Accumulation has
+// no natural bound, hence the cap; overflow drops the newest, since the oldest
+// swings are the ones already on screen for other players.
+const MAX_PENDING_ATTACKS = 64;
+
+function pushAttacks(entry, attacks) {
+  if (!Array.isArray(attacks) || attacks.length === 0) return;
+  if (!entry.pendingAttacks) entry.pendingAttacks = [];
+  for (const a of attacks) {
+    if (entry.pendingAttacks.length >= MAX_PENDING_ATTACKS) return;
+    entry.pendingAttacks.push(a);
+  }
+}
+
+// Take this tick's batch and clear the stash in one step, so no caller can
+// read it and forget to clear it.
+function drainAttacks(entry) {
+  const batch = entry.pendingAttacks;
+  entry.pendingAttacks = null;
+  return Array.isArray(batch) ? batch : [];
+}
+
 // Attach the authoritative WebSocket simulation to an existing http server.
 // Returns { close() } so callers/tests can tear it down.
 function attachAuthority(httpServer, pool, opts = {}) {
@@ -436,7 +461,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // Ammo-free weapons (all melee, all staves, darts) keep the fully
         // synchronous path: no DB round trip on the hot path.
         if (gate.weapon.ammo_type_id == null) {
-          const { killedCreatureIds } = entry.world.attack(ws.userId, ax, ay);
+          const { killedCreatureIds, attacks } = entry.world.attack(ws.userId, ax, ay);
+          pushAttacks(entry, attacks);
           for (const id of new Set(killedCreatureIds)) onCreatureDeath(entry, id);
           return;
         }
@@ -478,7 +504,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
               send(ws, { type: 'noammo', item_type_id: ammoTypeId }); // no cooldown consumed
               return;
             }
-            const { killedCreatureIds } = cur.world.attack(ws.userId, ax, ay);
+            const { killedCreatureIds, attacks } = cur.world.attack(ws.userId, ax, ay);
+            pushAttacks(cur, attacks);
             for (const id of new Set(killedCreatureIds)) onCreatureDeath(cur, id);
             // The shot is already committed above (ammo spent, kills
             // resolved) — pushing the client its new count is best-effort on
@@ -707,10 +734,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // re-broadcast (as stale, already-shown blasts) on the next tick.
       entry.pendingDetonations = null;
       const hasDets = Array.isArray(dets) && dets.length > 0;
+      // Same contract as detonations: this tick's batch or it is lost, cleared
+      // before the send loop, and omitted entirely when empty so an idle world
+      // pays nothing per frame.
+      const atks = drainAttacks(entry);
+      const hasAtks = atks.length > 0;
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
         const frame = { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players, projectiles: snap.projectiles };
         if (hasDets) frame.detonations = dets;
+        if (hasAtks) frame.attacks = atks;
         send(ws, frame);
       }
       if (tick % creatureBroadcastEvery === 0) {
@@ -810,4 +843,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
   };
 }
 
-module.exports = { attachAuthority, planTransition, planBind };
+module.exports = {
+  attachAuthority, planTransition, planBind,
+  // Stash internals, exported for unit test only. Not part of the module's API.
+  __test: { pushAttacks, drainAttacks, MAX_PENDING_ATTACKS },
+};
