@@ -96,6 +96,11 @@ export class Game {
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
 
+        // Wallet balance (Slice C, gold economy): server-owned, set from
+        // `joined.gold` and kept live by `wallet` messages on pickup. Gold
+        // never enters the inventory (see onPicked/onWallet below).
+        this.gold = 0;
+
         // Transient on-screen toast (Slice 3b fast-follow F3): the server's
         // rejection frames (equip/drop/etc "error" replies) previously only
         // hit console.error, so a rejected action produced no in-game
@@ -253,6 +258,7 @@ export class Game {
         this.inventorySelectedItemId = null;
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
+        this.gold = 0;
         this.blasts = [];
         this.noAmmoUntil = 0;
 
@@ -273,12 +279,17 @@ export class Game {
                 onJoined: (msg) => {
                     applyJoined(this.inventory, msg);
                     this.autoLoot = msg.autoLoot === true;
+                    this.gold = Number(msg.gold) || 0;
                     resolve(msg.spawn);
                 },
                 onState: (msg) => this._onWorldState(msg),
                 onCreatures: (msg) => this.creatures.applySnapshot(msg.creatures),
                 onItems: (msg) => this.groundItems.applySnapshot(msg.items || []),
                 onPicked: (msg) => { if (msg.item) addItem(this.inventory, msg.item); },
+                // Gold pickup is out-of-band from the inventory: the server
+                // never sends a `picked` frame for it, only this wallet
+                // balance (see onPicked above — items only).
+                onWallet: (msg) => { this.gold = Number(msg.gold) || 0; },
                 onDropped: (msg) => {
                     removeItem(this.inventory, msg.itemId);
                     if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
@@ -555,6 +566,7 @@ export class Game {
                 selectedItemId: this.inventorySelectedItemId,
                 groundItems: this.groundItems.all(),
                 autoLoot: this.autoLoot,
+                gold: this.gold,
                 toast: this.toast,
                 blasts: this.blasts,
                 // null whenever the equipped weapon needs no ammo — the HUD

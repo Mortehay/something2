@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWallet, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -17,6 +17,7 @@ export class WorldAuthorityClient {
     this.onItems = onItems || (() => {});
     this.onPicked = onPicked || (() => {});
     this.onDropped = onDropped || (() => {});
+    this.onWallet = onWallet || (() => {});
     this.onNoAmmo = onNoAmmo || (() => {});
     this.onAmmo = onAmmo || (() => {});
     this.onTransition = onTransition || (() => {});
@@ -63,6 +64,7 @@ export class WorldAuthorityClient {
       case 'items': this.onItems(msg); break;
       case 'picked': this.onPicked(msg); break;
       case 'dropped': this.onDropped(msg); break;
+      case 'wallet': this.onWallet(msg); break;
       // Sent to this socket alone when a shot was refused for an empty ammo
       // stack. The server consumed NO cooldown, so this is purely a cue to
       // the player — nothing local needs rolling back.

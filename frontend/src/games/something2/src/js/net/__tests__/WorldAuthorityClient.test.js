@@ -87,3 +87,16 @@ it('a kicked message invokes onKicked', () => {
   expect(seen).toHaveLength(1);
   expect(seen[0].reason).toBe('signed_in_elsewhere');
 });
+
+// Slice C (gold economy): the server credits the wallet out-of-band from the
+// inventory ('picked') — a ground gold pile is never an item — so onWallet
+// must fire on its own message type with the new balance.
+it('a wallet message invokes onWallet with the new balance', () => {
+  const seen = [];
+  const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', onWallet: (m) => seen.push(m) });
+  c.connect('w1');
+  FakeWS.last._l.open();
+  FakeWS.last._l.message({ data: JSON.stringify({ type: 'wallet', gold: 42 }) });
+  expect(seen).toHaveLength(1);
+  expect(seen[0].gold).toBe(42);
+});
