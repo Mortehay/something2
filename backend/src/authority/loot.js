@@ -145,6 +145,34 @@ async function claimItem(pool, entry, userId, groundItemId) {
   }
 }
 
+// Gold pickup: the currency path parallel to claimItem. One statement DELETEs
+// the world_items row and credits users.gold, so there is no window where the
+// row is gone but the wallet hasn't moved. rowCount === 1 means THIS call both
+// removed the row and credited it; 0 means it lost the race (already claimed or
+// swept) and nothing was credited. Returns the NEW balance so the caller can
+// push a wallet update to the owner.
+async function claimGold(pool, entry, userId, groundItemId) {
+  if (entry.claiming.has(groundItemId)) return null;
+  entry.claiming.add(groundItemId);
+  try {
+    const r = await pool.query(
+      `WITH d AS (DELETE FROM world_items WHERE id = $1 RETURNING quantity)
+       UPDATE users SET gold = gold + (SELECT quantity FROM d)
+       WHERE id = $2 AND EXISTS (SELECT 1 FROM d)
+       RETURNING gold`,
+      [groundItemId, userId],
+    );
+    entry.world.groundItems.remove(groundItemId);
+    if (r.rowCount !== 1) return null;
+    const gold = Number(r.rows[0].gold) || 0;
+    const p = entry.world.getPlayer(userId);
+    if (p) p.gold = gold;
+    return { gold };
+  } finally {
+    entry.claiming.delete(groundItemId);
+  }
+}
+
 // How long a just-dropped ground item is exempt from ITS OWN DROPPER's
 // auto-loot scan. dropItem spawns the item at the player's exact centre, so
 // without this the tick's `within(pcx, pcy, PICKUP_RADIUS)` scan finds it at
@@ -216,5 +244,5 @@ async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000, now = Dat
 }
 
 module.exports = {
-  rollDrops, rollGold, commitCreatureDeath, spawnDrops, claimItem, dropItem, dropGraceActive, DROP_GRACE_MS,
+  rollDrops, rollGold, commitCreatureDeath, spawnDrops, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
 };
