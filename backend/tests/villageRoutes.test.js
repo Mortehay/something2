@@ -31,7 +31,12 @@ test('POST village inserts a valid village and invalidates the world', async () 
     .send({ min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });
   assert.equal(res.status, 200);
   assert.equal(res.body.id, 'v1');
-  assert.equal(pool.calls.filter((c) => /INSERT INTO villages/i.test(c.sql)).length, 1);
+  const villageInserts = pool.calls.filter((c) => /INSERT INTO villages/i.test(c.sql));
+  assert.equal(villageInserts.length, 1);
+  // merchant post for this box/gate: S gate, minRow 5 minCol 5 width 8 height 6
+  // -> rMax 10, midCol 9, merchant row rMax-2=8, col midCol=9
+  assert.equal(villageInserts[0].params[8], 9 * 100 + 50, 'merchant_x stored from villageMerchantPost');
+  assert.equal(villageInserts[0].params[9], 8 * 100 + 50, 'merchant_y stored from villageMerchantPost');
   assert.equal(pool.calls.filter((c) => /DELETE FROM world_chunks/i.test(c.sql)).length, 1);
   const guardInserts = pool.calls.filter((c) => /INSERT INTO world_creatures/i.test(c.sql));
   assert.equal(guardInserts.length, 2, 'village creation spawns exactly two guards');
