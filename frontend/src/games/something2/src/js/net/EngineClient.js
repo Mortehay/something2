@@ -232,6 +232,33 @@ export function authHeaders() {
   };
 }
 
+// Event the UI listens for to drop back to the sign-in screen.
+export const AUTH_EXPIRED_EVENT = "something2:auth-expired";
+
+// A 401 on a request we DID send a token with means that token is dead —
+// expired, or revoked by a token_version bump (logout-everywhere, an admin
+// password rotation). getStoredToken() cannot detect revocation: the JWT still
+// parses and is unexpired, so the app keeps believing it is signed in while
+// every write 401s. That looks like a broken app, not a dead session.
+//
+// Clearing at the point of failure is what makes this reliable — a check that
+// only runs at mount misses a session revoked while the tab is open.
+export function noteAuthFailure(res) {
+  if (!res || res.status !== 401) return res;
+  if (!getStoredToken()) return res;   // already signed out; nothing to clear
+  clearToken();
+  try {
+    globalThis.dispatchEvent?.(new CustomEvent(AUTH_EXPIRED_EVENT));
+  } catch { /* no DOM (tests/SSR): clearing the token is the part that matters */ }
+  return res;
+}
+
+// fetch() + automatic dead-token handling. The data hooks call this instead of
+// bare fetch so no call site can forget the 401 check.
+export async function apiFetch(url, options) {
+  return noteAuthFailure(await fetch(url, options));
+}
+
 async function postAuth(apiUrl, path, username, password) {
   const res = await fetch(`${apiUrl}${path}`, {
     method: "POST",

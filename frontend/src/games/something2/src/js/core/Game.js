@@ -141,24 +141,34 @@ export class Game {
         }
     }
 
-    // Load each sprited entity type's atlas image + manifest from MinIO and
-    // attach the manifest to the type's sprite descriptor. Because entity
-    // instances share that descriptor object (Object.assign copies the ref),
-    // attaching here also lights up already-created entities. Any failure
-    // leaves the manifest unset, so rendering degrades to a rectangle.
+    // Load each sprited entity type's atlas image + manifest and attach the
+    // manifest to the type's sprite descriptor. Because entity instances share
+    // that descriptor object (Object.assign copies the ref), attaching here
+    // also lights up already-created entities. Any failure leaves the manifest
+    // unset, so rendering degrades to a rectangle.
+    //
+    // Assets go through the backend proxy (/api/assets/<key>), the same route
+    // _preloadTileAssets uses — MinIO's own port is not reachable from the
+    // browser in every deployment.
     async preloadSprites(entityTypes) {
         if (!entityTypes) return;
-        const MINIO = (import.meta.env && import.meta.env.VITE_MINIO_URL) || 'http://localhost:19000';
         const byAtlas = {};
         for (const name in entityTypes) {
-            const spr = entityTypes[name] && entityTypes[name].sprite;
-            if (spr && spr.atlas_key) byAtlas[spr.atlas_key] = spr;
+            const def = entityTypes[name];
+            if (!def) continue;
+            // Entities approved through the object pipeline carry a plain
+            // `image` and no atlas; RenderSystem's single-image fallback needs
+            // it loaded under that same key to find it.
+            if (def.image) {
+                this.imageManager.load(def.image, `${API_URL}/api/assets/${def.image}`);
+            }
+            if (def.sprite && def.sprite.atlas_key) byAtlas[def.sprite.atlas_key] = def.sprite;
         }
         const manifests = {};
         await Promise.all(Object.values(byAtlas).map(async (spr) => {
-            await this.imageManager.load(spr.atlas_key, `${MINIO}/${spr.atlas_key}`);
+            await this.imageManager.load(spr.atlas_key, `${API_URL}/api/assets/${spr.atlas_key}`);
             try {
-                const res = await fetch(`${MINIO}/${spr.manifest_key}`);
+                const res = await fetch(`${API_URL}/api/assets/${spr.manifest_key}`);
                 if (res.ok) manifests[spr.atlas_key] = await res.json();
             } catch { /* leave unset -> rect fallback */ }
         }));
@@ -166,8 +176,9 @@ export class Game {
             const spr = entityTypes[name] && entityTypes[name].sprite;
             if (spr && spr.atlas_key && manifests[spr.atlas_key]) spr.manifest = manifests[spr.atlas_key];
         }
-        // Also attach to any entities whose sprite is a distinct object.
-        for (const ent of this.map.entities) {
+        // Also attach to any entities whose sprite is a distinct object. The
+        // chunked world has no legacy Map entities, hence the guard.
+        for (const ent of (this.map && this.map.entities) || []) {
             if (ent.sprite && ent.sprite.atlas_key && manifests[ent.sprite.atlas_key]) {
                 ent.sprite.manifest = manifests[ent.sprite.atlas_key];
             }
@@ -220,7 +231,7 @@ export class Game {
         this.map.init(tiles, mapTiles, loadedEntities, entityTypes);
     }
 
-    async initChunked({ worldId, chunkSize, tileTypes, spawnX = 0, spawnY = 0 }) {
+    async initChunked({ worldId, chunkSize, tileTypes, entityTypes = null, spawnX = 0, spawnY = 0 }) {
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;
@@ -246,9 +257,13 @@ export class Game {
         this.renderSystem = new RenderSystem(this.canvas, this.imageManager);
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
         this._preloadTileAssets(tileTypes);
+        // Approved entity images/atlases, so authority-driven creatures render
+        // with their generated sprite rather than a colored box. Fire-and-forget
+        // like the tile preload: until it resolves, rendering degrades to color.
+        this.preloadSprites(entityTypes);
         this.streamer = new ChunkStreamer(this.chunkedMap, makeChunkFetcher(worldId, API_URL), 1);
 
-        this.creatures = new CreatureManager();
+        this.creatures = new CreatureManager(entityTypes);
         this.projectiles = new ProjectileManager();
 
         // Fresh inventory state per join (re-entry guard above tears down the

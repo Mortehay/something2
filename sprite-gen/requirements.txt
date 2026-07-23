@@ -9,3 +9,7 @@ transformers==4.42.*
 controlnet-aux==0.0.9
 accelerate==0.31.*
 rembg==2.0.*
+# rembg's inference runtime. WITHOUT it rembg imports fine but every remove()
+# call raises, so background removal silently fell back to a near-white colour
+# key and entities shipped with an opaque backdrop. Entities must be cut out.
+onnxruntime==1.18.*

@@ -125,11 +125,13 @@ test('approve links the atlas to the entity type and flips render_mode to static
   assert.equal(res.status, 200);
   const upd = calls.find((c) => /UPDATE entity_types/.test(c.sql));
   assert.ok(upd, 'entity_types should be updated');
-  assert.ok(/render_mode = 'static'/.test(upd.sql));
+  // render_mode is now a bound parameter (the route also writes 'animated' for
+  // flat atlases), so assert the value rather than a SQL literal.
+  assert.equal(upd.params[1], 'static');
   const sprite = JSON.parse(upd.params[0]);
   assert.equal(sprite.atlas_key, 'sprites/goblin/atlas.png');
   assert.equal(sprite.static_frame, 'S/0'); // default representative frame
-  assert.equal(upd.params[1], '7');
+  assert.equal(upd.params[2], '7');
   assert.equal(res.body.sprite.static_frame, 'S/0');
 });
 

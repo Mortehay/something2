@@ -1,11 +1,29 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import styled from 'styled-components';
 import { useEntityTypes, useCreateEntityType, useUpdateEntityType, useDeleteEntityType, useTileTypes } from './useMaps.js';
-import { useGenerateSprite, useSpriteJob, useApproveSprite, useSpriteCapability } from './useSprites.js';
+import {
+  useGenerateSprite, useSpriteJob, useApproveSprite, useSpriteCapability,
+  useGenerateEntityJob, useEntityJob, useApproveEntityImage, useSpriteManifest,
+} from './useSprites.js';
+import { assetUrl } from './useTileSprites.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 
-const MINIO_URL = import.meta.env.VITE_MINIO_URL || 'http://localhost:19000';
+// The saved image/atlas for an entity type, served through the backend asset
+// proxy (same route tiles use) rather than hitting MinIO directly.
+function entityTextureUrl(entity) {
+  if (!entity) return null;
+  const mode = entity.render_mode;
+  const key = (mode === 'animated' && entity.sprite?.atlas_key)
+    || entity.image
+    || entity.sprite?.atlas_key;
+  if (!key) return null;
+  // Asset keys are stable across regenerations (sprites/objects/Tree/static.png
+  // is overwritten in place), so without a version the browser keeps showing
+  // the previous image. updated_at changes on every approval.
+  const v = entity.updated_at ? `?v=${encodeURIComponent(entity.updated_at)}` : '';
+  return `${assetUrl(key)}${v}`;
+}
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -69,6 +87,77 @@ const ColorBadge = styled.div`
   background-color: ${props => props.color};
   border: 2px solid rgba(255, 255, 255, 0.1);
 `;
+
+const BadgeFrame = styled.div`
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  background-color: #0f0f1a;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  flex-shrink: 0;
+`;
+
+const BadgeImage = styled.img`
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  background: #0f0f1a;
+  object-fit: contain;
+  image-rendering: pixelated;
+  flex-shrink: 0;
+`;
+
+// The swatch beside an entity's name: its approved sprite when there is one,
+// the flat colour otherwise. Seeing the generated art in the list is the whole
+// point — a grid of identical coloured squares tells you nothing about which
+// entities have been generated yet.
+function EntityBadge({ entity }) {
+  const animated = entity.render_mode === 'animated' && entity.sprite?.atlas_key;
+  const { data: manifest } = useSpriteManifest(animated ? entity.sprite.manifest_key : null);
+  const [frame, setFrame] = useState(0);
+
+  // Frame keys are bare indices for the object/tile pipeline and "DIR/idx" for
+  // the directional one; sort so the cycle is stable either way.
+  const frameKeys = useMemo(() => Object.keys(manifest?.frames || {}).sort(), [manifest]);
+
+  useEffect(() => {
+    if (frameKeys.length < 2) return;      // nothing to animate
+    const id = setInterval(() => setFrame(f => (f + 1) % frameKeys.length), 250); // 4fps, as in game
+    return () => clearInterval(id);
+  }, [frameKeys.length]);
+
+  if (animated && manifest && frameKeys.length) {
+    const rect = manifest.frames[frameKeys[frame % frameKeys.length]];
+    const [cellW, cellH] = manifest.cell || [rect[2], rect[3]];
+    // The manifest carries no atlas dimensions, but every frame sits at a cell
+    // origin, so the sheet extends one cell past the furthest origin. Deriving
+    // it this way avoids duplicating pack_atlas's grid maths here.
+    const origins = Object.values(manifest.frames);
+    const atlasW = Math.max(...origins.map(r => r[0])) + cellW;
+    const atlasH = Math.max(...origins.map(r => r[1])) + cellH;
+    // Scale so ONE cell fills the badge, then offset to the current frame.
+    const scale = 40 / Math.max(cellW || 1, cellH || 1);
+    return (
+      <BadgeFrame
+        title={`${entity.name} (animated)`}
+        style={{
+          backgroundImage: `url(${assetUrl(entity.sprite.atlas_key)})`,
+          backgroundSize: `${atlasW * scale}px ${atlasH * scale}px`,
+          backgroundPosition: `${-rect[0] * scale}px ${-rect[1] * scale}px`,
+        }}
+      />
+    );
+  }
+
+  const url = entityTextureUrl(entity);
+  if (url && entity.render_mode && entity.render_mode !== 'rect') {
+    return <BadgeImage src={url} alt={entity.name} title={`${entity.name} (${entity.render_mode})`} />;
+  }
+  return <ColorBadge color={entity.color} />;
+}
 
 const EntityName = styled.h3`
   font-size: 1.8rem;
@@ -160,6 +249,7 @@ const Overlay = styled.div`
   display: flex;
   justify-content: center;
   align-items: center;
+  padding: 2rem 1rem;
   z-index: 2000;
 `;
 
@@ -167,16 +257,40 @@ const Modal = styled.div`
   background: #1a1a2e;
   border: 2px solid #facc15;
   border-radius: 16px;
-  width: 90%;
-  max-width: 500px;
-  padding: 2.5rem;
+  width: 100%;
+  max-width: 900px;
+  max-height: 100%;
+  padding: 2rem 2.5rem;
   box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 `;
 
 const Form = styled.form`
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 1rem;
+  margin-right: -1rem;
+
+  &::-webkit-scrollbar {
+    width: 10px;
+  }
+  &::-webkit-scrollbar-track {
+    background: #0f0f1a;
+    border-radius: 8px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(250, 204, 21, 0.4);
+    border-radius: 8px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(250, 204, 21, 0.7);
+  }
 `;
 
 const FormGroup = styled.div`
@@ -209,7 +323,7 @@ const FormGroup = styled.div`
 
 const MultiSelect = styled.div`
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 0.5rem;
   max-height: 150px;
   overflow-y: auto;
@@ -224,6 +338,11 @@ const FormActions = styled.div`
   justify-content: flex-end;
   gap: 1rem;
   margin-top: 1rem;
+  position: sticky;
+  bottom: 0;
+  background: #1a1a2e;
+  padding: 1rem 0 0;
+  border-top: 1px solid rgba(250, 204, 21, 0.2);
 `;
 
 const MainButton = styled.button`
@@ -393,7 +512,10 @@ function SpritePanel({ entity, capability, capabilityDown }) {
   const status = job?.status;
   const progressDone = job?.progress?.done ?? 0;
   const progressTotal = job?.progress?.total ?? 0;
-  const atlasUrl = job?.result?.atlas_key ? `${MINIO_URL}/${job.result.atlas_key}` : null;
+  // Through the backend asset proxy — MinIO itself isn't reachable from the
+  // browser in every deployment, which is why this preview used to fall back
+  // to a bare key label.
+  const atlasUrl = job?.result?.atlas_key ? `${assetUrl(job.result.atlas_key)}?v=${jobId}` : null;
 
   return (
     <SpriteSection>
@@ -493,6 +615,88 @@ function SpritePanel({ entity, capability, capabilityDown }) {
   );
 }
 
+// One-image / looped-animation generation for an entity type, from its prompt.
+// This is the tile pipeline (kind:'object' -> flat frame keys "0","1",…) rather
+// than the directional walk-set path in SpritePanel above: one image per frame
+// instead of one per direction per frame, so it finishes ~8x sooner on CPU and
+// suits props (trees, rocks) and non-facing creatures.
+function EntityTexturePanel({ entity, prompt }) {
+  const [mode, setMode] = useState(null);     // 'image' | 'animated' while a job runs
+  const [jobId, setJobId] = useState(null);
+  const { data: capability } = useSpriteCapability();
+  const generate = useGenerateEntityJob();
+  const { data: job } = useEntityJob(jobId);
+  const approveImage = useApproveEntityImage();
+  const approveSprite = useApproveSprite();
+
+  const start = (which) => {
+    const base = (prompt || '').trim() || entity.name;
+    setMode(which);
+    setJobId(null);
+    generate.mutate(
+      { entity_type: entity.name, base_prompt: base, frames: which === 'animated' ? 4 : 1 },
+      { onSuccess: (data) => setJobId(data.job_id) }
+    );
+  };
+
+  const status = job?.status;
+  const result = job?.result;
+  const previewKey = mode === 'animated' ? result?.atlas_key : result?.image_key;
+  // Asset keys are stable (e.g. sprites/objects/Tree/static.png), so the browser
+  // caches them across regenerations. Bust the cache with the job id so a fresh
+  // image actually shows instead of the previous one.
+  const previewUrl = previewKey ? `${assetUrl(previewKey)}?v=${jobId}` : null;
+
+  // Whatever is currently saved on the entity (from an earlier Approve).
+  const savedUrl = entityTextureUrl(entity);
+
+  const approve = () => {
+    if (!result) return;
+    if (mode === 'animated') {
+      approveSprite.mutate({
+        entityTypeId: entity.id, job_id: jobId, animated: true,
+        atlas_key: result.atlas_key, manifest_key: result.manifest_key, frames: result.frames,
+      });
+    } else {
+      approveImage.mutate({ entityTypeId: entity.id, image_key: result.image_key, job_id: jobId });
+    }
+  };
+
+  return (
+    <FormGroup>
+      <label>AI Image / Animation</label>
+      <div style={{ fontSize: '1rem', opacity: 0.7, marginBottom: '0.5rem' }}>
+        {capability ? `Backend tier: ${capability.tier} (${capability.recommended_backend})` : 'Sprite service…'}
+        {' · '}render mode: {entity.render_mode || 'rect'}
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <SecondaryButton type="button" onClick={() => start('image')} disabled={generate.isPending}>Generate image</SecondaryButton>
+        <SecondaryButton type="button" onClick={() => start('animated')} disabled={generate.isPending}>Generate animation</SecondaryButton>
+      </div>
+      {savedUrl && status !== 'done' && (
+        <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <img src={savedUrl} alt="current entity texture" style={{ width: 64, height: 64, objectFit: 'contain', imageRendering: 'pixelated', background: '#0f0f1a', borderRadius: 6 }} />
+          <span style={{ fontSize: '1rem', opacity: 0.7 }}>Current {entity.render_mode} image</span>
+        </div>
+      )}
+      {jobId && (
+        <div style={{ marginTop: '0.75rem', fontSize: '1.1rem' }}>
+          {status && status !== 'done' && status !== 'error' && <span>Generating… ({job?.progress?.done ?? 0}/{job?.progress?.total ?? 0})</span>}
+          {status === 'error' && <span style={{ color: '#ef4444' }}>Generation failed: {job?.error}</span>}
+          {status === 'done' && result && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
+              {previewUrl && <img src={previewUrl} alt="preview" style={{ width: 64, height: 64, objectFit: 'contain', imageRendering: 'pixelated', background: '#0f0f1a', borderRadius: 6 }} />}
+              <MainButton type="button" onClick={approve} disabled={approveImage.isPending || approveSprite.isPending}>
+                Approve {mode === 'animated' ? 'animation' : 'image'}
+              </MainButton>
+            </div>
+          )}
+        </div>
+      )}
+    </FormGroup>
+  );
+}
+
 function EntityTypesAdmin() {
   const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
   const { tileTypes } = useTileTypes();
@@ -503,6 +707,10 @@ function EntityTypesAdmin() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEntity, setEditingEntity] = useState(null);
+  // `editingEntity` is the row as it looked when the modal opened. Approving a
+  // generated image refetches entityTypes but can't update that snapshot, so
+  // re-read the row by id for anything that must reflect the approval.
+  const liveEditingEntity = (editingEntity && entityTypes?.find(e => e.id === editingEntity.id)) || editingEntity;
   
   const [formData, setFormData] = useState({
     name: '',
@@ -512,6 +720,7 @@ function EntityTypesAdmin() {
     spawn_tiles: [],
     chance: 0.1,
     image: '',
+    prompt: '',
     render_mode: 'rect',
     strength: 0,
     dexterity: 0,
@@ -539,6 +748,7 @@ function EntityTypesAdmin() {
         spawn_tiles: editingEntity.spawn_tiles || [],
         chance: editingEntity.chance,
         image: editingEntity.image || '',
+        prompt: editingEntity.prompt || '',
         render_mode: editingEntity.render_mode || 'rect',
         strength: editingEntity.strength || 0,
         dexterity: editingEntity.dexterity || 0,
@@ -564,6 +774,7 @@ function EntityTypesAdmin() {
         spawn_tiles: [],
         chance: 0.1,
         image: '',
+        prompt: '',
         render_mode: 'rect',
         strength: 10,
         dexterity: 10,
@@ -582,6 +793,19 @@ function EntityTypesAdmin() {
       });
     }
   }, [editingEntity, isModalOpen]);
+
+  // Approving a generated image/animation changes render_mode + image (and
+  // clears sprite) server-side while this form is open. Pull those back in, or
+  // pressing Save Changes afterwards writes the pre-approval values over them
+  // and silently reverts the entity to a colored rectangle.
+  useEffect(() => {
+    if (!editingEntity || !liveEditingEntity) return;
+    const mode = liveEditingEntity.render_mode || 'rect';
+    const image = liveEditingEntity.image || '';
+    setFormData(prev =>
+      prev.render_mode === mode && prev.image === image ? prev : { ...prev, render_mode: mode, image }
+    );
+  }, [editingEntity, liveEditingEntity?.render_mode, liveEditingEntity?.image]);
 
   const handleOpenAdd = () => {
     setEditingEntity(null);
@@ -653,7 +877,7 @@ function EntityTypesAdmin() {
           <EntityCard key={entity.id}>
             <EntityHeader>
               <EntityInfo>
-                <ColorBadge color={entity.color} />
+                <EntityBadge entity={entity} />
                 <EntityName>{entity.name}</EntityName>
               </EntityInfo>
               <ActionButtons>
@@ -713,7 +937,7 @@ function EntityTypesAdmin() {
       {isModalOpen && (
         <Overlay>
           <Modal>
-            <Header style={{ marginBottom: '1.5rem' }}>
+            <Header style={{ marginBottom: '1.5rem', flexShrink: 0 }}>
               <h2>{editingEntity ? 'Edit Entity' : 'Create New Entity'}</h2>
               <IconButton onClick={() => setIsModalOpen(false)}>
                 <HiOutlineXMark />
@@ -796,6 +1020,22 @@ function EntityTypesAdmin() {
                   <option value="animated">animated — moving sprite</option>
                 </select>
               </FormGroup>
+
+              <FormGroup>
+                <label>Prompt (for AI image generation)</label>
+                <textarea
+                  rows={2}
+                  value={formData.prompt}
+                  onChange={e => setFormData({...formData, prompt: e.target.value})}
+                  placeholder={`e.g. a tall broadleaf tree with a thick trunk`}
+                />
+              </FormGroup>
+
+              {/* Generation needs a saved row to attach the result to, so it
+                  only appears once the entity exists. */}
+              {editingEntity && (
+                <EntityTexturePanel entity={liveEditingEntity} prompt={formData.prompt} />
+              )}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
                 <FormGroup><label>STR</label><input type="number" value={formData.strength} onChange={e => setFormData({...formData, strength: parseInt(e.target.value)})}/></FormGroup>

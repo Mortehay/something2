@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from 'react-hot-toast';
-import { authHeaders } from "./src/js/net/EngineClient.js";
+import { authHeaders, apiFetch } from "./src/js/net/EngineClient.js";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
 
@@ -8,7 +8,7 @@ export function useMaps(){
   const { data: maps, isLoading: isLoadingMaps } = useQuery({
     queryKey: ['maps'],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/maps`);
+      const res = await apiFetch(`${API_URL}/api/maps`);
       if (!res.ok) throw new Error('Failed to fetch maps');
       return res.json();
     }
@@ -20,7 +20,7 @@ export function useMapTiles(){
   const { data: mapTiles, isLoading: isLoadingMapTiles } = useQuery({
     queryKey: ['mapTiles'],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/map/tiles`);
+      const res = await apiFetch(`${API_URL}/api/map/tiles`);
       if (!res.ok) throw new Error('Failed to fetch map tiles');
       return res.json();
     }
@@ -32,7 +32,7 @@ export function useGenerateMap(onSuccessCallback) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await fetch(`${API_URL}/api/maps/generate`, {
+      const res = await apiFetch(`${API_URL}/api/maps/generate`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ name: `World ${new Date().toLocaleTimeString()}` })
@@ -52,13 +52,13 @@ export function useGenerateMap(onSuccessCallback) {
 }
 
 export async function fetchMap(selectedMapId) {
-  const res = await fetch(`${API_URL}/api/maps/${selectedMapId}`);
+  const res = await apiFetch(`${API_URL}/api/maps/${selectedMapId}`);
   if (!res.ok) throw new Error("Failed to load map data");
   return res.json();
 }
 
 export async function fetchMapEntities(selectedMapId) {
-  const res = await fetch(`${API_URL}/api/maps/${selectedMapId}/entities`);
+  const res = await apiFetch(`${API_URL}/api/maps/${selectedMapId}/entities`);
   if (!res.ok) throw new Error("Failed to load map entities");
   return res.json();
 }
@@ -67,7 +67,7 @@ export function useSaveEntities(onSuccessCallback) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, entities }) => {
-      const res = await fetch(`${API_URL}/api/maps/${id}/entities`, {
+      const res = await apiFetch(`${API_URL}/api/maps/${id}/entities`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ entities })
@@ -87,7 +87,7 @@ export function useDeleteMap(onSuccessCallback) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id) => {
-      const res = await fetch(`${API_URL}/api/maps/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/maps/${id}`, {
         method: 'DELETE',
         headers: authHeaders(),
       });
@@ -109,7 +109,7 @@ export function useTileTypes() {
   const { data: tileTypes, isLoading: isLoadingTileTypes } = useQuery({
     queryKey: ['tileTypes'],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/tile-types`);
+      const res = await apiFetch(`${API_URL}/api/tile-types`);
       if (!res.ok) throw new Error('Failed to fetch tile types');
       return res.json();
     }
@@ -121,7 +121,7 @@ export function useCreateTileType() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (newTileType) => {
-      const res = await fetch(`${API_URL}/api/tile-types`, {
+      const res = await apiFetch(`${API_URL}/api/tile-types`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify(newTileType)
@@ -143,7 +143,7 @@ export function useUpdateTileType() {
   return useMutation({
     mutationFn: async (updatedTileType) => {
       const { id, ...data } = updatedTileType;
-      const res = await fetch(`${API_URL}/api/tile-types/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/tile-types/${id}`, {
         method: 'PUT',
         headers: authHeaders(),
         body: JSON.stringify(data)
@@ -164,7 +164,7 @@ export function useDeleteTileType() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id) => {
-      const res = await fetch(`${API_URL}/api/tile-types/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/tile-types/${id}`, {
         method: 'DELETE',
         headers: authHeaders(),
       });
@@ -184,7 +184,7 @@ export function useEntityTypes() {
   const { data: entityTypes, isLoading: isLoadingEntityTypes } = useQuery({
     queryKey: ['entityTypes'],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/entity-types`);
+      const res = await apiFetch(`${API_URL}/api/entity-types`);
       if (!res.ok) throw new Error('Failed to fetch entity types');
       return res.json();
     }
@@ -196,7 +196,7 @@ export function useMapConfig() {
   const { data: mapConfig, isLoading: isLoadingMapConfig } = useQuery({
     queryKey: ['mapConfig'],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/map/config`);
+      const res = await apiFetch(`${API_URL}/api/map/config`);
       if (!res.ok) throw new Error('Failed to fetch map configuration');
       return res.json();
     }
@@ -208,7 +208,7 @@ export function useCreateEntityType() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (newEntityType) => {
-      const res = await fetch(`${API_URL}/api/entity-types`, {
+      const res = await apiFetch(`${API_URL}/api/entity-types`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify(newEntityType)
@@ -230,7 +230,7 @@ export function useUpdateEntityType() {
   return useMutation({
     mutationFn: async (updatedEntityType) => {
       const { id, ...data } = updatedEntityType;
-      const res = await fetch(`${API_URL}/api/entity-types/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/entity-types/${id}`, {
         method: 'PUT',
         headers: authHeaders(),
         body: JSON.stringify(data)
@@ -251,7 +251,7 @@ export function useDeleteEntityType() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id) => {
-      const res = await fetch(`${API_URL}/api/entity-types/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/entity-types/${id}`, {
         method: 'DELETE',
         headers: authHeaders(),
       });
@@ -271,7 +271,7 @@ export function useItemTypes() {
   const { data: itemTypes, isLoading: isLoadingItemTypes } = useQuery({
     queryKey: ['itemTypes'],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/item-types`);
+      const res = await apiFetch(`${API_URL}/api/item-types`);
       if (!res.ok) throw new Error('Failed to fetch item types');
       return res.json();
     }
@@ -283,7 +283,7 @@ export function useCreateItemType() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (newItemType) => {
-      const res = await fetch(`${API_URL}/api/item-types`, {
+      const res = await apiFetch(`${API_URL}/api/item-types`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify(newItemType)
@@ -307,7 +307,7 @@ export function useUpdateItemType() {
   return useMutation({
     mutationFn: async (updatedItemType) => {
       const { id, ...data } = updatedItemType;
-      const res = await fetch(`${API_URL}/api/item-types/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/item-types/${id}`, {
         method: 'PUT',
         headers: authHeaders(),
         body: JSON.stringify(data)
@@ -330,7 +330,7 @@ export function useDeleteItemType() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id) => {
-      const res = await fetch(`${API_URL}/api/item-types/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/item-types/${id}`, {
         method: 'DELETE',
         headers: authHeaders(),
       });
@@ -352,7 +352,7 @@ export function useGenerateEntities(onSuccessCallback) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id) => {
-      const res = await fetch(`${API_URL}/api/maps/${id}/generate-entities`, {
+      const res = await apiFetch(`${API_URL}/api/maps/${id}/generate-entities`, {
         method: 'POST',
         headers: authHeaders(),
       });

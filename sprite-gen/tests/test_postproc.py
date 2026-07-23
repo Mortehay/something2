@@ -1,11 +1,11 @@
 from PIL import Image
-from app.postproc import to_transparent, crop_to_content, pack_atlas
+from app.postproc import key_near_white, crop_to_content, pack_atlas
 
 def _solid(w, h, color=(255, 0, 0, 255)):
     return Image.new("RGBA", (w, h), color)
 
-def test_to_transparent_returns_rgba():
-    out = to_transparent(Image.new("RGB", (10, 10), (255, 255, 255)))
+def test_key_near_white_returns_rgba():
+    out = key_near_white(Image.new("RGB", (10, 10), (255, 255, 255)))
     assert out.mode == "RGBA"
 
 def test_crop_to_content_trims_transparent_border():
