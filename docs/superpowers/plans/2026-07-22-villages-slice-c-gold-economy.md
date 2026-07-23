@@ -45,11 +45,19 @@ exports.up = (pgm) => {
     gold_min: { type: 'integer', notNull: true, default: 0 },
     gold_max: { type: 'integer', notNull: true, default: 0 },
   });
-  // The reserved currency item type. damage/category are NOT NULL with no
-  // usable default, so they're set explicitly. Rendered by name client-side.
+  // Gold is a new item CATEGORY. item_types.category has a CHECK limiting it to
+  // weapon/armor/ammo, so widen it to admit 'currency' before seeding the row.
+  // (The per-category field checks — weapon_fields/armor_fields/ammo_fields —
+  // are all `category <> 'X' OR ...`, so a currency row trips none of them.)
+  pgm.dropConstraint('item_types', 'item_types_category_check');
+  pgm.addConstraint('item_types', 'item_types_category_check', {
+    check: "category IN ('weapon','armor','ammo','currency')",
+  });
+  // The reserved currency item type. name/damage/category/cooldown are NOT NULL
+  // with no usable default, so they're set explicitly. Rendered by name client-side.
   pgm.sql(
-    `INSERT INTO item_types (name, category, damage, stackable)
-     VALUES ('gold', 'currency', 0, true)
+    `INSERT INTO item_types (name, category, damage, cooldown, stackable)
+     VALUES ('gold', 'currency', 0, 0, true)
      ON CONFLICT (name) DO NOTHING`
   );
   // Starting, toughness-scaled gold range for existing HOSTILE creatures; then
@@ -63,7 +71,13 @@ exports.up = (pgm) => {
 };
 
 exports.down = (pgm) => {
+  // Delete the gold row BEFORE narrowing the constraint back, or the restored
+  // check would fail on the still-present 'currency' row.
   pgm.sql("DELETE FROM item_types WHERE name = 'gold'");
+  pgm.dropConstraint('item_types', 'item_types_category_check');
+  pgm.addConstraint('item_types', 'item_types_category_check', {
+    check: "category IN ('weapon','armor','ammo')",
+  });
   pgm.dropColumns('entity_types', ['gold_min', 'gold_max']);
   pgm.dropColumns('users', ['gold']);
 };
