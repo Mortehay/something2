@@ -29,6 +29,8 @@ export class RenderSystem {
     // Hit-test rects for the inventory panel, recorded while drawing it and
     // read back by Game on click. Empty whenever the panel isn't open.
     this._invHitAreas = [];
+    // Same contract as _invHitAreas, for the merchant shop panel.
+    this._shopHitAreas = [];
   }
 
   // Effective render mode for an entity: the global override wins, else the
@@ -101,7 +103,7 @@ export class RenderSystem {
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
     groundItems = [], autoLoot = false, gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
-    merchants = [],
+    merchants = [], shop = null, shopOpen = false,
   }) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -189,6 +191,18 @@ export class RenderSystem {
     this._invHitAreas = [];
     if (inventoryOpen && inventory) {
       this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, autoLoot);
+    }
+
+    // Shop panel overlay (Slice D) — same overlay convention as the
+    // inventory panel above: raw canvas pixel space, hit areas rebuilt every
+    // frame and only populated while the panel is actually open.
+    this._shopHitAreas = [];
+    if (shopOpen && shop) {
+      // The item-type catalog lives on inventory.types (populated from the
+      // `joined` frame's itemTypes — see applyJoined in core/inventory.js);
+      // there is no separate itemTypes state to thread through.
+      const itemTypes = inventory ? inventory.types : new Map();
+      this.renderShop(this.ctx, shop, inventory, itemTypes, gold, this._shopHitAreas);
     }
   }
 
@@ -732,6 +746,192 @@ export class RenderSystem {
     if (inventory.items.length === 0) {
       ctx.fillStyle = "#6b7280";
       ctx.fillText("No items owned.", listX + 8, listTop + 6);
+    }
+
+    ctx.restore();
+  }
+
+  // Canvas-drawn merchant shop overlay (Slice D) — same panel/hit-area
+  // convention as renderInventory above: a centred translucent panel drawn
+  // in raw canvas pixel space, with every clickable row pushed into
+  // `hitAreas` as {x, y, w, h, kind, id} for Game to hit-test against this
+  // same frame's layout. Three sections:
+  //   - Catalog: the village's base stock (infinite — buying never removes
+  //     the row), `kind:'buy'` keyed on the merchant_stock row id (`row.id`,
+  //     i.e. the stockId `sendBuy` expects).
+  //   - Buyback: other players' sold-back items, same `kind:'buy'` action
+  //     but visually distinguished (amber) and finite — buying one deletes
+  //     the row.
+  //   - Your items: the player's own inventory, `kind:'sell'` keyed on the
+  //     item instance id (the itemId `sendSell` expects). Names/stats are
+  //     resolved the same way renderInventory's owned-item list does; the
+  //     server, not this panel, is what actually blocks selling an equipped
+  //     item.
+  renderShop(ctx, shop, inventory, itemTypes, gold, hitAreas) {
+    const panelW = 760;
+    const panelH = 560;
+    const px = (GAME_WIDTH - panelW) / 2;
+    const py = (GAME_HEIGHT - panelH) / 2;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(px, py, panelW, panelH);
+    ctx.strokeStyle = "#3a3a4e";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, panelW, panelH);
+
+    ctx.fillStyle = "#e5e7eb";
+    ctx.font = "14px monospace";
+    ctx.textBaseline = "top";
+    ctx.fillText("Shop — [e] to close", px + 16, py + 14);
+
+    // Close button — top-right of the header row, same position/sizing as
+    // the auto-loot toggle in renderInventory.
+    const closeW = 70, closeH = 26;
+    const closeX = px + panelW - 16 - closeW;
+    const closeY = py + 10;
+
+    // Gold readout, right-aligned just left of the close button.
+    ctx.font = "12px monospace";
+    ctx.textAlign = "right";
+    ctx.fillText(`Gold: ${gold ?? 0}`, closeX - 12, closeY + 7);
+    ctx.textAlign = "left";
+
+    ctx.fillStyle = "rgba(40,40,60,0.85)";
+    ctx.fillRect(closeX, closeY, closeW, closeH);
+    ctx.strokeStyle = "#4a9eff";
+    ctx.strokeRect(closeX, closeY, closeW, closeH);
+    ctx.fillStyle = "#e5e7eb";
+    ctx.fillText("Close", closeX + 18, closeY + 7);
+    hitAreas.push({ x: closeX, y: closeY, w: closeW, h: closeH, kind: "close", id: null });
+
+    const leftX = px + 16;
+    const colW = 340;
+    const rightX = leftX + colW + 24;
+    const rightW = px + panelW - 16 - rightX;
+    const listTop = py + 50;
+    const listBottom = py + panelH - 16;
+    const rowH = 40;
+    const rowGap = 6;
+    const buyW = 60, buyH = 26;
+
+    const resolveName = (typeId) => {
+      const type = itemTypes && itemTypes.get ? itemTypes.get(typeId) : null;
+      return type ? type.name : `#${typeId}`;
+    };
+
+    // Catalog rows.
+    ctx.font = "13px monospace";
+    ctx.fillStyle = "#9ca3af";
+    ctx.fillText("Catalog", leftX, listTop);
+    let y = listTop + 20;
+    const catalog = (shop && shop.catalog) || [];
+    for (const row of catalog) {
+      if (y + rowH > listBottom) break;
+      ctx.fillStyle = "rgba(40,40,60,0.85)";
+      ctx.fillRect(leftX, y, colW, rowH);
+      ctx.strokeStyle = "#3a3a4e";
+      ctx.strokeRect(leftX, y, colW, rowH);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "12px monospace";
+      ctx.fillText(resolveName(row.itemTypeId), leftX + 8, y + 6);
+      ctx.fillStyle = "#9ca3af";
+      ctx.fillText(`${row.price} g`, leftX + 8, y + 22);
+
+      const buyX = leftX + colW - 8 - buyW;
+      const buyY = y + (rowH - buyH) / 2;
+      ctx.fillStyle = "rgba(74,158,255,0.28)";
+      ctx.fillRect(buyX, buyY, buyW, buyH);
+      ctx.strokeStyle = "#4a9eff";
+      ctx.strokeRect(buyX, buyY, buyW, buyH);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.fillText("Buy", buyX + 16, buyY + 7);
+      hitAreas.push({ x: buyX, y: buyY, w: buyW, h: buyH, kind: "buy", id: row.id });
+
+      y += rowH + rowGap;
+    }
+    if (catalog.length === 0) {
+      ctx.fillStyle = "#6b7280";
+      ctx.font = "12px monospace";
+      ctx.fillText("Nothing for sale.", leftX + 8, y + 6);
+      y += rowH;
+    }
+
+    // Buyback rows — visually distinguished (amber) from the base catalog
+    // above: these are OTHER players' sold items, finite (the row is
+    // deleted on buy, unlike the base catalog's infinite stock).
+    y += 16;
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "13px monospace";
+    ctx.fillText("Buyback", leftX, y);
+    y += 20;
+    const buyback = (shop && shop.buyback) || [];
+    for (const row of buyback) {
+      if (y + rowH > listBottom) break;
+      ctx.fillStyle = "rgba(80,60,20,0.55)";
+      ctx.fillRect(leftX, y, colW, rowH);
+      ctx.strokeStyle = "#caa24a";
+      ctx.strokeRect(leftX, y, colW, rowH);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "12px monospace";
+      ctx.fillText(resolveName(row.itemTypeId), leftX + 8, y + 6);
+      ctx.fillStyle = "#caa24a";
+      ctx.fillText(`${row.price} g`, leftX + 8, y + 22);
+
+      const buyX = leftX + colW - 8 - buyW;
+      const buyY = y + (rowH - buyH) / 2;
+      ctx.fillStyle = "rgba(202,162,74,0.28)";
+      ctx.fillRect(buyX, buyY, buyW, buyH);
+      ctx.strokeStyle = "#caa24a";
+      ctx.strokeRect(buyX, buyY, buyW, buyH);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.fillText("Buy", buyX + 16, buyY + 7);
+      hitAreas.push({ x: buyX, y: buyY, w: buyW, h: buyH, kind: "buy", id: row.id });
+
+      y += rowH + rowGap;
+    }
+    if (buyback.length === 0) {
+      ctx.fillStyle = "#6b7280";
+      ctx.font = "12px monospace";
+      ctx.fillText("No buyback stock.", leftX + 8, y + 6);
+    }
+
+    // Your items (right column) — sell action only.
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "13px monospace";
+    ctx.fillText("Your items", rightX, listTop);
+    let ry = listTop + 20;
+    const items = (inventory && inventory.items) || [];
+    const sellW = 60, sellH = 26;
+    for (const item of items) {
+      if (ry + rowH > listBottom) break;
+      const type = inventory && inventory.types ? inventory.types.get(item.typeId) : null;
+      if (!type) continue;
+
+      ctx.fillStyle = "rgba(40,40,60,0.85)";
+      ctx.fillRect(rightX, ry, rightW, rowH);
+      ctx.strokeStyle = "#3a3a4e";
+      ctx.strokeRect(rightX, ry, rightW, rowH);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "12px monospace";
+      ctx.fillText(type.name, rightX + 8, ry + 6);
+
+      const sellX = rightX + rightW - 8 - sellW;
+      const sellY = ry + (rowH - sellH) / 2;
+      ctx.fillStyle = "rgba(255,90,90,0.22)";
+      ctx.fillRect(sellX, sellY, sellW, sellH);
+      ctx.strokeStyle = "#e05a5a";
+      ctx.strokeRect(sellX, sellY, sellW, sellH);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.fillText("Sell", sellX + 14, sellY + 7);
+      hitAreas.push({ x: sellX, y: sellY, w: sellW, h: sellH, kind: "sell", id: item.id });
+
+      ry += rowH + rowGap;
+    }
+    if (items.length === 0) {
+      ctx.fillStyle = "#6b7280";
+      ctx.font = "12px monospace";
+      ctx.fillText("No items to sell.", rightX + 8, listTop + 20);
     }
 
     ctx.restore();

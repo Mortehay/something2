@@ -609,6 +609,8 @@ export class Game {
                 autoLoot: this.autoLoot,
                 gold: this.gold,
                 merchants: this.merchants,
+                shop: this.shop,
+                shopOpen: this.shopOpen,
                 toast: this.toast,
                 blasts: this.blasts,
                 vfx: this.vfx,
@@ -680,6 +682,20 @@ export class Game {
             if (this.authorityClient) this.authorityClient.sendDrop(hit.id);
             return;
         }
+    }
+
+    // Hit-test the shop panel's buy/sell/close rects RenderSystem recorded
+    // while drawing it (same convention as _handleInventoryClick above, read
+    // from _shopHitAreas instead of _invHitAreas). Buy/sell just forward the
+    // stock/item id to the server — the server re-validates gold, proximity,
+    // and ownership; this click only expresses intent.
+    _handleShopClick(cx, cy) {
+        const hitAreas = (this.renderSystem && this.renderSystem._shopHitAreas) || [];
+        const hit = hitAreas.find((a) => cx >= a.x && cx <= a.x + a.w && cy >= a.y && cy <= a.y + a.h);
+        if (!hit) return;
+        if (hit.kind === 'close') { this.shopOpen = false; return; }
+        if (hit.kind === 'buy') { if (this.authorityClient) this.authorityClient.sendBuy(hit.id); return; }
+        if (hit.kind === 'sell') { if (this.authorityClient) this.authorityClient.sendSell(hit.id); return; }
     }
 
     setupInput(){
@@ -767,8 +783,14 @@ export class Game {
         this._mouseDownHandler = (e) => {
             if (e.button !== 0) return;
             if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
-            // While the panel is open, clicks hit-test it and must NOT also
-            // fire an attack.
+            // While a panel is open, clicks hit-test it and must NOT also
+            // fire an attack. Shop is checked first — the two panels never
+            // stack (see the 'e'/'i' key handlers above), but if they ever
+            // did, an open shop should still consume the click.
+            if (this.shopOpen) {
+                this._handleShopClick(this._cursorX ?? 0, this._cursorY ?? 0);
+                return;
+            }
             if (this.inventoryOpen) {
                 this._handleInventoryClick(this._cursorX ?? 0, this._cursorY ?? 0);
                 return;
