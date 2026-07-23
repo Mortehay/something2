@@ -7,6 +7,7 @@ const path = require('path');
 const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts, villageMerchantPost } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages } = require('./services/villages');
+const { seedBaseCatalog } = require('./services/merchantStock');
 require('dotenv').config();
 
 const app = express();
@@ -1168,6 +1169,7 @@ app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
       minRow: row.min_row, minCol: row.min_col,
       width: row.width, height: row.height, gateEdge: row.gate_edge,
     }]);
+    await seedBaseCatalog(pool, id, row.id);
     await invalidateWorld(id);
     res.json(ins.rows[0]);
   } catch (err) {

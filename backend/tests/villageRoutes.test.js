@@ -24,6 +24,7 @@ test('POST village inserts a valid village and invalidates the world', async () 
       id: 'v1', min_row: p[1], min_col: p[2], width: p[3], height: p[4], gate_edge: p[5],
     }] })],
     [/INSERT INTO world_creatures/i, () => ({ rows: [] })],
+    [/INSERT INTO merchant_stock/i, () => ({ rows: [] })],
     [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
   ]);
   __setPool(pool);
