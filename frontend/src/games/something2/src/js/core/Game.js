@@ -707,8 +707,10 @@ export class Game {
             this.keys[key] = true;
 
             // Inventory / paper-doll toggle (replaces the retired number-key
-            // weapon switch — equipping now goes through the panel).
-            if (key === 'i' && this.state === 'playing' && this.chunked && !e.repeat) {
+            // weapon switch — equipping now goes through the panel). Gated on
+            // !shopOpen so the two centred panels can never stack (the shop is
+            // closed with 'e' or Escape first).
+            if (key === 'i' && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen) {
                 this.inventoryOpen = !this.inventoryOpen;
                 if (!this.inventoryOpen) this.inventorySelectedItemId = null;
             }
