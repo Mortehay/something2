@@ -66,6 +66,23 @@ describe('WorldAuthorityClient', () => {
     expect(onCreatures).toHaveBeenCalledWith(expect.objectContaining({ type: 'creatures' }));
   });
 
+  it('ignores messages that arrive after disconnect (e.g. a self-kick during an intentional reconnect)', () => {
+    const onKicked = vi.fn();
+    const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', onKicked });
+    c.connect('w1');
+    FakeWS.last.emit('open');
+    const deadWs = FakeWS.last;
+
+    // The doorway transition tears this socket down and opens a fresh one for
+    // the destination world. The graceful close() is still in flight, so the
+    // server's single-session guard can still deliver a late 'kicked' on this
+    // dead socket — which must NOT flip the game into the kicked state.
+    c.disconnect();
+    deadWs.emit('message', { data: JSON.stringify({ type: 'kicked', reason: 'signed_in_elsewhere' }) });
+
+    expect(onKicked).not.toHaveBeenCalled();
+  });
+
   it('sendAttack sends an attack message', () => {
     const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't' });
     c.connect('w1');

@@ -27,6 +27,12 @@ export class WorldAuthorityClient {
     this.ws = null;
     this.connected = false;
     this.joined = false;
+    // Set by disconnect(): once we intentionally tear a socket down, its
+    // graceful close() may still be in flight, so late frames (notably a
+    // 'kicked' the server sends when our own reconnect trips the single-session
+    // guard) can still arrive. This flag makes the message handler drop them so
+    // a self-inflicted kick can't corrupt an intentional reconnect.
+    this._closed = false;
     this.worldId = null;
     this._seq = 0;
     this._accumDt = 0;
@@ -34,6 +40,7 @@ export class WorldAuthorityClient {
   }
 
   connect(worldId) {
+    this._closed = false;
     this.worldId = worldId;
     const sep = this.url.includes('?') ? '&' : '?';
     const wsUrl = `${this.url}${sep}token=${encodeURIComponent(this.token)}`;
@@ -44,6 +51,9 @@ export class WorldAuthorityClient {
       this._send({ type: 'join', world_id: worldId });
     });
     this.ws.addEventListener('message', (event) => {
+      // Drop anything that lands after an intentional disconnect — the socket
+      // is being replaced and its late frames are no longer ours to act on.
+      if (this._closed) return;
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       this._handleMessage(msg);
@@ -116,6 +126,9 @@ export class WorldAuthorityClient {
   sendAutoLoot(on) { return this._send({ type: 'autoloot', on: on === true }); }
 
   disconnect() {
+    // Mark closed BEFORE close() so any frame still queued on the socket is
+    // ignored by the message handler rather than dispatched to callbacks.
+    this._closed = true;
     if (this.ws) { try { this.ws.close(); } catch { /* already closed */ } this.ws = null; }
     this.connected = false; this.joined = false;
   }
