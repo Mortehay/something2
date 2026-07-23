@@ -414,6 +414,18 @@ app.post('/api/players/:userId/items', adminGuard, async (req, res) => {
   }
 });
 
+// VFX effect library. Read-only and unauthenticated: every client needs it to
+// draw an attack. Admin CRUD lands in slice E.
+app.get('/api/vfx-effects', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM vfx_effects ORDER BY id ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch vfx effects' });
+  }
+});
+
 // Tile Types CRUD
 app.get('/api/tile-types', async (req, res) => {
   try {

@@ -19,6 +19,7 @@ import { aimVector } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { addBlasts, pruneBlasts } from "./blasts.js";
+import { indexEffects, addEffects, pruneEffects } from "./vfx.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -82,6 +83,10 @@ export class Game {
         // they are copied into this list on arrival and animated locally.
         this.blasts = [];
         this.noAmmoUntil = 0;
+
+        // Live attack effects, and the library their names resolve against.
+        this.vfx = [];
+        this.vfxDefs = {};
 
         // Inventory / paper-doll (Slice 3b-2a). `inventory` mirrors the
         // account-wide item catalog + owned items + equipment; the server is
@@ -220,7 +225,7 @@ export class Game {
         this.map.init(tiles, mapTiles, loadedEntities, entityTypes);
     }
 
-    async initChunked({ worldId, chunkSize, tileTypes, spawnX = 0, spawnY = 0 }) {
+    async initChunked({ worldId, chunkSize, tileTypes, vfxEffects = null, spawnX = 0, spawnY = 0 }) {
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;
@@ -246,6 +251,10 @@ export class Game {
         this.renderSystem = new RenderSystem(this.canvas, this.imageManager);
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
         this._preloadTileAssets(tileTypes);
+        // Names arrive on the wire already resolved; this is the only lookup
+        // the client does. Empty until the fetch lands — effects then simply
+        // do not draw, rather than throwing.
+        this.vfxDefs = indexEffects(vfxEffects);
         this.streamer = new ChunkStreamer(this.chunkedMap, makeChunkFetcher(worldId, API_URL), 1);
 
         this.creatures = new CreatureManager();
@@ -260,6 +269,7 @@ export class Game {
         this.autoLoot = false;
         this.gold = 0;
         this.blasts = [];
+        this.vfx = [];
         this.noAmmoUntil = 0;
 
         this._inputBuffer = [];
@@ -491,6 +501,12 @@ export class Game {
         if (msg.detonations && msg.detonations.length) {
             addBlasts(this.blasts, msg.detonations, performance.now());
         }
+        // Attacks are present only on the tick they happened (the server
+        // clears its stash after this broadcast), so they must be taken off
+        // THIS frame — there is no snapshot to re-read them from later.
+        if (msg.attacks && msg.attacks.length) {
+            addEffects(this.vfx, msg.attacks, performance.now(), this.vfxDefs);
+        }
     }
 
     _reconcileSelf(serverPlayer) {
@@ -548,6 +564,7 @@ export class Game {
             // ring animation reads.
             const nowMs = performance.now();
             this.blasts = pruneBlasts(this.blasts, nowMs);
+            this.vfx = pruneEffects(this.vfx, nowMs);
             this.renderSystem.renderChunked({
                 player: this.player,
                 camera: this.camera,
@@ -569,6 +586,7 @@ export class Game {
                 gold: this.gold,
                 toast: this.toast,
                 blasts: this.blasts,
+                vfx: this.vfx,
                 // null whenever the equipped weapon needs no ammo — the HUD
                 // then draws no ammo line at all.
                 ammo: resolveAmmoHud(this.inventory),

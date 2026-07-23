@@ -32,7 +32,8 @@ function fakePool(rows) {
 const ROWS = [
   { id: 1, name: 'dagger', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'melee',
     damage: '8', cooldown: '0.3', reach: '80', arc_width: '0.6', range: null, projectile_speed: null,
-    projectile_radius: null, pierce: null, mana_cost: '0', element: null, defense: null, resistances: null },
+    projectile_radius: null, pierce: null, mana_cost: '0', element: null, defense: null, resistances: null,
+    vfx: null },
   { id: 2, name: 'halberd', category: 'weapon', slot: 'main_hand', two_handed: true, kind: 'melee',
     damage: '18', cooldown: '0.9', reach: '190', arc_width: '1.8', range: null, projectile_speed: null,
     projectile_radius: null, pierce: null, mana_cost: '0', element: null, defense: null, resistances: null },
@@ -372,4 +373,18 @@ test('AoE falloff leaves a meaningful damage band', () => {
     assert.ok(w.aoe_radius > w.projectile_radius * 2,
       `${w.name}: aoe_radius ${w.aoe_radius} is not meaningfully larger than its projectile radius ${w.projectile_radius} — the blast adds nothing over a direct hit`);
   }
+});
+
+test('loadItemTypes carries the vfx bindings through to the weapon catalog', async () => {
+  // world.attack() resolves the effect name off the weapon object it already
+  // holds. Dropped here, every attack silently resolves to null and slice A
+  // renders nothing while every other test stays green.
+  const rows = [{ ...ROWS[0], vfx: { attack: 'sweep_arc' } }];
+  const m = await loadItemTypes(fakePool(rows));
+  assert.deepEqual(m.get(1).vfx, { attack: 'sweep_arc' });
+});
+
+test('a weapon with no bindings loads vfx as null, not undefined', async () => {
+  const m = await loadItemTypes(fakePool([{ ...ROWS[0], vfx: null }]));
+  assert.strictEqual(m.get(1).vfx, null);
 });

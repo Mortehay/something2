@@ -1,6 +1,7 @@
 const { resolveMove } = require('./collision');
 const { CreatureSim } = require('./creatures');
 const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
+const { resolveEffectName } = require('./vfx.js');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION } = require('./damage');
 const {
@@ -247,21 +248,21 @@ class World {
   // projectile. Returns killed creature ids for the caller to DELETE.
   attack(userId, ax, ay) {
     const p = this.players.get(userId);
-    if (!p || p._attackCd > 0) return { killedCreatureIds: [] };
+    if (!p || p._attackCd > 0) return { killedCreatureIds: [], attacks: [] };
     // Shock's interrupt. Checked alongside the cooldown and BEFORE any resource
     // is deducted or any cooldown is stamped, matching the existing rule that a
     // refused attack costs nothing: an interrupt that silently ate the mana or
     // started the cooldown would punish the player twice for one hit.
-    if (!canAct(p, this.now)) return { killedCreatureIds: [] };
+    if (!canAct(p, this.now)) return { killedCreatureIds: [], attacks: [] };
     const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
-    if (!w) return { killedCreatureIds: [] };
+    if (!w) return { killedCreatureIds: [], attacks: [] };
 
     const manaCost = w.mana_cost || 0;
     const staminaCost = w.stamina_cost || 0;
     // Both resources are checked BEFORE either is deducted, and a denied
     // attack does NOT consume the cooldown — matching mana's existing rule,
     // now covering the melee branch too (melee weapons can carry a cost).
-    if (p.mana < manaCost || p.stamina < staminaCost) return { killedCreatureIds: [] };
+    if (p.mana < manaCost || p.stamina < staminaCost) return { killedCreatureIds: [], attacks: [] };
 
     const { nx, ny } = normalizeAim(ax, ay, p.facing);
     const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
@@ -271,7 +272,11 @@ class World {
       if (f) p.facing = f;
       if (manaCost) p.mana -= manaCost;
       if (staminaCost) p.stamina -= staminaCost;
+      // Queried BEFORE applyMeleeArc, which deletes whatever it kills: after
+      // the fact a one-shot kill would look like a miss.
+      const creatureTargets = this.creatures.meleeArcTargets(cx, cy, nx, ny, w.reach, w.arc_width);
       const killed = this.creatures.applyMeleeArc(cx, cy, nx, ny, w.reach, w.arc_width, w.damage, w.element, this.now);
+      let playerHits = 0;
       for (const other of this.players.values()) {
         if (other.userId === userId) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
@@ -279,10 +284,25 @@ class World {
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
           applyDamageWithEffects(other, w.damage, w.element, other.mit || NO_MITIGATION, this.now);
           applyElementEffect(other, w.element, this.now, userId);
+          playerHits++;
         }
       }
       p._attackCd = w.cooldown;
-      return { killedCreatureIds: killed };
+      // The descriptor exposes facts this method already computed — the aim
+      // vector, the attacker's centre, the catalog's reach/arc. Nothing here
+      // is derived, and the effect NAME is resolved on this side so the
+      // client never needs the weapon catalog to draw the swing.
+      return {
+        killedCreatureIds: killed,
+        attacks: [{
+          a: `p:${userId}`,
+          v: resolveEffectName(w, 'attack'),
+          x: cx, y: cy,
+          nx, ny,
+          reach: w.reach, arc: w.arc_width,
+          hit: creatureTargets.length > 0 || playerHits > 0,
+        }],
+      };
     }
 
     // projectile
@@ -292,7 +312,9 @@ class World {
     if (staminaCost) p.stamina -= staminaCost;
     this.projectiles.spawn({ ownerId: userId, x: cx, y: cy, nx, ny, weapon: w });
     p._attackCd = w.cooldown;
-    return { killedCreatureIds: [] };
+    // Projectiles already render as a moving dot; their trail effects are
+    // slice D, so slice A emits no descriptor for them.
+    return { killedCreatureIds: [], attacks: [] };
   }
 
   // Returns the whole step result — { killedCreatureIds, detonations } — so
