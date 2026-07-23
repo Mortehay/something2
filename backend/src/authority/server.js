@@ -3,13 +3,13 @@ const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
-const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
+const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
 const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
-const { commitCreatureDeath, claimItem, dropItem, dropGraceActive } = require('./loot');
+const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive } = require('./loot');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
 
@@ -117,9 +117,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
-        const { creatureTypes, creatureTypeIds, hostileCreatureTypes } = await loadCreatureTypes(pool);
+        const { creatureTypes, creatureTypeIds, hostileCreatureTypes, creatureGold } = await loadCreatureTypes(pool);
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
+        const goldItemTypeId = resolveGoldItemTypeId(itemTypes);
         const linkRows = await fetchLinks(pool, worldId);
         const links = new Map(linkRows.map((l) => [l.edge, { toWorldId: l.to_world_id, toWidth: l.to_width, toHeight: l.to_height }]));
         const villages = await fetchVillages(pool, worldId);
@@ -130,7 +131,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         const entry = {
           worldId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
-          tileTypes, creatureTypes, creatureTypeIds, hostileCreatureTypes, links, villages,
+          tileTypes, creatureTypes, creatureTypeIds, hostileCreatureTypes, creatureGold, goldItemTypeId, links, villages,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -372,6 +373,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
             const granted = await grantStartingLoadout(pool, ws.userId, entry.world.weapons);
             if (granted) inv = await loadInventory(pool, ws.userId);
           }
+          const gr = await pool.query('SELECT gold FROM users WHERE id = $1', [ws.userId]);
+          const gold = gr.rows.length ? Number(gr.rows[0].gold) || 0 : 0;
 
           // A newer session for this same account may have won (and kicked
           // us) while we awaited inventory above. If so, our reservation was
@@ -388,7 +391,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           }
 
           ws.worldId = msg.world_id;
-          entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn);
+          entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold);
           if (spawn.viaDoorway) {
             const p = entry.world.getPlayer(ws.userId);
             if (p) p._doorwayCdUntil = Date.now() + 1500;
@@ -403,6 +406,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             // value must always reflect whatever World actually holds, not an
             // assumption about what addPlayer currently does.
             autoLoot: entry.world.getPlayer(ws.userId).autoLoot,
+            gold,
           });
         } catch (err) {
           console.error('join failed:', err);
@@ -535,8 +539,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
             const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
             const target = entry.world.groundItems.nearest(cx, cy, PICKUP_RADIUS);
             if (!target) return; // nothing in range: silent no-op, not an error
-            const got = await claimItem(pool, entry, ws.userId, target.id);
-            if (got) send(ws, { type: 'picked', item: got });
+            if (target.typeId === entry.goldItemTypeId) {
+              const got = await claimGold(pool, entry, ws.userId, target.id);
+              if (got) send(ws, { type: 'wallet', gold: got.gold });
+            } else {
+              const got = await claimItem(pool, entry, ws.userId, target.id);
+              if (got) send(ws, { type: 'picked', item: got });
+            }
           } catch (err) {
             console.error('pickup failed:', err);
           }
@@ -659,7 +668,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // pickup (the 'pickup' handler above) never consults this — a
           // deliberate keypress always succeeds.
           if (dropGraceActive(p, it.id, autoLootNow)) continue;
-          claims.push(claimItem(pool, entry, p.userId, it.id));
+          if (it.typeId === entry.goldItemTypeId) {
+            claims.push(claimGold(pool, entry, p.userId, it.id));
+          } else {
+            claims.push(claimItem(pool, entry, p.userId, it.id));
+          }
         }
         if (claims.length === 0) continue;
         // Settled once per PLAYER, not per item: the socket is looked up
@@ -673,7 +686,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
           const sock = entry.sockets.get(p.userId);
           if (!sock) return;
           for (const r of results) {
-            if (r.status === 'fulfilled' && r.value) send(sock, { type: 'picked', item: r.value });
+            if (r.status === 'fulfilled' && r.value) {
+              // claimGold resolves { gold }; claimItem resolves { id, typeId, quantity }.
+              // Distinguishing by shape (rather than tagging each push) keeps this
+              // loop untouched for the non-gold path.
+              if ('gold' in r.value) send(sock, { type: 'wallet', gold: r.value.gold });
+              else send(sock, { type: 'picked', item: r.value });
+            }
             else if (r.status === 'rejected') console.error('auto-loot failed:', r.reason);
           }
         }).catch((err) => console.error('auto-loot notify failed:', err));

@@ -91,7 +91,7 @@ class World {
     this.now = 0;
   }
 
-  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn) {
+  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0) {
     this.players.set(userId, {
       userId,
       x: spawn.x,
@@ -116,6 +116,7 @@ class World {
       inv,
       mit: mitigation(inv, this.weapons),
       spawn: { x: respawn.x, y: respawn.y },
+      gold: Number(gold) || 0,
       _attackCd: 0,
       _doorwayCdUntil: 0,
       autoLoot: false,

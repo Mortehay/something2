@@ -98,7 +98,7 @@ export class RenderSystem {
     creatures = [], projectiles = [], mana = null, maxMana = null,
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
-    groundItems = [], autoLoot = false, toast = null,
+    groundItems = [], autoLoot = false, gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null,
   }) {
     this.ctx.fillStyle = "#0f3460";
@@ -170,7 +170,7 @@ export class RenderSystem {
     this.drawBlasts(blasts);
 
     camera.reset(this.ctx);
-    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash, effects });
+    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash, effects, gold });
     if (toast) this.renderToast(toast);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
@@ -464,7 +464,7 @@ export class RenderSystem {
     this._drawEffectPips(drawX, drawY, e.effects);
   }
 
-  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null }) {
+  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null, gold = null }) {
     const remoteCount = remotePlayers ? remotePlayers.size : 0;
     const lines = [
       `Players online: ${1 + remoteCount}`,
@@ -482,6 +482,7 @@ export class RenderSystem {
     if (stamina != null && maxStamina != null) {
       lines.push(`SP: ${Math.round(stamina)} / ${Math.round(maxStamina)}`);
     }
+    if (gold != null) lines.push(`Gold: ${gold}`);
     if (weaponName) {
       lines.push(`Weapon: ${weaponName}`);
     }

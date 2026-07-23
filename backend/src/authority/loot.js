@@ -29,6 +29,16 @@ function rollDrops(dropRows, rng = Math.random) {
   return out;
 }
 
+// Gold amount for a creature death. `range` is {min,max} from entry.creatureGold.
+// Returns 0 when the creature drops no gold (max 0 / missing range). Monotonic
+// in rng so a higher roll never yields less, matching rollDrops' contract.
+function rollGold(range, rng = Math.random) {
+  const max = Math.max(0, Math.floor((range && range.max) || 0));
+  if (max <= 0) return 0;
+  const min = Math.max(0, Math.min(max, Math.floor((range && range.min) || 0)));
+  return min + Math.floor(rng() * (max - min + 1));
+}
+
 // The single authoritative creature-death commit. rowCount === 1 means THIS
 // call finalized the death, which is what licenses the drop roll: two damage
 // sources reporting the same creature id in one tick cannot double-drop, and a
@@ -74,6 +84,19 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
     // waiting for a chunk reload.
     entry.world.groundItems.add(ins.rows);
   }
+
+  // Gold: one coin-pile ground item carrying the whole amount, when this
+  // creature type has a gold range and the currency type exists.
+  const goldAmt = rollGold(entry.creatureGold && entry.creatureGold.get(dead.type), rng);
+  if (goldAmt > 0 && entry.goldItemTypeId != null) {
+    const gi = await pool.query(
+      `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
+       VALUES ($1, $2, $3, $4, now() + ($5::int * interval '1 millisecond'), $6)
+       RETURNING id, item_type_id, x, y, expires_at, quantity`,
+      [entry.worldId, entry.goldItemTypeId, dropX, dropY, ttlMs, goldAmt],
+    );
+    entry.world.groundItems.add(gi.rows);
+  }
 }
 
 // The single claim path, shared by the keypress and auto-loot. One
@@ -117,6 +140,34 @@ async function claimItem(pool, entry, userId, groundItemId) {
     const p = entry.world.getPlayer(userId);
     if (p && p.inv) p.inv.items.push({ id: instanceId, typeId, quantity: qty }); // so a later equip validates without a reload
     return { id: instanceId, typeId, quantity: qty };
+  } finally {
+    entry.claiming.delete(groundItemId);
+  }
+}
+
+// Gold pickup: the currency path parallel to claimItem. One statement DELETEs
+// the world_items row and credits users.gold, so there is no window where the
+// row is gone but the wallet hasn't moved. rowCount === 1 means THIS call both
+// removed the row and credited it; 0 means it lost the race (already claimed or
+// swept) and nothing was credited. Returns the NEW balance so the caller can
+// push a wallet update to the owner.
+async function claimGold(pool, entry, userId, groundItemId) {
+  if (entry.claiming.has(groundItemId)) return null;
+  entry.claiming.add(groundItemId);
+  try {
+    const r = await pool.query(
+      `WITH d AS (DELETE FROM world_items WHERE id = $1 RETURNING quantity)
+       UPDATE users SET gold = gold + (SELECT quantity FROM d)
+       WHERE id = $2 AND EXISTS (SELECT 1 FROM d)
+       RETURNING gold`,
+      [groundItemId, userId],
+    );
+    entry.world.groundItems.remove(groundItemId);
+    if (r.rowCount !== 1) return null;
+    const gold = Number(r.rows[0].gold) || 0;
+    const p = entry.world.getPlayer(userId);
+    if (p) p.gold = gold;
+    return { gold };
   } finally {
     entry.claiming.delete(groundItemId);
   }
@@ -193,5 +244,5 @@ async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000, now = Dat
 }
 
 module.exports = {
-  rollDrops, commitCreatureDeath, spawnDrops, claimItem, dropItem, dropGraceActive, DROP_GRACE_MS,
+  rollDrops, rollGold, commitCreatureDeath, spawnDrops, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
 };
