@@ -370,3 +370,18 @@ export function useGenerateEntities(onSuccessCallback) {
     onError: (err) => toast.error(`Generation failed: ${err.message}`)
   });
 }
+
+// The VFX effect library. Fetched once and cached: rows only change when an
+// admin edits them (a later slice), and every attack frame looks up a name in it.
+export function useVfxEffects() {
+  const { data: vfxEffects } = useQuery({
+    queryKey: ['vfxEffects'],
+    staleTime: 60_000,
+    queryFn: async () => {
+      const res = await fetch(`${API_URL}/api/vfx-effects`);
+      if (!res.ok) throw new Error('Failed to fetch vfx effects');
+      return res.json();
+    }
+  });
+  return { vfxEffects };
+}
