@@ -45,7 +45,7 @@ function creatureMitigation(row) {
 // undefined and silently disables the feature it feeds.
 async function loadCreatureTypes(pool) {
   const r = await pool.query(
-    `SELECT id, name, color, hp, defense, resistances, faction
+    `SELECT id, name, color, hp, defense, resistances, faction, gold_min, gold_max
      FROM entity_types WHERE is_creature = true ORDER BY id ASC`,
   );
   const creatureTypes = r.rows.map((row) => ({
@@ -64,7 +64,13 @@ async function loadCreatureTypes(pool) {
   // and creatureTypeIds stay COMPLETE: drops and name→id lookups must still
   // see guards.
   const hostileCreatureTypes = creatureTypes.filter((t) => (t.faction || 'hostile') !== 'guard');
-  return { creatureTypes, creatureTypeIds, hostileCreatureTypes };
+  // Per-creature gold drop range, by name. Slice C: a killed creature drops a
+  // random amount in [min, max] into the killer's wallet.
+  const creatureGold = new Map(r.rows.map((row) => [row.name, {
+    min: Number(row.gold_min) || 0,
+    max: Number(row.gold_max) || 0,
+  }]));
+  return { creatureTypes, creatureTypeIds, hostileCreatureTypes, creatureGold };
 }
 
 function center(o) { return { x: o.x + o.width / 2, y: o.y + o.height / 2 }; }

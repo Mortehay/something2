@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
-const { loadItemTypes, resolveDefaultWeaponId, loadInventory, grantStartingLoadout } = require('./items');
+const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
 const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
@@ -117,9 +117,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
-        const { creatureTypes, creatureTypeIds, hostileCreatureTypes } = await loadCreatureTypes(pool);
+        const { creatureTypes, creatureTypeIds, hostileCreatureTypes, creatureGold } = await loadCreatureTypes(pool);
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
+        const goldItemTypeId = resolveGoldItemTypeId(itemTypes);
         const linkRows = await fetchLinks(pool, worldId);
         const links = new Map(linkRows.map((l) => [l.edge, { toWorldId: l.to_world_id, toWidth: l.to_width, toHeight: l.to_height }]));
         const villages = await fetchVillages(pool, worldId);
@@ -130,7 +131,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         const entry = {
           worldId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
-          tileTypes, creatureTypes, creatureTypeIds, hostileCreatureTypes, links, villages,
+          tileTypes, creatureTypes, creatureTypeIds, hostileCreatureTypes, creatureGold, goldItemTypeId, links, villages,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -372,6 +373,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
             const granted = await grantStartingLoadout(pool, ws.userId, entry.world.weapons);
             if (granted) inv = await loadInventory(pool, ws.userId);
           }
+          const gr = await pool.query('SELECT gold FROM users WHERE id = $1', [ws.userId]);
+          const gold = gr.rows.length ? Number(gr.rows[0].gold) || 0 : 0;
 
           // A newer session for this same account may have won (and kicked
           // us) while we awaited inventory above. If so, our reservation was
@@ -388,7 +391,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           }
 
           ws.worldId = msg.world_id;
-          entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn);
+          entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold);
           if (spawn.viaDoorway) {
             const p = entry.world.getPlayer(ws.userId);
             if (p) p._doorwayCdUntil = Date.now() + 1500;
@@ -403,6 +406,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             // value must always reflect whatever World actually holds, not an
             // assumption about what addPlayer currently does.
             autoLoot: entry.world.getPlayer(ws.userId).autoLoot,
+            gold,
           });
         } catch (err) {
           console.error('join failed:', err);

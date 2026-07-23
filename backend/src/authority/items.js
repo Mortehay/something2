@@ -56,6 +56,13 @@ function resolveDefaultWeaponId(mapById) {
   return firstWeapon;
 }
 
+// The reserved currency item type's id, resolved by name from the loaded
+// catalog. null if the migration that seeds it hasn't run.
+function resolveGoldItemTypeId(itemTypes) {
+  for (const t of itemTypes.values()) if (t.name === 'gold') return t.id;
+  return null;
+}
+
 const STARTING_LOADOUT = ['dagger', 'leather-vest'];
 
 // A user's owned instances + their paper-doll, both account-wide.
@@ -183,4 +190,4 @@ async function unequip(pool, userId, inv, slot) {
   return { ok: true };
 }
 
-module.exports = { loadItemTypes, resolveDefaultWeaponId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory, grantStartingLoadout, STARTING_LOADOUT, canEquip, mitigation, activeWeaponType, equip, unequip };
+module.exports = { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory, grantStartingLoadout, STARTING_LOADOUT, canEquip, mitigation, activeWeaponType, equip, unequip };
