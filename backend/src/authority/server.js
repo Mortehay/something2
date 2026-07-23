@@ -450,6 +450,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
             // assumption about what addPlayer currently does.
             autoLoot: entry.world.getPlayer(ws.userId).autoLoot,
             gold,
+            merchants: (entry.villages || [])
+              .filter((v) => v.merchantX != null && v.merchantY != null)
+              .map((v) => ({ villageId: v.id, x: v.merchantX, y: v.merchantY })),
           });
         } catch (err) {
           console.error('join failed:', err);

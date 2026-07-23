@@ -101,6 +101,7 @@ export class RenderSystem {
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
     groundItems = [], autoLoot = false, gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
+    merchants = [],
   }) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -151,11 +152,19 @@ export class RenderSystem {
       // players/creatures.
       drawables.push({ kind: "grounditem", ref: gi, depth: depthKey(gi.x - gi.width / 2, gi.y - gi.height / 2) });
     }
+    // Merchants are a fixed world point (village.merchantX/Y from the join
+    // frame), not an entity with a stored top-left corner — depth-sort on
+    // the point directly, the same origin ground items are adjusted back to
+    // above.
+    for (const m of merchants) {
+      drawables.push({ kind: "merchant", ref: m, depth: depthKey(m.x, m.y) });
+    }
     drawables.sort((a, b) => a.depth - b.depth);
     for (const d of drawables) {
       if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
       else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
+      else if (d.kind === "merchant") this.drawMerchant(d.ref);
       else this.drawEntity(d.ref);
     }
 
@@ -337,6 +346,32 @@ export class RenderSystem {
         this.ctx.fillText(type.name, dx, dy - r - 6);
       }
     }
+    this.ctx.restore();
+  }
+
+  // A village's merchant: a fixed marker (no facing/animation) at the
+  // village's merchantX/Y from the join frame. Distinct color + always-on
+  // label distinguish it from a transient ground-item drop at a glance.
+  drawMerchant(m) {
+    const s = worldToScreen(m.x, m.y);
+    const dx = s.x, dy = s.y;
+    const r = 11;
+    this.ctx.save();
+    this.ctx.fillStyle = "#c084fc";
+    this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(dx, dy - r);
+    this.ctx.lineTo(dx + r, dy);
+    this.ctx.lineTo(dx, dy + r);
+    this.ctx.lineTo(dx - r, dy);
+    this.ctx.closePath();
+    this.ctx.fill();
+    this.ctx.stroke();
+    this.ctx.fillStyle = "#fff";
+    this.ctx.font = "12px sans-serif";
+    this.ctx.textAlign = "center";
+    this.ctx.fillText("Merchant", dx, dy - r - 6);
     this.ctx.restore();
   }
 
