@@ -9,6 +9,7 @@ const { loadCreatureTypes } = require('./creatures');
 const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
+const { fetchShop } = require('../services/merchantStock');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive } = require('./loot');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -41,6 +42,22 @@ function planBind({ villages, gRow, gCol, boundVillageId }) {
   if (!v) return null;
   if (v.id === boundVillageId) return null;
   return v;
+}
+
+const INTERACT_RADIUS = 120; // px: how close a player must stand to trade
+
+// The village whose merchant is nearest to (cx,cy) within `radius`, or null.
+// Villages without a merchant position are skipped.
+function nearestMerchantVillage(villages, cx, cy, radius) {
+  if (!villages || !villages.length) return null;
+  let best = null, bd2 = radius * radius;
+  for (const v of villages) {
+    if (v.merchantX == null || v.merchantY == null) continue;
+    const dx = v.merchantX - cx, dy = v.merchantY - cy;
+    const d2 = dx * dx + dy * dy;
+    if (d2 <= bd2) { bd2 = d2; best = v; }
+  }
+  return best;
 }
 
 // Cap on a single world's un-broadcast attack batch. Attacks arrive from the
@@ -604,6 +621,26 @@ function attachAuthority(httpServer, pool, opts = {}) {
         return;
       }
 
+      if (msg.type === 'interact') {
+        const entry = worlds.get(ws.worldId);
+        if (!entry) return;
+        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
+          try {
+            const p = entry.world.getPlayer(ws.userId);
+            if (!p) return;
+            const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+            const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
+            if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
+            const shop = await fetchShop(pool, village.id);
+            send(ws, { type: 'shop', villageId: village.id, catalog: shop.catalog, buyback: shop.buyback });
+          } catch (err) {
+            console.error('interact failed:', err);
+            send(ws, { type: 'error', message: 'interact failed' });
+          }
+        });
+        return;
+      }
+
       if (msg.type === 'ping') { send(ws, { type: 'pong' }); return; }
     });
 
@@ -844,7 +881,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
 }
 
 module.exports = {
-  attachAuthority, planTransition, planBind,
+  attachAuthority, planTransition, planBind, nearestMerchantVillage, INTERACT_RADIUS,
   // Stash internals, exported for unit test only. Not part of the module's API.
   __test: { pushAttacks, drainAttacks, MAX_PENDING_ATTACKS },
 };
