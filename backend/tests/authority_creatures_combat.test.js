@@ -250,8 +250,8 @@ test('loadCreatureTypes maps defense/resistances and defaults them', async () =>
     { id: 2, name: 'Wolf', color: '#c00', hp: 10, defense: null, resistances: null },
   ] }) };
   const { creatureTypes, creatureTypeIds } = await loadCreatureTypes(pool);
-  assert.deepEqual(creatureTypes[0], { name: 'Slime', hp: 12, color: '#0f0', defense: 1, resistances: { fire: 0.6 } });
-  assert.deepEqual(creatureTypes[1], { name: 'Wolf', hp: 10, color: '#c00', defense: 0, resistances: {} });
+  assert.deepEqual(creatureTypes[0], { name: 'Slime', hp: 12, color: '#0f0', faction: 'hostile', defense: 1, resistances: { fire: 0.6 } });
+  assert.deepEqual(creatureTypes[1], { name: 'Wolf', hp: 10, color: '#c00', faction: 'hostile', defense: 0, resistances: {} });
   assert.equal(creatureTypeIds.get('Slime'), 1);
   assert.equal(creatureTypeIds.get('Wolf'), 2);
 });

@@ -101,6 +101,8 @@ test('POST /api/worlds/:id/regenerate reseeds and clears chunks+creatures', asyn
     [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42' }] })],
     [/DELETE FROM world_chunks WHERE world_id/i, () => ({ rows: [], rowCount: 2 })],
     [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 5 })],
+    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/INSERT INTO world_creatures/i, () => ({ rows: [] })],
     [/UPDATE worlds SET seed/i, (p) => ({ rows: [{ id: 'w1', seed: String(p[0]) }] })],
   ]);
   __setPool(pool);
@@ -109,6 +111,27 @@ test('POST /api/worlds/:id/regenerate reseeds and clears chunks+creatures', asyn
   const deletedChunks = pool.calls.some(c => /DELETE FROM world_chunks/i.test(c.sql));
   const deletedCreatures = pool.calls.some(c => /DELETE FROM world_creatures/i.test(c.sql));
   assert.ok(deletedChunks && deletedCreatures);
+});
+
+test('POST /api/worlds/:id/regenerate re-derives guards for surviving villages', async () => {
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42' }] })],
+    [/DELETE FROM world_chunks WHERE world_id/i, () => ({ rows: [], rowCount: 2 })],
+    [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 5 })],
+    // Villages survive a regenerate (separate table) — the wipe above has no
+    // village_id to spare guards by, so they must be re-inserted afterward.
+    [/FROM villages WHERE world_id/i, () => ({ rows: [{
+      id: 'v1', min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S', spawn_x: 650, spawn_y: 750,
+    }] })],
+    [/INSERT INTO world_creatures/i, () => ({ rows: [] })],
+    [/UPDATE worlds SET seed/i, (p) => ({ rows: [{ id: 'w1', seed: String(p[0]) }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).post('/api/worlds/w1/regenerate').set(...AUTH).send({});
+  assert.equal(res.status, 200);
+  const guardInserts = pool.calls.filter((c) => /INSERT INTO world_creatures/i.test(c.sql)
+    && c.params.includes('Village Guard'));
+  assert.equal(guardInserts.length, 2, 'regenerate must restore exactly two guards for the surviving village');
 });
 
 test('POST /api/worlds/:id/regenerate 404 when absent', async () => {

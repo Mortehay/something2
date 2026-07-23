@@ -117,7 +117,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
-        const { creatureTypes, creatureTypeIds } = await loadCreatureTypes(pool);
+        const { creatureTypes, creatureTypeIds, hostileCreatureTypes } = await loadCreatureTypes(pool);
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const linkRows = await fetchLinks(pool, worldId);
@@ -130,7 +130,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         const entry = {
           worldId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
-          tileTypes, creatureTypes, creatureTypeIds, links, villages,
+          tileTypes, creatureTypes, creatureTypeIds, hostileCreatureTypes, links, villages,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -215,10 +215,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Bounded maps use count-based placement (placeMapCreatures, written to
       // world_creatures by the admin re-roll route); they must NOT run the
       // per-tile roll here, which would scatter creatures onto the wall ring.
-      if (ins.rowCount > 0 && entry.creatureTypes.length && !isBoundedWorld(entry.row)) {
+      if (ins.rowCount > 0 && entry.hostileCreatureTypes.length && !isBoundedWorld(entry.row)) {
         const spawned = spawnChunkCreatures(
           { seed: Number(entry.row.seed), chunkSize: N, tileTypes: entry.tileTypes },
-          cx, cy, entry.creatureTypes,
+          cx, cy, entry.hostileCreatureTypes,
         );
         for (const c of spawned) {
           await pool.query(
@@ -231,8 +231,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const rows = await pool.query(
         // et.defense/et.resistances feed CreatureSim's `mit`; dropping either
         // from this SELECT loads it as undefined and silently makes every
-        // creature resistance inert.
-        `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, et.color, et.defense, et.resistances
+        // creature resistance inert. et.faction/wc.home_x/wc.home_y are the
+        // same kind of column: drop them and guards silently revert to
+        // ordinary roaming hostiles with no anchor.
+        `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
+                et.color, et.defense, et.resistances, et.faction
          FROM world_creatures wc LEFT JOIN entity_types et ON et.name = wc.type
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
@@ -631,7 +634,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
           }
         }
       }
-      entry.world.tickCreatures(dt, entry.activeChunks); // aggro/chase/contact damage + respawns (before state)
+      // aggro/chase/contact damage + respawns (before state). Guard kills route
+      // through onCreatureDeath like every other kill site, so the DELETE +
+      // drop roll stay authoritative.
+      const { killedCreatureIds: killedByGuards } = entry.world.tickCreatures(dt, entry.activeChunks);
+      for (const id of new Set(killedByGuards)) onCreatureDeath(entry, id);
       const { killedCreatureIds: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
       for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);
       // Stashed for this tick's broadcast (below). REPLACED, not appended, so

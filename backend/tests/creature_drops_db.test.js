@@ -50,8 +50,12 @@ test('EVERY creature type has at least one creature_drops row', async (t) => {
     return;
   }
   try {
+    // Scoped to the HOSTILE faction: this invariant is about huntable content —
+    // a mob a player kills must yield something. Guard-faction creatures
+    // (village gate guards) are defenders, not loot piles: they are never a
+    // kill target for progression and deliberately have no drop rule.
     const creatures = await pool.query(
-      'SELECT id, name FROM entity_types WHERE is_creature = true ORDER BY name ASC',
+      "SELECT id, name FROM entity_types WHERE is_creature = true AND faction = 'hostile' ORDER BY name ASC",
     );
     // Guard the guard: if the creature list ever comes back empty this test
     // would "pass" having asserted nothing at all — the vacuous-green failure
@@ -63,7 +67,7 @@ test('EVERY creature type has at least one creature_drops row', async (t) => {
       `SELECT et.name
          FROM entity_types et
          LEFT JOIN creature_drops cd ON cd.entity_type_id = et.id
-        WHERE et.is_creature = true AND cd.id IS NULL
+        WHERE et.is_creature = true AND et.faction = 'hostile' AND cd.id IS NULL
         ORDER BY et.name ASC`,
     );
     assert.deepEqual(dropless.rows.map((r) => r.name), [],
