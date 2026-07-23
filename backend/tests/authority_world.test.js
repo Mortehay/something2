@@ -373,7 +373,9 @@ test('an interrupted player cannot attack, and the refusal costs neither mana no
   const mana0 = p.mana, stamina0 = p.stamina;
   applyShockInterrupt(p, w.now);
   assert.equal(w.canAttack('u1').ok, false, 'canAttack ignored the interrupt');
-  w.attack('u1', 1, 0);
+  const refused = w.attack('u1', 1, 0);
+  assert.deepEqual(refused.attacks, [],
+    'an interrupt-refused attack must still return attacks:[] — a later socket handler destructures it unconditionally');
   assert.equal(p.mana, mana0, 'a refused attack must not spend mana');
   assert.equal(p.stamina, stamina0, 'a refused attack must not spend stamina');
   assert.equal(p._attackCd, 0,
