@@ -324,6 +324,39 @@ test('a SHOCKED creature misses its bite (the interrupt is not PvE-inert)', () =
     'the creature did not recover its bite after the interrupt lapsed');
 });
 
+test('meleeArcTargets lists in-arc creatures without damaging them', () => {
+  const sim = new CreatureSim(stubMap(), rng);
+  sim.addCreatures([creatureAt('a', 100, 108, 40)]);
+  const before = sim.creatures.get('a').hp;
+  const ids = sim.meleeArcTargets(60, 124, 1, 0, 120, 1.8);
+  assert.deepEqual(ids, ['a']);
+  assert.equal(sim.creatures.get('a').hp, before, 'the query must not deal damage');
+});
+
+test('meleeArcTargets excludes a creature outside the angular cone', () => {
+  const sim = new CreatureSim(stubMap(), rng);
+  // Due south of the origin, aim due north — behind the swing.
+  sim.addCreatures([creatureAt('b', 100, 400, 40)]);
+  assert.deepEqual(sim.meleeArcTargets(124, 300, 0, -1, 400, 0.6), []);
+});
+
+test('meleeArcTargets reports a survivor that applyMeleeArc omits', () => {
+  // This is the exact case `hit` exists for: a connected swing that kills
+  // nothing must still read as a hit, not a whiff.
+  const sim = new CreatureSim(stubMap(), rng);
+  sim.addCreatures([creatureAt('tough', 100, 108, 999)]);
+  assert.deepEqual(sim.meleeArcTargets(60, 124, 1, 0, 120, 1.8), ['tough']);
+  assert.deepEqual(sim.applyMeleeArc(60, 124, 1, 0, 120, 1.8, 20), [],
+    'no kills — which is why killed ids cannot stand in for hits');
+});
+
+test('applyMeleeArc still returns the dead ids after the refactor', () => {
+  const sim = new CreatureSim(stubMap(), rng);
+  sim.addCreatures([creatureAt('c', 100, 108, 5)]);
+  assert.deepEqual(sim.applyMeleeArc(60, 124, 1, 0, 120, 1.8, 20), ['c']);
+  assert.equal(sim.creatures.has('c'), false, 'a killed creature is removed');
+});
+
 test('a shocked creature cannot be PERMA-stunned: the immunity window is not refreshed', () => {
   const s = new CreatureSim(stubMap(), rng);
   s.addCreatures([creatureAt('a', 100, 100)]);
