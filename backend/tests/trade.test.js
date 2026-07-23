@@ -76,6 +76,40 @@ test('buying a buyback row deletes it', async () => {
   assert.equal(pool.rolledBack, false);
 });
 
+test('buyStock locks the stock row FOR UPDATE to prevent a concurrent double-sell', async () => {
+  const p = PLAYER();
+  let selectSql = null;
+  const pool = mkPool([
+    [/FROM merchant_stock WHERE id/i, (sql) => { selectSql = sql; return { rows: [{ id: 's1', item_type_id: 3, price: 20, seller_user_id: null, village_id: 'v1' }] }; }],
+    [/UPDATE users SET gold = gold - /i, () => ({ rowCount: 1, rows: [{ gold: 80 }] })],
+    [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new1', item_type_id: 3, quantity: 1 }] })],
+  ]);
+  const r = await buyStock(pool, mkEntry(p), 1, 's1');
+  assert.equal(r.ok, true);
+  assert.match(selectSql, /FOR UPDATE/i, 'stock row must be locked to serialize concurrent buyers');
+});
+
+test('a buyback whose row vanishes out from under the DELETE (lost race) rolls back and grants nothing', async () => {
+  const p = PLAYER();
+  const pool = mkPool([
+    // Row still visible to this transaction's SELECT ... FOR UPDATE (it had to
+    // wait for the winner's lock, then re-read), but by the time this tx's
+    // DELETE runs the row is already gone — defensive rowCount check catches it.
+    [/DELETE FROM merchant_stock/i, () => ({ rowCount: 0 })],
+    [/FROM merchant_stock WHERE id/i, () => ({ rows: [{ id: 's2', item_type_id: 3, price: 5, seller_user_id: 7, village_id: 'v1' }] })],
+    [/UPDATE users SET gold = gold - /i, () => ({ rowCount: 1, rows: [{ gold: 95 }] })],
+    [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new2', item_type_id: 3, quantity: 1 }] })],
+  ]);
+  const r = await buyStock(pool, mkEntry(p), 1, 's2');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /no longer for sale/i);
+  assert.equal(pool.rolledBack, true, 'must roll back when the buyback row is already gone');
+  assert.equal(pool.committed, false, 'must not commit a grant for a row that no longer exists');
+  assert.equal(p.gold, 100, 'wallet must be untouched — no debit persisted in memory');
+  assert.ok(!p.inv.items.some((it) => it.id === 'new2'), 'no item granted');
+  assert.equal(p.inv.items.length, 1, 'inventory unchanged from initial state');
+});
+
 test('buyStock with insufficient gold errors, grants nothing, and rolls back', async () => {
   const p = PLAYER();
   const pool = mkPool([

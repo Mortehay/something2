@@ -14,7 +14,7 @@ async function buyStock(pool, entry, userId, stockId) {
     await client.query('BEGIN');
 
     const sr = await client.query(
-      'SELECT id, item_type_id, price, seller_user_id, village_id FROM merchant_stock WHERE id = $1',
+      'SELECT id, item_type_id, price, seller_user_id, village_id FROM merchant_stock WHERE id = $1 FOR UPDATE',
       [stockId],
     );
     if (sr.rows.length !== 1) {
@@ -45,7 +45,11 @@ async function buyStock(pool, entry, userId, stockId) {
     // A base-catalog row (seller_user_id NULL) is infinite stock; a buyback row is
     // one specific instance and is consumed.
     if (stock.seller_user_id != null) {
-      await client.query('DELETE FROM merchant_stock WHERE id = $1', [stockId]);
+      const del = await client.query('DELETE FROM merchant_stock WHERE id = $1', [stockId]);
+      if (del.rowCount !== 1) {
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'that item is no longer for sale' };
+      }
     }
 
     await client.query('COMMIT');
