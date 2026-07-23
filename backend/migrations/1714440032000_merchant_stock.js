@@ -24,11 +24,18 @@ exports.up = (pgm) => {
     item_type_id: { type: 'integer', notNull: true, references: 'item_types', onDelete: 'CASCADE' },
     price: { type: 'integer', notNull: true },
     // NULL = base catalog (infinite, never expires). Set = a player buyback row.
-    seller_user_id: { type: 'integer', references: 'users', onDelete: 'SET NULL' },
+    //
+    // CASCADE, deliberately NOT "SET NULL": NULL is overloaded here to mean
+    // "base catalog", so nulling a departed seller's row would silently promote
+    // one sold item into permanent, infinite, never-expiring village stock.
+    // Deleting the account drops its personal listings instead.
+    seller_user_id: { type: 'integer', references: 'users', onDelete: 'CASCADE' },
     expires_at: { type: 'timestamptz' },
     quantity: { type: 'integer', notNull: true, default: 1 },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
+  pgm.addConstraint('merchant_stock', 'merchant_stock_price_check', { check: 'price >= 0' });
+  pgm.addConstraint('merchant_stock', 'merchant_stock_quantity_check', { check: 'quantity > 0' });
   pgm.createIndex('merchant_stock', 'village_id');
 };
 
