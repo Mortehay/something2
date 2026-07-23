@@ -250,8 +250,12 @@ export class RenderSystem {
       this.ctx.beginPath();
       this.ctx.ellipse(s.x, cy, rx, rx / 2, 0, from, to);
       this.ctx.stroke();
-      // The two radial edges. Without them a narrow swing (a dagger: 0.6 rad
-      // at reach 80) is a short stub of arc that barely reads as an attack.
+      // The leading radial edge (centre -> the sweeping edge). Without it a
+      // narrow swing (a dagger: 0.6 rad at reach 80) is a short stub of arc
+      // that barely reads as an attack; the spoke gives it a direction. The
+      // trailing edge is intentionally omitted — an open wedge reads as a
+      // moving swipe rather than a static pie slice (verified in a real world;
+      // closing it into a filled wedge is deferred to the slice B polish).
       this.ctx.beginPath();
       this.ctx.moveTo(s.x, cy);
       this.ctx.lineTo(s.x + rx * Math.cos(to), cy + (rx / 2) * Math.sin(to));
