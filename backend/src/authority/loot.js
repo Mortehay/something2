@@ -29,6 +29,16 @@ function rollDrops(dropRows, rng = Math.random) {
   return out;
 }
 
+// Gold amount for a creature death. `range` is {min,max} from entry.creatureGold.
+// Returns 0 when the creature drops no gold (max 0 / missing range). Monotonic
+// in rng so a higher roll never yields less, matching rollDrops' contract.
+function rollGold(range, rng = Math.random) {
+  const max = Math.max(0, Math.floor((range && range.max) || 0));
+  if (max <= 0) return 0;
+  const min = Math.max(0, Math.min(max, Math.floor((range && range.min) || 0)));
+  return min + Math.floor(rng() * (max - min + 1));
+}
+
 // The single authoritative creature-death commit. rowCount === 1 means THIS
 // call finalized the death, which is what licenses the drop roll: two damage
 // sources reporting the same creature id in one tick cannot double-drop, and a
@@ -73,6 +83,19 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
     // Straight into the sim so it appears in the next AOI broadcast rather than
     // waiting for a chunk reload.
     entry.world.groundItems.add(ins.rows);
+  }
+
+  // Gold: one coin-pile ground item carrying the whole amount, when this
+  // creature type has a gold range and the currency type exists.
+  const goldAmt = rollGold(entry.creatureGold && entry.creatureGold.get(dead.type), rng);
+  if (goldAmt > 0 && entry.goldItemTypeId != null) {
+    const gi = await pool.query(
+      `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
+       VALUES ($1, $2, $3, $4, now() + ($5::int * interval '1 millisecond'), $6)
+       RETURNING id, item_type_id, x, y, expires_at, quantity`,
+      [entry.worldId, entry.goldItemTypeId, dropX, dropY, ttlMs, goldAmt],
+    );
+    entry.world.groundItems.add(gi.rows);
   }
 }
 
@@ -193,5 +216,5 @@ async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000, now = Dat
 }
 
 module.exports = {
-  rollDrops, commitCreatureDeath, spawnDrops, claimItem, dropItem, dropGraceActive, DROP_GRACE_MS,
+  rollDrops, rollGold, commitCreatureDeath, spawnDrops, claimItem, dropItem, dropGraceActive, DROP_GRACE_MS,
 };
