@@ -539,7 +539,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
             const target = entry.world.groundItems.nearest(cx, cy, PICKUP_RADIUS);
             if (!target) return; // nothing in range: silent no-op, not an error
-            if (target.item_type_id === entry.goldItemTypeId) {
+            if (target.typeId === entry.goldItemTypeId) {
               const got = await claimGold(pool, entry, ws.userId, target.id);
               if (got) send(ws, { type: 'wallet', gold: got.gold });
             } else {
@@ -668,7 +668,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // pickup (the 'pickup' handler above) never consults this — a
           // deliberate keypress always succeeds.
           if (dropGraceActive(p, it.id, autoLootNow)) continue;
-          if (it.item_type_id === entry.goldItemTypeId) {
+          if (it.typeId === entry.goldItemTypeId) {
             claims.push(claimGold(pool, entry, p.userId, it.id));
           } else {
             claims.push(claimItem(pool, entry, p.userId, it.id));
