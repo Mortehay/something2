@@ -4,9 +4,10 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts, villageMerchantPost } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages } = require('./services/villages');
+const { seedBaseCatalog } = require('./services/merchantStock');
 require('dotenv').config();
 
 const app = express();
@@ -1155,16 +1156,20 @@ app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
     const err = validateVillageBody(req.body, wr.rows[0], existing);
     if (err) return res.status(400).json({ error: err });
     const { min_row, min_col, width, height, gate_edge, spawn_x, spawn_y } = req.body;
+    const mpost = villageMerchantPost({
+      minRow: min_row, minCol: min_col, width, height, gateEdge: gate_edge,
+    });
     const ins = await pool.query(
-      `INSERT INTO villages (world_id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y],
+      `INSERT INTO villages (world_id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, mpost.x, mpost.y],
     );
     const row = ins.rows[0];
     await insertVillageGuards(id, [{
       minRow: row.min_row, minCol: row.min_col,
       width: row.width, height: row.height, gateEdge: row.gate_edge,
     }]);
+    await seedBaseCatalog(pool, id, row.id);
     await invalidateWorld(id);
     res.json(ins.rows[0]);
   } catch (err) {

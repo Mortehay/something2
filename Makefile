@@ -1,6 +1,6 @@
 .PHONY: up down build logs restart rebuild clean shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
-        redis-shell
+        redis-shell admin-password admin-password-rotate
 
 COMPOSE_FILE = compose/docker-compose.yml
 
@@ -62,3 +62,15 @@ engine-logs:
 
 engine-shell:
 	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) exec game-engine sh
+
+# --- Admin -----------------------------------------------------------------
+# Runs on the host so the script parses .env with the same dotenv the backend
+# and node-pg-migrate use; the db port is published on localhost per .env.
+
+# Push the ADMIN_USERNAME/ADMIN_PASSWORD already in .env into the users table.
+admin-password:
+	node backend/scripts/set-admin-password.js
+
+# Generate a fresh random password, write it to .env, then apply it.
+admin-password-rotate:
+	node backend/scripts/set-admin-password.js --rotate

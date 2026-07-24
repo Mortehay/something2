@@ -327,6 +327,12 @@ export default function Something2() {
   const gameRef = useRef(null);
   const engineRef = useRef(null);
   const contentRef = useRef(null); // fullscreen target (wraps the game canvas)
+  // Always holds the LATEST handleEnterChunkedWorld. The doorway-transition
+  // callback is registered once (in the [activeTab] effect) and would otherwise
+  // capture a stale closure — one built before the async map-tiles/worlds/vfx
+  // queries resolved — making a mid-session transition re-init the world with
+  // empty tile defs (terrain then renders as the invisible fallback colour).
+  const handleEnterRef = useRef(null);
   const [activeTab, setActiveTab] = useState('game');
   const [helpOpen, setHelpOpen] = useState(false);
   const [selectedWorldId, setSelectedWorldId] = useState(null);
@@ -445,12 +451,13 @@ export default function Something2() {
       // and Game surfaces it here. Re-running handleEnterChunkedWorld tears
       // down the old authority connection and reconnects to the destination
       // world; the server spawns the rejoining player at the pending arrival.
-      // handleEnterChunkedWorld is a component-scope const defined later in
-      // this same render — safe to reference here because this callback is
-      // only invoked later (on a transition frame), long after the const is
-      // assigned, not during this effect's synchronous execution.
+      // Call through handleEnterRef (updated every render) rather than closing
+      // over handleEnterChunkedWorld directly: this effect runs once on tab
+      // entry, before the async map-tiles/worlds/vfx queries resolve, so a
+      // captured closure would re-init the destination world with empty tile
+      // defs and render the whole map as the invisible fallback colour.
       gameRef.current.setOnTransition((msg) => {
-        if (msg?.toWorldId) handleEnterChunkedWorld(msg.toWorldId);
+        if (msg?.toWorldId) handleEnterRef.current?.(msg.toWorldId);
       });
     }
     return () => {
@@ -494,6 +501,9 @@ export default function Something2() {
       toast.error(err.message);
     }
   };
+  // Keep the transition callback pointed at the current closure (fresh
+  // mapTiles/worlds/vfxEffects) — see handleEnterRef declaration above.
+  handleEnterRef.current = handleEnterChunkedWorld;
 
   // MISMATCH fix: a logged-in player should spawn straight into the canonical
   // entry world, not a world-picker. Prefer the world flagged `is_entry`

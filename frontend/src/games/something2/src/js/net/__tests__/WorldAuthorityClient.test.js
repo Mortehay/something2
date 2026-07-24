@@ -100,3 +100,16 @@ it('a wallet message invokes onWallet with the new balance', () => {
   expect(seen).toHaveLength(1);
   expect(seen[0].gold).toBe(42);
 });
+
+// Slice D (merchant): interacting with a merchant returns its catalog +
+// buyback list on its own message type, distinct from wallet/picked.
+it('a shop message invokes onShop with the catalog and buyback', () => {
+  const seen = [];
+  const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', onShop: (m) => seen.push(m) });
+  c.connect('w1');
+  FakeWS.last._l.open();
+  FakeWS.last._l.message({ data: JSON.stringify({ type: 'shop', villageId: 'v1', catalog: [{ id: 's1' }], buyback: [] }) });
+  expect(seen).toHaveLength(1);
+  expect(seen[0].villageId).toBe('v1');
+  expect(seen[0].catalog).toHaveLength(1);
+});

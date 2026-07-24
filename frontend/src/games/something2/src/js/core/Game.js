@@ -106,6 +106,15 @@ export class Game {
         // never enters the inventory (see onPicked/onWallet below).
         this.gold = 0;
 
+        // Merchant + shop (Slice D): `merchants` is the join-time list of
+        // village merchant markers to render; `shop` is the catalog/buyback
+        // snapshot from the last `shop` message (null when no shop is open),
+        // and `shopOpen` gates the panel render/input independently of
+        // `shop` itself staying populated across a close/reopen.
+        this.merchants = [];
+        this.shop = null;
+        this.shopOpen = false;
+
         // Transient on-screen toast (Slice 3b fast-follow F3): the server's
         // rejection frames (equip/drop/etc "error" replies) previously only
         // hit console.error, so a rejected action produced no in-game
@@ -268,6 +277,9 @@ export class Game {
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
         this.gold = 0;
+        this.merchants = [];
+        this.shop = null;
+        this.shopOpen = false;
         this.blasts = [];
         this.vfx = [];
         this.noAmmoUntil = 0;
@@ -290,6 +302,7 @@ export class Game {
                     applyJoined(this.inventory, msg);
                     this.autoLoot = msg.autoLoot === true;
                     this.gold = Number(msg.gold) || 0;
+                    this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
                     resolve(msg.spawn);
                 },
                 onState: (msg) => this._onWorldState(msg),
@@ -300,6 +313,17 @@ export class Game {
                 // never sends a `picked` frame for it, only this wallet
                 // balance (see onPicked above — items only).
                 onWallet: (msg) => { this.gold = Number(msg.gold) || 0; },
+                // Interacting near a merchant opens the panel with its
+                // current stock; the server is the sole source of truth for
+                // catalog/buyback/prices, so this simply mirrors the frame.
+                onShop: (msg) => { this.shop = { villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [] }; this.shopOpen = true; },
+                // A trade lands its inventory/wallet effect via the existing
+                // item/gold plumbing (addItem/removeItem, wallet frame); what
+                // 'bought'/'sold' add on top is re-issuing `interact` so the
+                // now-stale catalog/buyback the panel is showing gets
+                // refreshed from the server rather than guessed locally.
+                onBought: (msg) => { if (msg.item) addItem(this.inventory, msg.item); if (this.authorityClient) this.authorityClient.sendInteract(); },
+                onSold: (msg) => { removeItem(this.inventory, msg.itemId); if (this.authorityClient) this.authorityClient.sendInteract(); },
                 onDropped: (msg) => {
                     removeItem(this.inventory, msg.itemId);
                     if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
@@ -584,6 +608,9 @@ export class Game {
                 groundItems: this.groundItems.all(),
                 autoLoot: this.autoLoot,
                 gold: this.gold,
+                merchants: this.merchants,
+                shop: this.shop,
+                shopOpen: this.shopOpen,
                 toast: this.toast,
                 blasts: this.blasts,
                 vfx: this.vfx,
@@ -657,6 +684,20 @@ export class Game {
         }
     }
 
+    // Hit-test the shop panel's buy/sell/close rects RenderSystem recorded
+    // while drawing it (same convention as _handleInventoryClick above, read
+    // from _shopHitAreas instead of _invHitAreas). Buy/sell just forward the
+    // stock/item id to the server — the server re-validates gold, proximity,
+    // and ownership; this click only expresses intent.
+    _handleShopClick(cx, cy) {
+        const hitAreas = (this.renderSystem && this.renderSystem._shopHitAreas) || [];
+        const hit = hitAreas.find((a) => cx >= a.x && cx <= a.x + a.w && cy >= a.y && cy <= a.y + a.h);
+        if (!hit) return;
+        if (hit.kind === 'close') { this.shopOpen = false; return; }
+        if (hit.kind === 'buy') { if (this.authorityClient) this.authorityClient.sendBuy(hit.id); return; }
+        if (hit.kind === 'sell') { if (this.authorityClient) this.authorityClient.sendSell(hit.id); return; }
+    }
+
     setupInput(){
         if (this._inputAttached) return;
         this._inputAttached = true;
@@ -666,19 +707,35 @@ export class Game {
             this.keys[key] = true;
 
             // Inventory / paper-doll toggle (replaces the retired number-key
-            // weapon switch — equipping now goes through the panel).
-            if (key === 'i' && this.state === 'playing' && this.chunked && !e.repeat) {
+            // weapon switch — equipping now goes through the panel). Gated on
+            // !shopOpen so the two centred panels can never stack (the shop is
+            // closed with 'e' or Escape first).
+            if (key === 'i' && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen) {
                 this.inventoryOpen = !this.inventoryOpen;
                 if (!this.inventoryOpen) this.inventorySelectedItemId = null;
             }
 
             if(key === 'escape'){
                 console.log("Escape pressed, current state:", this.state);
-                if(this.state === 'playing'){
+                if (this.shopOpen) {
+                    this.shopOpen = false;
+                } else if(this.state === 'playing'){
                     this.pause();
                 }else if(this.state === 'paused'){
                     this.resume();
                 }
+            }
+
+            // Merchant interact (Slice D): 'e' either closes an already-open
+            // shop panel or asks the server whether a merchant is in range
+            // (a 'shop' frame comes back only if one is; see onShop above).
+            // Gated on !inventoryOpen like 'g' pickup — the two panels don't
+            // stack, and game-world intents don't fire while one consumes
+            // input.
+            if (key === 'e' && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen) {
+                if (this.shopOpen) { this.shopOpen = false; return; }
+                if (this.authorityClient) this.authorityClient.sendInteract();
+                return;
             }
 
             if (key === 'g' && this.state === 'playing') {
@@ -728,8 +785,14 @@ export class Game {
         this._mouseDownHandler = (e) => {
             if (e.button !== 0) return;
             if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
-            // While the panel is open, clicks hit-test it and must NOT also
-            // fire an attack.
+            // While a panel is open, clicks hit-test it and must NOT also
+            // fire an attack. Shop is checked first — the two panels never
+            // stack (see the 'e'/'i' key handlers above), but if they ever
+            // did, an open shop should still consume the click.
+            if (this.shopOpen) {
+                this._handleShopClick(this._cursorX ?? 0, this._cursorY ?? 0);
+                return;
+            }
             if (this.inventoryOpen) {
                 this._handleInventoryClick(this._cursorX ?? 0, this._cursorY ?? 0);
                 return;

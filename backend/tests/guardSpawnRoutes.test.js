@@ -21,6 +21,7 @@ test('creating a village inserts two Village Guard creatures at the gate posts',
     [/SELECT min_row, min_col, width, height FROM villages WHERE world_id/i, () => ({ rows: [] })],
     [/INSERT INTO villages/i, () => ({ rows: [{ id: 'v1', min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S' }] })],
     [/INSERT INTO world_creatures/i, () => ({ rows: [] })],
+    [/INSERT INTO merchant_stock/i, () => ({ rows: [] })],
     [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
   ]);
   __setPool(pool);

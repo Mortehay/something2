@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWallet, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWallet, onShop, onBought, onSold, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -18,6 +18,9 @@ export class WorldAuthorityClient {
     this.onPicked = onPicked || (() => {});
     this.onDropped = onDropped || (() => {});
     this.onWallet = onWallet || (() => {});
+    this.onShop = onShop || (() => {});
+    this.onBought = onBought || (() => {});
+    this.onSold = onSold || (() => {});
     this.onNoAmmo = onNoAmmo || (() => {});
     this.onAmmo = onAmmo || (() => {});
     this.onTransition = onTransition || (() => {});
@@ -27,6 +30,12 @@ export class WorldAuthorityClient {
     this.ws = null;
     this.connected = false;
     this.joined = false;
+    // Set by disconnect(): once we intentionally tear a socket down, its
+    // graceful close() may still be in flight, so late frames (notably a
+    // 'kicked' the server sends when our own reconnect trips the single-session
+    // guard) can still arrive. This flag makes the message handler drop them so
+    // a self-inflicted kick can't corrupt an intentional reconnect.
+    this._closed = false;
     this.worldId = null;
     this._seq = 0;
     this._accumDt = 0;
@@ -34,6 +43,7 @@ export class WorldAuthorityClient {
   }
 
   connect(worldId) {
+    this._closed = false;
     this.worldId = worldId;
     const sep = this.url.includes('?') ? '&' : '?';
     const wsUrl = `${this.url}${sep}token=${encodeURIComponent(this.token)}`;
@@ -44,6 +54,9 @@ export class WorldAuthorityClient {
       this._send({ type: 'join', world_id: worldId });
     });
     this.ws.addEventListener('message', (event) => {
+      // Drop anything that lands after an intentional disconnect — the socket
+      // is being replaced and its late frames are no longer ours to act on.
+      if (this._closed) return;
       let msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       this._handleMessage(msg);
@@ -65,6 +78,9 @@ export class WorldAuthorityClient {
       case 'picked': this.onPicked(msg); break;
       case 'dropped': this.onDropped(msg); break;
       case 'wallet': this.onWallet(msg); break;
+      case 'shop': this.onShop(msg); break;
+      case 'bought': this.onBought(msg); break;
+      case 'sold': this.onSold(msg); break;
       // Sent to this socket alone when a shot was refused for an empty ammo
       // stack. The server consumed NO cooldown, so this is purely a cue to
       // the player — nothing local needs rolling back.
@@ -114,8 +130,14 @@ export class WorldAuthorityClient {
   sendPickup() { this._send({ type: 'pickup' }); }
   sendDrop(itemId) { this._send({ type: 'drop', itemId }); }
   sendAutoLoot(on) { return this._send({ type: 'autoloot', on: on === true }); }
+  sendInteract() { this._send({ type: 'interact' }); }
+  sendBuy(stockId) { this._send({ type: 'buy', stockId }); }
+  sendSell(itemId) { this._send({ type: 'sell', itemId }); }
 
   disconnect() {
+    // Mark closed BEFORE close() so any frame still queued on the socket is
+    // ignored by the message handler rather than dispatched to callbacks.
+    this._closed = true;
     if (this.ws) { try { this.ws.close(); } catch { /* already closed */ } this.ws = null; }
     this.connected = false; this.joined = false;
   }

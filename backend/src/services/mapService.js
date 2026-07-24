@@ -513,6 +513,26 @@ function villageGatePosts(v) {
   return cells.map(([r, c]) => ({ x: c * 100 + 50, y: r * 100 + 50 }));
 }
 
+// Where the village merchant stands: on the gate's centre line, one tile deeper
+// into the village than the guard posts, clamped into the interior so a
+// minimum-size village still yields a legal interior tile.
+function villageMerchantPost(v) {
+  const rMax = v.minRow + v.height - 1;
+  const cMax = v.minCol + v.width - 1;
+  const midCol = v.minCol + Math.floor(v.width / 2);
+  const midRow = v.minRow + Math.floor(v.height / 2);
+  const loR = v.minRow + 1, hiR = rMax - 1;
+  const loC = v.minCol + 1, hiC = cMax - 1;
+  const clampR = (r) => Math.min(hiR, Math.max(loR, r));
+  const clampC = (c) => Math.min(hiC, Math.max(loC, c));
+  let row, col;
+  if (v.gateEdge === 'S')      { row = clampR(rMax - 2); col = clampC(midCol); }
+  else if (v.gateEdge === 'N') { row = clampR(v.minRow + 2); col = clampC(midCol); }
+  else if (v.gateEdge === 'W') { row = clampR(midRow); col = clampC(v.minCol + 2); }
+  else                         { row = clampR(midRow); col = clampC(cMax - 2); }
+  return { x: col * 100 + 50, y: row * 100 + 50 };
+}
+
 function stampVillage(grid, rMin, cMin, rows, cols, village) {
   const { minRow, minCol, width, height, wallTile, gateTile } = village;
   const rMax = minRow + height - 1;
@@ -762,6 +782,7 @@ module.exports = {
     pointInVillageBox,
     villageContaining,
     villageGatePosts,
+    villageMerchantPost,
     DOORWAY_TILES,
     oppositeEdge,
     edgeOfDoorwayTile,
