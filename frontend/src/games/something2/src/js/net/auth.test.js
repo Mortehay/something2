@@ -6,7 +6,7 @@ import {
   getStoredToken,
   clearToken,
   authHeaders,
-} from "./EngineClient.js";
+} from "./auth.js";
 
 // A minimal in-memory localStorage stand-in — the vitest env is `node`, which
 // has no localStorage. The helpers read globalThis.localStorage.

@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { HiOutlineTrash, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineMap } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
-import { getStoredToken, parseJwt, clearToken, authHeaders, AUTH_EXPIRED_EVENT } from "./src/js/net/EngineClient.js";
+import { getStoredToken, parseJwt, clearToken, authHeaders, AUTH_EXPIRED_EVENT } from "./src/js/net/auth.js";
 import Login from "../../pages/Login.jsx";
 import { useMapTiles, useMapConfig, useVfxEffects } from "./useMaps.js";
 import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";

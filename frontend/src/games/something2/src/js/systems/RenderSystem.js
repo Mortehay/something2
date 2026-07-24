@@ -71,31 +71,6 @@ export class RenderSystem {
     return out;
   }
 
-  render(player, camera, map, remotePlayers, localUserId) {
-    // Timestamp for this frame; animated sprites advance off it.
-    this.nowMs = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
-    // Background
-    this.ctx.fillStyle = "#0f3460";
-    this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
-    camera.apply(this.ctx);
-
-    // Tiles (drawn first; they underlay all sprites).
-    map.render(this.ctx, camera);
-
-    // Depth-sorted sprites (entities + local + remote players interleaved).
-    const drawables = RenderSystem.buildDrawables(player, map, remotePlayers);
-    for (const d of drawables) {
-      if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
-      else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
-      else this.drawEntity(d.ref);
-    }
-
-    camera.reset(this.ctx);
-
-    this.renderHud({ player, remotePlayers, localUserId });
-  }
-
   renderChunked({
     player, camera, chunkedMap, remotePlayers, localUserId,
     creatures = [], projectiles = [], mana = null, maxMana = null,
