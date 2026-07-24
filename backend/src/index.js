@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { rateLimit } = require('express-rate-limit');
 const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
@@ -15,8 +16,38 @@ const port = process.env.PORT || 3101;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// A modest global rate limit in front of the whole router (SOMET-189 /
+// F-009). /api/auth already has its own tighter, credential-aware limiter
+// (auth/routes.js authRateLimiter); this one is the backstop for every other
+// route, none of which had any limiter at all. Factored out (default limit
+// applied below) so a test can build a much lower-ceiling instance on a
+// scratch app instead of firing 300 real requests to prove it works.
+function apiRateLimiter(limit = 300, windowMs = 60 * 1000) {
+  return rateLimit({ windowMs, limit, standardHeaders: true, legacyHeaders: false });
+}
+app.use(apiRateLimiter());
+
+// Body-size ceiling (SOMET-189 / F-009). express.json/urlencoded ran as
+// app-level middleware ahead of routing AND ahead of every auth guard at a
+// 50mb limit, so it applied to unauthenticated requests against ANY path --
+// including ones with no route at all. Confirmed live: a single
+// unauthenticated ~44MB JSON POST to /api/health (a route that accepts no
+// body) was fully buffered and parsed before the 404 was produced, and
+// backend RSS jumped from ~37MiB to ~181MiB for that one request.
+//
+// 256kb comfortably covers every route's legitimate payload except the
+// map-entities bulk upload, which needs headroom for a full map's obstacle
+// array. That route gets its own larger, path-scoped parser registered
+// FIRST: body-parser no-ops on a second parse attempt once req._body is set
+// (node_modules/body-parser/lib/types/json.js), so registering the tighter
+// global limit first would silently pre-empt any larger per-route override
+// declared later inside the route itself -- the ordering here, not just the
+// limit, is what makes the exception real.
+const ENTITY_UPLOAD_PATH = '/api/maps/:id/entities';
+app.use(ENTITY_UPLOAD_PATH, express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '256kb' }));
+app.use(express.urlencoded({ limit: '256kb', extended: true }));
 
 // Database setup
 let pool = new Pool({
@@ -1571,4 +1602,4 @@ if (require.main === module) {
   console.log('Authority WS attached at /authority');
 }
 
-module.exports = { app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType };
+module.exports = { app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, apiRateLimiter };
