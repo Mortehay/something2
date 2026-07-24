@@ -907,6 +907,10 @@ test('reconcile is idempotent: a second run creates nothing', async () => {
 
   assert.strictEqual(client.creates.length, 1);
   assert.deepStrictEqual(second.created, []);
+  // Without this, the test passes even if the snapshot early-return is deleted:
+  // the !plane_id guard alone stops a second create, so an unchanged finding
+  // would silently re-PATCH its issue on every run.
+  assert.strictEqual(client.patches.length, 0);
 });
 
 test('reconcile patches an issue whose severity changed', async () => {
@@ -974,7 +978,9 @@ function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function summarize(claim) {
@@ -1017,15 +1023,23 @@ async function reconcile({ doc, client, epicId, labelIds = [], dryRun = false })
     }
 
     if (!f.plane_id) {
-      created.push(f.id);
+      // A finding can already be `fixed` the first time it is synced. Creating
+      // it in the default open state would strand it: the snapshot stamped
+      // below already encodes status `fixed`, so the drift check matches on
+      // every later run and nothing ever patches it to Done.
+      const isFixed = f.status === 'fixed';
+      if (isFixed) closed.push(f.id);
+      else created.push(f.id);
       if (dryRun) continue;
-      const issue = await client.createIssue({
+      const payload = {
         name: renderTitle(f),
         description_html: renderBody(f),
         priority: PRIORITY_BY_SEVERITY[f.severity],
         labels: labelIds,
         parent: epicId,
-      });
+      };
+      if (isFixed) payload.state = PLANE.doneStateId;
+      const issue = await client.createIssue(payload);
       f.plane_id = issue.id;
       f.plane_key = issue.sequence_id ? `SOMET-${issue.sequence_id}` : undefined;
       f.synced_snapshot = snapshot(f);
