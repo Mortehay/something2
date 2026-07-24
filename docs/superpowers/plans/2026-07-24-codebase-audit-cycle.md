@@ -937,6 +937,18 @@ test('reconcile closes an issue whose finding is fixed', async () => {
   assert.strictEqual(client.patches.at(-1).patch.state, PLANE.doneStateId);
 });
 
+test('reconcile creates a pre-fixed finding directly into the done state', async () => {
+  const client = new FakeClient();
+  const doc = { version: 1, findings: [finding({ status: 'fixed', plane_id: null })] };
+
+  const result = await reconcile({ doc, client, epicId: 'epic-1', labelIds: [] });
+
+  assert.strictEqual(client.creates.length, 1);
+  assert.strictEqual(client.creates[0].state, PLANE.doneStateId);
+  assert.deepStrictEqual(result.closed, ['F-001']);
+  assert.deepStrictEqual(result.created, []);
+});
+
 test('reconcile never files an unverified finding', async () => {
   const client = new FakeClient();
   const doc = { version: 1, findings: [finding({ status: 'unverified' })] };
@@ -1075,7 +1087,7 @@ module.exports = { renderTitle, renderBody, snapshot, reconcile };
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd tools/audit && node --test test/sync.test.js`
-Expected: PASS — 9 tests, 0 failures
+Expected: PASS — 10 tests, 0 failures
 
 - [ ] **Step 5: Run the whole toolkit suite**
 
