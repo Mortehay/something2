@@ -42,6 +42,14 @@ const adminGuard = requireAdmin(guardPool);
 // Reject anything that isn't a bare job id before it ever reaches the proxy.
 const JOB_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
+// Upper bound for PUT /api/worlds/:id creature_count (SOMET-188 / F-008).
+const MAX_CREATURE_COUNT = 2000;
+// Upper bound for POST /api/maps/generate rows/cols. This route eagerly
+// builds an rows*cols in-memory array and JSON.stringifies the whole thing
+// into a single row, unlike chunked worlds -- an unvalidated 100000x100000
+// request exhausts the heap (SOMET-188 / F-008).
+const MAX_MAP_DIM = 500;
+
 // World preview memo
 const PREVIEW_DIM = 64;
 const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path grid)
@@ -613,13 +621,18 @@ app.get('/api/maps/:id', async (req, res) => {
 app.post('/api/maps/generate', adminGuard, async (req, res) => {
   try {
     const { name, description, rows = 100, cols = 100, seed } = req.body;
+    const r = Number.isFinite(rows) ? Math.floor(rows) : NaN;
+    const c = Number.isFinite(cols) ? Math.floor(cols) : NaN;
+    if (!Number.isInteger(r) || !Number.isInteger(c) || r < 1 || r > MAX_MAP_DIM || c < 1 || c > MAX_MAP_DIM) {
+      return res.status(400).json({ error: `rows and cols must be integers between 1 and ${MAX_MAP_DIM}` });
+    }
 
-    console.log(`Generating map: ${name} (${rows}x${cols})`);
+    console.log(`Generating map: ${name} (${r}x${c})`);
 
     // Fetch tile types from DB for generation
     const tileTypes = await getTileTypesMap();
     const worldSeed = Number.isFinite(seed) ? seed : Date.now();
-    const mapData = generateWorld(rows, cols, tileTypes, { seed: worldSeed });
+    const mapData = generateWorld(r, c, tileTypes, { seed: worldSeed });
     
     const result = await pool.query(
       'INSERT INTO maps (name, data, description) VALUES ($1, $2, $3) RETURNING id, name, created_at',
@@ -1113,7 +1126,17 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     if (w !== null && (w < 8 || w > 4096 || h < 8 || h > 4096)) {
       return res.status(400).json({ error: 'width and height must be between 8 and 4096 tiles' });
     }
-    const count = Number.isFinite(creature_count) ? Math.max(0, Math.floor(creature_count)) : 0;
+    // POST /api/worlds/:id/creatures re-rolls this many creatures with one
+    // generateRegion() call and one INSERT round-trip per placement attempt
+    // (SOMET-188 / F-008) -- an unbounded count ties up the request and a
+    // pool connection indefinitely. MapsAdmin's Creatures field is a plain
+    // <input type="number"> with no max, so this server-side cap is the only
+    // real gate.
+    const countRaw = Number.isFinite(creature_count) ? Math.floor(creature_count) : 0;
+    if (countRaw > MAX_CREATURE_COUNT) {
+      return res.status(400).json({ error: `creature_count must be between 0 and ${MAX_CREATURE_COUNT}` });
+    }
+    const count = Math.max(0, countRaw);
     const allowed = Array.isArray(allowed_creature_types)
       ? allowed_creature_types.filter((t) => typeof t === 'string')
       : [];

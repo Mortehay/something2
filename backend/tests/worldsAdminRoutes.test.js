@@ -60,6 +60,33 @@ test('PUT /api/worlds/:id updates and returns the row', async () => {
   assert.equal(res.body.name, 'Renamed');
 });
 
+// F-008 (SOMET-188): creature_count had no server-side upper bound. The
+// re-roll route (POST /api/worlds/:id/creatures) issues one generateRegion()
+// call and one INSERT round-trip per placement attempt, so an admin-supplied
+// count in the hundreds of thousands ties up the request and a pool
+// connection indefinitely. MapsAdmin's Creatures field is a plain
+// <input type="number"> with no max, so this cap has to live server-side.
+test('PUT /api/worlds/:id rejects a creature_count above the cap', async () => {
+  __setPool(mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],
+  ]));
+  const res = await request(app).put('/api/worlds/w1').set(...AUTH)
+    .send({ name: 'Big', width: 24, height: 24, creature_count: 200000 });
+  assert.equal(res.status, 400);
+});
+
+test('PUT /api/worlds/:id accepts a creature_count at the cap', async () => {
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],
+    [/UPDATE worlds SET/i, (p) => ({ rows: [{ id: 'w1', name: p[0], creature_count: p[3] }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).put('/api/worlds/w1').set(...AUTH)
+    .send({ name: 'AtCap', width: 24, height: 24, creature_count: 2000 });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.creature_count, 2000);
+});
+
 test('PUT /api/worlds/:id 404 when the row is absent', async () => {
   __setPool(mockPool([
     [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [] })],
