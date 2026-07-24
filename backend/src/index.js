@@ -87,6 +87,14 @@ function catalogNameTooLong(name) {
   return typeof name === 'string' && name.length > MAX_CATALOG_NAME_LEN;
 }
 
+// Postgres unique_violation. worlds.name gained a unique constraint
+// (SOMET-224 / F-044, migration 1714440037000) matching the one
+// tile_types/entity_types/item_types have always had; this turns the raw
+// constraint error into a clean 409 instead of the generic 500 catch-all.
+function isUniqueViolation(err) {
+  return !!err && err.code === '23505';
+}
+
 // Upper bound for PUT /api/worlds/:id creature_count (SOMET-188 / F-008).
 const MAX_CREATURE_COUNT = 2000;
 // Upper bound for POST /api/maps/generate rows/cols. This route eagerly
@@ -1135,6 +1143,9 @@ app.post('/api/worlds', adminGuard, async (req, res) => {
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({ error: 'a world with that name already exists' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to create world' });
   }
@@ -1280,6 +1291,9 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     const liveWarning = boundsChanged ? evictOrWarn(id) : undefined;
     res.json(liveWarning ? { ...result.rows[0], liveWarning } : result.rows[0]);
   } catch (err) {
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({ error: 'a world with that name already exists' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to update world' });
   }

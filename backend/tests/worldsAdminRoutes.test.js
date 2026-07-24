@@ -68,6 +68,25 @@ test('PUT /api/worlds/:id updates and returns the row', async () => {
   assert.equal(res.body.name, 'Renamed');
 });
 
+// F-044 (SOMET-224): renaming a world into collision with another world's
+// name must surface the same clean 409 POST /api/worlds now does, not the
+// generic 500 catch-all a raw Postgres unique_violation would produce.
+test('PUT /api/worlds/:id returns 409 on a rename that collides with another world', async () => {
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],
+    [/UPDATE worlds SET/i, () => {
+      const err = new Error('duplicate key value violates unique constraint "worlds_name_unique"');
+      err.code = '23505';
+      throw err;
+    }],
+  ]);
+  __setPool(pool);
+  const res = await request(app).put('/api/worlds/w1').set(...AUTH)
+    .send({ name: 'AlreadyTaken', width: 24, height: 24 });
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /already exists/i);
+});
+
 // F-008 (SOMET-188): creature_count had no server-side upper bound. The
 // re-roll route (POST /api/worlds/:id/creatures) issues one generateRegion()
 // call and one INSERT round-trip per placement attempt, so an admin-supplied
