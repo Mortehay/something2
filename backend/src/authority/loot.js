@@ -213,22 +213,27 @@ async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000, now = Dat
     return { ok: false, reason: 'unequip it first' };
   }
 
-  // The user_id predicate IS the ownership check — a forged itemId naming
-  // someone else's item deletes nothing.
-  const del = await pool.query(
-    'DELETE FROM player_items WHERE id = $1 AND user_id = $2 RETURNING item_type_id, quantity',
-    [itemId, userId],
-  );
-  if (del.rowCount !== 1) return { ok: false, reason: 'you do not own that item' };
-
   const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
-  const ins = await pool.query(
-    `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
-     VALUES ($1, $2, $3, $4, now() + ($5::int * interval '1 millisecond'), $6)
+  // One statement does the DELETE ... RETURNING and the world_items INSERT
+  // together via a CTE (mirrors claimItem), so Postgres commits or rolls
+  // back both as a unit. Previously this was two independent pool.query
+  // calls (two connections, two implicit transactions): a failure between
+  // them — a dropped connection, a pool timeout, or world_items.world_id's
+  // FK rejecting because an admin deleted the world out from under a live
+  // session — committed the DELETE and never ran the INSERT, destroying the
+  // item (F-016 / SOMET-196). The user_id predicate IS the ownership check —
+  // a forged itemId naming someone else's item deletes (and therefore
+  // inserts) nothing.
+  const r = await pool.query(
+    `WITH d AS (DELETE FROM player_items WHERE id = $1 AND user_id = $2 RETURNING item_type_id, quantity)
+     INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
+     SELECT $3, item_type_id, $4, $5, now() + ($6::int * interval '1 millisecond'), quantity FROM d
      RETURNING id, item_type_id, x, y, expires_at, quantity`,
-    [entry.worldId, del.rows[0].item_type_id, cx, cy, ttlMs, del.rows[0].quantity],
+    [itemId, userId, entry.worldId, cx, cy, ttlMs],
   );
-  entry.world.groundItems.add(ins.rows);
+  if (r.rowCount !== 1) return { ok: false, reason: 'you do not own that item' };
+
+  entry.world.groundItems.add(r.rows);
   // Bound p.dropGrace: entries only get pruned opportunistically when looked
   // up by dropGraceActive (i.e. while the item is still in pickup range), so
   // an item dropped with auto-loot off, or one the player walks away from,
@@ -238,9 +243,9 @@ async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000, now = Dat
   for (const [id, exp] of p.dropGrace) {
     if (exp <= now) p.dropGrace.delete(id);
   }
-  p.dropGrace.set(ins.rows[0].id, now + graceMs);
+  p.dropGrace.set(r.rows[0].id, now + graceMs);
   p.inv.items = p.inv.items.filter((it) => it.id !== itemId);
-  return { ok: true, item: ins.rows[0] };
+  return { ok: true, item: r.rows[0] };
 }
 
 module.exports = {

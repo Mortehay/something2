@@ -272,36 +272,65 @@ test('dropping an equipped item is rejected and touches no table', async () => {
 
 test("dropping another user's item deletes nothing and spawns nothing", async () => {
   const entry = armDropEntry();
-  // The user_id predicate matches no row -> rowCount 0.
-  const pool = scriptedPool([[/DELETE FROM player_items/i, { rows: [], rowCount: 0 }]]);
+  // The user_id predicate matches no row in the CTE's DELETE, so the INSERT's
+  // "SELECT ... FROM d" has nothing to project -> rowCount 0 for the whole
+  // statement.
+  const pool = scriptedPool([[DROP_RE, { rows: [], rowCount: 0 }]]);
 
   const r = await dropItem(pool, entry, 'u1', 'not-mine', { ttlMs: 1000 });
 
   assert.strictEqual(r.ok, false);
-  assert.strictEqual(pool.matching(/INSERT INTO world_items/i).length, 0);
+  assert.strictEqual(entry.world.groundItems.count(), 0, 'nothing spawned in the sim');
   // Scripting rowCount 0 alone proves nothing about the query that was
   // actually issued — a test that only asserts a consequence of a result it
   // supplied itself never observes the ownership predicate. Assert on the
-  // DELETE that was actually sent: both that its WHERE clause still filters
-  // by user_id, and that the bound params are (itemId, callerId) — not
-  // attacker-controlled data standing in for the caller. Without this, a
+  // statement that was actually sent: both that its WHERE clause still
+  // filters by user_id, and that the bound params are (itemId, callerId) —
+  // not attacker-controlled data standing in for the caller. Without this, a
   // refactor that deletes "AND user_id = $2" from the SQL (while leaving the
   // params array untouched) would leave `r.ok === false` on THIS particular
   // scripted call yet stay green, because nothing here forces the SQL
   // itself to still contain the check.
-  const del = pool.matching(/DELETE FROM player_items/i)[0];
-  assert.match(del.sql, /user_id\s*=\s*\$2/i,
+  const q = pool.matching(DROP_RE)[0];
+  assert.match(q.sql, /user_id\s*=\s*\$2/i,
     'the DELETE must filter by ownership (user_id), not just the item id');
-  assert.deepStrictEqual(del.params, ['not-mine', 'u1'],
+  assert.deepStrictEqual(q.params.slice(0, 2), ['not-mine', 'u1'],
     'ownership predicate must bind the CALLER (u1), not the forged itemId, as user_id');
+});
+
+// F-016 (SOMET-196): dropItem used to issue the DELETE FROM player_items and
+// the INSERT INTO world_items as two INDEPENDENT pool.query calls -- two
+// separate connections, two separate implicit transactions. A failure between
+// them (a dropped connection, a world row deleted out from under a live
+// session so the INSERT's FK rejects, a pool timeout) committed the DELETE
+// and never ran the INSERT: the item vanished from the account and never
+// reached the ground. This test pins the structural fix directly: the pair
+// must reach the pool as ONE statement, matching claimItem's CTE pattern, so
+// Postgres commits or rolls back both as a unit. Against the old two-call
+// implementation this fails with `calls.length === 2`.
+const DROP_RE = /^\s*WITH d AS/i;
+
+test('dropItem persists the delete+insert as ONE atomic statement, not two independent pool.query calls', async () => {
+  const entry = armDropEntry();
+  const pool = scriptedPool([
+    [DROP_RE, (p) => ({
+      rows: [{ id: 'g9', item_type_id: 7, x: p[3], y: p[4], expires_at: '2999-01-01T00:00:00Z' }],
+      rowCount: 1,
+    })],
+  ]);
+
+  const r = await dropItem(pool, entry, 'u1', 'i1', { ttlMs: 1000 });
+
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(pool.calls.length, 1,
+    'the delete and the insert must reach the pool as a single atomic statement, not two independent queries');
 });
 
 test('a successful drop spawns a ground item at the player centre and removes the instance', async () => {
   const entry = armDropEntry();
   const pool = scriptedPool([
-    [/DELETE FROM player_items/i, { rows: [{ item_type_id: 7 }], rowCount: 1 }],
-    [/INSERT INTO world_items/i, (p) => ({
-      rows: [{ id: 'g9', item_type_id: p[1], x: p[2], y: p[3], expires_at: '2999-01-01T00:00:00Z' }],
+    [DROP_RE, (p) => ({
+      rows: [{ id: 'g9', item_type_id: 7, x: p[3], y: p[4], expires_at: '2999-01-01T00:00:00Z' }],
       rowCount: 1,
     })],
   ]);
@@ -310,8 +339,8 @@ test('a successful drop spawns a ground item at the player centre and removes th
 
   assert.strictEqual(r.ok, true);
   const p = entry.world.getPlayer('u1');
-  const ins = pool.matching(/INSERT INTO world_items/i)[0];
-  assert.deepStrictEqual(ins.params.slice(0, 4), ['w1', 7, p.x + p.width / 2, p.y + p.height / 2]);
+  const q = pool.matching(DROP_RE)[0];
+  assert.deepStrictEqual(q.params.slice(0, 5), ['i1', 'u1', 'w1', p.x + p.width / 2, p.y + p.height / 2]);
   assert.strictEqual(entry.world.groundItems.count(), 1);
   assert.strictEqual(p.inv.items.length, 0, 'no longer owned');
 });
@@ -324,9 +353,8 @@ test('a successful drop spawns a ground item at the player centre and removes th
 // `now` values (never a real sleep) so the window's expiry is deterministic.
 function scriptedDropPool() {
   return scriptedPool([
-    [/DELETE FROM player_items/i, { rows: [{ item_type_id: 7 }], rowCount: 1 }],
-    [/INSERT INTO world_items/i, (p) => ({
-      rows: [{ id: 'g9', item_type_id: p[1], x: p[2], y: p[3], expires_at: '2999-01-01T00:00:00Z' }],
+    [DROP_RE, (p) => ({
+      rows: [{ id: 'g9', item_type_id: 7, x: p[3], y: p[4], expires_at: '2999-01-01T00:00:00Z' }],
       rowCount: 1,
     })],
   ]);
