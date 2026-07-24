@@ -466,6 +466,312 @@ function attachAuthority(httpServer, pool, opts = {}) {
     entry.world.groundItems.pruneInactive(entry.activeChunks);
   }
 
+  // Shared serialize-on-ws._opChain + try/catch wrapper. Six message-type
+  // branches below (equip/unequip, pickup, drop, interact, buy, sell) — plus
+  // the ammo-attack sub-path — repeated this identically before (F-020 /
+  // SOMET-200): the chain read/write and the try/catch/log/notify shape were
+  // verbatim. Serializing per-socket mutations on the ws itself matters
+  // because two frames sent back-to-back (e.g. two equip frames) would
+  // otherwise start concurrently and race on the same DB write; the
+  // try/catch is what keeps an unhandled rejection here from propagating out
+  // and crashing the whole process (Node exits by default on
+  // unhandledRejection — confirmed live, once, before this existed).
+  // `notify: false` matches the two call sites (pickup, attack/ammo) whose
+  // original catch body logged the error but never sent the client an
+  // `error` frame.
+  function chainOp(ws, label, fn, { notify = true } = {}) {
+    ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
+      try {
+        await fn();
+      } catch (err) {
+        console.error(`${label} failed:`, err);
+        if (notify) send(ws, { type: 'error', message: `${label} failed` });
+      }
+    });
+  }
+
+  // equip/unequip share one handler (as they did as a combined if-branch
+  // before): only which World method runs, and the fallback error message,
+  // differ by msg.type.
+  function equipOrUnequip(ws, msg) {
+    const entry = worlds.get(ws.worldId);
+    if (!entry) return;
+    chainOp(ws, msg.type, async () => {
+      const r = msg.type === 'equip'
+        ? await entry.world.setEquipment(pool, ws.userId, msg.itemId, msg.slot)
+        : await entry.world.clearEquipment(pool, ws.userId, msg.slot);
+      if (r && !r.ok) send(ws, { type: 'error', message: r.reason || `cannot ${msg.type}` });
+    });
+  }
+
+  // Dispatch table (F-020 / SOMET-200), replacing an eleven-branch if-chain.
+  // Every handler here is a verbatim move of that branch's body — this is a
+  // structural extraction, not a behavior change: no handler gained a check
+  // it didn't already have, and none lost one. An unrecognized msg.type is
+  // silently ignored below, same as falling off the end of the old if-chain.
+  const messageHandlers = {
+    // A second join on an already-joined socket bypasses the "newest
+    // session wins" kick (prev === ws skips it) and re-runs addPlayer, which
+    // resets hp/mana to max and teleports to spawn — a free full
+    // heal/exploit now that combat is real. One join per socket; a client
+    // that wants a different world must reconnect.
+    async join(ws, msg) {
+      if (ws.worldId != null) { send(ws, { type: 'error', message: 'already joined' }); return; }
+
+      const entry = await loadWorld(msg.world_id).catch(() => null);
+      if (!entry) { send(ws, { type: 'error', message: 'unknown world' }); return; }
+
+      try {
+        // entry.worldId, not msg.world_id: loadWorld canonicalizes the id
+        // (F-014), and pendingArrivals (set from entry.links, itself built
+        // off the canonical id) is matched by strict worldId equality in
+        // loadSpawn — passing the client's raw spelling back in here would
+        // silently reintroduce the same split for doorway arrivals.
+        const spawn = await loadSpawn(entry.worldId, ws.userId, entry.row.chunk_size, entry.row);
+        if (ws.readyState !== ws.OPEN) return; // client vanished while we awaited spawn
+
+        // One live session per account: the newest join wins. (Refusing instead
+        // would lock a user out for up to a full heartbeat cycle after a crash,
+        // since the dead-socket reaper needs one interval to notice.)
+        const prev = sessionsByUser.get(ws.userId);
+        if (prev && prev !== ws) {
+          try { send(prev, { type: 'kicked', reason: 'signed_in_elsewhere' }); } catch { /* best-effort */ }
+          prev.terminate();
+        }
+        sessionsByUser.set(ws.userId, ws);
+        // Reserve socket ownership synchronously too (mirrors sessionsByUser
+        // above), before the inventory awaits below hit the DB. Otherwise a
+        // kicked socket's 'close' can fire during that window and find
+        // entry.sockets still pointing at the OLD socket (nothing reassigned
+        // it yet), so its identity guard passes and it tears down the world
+        // entry the new session is about to join. The tick loop and
+        // broadcastCreatures already tolerate a registered socket with no
+        // player yet (they null-check getPlayer), so this is safe.
+        entry.sockets.set(ws.userId, ws);
+
+        let inv = await loadInventory(pool, ws.userId);
+        if (inv.items.length === 0) {
+          const granted = await grantStartingLoadout(pool, ws.userId, entry.world.weapons);
+          if (granted) inv = await loadInventory(pool, ws.userId);
+        }
+        const gr = await pool.query('SELECT gold FROM users WHERE id = $1', [ws.userId]);
+        const gold = gr.rows.length ? Number(gr.rows[0].gold) || 0 : 0;
+
+        // A newer session for this same account may have won (and kicked
+        // us) while we awaited inventory above. If so, our reservation was
+        // already overwritten — mutating world state now would clobber the
+        // newer session's already-added player with our stale snapshot,
+        // leaving it soft-locked (entry.sockets now points at us, so it
+        // stops receiving 'state') with no way to recover: its own later
+        // close() checks identity against entry.sockets, finds us there
+        // instead of itself, and no-ops instead of cleaning up — an
+        // unremovable ghost player. Bail instead of mutating shared state.
+        if (sessionsByUser.get(ws.userId) !== ws || entry.sockets.get(ws.userId) !== ws || ws.readyState !== ws.OPEN) {
+          if (entry.sockets.get(ws.userId) === ws) entry.sockets.delete(ws.userId);
+          return;
+        }
+
+        ws.worldId = entry.worldId; // canonical (F-014), not the client's raw spelling
+        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold);
+        if (spawn.viaDoorway) {
+          const p = entry.world.getPlayer(ws.userId);
+          if (p) p._doorwayCdUntil = Date.now() + 1500;
+        }
+        send(ws, {
+          type: 'joined', user_id: ws.userId, spawn, tickRate: 1000 / tickMs,
+          itemTypes: [...entry.world.weapons.values()],
+          items: inv.items,
+          equipment: inv.equipment,
+          // Server-authoritative: addPlayer always resets this to false, but
+          // read it back off the player rather than hardcoding — the wire
+          // value must always reflect whatever World actually holds, not an
+          // assumption about what addPlayer currently does.
+          autoLoot: entry.world.getPlayer(ws.userId).autoLoot,
+          gold,
+          merchants: (entry.villages || [])
+            .filter((v) => v.merchantX != null && v.merchantY != null)
+            .map((v) => ({ villageId: v.id, x: v.merchantX, y: v.merchantY })),
+        });
+      } catch (err) {
+        console.error('join failed:', err);
+        if (entry.sockets.get(ws.userId) === ws) entry.sockets.delete(ws.userId);
+        if (sessionsByUser.get(ws.userId) === ws) sessionsByUser.delete(ws.userId);
+        send(ws, { type: 'error', message: 'join failed' });
+      }
+    },
+
+    input(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (entry) entry.world.setInput(ws.userId, msg.seq, finiteOr(msg.dx, 0), finiteOr(msg.dy, 0));
+    },
+
+    attack(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      const ax = finiteOr(msg.ax, 0), ay = finiteOr(msg.ay, 0);
+
+      // Cheap synchronous reject: cooldown / mana / stamina. Nothing has
+      // been spent, and a refused attack must not consume the cooldown.
+      const gate = entry.world.canAttack(ws.userId);
+      if (!gate.ok) return;
+
+      // Ammo-free weapons (all melee, all staves, darts) keep the fully
+      // synchronous path: no DB round trip on the hot path.
+      if (gate.weapon.ammo_type_id == null) {
+        const { killedCreatureIds, attacks } = entry.world.attack(ws.userId, ax, ay);
+        pushAttacks(entry, attacks);
+        for (const id of new Set(killedCreatureIds)) onCreatureDeath(entry, id);
+        return;
+      }
+
+      // Ammo is spent LAST, after every other gate has passed, so a refused
+      // attack can never destroy a unit. Serialized on chainOp for the same
+      // reason as equip/pickup/drop; `notify: false` since a refused shot
+      // sends its own `noammo` frame below, not a generic error.
+      chainOp(ws, 'attack/ammo', async () => {
+        // Everything is re-read INSIDE the chain. The `entry`/`gate`
+        // captured above were computed when the frame was parsed, which
+        // can be arbitrarily long before this callback runs — and the
+        // stale gate is exactly the bug that loses arrows. Two attack
+        // frames in one socket read are both parsed (and both gated)
+        // before either chained callback runs, so both would see
+        // _attackCd === 0; the second would then consume a unit and hand
+        // it to an attack() that refuses for the cooldown the first one
+        // just started. Re-gating here keeps canAttack → consume →
+        // attack a true sequence under every interleaving. The world
+        // entry can also have been swapped/evicted (rejoin, world
+        // teardown) across the await, so re-read that too.
+        const cur = worlds.get(ws.worldId);
+        if (!cur) return;
+        const g = cur.world.canAttack(ws.userId);
+        if (!g.ok) return; // nothing spent
+        // The equipped weapon may have changed too (an equip frame can be
+        // chained between the two): always spend the CURRENT weapon's
+        // ammo, and fall back to the sync path if it now needs none.
+        const ammoTypeId = g.weapon.ammo_type_id;
+        if (ammoTypeId != null && !(await consumeAmmo(pool, ws.userId, ammoTypeId))) {
+          // The type id is carried so the client can zero ITS displayed
+          // count for exactly this ammo type. Without it the HUD keeps
+          // rendering whatever it last believed while the server refuses
+          // every shot, and the client would have to guess which type was
+          // refused from its own equipment state — which can already have
+          // moved on. A refusal is the server stating there is none of
+          // this type left; say which type.
+          send(ws, { type: 'noammo', item_type_id: ammoTypeId }); // no cooldown consumed
+          return;
+        }
+        const { killedCreatureIds, attacks } = cur.world.attack(ws.userId, ax, ay);
+        pushAttacks(cur, attacks);
+        for (const id of new Set(killedCreatureIds)) onCreatureDeath(cur, id);
+        // The shot is already committed above (ammo spent, kills
+        // resolved) — pushing the client its new count is best-effort on
+        // top of that, not a condition of it. Isolated in its own
+        // try/catch so a failed COUNT query can never look like a failed
+        // attack, and placed after attack()/onCreatureDeath so it cannot
+        // delay or skip the resolution that already succeeded.
+        if (ammoTypeId != null) {
+          try {
+            const count = await ammoCount(pool, ws.userId, ammoTypeId);
+            send(ws, { type: 'ammo', item_type_id: ammoTypeId, count });
+          } catch (err) {
+            console.error('ammoCount failed:', err);
+          }
+        }
+      }, { notify: false });
+    },
+
+    equip: equipOrUnequip,
+    unequip: equipOrUnequip,
+
+    pickup(ws) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      chainOp(ws, 'pickup', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const target = entry.world.groundItems.nearest(cx, cy, PICKUP_RADIUS);
+        if (!target) return; // nothing in range: silent no-op, not an error
+        if (target.typeId === entry.goldItemTypeId) {
+          const got = await claimGold(pool, entry, ws.userId, target.id);
+          if (got) send(ws, { type: 'wallet', gold: got.gold });
+        } else {
+          const got = await claimItem(pool, entry, ws.userId, target.id);
+          if (got) send(ws, { type: 'picked', item: got });
+        }
+      }, { notify: false });
+    },
+
+    autoloot(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      // Strict boolean — a truthy string from the wire must not enable it.
+      if (entry) entry.world.setAutoLoot(ws.userId, msg.on === true);
+    },
+
+    drop(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.itemId !== 'string') return; // wire hygiene: ids are strings
+      chainOp(ws, 'drop', async () => {
+        const r = await dropItem(pool, entry, ws.userId, msg.itemId, { ttlMs: groundItemTtlMs });
+        if (r.ok) send(ws, { type: 'dropped', itemId: msg.itemId });
+        else send(ws, { type: 'error', message: r.reason });
+      });
+    },
+
+    interact(ws) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      chainOp(ws, 'interact', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
+        if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
+        const shop = await fetchShop(pool, village.id);
+        send(ws, { type: 'shop', villageId: village.id, catalog: shop.catalog, buyback: shop.buyback });
+      });
+    },
+
+    buy(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.stockId !== 'string') return;
+      chainOp(ws, 'buy', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
+        if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
+        const r = await buyStock(pool, entry, ws.userId, msg.stockId, village.id);
+        if (r.ok) {
+          send(ws, { type: 'bought', item: r.item, gold: r.gold });
+          send(ws, { type: 'wallet', gold: r.gold });
+        } else send(ws, { type: 'error', message: r.reason });
+      });
+    },
+
+    sell(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.itemId !== 'string') return;
+      chainOp(ws, 'sell', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
+        if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
+        const r = await sellItem(pool, entry, ws.userId, village.id, msg.itemId);
+        if (r.ok) {
+          send(ws, { type: 'sold', itemId: msg.itemId, price: r.price, gold: r.gold });
+          send(ws, { type: 'wallet', gold: r.gold });
+        } else send(ws, { type: 'error', message: r.reason });
+      });
+    },
+
+    ping(ws) { send(ws, { type: 'pong' }); },
+  };
+
   wss.on('connection', (ws) => {
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
@@ -487,7 +793,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       try { msg = JSON.parse(data); } catch { return; }
       // JSON.parse succeeds on non-object top-level values too (`null`,
       // `"str"`, `123`, `true`, arrays) without throwing, so the try/catch
-      // above does not catch them. Every branch below dereferences
+      // above does not catch them. Every handler above dereferences
       // `msg.type`, which throws on a non-object `msg` (TypeError on null,
       // undefined `.type` on primitives/arrays just falls through harmlessly
       // — but null is fatal). Reject anything that isn't a plain object here.
@@ -502,328 +808,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // to whoever is flooding.
       if (!consumeRateToken(ws)) return;
 
-      if (msg.type === 'join') {
-        // A second join on an already-joined socket bypasses the "newest
-        // session wins" kick (prev === ws skips it) and re-runs addPlayer,
-        // which resets hp/mana to max and teleports to spawn — a free full
-        // heal/exploit now that combat is real. One join per socket; a
-        // client that wants a different world must reconnect.
-        if (ws.worldId != null) { send(ws, { type: 'error', message: 'already joined' }); return; }
-
-        const entry = await loadWorld(msg.world_id).catch(() => null);
-        if (!entry) { send(ws, { type: 'error', message: 'unknown world' }); return; }
-
-        try {
-          // entry.worldId, not msg.world_id: loadWorld canonicalizes the id
-          // (F-014), and pendingArrivals (set from entry.links, itself built
-          // off the canonical id) is matched by strict worldId equality in
-          // loadSpawn — passing the client's raw spelling back in here would
-          // silently reintroduce the same split for doorway arrivals.
-          const spawn = await loadSpawn(entry.worldId, ws.userId, entry.row.chunk_size, entry.row);
-          if (ws.readyState !== ws.OPEN) return; // client vanished while we awaited spawn
-
-          // One live session per account: the newest join wins. (Refusing instead
-          // would lock a user out for up to a full heartbeat cycle after a crash,
-          // since the dead-socket reaper needs one interval to notice.)
-          const prev = sessionsByUser.get(ws.userId);
-          if (prev && prev !== ws) {
-            try { send(prev, { type: 'kicked', reason: 'signed_in_elsewhere' }); } catch { /* best-effort */ }
-            prev.terminate();
-          }
-          sessionsByUser.set(ws.userId, ws);
-          // Reserve socket ownership synchronously too (mirrors sessionsByUser
-          // above), before the inventory awaits below hit the DB. Otherwise a
-          // kicked socket's 'close' can fire during that window and find
-          // entry.sockets still pointing at the OLD socket (nothing reassigned
-          // it yet), so its identity guard passes and it tears down the world
-          // entry the new session is about to join. The tick loop and
-          // broadcastCreatures already tolerate a registered socket with no
-          // player yet (they null-check getPlayer), so this is safe.
-          entry.sockets.set(ws.userId, ws);
-
-          let inv = await loadInventory(pool, ws.userId);
-          if (inv.items.length === 0) {
-            const granted = await grantStartingLoadout(pool, ws.userId, entry.world.weapons);
-            if (granted) inv = await loadInventory(pool, ws.userId);
-          }
-          const gr = await pool.query('SELECT gold FROM users WHERE id = $1', [ws.userId]);
-          const gold = gr.rows.length ? Number(gr.rows[0].gold) || 0 : 0;
-
-          // A newer session for this same account may have won (and kicked
-          // us) while we awaited inventory above. If so, our reservation was
-          // already overwritten — mutating world state now would clobber the
-          // newer session's already-added player with our stale snapshot,
-          // leaving it soft-locked (entry.sockets now points at us, so it
-          // stops receiving 'state') with no way to recover: its own later
-          // close() checks identity against entry.sockets, finds us there
-          // instead of itself, and no-ops instead of cleaning up — an
-          // unremovable ghost player. Bail instead of mutating shared state.
-          if (sessionsByUser.get(ws.userId) !== ws || entry.sockets.get(ws.userId) !== ws || ws.readyState !== ws.OPEN) {
-            if (entry.sockets.get(ws.userId) === ws) entry.sockets.delete(ws.userId);
-            return;
-          }
-
-          ws.worldId = entry.worldId; // canonical (F-014), not the client's raw spelling
-          entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold);
-          if (spawn.viaDoorway) {
-            const p = entry.world.getPlayer(ws.userId);
-            if (p) p._doorwayCdUntil = Date.now() + 1500;
-          }
-          send(ws, {
-            type: 'joined', user_id: ws.userId, spawn, tickRate: 1000 / tickMs,
-            itemTypes: [...entry.world.weapons.values()],
-            items: inv.items,
-            equipment: inv.equipment,
-            // Server-authoritative: addPlayer always resets this to false, but
-            // read it back off the player rather than hardcoding — the wire
-            // value must always reflect whatever World actually holds, not an
-            // assumption about what addPlayer currently does.
-            autoLoot: entry.world.getPlayer(ws.userId).autoLoot,
-            gold,
-            merchants: (entry.villages || [])
-              .filter((v) => v.merchantX != null && v.merchantY != null)
-              .map((v) => ({ villageId: v.id, x: v.merchantX, y: v.merchantY })),
-          });
-        } catch (err) {
-          console.error('join failed:', err);
-          if (entry.sockets.get(ws.userId) === ws) entry.sockets.delete(ws.userId);
-          if (sessionsByUser.get(ws.userId) === ws) sessionsByUser.delete(ws.userId);
-          send(ws, { type: 'error', message: 'join failed' });
-        }
-        return;
-      }
-
-      if (msg.type === 'input') {
-        const entry = worlds.get(ws.worldId);
-        if (entry) entry.world.setInput(ws.userId, msg.seq, finiteOr(msg.dx, 0), finiteOr(msg.dy, 0));
-        return;
-      }
-
-      if (msg.type === 'attack') {
-        const entry = worlds.get(ws.worldId);
-        if (!entry) return;
-        const ax = finiteOr(msg.ax, 0), ay = finiteOr(msg.ay, 0);
-
-        // Cheap synchronous reject: cooldown / mana / stamina. Nothing has
-        // been spent, and a refused attack must not consume the cooldown.
-        const gate = entry.world.canAttack(ws.userId);
-        if (!gate.ok) return;
-
-        // Ammo-free weapons (all melee, all staves, darts) keep the fully
-        // synchronous path: no DB round trip on the hot path.
-        if (gate.weapon.ammo_type_id == null) {
-          const { killedCreatureIds, attacks } = entry.world.attack(ws.userId, ax, ay);
-          pushAttacks(entry, attacks);
-          for (const id of new Set(killedCreatureIds)) onCreatureDeath(entry, id);
-          return;
-        }
-
-        // Ammo is spent LAST, after every other gate has passed, so a refused
-        // attack can never destroy a unit. Serialized on the op chain for the
-        // same reason as equip/pickup/drop, and with the same try/catch: an
-        // unhandled rejection out of this async handler kills the process.
-        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
-          try {
-            // Everything is re-read INSIDE the chain. The `entry`/`gate`
-            // captured above were computed when the frame was parsed, which
-            // can be arbitrarily long before this callback runs — and the
-            // stale gate is exactly the bug that loses arrows. Two attack
-            // frames in one socket read are both parsed (and both gated)
-            // before either chained callback runs, so both would see
-            // _attackCd === 0; the second would then consume a unit and hand
-            // it to an attack() that refuses for the cooldown the first one
-            // just started. Re-gating here keeps canAttack → consume →
-            // attack a true sequence under every interleaving. The world
-            // entry can also have been swapped/evicted (rejoin, world
-            // teardown) across the await, so re-read that too.
-            const cur = worlds.get(ws.worldId);
-            if (!cur) return;
-            const g = cur.world.canAttack(ws.userId);
-            if (!g.ok) return; // nothing spent
-            // The equipped weapon may have changed too (an equip frame can be
-            // chained between the two): always spend the CURRENT weapon's
-            // ammo, and fall back to the sync path if it now needs none.
-            const ammoTypeId = g.weapon.ammo_type_id;
-            if (ammoTypeId != null && !(await consumeAmmo(pool, ws.userId, ammoTypeId))) {
-              // The type id is carried so the client can zero ITS displayed
-              // count for exactly this ammo type. Without it the HUD keeps
-              // rendering whatever it last believed while the server refuses
-              // every shot, and the client would have to guess which type was
-              // refused from its own equipment state — which can already have
-              // moved on. A refusal is the server stating there is none of
-              // this type left; say which type.
-              send(ws, { type: 'noammo', item_type_id: ammoTypeId }); // no cooldown consumed
-              return;
-            }
-            const { killedCreatureIds, attacks } = cur.world.attack(ws.userId, ax, ay);
-            pushAttacks(cur, attacks);
-            for (const id of new Set(killedCreatureIds)) onCreatureDeath(cur, id);
-            // The shot is already committed above (ammo spent, kills
-            // resolved) — pushing the client its new count is best-effort on
-            // top of that, not a condition of it. Isolated in its own
-            // try/catch so a failed COUNT query can never look like a failed
-            // attack, and placed after attack()/onCreatureDeath so it cannot
-            // delay or skip the resolution that already succeeded.
-            if (ammoTypeId != null) {
-              try {
-                const count = await ammoCount(pool, ws.userId, ammoTypeId);
-                send(ws, { type: 'ammo', item_type_id: ammoTypeId, count });
-              } catch (err) {
-                console.error('ammoCount failed:', err);
-              }
-            }
-          } catch (err) {
-            console.error('attack/ammo failed:', err);
-          }
-        });
-        return;
-      }
-
-      if (msg.type === 'equip' || msg.type === 'unequip') {
-        const entry = worlds.get(ws.worldId);
-        if (!entry) return;
-        // Serialize per-socket mutations on the ws itself: without this, two
-        // equip/unequip frames sent back-to-back start concurrently, and the
-        // second's canEquip() check reads an inventory snapshot the first is
-        // still in the middle of writing (e.g. both see main_hand empty and
-        // both INSERT the same one-handed weapon instance), so the second
-        // write violates player_equipment_item_unique. pool.query then
-        // rejects; with no catch that propagated out of this async handler
-        // as an unhandled rejection and crashed the whole process (Node
-        // exits by default on unhandledRejection).
-        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
-          try {
-            const r = msg.type === 'equip'
-              ? await entry.world.setEquipment(pool, ws.userId, msg.itemId, msg.slot)
-              : await entry.world.clearEquipment(pool, ws.userId, msg.slot);
-            if (r && !r.ok) send(ws, { type: 'error', message: r.reason || `cannot ${msg.type}` });
-          } catch (err) {
-            console.error(`${msg.type} failed:`, err);
-            send(ws, { type: 'error', message: `${msg.type} failed` });
-          }
-        });
-        return;
-      }
-
-      if (msg.type === 'pickup') {
-        const entry = worlds.get(ws.worldId);
-        if (!entry) return;
-        // Same per-socket serialisation and try/catch as equip: an unhandled
-        // rejection in an async ws handler kills the process on Node 20.
-        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
-          try {
-            const p = entry.world.getPlayer(ws.userId);
-            if (!p) return;
-            const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
-            const target = entry.world.groundItems.nearest(cx, cy, PICKUP_RADIUS);
-            if (!target) return; // nothing in range: silent no-op, not an error
-            if (target.typeId === entry.goldItemTypeId) {
-              const got = await claimGold(pool, entry, ws.userId, target.id);
-              if (got) send(ws, { type: 'wallet', gold: got.gold });
-            } else {
-              const got = await claimItem(pool, entry, ws.userId, target.id);
-              if (got) send(ws, { type: 'picked', item: got });
-            }
-          } catch (err) {
-            console.error('pickup failed:', err);
-          }
-        });
-        return;
-      }
-
-      if (msg.type === 'autoloot') {
-        const entry = worlds.get(ws.worldId);
-        // Strict boolean — a truthy string from the wire must not enable it.
-        if (entry) entry.world.setAutoLoot(ws.userId, msg.on === true);
-        return;
-      }
-
-      if (msg.type === 'drop') {
-        const entry = worlds.get(ws.worldId);
-        if (!entry) return;
-        if (typeof msg.itemId !== 'string') return; // wire hygiene: ids are strings
-        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
-          try {
-            const r = await dropItem(pool, entry, ws.userId, msg.itemId, { ttlMs: groundItemTtlMs });
-            if (r.ok) send(ws, { type: 'dropped', itemId: msg.itemId });
-            else send(ws, { type: 'error', message: r.reason });
-          } catch (err) {
-            console.error('drop failed:', err);
-            send(ws, { type: 'error', message: 'drop failed' });
-          }
-        });
-        return;
-      }
-
-      if (msg.type === 'interact') {
-        const entry = worlds.get(ws.worldId);
-        if (!entry) return;
-        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
-          try {
-            const p = entry.world.getPlayer(ws.userId);
-            if (!p) return;
-            const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
-            const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
-            if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
-            const shop = await fetchShop(pool, village.id);
-            send(ws, { type: 'shop', villageId: village.id, catalog: shop.catalog, buyback: shop.buyback });
-          } catch (err) {
-            console.error('interact failed:', err);
-            send(ws, { type: 'error', message: 'interact failed' });
-          }
-        });
-        return;
-      }
-
-      if (msg.type === 'buy') {
-        const entry = worlds.get(ws.worldId);
-        if (!entry) return;
-        if (typeof msg.stockId !== 'string') return;
-        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
-          try {
-            const p = entry.world.getPlayer(ws.userId);
-            if (!p) return;
-            const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
-            const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
-            if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
-            const r = await buyStock(pool, entry, ws.userId, msg.stockId, village.id);
-            if (r.ok) {
-              send(ws, { type: 'bought', item: r.item, gold: r.gold });
-              send(ws, { type: 'wallet', gold: r.gold });
-            } else send(ws, { type: 'error', message: r.reason });
-          } catch (err) {
-            console.error('buy failed:', err);
-            send(ws, { type: 'error', message: 'buy failed' });
-          }
-        });
-        return;
-      }
-
-      if (msg.type === 'sell') {
-        const entry = worlds.get(ws.worldId);
-        if (!entry) return;
-        if (typeof msg.itemId !== 'string') return;
-        ws._opChain = (ws._opChain || Promise.resolve()).then(async () => {
-          try {
-            const p = entry.world.getPlayer(ws.userId);
-            if (!p) return;
-            const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
-            const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
-            if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
-            const r = await sellItem(pool, entry, ws.userId, village.id, msg.itemId);
-            if (r.ok) {
-              send(ws, { type: 'sold', itemId: msg.itemId, price: r.price, gold: r.gold });
-              send(ws, { type: 'wallet', gold: r.gold });
-            } else send(ws, { type: 'error', message: r.reason });
-          } catch (err) {
-            console.error('sell failed:', err);
-            send(ws, { type: 'error', message: 'sell failed' });
-          }
-        });
-        return;
-      }
-
-      if (msg.type === 'ping') { send(ws, { type: 'pong' }); return; }
+      // An unrecognized msg.type is silently ignored — same as falling off
+      // the end of the old if-chain.
+      const handler = messageHandlers[msg.type];
+      if (handler) await handler(ws, msg);
       })().catch((err) => {
         console.error('message handler failed:', err);
       });

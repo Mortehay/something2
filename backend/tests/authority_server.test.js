@@ -348,6 +348,24 @@ test('frames sent well within the production rate limit are never dropped', asyn
   ws.close(); handle.close(); server.close();
 });
 
+// F-020 (SOMET-200): the if-chain was replaced with a dispatch table keyed
+// on msg.type (messageHandlers[msg.type]). An unrecognized type must still
+// be silently ignored — same as falling off the end of the old if-chain —
+// not throw, not crash the process, and not block frames sent afterward.
+test('an unrecognized message type is silently ignored and does not disrupt later frames', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  ws.send(JSON.stringify({ type: 'this-type-does-not-exist', anything: 'goes' }));
+  ws.send(JSON.stringify({ type: 'ping' }));
+  const pong = await nextMsg(ws, 'pong');
+  assert.equal(pong.type, 'pong', 'a bogus type must not disrupt a normal frame sent right after it');
+  ws.close(); handle.close(); server.close();
+});
+
 test('the token bucket refills over time, so a client is not permanently penalized after one burst', async () => {
   const { url, handle, server } = await bootRate(3, 1000); // tiny capacity, fast refill
   const ws = connect(url, 1);
