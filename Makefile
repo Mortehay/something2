@@ -1,4 +1,4 @@
-.PHONY: up down build logs restart rebuild clean shell-backend shell-frontend db-shell \
+.PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate
 
@@ -25,6 +25,18 @@ rebuild:
 	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) up -d
 
 clean:
+	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) down --rmi all --remove-orphans
+
+# Destructive: also deletes the named volumes (postgres_data, redis_data,
+# minio_data, sprite-models) -- the local Postgres DB (maps/entities/users/
+# inventory) and every MinIO-stored sprite/tile. `clean` above deliberately
+# does NOT do this (F-042/SOMET-222): a developer running `make clean`
+# expecting the same kind of tidy-up as `down`/`restart`/`rebuild` (none of
+# which touch volumes) should not silently lose all local game state. Use
+# this only when you actually want to wipe local data and start over.
+nuke:
+	@echo "This deletes ALL local data: Postgres DB, MinIO sprites/tiles, sprite-gen model cache."
+	@read -p "Type 'yes' to confirm: " confirm && [ "$$confirm" = "yes" ] || (echo "Aborted."; exit 1)
 	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) down -v --rmi all --remove-orphans
 
 shell-backend:
