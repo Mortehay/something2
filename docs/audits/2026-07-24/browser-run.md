@@ -291,3 +291,200 @@ forms with the same edge-case input and compare what actually comes back.
 
 No finding was demoted in this flow — everything arbitrated held up exactly
 as claimed. No assertion needed a flake retry.
+
+---
+
+## Flow C — game loop
+
+Driven against the live stack via Chrome DevTools MCP, mostly as the admin
+account (which gets the world picker instead of auto-join, needed to select
+specific worlds by name) plus two fresh player accounts
+(`audit_flowC_user1`, `audit_flowC_user2`) for the reconnect and two-client
+checks. Movement was driven by dispatching real `keydown`/`keyup`
+`KeyboardEvent`s at `window` (the same listener the game itself attaches
+to), not synthetic position writes.
+
+### 1. Canvas render, no accumulating console errors — Pass
+
+Fresh login → auto-join into `Overworld` rendered the canvas correctly
+(HUD, terrain, HP/gold) with only benign `[debug]`/`[info]` console lines
+and one pre-existing a11y warning (missing `id`/`name` on form fields, not a
+Flow C concern). No uncaught exceptions in any clean session.
+
+While chasing this check I found and **reproduced twice, deterministically**
+a real defect: signing out and back in (or, per the app's own code comments,
+having a token silently revoked mid-session and re-authenticating) without a
+full page reload leaves the canvas element permanently blank. Filed as
+**F-045** (P1, `frontend-game`, browser) — see below.
+
+### 2. Movement in four directions, camera follow, position persistence — Pass
+
+Held `w`/`a`/`s`/`d` individually in a creature-free bounded world
+(`MerchantVerify`). Each clean, uninterrupted single-key hold produced
+movement on exactly that axis (e.g. `d` for 1.5s: x +200, y unchanged) with
+the camera keeping the player centered while terrain scrolled underneath —
+correct camera-follow. Diagonal-looking deltas observed elsewhere turned out
+to be combat knockback/death-respawn from nearby wildlife in "Overworld"
+(unbounded, ambient creatures despite `creature_count:0` in the worlds
+table — chunk-based spawning, not the bounded-world roll), not a movement
+bug; a clean re-run in a creature-free world confirmed single-axis fidelity.
+
+Position persistence confirmed two ways: (a) reloading the page and
+re-entering `MerchantVerify` restored the exact last position
+(`60, 1518`); (b) killing and rejoining the authority socket (§6) also
+restored the same exact position server-side.
+
+### 3. Wall collision, no tunnelling — Pass
+
+Held `a` toward `MerchantVerify`'s west boundary in three consecutive 5s
+pushes. Speed decayed as the player approached the wall (152 px/s → 35 px/s
+→ 12 px/s) and then fully stopped at `x=60`; a further push produced zero
+further movement. No tunnelling through the boundary at any point.
+
+### 4. Doorway transition + return trip — Pass
+
+`BoundedArena` (24×24) has doorway links on all four edges to `test2`
+(2560×2560). Walked from `BoundedArena` through its `S` doorway into
+`test2`: console logged `chunked game loop started (world test2-id)`, tiles
+rendered with correct textures immediately (no fallback-color flash), no
+console errors. Located the exact return doorway columns via the chunk API
+(`GET /api/worlds/:id/chunk?cx=19&cy=0` /
+`cx=20&cy=0`, row 0 = `map_wall` everywhere except columns 1279–1281 =
+`map_doorway`, matching `arrivalPoint()`'s `midCol`/`DOORWAY_TILES=3`
+geometry in `backend/src/services/mapService.js`), navigated into that
+column range, and walked back north: console logged
+`chunked game loop started (world BoundedArena-id)` again, tiles rendered
+correctly, no errors. Both directions clean.
+
+### 5. Chunk seam continuity — Pass (observed, not a dedicated repro)
+
+The doorway-hunting traversal in `test2` (chunk_size 64, i.e. 6400 world-px
+per chunk) crossed at least two chunk boundaries end-to-end (~10,000 world-px
+of travel). No screenshot across that traversal showed a visual seam, gap,
+or duplicate entity; terrain and creature rendering stayed continuous
+throughout. Did not additionally instrument `chunkTileCells` cell counts —
+that's F-029's territory (perf), separately arbitrated below.
+
+### 6. Kill the socket, assert reconnect — Confirms F-045A / **F-028**
+
+Injected a `WebSocket` constructor wrapper via `navigate_page`'s
+`initScript` to get a live handle on the authority socket, joined
+`MerchantVerify`, then called `.close()` on it directly (`readyState`
+1→2→3). Over 10+ seconds afterward: zero new WebSocket connections (no
+reconnect attempt), zero console output referencing the disconnect, no
+toast. Pressing `d` afterward still visibly moved the sprite (local
+prediction against the already-loaded map continued), so there is *no
+on-screen indication whatsoever* that the session died — exactly F-028's
+claimed defect. See arbitration below.
+
+### 7. Two clients, one map, see each other move — Pass
+
+Admin (`user_id=1`) and `audit_flowC_user2` (`user_id=456`) both joined
+`Overworld`; both HUDs read `Players online: 2` throughout. After closing
+the gap between their positions, admin's own screen rendered the `#456`
+name tag next to user2's character. Confirmed bidirectionally reachable
+(both accounts show each other in `Players online` and in rendered state).
+
+Tab-backgrounding caveat for future runs: switching CDP focus away from a
+tab and back caused that tab's local, unacked movement prediction to get
+discarded and hard-snapped to the last *server-acknowledged* position on
+resume (consistent with `reconcile()` in `net/reconcile.js` trusting
+`ackSeq`, not a bug — likely `requestAnimationFrame` throttling in the
+backgrounded tab pausing outbound input frames). Not filed; this is
+expected authoritative-server behavior, not a defect, and only appeared as
+an artifact of switching between two CDP-driven tabs in the same window.
+
+---
+
+## Static findings arbitrated in Flow C
+
+Three static findings named a browser check reachable through the game
+loop:
+
+- **F-012** (P0, `backend-authority`, "`null` frame kills the process") —
+  **confirmed in browser.** Sent the literal 4-byte frame `null` (not
+  `JSON.stringify(null)`) over a live, joined authority WebSocket. The
+  socket closed immediately with code 1006 (abnormal closure — not a clean
+  protocol close). `docker ps` still reported `something2-backend-1` as
+  "Up" (its container `CMD` is `tail -f /dev/null`, fully decoupled from the
+  app process, which is `docker exec`'d in separately via
+  `npm run dev`/nodemon), but `docker exec ... ps aux` inside the container
+  showed only that `tail` process — the `node`/`nodemon` process that had
+  been serving every prior request in this session was gone, and nothing
+  was listening on the app port (`ss -tlnp` empty, `GET /api/health` failed
+  to connect). This is exactly the failure signature the finding predicts:
+  one 4-byte frame from any authenticated player kills the shared HTTP+WS
+  process and drops every connection. Run **last**, as instructed, after
+  every other Flow C check was complete. **Left the stack down** for the
+  minimum time needed to confirm the process was actually gone, then
+  restarted it with `docker compose exec -d backend npm run dev`; backend
+  health, frontend, and both existing browser sessions were verified
+  recovered (`/api/health` → 200) before finishing this report. Severity
+  left at P0; `verification` updated with the browser repro.
+
+- **F-028** (P1, `frontend-game`, "no reconnect after socket close") —
+  **confirmed in browser**, per check 6 above. `verification` updated.
+
+- **F-014** (P1, `backend-authority`, "case-sensitive world_id splits the
+  world") — **confirmed in browser.** Opened two raw authority WebSockets
+  (admin `user_id=1`, `audit_flowC_user2` `user_id=456`) joining the same
+  `MerchantVerify` UUID, one lower-cased, one upper-cased. Both got `joined`
+  frames, but each connection's `state` frames only ever listed its own
+  player id — neither ever saw the other, despite being nominally in the
+  same world. Control run with both connections using the *identical*
+  lower-case id showed each `state` frame correctly listing both players,
+  isolating the case difference as the cause (not e.g. an unrelated
+  per-account isolation bug). `verification` updated.
+
+No static finding was demoted in this flow.
+
+### New findings emitted by Flow C
+
+Two, both `source: 'browser'`, both `frontend-game`:
+
+- **F-045** (P1, user-logic) — the mount effect that binds the live `Game`
+  instance to the DOM `<canvas>` only re-runs on an `activeTab` change; it
+  never re-runs when `authed` flips false→true. Signing out and back in (or
+  the app's own designed recovery path for a token revoked mid-session,
+  which routes through the same `authed`-gated remount) leaves the visible
+  canvas at its browser-default 300×150 size, permanently blank, while the
+  authority WebSocket and game loop keep running underneath — confirmed by
+  observing HP drop from 100 to 95 with zero player input during the
+  "blank" period. Reproduced twice, deterministically. Only a full page
+  reload recovers.
+
+- **F-046** (P2, security) — the Worlds picker's delete-world control (a
+  trash icon per list row) and the world-creation form beneath it are not
+  gated behind `isAdmin`, unlike the admin-only tabs in the same component.
+  A completely unprivileged fresh player account sees a working-looking
+  destructive icon next to every world. Clicking it does fire a real
+  `DELETE /api/worlds/:id` request — correctly rejected server-side (403 via
+  `adminGuard`) with an eventual "Failed to delete world" toast — so there
+  is no actual security bypass, only a misleading admin-only affordance
+  shown to the wrong role.
+
+### Flake policy
+
+One assertion was retried and dropped per policy: on one admin session,
+clicking "Enter World" did nothing at all (no console output, no network
+request beyond the world preview, no error) — traced to the same
+`gameRef.current` mount-effect race as F-045's cousin (the instance simply
+hadn't been constructed yet when the click fired). Switching tabs away and
+back forced the effect to re-run and fixed it for that session. A
+fresh-reload retry did **not** reproduce the failure (worked on the first
+click). Per the flake policy this is marked `unverified` and was **not**
+filed — noted here only as a "watch for this" observation, not a tracked
+finding, since a second independent attempt did not reproduce it.
+
+### Report
+
+Every one of the skill's seven Flow C checks passed. Two static P0/P1
+findings (F-012, F-028) that were previously reproduced only against
+isolated/local harnesses are now proven against the actual running stack —
+F-012 in particular is the single most consequential result of this whole
+phase: a one-frame remote DoS against the shared HTTP+WS process, confirmed
+live and then recovered. F-014's case-sensitivity world-splitting bug is
+now demonstrated with two real accounts rather than inferred from code
+reading. Two new client-side defects (F-045, F-046) surfaced only because
+this flow drove real auth-state transitions and role combinations through
+the actual game shell, which static review has no way to do.
