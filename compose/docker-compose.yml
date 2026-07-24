@@ -26,11 +26,11 @@ services:
       - ./backend:/app
       - /app/node_modules
     environment:
-      - DATABASE_URL=postgres://user:password@db:5432/game_db
+      - DATABASE_URL=postgres://user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/game_db
       - MINIO_ENDPOINT=minio
       - MINIO_PORT=9000
       - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set in .env}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
       - SPRITE_GEN_URL=http://sprite-gen:8100
       - SPRITE_GEN_SHARED_SECRET=${SPRITE_GEN_SHARED_SECRET:?SPRITE_GEN_SHARED_SECRET must be set in .env}
@@ -54,7 +54,7 @@ services:
       - ENGINE_IDLE_EVICT=${ENGINE_IDLE_EVICT:-10m}
       - ENGINE_AOI_RADIUS=${ENGINE_AOI_RADIUS:-30}
       - ENGINE_GRID_CELL_SIZE=${ENGINE_GRID_CELL_SIZE:-4}
-      - DATABASE_URL=postgres://user:password@db:5432/game_db
+      - DATABASE_URL=postgres://user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/game_db
       - REDIS_URL=redis://redis:6379/0
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
       - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -75,7 +75,7 @@ services:
       - N_FRAMES=4
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set in .env}
       - MINIO_BUCKET=sprites
       - SPRITE_GEN_SHARED_SECRET=${SPRITE_GEN_SHARED_SECRET:?SPRITE_GEN_SHARED_SECRET must be set in .env}
     volumes:
@@ -87,7 +87,7 @@ services:
     image: postgres:15-alpine
     environment:
       - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=password
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       - POSTGRES_DB=game_db
     ports:
       - "127.0.0.1:15432:5432"
@@ -109,7 +109,7 @@ services:
       - "127.0.0.1:19001:9001"
     environment:
       - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set in .env}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
