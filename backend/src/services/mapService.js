@@ -170,6 +170,52 @@ function generateWorldPreview(world, dim) {
   return generateRegion(world, origin, origin, dim, dim);
 }
 
+// Player-centered coarse overview for the in-game minimap. Distinct from
+// generateWorldPreview (fixed origin window): this window follows the player.
+// Snapping the center to a span/4 grid keeps the response cacheable — small
+// moves reuse the same window.
+function overviewOrigin(centerCol, centerRow, span) {
+  const half = Math.floor(span / 2);
+  const snap = Math.max(1, Math.floor(span / 4));
+  const snappedCol = Math.round(centerCol / snap) * snap;
+  const snappedRow = Math.round(centerRow / snap) * snap;
+  return { snappedCol, snappedRow, originCol: snappedCol - half, originRow: snappedRow - half };
+}
+
+function overviewDoorwayMarkers(world) {
+  if (!world.width || !world.height) return [];
+  const W = world.width, H = world.height;
+  const midW = Math.floor(W / 2), midH = Math.floor(H / 2);
+  const at = { N: { col: midW, row: 0 }, S: { col: midW, row: H - 1 }, W: { col: 0, row: midH }, E: { col: W - 1, row: midH } };
+  return (world.doorways || []).filter((e) => at[e]).map((e) => ({ edge: e, ...at[e] }));
+}
+
+function overviewVillageMarkers(world) {
+  return (world.villages || []).map((v) => ({
+    col: v.minCol + Math.floor(v.width / 2),
+    row: v.minRow + Math.floor(v.height / 2),
+  }));
+}
+
+function generateWorldOverview(world, centerCol, centerRow, span, step) {
+  const { originCol, originRow } = overviewOrigin(centerCol, centerRow, span);
+  // One contiguous span×span generation, then sample every `step`th tile —
+  // far cheaper than one generateRegion call per coarse cell.
+  const full = generateRegion(world, originRow, originCol, span, span);
+  const rows = Math.floor(span / step), cols = Math.floor(span / step);
+  const tiles = [];
+  for (let r = 0; r < rows; r++) {
+    const row = new Array(cols);
+    for (let c = 0; c < cols; c++) row[c] = full[r * step][c * step];
+    tiles[r] = row;
+  }
+  return {
+    step, originCol, originRow, cols, rows, tiles,
+    doorways: overviewDoorwayMarkers(world),
+    villages: overviewVillageMarkers(world),
+  };
+}
+
 // Generate an arbitrary rows x cols window of the world. Cell [r][c] is the
 // world tile at (rMin + r, cMin + c). Overlays carved paths on biomes.
 // generateChunk is a fixed-size wrapper over this.
@@ -702,6 +748,8 @@ module.exports = {
     worldConfig,
     sampleBiome,
     generateWorldPreview,
+    overviewOrigin,
+    generateWorldOverview,
     generateRegion,
     generateChunk,
     pathAnchor,
