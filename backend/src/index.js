@@ -1400,6 +1400,22 @@ app.get('/api/worlds/:id/preview', async (req, res) => {
 });
 
 if (require.main === module) {
+  // Last-resort backstop: log and keep running instead of letting Node's
+  // default behavior (exit 1) tear down the process on a rejection that
+  // slipped past every route/handler guard. This is a safety net, not a
+  // license to skip guarding individual async paths — F-001 and F-012 were
+  // both fixed at the source; this only catches whatever the next one is.
+  // Installed only inside the require.main guard (not at module-load time)
+  // so it stays scoped to the actually-running server: `index.js` and
+  // `authority/server.js` are also `require()`d by the test suite, and a
+  // process-wide listener installed at import time would attach once per
+  // test file, swallow rejections tests want to observe/assert on, and
+  // leak across the whole `node --test` run instead of just protecting the
+  // live service.
+  process.on('unhandledRejection', (reason) => {
+    console.error('unhandledRejection (backstopped, process kept alive):', reason);
+  });
+
   const server = app.listen(port, () => {
     console.log(`Backend server running on port ${port}`);
   });

@@ -373,9 +373,24 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // don't surface as an uncaught 'error' event that crashes the process.
     ws.on('error', () => {});
 
-    ws.on('message', async (data) => {
+    // The whole handler body is wrapped in an IIFE + .catch (mirrors the
+    // upgrade handler above) so that no branch below — however deep, however
+    // future — can escape as an unhandled rejection. Without this, a plain
+    // `async (data) => { ... }` callback handed to ws's EventEmitter has its
+    // rejections silently dropped by 'ws', which Node 22 then turns into an
+    // uncaught exception that exits the process (confirmed live: a bare
+    // `null` frame did exactly this via the `msg.type` dereference below).
+    ws.on('message', (data) => {
+      (async () => {
       let msg;
       try { msg = JSON.parse(data); } catch { return; }
+      // JSON.parse succeeds on non-object top-level values too (`null`,
+      // `"str"`, `123`, `true`, arrays) without throwing, so the try/catch
+      // above does not catch them. Every branch below dereferences
+      // `msg.type`, which throws on a non-object `msg` (TypeError on null,
+      // undefined `.type` on primitives/arrays just falls through harmlessly
+      // — but null is fatal). Reject anything that isn't a plain object here.
+      if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
 
       if (msg.type === 'join') {
         // A second join on an already-joined socket bypasses the "newest
@@ -695,6 +710,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
       }
 
       if (msg.type === 'ping') { send(ws, { type: 'pong' }); return; }
+      })().catch((err) => {
+        console.error('message handler failed:', err);
+      });
     });
 
     ws.on('close', async () => {
