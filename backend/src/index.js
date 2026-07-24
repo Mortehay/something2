@@ -341,6 +341,11 @@ function validateItemType(b) {
       return 'ammo_type_id must be a non-negative finite number';
     }
   }
+  if (b.value != null) {
+    if (typeof b.value !== 'number' || !Number.isInteger(b.value) || b.value < 0) {
+      return 'value must be a non-negative integer';
+    }
+  }
   // Mirror the DB CHECKs: a detonating projectile can't also pierce, and only
   // a projectile weapon can consume ammo.
   if (b.aoe_radius != null && b.pierce > 1) {
@@ -371,14 +376,14 @@ app.post('/api/item-types', adminGuard, async (req, res) => {
       `INSERT INTO item_types
         (name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
          range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element, defense, resistances, icon,
-         stackable, ammo_type_id, aoe_radius)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
+         stackable, ammo_type_id, aoe_radius, value)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
        b.mana_cost ?? 0, b.stamina_cost ?? 0, b.element ?? null, b.defense ?? null,
        JSON.stringify(b.resistances ?? {}), b.icon ?? null,
-       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null],
+       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0],
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -397,15 +402,15 @@ app.put('/api/item-types/:id', adminGuard, async (req, res) => {
         name=$1, category=$2, slot=$3, two_handed=$4, kind=$5, damage=$6, cooldown=$7,
         reach=$8, arc_width=$9, range=$10, projectile_speed=$11, projectile_radius=$12,
         pierce=$13, mana_cost=$14, stamina_cost=$15, element=$16, defense=$17, resistances=$18, icon=$19,
-        stackable=$20, ammo_type_id=$21, aoe_radius=$22,
+        stackable=$20, ammo_type_id=$21, aoe_radius=$22, value=$23,
         updated_at=now()
-       WHERE id=$23 RETURNING *`,
+       WHERE id=$24 RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
        b.mana_cost ?? 0, b.stamina_cost ?? 0, b.element ?? null, b.defense ?? null,
        JSON.stringify(b.resistances ?? {}), b.icon ?? null,
-       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, req.params.id],
+       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0, req.params.id],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
     res.json(result.rows[0]);

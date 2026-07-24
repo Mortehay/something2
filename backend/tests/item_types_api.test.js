@@ -238,6 +238,7 @@ const LOAD_BEARING_COLUMNS = [
   'stamina_cost', 'mana_cost', 'element', 'damage', 'cooldown', 'reach', 'arc_width',
   'range', 'projectile_speed', 'projectile_radius', 'pierce', 'defense', 'resistances',
   'category', 'slot', 'two_handed', 'kind', 'name', 'stackable', 'ammo_type_id', 'aoe_radius',
+  'value',
 ];
 
 // The mock pool dispatches on SQL text but never asserted the column list or
@@ -253,7 +254,7 @@ test('POST /api/item-types INSERT names every load-bearing column with a positio
   __setPool(pool);
   const body = {
     name: 'x', category: 'weapon', kind: 'projectile', range: 700, projectile_speed: 900, projectile_radius: 8,
-    stamina_cost: 7, element: 'fire', stackable: true, ammo_type_id: 3, aoe_radius: 42,
+    stamina_cost: 7, element: 'fire', stackable: true, ammo_type_id: 3, aoe_radius: 42, value: 25,
   };
   const res = await request(app).post('/api/item-types').set(...AUTH).send(body);
   assert.equal(res.status, 201);
@@ -275,6 +276,7 @@ test('POST /api/item-types INSERT names every load-bearing column with a positio
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'stackable'), body.stackable);
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'ammo_type_id'), body.ammo_type_id);
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'aoe_radius'), body.aoe_radius);
+  assert.strictEqual(paramFor(columns, placeholders, call.params, 'value'), body.value);
 });
 
 test('PUT /api/item-types/:id UPDATE names every load-bearing column with a positionally-aligned placeholder', async () => {
@@ -284,7 +286,7 @@ test('PUT /api/item-types/:id UPDATE names every load-bearing column with a posi
   __setPool(pool);
   const body = {
     name: 'y', category: 'weapon', kind: 'projectile', range: 620, projectile_speed: 650, projectile_radius: 12,
-    stamina_cost: 9, element: 'ice', stackable: false, ammo_type_id: 5, aoe_radius: 30,
+    stamina_cost: 9, element: 'ice', stackable: false, ammo_type_id: 5, aoe_radius: 30, value: 40,
   };
   const res = await request(app).put('/api/item-types/1').set(...AUTH).send(body);
   assert.equal(res.status, 200);
@@ -306,6 +308,40 @@ test('PUT /api/item-types/:id UPDATE names every load-bearing column with a posi
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'stackable'), body.stackable);
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'ammo_type_id'), body.ammo_type_id);
   assert.strictEqual(paramFor(columns, placeholders, call.params, 'aoe_radius'), body.aoe_radius);
+  assert.strictEqual(paramFor(columns, placeholders, call.params, 'value'), body.value);
+});
+
+// F-003 (SOMET-183): item_types.value (an item's gold worth) was never written
+// by POST/PUT /api/item-types, so every item created through the admin UI was
+// permanently worth 0 gold -- confirmed live: POST with {"value":25} returned
+// 201 with the stored row reporting value:0.
+test('validateItemType rejects a negative value', () => {
+  const err = validateItemType({ name: 'x', category: 'weapon', kind: 'melee', reach: 10, arc_width: 1, value: -5 });
+  assert.match(err, /value/i);
+});
+
+test('validateItemType rejects a non-integer value', () => {
+  const err = validateItemType({ name: 'x', category: 'weapon', kind: 'melee', reach: 10, arc_width: 1, value: 1.5 });
+  assert.match(err, /value/i);
+});
+
+test('validateItemType rejects a non-numeric value', () => {
+  const err = validateItemType({ name: 'x', category: 'weapon', kind: 'melee', reach: 10, arc_width: 1, value: 'lots' });
+  assert.match(err, /value/i);
+});
+
+test('validateItemType accepts a valid non-negative integer value', () => {
+  assert.strictEqual(
+    validateItemType({ name: 'x', category: 'weapon', kind: 'melee', reach: 10, arc_width: 1, value: 25 }),
+    null,
+  );
+});
+
+test('validateItemType accepts an absent value (defaults server-side to 0)', () => {
+  assert.strictEqual(
+    validateItemType({ name: 'x', category: 'weapon', kind: 'melee', reach: 10, arc_width: 1 }),
+    null,
+  );
 });
 
 test('POST /api/players/:userId/items grants an item instance', async () => {
