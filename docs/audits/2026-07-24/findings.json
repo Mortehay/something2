@@ -405,6 +405,66 @@
       "fingerprint": "1571d778131a482dfb4cf92a8f76d2b5d110c4d3",
       "status": "open",
       "plane_id": null
+    },
+    {
+      "surface": "frontend-game",
+      "source": "static",
+      "file": "frontend/src/games/something2/src/js/core/Game.js:373",
+      "lens": "user-logic",
+      "severity": "P1",
+      "claim": "WorldAuthorityClient's onClose handler only sets `this.authorityJoined = false` (a field nothing else in the codebase reads) — there is no reconnect attempt, no heartbeat (WorldAuthorityClient.ping() is defined at net/WorldAuthorityClient.js:122 but is never called by any caller in the client), and no state transition to alert the player, unlike the deliberate 'kicked' flow at Game.js:374-378 which does call setState('kicked').",
+      "failure_scenario": "The backend authority process restarts (deploy, crash, or a transient network blip) while a player is mid-session. The WebSocket 'close' event fires WorldAuthorityClient.onClose, which only flips the unused `authorityJoined` flag; Game.state stays 'playing' and the rAF loop keeps calling update()/render() every frame, so the player's sprite keeps moving under local prediction (Player.update against the already-loaded chunkedMap) and the screen looks fully live. Every subsequent authorityClient.sendAttack/sendEquip/sendPickup/sendInteract/sendBuy/sendSell call now hits WorldAuthorityClient._send's `if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false` guard and is silently dropped — no toast, no error, no retry — because none of Game.js's input handlers (setupInput, _handleInventoryClick, _handleShopClick) check that return value. The player has no way to tell the session died except that other players stop appearing or moving, and the only recovery is a manual page reload.",
+      "proposed_fix": "Add a heartbeat (call the existing but unused ping()) and treat a non-intentional close (this._closed === false at the point onClose fires) as fatal: transition Game to a visible 'disconnected' state (mirroring the existing 'kicked' render branch at Game.js:597-609) and either auto-reconnect authorityClient with backoff or show a clear 'connection lost — reload' message instead of leaving the player in a silently-broken 'playing' state.",
+      "verification": "In the browser: join a chunked world, then force-close the authority WebSocket (devtools Network tab, or kill/restart the authority server process). Confirm the player sprite keeps responding to WASD with no on-screen indication anything is wrong, and that pressing 'g'/'e' or left-clicking to attack produces no toast and no visible error — only a manual reload restores play.",
+      "id": "F-028",
+      "fingerprint": "a28654816b02c1dce644ab86ebacd7b5a0df42d9",
+      "status": "open",
+      "plane_id": null
+    },
+    {
+      "surface": "frontend-game",
+      "source": "static",
+      "file": "frontend/src/games/something2/src/js/systems/RenderSystem.js:119",
+      "lens": "kiss",
+      "severity": "P2",
+      "claim": "renderChunked's tile-draw loop iterates every cell chunkTileCells (core/chunkTiles.js:38-60) returns — which culls only at whole-CHUNK granularity via chunkVisible — and calls worldToScreen plus allocates a cell object for EVERY tile of every chunk-visible chunk, before RenderSystem.js:123's per-tile relX/relY bounds check throws most of them away. With the backend's default chunkSize of 64 (backend/src/authority/world.js:81) and ChunkStreamer's radius of 1 (core/Game.js:290 -> 9 loaded chunks), that is up to 9*64*64 = 36864 worldToScreen calls and object allocations rebuilt from scratch every single animation frame.",
+      "failure_scenario": "On the fixed 1280x720 canvas (GAME_WIDTH/HEIGHT) with 128x64 iso diamonds (ISO_TILE_W/H), well under a thousand tiles are ever actually on screen, but chunkTileCells enumerates and projects all ~36864 loaded-and-chunk-visible cells every frame at 60fps before the bulk are discarded by the per-tile cull at RenderSystem.js:123 — over an order of magnitude more worldToScreen calls and array pushes than the frame needs, with the array itself reallocated fresh every frame. This is the dominant avoidable per-frame cost in the render path and gets strictly worse the moment chunkSize or the streamer radius is increased, or on lower-end/mobile hardware, directly lowering frame rate during ordinary movement rather than during any one heavy action.",
+      "proposed_fix": "Push the existing per-tile relX/relY visibility check (RenderSystem.js:123) down into chunkTileCells itself (or compute a cheap local row/col range per visible chunk from the camera bounds) so off-screen cells are never constructed or projected in the first place — chunkVisible already proves this exact pattern one granularity up (chunk-level) and it just needs to be repeated at tile-level.",
+      "verification": "In the browser with devtools Performance recording, join a chunked world and walk continuously; compare the cell count chunkTileCells produces for a frame against the count that survives the RenderSystem.js:123 per-tile cull for that same frame, and measure time spent inside renderChunked's tile loop.",
+      "id": "F-029",
+      "fingerprint": "d77a1443830aaca2055ddd8e958b5563f1e85d5a",
+      "status": "open",
+      "plane_id": null
+    },
+    {
+      "surface": "frontend-game",
+      "source": "static",
+      "file": "frontend/src/games/something2/src/js/core/Game.js:210",
+      "lens": "yagni",
+      "severity": "P2",
+      "claim": "Game.js's entire non-chunked code path — init() (210-250), setMap() (252-254), the non-chunked branches of update()/render() (462-472, 651-653), _onServerState()/_reconcileSelf() (479-579, including the RECONCILE_SOFT_PX/HARD_PX/LERP tuning constants at 44-46) — plus net/EngineClient.js's WebSocket-wrapper class (lines 19-131 only, not the auth helper functions below it which ARE used elsewhere), core/Map.js (264 lines), entities/MapEntity.js, and the 'legacy single-Map path' branch of Player.update (entities/Player.js:56-125) are never reached by the shipped app: Something2.jsx never calls Game.prototype.init, never calls setEngineClient with a real client (only the teardown call `setEngineClient?.(null, null)` at Something2.jsx:461), and never does `new EngineClient(...)` anywhere in frontend/src (confirmed by repo-wide grep). No test file calls Game.prototype.init, setEngineClient, or instantiates the EngineClient WS-wrapper class either.",
+      "failure_scenario": "A developer, reading Game.js's own inline comments describing dual chunked/non-chunked support, spends time tuning RECONCILE_SOFT_PX/RECONCILE_HARD_PX/RECONCILE_LERP (Game.js:44-46) or fixing a suspected bug in _reconcileSelf (Game.js:562-579) to smooth out perceived player rubber-banding in production — but that code path only executes via _onServerState, which only fires from an EngineClient instance that Something2.jsx never creates, so the change has zero effect on any real session; the actual live reconciliation path is net/reconcile.js via _onWorldState, an entirely separate implementation with its own tuning. The same trap applies to anyone patching core/Map.js's collision/tile logic or Player.js's non-ChunkedMap branch believing it still backs some reachable in-game mode: the fix ships, the tests (if any are added against the dead path) pass, and no real player is ever affected because the code never runs.",
+      "proposed_fix": "Delete the unreachable branches: Game.init/setMap/_onServerState/_reconcileSelf and their RECONCILE_* constants, the EngineClient WS-wrapper class (relocate the still-used auth helper functions below it into their own module first), core/Map.js, entities/MapEntity.js, and Player.update's legacy branch. This removes roughly 500 lines split across Game.js/Player.js/Map.js/EngineClient.js, directly shrinking Game.js and Player.js without touching any code that actually executes, and removes the risk of a future change being made against a path with no effect.",
+      "verification": "Repo-wide grep confirms no reachable call site: `grep -rn \"new EngineClient(\" frontend/src` returns nothing; `grep -rn \"setEngineClient\" frontend/src/games/something2/Something2.jsx` shows only the `(null, null)` teardown call; `grep -rln \"\\.init(\\|setEngineClient\\|new EngineClient\" frontend/src/games/something2/src/js` returns only core/Game.js itself (the definition site, not a caller).",
+      "id": "F-030",
+      "fingerprint": "6652ff4731a82637513b4eadc8df903af46de402",
+      "status": "open",
+      "plane_id": null
+    },
+    {
+      "surface": "frontend-game",
+      "source": "static",
+      "file": "frontend/src/games/something2/src/js/core/Game.js:780",
+      "lens": "user-logic",
+      "severity": "P3",
+      "claim": "The 't' (toggle tile textures, Game.js:786-789) and 'm' (cycle render-mode override, Game.js:780-783) dev keydown handlers are missing the `!e.repeat` guard that every other one-shot hotkey in the same setupInput() method already uses ('i' at 739, 'e' at 761, 'g' at 773), so they re-fire on every OS auto-repeat tick while the key is held rather than once per physical key press.",
+      "failure_scenario": "A developer holds 't' down instead of tapping it (even the OS default key-repeat window, typically starting after ~500ms and repeating every ~30-50ms, is enough): toggleTileTextures() flips on/off many times before keyup, each flip also replacing the on-screen toast via _showToast, and the final rendered state on release is whichever parity the repeat count happened to land on — effectively unpredictable from the user's point of view — unlike every other panel/mode hotkey in this same handler, which fires exactly once per press.",
+      "proposed_fix": "Add `&& !e.repeat` to both the 't' and 'm' conditions, matching the guard already used for 'i', 'e', and 'g' a few lines above each.",
+      "verification": "In the browser, press and hold 't' (or 'm') for about a second and release; observe the tile-texture (or render-mode) toggle state after release does not reliably correspond to a single press, and the toast/console log fires repeatedly during the hold.",
+      "id": "F-031",
+      "fingerprint": "60537184cbdeeae0b6699ce9af822cb4d8467984",
+      "status": "open",
+      "plane_id": null
     }
   ]
 }
