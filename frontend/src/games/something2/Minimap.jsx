@@ -12,6 +12,30 @@ const FALLBACK_STEP = 4;  // projection step before the first overview lands
 
 const LS_KEY = 'something2:minimapVisible';
 
+// Draw one frame into `ctx` for a box of `box` css px at `cellW` diamond size.
+// Returns true if it drew live content (a snapshot existed).
+function renderFrame(ctx, dpr, box, cellW, { gameRef, overviewRef, tileColors }) {
+  const snap = gameRef.current && gameRef.current.getMinimapSnapshot
+    ? gameRef.current.getMinimapSnapshot() : null;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, box, box);
+  if (!snap) return false;
+  const pCol = snap.player.x / MAP_TILE_SIZE;
+  const pRow = snap.player.y / MAP_TILE_SIZE;
+  let overview = overviewRef.current;
+  if (overview && overview.world_id !== snap.worldId) overview = null;
+  drawMinimap(ctx, {
+    overview,
+    tileColors,
+    player: { col: pCol, row: pRow, dir: snap.player.dir },
+    creatures: snap.creatures.map((c) => ({ col: c.x / MAP_TILE_SIZE, row: c.y / MAP_TILE_SIZE, color: c.color })),
+    doorways: overview ? overview.doorways : [],
+    villages: overview ? overview.villages : [],
+    view: { centerCol: pCol, centerRow: pRow, step: overview ? overview.step : FALLBACK_STEP, cellW, boxW: box, boxH: box },
+  });
+  return true;
+}
+
 const Frame = styled.div`
   position: absolute;
   top: 64px;   /* clears the 40px fullscreen toggle at top:16 + gap */
@@ -63,9 +87,23 @@ const ShowButton = styled.button`
   &:hover { color: #4a9eff; }
 `;
 
+const ExpandBackdrop = styled.div`
+  position: absolute; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: auto;
+`;
+
+const ExpandCard = styled.div`
+  border-radius: 14px; overflow: hidden; border: 1px solid #2e2e3e;
+  background: rgba(15,15,26,0.9); box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+`;
+
 export default function Minimap({ gameRef, tileColors }) {
   const [visible, setVisible] = useState(() => localStorage.getItem(LS_KEY) !== '0');
+  const [expanded, setExpanded] = useState(false);
   const canvasRef = useRef(null);
+  const modalCanvasRef = useRef(null);
   const overviewRef = useRef(null);   // last fetched overview payload
   const fetchingRef = useRef(false);
   const tileColorsRef = useRef(tileColors);
@@ -122,43 +160,65 @@ export default function Minimap({ gameRef, tileColors }) {
       raf = requestAnimationFrame(frame);
       const snap = gameRef.current && gameRef.current.getMinimapSnapshot
         ? gameRef.current.getMinimapSnapshot() : null;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, SIZE, SIZE);
-      if (!snap) return;
-
-      const pCol = snap.player.x / MAP_TILE_SIZE;
-      const pRow = snap.player.y / MAP_TILE_SIZE;
-      maybeFetch(snap.worldId, pCol, pRow);
-
-      let overview = overviewRef.current;
-      if (overview && overview.world_id !== snap.worldId) overview = null; // wrong world; markers only
-      const view = {
-        centerCol: pCol, centerRow: pRow,
-        step: overview ? overview.step : FALLBACK_STEP,
-        cellW: CELL_PX, boxW: SIZE, boxH: SIZE,
-      };
-      drawMinimap(ctx, {
-        overview,
-        tileColors: tileColorsRef.current,
-        player: { col: pCol, row: pRow, dir: snap.player.dir },
-        creatures: snap.creatures.map((c) => ({ col: c.x / MAP_TILE_SIZE, row: c.y / MAP_TILE_SIZE, color: c.color })),
-        doorways: overview ? overview.doorways : [],
-        villages: overview ? overview.villages : [],
-        view,
-      });
+      if (snap) {
+        const pCol = snap.player.x / MAP_TILE_SIZE;
+        const pRow = snap.player.y / MAP_TILE_SIZE;
+        maybeFetch(snap.worldId, pCol, pRow);
+      }
+      renderFrame(ctx, dpr, SIZE, CELL_PX, { gameRef, overviewRef, tileColors: tileColorsRef.current });
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
   }, [visible, gameRef]);
 
+  // Esc, while the modal is open, closes it instead of pausing the game.
+  // Capture phase wins over Game's window keydown (bubble phase) handler.
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopImmediatePropagation(); e.preventDefault(); setExpanded(false); }
+    };
+    window.addEventListener('keydown', onKey, true); // capture
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [expanded]);
+
+  // Modal rAF draw loop — larger box, wider window via a bigger cellW. Reuses
+  // the same overviewRef as the small minimap; no extra fetching.
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const canvas = modalCanvasRef.current;
+    if (!canvas) return undefined;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const box = Math.min(640, Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.8));
+    canvas.width = box * dpr; canvas.height = box * dpr;
+    canvas.style.width = `${box}px`; canvas.style.height = `${box}px`;
+    let raf = 0;
+    const frame = () => {
+      raf = requestAnimationFrame(frame);
+      renderFrame(ctx, dpr, box, CELL_PX * 1.6, { gameRef, overviewRef, tileColors: tileColorsRef.current });
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [expanded, gameRef]);
+
   if (!visible) {
     return <ShowButton type="button" title="Show minimap (M)" aria-label="Show minimap" onClick={() => persistVisible(true)}>🗺</ShowButton>;
   }
   return (
-    <Frame title="Minimap — click to expand, M to hide">
-      <canvas ref={canvasRef} style={{ width: `${SIZE}px`, height: `${SIZE}px`, display: 'block' }} />
-      <HideButton type="button" title="Hide minimap (M)" aria-label="Hide minimap"
-        onClick={(e) => { e.stopPropagation(); persistVisible(false); }}>×</HideButton>
-    </Frame>
+    <>
+      <Frame title="Minimap — click to expand, M to hide" onClick={() => setExpanded(true)}>
+        <canvas ref={canvasRef} style={{ width: `${SIZE}px`, height: `${SIZE}px`, display: 'block' }} />
+        <HideButton type="button" title="Hide minimap (M)" aria-label="Hide minimap"
+          onClick={(e) => { e.stopPropagation(); persistVisible(false); }}>×</HideButton>
+      </Frame>
+      {expanded && (
+        <ExpandBackdrop onClick={() => setExpanded(false)}>
+          <ExpandCard onClick={(e) => e.stopPropagation()}>
+            <canvas ref={modalCanvasRef} style={{ display: 'block' }} />
+          </ExpandCard>
+        </ExpandBackdrop>
+      )}
+    </>
   );
 }
