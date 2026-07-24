@@ -478,7 +478,7 @@
       "verification": "Note the object timestamp for sprites/tiles/grass/static.png in MinIO, run docker exec something2-sprite-gen-1 pytest -q tests/test_tile_storage_api.py, then confirm the timestamp is unchanged; also confirm app.main._STORE_ENABLED is False inside the pytest process after the fix.",
       "id": "F-032",
       "fingerprint": "053eb24631f198c74c5d2fb5507d8c4775411429",
-      "status": "open",
+      "status": "fixed",
       "plane_id": null
     },
     {

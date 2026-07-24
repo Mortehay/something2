@@ -3,6 +3,41 @@ from unittest.mock import patch
 from app.backends.stub import StubBackend
 
 
+def _blocked_default_store(*args, **kwargs):
+    raise RuntimeError(
+        "app.storage.default_store() was called from inside the pytest suite. "
+        "Tests must never reach the real MinIO sprite store — this call was "
+        "blocked by the _no_real_store_writes autouse fixture in conftest.py "
+        "(see F-032: SPRITE_STORE_ENABLED=true in the deployed container let "
+        "`pytest` overwrite real production sprites). If a test genuinely "
+        "needs storage behavior, exercise SpriteStore directly against a fake "
+        "client (see tests/test_storage.py) instead of disabling this guard."
+    )
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _no_real_store_writes():
+    """Force the sprite store off for the entire test session, unconditionally.
+
+    `app.main._STORE_ENABLED` is read from the `SPRITE_STORE_ENABLED` env var
+    at import time. That makes it a container-wide flag with no test-mode
+    override: running pytest inside the deployed sprite-gen container (where
+    the flag is `true` for real generation) makes `/generate` requests
+    silently persist stub output over real art in the production MinIO
+    bucket — this already destroyed the real `grass` tile and `Tree` object
+    sprites once (F-032).
+
+    Patch the flag to False regardless of the process environment so the
+    suite can never depend on where it happens to run, and additionally patch
+    `default_store` to raise loudly if anything still reaches it — defense in
+    depth in case the flag check is ever bypassed, removed, or a new code
+    path forgets it.
+    """
+    with patch("app.main._STORE_ENABLED", False), \
+         patch("app.storage.default_store", side_effect=_blocked_default_store):
+        yield
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _force_stub_backend_in_jobs():
     """Unit tests must never *execute* a real diffusion backend.
