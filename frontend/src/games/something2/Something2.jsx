@@ -8,6 +8,7 @@ import Login from "../../pages/Login.jsx";
 import { useMapTiles, useMapConfig, useVfxEffects } from "./useMaps.js";
 import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";
 import { autoJoinTarget } from "./autoJoin.js";
+import { bindGameCanvas } from "./gameCanvasBinding.js";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
@@ -465,17 +466,21 @@ export default function Something2() {
     }
   };
 
+  // F-045: this used to only rerun on an activeTab change, so an authed
+  // false->true cycle (sign out, sign back in — same mechanism a
+  // token_version revocation mid-session routes through, see the apiFetch
+  // comment below) tore down and remounted the whole <canvas> node without
+  // ever telling the still-alive Game instance about it: Game.canvas kept
+  // pointing at the old, detached node while the authority socket and rAF
+  // loop kept running underneath, so the screen went blank while the
+  // player kept taking live damage. Rebinding is now `authed` too, and
+  // bindGameCanvas (unlike the old inline `new Game(canvasRef.current)`,
+  // which silently discarded that argument — see its own docs) always
+  // assigns canvas/ctx/size explicitly rather than leaning on construction.
   useEffect(() => {
     if (activeTab === 'game' && canvasRef.current) {
-      if (!gameRef.current) {
-        gameRef.current = new Game(canvasRef.current);
-      } else {
-        gameRef.current.canvas = canvasRef.current;
-        if (gameRef.current.init) {
-          gameRef.current.ctx = canvasRef.current.getContext('2d');
-        }
-      }
-      
+      gameRef.current = bindGameCanvas(gameRef.current, canvasRef.current, () => new Game());
+
       gameRef.current.setOnStateChange((newState) => {
         setIsPaused(newState === 'paused');
         if (newState === 'menu') {
@@ -504,7 +509,7 @@ export default function Something2() {
         engineRef.current = null;
       }
     };
-  }, [activeTab]);
+  }, [activeTab, authed]);
 
   // Mount-once effect whose cleanup only fires on true component unmount
   // (empty dep array), unlike the [activeTab] effect above whose cleanup
