@@ -256,6 +256,34 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
       display_width, display_height, render_mode, is_creature, prompt
     } = req.body;
+
+    // SOMET-185: worlds.allowed_creature_types and world_creatures.type
+    // reference entity_types by NAME (no FK), so a free rename here silently
+    // orphans them — a creature re-roll on an affected world then matches
+    // zero rows and reports {"placed": 0} with no error, and the GUARD_TYPE =
+    // 'Village Guard' guard-sparing clause (index.js's insertVillageGuards
+    // callers) stops matching, so a re-roll wipes every village guard.
+    // Block a rename that would break an outstanding reference rather than
+    // silently orphaning it.
+    if (name != null) {
+      const cur = await pool.query('SELECT name FROM entity_types WHERE id = $1', [id]);
+      if (cur.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
+      const oldName = cur.rows[0].name;
+      if (oldName !== name) {
+        const [worldsRef, creaturesRef] = await Promise.all([
+          pool.query('SELECT id, name FROM worlds WHERE allowed_creature_types @> $1::jsonb', [JSON.stringify([oldName])]),
+          pool.query('SELECT 1 FROM world_creatures WHERE type = $1 LIMIT 1', [oldName]),
+        ]);
+        if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0) {
+          return res.status(409).json({
+            error: `Cannot rename '${oldName}': still referenced by allowed_creature_types or placed creatures`,
+            referencing_worlds: worldsRef.rows.map((w) => ({ id: w.id, name: w.name })),
+            has_placed_creatures: creaturesRef.rows.length > 0,
+          });
+        }
+      }
+    }
+
     const result = await pool.query(
       `UPDATE entity_types SET
         name = $1, color = $2, walkable = $3, spawn_tiles = $4, chance = $5,
