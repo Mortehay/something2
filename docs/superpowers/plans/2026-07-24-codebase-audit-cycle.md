@@ -32,8 +32,9 @@
 | `tools/audit/lib/config.js` | Plane UUIDs, priority map, surface/lens/severity vocabularies. The only place an id literal appears. |
 | `tools/audit/lib/finding.js` | Finding shape: validation and fingerprint derivation. Pure. |
 | `tools/audit/lib/store.js` | Read, merge, and write `findings.json`. Owns id assignment and dedupe-on-merge. Pure except file I/O. |
-| `tools/audit/lib/plane.js` | Plane REST v1 client. The only place `fetch` and the API key appear. |
-| `tools/audit/lib/sync.js` | Reconcile findings against Plane. Pure logic over an injected client, so it is testable without the network. |
+| `tools/audit/lib/plane.js` | Plane REST v1 client. The only place `fetch` and the API key appear. Retries a Cloudflare rate-limit block with exponential backoff; a genuine JSON authz failure fails fast. |
+| `tools/audit/lib/sleep.js` | One-line injectable sleep, shared by the client's retry backoff and `reconcile`'s write throttle. |
+| `tools/audit/lib/sync.js` | Reconcile findings against Plane. Pure logic over an injected client, so it is testable without the network. Throttles consecutive writes to avoid the Cloudflare burst limit. |
 | `tools/audit/bin/sync.js` | CLI entry point wiring config + store + client + sync together. |
 | `tools/audit/test/finding.test.js` | Unit tests for validation and fingerprinting. |
 | `tools/audit/test/store.test.js` | Unit tests for merge, dedupe, id assignment. |
@@ -753,35 +754,80 @@ Expected: FAIL — `Cannot find module '../lib/plane.js'`
 'use strict';
 
 const { PLANE } = require('./config.js');
+const { defaultSleep } = require('./sleep.js');
+
+// Cloudflare's block page (the one that ambushed the first live sync — Ray ID
+// a203d1cb8fb85b5a) is HTML containing one of these markers. A genuine Plane
+// authorization failure is always JSON. We only retry the former: retrying a
+// bad API key for a minute would just hide a misconfiguration behind a slow,
+// confusing failure.
+const BLOCK_PAGE_MARKERS = [/cloudflare/i, /Ray ID/i, /Attention Required/i, /cf-error/i];
+
+function looksLikeBlockPage(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed || !/^<(!doctype|html)/i.test(trimmed)) return false;
+  return BLOCK_PAGE_MARKERS.some((re) => re.test(trimmed));
+}
 
 class PlaneClient {
-  constructor({ apiKey, fetchImpl = globalThis.fetch, plane = PLANE }) {
+  constructor({
+    apiKey,
+    fetchImpl = globalThis.fetch,
+    plane = PLANE,
+    sleepImpl = defaultSleep,
+    maxAttempts = 4,
+    retryBaseMs = 1000,
+  } = {}) {
     if (!apiKey) throw new Error('PlaneClient requires an apiKey');
     this.apiKey = apiKey;
     this.fetchImpl = fetchImpl;
     this.plane = plane;
+    this.sleepImpl = sleepImpl;
+    this.maxAttempts = maxAttempts;
+    this.retryBaseMs = retryBaseMs;
     this.projectRoot =
       `${plane.baseUrl}/workspaces/${plane.workspace}/projects/${plane.projectId}`;
   }
 
   async request(pathname, { method = 'GET', body } = {}) {
     const url = pathname.startsWith('http') ? pathname : `${this.projectRoot}${pathname}`;
-    const response = await this.fetchImpl(url, {
-      method,
-      headers: {
-        'X-API-Key': this.apiKey,
-        'Content-Type': 'application/json',
-        // Cloudflare 403s the default Node UA. Do not remove.
-        'User-Agent': this.plane.userAgent,
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    let attempt = 0;
 
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`Plane ${method} ${url} failed: ${response.status} ${text}`);
+    for (;;) {
+      attempt += 1;
+      const response = await this.fetchImpl(url, {
+        method,
+        headers: {
+          'X-API-Key': this.apiKey,
+          'Content-Type': 'application/json',
+          // Cloudflare 403s the default Node UA. Do not remove.
+          'User-Agent': this.plane.userAgent,
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+
+      const text = await response.text();
+      if (response.ok) {
+        return text ? JSON.parse(text) : null;
+      }
+
+      // 429 is unambiguous — Plane/Cloudflare are never rate-limiting a genuine
+      // authz failure with that status. A 403 is ambiguous, so only treat it as
+      // retryable when the body is the Cloudflare block page rather than JSON.
+      const retryable = response.status === 429 || (response.status === 403 && looksLikeBlockPage(text));
+
+      if (!retryable) {
+        throw new Error(`Plane ${method} ${url} failed: ${response.status} ${text}`);
+      }
+      if (attempt >= this.maxAttempts) {
+        throw new Error(
+          `Plane ${method} ${url} failed after ${attempt} attempts (rate-limited, giving up): ${response.status} ${text}`
+        );
+      }
+
+      const delay = this.retryBaseMs * 2 ** (attempt - 1);
+      await this.sleepImpl(delay);
     }
-    return text ? JSON.parse(text) : null;
   }
 
   async paginate(pathname) {
@@ -821,13 +867,31 @@ class PlaneClient {
   }
 }
 
-module.exports = { PlaneClient };
+module.exports = { PlaneClient, looksLikeBlockPage };
+```
+
+`tools/audit/lib/sleep.js` (shared by the client's retry backoff and, in Task 4, `reconcile`'s write throttle — both accept a `sleepImpl` override so tests never actually wait):
+
+```js
+'use strict';
+
+function defaultSleep(ms) {
+  if (!ms) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+module.exports = { defaultSleep };
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd tools/audit && node --test test/plane.test.js`
-Expected: PASS — 6 tests, 0 failures
+Expected: PASS — 11 tests, 0 failures
+
+(6 original + 5 covering the Cloudflare-block-vs-genuine-403 retry: a Cloudflare
+HTML 403 is retried and succeeds later, a genuine JSON 403 fails on the first
+attempt, a genuine JSON 429 is retried, retries are capped with a named
+exhaustion error, and the exhaustion error never contains the API key.)
 
 - [ ] **Step 5: Commit**
 
@@ -1032,6 +1096,13 @@ Expected: FAIL — `Cannot find module '../lib/sync.js'`
 'use strict';
 
 const { PRIORITY_BY_SEVERITY, PLANE } = require('./config.js');
+const { defaultSleep } = require('./sleep.js');
+
+// This workspace rate-limits write bursts via Cloudflare (see plane.js) — a
+// prior batch script against the same API needed exactly this kind of
+// throttle. Conservative default; overridable via reconcile's `delayMs` or
+// bin/sync.js's `--delay-ms`.
+const DEFAULT_WRITE_DELAY_MS = 500;
 
 function escapeHtml(value) {
   return String(value)
@@ -1069,11 +1140,30 @@ function snapshot(f) {
   return `${renderTitle(f)}||${renderBody(f)}||${PRIORITY_BY_SEVERITY[f.severity]}||${f.status}`;
 }
 
-async function reconcile({ doc, client, epicId, labelIds = [], dryRun = false }) {
+async function reconcile({
+  doc,
+  client,
+  epicId,
+  labelIds = [],
+  dryRun = false,
+  delayMs = DEFAULT_WRITE_DELAY_MS,
+  sleepImpl = defaultSleep,
+}) {
   const created = [];
   const updated = [];
   const closed = [];
   const skipped = [];
+
+  // Read-only calls (e.g. listLabels, done before reconcile runs) are not
+  // throttled — only the write burst that tripped Cloudflare needs spacing.
+  // No delay before the first write; only between consecutive ones.
+  let wroteOnce = false;
+  async function throttleBeforeWrite() {
+    if (wroteOnce && delayMs > 0) {
+      await sleepImpl(delayMs);
+    }
+    wroteOnce = true;
+  }
 
   for (const f of doc.findings) {
     if (f.status === 'unverified') {
@@ -1098,6 +1188,7 @@ async function reconcile({ doc, client, epicId, labelIds = [], dryRun = false })
         parent: epicId,
       };
       if (isFixed) payload.state = PLANE.doneStateId;
+      await throttleBeforeWrite();
       const issue = await client.createIssue(payload);
       f.plane_id = issue.id;
       f.plane_key = issue.sequence_id ? `SOMET-${issue.sequence_id}` : undefined;
@@ -1121,6 +1212,7 @@ async function reconcile({ doc, client, epicId, labelIds = [], dryRun = false })
     }
 
     if (dryRun) continue;
+    await throttleBeforeWrite();
     await client.updateIssue(f.plane_id, patch);
     f.synced_snapshot = current;
   }
@@ -1134,12 +1226,17 @@ module.exports = { renderTitle, renderBody, snapshot, reconcile };
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd tools/audit && node --test test/sync.test.js`
-Expected: PASS — 10 tests, 0 failures
+Expected: PASS — 15 tests, 0 failures
+
+(10 original + 5 covering the write throttle: waits `delayMs` between writes but
+not before the first one, defaults to 400-600ms when unset, skips sleeping when
+`delayMs` is 0, skips sleeping on a dry run, and never throttles around a
+skipped/unchanged finding.)
 
 - [ ] **Step 5: Run the whole toolkit suite**
 
 Run: `cd tools/audit && npm test`
-Expected: PASS — 44 tests total, 0 failures
+Expected: PASS — 54 tests total, 0 failures
 
 - [ ] **Step 6: Commit**
 
@@ -1158,7 +1255,7 @@ git commit -m "feat(audit): idempotent Plane reconcile"
 
 **Interfaces:**
 - Consumes: `store.load`, `store.save`, `PlaneClient`, `sync.reconcile`
-- Produces: CLI `node tools/audit/bin/sync.js --findings <path> [--dry-run]`, exit code 0 on success and 1 on failure.
+- Produces: CLI `node tools/audit/bin/sync.js --findings <path> [--epic <uuid>] [--dry-run] [--delay-ms <n>]`, exit code 0 on success and 1 on failure. `--delay-ms` overrides the default ~500ms throttle `reconcile` applies between consecutive Plane writes (see Task 4); it does not affect the read-only `listLabels` call this CLI makes before reconciling.
 
 - [ ] **Step 1: Write the CLI**
 
@@ -1175,7 +1272,7 @@ const { PlaneClient } = require('../lib/plane.js');
 const { reconcile } = require('../lib/sync.js');
 
 const EPIC_LABEL = 'K · Audit & hardening';
-const KNOWN_FLAGS = new Set(['--dry-run', '--findings', '--epic']);
+const KNOWN_FLAGS = new Set(['--dry-run', '--findings', '--epic', '--delay-ms']);
 
 function readApiKey() {
   if (process.env.PLANE_API_KEY) return process.env.PLANE_API_KEY;
@@ -1194,7 +1291,12 @@ function readApiKey() {
 }
 
 function parseArgs(argv) {
-  const args = { dryRun: false, findings: null, epicId: process.env.AUDIT_EPIC_ID || null };
+  const args = {
+    dryRun: false,
+    findings: null,
+    epicId: process.env.AUDIT_EPIC_ID || null,
+    delayMs: null,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     if (!KNOWN_FLAGS.has(flag)) {
@@ -1211,8 +1313,17 @@ function parseArgs(argv) {
     i += 1;
     if (flag === '--findings') args.findings = value;
     else if (flag === '--epic') args.epicId = value;
+    else if (flag === '--delay-ms') {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        throw new Error(`--delay-ms must be a non-negative number, got: ${value}`);
+      }
+      args.delayMs = parsed;
+    }
   }
-  if (!args.findings) throw new Error('usage: sync.js --findings <path> [--epic <uuid>] [--dry-run]');
+  if (!args.findings) {
+    throw new Error('usage: sync.js --findings <path> [--epic <uuid>] [--dry-run] [--delay-ms <n>]');
+  }
   if (!args.epicId) throw new Error('no epic id: pass --epic <uuid> or set AUDIT_EPIC_ID');
   return args;
 }
@@ -1222,11 +1333,14 @@ function parseArgs(argv) {
 // this, a mid-sync failure leaves newly created plane_ids only in memory:
 // the on-disk file stays stale and the next run duplicates every issue
 // reconcile already created before the failure.
-async function syncDocument({ findingsPath, client, epicId, labelIds, dryRun = false }) {
+async function syncDocument({ findingsPath, client, epicId, labelIds, dryRun = false, delayMs, sleepImpl }) {
   const doc = store.load(findingsPath);
+  const reconcileArgs = { doc, client, epicId, labelIds, dryRun };
+  if (delayMs !== undefined && delayMs !== null) reconcileArgs.delayMs = delayMs;
+  if (sleepImpl !== undefined) reconcileArgs.sleepImpl = sleepImpl;
   let result;
   try {
-    result = await reconcile({ doc, client, epicId, labelIds, dryRun });
+    result = await reconcile(reconcileArgs);
   } finally {
     if (!dryRun) store.save(findingsPath, doc);
   }
@@ -1260,6 +1374,7 @@ async function main() {
     epicId: args.epicId,
     labelIds: [label.id],
     dryRun: args.dryRun,
+    delayMs: args.delayMs,
   });
 
   console.log(JSON.stringify(summary, null, 2));
@@ -1290,15 +1405,17 @@ Replace the `scripts` block in `tools/audit/package.json`:
 
 Cover, in the existing test files' style with a hand-written fake client:
 `parseArgs` rejects an unknown flag; `parseArgs` rejects a flag given without a
-value; `parseArgs` accepts a well-formed list. Then the regression test that
+value; `parseArgs` accepts a well-formed list; `parseArgs` accepts `--delay-ms`
+and rejects a non-numeric or negative value. Then the regression test that
 matters: with a fake client that succeeds for the first N findings and then
 throws, assert the findings file ON DISK holds the `plane_id`s of the findings
 that did succeed, and that the error still propagates. Without the `try`/`finally`
 in `syncDocument`, a mid-sync failure persists nothing and the next run
-duplicates every issue already created.
+duplicates every issue already created. Pass `delayMs: 0` in that test so the
+default write throttle doesn't slow the suite down for no reason.
 
 Run: `cd tools/audit && npm test`
-Expected: PASS — 51 tests total, 0 failures
+Expected: PASS — 64 tests total, 0 failures
 
 - [ ] **Step 4: Verify the CLI fails cleanly with no arguments**
 
@@ -1778,13 +1895,19 @@ audit updates its tasks instead of duplicating them.
 - Priority map: `P0→urgent`, `P1→high`, `P2→medium`, `P3→low`
 - Done state: `e1cbace7-9999-4847-a54b-6d3f248c6dfe`
 
-Two operational facts that cost time when forgotten:
+Three operational facts that cost time when forgotten:
 
 - **Cloudflare rejects the default Node/Python User-Agent** with a 403 carrying
   error code 1010. The client sends `curl/8.5.0`. If you write an ad-hoc request,
   send one too.
 - **The modules feature is disabled** in this workspace. Grouping is Epic + Label.
   Do not try to create a module.
+- **This workspace burst-limits writes.** The first live sync created exactly one
+  issue, then Cloudflare blocked the next request with a 403 HTML page (Ray ID
+  `a203d1cb8fb85b5a`) — a rate limit, not a ban. `reconcile` now waits `delayMs`
+  (default ~500ms) between consecutive create/update calls, and `PlaneClient`
+  retries a Cloudflare-shaped 403/429 with exponential backoff. See "Recognising
+  a Cloudflare block" below.
 
 ## Running a sync
 
@@ -1804,6 +1927,25 @@ new findings were genuinely added.
 Then run for real by dropping `--dry-run`. The tool writes `plane_id` back into
 `findings.json`; **commit that file afterwards** — it is what makes the next sync
 idempotent.
+
+If this workspace's rate limit looks tighter than usual (repeated retries logged,
+or an exhausted-retry failure), widen the gap between writes with `--delay-ms`:
+
+```bash
+node bin/sync.js --findings ../../docs/audits/2026-07-24/findings.json \
+  --epic "$AUDIT_EPIC_ID" --delay-ms 1000
+```
+
+## Recognising a Cloudflare block
+
+A genuine Plane authorization failure (bad key, wrong scope) returns **JSON** and
+fails immediately — no retry, because retrying a bad key for a minute would just
+hide a misconfiguration. A Cloudflare rate-limit block instead returns an **HTML**
+page mentioning Cloudflare, a Ray ID, or "Attention Required!"; `PlaneClient`
+recognises that shape and retries it with exponential backoff (up to 4 attempts)
+before giving up. If you see an error like `Plane POST ... failed after 4 attempts
+(rate-limited, giving up)`, the retries were exhausted — rerun with a larger
+`--delay-ms` rather than immediately retrying at the same pace.
 
 ## Closing a task
 
@@ -1827,16 +1969,23 @@ task will be reopened in spirit by the next sync's drift check.
 
 A sync interrupted mid-run leaves some findings with a `plane_id` and some without.
 This is safe: re-run it. Findings that already have an id are skipped or patched;
-findings without one are created.
+findings without one are created. The `try`/`finally` in `syncDocument` persists
+every `plane_id` reconcile managed to write before a failure, so a re-run never
+duplicates an issue that was already created.
 
 If the API returns a 403 with `1010`, the User-Agent is wrong. If it returns 401,
-the key in `.mcp.json` has rotated.
+the key in `.mcp.json` has rotated. If it returns a 403/429 whose body is HTML
+instead of JSON, that's the Cloudflare rate limit described above — the client
+already retries it; if it still fails, rerun with a larger `--delay-ms`.
 
 ## Never
 
 - Never file a finding with `status: 'unverified'`. `reconcile` already skips them.
 - Never edit a task's title or body in the Plane UI; the drift check will overwrite it.
 - Never commit the API key.
+- Never set `--delay-ms 0` (or otherwise remove the write throttle) against this
+  workspace to "go faster" — it is what stands between a sync and the Cloudflare
+  block that already happened once.
 ````
 
 - [ ] **Step 2: Verify the dry-run path works end to end**

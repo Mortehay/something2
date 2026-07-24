@@ -1,6 +1,13 @@
 'use strict';
 
 const { PRIORITY_BY_SEVERITY, PLANE } = require('./config.js');
+const { defaultSleep } = require('./sleep.js');
+
+// This workspace rate-limits write bursts via Cloudflare (see plane.js) — a
+// prior batch script against the same API needed exactly this kind of
+// throttle. Conservative default; overridable via reconcile's `delayMs` or
+// bin/sync.js's `--delay-ms`.
+const DEFAULT_WRITE_DELAY_MS = 500;
 
 function escapeHtml(value) {
   return String(value)
@@ -38,11 +45,30 @@ function snapshot(f) {
   return `${renderTitle(f)}||${renderBody(f)}||${PRIORITY_BY_SEVERITY[f.severity]}||${f.status}`;
 }
 
-async function reconcile({ doc, client, epicId, labelIds = [], dryRun = false }) {
+async function reconcile({
+  doc,
+  client,
+  epicId,
+  labelIds = [],
+  dryRun = false,
+  delayMs = DEFAULT_WRITE_DELAY_MS,
+  sleepImpl = defaultSleep,
+}) {
   const created = [];
   const updated = [];
   const closed = [];
   const skipped = [];
+
+  // Read-only calls (e.g. listLabels, done before reconcile runs) are not
+  // throttled — only the write burst that tripped Cloudflare needs spacing.
+  // No delay before the first write; only between consecutive ones.
+  let wroteOnce = false;
+  async function throttleBeforeWrite() {
+    if (wroteOnce && delayMs > 0) {
+      await sleepImpl(delayMs);
+    }
+    wroteOnce = true;
+  }
 
   for (const f of doc.findings) {
     if (f.status === 'unverified') {
@@ -68,6 +94,7 @@ async function reconcile({ doc, client, epicId, labelIds = [], dryRun = false })
       if (isFixed) {
         payload.state = PLANE.doneStateId;
       }
+      await throttleBeforeWrite();
       const issue = await client.createIssue(payload);
       f.plane_id = issue.id;
       f.plane_key = issue.sequence_id ? `SOMET-${issue.sequence_id}` : undefined;
@@ -91,6 +118,7 @@ async function reconcile({ doc, client, epicId, labelIds = [], dryRun = false })
     }
 
     if (dryRun) continue;
+    await throttleBeforeWrite();
     await client.updateIssue(f.plane_id, patch);
     f.synced_snapshot = current;
   }

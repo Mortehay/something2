@@ -14,12 +14,35 @@ function fakeFetch(responses) {
     return {
       ok: next.status < 400,
       status: next.status,
-      text: async () => JSON.stringify(next.body),
+      // A response can supply raw HTML via `text` (Cloudflare block pages
+      // aren't JSON) or a plain object via `body` (JSON-stringified for you).
+      text: async () => (next.text !== undefined ? next.text : JSON.stringify(next.body)),
     };
   };
   impl.calls = calls;
   return impl;
 }
+
+function fakeSleepSpy() {
+  const calls = [];
+  const impl = async (ms) => {
+    calls.push(ms);
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+// A trimmed version of the page that actually blocked the live sync
+// (Ray ID a203d1cb8fb85b5a) — HTML, not JSON, with Cloudflare markers.
+const CLOUDFLARE_BLOCK_HTML = [
+  '<!DOCTYPE html>',
+  '<html><head><title>Attention Required! | Cloudflare</title></head>',
+  '<body><div class="cf-error-details">',
+  '<h1>Attention Required!</h1>',
+  '<p>You are unable to access api.plane.so</p>',
+  '<p>Ray ID: a203d1cb8fb85b5a &bull; Performance &amp; security by Cloudflare</p>',
+  '</div></body></html>',
+].join('\n');
 
 test('sends the API key and a browser-like user agent', async () => {
   const impl = fakeFetch([{ status: 200, body: { results: [] } }]);
@@ -85,4 +108,85 @@ test('a non-ok response raises an error naming the status and body', async () =>
   const client = new PlaneClient({ apiKey: 'k', fetchImpl: impl });
 
   await assert.rejects(() => client.listLabels(), /403.*forbidden/s);
+});
+
+// Regression coverage for the live sync (F-001 -> SOMET-165, then a
+// Cloudflare 403 block on the very next write, Ray ID a203d1cb8fb85b5a).
+
+test('a Cloudflare-style HTML 403 is retried and succeeds on a later attempt', async () => {
+  const impl = fakeFetch([
+    { status: 403, text: CLOUDFLARE_BLOCK_HTML },
+    { status: 403, text: CLOUDFLARE_BLOCK_HTML },
+    { status: 200, body: { results: [{ id: 'l1' }] } },
+  ]);
+  const sleepImpl = fakeSleepSpy();
+  const client = new PlaneClient({ apiKey: 'plane_api_secret', fetchImpl: impl, sleepImpl });
+
+  const result = await client.listLabels();
+
+  assert.deepStrictEqual(result, [{ id: 'l1' }]);
+  assert.strictEqual(impl.calls.length, 3);
+  // Exponential backoff: each wait strictly longer than the last.
+  assert.strictEqual(sleepImpl.calls.length, 2);
+  assert.ok(sleepImpl.calls[1] > sleepImpl.calls[0], `expected backoff to grow: ${sleepImpl.calls}`);
+});
+
+test('a genuine JSON 403 is not retried and fails immediately', async () => {
+  const impl = fakeFetch([{ status: 403, body: { error: 'Invalid API key.' } }]);
+  const sleepImpl = fakeSleepSpy();
+  const client = new PlaneClient({ apiKey: 'bad-key', fetchImpl: impl, sleepImpl });
+
+  await assert.rejects(() => client.listLabels(), /403.*Invalid API key/s);
+  assert.strictEqual(impl.calls.length, 1, 'a genuine authz failure must not be retried');
+  assert.deepStrictEqual(sleepImpl.calls, []);
+});
+
+test('a genuine JSON 429 from Plane itself is retried like a rate limit', async () => {
+  const impl = fakeFetch([
+    { status: 429, body: { error: 'rate limited' } },
+    { status: 200, body: { results: [] } },
+  ]);
+  const sleepImpl = fakeSleepSpy();
+  const client = new PlaneClient({ apiKey: 'k', fetchImpl: impl, sleepImpl });
+
+  const result = await client.listLabels();
+  assert.deepStrictEqual(result, []);
+  assert.strictEqual(impl.calls.length, 2);
+});
+
+test('retries are capped and the final error names the exhaustion', async () => {
+  const impl = fakeFetch([
+    { status: 403, text: CLOUDFLARE_BLOCK_HTML },
+    { status: 403, text: CLOUDFLARE_BLOCK_HTML },
+    { status: 403, text: CLOUDFLARE_BLOCK_HTML },
+    { status: 403, text: CLOUDFLARE_BLOCK_HTML },
+  ]);
+  const sleepImpl = fakeSleepSpy();
+  const client = new PlaneClient({ apiKey: 'plane_api_secret', fetchImpl: impl, sleepImpl, maxAttempts: 4 });
+
+  await assert.rejects(() => client.listLabels(), /after 4 attempts/);
+  assert.strictEqual(impl.calls.length, 4);
+  assert.strictEqual(sleepImpl.calls.length, 3);
+});
+
+test('the exhaustion error never contains the API key (it travels as a header, not in the body)', async () => {
+  const impl = fakeFetch([
+    { status: 403, text: CLOUDFLARE_BLOCK_HTML },
+    { status: 403, text: CLOUDFLARE_BLOCK_HTML },
+  ]);
+  const sleepImpl = fakeSleepSpy();
+  const client = new PlaneClient({
+    apiKey: 'plane_api_supersecret123',
+    fetchImpl: impl,
+    sleepImpl,
+    maxAttempts: 2,
+  });
+
+  await assert.rejects(
+    () => client.listLabels(),
+    (error) => {
+      assert.ok(!error.message.includes('plane_api_supersecret123'), error.message);
+      return true;
+    }
+  );
 });

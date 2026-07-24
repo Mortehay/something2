@@ -16,13 +16,19 @@ audit updates its tasks instead of duplicating them.
 - Priority map: `P0→urgent`, `P1→high`, `P2→medium`, `P3→low`
 - Done state: `e1cbace7-9999-4847-a54b-6d3f248c6dfe`
 
-Two operational facts that cost time when forgotten:
+Three operational facts that cost time when forgotten:
 
 - **Cloudflare rejects the default Node/Python User-Agent** with a 403 carrying
   error code 1010. The client sends `curl/8.5.0`. If you write an ad-hoc request,
   send one too.
 - **The modules feature is disabled** in this workspace. Grouping is Epic + Label.
   Do not try to create a module.
+- **This workspace burst-limits writes.** The first live sync created exactly one
+  issue, then Cloudflare blocked the next request with a 403 HTML page (Ray ID
+  `a203d1cb8fb85b5a`) — a rate limit, not a ban. `reconcile` now waits `delayMs`
+  (default ~500ms) between consecutive create/update calls, and `PlaneClient`
+  retries a Cloudflare-shaped 403/429 with exponential backoff. See "Recognising
+  a Cloudflare block" below.
 
 ## Running a sync
 
@@ -42,6 +48,25 @@ new findings were genuinely added.
 Then run for real by dropping `--dry-run`. The tool writes `plane_id` back into
 `findings.json`; **commit that file afterwards** — it is what makes the next sync
 idempotent.
+
+If this workspace's rate limit looks tighter than usual (repeated retries logged,
+or an exhausted-retry failure), widen the gap between writes with `--delay-ms`:
+
+```bash
+node bin/sync.js --findings ../../docs/audits/2026-07-24/findings.json \
+  --epic "$AUDIT_EPIC_ID" --delay-ms 1000
+```
+
+## Recognising a Cloudflare block
+
+A genuine Plane authorization failure (bad key, wrong scope) returns **JSON** and
+fails immediately — no retry, because retrying a bad key for a minute would just
+hide a misconfiguration. A Cloudflare rate-limit block instead returns an **HTML**
+page mentioning Cloudflare, a Ray ID, or "Attention Required!"; `PlaneClient`
+recognises that shape and retries it with exponential backoff (up to 4 attempts)
+before giving up. If you see an error like `Plane POST ... failed after 4 attempts
+(rate-limited, giving up)`, the retries were exhausted — rerun with a larger
+`--delay-ms` rather than immediately retrying at the same pace.
 
 ## Closing a task
 
@@ -65,13 +90,20 @@ task will be reopened in spirit by the next sync's drift check.
 
 A sync interrupted mid-run leaves some findings with a `plane_id` and some without.
 This is safe: re-run it. Findings that already have an id are skipped or patched;
-findings without one are created.
+findings without one are created. The `try`/`finally` in `syncDocument` persists
+every `plane_id` reconcile managed to write before a failure, so a re-run never
+duplicates an issue that was already created.
 
 If the API returns a 403 with `1010`, the User-Agent is wrong. If it returns 401,
-the key in `.mcp.json` has rotated.
+the key in `.mcp.json` has rotated. If it returns a 403/429 whose body is HTML
+instead of JSON, that's the Cloudflare rate limit described above — the client
+already retries it; if it still fails, rerun with a larger `--delay-ms`.
 
 ## Never
 
 - Never file a finding with `status: 'unverified'`. `reconcile` already skips them.
 - Never edit a task's title or body in the Plane UI; the drift check will overwrite it.
 - Never commit the API key.
+- Never set `--delay-ms 0` (or otherwise remove the write throttle) against this
+  workspace to "go faster" — it is what stands between a sync and the Cloudflare
+  block that already happened once.

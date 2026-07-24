@@ -68,12 +68,31 @@ test('parseArgs rejects --findings given with no value', () => {
 
 test('parseArgs accepts a well-formed argument list', () => {
   const args = parseArgs(['--findings', 'f.json', '--epic', 'e1', '--dry-run']);
-  assert.deepStrictEqual(args, { dryRun: true, findings: 'f.json', epicId: 'e1' });
+  assert.deepStrictEqual(args, { dryRun: true, findings: 'f.json', epicId: 'e1', delayMs: null });
 });
 
 test('parseArgs accepts a well-formed argument list without --dry-run', () => {
   const args = parseArgs(['--findings', 'f.json', '--epic', 'e1']);
-  assert.deepStrictEqual(args, { dryRun: false, findings: 'f.json', epicId: 'e1' });
+  assert.deepStrictEqual(args, { dryRun: false, findings: 'f.json', epicId: 'e1', delayMs: null });
+});
+
+test('parseArgs accepts --delay-ms and carries it through', () => {
+  const args = parseArgs(['--findings', 'f.json', '--epic', 'e1', '--delay-ms', '750']);
+  assert.deepStrictEqual(args, { dryRun: false, findings: 'f.json', epicId: 'e1', delayMs: 750 });
+});
+
+test('parseArgs rejects a non-numeric --delay-ms', () => {
+  assert.throws(
+    () => parseArgs(['--findings', 'f.json', '--epic', 'e1', '--delay-ms', 'soon']),
+    /--delay-ms must be a non-negative number/
+  );
+});
+
+test('parseArgs rejects a negative --delay-ms', () => {
+  assert.throws(
+    () => parseArgs(['--findings', 'f.json', '--epic', 'e1', '--delay-ms', '-5']),
+    /--delay-ms must be a non-negative number/
+  );
 });
 
 // Finding 1 regression test: a mid-sync failure must not lose the progress
@@ -98,6 +117,9 @@ test('syncDocument persists plane_ids for findings that succeeded before a later
       epicId: 'epic-1',
       labelIds: ['label-k'],
       dryRun: false,
+      // Zero throttle delay: this test is about persistence, not pacing, and
+      // the default 500ms real sleep would make the suite slow for no reason.
+      delayMs: 0,
     }),
     /429 rate limited/
   );

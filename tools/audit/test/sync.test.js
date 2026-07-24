@@ -154,3 +154,103 @@ test('dryRun reports the work without performing it', async () => {
   assert.strictEqual(client.creates.length, 0);
   assert.strictEqual(doc.findings[0].plane_id, null);
 });
+
+// Regression coverage for the Cloudflare burst-limit hit during the first
+// live sync (F-001 -> SOMET-165, then a 403 block on the very next write).
+// reconcile must space out consecutive writes; read-only calls (listLabels,
+// done by the caller before reconcile runs) are out of scope here.
+function fakeSleepSpy() {
+  const calls = [];
+  const impl = async (ms) => {
+    calls.push(ms);
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+test('reconcile waits delayMs between writes but not before the first one', async () => {
+  const client = new FakeClient();
+  const doc = {
+    version: 1,
+    findings: [
+      finding({ id: 'F-001', fingerprint: 'a'.repeat(40), claim: 'First problem here.' }),
+      finding({ id: 'F-002', fingerprint: 'b'.repeat(40), claim: 'Second problem here.' }),
+      finding({ id: 'F-003', fingerprint: 'c'.repeat(40), claim: 'Third problem here.' }),
+    ],
+  };
+  const sleepImpl = fakeSleepSpy();
+
+  await reconcile({ doc, client, epicId: 'epic-1', labelIds: [], delayMs: 750, sleepImpl });
+
+  assert.strictEqual(client.creates.length, 3);
+  // 3 writes -> 2 gaps, each the full configured delay; no delay before the
+  // very first write.
+  assert.deepStrictEqual(sleepImpl.calls, [750, 750]);
+});
+
+test('reconcile defaults to a conservative delay when none is given', async () => {
+  const client = new FakeClient();
+  const doc = {
+    version: 1,
+    findings: [
+      finding({ id: 'F-001', fingerprint: 'a'.repeat(40), claim: 'First problem here.' }),
+      finding({ id: 'F-002', fingerprint: 'b'.repeat(40), claim: 'Second problem here.' }),
+    ],
+  };
+  const sleepImpl = fakeSleepSpy();
+
+  await reconcile({ doc, client, epicId: 'epic-1', labelIds: [], sleepImpl });
+
+  assert.strictEqual(sleepImpl.calls.length, 1);
+  assert.ok(sleepImpl.calls[0] >= 400 && sleepImpl.calls[0] <= 600, `expected 400-600ms, got ${sleepImpl.calls[0]}`);
+});
+
+test('reconcile does not sleep when delayMs is 0', async () => {
+  const client = new FakeClient();
+  const doc = {
+    version: 1,
+    findings: [
+      finding({ id: 'F-001', fingerprint: 'a'.repeat(40), claim: 'First problem here.' }),
+      finding({ id: 'F-002', fingerprint: 'b'.repeat(40), claim: 'Second problem here.' }),
+    ],
+  };
+  const sleepImpl = fakeSleepSpy();
+
+  await reconcile({ doc, client, epicId: 'epic-1', labelIds: [], delayMs: 0, sleepImpl });
+
+  assert.deepStrictEqual(sleepImpl.calls, []);
+});
+
+test('reconcile does not sleep during a dry run', async () => {
+  const client = new FakeClient();
+  const doc = {
+    version: 1,
+    findings: [
+      finding({ id: 'F-001', fingerprint: 'a'.repeat(40), claim: 'First problem here.' }),
+      finding({ id: 'F-002', fingerprint: 'b'.repeat(40), claim: 'Second problem here.' }),
+    ],
+  };
+  const sleepImpl = fakeSleepSpy();
+
+  await reconcile({ doc, client, epicId: 'epic-1', labelIds: [], dryRun: true, sleepImpl });
+
+  assert.deepStrictEqual(sleepImpl.calls, []);
+});
+
+test('reconcile only throttles between writes, not between skipped or unchanged findings', async () => {
+  const client = new FakeClient();
+  const doc = {
+    version: 1,
+    findings: [
+      finding({ id: 'F-001', fingerprint: 'a'.repeat(40), claim: 'First problem here.', status: 'unverified' }),
+      finding({ id: 'F-002', fingerprint: 'b'.repeat(40), claim: 'Second problem here.' }),
+    ],
+  };
+  const sleepImpl = fakeSleepSpy();
+
+  const result = await reconcile({ doc, client, epicId: 'epic-1', labelIds: [], delayMs: 750, sleepImpl });
+
+  assert.deepStrictEqual(result.skipped, ['F-001']);
+  assert.strictEqual(client.creates.length, 1);
+  assert.deepStrictEqual(sleepImpl.calls, []);
+});

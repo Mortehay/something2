@@ -8,7 +8,7 @@ const { PlaneClient } = require('../lib/plane.js');
 const { reconcile } = require('../lib/sync.js');
 
 const EPIC_LABEL = 'K · Audit & hardening';
-const KNOWN_FLAGS = new Set(['--dry-run', '--findings', '--epic']);
+const KNOWN_FLAGS = new Set(['--dry-run', '--findings', '--epic', '--delay-ms']);
 
 function readApiKey() {
   if (process.env.PLANE_API_KEY) return process.env.PLANE_API_KEY;
@@ -27,7 +27,12 @@ function readApiKey() {
 }
 
 function parseArgs(argv) {
-  const args = { dryRun: false, findings: null, epicId: process.env.AUDIT_EPIC_ID || null };
+  const args = {
+    dryRun: false,
+    findings: null,
+    epicId: process.env.AUDIT_EPIC_ID || null,
+    delayMs: null,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     if (!KNOWN_FLAGS.has(flag)) {
@@ -44,8 +49,17 @@ function parseArgs(argv) {
     i += 1;
     if (flag === '--findings') args.findings = value;
     else if (flag === '--epic') args.epicId = value;
+    else if (flag === '--delay-ms') {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        throw new Error(`--delay-ms must be a non-negative number, got: ${value}`);
+      }
+      args.delayMs = parsed;
+    }
   }
-  if (!args.findings) throw new Error('usage: sync.js --findings <path> [--epic <uuid>] [--dry-run]');
+  if (!args.findings) {
+    throw new Error('usage: sync.js --findings <path> [--epic <uuid>] [--dry-run] [--delay-ms <n>]');
+  }
   if (!args.epicId) throw new Error('no epic id: pass --epic <uuid> or set AUDIT_EPIC_ID');
   return args;
 }
@@ -55,11 +69,14 @@ function parseArgs(argv) {
 // this, a mid-sync failure leaves newly created plane_ids only in memory:
 // the on-disk file stays stale and the next run duplicates every issue
 // reconcile already created before the failure.
-async function syncDocument({ findingsPath, client, epicId, labelIds, dryRun = false }) {
+async function syncDocument({ findingsPath, client, epicId, labelIds, dryRun = false, delayMs, sleepImpl }) {
   const doc = store.load(findingsPath);
+  const reconcileArgs = { doc, client, epicId, labelIds, dryRun };
+  if (delayMs !== undefined && delayMs !== null) reconcileArgs.delayMs = delayMs;
+  if (sleepImpl !== undefined) reconcileArgs.sleepImpl = sleepImpl;
   let result;
   try {
-    result = await reconcile({ doc, client, epicId, labelIds, dryRun });
+    result = await reconcile(reconcileArgs);
   } finally {
     if (!dryRun) store.save(findingsPath, doc);
   }
@@ -93,6 +110,7 @@ async function main() {
     epicId: args.epicId,
     labelIds: [label.id],
     dryRun: args.dryRun,
+    delayMs: args.delayMs,
   });
 
   console.log(JSON.stringify(summary, null, 2));

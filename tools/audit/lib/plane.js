@@ -1,35 +1,80 @@
 'use strict';
 
 const { PLANE } = require('./config.js');
+const { defaultSleep } = require('./sleep.js');
+
+// Cloudflare's block page (the one that ambushed the first live sync — Ray ID
+// a203d1cb8fb85b5a) is HTML containing one of these markers. A genuine Plane
+// authorization failure is always JSON. We only retry the former: retrying a
+// bad API key for a minute would just hide a misconfiguration behind a slow,
+// confusing failure.
+const BLOCK_PAGE_MARKERS = [/cloudflare/i, /Ray ID/i, /Attention Required/i, /cf-error/i];
+
+function looksLikeBlockPage(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed || !/^<(!doctype|html)/i.test(trimmed)) return false;
+  return BLOCK_PAGE_MARKERS.some((re) => re.test(trimmed));
+}
 
 class PlaneClient {
-  constructor({ apiKey, fetchImpl = globalThis.fetch, plane = PLANE }) {
+  constructor({
+    apiKey,
+    fetchImpl = globalThis.fetch,
+    plane = PLANE,
+    sleepImpl = defaultSleep,
+    maxAttempts = 4,
+    retryBaseMs = 1000,
+  } = {}) {
     if (!apiKey) throw new Error('PlaneClient requires an apiKey');
     this.apiKey = apiKey;
     this.fetchImpl = fetchImpl;
     this.plane = plane;
+    this.sleepImpl = sleepImpl;
+    this.maxAttempts = maxAttempts;
+    this.retryBaseMs = retryBaseMs;
     this.projectRoot =
       `${plane.baseUrl}/workspaces/${plane.workspace}/projects/${plane.projectId}`;
   }
 
   async request(pathname, { method = 'GET', body } = {}) {
     const url = pathname.startsWith('http') ? pathname : `${this.projectRoot}${pathname}`;
-    const response = await this.fetchImpl(url, {
-      method,
-      headers: {
-        'X-API-Key': this.apiKey,
-        'Content-Type': 'application/json',
-        // Cloudflare 403s the default Node UA. Do not remove.
-        'User-Agent': this.plane.userAgent,
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    let attempt = 0;
 
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`Plane ${method} ${url} failed: ${response.status} ${text}`);
+    for (;;) {
+      attempt += 1;
+      const response = await this.fetchImpl(url, {
+        method,
+        headers: {
+          'X-API-Key': this.apiKey,
+          'Content-Type': 'application/json',
+          // Cloudflare 403s the default Node UA. Do not remove.
+          'User-Agent': this.plane.userAgent,
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+
+      const text = await response.text();
+      if (response.ok) {
+        return text ? JSON.parse(text) : null;
+      }
+
+      // 429 is unambiguous — Plane/Cloudflare are never rate-limiting a genuine
+      // authz failure with that status. A 403 is ambiguous, so only treat it as
+      // retryable when the body is the Cloudflare block page rather than JSON.
+      const retryable = response.status === 429 || (response.status === 403 && looksLikeBlockPage(text));
+
+      if (!retryable) {
+        throw new Error(`Plane ${method} ${url} failed: ${response.status} ${text}`);
+      }
+      if (attempt >= this.maxAttempts) {
+        throw new Error(
+          `Plane ${method} ${url} failed after ${attempt} attempts (rate-limited, giving up): ${response.status} ${text}`
+        );
+      }
+
+      const delay = this.retryBaseMs * 2 ** (attempt - 1);
+      await this.sleepImpl(delay);
     }
-    return text ? JSON.parse(text) : null;
   }
 
   async paginate(pathname) {
@@ -69,4 +114,4 @@ class PlaneClient {
   }
 }
 
-module.exports = { PlaneClient };
+module.exports = { PlaneClient, looksLikeBlockPage };
