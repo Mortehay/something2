@@ -56,7 +56,7 @@ function fakePool() {
       }
       // token_version lookup done on every upgrade: return the same version
       // token() signs with (1) so the fakePool sessions pass the version check.
-      if (/token_version FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+      if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
       if (/FROM item_types/i.test(sql)) {
@@ -524,6 +524,67 @@ test('the authority rejects a connect whose token_version is stale', async (t) =
     });
     assert.ok(outcome === 'error' || outcome === 'close',
       `a stale token_version must be refused at upgrade, got ${outcome}`);
+  } finally {
+    if (userId != null) await pool.query('DELETE FROM users WHERE id = $1', [userId]).catch(() => {});
+    await pool.end().catch(() => {});
+  }
+});
+
+// F-021 (SOMET-201): the revocation check used to be two independent copies
+// (auth/middleware.js's HTTP guard, this file's WS upgrade handler) with no
+// test asserting they agreed — they could read different column lists and
+// drift, and a fix applied to only one would leave the other transport
+// silently unprotected. Both now call the SAME auth/tokens.js
+// currentUserForToken. This test is the one the finding asked for: mint a
+// token, revoke it exactly the way logout-all does (bump token_version),
+// and assert BOTH transports reject it for the SAME account in ONE test —
+// something no test did before this fix (the two existing coverage tests
+// above/nearby each exercise only one transport).
+test('a token revoked after minting is rejected by BOTH the HTTP guard and a live WS upgrade for the same account (F-021)', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — the shared revocation check is UNVERIFIED on this run`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  let userId;
+  try {
+    const username = `authshared-${process.pid}-${Date.now()}`;
+    const ins = await pool.query(
+      `INSERT INTO users (username, password_hash, role, token_version) VALUES ($1, 'x', 'player', 1) RETURNING id`,
+      [username],
+    );
+    userId = ins.rows[0].id;
+    const token = jwt.sign({ user_id: userId, username, role: 'player', tv: 1 }, SECRET, { algorithm: 'HS256' });
+
+    // Revoke it — the exact mutation POST /api/auth/logout-all performs.
+    await pool.query('UPDATE users SET token_version = token_version + 1 WHERE id = $1', [userId]);
+
+    // HTTP transport: auth/middleware.js's requireAuth against the real row.
+    const { requireAuth } = require('../src/auth/middleware.js');
+    const guard = requireAuth(pool);
+    const res = {
+      statusCode: null, body: null,
+      status(c) { this.statusCode = c; return this; },
+      json(b) { this.body = b; return this; },
+    };
+    let nextCalled = false;
+    await guard({ headers: { authorization: `Bearer ${token}` } }, res, () => { nextCalled = true; });
+    assert.equal(res.statusCode, 401, 'the HTTP guard must reject the revoked token');
+    assert.equal(nextCalled, false, 'a revoked token must never reach the route handler');
+
+    // WS transport: the SAME token against a live authority upgrade.
+    const { url } = await bootWith(pool);
+    const ws = new WebSocket(`${url}?token=${encodeURIComponent(token)}`);
+    openResources.push({ close() { ws.terminate(); } });
+    const outcome = await new Promise((res2) => {
+      ws.on('error', () => res2('error'));
+      ws.on('close', () => res2('close'));
+      ws.on('open', () => res2('open'));
+    });
+    assert.ok(outcome === 'error' || outcome === 'close',
+      `the WS upgrade must reject the same revoked token, got ${outcome}`);
   } finally {
     if (userId != null) await pool.query('DELETE FROM users WHERE id = $1', [userId]).catch(() => {});
     await pool.end().catch(() => {});

@@ -52,7 +52,7 @@ function fakePool() {
           { name: 'path', walkable: true, speed: 1 },
         ] };
       }
-      if (/token_version FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+      if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
       if (/FROM item_types/i.test(sql)) return { rows: [] };

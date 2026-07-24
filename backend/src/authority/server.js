@@ -1,6 +1,7 @@
 const { URL } = require('node:url');
 const jwt = require('jsonwebtoken');
 const { WebSocketServer } = require('ws');
+const { currentUserForToken } = require('../auth/tokens.js');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
@@ -181,14 +182,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
       }
 
       // Signature-valid is not enough: reject a token whose tv is behind the
-      // account's CURRENT token_version, mirroring the HTTP middleware. This is
-      // what makes logout-all / bans also kill a live game socket instead of
-      // only future HTTP requests. One indexed query per CONNECT (not per tick).
-      // A DB error or a missing user must destroy the socket, never throw out.
+      // account's CURRENT token_version. This is what makes logout-all / bans
+      // also kill a live game socket instead of only future HTTP requests.
+      // currentUserForToken is the SAME check auth/middleware.js's HTTP guard
+      // runs (F-021 / SOMET-201) — one indexed query per CONNECT (not per
+      // tick), shared so the two transports cannot silently drift apart. A DB
+      // error or a revoked/missing user must destroy the socket, never throw out.
       try {
-        const r = await pool.query('SELECT token_version FROM users WHERE id = $1', [payload.user_id]);
-        const row = r.rows[0];
-        if (!row || row.token_version !== payload.tv) { socket.destroy(); return; }
+        const user = await currentUserForToken(pool, payload);
+        if (!user) { socket.destroy(); return; }
       } catch {
         socket.destroy();
         return;

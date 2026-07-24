@@ -66,7 +66,7 @@ function makePool(chunkSize, { itemsFor, claim } = {}) {
     query: async (sql, params) => {
       calls.push({ sql, params });
       if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: chunkSize }] };
-      if (/token_version FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] }; // matches token()'s tv:1 → passes the on-connect version check
+      if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] }; // matches token()'s tv:1 → passes the on-connect version check
       if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
       if (/FROM entity_types WHERE is_creature/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 }; // already materialized
