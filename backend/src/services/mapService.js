@@ -788,5 +788,6 @@ module.exports = {
     edgeOfDoorwayTile,
     arrivalPoint,
     chooseSpawn,
+    CREATURE_TILE_PX,
 };
 

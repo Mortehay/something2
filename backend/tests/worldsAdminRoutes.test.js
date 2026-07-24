@@ -62,6 +62,53 @@ test('PUT /api/worlds/:id 404 when the row is absent', async () => {
   assert.equal(res.status, 404);
 });
 
+// F-004 (SOMET-184): PUT /api/worlds/:id stored entry_spawn without checking
+// it lands inside the world bounds. chooseSpawn() only checks Number.isFinite,
+// so an out-of-range entry_spawn puts every first-time joiner inside the solid
+// wall ring stamped by stampBounds() -- confirmed live: entry_spawn
+// {x:99999,y:99999} on a 24x24 world saved with 200, and a fresh joiner spawned
+// there and never moved across 50 subsequent state frames.
+test('PUT /api/worlds/:id rejects an entry_spawn far outside a bounded world', async () => {
+  __setPool(mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],
+  ]));
+  const res = await request(app).put('/api/worlds/w1').set(...AUTH)
+    .send({ name: 'Entry', width: 24, height: 24, is_entry: true, entry_spawn: { x: 99999, y: 99999 } });
+  assert.equal(res.status, 400);
+});
+
+test('PUT /api/worlds/:id rejects an entry_spawn landing in the wall ring', async () => {
+  __setPool(mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],
+  ]));
+  // (0,0) is tile (0,0) -- the outer wall ring stampBounds() always solidifies.
+  const res = await request(app).put('/api/worlds/w1').set(...AUTH)
+    .send({ name: 'Entry', width: 24, height: 24, is_entry: true, entry_spawn: { x: 0, y: 0 } });
+  assert.equal(res.status, 400);
+});
+
+test('PUT /api/worlds/:id accepts an entry_spawn inside the interior', async () => {
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],
+    [/UPDATE worlds SET/i, (p) => ({ rows: [{ id: 'w1', name: p[0] }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).put('/api/worlds/w1').set(...AUTH)
+    .send({ name: 'Entry', width: 24, height: 24, is_entry: true, entry_spawn: { x: 1200, y: 1200 } });
+  assert.equal(res.status, 200);
+});
+
+test('PUT /api/worlds/:id ignores entry_spawn bounds when the world is unbounded', async () => {
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: null, height: null }] })],
+    [/UPDATE worlds SET/i, (p) => ({ rows: [{ id: 'w1', name: p[0] }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).put('/api/worlds/w1').set(...AUTH)
+    .send({ name: 'Entry', is_entry: true, entry_spawn: { x: 99999, y: 99999 } });
+  assert.equal(res.status, 200);
+});
+
 test('PUT /api/worlds/:id with is_entry clears the previous entry first', async () => {
   const pool = mockPool([
     [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],

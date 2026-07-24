@@ -4,7 +4,7 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts, villageMerchantPost } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts, villageMerchantPost, CREATURE_TILE_PX } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages } = require('./services/villages');
 const { seedBaseCatalog } = require('./services/merchantStock');
@@ -1069,6 +1069,23 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     const nextW = boundsProvided ? w : (before.width ?? null);
     const nextH = boundsProvided ? h : (before.height ?? null);
     const boundsChanged = (before.width ?? null) !== nextW || (before.height ?? null) !== nextH;
+
+    // A bounded world's outer ring is always solid wall (stampBounds(), map
+    // Service.js), so an entry_spawn must land strictly inside it or the first
+    // joiner materialises inside impassable terrain with no way out (SOMET-184,
+    // confirmed live: entry_spawn {x:99999,y:99999} on a 24x24 world spawned a
+    // fresh player who then couldn't move across 50 state frames). Only bounded
+    // worlds have a wall ring to fall inside; unbounded worlds have none.
+    if (spawn && nextW != null && nextH != null) {
+      const minPx = CREATURE_TILE_PX;
+      const maxX = (nextW - 1) * CREATURE_TILE_PX;
+      const maxY = (nextH - 1) * CREATURE_TILE_PX;
+      const inBounds = Number.isFinite(spawn.x) && Number.isFinite(spawn.y) &&
+        spawn.x >= minPx && spawn.x < maxX && spawn.y >= minPx && spawn.y < maxY;
+      if (!inBounds) {
+        return res.status(400).json({ error: 'entry_spawn must land inside the world bounds, clear of the wall ring' });
+      }
+    }
 
     // Enforce a single entry world.
     if (entry) {
