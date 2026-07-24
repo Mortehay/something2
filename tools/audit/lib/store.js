@@ -41,7 +41,7 @@ function nextId(doc) {
 }
 
 function merge(doc, incoming) {
-  const next = { version: doc.version || 1, findings: doc.findings.slice() };
+  const next = { version: doc.version || 1, findings: doc.findings.map((f) => Object.assign({}, f)) };
   const byFingerprint = new Map(next.findings.map((f) => [f.fingerprint, f]));
   const added = [];
   const updated = [];

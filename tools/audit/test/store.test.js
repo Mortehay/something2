@@ -93,3 +93,22 @@ test('nextId continues past the highest existing id', () => {
   const doc = { version: 1, findings: [{ id: 'F-007' }, { id: 'F-003' }] };
   assert.strictEqual(store.nextId(doc), 'F-008');
 });
+
+test('merge returns a document independent of the input; does not mutate the input', () => {
+  const before = store.merge(store.emptyDoc(), [incoming({ severity: 'P0' })]).doc;
+  const beforeSeverity = before.findings[0].severity;
+  const beforeFinding = before.findings[0];
+
+  const after = store.merge(before, [incoming({ severity: 'P1' })]).doc;
+  const afterSeverity = after.findings[0].severity;
+
+  // The returned document should have the new severity.
+  assert.strictEqual(afterSeverity, 'P1');
+
+  // The original input document's finding should NOT have changed.
+  assert.strictEqual(before.findings[0].severity, beforeSeverity);
+  assert.strictEqual(before.findings[0].severity, 'P0');
+
+  // The objects should be different (not the same reference).
+  assert.notStrictEqual(before.findings[0], after.findings[0]);
+});
