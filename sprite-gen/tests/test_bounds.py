@@ -59,6 +59,30 @@ def test_size_below_minimum_is_rejected():
     assert r.status_code == 422
 
 
+# F-035 (SOMET-215): size had no shape validation, so a malformed size (e.g.
+# a single-element list) was accepted at 202 and only failed deep inside the
+# async job — after a real ~66s backend generation pass — with a raw
+# PIL/Python unpacking error surfaced verbatim through GET /jobs/{id}. The
+# `_size_within_bounds` validator's `len(v) != 2` check (added alongside
+# these same MIN/MAX_SIZE_DIM bounds) already rejects this at the request
+# boundary; these tests lock that shape check in with the finding's exact
+# failure scenario, which had no dedicated coverage before this.
+def test_size_single_element_is_rejected():
+    # The exact scenario from F-035's failure_scenario.
+    r = _post(size=[16])
+    assert r.status_code == 422
+
+
+def test_size_three_elements_is_rejected():
+    r = _post(size=[MIN_SIZE_DIM, MIN_SIZE_DIM, MIN_SIZE_DIM])
+    assert r.status_code == 422
+
+
+def test_size_empty_list_is_rejected():
+    r = _post(size=[])
+    assert r.status_code == 422
+
+
 def test_zero_frames_is_rejected():
     r = _post(frames=0)
     assert r.status_code == 422
