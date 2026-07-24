@@ -235,6 +235,47 @@ test('two clients in one world see each other', async () => {
   handle.close(); server.close();
 });
 
+// F-014 (SOMET-194): Postgres uuid input is case-insensitive (and also
+// accepts braced / hyphenless spellings), so `SELECT ... WHERE id = $1`
+// finds the same row for any spelling of the id -- but loadWorld() used to
+// key the in-memory `worlds` Map on the client's RAW string, not on what the
+// SELECT actually returned. Two clients naming the same DB world with
+// different spellings therefore landed in two separate in-memory shards:
+// each only ever sees its own shard's sockets/players, so they are
+// invisible and untargetable to each other despite playing "the same"
+// world. fakePool's world lookup always returns `id: 'w1'` regardless of
+// what was queried, mirroring Postgres always returning the one canonical
+// text form no matter how the client spelled it — so this pool is a
+// faithful stand-in for the live case-insensitivity confirmed against
+// something2-db-1.
+test('two clients naming the same world with different id spellings still see each other', async () => {
+  const { url, handle, server } = await boot();
+  const a = connect(url, 1);
+  const b = connect(url, 2);
+  await Promise.all([
+    new Promise((r) => a.on('open', r)),
+    new Promise((r) => b.on('open', r)),
+  ]);
+  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  b.send(JSON.stringify({ type: 'join', world_id: 'W1' })); // same DB row, different spelling
+  await nextMsg(a, 'joined');
+  await nextMsg(b, 'joined');
+
+  // Exactly one in-memory world entry must back both sessions.
+  assert.equal(handle.worlds.size, 1,
+    'a differently-spelled world_id for the same DB row must not create a second in-memory shard');
+
+  let both = false;
+  for (let i = 0; i < 20 && !both; i++) {
+    const s = await nextMsg(a, 'state');
+    const ids = s.players.map((p) => p.id).sort();
+    if (ids.includes('1') && ids.includes('2')) both = true;
+  }
+  assert.ok(both, "a should see b (and vice versa) despite the different world_id spelling");
+  a.close(); b.close();
+  handle.close(); server.close();
+});
+
 test('concurrent first-joins to a fresh (unloaded) world both get ticked, not orphaned', async () => {
   // Regression test for the cold-start race in loadWorld(): with an
   // instant-resolving pool two concurrent joins never actually interleave

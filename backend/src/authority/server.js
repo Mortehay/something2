@@ -157,6 +157,23 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
+        // Postgres uuid input is case-insensitive and also accepts braced /
+        // hyphenless spellings, but `row.id` — what the SELECT actually
+        // returns — is always the single canonical lowercase-hyphenated text
+        // form, regardless of how the client spelled it. Key the in-memory
+        // registry (and everything downstream: ws.worldId, persist(),
+        // pendingArrivals, evictWorld) off THIS value, never the client's raw
+        // string, or a client that spells the same world differently creates
+        // a second, invisible shard of it (F-014 / SOMET-194): confirmed
+        // live — two accounts joining the same world with different id
+        // casing each got a `joined` reply but never saw each other in a
+        // `state` frame, while a same-case control correctly saw both.
+        const canonicalId = row.id;
+        // Re-check under the canonical id: a concurrent load of a DIFFERENT
+        // spelling of this same world may have already resolved and inserted
+        // it while this one's SELECT was in flight.
+        const already = worlds.get(canonicalId);
+        if (already) return already;
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
@@ -164,23 +181,23 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const goldItemTypeId = resolveGoldItemTypeId(itemTypes);
-        const linkRows = await fetchLinks(pool, worldId);
+        const linkRows = await fetchLinks(pool, canonicalId);
         const links = new Map(linkRows.map((l) => [l.edge, { toWorldId: l.to_world_id, toWidth: l.to_width, toHeight: l.to_height }]));
-        const villages = await fetchVillages(pool, worldId);
+        const villages = await fetchVillages(pool, canonicalId);
         const map = new ServerMap({
           seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes,
           width: row.width, height: row.height, doorways: [...links.keys()],
           villages,
         });
         const entry = {
-          worldId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
+          worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
           tileTypes, creatureTypes, creatureTypeIds, hostileCreatureTypes, creatureGold, goldItemTypeId, links, villages,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
           claiming: new Set(),       // ground item ids with a claim in flight (avoids wasted queries)
         };
-        worlds.set(worldId, entry);
+        worlds.set(canonicalId, entry);
         return entry;
       })();
       loading.set(worldId, pending);
@@ -404,7 +421,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!entry) { send(ws, { type: 'error', message: 'unknown world' }); return; }
 
         try {
-          const spawn = await loadSpawn(msg.world_id, ws.userId, entry.row.chunk_size, entry.row);
+          // entry.worldId, not msg.world_id: loadWorld canonicalizes the id
+          // (F-014), and pendingArrivals (set from entry.links, itself built
+          // off the canonical id) is matched by strict worldId equality in
+          // loadSpawn — passing the client's raw spelling back in here would
+          // silently reintroduce the same split for doorway arrivals.
+          const spawn = await loadSpawn(entry.worldId, ws.userId, entry.row.chunk_size, entry.row);
           if (ws.readyState !== ws.OPEN) return; // client vanished while we awaited spawn
 
           // One live session per account: the newest join wins. (Refusing instead
@@ -448,7 +470,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             return;
           }
 
-          ws.worldId = msg.world_id;
+          ws.worldId = entry.worldId; // canonical (F-014), not the client's raw spelling
           entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold);
           if (spawn.viaDoorway) {
             const p = entry.world.getPlayer(ws.userId);
