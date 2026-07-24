@@ -73,6 +73,20 @@ const adminGuard = requireAdmin(guardPool);
 // Reject anything that isn't a bare job id before it ever reaches the proxy.
 const JOB_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
+// Shared cap for the "name" field on every admin catalog (tile-types,
+// entity-types, item-types, worlds) (SOMET-223 / F-043). Without this, a
+// pathologically long name either raw-500s the generic catch-all on a
+// varchar(255) column (tile_types, entity_types) or is silently accepted
+// with no limit on a text column (item_types, worlds) -- confirmed live: a
+// 10,000-character name 500'd on tile-types/entity-types and was persisted
+// verbatim on item-types/worlds. Neither is "rejected, not truncated or
+// 500'd", which is what an admin should see from any of the four identical
+// "Name" text fields.
+const MAX_CATALOG_NAME_LEN = 200;
+function catalogNameTooLong(name) {
+  return typeof name === 'string' && name.length > MAX_CATALOG_NAME_LEN;
+}
+
 // Upper bound for PUT /api/worlds/:id creature_count (SOMET-188 / F-008).
 const MAX_CREATURE_COUNT = 2000;
 // Upper bound for POST /api/maps/generate rows/cols. This route eagerly
@@ -298,6 +312,9 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       display_width, display_height, render_mode, is_creature, prompt
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
+    if (catalogNameTooLong(name)) {
+      return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
+    }
 
     const result = await pool.query(
       `INSERT INTO entity_types (
@@ -329,6 +346,9 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
       display_width, display_height, render_mode, is_creature, prompt
     } = req.body;
+    if (catalogNameTooLong(name)) {
+      return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
+    }
 
     // SOMET-185: worlds.allowed_creature_types and world_creatures.type
     // reference entity_types by NAME (no FK), so a free rename here silently
@@ -401,6 +421,7 @@ const ITEM_SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', '
 // Mirror the DB CHECKs so the API returns 400 instead of a constraint error.
 function validateItemType(b) {
   if (!b.name) return 'Name is required';
+  if (catalogNameTooLong(b.name)) return `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer`;
   if (!['weapon', 'armor', 'ammo'].includes(b.category)) return "category must be 'weapon', 'armor' or 'ammo'";
   if (b.element != null && !ITEM_ELEMENTS.includes(b.element)) return `element must be one of ${ITEM_ELEMENTS.join(', ')}`;
   if (b.slot != null && !ITEM_SLOTS.includes(b.slot)) return `slot must be one of ${ITEM_SLOTS.join(', ')}`;
@@ -579,6 +600,9 @@ app.post('/api/tile-types', adminGuard, async (req, res) => {
     if (!name || !color) {
       return res.status(400).json({ error: 'Name and color are required' });
     }
+    if (catalogNameTooLong(name)) {
+      return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
+    }
 
     const result = await pool.query(
       'INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors, prompt) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
@@ -595,6 +619,9 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, color, walkable, speed, image, valid_neighbors, prompt } = req.body;
+    if (catalogNameTooLong(name)) {
+      return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
+    }
 
     // image/render_mode/sprite are owned by the generate+approve flow, NOT this
     // property-edit form. The form captures `image` at modal-open (often empty,
@@ -1083,6 +1110,9 @@ app.post('/api/worlds', adminGuard, async (req, res) => {
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'name is required' });
     }
+    if (catalogNameTooLong(name)) {
+      return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
+    }
     const worldSeed = Number.isFinite(seed) ? Math.floor(seed) : Math.floor(Math.random() * 2 ** 31);
     const chunkSize = Number.isFinite(chunk_size) ? Math.floor(chunk_size) : 64;
     if (chunkSize < 1 || chunkSize > 256) {
@@ -1148,6 +1178,9 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     const { name, width, height, creature_count, allowed_creature_types, is_entry, entry_spawn } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'name is required' });
+    }
+    if (catalogNameTooLong(name)) {
+      return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
     const w = Number.isFinite(width) ? Math.floor(width) : null;
     const h = Number.isFinite(height) ? Math.floor(height) : null;
