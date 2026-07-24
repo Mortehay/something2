@@ -30,6 +30,7 @@ const __setPool = (impl) => { pool = impl; };
 // rather than whatever value existed at module-load time.
 const guardPool = { query: (sql, params) => pool.query(sql, params) };
 const { requireAdmin } = require('./auth/middleware.js');
+const { assertJwtSecretOrExit } = require('./auth/assertJwtSecret.js');
 const authRouter = require('./auth/routes.js');
 // Single admin guard applied to every mutating admin route below.
 const adminGuard = requireAdmin(guardPool);
@@ -70,8 +71,11 @@ async function runMigrations() {
 }
 
 // Only run migrations (and later, app.listen) when this file is executed
-// directly, not when it's required (e.g. by tests importing `app`).
+// directly, not when it's required (e.g. by tests importing `app`). Same
+// guard protects the JWT_SECRET boot check: tests import `app` with their
+// own short, deterministic secret and must not trip it.
 if (require.main === module) {
+  assertJwtSecretOrExit();
   runMigrations();
 }
 
