@@ -72,13 +72,12 @@ function parseArgs(argv) {
 async function syncDocument({ findingsPath, client, epicId, labelIds, dryRun = false, delayMs, sleepImpl }) {
   const doc = store.load(findingsPath);
 
-  // Computed up front, before any write: a near-duplicate pair (same
-  // surface+location+lens, different fingerprint — see store.js's
-  // duplicateKey) is a sign that a re-audit re-described an existing defect
-  // in different words and is about to file it as a second Plane issue.
-  // Warn-only, never blocks the sync — see .claude/skills/plane-sync/SKILL.md.
-  const suspected = store.findSuspectedDuplicates(doc.findings);
-
+  // Near-duplicate detection deliberately does NOT run here. store.merge
+  // reports it for the findings IT adds, which is the moment the mistake is
+  // actually made. Re-scanning the whole corpus on every sync instead flags
+  // every pair that merely shares a file and a lens — 19 false positives out
+  // of 46 real findings on the first audit — and a warning that cries wolf on
+  // every run is a warning nobody reads.
   const reconcileArgs = { doc, client, epicId, labelIds, dryRun };
   if (delayMs !== undefined && delayMs !== null) reconcileArgs.delayMs = delayMs;
   if (sleepImpl !== undefined) reconcileArgs.sleepImpl = sleepImpl;
@@ -96,7 +95,6 @@ async function syncDocument({ findingsPath, client, epicId, labelIds, dryRun = f
     closed: result.closed.length,
     skipped: result.skipped.length,
     total: doc.findings.length,
-    suspected,
   };
 }
 
@@ -122,18 +120,6 @@ async function main() {
     delayMs: args.delayMs,
   });
 
-  if (summary.suspected.length) {
-    console.warn(
-      `\n⚠ ${summary.suspected.length} suspected near-duplicate finding pair(s) — ` +
-      'same surface+file+lens, different fingerprint. Not blocked, but check by hand ' +
-      'before trusting the tracker: a re-audit may have re-described an existing ' +
-      'finding in different words instead of matching it.'
-    );
-    for (const { newId, existingId } of summary.suspected) {
-      console.warn(`  ${newId} looks like it may duplicate ${existingId}`);
-    }
-    console.warn('');
-  }
 
   console.log(JSON.stringify(summary, null, 2));
 }

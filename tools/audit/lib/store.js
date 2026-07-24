@@ -101,30 +101,6 @@ function merge(doc, incoming) {
   return { doc: next, added, updated, suspected };
 }
 
-// Whole-doc version of the same check `merge` runs incrementally: every pair
-// of findings sharing a surface+location+lens, regardless of when either was
-// added. `bin/sync.js` runs this against the loaded doc immediately before
-// syncing, so a near-duplicate pair is visible to the operator right before
-// the write that would file it as a second Plane issue — whether it arrived
-// via `merge` moments ago or was already sitting in findings.json from
-// before this check existed.
-function findSuspectedDuplicates(findings) {
-  const byKey = new Map();
-  for (const f of findings) {
-    const key = duplicateKey(f);
-    if (!byKey.has(key)) byKey.set(key, []);
-    byKey.get(key).push(f);
-  }
-  const suspected = [];
-  for (const group of byKey.values()) {
-    if (group.length < 2) continue;
-    for (let i = 1; i < group.length; i += 1) {
-      suspected.push({ newId: group[i].id, existingId: group[0].id });
-    }
-  }
-  return suspected;
-}
-
 // The narrow, explicit path for lifecycle status changes. `merge` deliberately
 // excludes `status` from MUTABLE so a re-audit cannot silently reset a `fixed`
 // finding back to `open`; this is the only sanctioned way to change it.
@@ -140,4 +116,4 @@ function setStatus(doc, id, status) {
   return doc;
 }
 
-module.exports = { emptyDoc, load, save, nextId, merge, setStatus, findSuspectedDuplicates, MUTABLE };
+module.exports = { emptyDoc, load, save, nextId, merge, setStatus, MUTABLE };
