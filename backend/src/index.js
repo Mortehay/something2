@@ -874,35 +874,43 @@ app.get('/api/sprite-capability', async (req, res) => {
   }
 });
 
-// Sprite-gen admin bridge: kick off a generation job with the sprite-gen
-// service and record it as a queued sprite_sets row. When the caller doesn't
-// pin a backend/tier we auto-select the tier from detected hardware; the
-// sprite-gen recipe then fills backend/frames/steps for that tier.
-app.post('/api/sprite-jobs', adminGuard, async (req, res) => {
+// Shared by /api/sprite-jobs, /api/entity-jobs and /api/tile-jobs (F-011 /
+// SOMET-191): each kicks off a generation job with the sprite-gen service
+// and records it as a queued sprite_sets row, differing only in `kind`, the
+// default frame count, and which request-body field names the subject.
+// When the caller doesn't pin a backend/tier we auto-select the tier from
+// detected hardware; the sprite-gen recipe then fills backend/frames/steps
+// for that tier.
+async function startGenerationJob(req, res, { subject, kind, defaultFrames, failureMessage }) {
   try {
-    const { entity_type, base_prompt, backend, frames, seed = 0, tier } = req.body;
+    const { base_prompt, backend, frames, seed = 0, tier } = req.body;
     let effectiveTier = tier;
     if (!effectiveTier && !backend) {
       // Best-effort: if capability lookup fails, let sprite-gen use its own default.
       try { effectiveTier = (await spriteGen.getCapability()).tier; } catch (_) { /* ignore */ }
     }
     const gen = await spriteGen.postGenerate({
-      creature: entity_type, base_prompt, backend, frames, seed, tier: effectiveTier,
+      creature: subject, base_prompt, kind, backend, frames, seed, tier: effectiveTier,
     });
     // Record the actually-chosen backend/frames (from the recipe when not pinned).
     const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
-    const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || 4;
+    const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || defaultFrames;
     const row = await pool.query(
       `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
        VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
-      [entity_type, chosenBackend, seed, chosenFrames, gen.job_id]
+      [subject, chosenBackend, seed, chosenFrames, gen.job_id]
     );
     res.status(201).json({ ...row.rows[0], job_id: gen.job_id, recipe: gen.recipe });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to start sprite job' });
+    res.status(500).json({ error: failureMessage });
   }
-});
+}
+
+app.post('/api/sprite-jobs', adminGuard, (req, res) => startGenerationJob(req, res, {
+  subject: req.body.entity_type, kind: undefined, defaultFrames: 4,
+  failureMessage: 'Failed to start sprite job',
+}));
 
 // Proxy job status from the sprite-gen service.
 app.get('/api/sprite-jobs/:jobId', async (req, res) => {
@@ -969,29 +977,10 @@ app.post('/api/entity-types/:id/sprite', adminGuard, async (req, res) => {
 // sprite-gen produces ONE framed object image (+ optional loop) instead of a
 // full directional walk set. This is the cheap path for props and for creatures
 // that don't need per-facing frames; /api/sprite-jobs stays the directional one.
-app.post('/api/entity-jobs', adminGuard, async (req, res) => {
-  try {
-    const { entity_type, base_prompt, backend, frames, seed = 0, tier } = req.body;
-    let effectiveTier = tier;
-    if (!effectiveTier && !backend) {
-      try { effectiveTier = (await spriteGen.getCapability()).tier; } catch (_) { /* ignore */ }
-    }
-    const gen = await spriteGen.postGenerate({
-      creature: entity_type, base_prompt, kind: 'object', backend, frames, seed, tier: effectiveTier,
-    });
-    const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
-    const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || 1;
-    const row = await pool.query(
-      `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
-       VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
-      [entity_type, chosenBackend, seed, chosenFrames, gen.job_id]
-    );
-    res.status(201).json({ ...row.rows[0], job_id: gen.job_id, recipe: gen.recipe });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to start entity job' });
-  }
-});
+app.post('/api/entity-jobs', adminGuard, (req, res) => startGenerationJob(req, res, {
+  subject: req.body.entity_type, kind: 'object', defaultFrames: 1,
+  failureMessage: 'Failed to start entity job',
+}));
 
 // Proxy entity job status (job ids are global to the sprite-gen job manager).
 app.get('/api/entity-jobs/:jobId', async (req, res) => {
@@ -1004,56 +993,63 @@ app.get('/api/entity-jobs/:jobId', async (req, res) => {
   }
 });
 
-// Approve a generated static image and link it to an entity type. Mirrors
-// /api/tile-types/:id/image; 'static' is the entity-side name for what tiles
-// call 'image' render mode.
-app.post('/api/entity-types/:id/image', adminGuard, async (req, res) => {
+// Shared by entity-types/:id/image, tile-types/:id/image and
+// tile-types/:id/sprite (F-011 / SOMET-191): job_id is optional for all
+// three -- if present, mark the sprite_sets row approved (and, for entity
+// types only, link it via entity_type_id; sprite_sets has no tile_type_id
+// column) -- then persist the asset onto the catalog row and return it.
+// entity-types/:id/sprite is deliberately NOT folded in here: unlike these
+// three, it requires job_id (its sprite_sets UPDATE has no `if (job_id)`
+// guard and 404s when the row isn't found), it branches into two different
+// response shapes (animated vs static/directional), and it returns the
+// sprite_sets row rather than the catalog row -- forcing it into this same
+// shape would risk quietly weakening that route's contract, which is worse
+// than leaving one route hand-written.
+async function approveGeneratedAsset(req, res, {
+  jobId, spriteSetsUpdate, catalogUpdate, notFoundMessage, failureMessage,
+}) {
   try {
-    const { image_key, job_id } = req.body;
-    if (job_id) {
-      await pool.query(`UPDATE sprite_sets SET status = 'approved', entity_type_id = $1 WHERE job_id = $2`,
-        [req.params.id, job_id]);
+    if (jobId && spriteSetsUpdate) {
+      await pool.query(spriteSetsUpdate.sql, spriteSetsUpdate.params);
     }
-    // Clear `sprite` so the atlas path doesn't keep winning over the new image:
-    // RenderSystem.resolveSprite() is tried before the plain-image fallback.
-    const result = await pool.query(
-      `UPDATE entity_types SET image = $1, sprite = NULL, render_mode = 'static', updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2 RETURNING *`,
-      [image_key, req.params.id]
-    );
-    if (!result.rows[0]) return res.status(404).json({ error: 'Entity type not found' });
+    const result = await pool.query(catalogUpdate.sql, catalogUpdate.params);
+    if (!result.rows[0]) return res.status(404).json({ error: notFoundMessage });
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to save entity image' });
+    res.status(500).json({ error: failureMessage });
   }
+}
+
+// Approve a generated static image and link it to an entity type. Mirrors
+// /api/tile-types/:id/image; 'static' is the entity-side name for what tiles
+// call 'image' render mode.
+app.post('/api/entity-types/:id/image', adminGuard, (req, res) => {
+  const { image_key, job_id } = req.body;
+  return approveGeneratedAsset(req, res, {
+    jobId: job_id,
+    spriteSetsUpdate: {
+      sql: `UPDATE sprite_sets SET status = 'approved', entity_type_id = $1 WHERE job_id = $2`,
+      params: [req.params.id, job_id],
+    },
+    // Clear `sprite` so the atlas path doesn't keep winning over the new image:
+    // RenderSystem.resolveSprite() is tried before the plain-image fallback.
+    catalogUpdate: {
+      sql: `UPDATE entity_types SET image = $1, sprite = NULL, render_mode = 'static', updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2 RETURNING *`,
+      params: [image_key, req.params.id],
+    },
+    notFoundMessage: 'Entity type not found',
+    failureMessage: 'Failed to save entity image',
+  });
 });
 
 // Tile generation bridge: mirror /api/sprite-jobs but with kind:'tile' so
 // sprite-gen produces a seamless texture (+ optional loop), not a directional set.
-app.post('/api/tile-jobs', adminGuard, async (req, res) => {
-  try {
-    const { tile_type, base_prompt, backend, frames, seed = 0, tier } = req.body;
-    let effectiveTier = tier;
-    if (!effectiveTier && !backend) {
-      try { effectiveTier = (await spriteGen.getCapability()).tier; } catch (_) { /* ignore */ }
-    }
-    const gen = await spriteGen.postGenerate({
-      creature: tile_type, base_prompt, kind: 'tile', backend, frames, seed, tier: effectiveTier,
-    });
-    const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
-    const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || 1;
-    const row = await pool.query(
-      `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
-       VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
-      [tile_type, chosenBackend, seed, chosenFrames, gen.job_id]
-    );
-    res.status(201).json({ ...row.rows[0], job_id: gen.job_id, recipe: gen.recipe });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to start tile job' });
-  }
-});
+app.post('/api/tile-jobs', adminGuard, (req, res) => startGenerationJob(req, res, {
+  subject: req.body.tile_type, kind: 'tile', defaultFrames: 1,
+  failureMessage: 'Failed to start tile job',
+}));
 
 // Proxy tile job status (job ids are global to the sprite-gen job manager).
 app.get('/api/tile-jobs/:jobId', async (req, res) => {
@@ -1067,45 +1063,45 @@ app.get('/api/tile-jobs/:jobId', async (req, res) => {
 });
 
 // Approve a generated static texture and link it to a tile type.
-app.post('/api/tile-types/:id/image', adminGuard, async (req, res) => {
-  try {
-    const { image_key, job_id } = req.body;
-    if (job_id) {
-      await pool.query(`UPDATE sprite_sets SET status = 'approved' WHERE job_id = $1`, [job_id]);
-    }
-    const result = await pool.query(
-      `UPDATE tile_types SET image = $1, render_mode = 'image', updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
-      [image_key, req.params.id]
-    );
-    if (!result.rows[0]) return res.status(404).json({ error: 'Tile type not found' });
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to save tile image' });
-  }
+app.post('/api/tile-types/:id/image', adminGuard, (req, res) => {
+  const { image_key, job_id } = req.body;
+  return approveGeneratedAsset(req, res, {
+    jobId: job_id,
+    spriteSetsUpdate: {
+      sql: `UPDATE sprite_sets SET status = 'approved' WHERE job_id = $1`,
+      params: [job_id],
+    },
+    // F-011 / SOMET-191: now clears `sprite` the same way entity-types/:id/image
+    // does. Previously it didn't -- harmless only because resolveTileVisual
+    // gates on render_mode === 'animated' rather than sprite presence, but a
+    // trap waiting for the tile renderer to adopt the same sprite-presence
+    // precedence entity rendering already uses.
+    catalogUpdate: {
+      sql: `UPDATE tile_types SET image = $1, sprite = NULL, render_mode = 'image', updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+      params: [image_key, req.params.id],
+    },
+    notFoundMessage: 'Tile type not found',
+    failureMessage: 'Failed to save tile image',
+  });
 });
 
 // Approve a generated animation atlas and link it to a tile type.
-app.post('/api/tile-types/:id/sprite', adminGuard, async (req, res) => {
-  try {
-    const { atlas_key, manifest_key, frames, job_id } = req.body;
-    if (job_id) {
-      await pool.query(
-        `UPDATE sprite_sets SET atlas_key = $1, manifest_key = $2, status = 'approved' WHERE job_id = $3`,
-        [atlas_key, manifest_key, job_id]
-      );
-    }
-    const sprite = { atlas_key, manifest_key, frames: frames || 1 };
-    const result = await pool.query(
-      `UPDATE tile_types SET sprite = $1, render_mode = 'animated', updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
-      [JSON.stringify(sprite), req.params.id]
-    );
-    if (!result.rows[0]) return res.status(404).json({ error: 'Tile type not found' });
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to save tile sprite' });
-  }
+app.post('/api/tile-types/:id/sprite', adminGuard, (req, res) => {
+  const { atlas_key, manifest_key, frames, job_id } = req.body;
+  const sprite = { atlas_key, manifest_key, frames: frames || 1 };
+  return approveGeneratedAsset(req, res, {
+    jobId: job_id,
+    spriteSetsUpdate: {
+      sql: `UPDATE sprite_sets SET atlas_key = $1, manifest_key = $2, status = 'approved' WHERE job_id = $3`,
+      params: [atlas_key, manifest_key, job_id],
+    },
+    catalogUpdate: {
+      sql: `UPDATE tile_types SET sprite = $1, render_mode = 'animated', updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+      params: [JSON.stringify(sprite), req.params.id],
+    },
+    notFoundMessage: 'Tile type not found',
+    failureMessage: 'Failed to save tile sprite',
+  });
 });
 
 // --- Worlds (chunked overworld) -------------------------------------------
