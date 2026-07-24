@@ -18,17 +18,34 @@ audit updates its tasks instead of duplicating them.
 
 Three operational facts that cost time when forgotten:
 
-- **Cloudflare rejects the default Node/Python User-Agent** with a 403 carrying
-  error code 1010. The client sends `curl/8.5.0`. If you write an ad-hoc request,
-  send one too.
+- **Cloudflare fingerprints the HTTP client itself, not the `User-Agent`
+  header — and writes from Node's `fetch` are blocked no matter what
+  `User-Agent` you send.** This was originally misdiagnosed as a UA problem
+  (`curl/8.5.0` was added, matching the error-1010 symptom) and that masked
+  the real cause for a while. The decisive experiment: an identical `POST`
+  issued by real `curl` from this machine, same key, same instant, returned
+  **201**; the same `POST` from Node's `fetch` — same `User-Agent:
+  curl/8.5.0` — was blocked with a 403 Cloudflare HTML page. Cloudflare is
+  reading the TLS/HTTP2 handshake characteristics, which Node cannot spoof
+  from userland no matter which headers it sends. **`reads` (`GET`) largely
+  pass through `fetch` fine — only writes get fingerprinted — which is
+  exactly what makes this failure look intermittent rather than structural**
+  if you're only watching for it on `listLabels`/`listIssues` calls.
+  The fix: `PlaneClient`'s `fetchImpl` defaults to `tools/audit/lib/curl-transport.js`,
+  which shells out to a real `curl` binary for every request (reads included,
+  for consistency). If you write an ad-hoc request against this API instead of
+  going through `PlaneClient`, route it through real `curl` too — not `fetch`,
+  regardless of headers.
 - **The modules feature is disabled** in this workspace. Grouping is Epic + Label.
   Do not try to create a module.
 - **This workspace burst-limits writes.** The first live sync created exactly one
   issue, then Cloudflare blocked the next request with a 403 HTML page (Ray ID
-  `a203d1cb8fb85b5a`) — a rate limit, not a ban. `reconcile` now waits `delayMs`
-  (default ~500ms) between consecutive create/update calls, and `PlaneClient`
-  retries a Cloudflare-shaped 403/429 with exponential backoff. See "Recognising
-  a Cloudflare block" below.
+  `a203d1cb8fb85b5a`) — a rate limit, not a ban, and it hit on top of the
+  fingerprinting problem above. `reconcile` waits `delayMs` (default ~500ms)
+  between consecutive create/update calls, and `PlaneClient` retries a
+  Cloudflare-shaped 403/429 with exponential backoff. Cheap insurance, but it
+  was never the root cause of the write failures — the curl transport is. See
+  "Recognising a Cloudflare block" below.
 
 ## Running a sync
 
@@ -68,6 +85,14 @@ before giving up. If you see an error like `Plane POST ... failed after 4 attemp
 (rate-limited, giving up)`, the retries were exhausted — rerun with a larger
 `--delay-ms` rather than immediately retrying at the same pace.
 
+If instead you get a *hard* 403 HTML block on essentially every write with no
+success even on the first attempt, and `curl-transport.js` is somehow not the
+active transport (e.g. code was changed to pass a raw `fetch`-based
+`fetchImpl` again), that's the client-fingerprinting problem, not the rate
+limit — no amount of retrying or backoff will fix it, because it isn't a rate
+limit. Confirm `PlaneClient` is using `createCurlTransport()` (the default)
+and that real `curl` is on `PATH`.
+
 ## Closing a task
 
 Set the finding's `status` to `fixed` with `store.setStatus` — this is the only
@@ -94,16 +119,23 @@ findings without one are created. The `try`/`finally` in `syncDocument` persists
 every `plane_id` reconcile managed to write before a failure, so a re-run never
 duplicates an issue that was already created.
 
-If the API returns a 403 with `1010`, the User-Agent is wrong. If it returns 401,
-the key in `.mcp.json` has rotated. If it returns a 403/429 whose body is HTML
-instead of JSON, that's the Cloudflare rate limit described above — the client
-already retries it; if it still fails, rerun with a larger `--delay-ms`.
+If it returns 401, the key in `.mcp.json` has rotated. If it returns a 403/429
+whose body is HTML instead of JSON, that's the Cloudflare rate limit described
+above — the client already retries it; if it still fails, rerun with a larger
+`--delay-ms`. If every write gets a 403 HTML block with no retries succeeding,
+see "Recognising a Cloudflare block" above — that's the client-fingerprinting
+problem, and the fix is transport (real curl), not headers or backoff.
 
 ## Never
 
 - Never file a finding with `status: 'unverified'`. `reconcile` already skips them.
 - Never edit a task's title or body in the Plane UI; the drift check will overwrite it.
 - Never commit the API key.
+- Never pass the API key on a command line / process argv (visible to any
+  local user via `ps`) — including in ad-hoc `curl` debugging commands.
+  `curl-transport.js` sends it as a `header = "X-API-Key: ..."` line inside a
+  curl config file on **stdin** (`curl --config -`) for exactly this reason;
+  match that pattern rather than typing `-H "X-API-Key: ..."` on a shell line.
 - Never set `--delay-ms 0` (or otherwise remove the write throttle) against this
   workspace to "go faster" — it is what stands between a sync and the Cloudflare
   block that already happened once.

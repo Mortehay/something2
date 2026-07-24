@@ -32,13 +32,15 @@
 | `tools/audit/lib/config.js` | Plane UUIDs, priority map, surface/lens/severity vocabularies. The only place an id literal appears. |
 | `tools/audit/lib/finding.js` | Finding shape: validation and fingerprint derivation. Pure. |
 | `tools/audit/lib/store.js` | Read, merge, and write `findings.json`. Owns id assignment and dedupe-on-merge. Pure except file I/O. |
-| `tools/audit/lib/plane.js` | Plane REST v1 client. The only place `fetch` and the API key appear. Retries a Cloudflare rate-limit block with exponential backoff; a genuine JSON authz failure fails fast. |
+| `tools/audit/lib/plane.js` | Plane REST v1 client. The only place the API key appears. Defaults `fetchImpl` to the curl transport below (fetch/UA-based writes are Cloudflare-fingerprinted and blocked, confirmed by experiment); also retries a Cloudflare rate-limit block with exponential backoff, and a genuine JSON authz failure fails fast. |
+| `tools/audit/lib/curl-transport.js` | Fetch-like transport that shells out to real `curl` (`--config -`, headers incl. the API key on stdin, never in argv) so writes survive Cloudflare's TLS/HTTP2 fingerprinting, which a plain Node `fetch` cannot spoof regardless of `User-Agent`. Injectable process runner keeps it offline-testable. |
 | `tools/audit/lib/sleep.js` | One-line injectable sleep, shared by the client's retry backoff and `reconcile`'s write throttle. |
 | `tools/audit/lib/sync.js` | Reconcile findings against Plane. Pure logic over an injected client, so it is testable without the network. Throttles consecutive writes to avoid the Cloudflare burst limit. |
 | `tools/audit/bin/sync.js` | CLI entry point wiring config + store + client + sync together. |
 | `tools/audit/test/finding.test.js` | Unit tests for validation and fingerprinting. |
 | `tools/audit/test/store.test.js` | Unit tests for merge, dedupe, id assignment. |
-| `tools/audit/test/plane.test.js` | Unit tests for the client against a fake fetch. |
+| `tools/audit/test/plane.test.js` | Unit tests for the client against a fake `fetchImpl`. |
+| `tools/audit/test/curl-transport.test.js` | Unit tests for the curl transport against a fake process runner — no real `curl` is ever spawned by the suite. |
 | `tools/audit/test/sync.test.js` | Unit tests for reconcile, including the idempotency property. |
 | `tools/audit/package.json` | Declares the test script. No dependencies. |
 
@@ -629,11 +631,35 @@ git commit -m "feat(audit): findings store with fingerprint dedupe"
 
 ### Task 3: Plane REST client
 
-The client is deliberately thin and takes an injected `fetchImpl`, so every behaviour below is tested without touching the network. Note the `User-Agent` header — omitting it is the single most likely cause of an unexplained 403.
+The client is deliberately thin and takes an injected `fetchImpl`, so every behaviour below is tested without touching the network.
+
+> **Update (2026-07-24, `audit-cycle` branch): the `User-Agent` header alone is not enough.**
+> A decisive experiment established that Cloudflare fingerprints the HTTP
+> client's TLS/HTTP2 handshake, not the `User-Agent` header and not request
+> rate. An identical `POST` issued by real `curl` from this machine returned
+> **201**; the same `POST` from Node's `fetch` — same key, same instant, same
+> `User-Agent: curl/8.5.0` — was blocked with a 403 Cloudflare HTML page.
+> Node cannot spoof that fingerprint. Reads (`GET`) pass through `fetch` fine,
+> which is what makes the failure look intermittent rather than structural.
+>
+> The fix: `fetchImpl` now defaults to a transport that shells out to a real
+> `curl` binary (`tools/audit/lib/curl-transport.js`) instead of
+> `globalThis.fetch`. Tests keep injecting a fake `fetchImpl` exactly as
+> before — the constructor option didn't change, only its default. The
+> reference code below reflects the client as it exists today; the
+> `curl-transport.js` block right after it is new.
+>
+> The API key must never appear in the curl process's argv (visible to any
+> local user via `ps`). It reaches curl as a `header = "X-API-Key: ..."` line
+> inside a curl config file (`curl --config -`) written to curl's **stdin**;
+> the argv is always the fixed, secret-free
+> `['--silent', '--show-error', '--config', '-']`.
 
 **Files:**
 - Create: `tools/audit/lib/plane.js`
+- Create: `tools/audit/lib/curl-transport.js`
 - Test: `tools/audit/test/plane.test.js`
+- Test: `tools/audit/test/curl-transport.test.js`
 
 **Interfaces:**
 - Consumes: `config.PLANE`
@@ -755,12 +781,23 @@ Expected: FAIL — `Cannot find module '../lib/plane.js'`
 
 const { PLANE } = require('./config.js');
 const { defaultSleep } = require('./sleep.js');
+const { createCurlTransport } = require('./curl-transport.js');
 
 // Cloudflare's block page (the one that ambushed the first live sync — Ray ID
 // a203d1cb8fb85b5a) is HTML containing one of these markers. A genuine Plane
 // authorization failure is always JSON. We only retry the former: retrying a
 // bad API key for a minute would just hide a misconfiguration behind a slow,
 // confusing failure.
+//
+// Root cause (confirmed by experiment, not guesswork): Cloudflare fingerprints
+// the HTTP client's TLS/HTTP2 handshake, not the User-Agent header and not
+// request rate. An identical write issued by real `curl` succeeded (201) at
+// the same instant Node's `fetch` was blocked (403 HTML) from the same
+// machine, same key. Reads (GET) pass through fetch fine, which is why the
+// failure looks intermittent rather than structural. The fix is transport,
+// not headers or backoff: writes go through real curl (see
+// ./curl-transport.js and the default `fetchImpl` below). This retry/backoff
+// logic stays as cheap insurance regardless.
 const BLOCK_PAGE_MARKERS = [/cloudflare/i, /Ray ID/i, /Attention Required/i, /cf-error/i];
 
 function looksLikeBlockPage(text) {
@@ -772,7 +809,11 @@ function looksLikeBlockPage(text) {
 class PlaneClient {
   constructor({
     apiKey,
-    fetchImpl = globalThis.fetch,
+    // Real curl by default — see the root-cause note above. Tests (and any
+    // other caller that needs to stay offline) inject a fake `fetchImpl`
+    // here; it only needs to match the small fetch-like surface `request()`
+    // calls: (url, { method, headers, body }) => { ok, status, text() }.
+    fetchImpl = createCurlTransport(),
     plane = PLANE,
     sleepImpl = defaultSleep,
     maxAttempts = 4,
@@ -883,21 +924,155 @@ function defaultSleep(ms) {
 module.exports = { defaultSleep };
 ```
 
+`tools/audit/lib/curl-transport.js` (the transport `PlaneClient` defaults to; shells
+out to real `curl` so writes survive Cloudflare's TLS/HTTP2 fingerprinting —
+see the root-cause note above the `plane.js` listing):
+
+```js
+'use strict';
+
+const { execFile } = require('node:child_process');
+
+const STATUS_MARKER = '\n__PLANE_AUDIT_CURL_STATUS__:';
+
+function escapeConfigValue(value) {
+  return String(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+}
+
+function buildConfig({ url, method, headers, body }) {
+  const lines = [
+    'globoff',
+    `url = "${escapeConfigValue(url)}"`,
+    `request = "${escapeConfigValue(method)}"`,
+  ];
+  for (const [name, value] of Object.entries(headers || {})) {
+    lines.push(`header = "${escapeConfigValue(`${name}: ${value}`)}"`);
+  }
+  if (body !== undefined) {
+    lines.push(`data-raw = "${escapeConfigValue(body)}"`);
+  }
+  lines.push(`write-out = "${escapeConfigValue(STATUS_MARKER)}%{http_code}"`);
+  return `${lines.join('\n')}\n`;
+}
+
+// Default process runner: spawns the real `curl` binary. Tests inject a fake
+// runner instead so the suite never spawns a process.
+function defaultRunner({ command, args, input }) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = execFile(
+        command,
+        args,
+        { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+        (error, stdout, stderr) => {
+          if (error && typeof error.code !== 'number') {
+            // Spawn-level failure (e.g. ENOENT — curl is not installed).
+            resolve({ spawnError: error, code: null, stdout: '', stderr: stderr || '' });
+            return;
+          }
+          resolve({ spawnError: null, code: error ? error.code : 0, stdout, stderr });
+        }
+      );
+    } catch (error) {
+      resolve({ spawnError: error, code: null, stdout: '', stderr: '' });
+      return;
+    }
+    if (!child || !child.stdin) {
+      resolve({ spawnError: new Error('curl transport: child process has no stdin'), code: null, stdout: '', stderr: '' });
+      return;
+    }
+    child.stdin.on('error', () => {});
+    child.stdin.write(input);
+    child.stdin.end();
+  });
+}
+
+// Fetch-like function: (url, { method, headers, body }) =>
+// Promise<{ ok, status, text() }>. Drops straight into PlaneClient's
+// `fetchImpl` constructor option.
+function createCurlTransport({ runner = defaultRunner, curlPath = 'curl' } = {}) {
+  return async function curlFetch(url, { method = 'GET', headers = {}, body } = {}) {
+    const input = buildConfig({ url, method, headers, body });
+    // Only fixed, non-secret flags belong in argv — `--config -` routes the
+    // URL, method, headers (including X-API-Key), and body through stdin
+    // instead, so the key is never visible via `ps`. No `-L`: curl never
+    // follows a redirect into a different host.
+    const args = ['--silent', '--show-error', '--config', '-'];
+
+    const result = await runner({ command: curlPath, args, input });
+
+    if (result.spawnError) {
+      const err = new Error(
+        `curl transport failed to launch ("${curlPath}"): ${result.spawnError.message}`
+      );
+      err.curlSpawnError = true;
+      err.cause = result.spawnError;
+      throw err;
+    }
+
+    if (result.code !== 0) {
+      const stderr = String(result.stderr || '').trim();
+      const err = new Error(
+        `curl exited with status ${result.code} for ${method} ${url}` +
+          (stderr ? `: ${stderr}` : ' (no stderr output)')
+      );
+      err.curlExitCode = result.code;
+      throw err;
+    }
+
+    const stdout = result.stdout || '';
+    const markerIndex = stdout.lastIndexOf(STATUS_MARKER);
+    if (markerIndex === -1) {
+      throw new Error(
+        `curl transport: response for ${method} ${url} was missing the expected status marker`
+      );
+    }
+
+    const text = stdout.slice(0, markerIndex);
+    const status = Number(stdout.slice(markerIndex + STATUS_MARKER.length).trim());
+
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      text: async () => text,
+    };
+  };
+}
+
+module.exports = { createCurlTransport, buildConfig, escapeConfigValue, STATUS_MARKER };
+```
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd tools/audit && node --test test/plane.test.js`
-Expected: PASS — 11 tests, 0 failures
+Run: `cd tools/audit && node --test test/plane.test.js test/curl-transport.test.js`
+Expected: PASS — 11 tests in `plane.test.js` + 12 in `curl-transport.test.js`, 0 failures
 
-(6 original + 5 covering the Cloudflare-block-vs-genuine-403 retry: a Cloudflare
-HTML 403 is retried and succeeds later, a genuine JSON 403 fails on the first
-attempt, a genuine JSON 429 is retried, retries are capped with a named
-exhaustion error, and the exhaustion error never contains the API key.)
+(`plane.test.js`: 6 original + 5 covering the Cloudflare-block-vs-genuine-403
+retry: a Cloudflare HTML 403 is retried and succeeds later, a genuine JSON 403
+fails on the first attempt, a genuine JSON 429 is retried, retries are capped
+with a named exhaustion error, and the exhaustion error never contains the API
+key — all of these still pass unmodified against the curl-based default,
+because they inject their own `fetchImpl` fake.
+
+`curl-transport.test.js` (new): builds the expected argv/config for
+GET/POST/PATCH/DELETE via an injected fake process runner, asserts the API key
+is never in argv (only in the stdin config), asserts config-value escaping is
+correct and reversible, and asserts that a curl launch failure (binary
+missing) and a non-zero curl exit code each raise a distinct error rather than
+being reported as an HTTP failure.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tools/audit/lib/plane.js tools/audit/test/plane.test.js
-git commit -m "feat(audit): Plane REST client with pagination and UA workaround"
+git add tools/audit/lib/plane.js tools/audit/lib/curl-transport.js \
+  tools/audit/test/plane.test.js tools/audit/test/curl-transport.test.js
+git commit -m "fix(audit): route Plane requests through curl to survive Cloudflare fingerprinting"
 ```
 
 ---

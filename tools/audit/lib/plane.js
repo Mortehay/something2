@@ -2,12 +2,23 @@
 
 const { PLANE } = require('./config.js');
 const { defaultSleep } = require('./sleep.js');
+const { createCurlTransport } = require('./curl-transport.js');
 
 // Cloudflare's block page (the one that ambushed the first live sync — Ray ID
 // a203d1cb8fb85b5a) is HTML containing one of these markers. A genuine Plane
 // authorization failure is always JSON. We only retry the former: retrying a
 // bad API key for a minute would just hide a misconfiguration behind a slow,
 // confusing failure.
+//
+// Root cause (confirmed by experiment, not guesswork): Cloudflare fingerprints
+// the HTTP client's TLS/HTTP2 handshake, not the User-Agent header and not
+// request rate. An identical write issued by real `curl` succeeded (201) at
+// the same instant Node's `fetch` was blocked (403 HTML) from the same
+// machine, same key. Reads (GET) pass through fetch fine, which is why the
+// failure looks intermittent rather than structural. The fix is transport,
+// not headers or backoff: writes go through real curl (see
+// ./curl-transport.js and the default `fetchImpl` below). This retry/backoff
+// logic stays as cheap insurance regardless.
 const BLOCK_PAGE_MARKERS = [/cloudflare/i, /Ray ID/i, /Attention Required/i, /cf-error/i];
 
 function looksLikeBlockPage(text) {
@@ -19,7 +30,11 @@ function looksLikeBlockPage(text) {
 class PlaneClient {
   constructor({
     apiKey,
-    fetchImpl = globalThis.fetch,
+    // Real curl by default — see the root-cause note above. Tests (and any
+    // other caller that needs to stay offline) inject a fake `fetchImpl`
+    // here; it only needs to match the small fetch-like surface `request()`
+    // calls: (url, { method, headers, body }) => { ok, status, text() }.
+    fetchImpl = createCurlTransport(),
     plane = PLANE,
     sleepImpl = defaultSleep,
     maxAttempts = 4,
