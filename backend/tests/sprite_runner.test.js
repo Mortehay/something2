@@ -33,6 +33,7 @@ test('generates a fresh entity and records it in the lock + report', async () =>
   assert.equal(report[0].entityTypeId, 7);
   assert.equal(lock.Wolf.fingerprint, fingerprint(resolveEntity(DEFAULTS, WOLF)));
   assert.equal(lock.Wolf.atlas_key, 'sprites/Wolf/atlas.png');
+  assert.equal(lock.Wolf.manifest_key, 'sprites/Wolf/atlas.json');
 });
 
 test('skips an entity whose fingerprint is unchanged', async () => {
@@ -44,6 +45,41 @@ test('skips an entity whose fingerprint is unchanged', async () => {
   });
   assert.equal(report[0].status, 'skipped');
   assert.deepEqual(client.calls, []);
+});
+
+test('a skipped entity re-emits approve hints from the pre-existing lock entry', async () => {
+  const preLock = {
+    Wolf: {
+      fingerprint: fingerprint(resolveEntity(DEFAULTS, WOLF)),
+      atlas_key: 'sprites/Wolf/atlas.png',
+      manifest_key: 'sprites/Wolf/atlas.json',
+      job_id: 'Wolf-job',
+    },
+  };
+  const client = fakeClient({});
+  const { report } = await runGeneration({
+    entities: [WOLF], defaults: DEFAULTS, lock: preLock, client, token: 'T',
+    nameToId: { Wolf: 7 }, force: false, dryRun: false,
+  });
+  assert.equal(report[0].status, 'skipped');
+  assert.equal(report[0].entityTypeId, 7);
+  assert.equal(report[0].atlasKey, 'sprites/Wolf/atlas.png');
+  assert.equal(report[0].manifestKey, 'sprites/Wolf/atlas.json');
+  assert.equal(report[0].jobId, 'Wolf-job');
+  assert.deepEqual(client.calls, []);
+});
+
+test('a skipped entity from an old lock without atlas/manifest/job fields stays a bare skip', async () => {
+  const preLock = { Wolf: { fingerprint: fingerprint(resolveEntity(DEFAULTS, WOLF)) } };
+  const client = fakeClient({});
+  const { report } = await runGeneration({
+    entities: [WOLF], defaults: DEFAULTS, lock: preLock, client, token: 'T',
+    nameToId: { Wolf: 7 }, force: false, dryRun: false,
+  });
+  assert.equal(report[0].status, 'skipped');
+  assert.equal(report[0].atlasKey, undefined);
+  assert.equal(report[0].manifestKey, undefined);
+  assert.equal(report[0].jobId, undefined);
 });
 
 test('--force regenerates even when unchanged', async () => {
@@ -94,6 +130,17 @@ test('entityTypeId is null for names with no matching row (heroes)', async () =>
     nameToId: {}, force: false, dryRun: false,
   });
   assert.equal(report[0].entityTypeId, null);
+});
+
+test('a done job missing atlas_key/manifest_key is reported as failed and does not update the lock', async () => {
+  const client = fakeClient({ Wolf: { poll: { status: 'done', result: { atlas_key: 'sprites/Wolf/atlas.png' } } } });
+  const { report, lock } = await runGeneration({
+    entities: [WOLF], defaults: DEFAULTS, lock: {}, client, token: 'T',
+    nameToId: { Wolf: 7 }, force: false, dryRun: false,
+  });
+  assert.equal(report[0].status, 'failed');
+  assert.match(report[0].error, /atlas_key\/manifest_key/);
+  assert.deepEqual(lock, {});
 });
 
 test('startJob exception is caught, reported as failed, and does not update the lock', async () => {

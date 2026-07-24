@@ -30,3 +30,11 @@ The run prints a ready-to-paste `curl` for each generated entity that maps to an
 have no row yet and are stored only — the hero picker (Slice 3) will consume them.
 Approval uses `animated: true, frames: 1` so the single idle frame renders
 directionally (`<dir>/0`) rather than as a fixed south-facing static.
+
+Reruns re-print approve commands too: an entity that's unchanged (`status: skipped`)
+still gets its approve `curl` re-emitted, reconstructed from the lockfile's
+`atlas_key`/`manifest_key`/`job_id`. Approval doesn't have to happen in the same
+run as generation — you can generate now and approve later, even after other
+entities have been regenerated in between. (Lock entries written before this
+behavior existed lack `manifest_key`; those rows stay a bare skip with no
+approve hint until the entity is regenerated once.)

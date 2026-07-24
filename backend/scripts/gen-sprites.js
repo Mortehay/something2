@@ -35,7 +35,11 @@ function printReport(report) {
     const tail = r.status === 'failed' ? (r.error || '') : (r.atlasKey || '');
     console.log(`${pad(r.name, 16)}${pad(r.kind, 10)}${pad(r.status, 12)}${tail}`);
   }
-  const approvable = report.filter((r) => r.status === 'generated' && r.entityTypeId != null);
+  const approvable = report.filter((r) => (
+    (r.status === 'generated' || r.status === 'skipped')
+    && r.entityTypeId != null
+    && r.atlasKey != null && r.manifestKey != null && r.jobId != null
+  ));
   if (approvable.length) {
     console.log('\nApprove these onto their entity types (admin token required):');
     for (const r of approvable) {

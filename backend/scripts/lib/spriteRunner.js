@@ -11,7 +11,14 @@ async function runGeneration({ entities, defaults, lock, client, token, nameToId
     const base = { name: resolved.name, kind: resolved.kind, entityTypeId };
 
     if (shouldSkip(resolved, lock, force)) {
-      report.push({ ...base, status: 'skipped' });
+      const priorLock = lock[resolved.name] || {};
+      const skipRow = { ...base, status: 'skipped' };
+      if (priorLock.atlas_key && priorLock.manifest_key && priorLock.job_id) {
+        skipRow.atlasKey = priorLock.atlas_key;
+        skipRow.manifestKey = priorLock.manifest_key;
+        skipRow.jobId = priorLock.job_id;
+      }
+      report.push(skipRow);
       continue;
     }
     if (dryRun) {
@@ -30,10 +37,18 @@ async function runGeneration({ entities, defaults, lock, client, token, nameToId
         continue;
       }
       const result = job.result || {};
+      if (!result.atlas_key || !result.manifest_key) {
+        report.push({
+          ...base, status: 'failed', jobId,
+          error: 'job done but result missing atlas_key/manifest_key',
+        });
+        continue;
+      }
       nextLock[resolved.name] = {
         fingerprint: fingerprint(resolved),
         atlas_key: result.atlas_key,
         job_id: jobId,
+        manifest_key: result.manifest_key,
       };
       report.push({
         ...base, status: 'generated', jobId,
