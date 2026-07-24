@@ -145,6 +145,35 @@ test('sellItem removes the item, credits gold, and inserts a buyback row', async
   assert.match(pool.seen[pool.seen.length - 1], /^COMMIT$/i);
 });
 
+// F-022 (SOMET-202): player_items.quantity is read and preserved by every
+// writer/reader in the tree but never written above 1 by any of them —
+// confirmed by grep across the whole repo (trade.js's own INSERT is
+// hardcoded to 1, items.js/index.js's grants omit quantity and take the
+// column default of 1, and loot.js's claimItem only ever copies quantity
+// from a world_items row that spawnDrops itself always inserts as 1). If a
+// stack >1 ever DID appear (e.g. a future write path), sellItem as written
+// would silently destroy every unit but one: it DELETEs the whole row and
+// pays for exactly ONE unit. Rather than try to make the whole stack
+// concept real end-to-end (merchant_stock's own buyback quantity has the
+// same unaddressed generality), sellItem refuses a stacked row outright —
+// loud and rolled-back beats silent data loss.
+test('sellItem refuses to sell a stacked item (quantity > 1) and rolls back instead of destroying units (F-022)', async () => {
+  const p = PLAYER(); p.inv.items = [{ id: 'i1', typeId: 3, quantity: 5 }];
+  const pool = mkPool([
+    [/DELETE FROM player_items/i, () => ({ rowCount: 1, rows: [{ item_type_id: 3, quantity: 5 }] })],
+  ]);
+  const r = await sellItem(pool, mkEntry(p), 1, 'v1', 'i1');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /stack/i);
+  assert.ok(!pool.seen.some((s) => /SELECT value FROM item_types/i.test(s)), 'must not price a stack it refuses to sell');
+  assert.ok(!pool.seen.some((s) => /UPDATE users SET gold \+/i.test(s)), 'no credit on refusal');
+  assert.ok(!pool.seen.some((s) => /INSERT INTO merchant_stock/i.test(s)), 'no buyback row on refusal');
+  assert.equal(pool.committed, false);
+  assert.equal(pool.rolledBack, true, 'the DELETE must be rolled back — the stack must survive intact, not be half-destroyed');
+  assert.equal(p.gold, 100, 'wallet untouched');
+  assert.equal(p.inv.items.length, 1, 'item not removed from in-memory inventory — the sale never happened');
+});
+
 test('sellItem refuses an equipped item, mutates nothing, and never opens a transaction', async () => {
   const p = PLAYER(); p.inv.equipment = { main_hand: 'i1' };
   const pool = {

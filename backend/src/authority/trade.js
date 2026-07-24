@@ -95,6 +95,21 @@ async function sellItem(pool, entry, userId, villageId, itemId) {
     }
     const itemTypeId = del.rows[0].item_type_id;
 
+    // Nothing in this codebase currently grants a player_items row with
+    // quantity > 1 (grep confirms it: trade.js's own buy INSERT hardcodes 1,
+    // items.js/index.js's grants take the column default of 1, and
+    // claimItem only ever copies a world_items quantity that spawnDrops
+    // itself always inserts as 1 — F-022 / SOMET-202). If a stack ever DID
+    // appear, the code below would price and pay for exactly ONE unit while
+    // deleting the whole row — silently destroying every unit but one.
+    // Refuse instead of risking that: the DELETE above already removed the
+    // row, so this must roll back, not merely return an error.
+    const quantity = Number(del.rows[0].quantity) || 1;
+    if (quantity !== 1) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'cannot sell a stacked item' };
+    }
+
     const vr = await client.query('SELECT value FROM item_types WHERE id = $1', [itemTypeId]);
     const value = vr.rows.length ? Number(vr.rows[0].value) || 0 : 0;
     const price = sellPriceFor(value);

@@ -2,6 +2,23 @@
 // truth for how much ammo a player has, so a crash can neither lose nor
 // refund a shot. Deliberately NOT cached in memory — see the "Why not Redis"
 // section of the 3b-3b spec.
+//
+// F-022 / SOMET-202 evaluated this file's del/upd split (a single row's
+// `quantity` going above 1 and being decremented in place) as unused
+// generality: grep across the whole tree shows no production writer ever
+// grants a player_items row with quantity > 1 — every grant hardcodes 1 or
+// takes the column default. That's real, and it's why sellItem (trade.js)
+// was tightened to refuse a stacked row instead of silently mispricing it.
+// This file's decrement path was deliberately LEFT AS IS rather than
+// collapsed to a single-row delete: authority_ammo_db.test.js exercises the
+// quantity > 1 case on purpose, as a regression test for a P0 bug that
+// shipped here once already (a decrement expressed as UPDATE ... quantity =
+// quantity - 1 hit the 1 -> 0 CHECK violation and permanently stuck every
+// ammo stack at 1). Removing this machinery would mean deleting that
+// protection for a P3 cleanup with no functional bug behind it in THIS
+// file — a bad trade. If a future change actually needs multi-unit stacks,
+// this is already correct for them; if the answer instead becomes "quantity
+// is permanently 1," delete this comment and the del/upd split together.
 
 // Spend one unit of `ammoTypeId` from `userId`. Returns whether a unit was
 // actually spent; the caller must treat false as "out of ammo" and refuse the
