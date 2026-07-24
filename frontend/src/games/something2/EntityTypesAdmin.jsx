@@ -8,6 +8,7 @@ import {
 import { assetUrlVersioned } from './useTileSprites.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
+import { validateEntityType } from './catalogValidation.js';
 
 // The saved image/atlas for an entity type, served through the backend asset
 // proxy (same route tiles use) rather than hitting MinIO directly.
@@ -818,11 +819,14 @@ function EntityTypesAdmin() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!formData.name.trim()) {
-      toast.error("Name is required");
+    // F-025/SOMET-205: this used to only check that name was non-empty, so a
+    // negative Max HP (or any other out-of-range stat) saved silently.
+    const problem = validateEntityType(formData);
+    if (problem) {
+      toast.error(problem);
       return;
     }
-    
+
     if (editingEntity) {
       updateMutation.mutate({ id: editingEntity.id, ...formData }, {
         onSuccess: () => setIsModalOpen(false)

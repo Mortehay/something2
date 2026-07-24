@@ -5,6 +5,7 @@ import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark } from "
 import toast from 'react-hot-toast';
 import { useGenerateTileJob, useTileJob, useApproveTileImage, useApproveTileSprite, assetUrl } from './useTileSprites.js';
 import { useSpriteCapability } from './useSprites.js';
+import { validateTileType } from './catalogValidation.js';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -411,13 +412,15 @@ function TileTypesAdmin() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
-    // Validation
-    if (!formData.name.trim()) {
-      toast.error("Name is required");
+
+    // F-025/SOMET-205: this used to only check that name was non-empty, so a
+    // negative (or > 2) speed multiplier saved silently.
+    const problem = validateTileType(formData);
+    if (problem) {
+      toast.error(problem);
       return;
     }
-    
+
     if (editingTile) {
       updateMutation.mutate({ id: editingTile.id, ...formData }, {
         onSuccess: () => setIsModalOpen(false)
