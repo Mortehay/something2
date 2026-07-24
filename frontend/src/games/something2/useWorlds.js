@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
-import { authHeaders } from "./src/js/net/EngineClient.js";
+import { authHeaders, apiFetch } from "./src/js/net/EngineClient.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
 
@@ -10,7 +10,7 @@ export function useWorlds() {
   const { data: worlds, isLoading: isLoadingWorlds, error: worldsError } = useQuery({
     queryKey: ["worlds"],
     queryFn: async () => {
-      const res = await fetch(`${API_URL}/api/worlds`);
+      const res = await apiFetch(`${API_URL}/api/worlds`);
       if (!res.ok) throw new Error("Failed to fetch worlds");
       return res.json();
     },
@@ -22,7 +22,7 @@ export function useCreateWorld() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body) => {
-      const res = await fetch(`${API_URL}/api/worlds`, {
+      const res = await apiFetch(`${API_URL}/api/worlds`, {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify(body),
@@ -42,7 +42,7 @@ export function useDeleteWorld() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id) => {
-      const res = await fetch(`${API_URL}/api/worlds/${id}`, {
+      const res = await apiFetch(`${API_URL}/api/worlds/${id}`, {
         method: "DELETE",
         headers: authHeaders(),
       });

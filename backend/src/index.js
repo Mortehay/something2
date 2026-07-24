@@ -120,7 +120,13 @@ async function getEntityTypesMap() {
       image: row.image,
       displayWidth: row.display_width,
       displayHeight: row.display_height,
-      isCreature: row.is_creature
+      isCreature: row.is_creature,
+      // Visual fields the renderer needs to draw a generated sprite instead of
+      // a flat rectangle. Omitting these was why approved entity textures never
+      // showed up in game (tile_types has always exposed its equivalents).
+      render_mode: row.render_mode,
+      sprite: row.sprite,
+      prompt: row.prompt
     };
   });
   return entityTypes;
@@ -197,7 +203,7 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       name, color, walkable, spawn_tiles, chance,
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-      display_width, display_height, render_mode, is_creature
+      display_width, display_height, render_mode, is_creature, prompt
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
 
@@ -206,13 +212,13 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         name, color, walkable, spawn_tiles, chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-        display_width, display_height, render_mode, is_creature
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) RETURNING *`,
+        display_width, display_height, render_mode, is_creature, prompt
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
-        display_width, display_height, render_mode ?? 'rect', is_creature ?? false
+        display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? ''
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -229,20 +235,22 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       name, color, walkable, spawn_tiles, chance,
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-      display_width, display_height, render_mode, is_creature
+      display_width, display_height, render_mode, is_creature, prompt
     } = req.body;
     const result = await pool.query(
       `UPDATE entity_types SET
         name = $1, color = $2, walkable = $3, spawn_tiles = $4, chance = $5,
         strength = $6, dexterity = $7, constitution = $8, intelligence = $9, wisdom = $10, charisma = $11,
         hp = $12, max_hp = $13, hp_regen_rate = $14, mana = $15, max_mana = $16, mana_regen_rate = $17,
-        image = $18, display_width = $19, display_height = $20, render_mode = $21, is_creature = $22, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $23 RETURNING *`,
+        image = $18, display_width = $19, display_height = $20, render_mode = $21, is_creature = $22,
+        prompt = COALESCE($23, prompt), updated_at = CURRENT_TIMESTAMP
+      WHERE id = $24 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-        display_width, display_height, render_mode ?? 'rect', is_creature ?? false, id
+        display_width, display_height, render_mode ?? 'rect', is_creature ?? false,
+        prompt ?? null, id
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
@@ -757,7 +765,7 @@ app.get('/api/assets/*', async (req, res) => {
 // :id is entity_types.id (integer); pg casts the string param automatically.
 app.post('/api/entity-types/:id/sprite', adminGuard, async (req, res) => {
   try {
-    const { atlas_key, manifest_key, job_id, static_frame } = req.body;
+    const { atlas_key, manifest_key, job_id, static_frame, animated, frames } = req.body;
     const result = await pool.query(
       `UPDATE sprite_sets SET atlas_key = $1, manifest_key = $2, status = 'approved', entity_type_id = $3
        WHERE job_id = $4 RETURNING *`,
@@ -765,18 +773,86 @@ app.post('/api/entity-types/:id/sprite', adminGuard, async (req, res) => {
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Sprite set not found' });
 
-    // Link the atlas to the entity type and flip it to static rendering so the
-    // game crops the named frame from the atlas (default: south-facing frame 0).
-    const sprite = { atlas_key, manifest_key, static_frame: static_frame || 'S/0' };
+    // Two atlas shapes land here:
+    //  - directional (from /api/sprite-jobs): frame keys "DIR/idx", shown as one
+    //    representative frame in 'static' mode.
+    //  - flat (from /api/entity-jobs, the tile pipeline): frame keys "0","1",…,
+    //    cycled in 'animated' mode. Flat atlases have no 'S/0', so don't claim one.
+    const sprite = animated
+      ? { atlas_key, manifest_key, frames: frames || 1 }
+      : { atlas_key, manifest_key, static_frame: static_frame || 'S/0' };
     await pool.query(
-      `UPDATE entity_types SET sprite = $1, render_mode = 'static', updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-      [JSON.stringify(sprite), req.params.id]
+      `UPDATE entity_types SET sprite = $1, render_mode = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+      [JSON.stringify(sprite), animated ? 'animated' : 'static', req.params.id]
     );
 
     res.json({ ...result.rows[0], sprite });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to save sprite' });
+  }
+});
+
+// Entity object-image bridge: mirror /api/tile-jobs but with kind:'object', so
+// sprite-gen produces ONE framed object image (+ optional loop) instead of a
+// full directional walk set. This is the cheap path for props and for creatures
+// that don't need per-facing frames; /api/sprite-jobs stays the directional one.
+app.post('/api/entity-jobs', adminGuard, async (req, res) => {
+  try {
+    const { entity_type, base_prompt, backend, frames, seed = 0, tier } = req.body;
+    let effectiveTier = tier;
+    if (!effectiveTier && !backend) {
+      try { effectiveTier = (await spriteGen.getCapability()).tier; } catch (_) { /* ignore */ }
+    }
+    const gen = await spriteGen.postGenerate({
+      creature: entity_type, base_prompt, kind: 'object', backend, frames, seed, tier: effectiveTier,
+    });
+    const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
+    const chosenFrames = frames || (gen.recipe && gen.recipe.frames) || 1;
+    const row = await pool.query(
+      `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
+       VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
+      [entity_type, chosenBackend, seed, chosenFrames, gen.job_id]
+    );
+    res.status(201).json({ ...row.rows[0], job_id: gen.job_id, recipe: gen.recipe });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to start entity job' });
+  }
+});
+
+// Proxy entity job status (job ids are global to the sprite-gen job manager).
+app.get('/api/entity-jobs/:jobId', async (req, res) => {
+  try {
+    res.json(await spriteGen.getJob(req.params.jobId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch job' });
+  }
+});
+
+// Approve a generated static image and link it to an entity type. Mirrors
+// /api/tile-types/:id/image; 'static' is the entity-side name for what tiles
+// call 'image' render mode.
+app.post('/api/entity-types/:id/image', adminGuard, async (req, res) => {
+  try {
+    const { image_key, job_id } = req.body;
+    if (job_id) {
+      await pool.query(`UPDATE sprite_sets SET status = 'approved', entity_type_id = $1 WHERE job_id = $2`,
+        [req.params.id, job_id]);
+    }
+    // Clear `sprite` so the atlas path doesn't keep winning over the new image:
+    // RenderSystem.resolveSprite() is tried before the plain-image fallback.
+    const result = await pool.query(
+      `UPDATE entity_types SET image = $1, sprite = NULL, render_mode = 'static', updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 RETURNING *`,
+      [image_key, req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Entity type not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save entity image' });
   }
 });
 
@@ -1131,7 +1207,7 @@ function validateVillageBody(body, worldRow, existing) {
 app.get('/api/worlds/:id/villages', async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y
+      `SELECT id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y
          FROM villages WHERE world_id = $1 ORDER BY created_at ASC`,
       [req.params.id],
     );

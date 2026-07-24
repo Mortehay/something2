@@ -20,3 +20,16 @@ def build_tile_prompt(base: str) -> str:
         f"{base}, seamless top-down isometric ground tile, tileable texture, "
         f"flat even lighting, no shadows, centered, crisp pixel-art style, high detail"
     )
+
+def build_object_prompt(base: str) -> str:
+    # World objects (trees, rocks, props): one image, no facing and no tiling.
+    # Unlike a tile this must NOT be seamless — it is a single silhouette that
+    # gets cut out of its background, so ask for an isolated subject.
+    # "solid white background" is not styling — cutout_background() keys the
+    # backdrop out by colour, and it only works reliably when the backdrop is
+    # one flat tone with nothing touching the frame edge.
+    return (
+        f"{base}, single isometric video game object, 3/4 top-down view, "
+        f"whole object centered with a margin, isolated on a solid white background, "
+        f"no ground, no shadow, crisp pixel-art style, high detail"
+    )

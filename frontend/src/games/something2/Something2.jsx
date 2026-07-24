@@ -3,9 +3,9 @@ import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { HiOutlineTrash, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineMap } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
-import { getStoredToken, parseJwt, clearToken } from "./src/js/net/EngineClient.js";
+import { getStoredToken, parseJwt, clearToken, authHeaders, AUTH_EXPIRED_EVENT } from "./src/js/net/EngineClient.js";
 import Login from "../../pages/Login.jsx";
-import { useMapTiles, useVfxEffects } from "./useMaps.js";
+import { useMapTiles, useMapConfig, useVfxEffects } from "./useMaps.js";
 import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 
@@ -352,8 +352,46 @@ export default function Something2() {
   // depth. Recomputed when `authed` flips (sign in/out swaps the stored token).
   const isAdmin = useMemo(() => parseJwt(getStoredToken())?.role === 'admin', [authed]);
 
+  // A token can be REVOKED while still being well-formed and unexpired: any
+  // token_version bump (logout-everywhere, `make admin-password`) leaves the
+  // stored JWT parsing fine, so the checks above happily report "signed in as
+  // admin" while the server 401s every write. That zombie session looks like a
+  // broken app — admin screens render, saving silently fails.
+  // Ask the server once on mount; only the server knows about token_version.
+  useEffect(() => {
+    if (!authed) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/auth/me`, { headers: authHeaders() });
+        if (cancelled || res.status !== 401) return;   // network/5xx: keep the session
+        clearToken();
+        setAuthed(false);
+        toast.error('Session expired — please sign in again');
+      } catch { /* offline: leave the session alone rather than logging out */ }
+    })();
+    return () => { cancelled = true; };
+  }, [authed]);
+
+  // The mount check above only catches a token that was ALREADY dead. A session
+  // revoked while this tab is open (someone rotates the admin password, or hits
+  // logout-everywhere) is caught here instead: apiFetch clears the token on any
+  // 401 and fires this event, so the UI stops pretending to be signed in the
+  // moment a request is actually rejected.
+  useEffect(() => {
+    const onExpired = () => {
+      setAuthed(false);
+      toast.error('Session expired — please sign in again');
+    };
+    globalThis.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => globalThis.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
+
   const { mapTiles, isLoadingMapTiles } = useMapTiles();
   const { vfxEffects } = useVfxEffects();
+  // Entity types keyed by name (same shape the legacy map path uses) — the
+  // chunked renderer needs them to draw creatures with their approved sprite.
+  const { mapConfig } = useMapConfig();
   const { worlds, isLoadingWorlds, worldsError } = useWorlds();
   const createWorldMutation = useCreateWorld();
   const deleteWorldMutation = useDeleteWorld();
@@ -492,6 +530,7 @@ export default function Something2() {
         chunkSize,
         tileTypes: mapTiles,
         vfxEffects: vfxEffects || null,
+        entityTypes: mapConfig?.entityTypes || null,
         spawnX: spawn,
         spawnY: spawn,
       });
@@ -502,7 +541,7 @@ export default function Something2() {
     }
   };
   // Keep the transition callback pointed at the current closure (fresh
-  // mapTiles/worlds/vfxEffects) — see handleEnterRef declaration above.
+  // mapTiles/worlds/vfxEffects/mapConfig) — see handleEnterRef declaration above.
   handleEnterRef.current = handleEnterChunkedWorld;
 
   // MISMATCH fix: a logged-in player should spawn straight into the canonical
@@ -746,13 +785,27 @@ export default function Something2() {
               Select a world to preview it, then Enter World.
             </div>
           )}
-          <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: isPlaying ? 'block' : 'none' }} />
           </>
         )}
         {isAdmin && activeTab === 'tiles' && <TileTypesAdmin />}
         {isAdmin && activeTab === 'entity' && <EntityTypesAdmin />}
         {isAdmin && activeTab === 'items' && <ItemTypesAdmin />}
         {isAdmin && activeTab === 'maps' && <MapsAdmin />}
+        {/* Kept mounted across tab switches, NOT nested in the game tab's
+            conditional. RenderSystem captures this element and its 2d context
+            when the world is entered, so unmounting it on a tab switch left the
+            running render loop drawing into a detached canvas while React
+            mounted a fresh (blank) one — the game view came back empty.
+            Hiding it is enough; the rAF loop and authority socket keep running,
+            so returning to the tab resumes the live world instead of reloading. */}
+        <canvas
+          ref={canvasRef}
+          style={{
+            width: '100%',
+            height: '100%',
+            display: activeTab === 'game' && isPlaying ? 'block' : 'none',
+          }}
+        />
       </ContentArea>
     </StyledGameContainer>
   );

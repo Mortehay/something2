@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
-import { authHeaders } from "./src/js/net/EngineClient.js";
+import { authHeaders, apiFetch } from "./src/js/net/EngineClient.js";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:13101";
 
@@ -12,7 +12,7 @@ export function assetUrl(key) {
 export function useGenerateTileJob() {
   return useMutation({
     mutationFn: async (body) => {
-      const res = await fetch(`${API}/api/tile-jobs`, {
+      const res = await apiFetch(`${API}/api/tile-jobs`, {
         method: "POST", headers: authHeaders(), body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("failed to start tile job");
@@ -32,7 +32,7 @@ export function useTileJob(jobId) {
       return s === "done" || s === "error" ? false : 1000;
     },
     queryFn: async () => {
-      const res = await fetch(`${API}/api/tile-jobs/${jobId}`);
+      const res = await apiFetch(`${API}/api/tile-jobs/${jobId}`);
       if (!res.ok) throw new Error("failed to fetch tile job");
       return res.json();
     },
@@ -43,7 +43,7 @@ export function useApproveTileImage() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ tileId, ...body }) => {
-      const res = await fetch(`${API}/api/tile-types/${tileId}/image`, {
+      const res = await apiFetch(`${API}/api/tile-types/${tileId}/image`, {
         method: "POST", headers: authHeaders(), body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("failed to approve tile texture");
@@ -62,7 +62,7 @@ export function useApproveTileSprite() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ tileId, ...body }) => {
-      const res = await fetch(`${API}/api/tile-types/${tileId}/sprite`, {
+      const res = await apiFetch(`${API}/api/tile-types/${tileId}/sprite`, {
         method: "POST", headers: authHeaders(), body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("failed to approve tile animation");

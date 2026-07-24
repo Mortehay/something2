@@ -16,5 +16,10 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
 
 COPY sprite-gen/ .
 
+# Bake rembg's u2net matting model (~176MB) into the image. Left out, rembg
+# downloads it inside the FIRST generation job — turning that job into a
+# multi-minute network wait, and failing outright on an offline host.
+RUN python -c "import rembg; rembg.new_session('u2net')"
+
 EXPOSE 8100
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100"]

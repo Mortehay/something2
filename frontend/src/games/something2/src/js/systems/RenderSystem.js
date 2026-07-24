@@ -1,7 +1,7 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
-import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, resolveTileVisual } from "./spriteAtlas.js";
+import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual } from "./spriteAtlas.js";
 import { TileDiamondCache } from "./tileTexture.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
@@ -516,10 +516,14 @@ export class RenderSystem {
     const atlas = imageManager.get(entity.sprite.atlas_key);
     const manifest = entity.sprite.manifest;
     if (!atlas || !manifest) return null;
-    // Animated -> cycle the facing's frames, degrading to the static frame if
-    // that direction has none; static -> a single representative frame.
+    // Animated -> cycle the facing's frames; entity atlases generated through
+    // the object/tile pipeline are FLAT (keys "0","1",… with no direction), so
+    // fall back to the flat cycle before giving up on a single static frame.
+    // Static -> a single representative frame.
     const key = mode === "animated"
-      ? (animatedFrameKey(manifest, facingToDir(entity.facing), timeMs) || staticFrameKey(entity.sprite, manifest))
+      ? (animatedFrameKey(manifest, facingToDir(entity.facing), timeMs)
+         || tileFrameKey(manifest, timeMs)
+         || staticFrameKey(entity.sprite, manifest))
       : staticFrameKey(entity.sprite, manifest);
     const rect = frameRect(manifest, key);
     return rect ? { img: atlas, crop: rect } : null;

@@ -4,7 +4,7 @@ from typing import Optional, List
 from .config import settings
 from . import backends
 from .jobs import JobManager
-from .orchestrator import generate_creature, generate_tile
+from .orchestrator import generate_creature, generate_tile, generate_object
 from .recipe import recipe_for
 
 app = FastAPI(title="something2 sprite-gen")
@@ -13,7 +13,7 @@ job_manager = JobManager()
 class GenerateRequest(BaseModel):
     creature: str
     base_prompt: str
-    kind: str = "creature"  # "creature" | "tile"
+    kind: str = "creature"  # "creature" | "tile" | "object"
     backend: Optional[str] = None
     seed: int = 0
     frames: Optional[int] = None
@@ -64,6 +64,15 @@ def generate(req: GenerateRequest):
             if _STORE_ENABLED:
                 from .storage import default_store
                 return default_store().put_tile(req.creature, out)
+            return {"frames": len(out["frames"]), "manifest": out["manifest"]}
+        if req.kind == "object":
+            out = generate_object(
+                obj=req.creature, base_prompt=req.base_prompt, backend_name=backend_name,
+                seed=req.seed, n_frames=frames, size=size, steps=steps, progress=progress,
+            )
+            if _STORE_ENABLED:
+                from .storage import default_store
+                return default_store().put_object(req.creature, out)
             return {"frames": len(out["frames"]), "manifest": out["manifest"]}
         out = generate_creature(
             creature=req.creature, base_prompt=req.base_prompt, backend_name=backend_name,

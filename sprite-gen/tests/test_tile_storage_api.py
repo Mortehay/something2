@@ -57,7 +57,7 @@ def test_generate_default_kind_is_creature_unchanged():
     done = _wait(r.json()["job_id"])
     assert done["progress"]["total"] == 16  # 8 dirs x 2 frames — creature path intact
 
-def test_env_backend_overrides_recipe(monkeypatch):
+def test_env_backend_overrides_recipe(monkeypatch, no_real_work):
     # SPRITE_BACKEND forces the backend even when the cpu recipe would pick sd-turbo.
     monkeypatch.setenv("SPRITE_BACKEND", "stub")
     r = client.post("/generate", json={"creature": "grass", "base_prompt": "g", "kind": "tile",
@@ -65,7 +65,7 @@ def test_env_backend_overrides_recipe(monkeypatch):
     assert r.status_code == 202
     assert r.json()["recipe"]["backend"] == "stub"
 
-def test_unset_env_falls_back_to_tier_recipe(monkeypatch):
+def test_unset_env_falls_back_to_tier_recipe(monkeypatch, no_real_work):
     # With no SPRITE_BACKEND and no request backend, the cpu recipe chooses sd-turbo.
     monkeypatch.delenv("SPRITE_BACKEND", raising=False)
     r = client.post("/generate", json={"creature": "grass", "base_prompt": "g", "kind": "tile",
@@ -73,7 +73,7 @@ def test_unset_env_falls_back_to_tier_recipe(monkeypatch):
     assert r.status_code == 202
     assert r.json()["recipe"]["backend"] == "sd-turbo"
 
-def test_request_backend_still_wins_over_env(monkeypatch):
+def test_request_backend_still_wins_over_env(monkeypatch, no_real_work):
     monkeypatch.setenv("SPRITE_BACKEND", "sd-turbo")
     r = client.post("/generate", json={"creature": "grass", "base_prompt": "g", "kind": "tile",
                                         "backend": "stub", "seed": 1, "frames": 1, "size": [8, 8], "steps": 1})

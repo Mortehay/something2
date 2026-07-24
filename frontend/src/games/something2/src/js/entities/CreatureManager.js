@@ -6,8 +6,32 @@ const CREATURE_SIZE = 48;
 const INTERP_RATE = 12; // higher = snappier; ~reaches target within a couple frames
 
 export class CreatureManager {
-  constructor() {
+  // `entityTypes` (name -> entity type def) is optional: when supplied, each
+  // creature is decorated with its type's visuals (render_mode + generated
+  // image/sprite) so the renderer can draw the approved sprite instead of a
+  // flat colored box. Without it, creatures render exactly as before.
+  constructor(entityTypes = null) {
     this.creatures = new Map(); // id -> creature
+    this.entityTypes = entityTypes;
+  }
+
+  // Copy the type's visual fields onto a creature. The sprite descriptor is
+  // shared by reference on purpose — Game.preloadSprites attaches `manifest`
+  // to that same object after the atlas loads, which must light up creatures
+  // that were created before the load finished.
+  _applyTypeVisuals(creature) {
+    const def = this.entityTypes && this.entityTypes[creature.type];
+    if (!def) return creature;
+    // Two shapes reach this: /api/entity-types rows (snake_case) and
+    // /api/map/config's entityTypes map (camelCase). Accept either.
+    creature.render_mode = def.render_mode || def.renderMode;
+    creature.image = def.image || null;
+    creature.sprite = def.sprite || null;
+    const w = def.display_width || def.displayWidth;
+    const h = def.display_height || def.displayHeight;
+    if (w) creature.displayWidth = w;
+    if (h) creature.displayHeight = h;
+    return creature;
   }
 
   has(id) { return this.creatures.has(id); }
@@ -29,13 +53,13 @@ export class CreatureManager {
         ex.effects = c.effects || null;
         if (c.color) ex.color = c.color;
       } else {
-        this.creatures.set(c.id, {
+        this.creatures.set(c.id, this._applyTypeVisuals({
           id: c.id, type: c.type,
           x: c.x, y: c.y, tx: c.x, ty: c.y,
           width: CREATURE_SIZE, height: CREATURE_SIZE,
           facing: c.facing || 'S', hp: c.hp, maxHp: c.maxHp, mode: c.mode, color: c.color,
           effects: c.effects || null,
-        });
+        }));
       }
     }
     for (const id of [...this.creatures.keys()]) {

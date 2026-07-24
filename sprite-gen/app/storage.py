@@ -32,20 +32,28 @@ class SpriteStore:
                                content_type="application/json")
         return {"atlas_key": atlas_key, "manifest_key": manifest_key, "frame_keys": frame_keys}
 
-    def put_tile(self, tile: str, result: dict) -> dict:
+    def _put_flat(self, prefix: str, name: str, result: dict) -> dict:
+        # Storage layout for the non-directional pipeline (tiles and objects):
+        # <prefix>/<name>/{static.png, atlas.png, atlas.json}.
         self.ensure_bucket()
-        image_key = f"{self.bucket}/tiles/{tile}/static.png"
+        image_key = f"{self.bucket}/{prefix}/{name}/static.png"
         data, length = _png_bytes(result["static"])
         self.client.put_object(self.bucket, image_key, data, length, content_type="image/png")
-        atlas_key = f"{self.bucket}/tiles/{tile}/atlas.png"
+        atlas_key = f"{self.bucket}/{prefix}/{name}/atlas.png"
         data, length = _png_bytes(result["atlas"])
         self.client.put_object(self.bucket, atlas_key, data, length, content_type="image/png")
-        manifest_key = f"{self.bucket}/tiles/{tile}/atlas.json"
+        manifest_key = f"{self.bucket}/{prefix}/{name}/atlas.json"
         mbytes = json.dumps(result["manifest"]).encode()
         self.client.put_object(self.bucket, manifest_key, io.BytesIO(mbytes), len(mbytes),
                                content_type="application/json")
         return {"image_key": image_key, "atlas_key": atlas_key,
                 "manifest_key": manifest_key, "frames": len(result["frames"])}
+
+    def put_tile(self, tile: str, result: dict) -> dict:
+        return self._put_flat("tiles", tile, result)
+
+    def put_object(self, obj: str, result: dict) -> dict:
+        return self._put_flat("objects", obj, result)
 
 def default_store():
     from minio import Minio
