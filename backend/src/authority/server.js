@@ -323,26 +323,49 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const { cx, cy } = parseKey(chunkKey);
       const N = entry.row.chunk_size;
       const grid = entry.world.map.getChunk(cx, cy); // deterministic terrain
-      const ins = await pool.query(
-        `INSERT INTO world_chunks (world_id, cx, cy, data) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (world_id, cx, cy) DO NOTHING RETURNING id`,
-        [entry.worldId, cx, cy, JSON.stringify(grid)],
-      );
-      // Bounded maps use count-based placement (placeMapCreatures, written to
-      // world_creatures by the admin re-roll route); they must NOT run the
-      // per-tile roll here, which would scatter creatures onto the wall ring.
-      if (ins.rowCount > 0 && entry.hostileCreatureTypes.length && !isBoundedWorld(entry.row)) {
-        const spawned = spawnChunkCreatures(
-          { seed: Number(entry.row.seed), chunkSize: N, tileTypes: entry.tileTypes },
-          cx, cy, entry.hostileCreatureTypes,
+
+      // The world_chunks INSERT is this function's once-only spawn flag
+      // (ins.rowCount > 0 below), so it and the creature INSERTs it gates
+      // must commit or fail TOGETHER — otherwise a failure partway through
+      // spawning still leaves the flag committed, and every retry then sees
+      // the chunk "already materialized" and silently skips spawning
+      // forever, with no recovery short of deleting the world_chunks row by
+      // hand (F-018 / SOMET-198). Same pool.connect() + BEGIN/COMMIT/
+      // ROLLBACK + client.release() shape as trade.js.
+      const client = await pool.connect();
+      let rowCount = 0;
+      try {
+        await client.query('BEGIN');
+        const ins = await client.query(
+          `INSERT INTO world_chunks (world_id, cx, cy, data) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (world_id, cx, cy) DO NOTHING RETURNING id`,
+          [entry.worldId, cx, cy, JSON.stringify(grid)],
         );
-        for (const c of spawned) {
-          await pool.query(
-            `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
-            [entry.worldId, c.type, c.x, c.y, c.hp, c.facing],
+        rowCount = ins.rowCount;
+        // Bounded maps use count-based placement (placeMapCreatures, written
+        // to world_creatures by the admin re-roll route); they must NOT run
+        // the per-tile roll here, which would scatter creatures onto the
+        // wall ring.
+        if (rowCount > 0 && entry.hostileCreatureTypes.length && !isBoundedWorld(entry.row)) {
+          const spawned = spawnChunkCreatures(
+            { seed: Number(entry.row.seed), chunkSize: N, tileTypes: entry.tileTypes },
+            cx, cy, entry.hostileCreatureTypes,
           );
+          for (const c of spawned) {
+            await client.query(
+              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
+              [entry.worldId, c.type, c.x, c.y, c.hp, c.facing],
+            );
+          }
         }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
       }
+
       const span = N * 100;
       const rows = await pool.query(
         // et.defense/et.resistances feed CreatureSim's `mit`; dropping either
@@ -364,8 +387,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
       );
       entry.world.groundItems.add(itemRows.rows);
       entry.loadedChunks.add(chunkKey);
-    } catch {
-      // best-effort: left out of loadedChunks so recomputeActive retries it
+    } catch (err) {
+      // best-effort: left out of loadedChunks so recomputeActive retries it.
+      // Logged (previously silent) so a persistently failing chunk is at
+      // least visible to an operator instead of only manifesting as an
+      // empty-looking world (F-018 / SOMET-198).
+      console.error('chunk activation failed:', chunkKey, err);
     } finally {
       entry.chunkLoads.delete(chunkKey);
     }

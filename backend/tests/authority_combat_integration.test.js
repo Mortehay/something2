@@ -7,11 +7,22 @@ const { attachAuthority } = require('../src/authority/server.js');
 
 const SECRET = 'test-secret';
 
+// activateChunk (F-018 / SOMET-198) now opens a client via pool.connect() to
+// wrap the world_chunks INSERT and the creature INSERTs it gates in one
+// transaction, on top of the plain pool.query() every fake pool below
+// already answers. Neither fake asserts on BEGIN/COMMIT/ROLLBACK, so a
+// client that proxies straight back to the same `query` fn is a faithful
+// stand-in.
+function withConnect(pool) {
+  pool.connect = async () => ({ query: pool.query, release: () => {} });
+  return pool;
+}
+
 // World w1 (chunk_size 8 → chunk (0,0) center 400,400). One wolf near the
 // player's spawn so it aggros. chunk insert rowCount 0 (already materialized).
 function fakePool() {
   const deletes = [];
-  return {
+  return withConnect({
     deletes,
     query: async (sql, params) => {
       if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
@@ -47,7 +58,7 @@ function fakePool() {
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
       return { rows: [] };
     },
-  };
+  });
 }
 function token(u) { return jwt.sign({ user_id: u, tv: 1 }, SECRET, { algorithm: 'HS256' }); }
 function bootWith(pool) {
@@ -131,7 +142,7 @@ function fakePoolWithBow() {
   const rawDeletes = [];    // any other DELETE FROM world_creatures (e.g. a reverted raw query)
   const dropQueries = [];   // creature_drops lookups (only the funnel issues these)
   const itemInserts = [];   // world_items inserts spawned by the drop roll
-  return {
+  return withConnect({
     deletes, rawDeletes, dropQueries, itemInserts,
     query: async (sql, params) => {
       if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
@@ -187,7 +198,7 @@ function fakePoolWithBow() {
       }
       return { rows: [] };
     },
-  };
+  });
 }
 
 test('a creature killed BY A PROJECTILE routes through the shared kill funnel (DELETE ... RETURNING, then a drop roll) — not merely gone from memory', async () => {

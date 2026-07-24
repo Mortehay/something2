@@ -29,10 +29,21 @@ async function openPool() {
   }
 }
 
+// activateChunk (F-018 / SOMET-198) now opens a client via pool.connect() to
+// wrap the world_chunks INSERT and the creature INSERTs it gates in one
+// transaction, on top of the plain pool.query() every fake pool below
+// already answers. None of these fakes assert on BEGIN/COMMIT/ROLLBACK, so a
+// client that proxies straight back to the same `query` fn is a faithful
+// stand-in.
+function withConnect(pool) {
+  pool.connect = async () => ({ query: pool.query, release: () => {} });
+  return pool;
+}
+
 // Minimal pool: one world row, a couple of walkable tile types, no persisted
 // player rows, and a no-op upsert.
 function fakePool() {
-  return {
+  return withConnect({
     query: async (sql) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
         return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
@@ -68,7 +79,7 @@ function fakePool() {
       if (/INSERT INTO player_items/i.test(sql)) return { rows: [], rowCount: 1 };
       return { rows: [] };
     },
-  };
+  });
 }
 
 // Signs tv:1 to match the token_version the fakePool users lookup reports, so
@@ -139,7 +150,7 @@ function track(handle, server) {
 // never interleave the two).
 function delayedFakePool(delayMs, opts = {}) {
   const itemsDelayMs = opts.itemsDelayMs || 0;
-  return {
+  return withConnect({
     query: async (sql, ...args) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
         await new Promise((r) => setTimeout(r, delayMs));
@@ -150,7 +161,7 @@ function delayedFakePool(delayMs, opts = {}) {
       }
       return fakePool().query(sql, ...args);
     },
-  };
+  });
 }
 
 function connect(url, uid) {
@@ -712,7 +723,7 @@ test('a second session for the same account kicks the first (newest wins)', asyn
 function equipRacePool(delayMs = 20) {
   const base = fakePool();
   const usedItemIds = new Set();
-  return {
+  return withConnect({
     query: async (sql, params) => {
       if (/INSERT INTO player_equipment/i.test(sql)) {
         await new Promise((r) => setTimeout(r, delayMs));
@@ -727,7 +738,7 @@ function equipRacePool(delayMs = 20) {
       }
       return base.query(sql, params);
     },
-  };
+  });
 }
 
 test('concurrent double-equip of the same item into two hand slots does not crash the process', async () => {
@@ -861,7 +872,7 @@ async function mkAttackHarness(opts = {}) {
   // simulate the summed-across-stacks total draining shot by shot.
   const ammoCountFn = opts.ammoCountFn || (() => 5);
   const base = fakePool();
-  const pool = {
+  const pool = withConnect({
     query: async (sql, params) => {
       // Must be matched BEFORE the generic /FROM player_items/ branch: the
       // consume statement mentions player_items in its subquery too.
@@ -893,7 +904,7 @@ async function mkAttackHarness(opts = {}) {
       if (/FROM player_equipment/i.test(sql)) return { rows: [{ slot: 'main_hand', item_id: 'i9' }] };
       return base.query(sql, params);
     },
-  };
+  });
 
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);

@@ -60,7 +60,7 @@ const ITEMS_SELECT_RE = /SELECT.*FROM world_items/i;
 // the claim result itself).
 function makePool(chunkSize, { itemsFor, claim } = {}) {
   const calls = [];
-  return {
+  const pool = {
     calls,
     matching(re) { return calls.filter((c) => re.test(c.sql)); },
     query: async (sql, params) => {
@@ -86,6 +86,13 @@ function makePool(chunkSize, { itemsFor, claim } = {}) {
       return { rows: [] };
     },
   };
+  // activateChunk (F-018 / SOMET-198) now opens a client via pool.connect()
+  // to wrap the world_chunks INSERT and the creature INSERTs it gates in one
+  // transaction. This fake doesn't assert on BEGIN/COMMIT/ROLLBACK, so a
+  // client that proxies straight back to the same `query` fn (and keeps
+  // recording into the same `calls` array) is a faithful stand-in.
+  pool.connect = async () => ({ query: pool.query, release: () => {} });
+  return pool;
 }
 
 // Poll 'pickup' until a 'picked' reply arrives or the timeout elapses.

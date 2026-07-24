@@ -27,11 +27,21 @@ const { attachAuthority } = require('../src/authority/server.js');
 
 const SECRET = 'test-secret-nonobject-frame';
 
+// activateChunk (F-018 / SOMET-198) now opens a client via pool.connect() to
+// wrap the world_chunks INSERT and the creature INSERTs it gates in one
+// transaction. This fake doesn't assert on BEGIN/COMMIT/ROLLBACK, so a
+// client that proxies straight back to the same `query` fn is a faithful
+// stand-in.
+function withConnect(pool) {
+  pool.connect = async () => ({ query: pool.query, release: () => {} });
+  return pool;
+}
+
 // Minimal pool: one world, two walkable tile types, no persisted player rows.
 // Same shape as authority_server.test.js's fakePool(); duplicated here rather
 // than imported since that helper is private to its file.
 function fakePool() {
-  return {
+  return withConnect({
     query: async (sql) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
         return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
@@ -53,7 +63,7 @@ function fakePool() {
       if (/INSERT INTO player_items/i.test(sql)) return { rows: [], rowCount: 1 };
       return { rows: [] };
     },
-  };
+  });
 }
 
 function token(userId, tv = 1) {
