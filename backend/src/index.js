@@ -110,12 +110,26 @@ const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path g
 // World overview memo (player-centered minimap window, SOMET minimap HUD)
 const OVERVIEW_SPAN = 256;   // tiles per side of the player-centered window
 const OVERVIEW_STEP = 4;     // downsample factor -> 64x64 coarse cells
+// Unlike worldPreviewCache (one entry per world), a roaming player can mint one
+// overview entry per 64-tile snap region, unbounded across every world/player
+// on a long-running server -- so this cache needs a size cap (SOMET minimap
+// HUD final review).
+const OVERVIEW_CACHE_MAX = 64;
 const worldOverviewCache = new Map(); // "worldId:snappedCol:snappedRow" -> payload
 
 function clearOverviewCache(worldId) {
   for (const key of worldOverviewCache.keys()) {
     if (key.startsWith(`${worldId}:`)) worldOverviewCache.delete(key);
   }
+}
+
+// Insert into a Map with a FIFO size cap: once it exceeds `max`, evict the
+// oldest-inserted entry (Map preserves insertion order). Re-setting an
+// existing key updates its value without evicting anything.
+function boundedCacheSet(map, key, value, max) {
+  map.set(key, value);
+  while (map.size > max) map.delete(map.keys().next().value);
+  return map;
 }
 
 // Handle to the running authority (set only when this module is the entrypoint;
@@ -1727,7 +1741,7 @@ app.get('/api/worlds/:id/overview', async (req, res) => {
       centerCol, centerRow, OVERVIEW_SPAN, OVERVIEW_STEP,
     );
     const payload = { world_id: worldId, ...data };
-    worldOverviewCache.set(cacheKey, payload);
+    boundedCacheSet(worldOverviewCache, cacheKey, payload, OVERVIEW_CACHE_MAX);
     res.json(payload);
   } catch (err) {
     console.error(err);
@@ -1759,4 +1773,4 @@ if (require.main === module) {
   console.log('Authority WS attached at /authority');
 }
 
-module.exports = { app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, apiRateLimiter };
+module.exports = { app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, boundedCacheSet, apiRateLimiter };
