@@ -19,6 +19,7 @@ Claude and Codex follow the same rules. This file is the source of truth for bot
 - [.ai/styleguides/frontend.md](.ai/styleguides/frontend.md) — React + styled-components + TanStack Query patterns
 - [.ai/styleguides/backend.md](.ai/styleguides/backend.md) — Express + pg patterns
 - `.ai/decisions/` — architecture decisions go here (created as needed)
+- [docs/superpowers/specs/2026-07-24-codebase-audit-cycle-design.md](docs/superpowers/specs/2026-07-24-codebase-audit-cycle-design.md) — the audit cycle; re-run it with the `audit-cycle` skill
 
 ## Quick start
 
