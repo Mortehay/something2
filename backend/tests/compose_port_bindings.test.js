@@ -46,10 +46,10 @@ function portMappings(block) {
   return out;
 }
 
-test('db and redis publish ports bound to 127.0.0.1, not the LAN-wide 0.0.0.0 default', () => {
+test('db, redis, and minio publish ports bound to 127.0.0.1, not the LAN-wide 0.0.0.0 default', () => {
   const text = fs.readFileSync(COMPOSE_PATH, 'utf8');
 
-  for (const service of ['db', 'redis']) {
+  for (const service of ['db', 'redis', 'minio']) {
     const block = serviceBlock(text, service);
     const mappings = portMappings(block);
     assert.ok(mappings.length > 0, `service '${service}' has no port mappings to check`);
