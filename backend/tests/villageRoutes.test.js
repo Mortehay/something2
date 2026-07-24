@@ -7,14 +7,20 @@ const { adminToken, isUserLookup, ADMIN_USER_ROW } = require('./helpers/auth.js'
 test.afterEach(() => { __setAuthorityHandle(null); });
 
 const AUTH = ['Authorization', `Bearer ${adminToken()}`];
+// F-007 (SOMET-187): village create/delete now run inside a real transaction
+// via pool.connect(), so this mock needs a connect() handing back a client
+// that dispatches through the same handlers; BEGIN/COMMIT/ROLLBACK are
+// answered directly instead of needing a handler in every test.
 function mockPool(handlers) {
   const calls = [];
-  return { calls, query: async (sql, params) => {
+  const dispatch = async (sql, params) => {
     if (isUserLookup(sql)) return ADMIN_USER_ROW;
+    if (/^(BEGIN|COMMIT|ROLLBACK)$/i.test(sql.trim())) return { rows: [] };
     calls.push({ sql, params });
     for (const [re, fn] of handlers) if (re.test(sql)) return fn(params);
     throw new Error(`unexpected query: ${sql}`);
-  } };
+  };
+  return { calls, query: dispatch, connect: async () => ({ query: dispatch, release: () => {} }) };
 }
 const WORLD = (over = {}) => ({ id: 'w1', width: 30, height: 30, ...over });
 

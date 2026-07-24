@@ -12,18 +12,26 @@ test.afterEach(() => { __setAuthorityHandle(null); });
 
 const AUTH = ['Authorization', `Bearer ${adminToken()}`];
 
+// F-007 (SOMET-187) wraps village create/delete and the creature re-roll in a
+// real transaction via pool.connect(), so this mock needs a connect() that
+// hands back a client dispatching through the same handlers -- and BEGIN/
+// COMMIT/ROLLBACK are answered directly rather than requiring every test to
+// register a handler for them.
 function mockPool(handlers) {
   const calls = [];
+  const dispatch = async (sql, params) => {
+    if (isUserLookup(sql)) return ADMIN_USER_ROW;
+    if (/^(BEGIN|COMMIT|ROLLBACK)$/i.test(sql.trim())) return { rows: [] };
+    calls.push({ sql, params });
+    for (const [re, fn] of handlers) {
+      if (re.test(sql)) return fn(params);
+    }
+    throw new Error(`unexpected query: ${sql}`);
+  };
   return {
     calls,
-    query: async (sql, params) => {
-      if (isUserLookup(sql)) return ADMIN_USER_ROW;
-      calls.push({ sql, params });
-      for (const [re, fn] of handlers) {
-        if (re.test(sql)) return fn(params);
-      }
-      throw new Error(`unexpected query: ${sql}`);
-    },
+    query: dispatch,
+    connect: async () => ({ query: dispatch, release: () => {} }),
   };
 }
 

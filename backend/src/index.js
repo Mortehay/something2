@@ -1300,7 +1300,7 @@ app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
     // Villages live in a separate table and survive a regenerate — without
     // this, a regenerated world keeps its gated villages but loses their
     // guards, since the wipe above has no village_id to spare them by.
-    await insertVillageGuards(id, await fetchVillages(pool, id));
+    await insertVillageGuards(pool, id, await fetchVillages(pool, id));
     worldPreviewCache.delete(id);
     const result = await pool.query(
       'UPDATE worlds SET seed = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
@@ -1315,6 +1315,12 @@ app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
 });
 
 app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
+  // client acquired inside the try: pool.connect() can reject (DB restart,
+  // pool exhaustion) and Express 4.x does not catch an async handler's
+  // rejection, so an unguarded await here would escape as an
+  // unhandledRejection and kill the process (same hardening as
+  // POST /api/maps/:id/entities).
+  let client = null;
   try {
     const { id } = req.params;
     const wr = await pool.query('SELECT * FROM worlds WHERE id = $1', [id]);
@@ -1326,48 +1332,63 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
     const allowed = Array.isArray(world.allowed_creature_types) ? world.allowed_creature_types : [];
     const count = Number(world.creature_count) || 0;
 
-    // Spare guards — they aren't rolled, they're re-derived from villages below.
-    await pool.query(
-      `DELETE FROM world_creatures WHERE world_id = $1 AND type <> $2`,
-      [id, GUARD_TYPE],
-    );
-
-    const villages = await fetchVillages(pool, world.id);
-
+    // F-007 / SOMET-187: wipe-then-re-derive is two dependent writes around
+    // the guard set (like village create/delete below). Without a
+    // transaction, a failure between the wipe and the re-roll's own guard
+    // re-insert leaves the world with zero guards and no endpoint that
+    // re-derives them except another re-roll.
+    client = await pool.connect();
+    await client.query('BEGIN');
     let placed = 0;
-    if (count > 0 && allowed.length > 0) {
-      const et = await pool.query(
-        `SELECT name, hp, defense, resistances, faction FROM entity_types WHERE is_creature = true AND name = ANY($1::text[])`,
-        [allowed],
+    try {
+      // Spare guards — they aren't rolled, they're re-derived from villages below.
+      await client.query(
+        `DELETE FROM world_creatures WHERE world_id = $1 AND type <> $2`,
+        [id, GUARD_TYPE],
       );
-      const hostileTypes = et.rows.filter((t) => (t.faction || 'hostile') !== 'guard');
-      if (hostileTypes.length > 0) {
-        const tileTypes = await getTileTypesMap();
-        const rows = placeMapCreatures(
-          { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-            width: world.width, height: world.height,
-            doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
-            villages },
-          count, hostileTypes, Math.floor(Math.random() * 2 ** 31),
-        );
-        for (const c of rows) {
-          await pool.query(
-            `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
-            [id, c.type, c.x, c.y, c.hp, c.facing],
-          );
-        }
-        placed = rows.length;
-      }
-    }
 
-    await pool.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`, [id, GUARD_TYPE]);
-    await insertVillageGuards(id, villages);
+      const villages = await fetchVillages(client, world.id);
+
+      if (count > 0 && allowed.length > 0) {
+        const et = await client.query(
+          `SELECT name, hp, defense, resistances, faction FROM entity_types WHERE is_creature = true AND name = ANY($1::text[])`,
+          [allowed],
+        );
+        const hostileTypes = et.rows.filter((t) => (t.faction || 'hostile') !== 'guard');
+        if (hostileTypes.length > 0) {
+          const tileTypes = await getTileTypesMap();
+          const rows = placeMapCreatures(
+            { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
+              width: world.width, height: world.height,
+              doorways: (await fetchLinks(client, world.id)).map((l) => l.edge),
+              villages },
+            count, hostileTypes, Math.floor(Math.random() * 2 ** 31),
+          );
+          for (const c of rows) {
+            await client.query(
+              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
+              [id, c.type, c.x, c.y, c.hp, c.facing],
+            );
+          }
+          placed = rows.length;
+        }
+      }
+
+      await client.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`, [id, GUARD_TYPE]);
+      await insertVillageGuards(client, id, villages);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    }
 
     const liveWarning = evictOrWarn(id);
     res.json(liveWarning ? { placed, liveWarning } : { placed });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to re-roll creatures' });
+  } finally {
+    client?.release();
   }
 });
 
@@ -1397,11 +1418,15 @@ async function invalidateWorld(worldId) {
 
 // Two guards per village, standing on the interior tiles flanking the gate.
 // home_x/home_y is the post: the authority leashes a guard to it.
+// `db` is any queryable (the module-level pool, or a connected client mid-
+// transaction — village create/delete and the creature re-roll route all
+// pass their transaction's client so this participates in it (F-007 /
+// SOMET-187); regenerate isn't transactional and still passes the pool).
 const GUARD_TYPE = 'Village Guard';
-async function insertVillageGuards(worldId, villages) {
+async function insertVillageGuards(db, worldId, villages) {
   for (const v of villages) {
     for (const post of villageGatePosts(v)) {
-      await pool.query(
+      await db.query(
         `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, home_x, home_y)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [worldId, GUARD_TYPE, post.x, post.y, 300, 'S', post.x, post.y],
@@ -1450,6 +1475,9 @@ app.get('/api/worlds/:id/villages', async (req, res) => {
 });
 
 app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
+  // client acquired inside the try: same pool.connect()-rejection hardening
+  // as POST /api/maps/:id/entities.
+  let client = null;
   try {
     const { id } = req.params;
     const wr = await pool.query('SELECT id, width, height FROM worlds WHERE id = $1', [id]);
@@ -1466,37 +1494,69 @@ app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
     const mpost = villageMerchantPost({
       minRow: min_row, minCol: min_col, width, height, gateEdge: gate_edge,
     });
-    const ins = await pool.query(
-      `INSERT INTO villages (world_id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, mpost.x, mpost.y],
-    );
-    const row = ins.rows[0];
-    await insertVillageGuards(id, [{
-      minRow: row.min_row, minCol: row.min_col,
-      width: row.width, height: row.height, gateEdge: row.gate_edge,
-    }]);
-    await seedBaseCatalog(pool, id, row.id);
+
+    // F-007 / SOMET-187: village row, guards and base catalog are three
+    // dependent writes. Without a transaction, a failure partway through
+    // (e.g. seedBaseCatalog throwing) leaves a committed village with no
+    // shop and no way for the admin to see or fix it -- a retry then 400s
+    // with "village overlaps an existing village" against the phantom row
+    // they were never told exists.
+    client = await pool.connect();
+    await client.query('BEGIN');
+    let row;
+    try {
+      const ins = await client.query(
+        `INSERT INTO villages (world_id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+        [id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, mpost.x, mpost.y],
+      );
+      row = ins.rows[0];
+      await insertVillageGuards(client, id, [{
+        minRow: row.min_row, minCol: row.min_col,
+        width: row.width, height: row.height, gateEdge: row.gate_edge,
+      }]);
+      await seedBaseCatalog(client, id, row.id);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    }
+
     const liveWarning = await invalidateWorld(id);
-    res.json(liveWarning ? { ...ins.rows[0], liveWarning } : ins.rows[0]);
+    res.json(liveWarning ? { ...row, liveWarning } : row);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create village' });
+  } finally {
+    client?.release();
   }
 });
 
 app.delete('/api/worlds/:id/villages/:villageId', adminGuard, async (req, res) => {
+  let client = null;
   try {
     const { id, villageId } = req.params;
-    await pool.query('DELETE FROM villages WHERE id = $1 AND world_id = $2', [villageId, id]);
-    // Guards have no FK cascade to their village (world_creatures rows carry
-    // no village_id) — re-derive the whole guard set from the villages that
-    // survive the delete, the same pattern the re-roll route uses. This
-    // deletes every guard for the world, then re-inserts exactly two per
-    // surviving village, so a village deleted alongside others leaves the
-    // rest's guards intact, and deleting the last village leaves zero.
-    await pool.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`, [id, GUARD_TYPE]);
-    await insertVillageGuards(id, await fetchVillages(pool, id));
+    // F-007 / SOMET-187: the guard wipe + re-derive around the village
+    // delete is the same "two dependent writes, no transaction" shape as the
+    // re-roll route below. A failure between them leaves the world with zero
+    // guards and no endpoint that re-derives them except another re-roll.
+    client = await pool.connect();
+    await client.query('BEGIN');
+    try {
+      await client.query('DELETE FROM villages WHERE id = $1 AND world_id = $2', [villageId, id]);
+      // Guards have no FK cascade to their village (world_creatures rows carry
+      // no village_id) — re-derive the whole guard set from the villages that
+      // survive the delete, the same pattern the re-roll route uses. This
+      // deletes every guard for the world, then re-inserts exactly two per
+      // surviving village, so a village deleted alongside others leaves the
+      // rest's guards intact, and deleting the last village leaves zero.
+      await client.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`, [id, GUARD_TYPE]);
+      await insertVillageGuards(client, id, await fetchVillages(client, id));
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    }
     const liveWarning = await invalidateWorld(id);
     // 204 carries no body — a header is the only way this still-live-blocked
     // signal (F-017 / SOMET-197) can reach a caller without changing the
@@ -1506,6 +1566,8 @@ app.delete('/api/worlds/:id/villages/:villageId', adminGuard, async (req, res) =
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete village' });
+  } finally {
+    client?.release();
   }
 });
 
