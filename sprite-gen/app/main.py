@@ -114,6 +114,14 @@ def generate(req: GenerateRequest):
     steps = req.steps if req.steps is not None else recipe.steps
     size = tuple(req.size) if req.size else ((128, 128) if req.kind == "tile" else (128, 160))
 
+    # F-037/SOMET-217: report what the resolved backend actually does, not
+    # what the tier's recipe assumed -- backend_name can diverge from
+    # recipe.backend (e.g. via the SPRITE_BACKEND override), and a stale
+    # recipe.controlnet/steps in the response would misrepresent the job
+    # that is actually about to run.
+    caps = backends.capabilities_for(backend_name)
+    reported_steps = steps if caps["max_steps"] is None else min(steps, caps["max_steps"])
+
     def work(progress):
         if req.kind == "tile":
             out = generate_tile(
@@ -149,9 +157,9 @@ def generate(req: GenerateRequest):
         "recipe": {
             "tier": recipe.tier,
             "backend": backend_name,
-            "steps": steps,
+            "steps": reported_steps,
             "frames": frames,
-            "controlnet": recipe.controlnet,
+            "controlnet": caps["controlnet"],
         },
     }
 

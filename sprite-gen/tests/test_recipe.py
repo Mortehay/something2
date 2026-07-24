@@ -28,10 +28,21 @@ def test_unknown_tier_falls_back_to_cpu():
     assert recipe_for("bogus") == recipe_for("cpu")
 
 
-def test_generate_fills_defaults_from_tier_recipe(no_real_work):
+def test_generate_fills_defaults_from_tier_recipe(monkeypatch, no_real_work):
     # No backend/frames/steps -> filled from the requested tier's recipe.
     # no_real_work: this resolves to sdxl, and an un-awaited sdxl job would
     # hold the shared worker for minutes.
+    #
+    # This test is specifically about recipe_for(tier) resolution, which is
+    # independent of the SPRITE_BACKEND deployment override (F-037/SOMET-217:
+    # the override is a real, intended feature -- see test_tile_storage_api.py's
+    # test_env_backend_overrides_recipe -- not something this test exercises).
+    # SPRITE_BACKEND is permanently set to sd-turbo in this deployment's
+    # compose file, which used to make this test flake depending on where
+    # pytest ran (unset locally, set in the container); explicitly clearing
+    # it here makes the test deterministic regardless of ambient environment,
+    # matching the isolation pattern test_tile_storage_api.py already uses.
+    monkeypatch.delenv("SPRITE_BACKEND", raising=False)
     r = client.post("/generate", json={
         "creature": "goblin", "base_prompt": "a goblin", "tier": "gpu",
     })
