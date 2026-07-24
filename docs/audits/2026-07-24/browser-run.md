@@ -655,11 +655,21 @@ Left untouched, with reasons:
 - **F-001, F-007, F-018** — each needs an in-process fault-injected DB pool
   (`__setPool`, a query that rejects exactly once); not a browser/curl
   check reachable against the live server.
-- **F-030, F-036, F-041** — each names a repo `grep`/`git diff` as its
-  verification, not a browser or curl check; out of scope for this sweep by
-  the letter of the instruction. (F-041's underlying fact — the literal
-  Postgres password committed in a tracked file — was independently
-  reconfirmed while arbitrating F-039.)
+- **F-026, F-030, F-036, F-041** — each names a repo `grep`/`git diff` as
+  its verification, not a browser or curl check; out of scope for this
+  sweep by the letter of the instruction. (F-041's underlying fact — the
+  literal Postgres password committed in a tracked file — was
+  independently reconfirmed while arbitrating F-039.)
+- **F-015** — the WS payload/burst-flood check (one 100 MiB frame, then a
+  50,000-frame `interact` burst) is technically browser/curl-reachable but
+  deliberately not run: per F-009's own established pattern for this exact
+  class of resource-exhaustion check, and given F-012 already proved this
+  same authority process dies from a single malformed frame, repeating a
+  similarly aggressive input against the shared process outside of a
+  specifically sanctioned "run this once, recorded, and recover
+  immediately" moment (as Flow C did for F-012 itself) was judged an
+  unnecessary re-roll of that risk for a check outside Flow D's assigned
+  scope.
 - **F-033, F-034, F-035, F-037** — each sprite-gen finding's verification
   would submit a real `/generate` request, which (per F-033's own text)
   triggers genuine multi-minute-to-multi-hour sd-turbo compute as a side
