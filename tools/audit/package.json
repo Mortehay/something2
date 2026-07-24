@@ -4,6 +4,6 @@
   "private": true,
   "description": "Audit cycle toolkit: finding schema, dedupe, Plane sync.",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test"
   }
 }

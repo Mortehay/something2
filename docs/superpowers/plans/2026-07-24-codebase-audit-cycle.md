@@ -98,7 +98,7 @@ The fingerprint is the keystone of the whole cycle: it is what makes the second 
   "private": true,
   "description": "Audit cycle toolkit: finding schema, dedupe, Plane sync.",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test"
   }
 }
 ```
@@ -1066,7 +1066,7 @@ Expected: PASS — 9 tests, 0 failures
 - [ ] **Step 5: Run the whole toolkit suite**
 
 Run: `cd tools/audit && npm test`
-Expected: PASS — 39 tests total, 0 failures
+Expected: PASS — 40 tests total, 0 failures
 
 - [ ] **Step 6: Commit**
 
@@ -1164,7 +1164,7 @@ Replace the `scripts` block in `tools/audit/package.json`:
 
 ```json
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test",
     "sync": "node bin/sync.js"
   },
 ```
