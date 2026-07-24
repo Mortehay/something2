@@ -525,7 +525,9 @@ function nextId(doc) {
 }
 
 function merge(doc, incoming) {
-  const next = { version: doc.version || 1, findings: doc.findings.slice() };
+  // Copy each finding: a shallow slice() would share the objects with the
+  // caller, so merging would silently rewrite the document it was handed.
+  const next = { version: doc.version || 1, findings: doc.findings.map((f) => Object.assign({}, f)) };
   const byFingerprint = new Map(next.findings.map((f) => [f.fingerprint, f]));
   const added = [];
   const updated = [];
@@ -566,7 +568,7 @@ module.exports = { emptyDoc, load, save, nextId, merge, MUTABLE };
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd tools/audit && node --test test/store.test.js`
-Expected: PASS — 10 tests, 0 failures
+Expected: PASS — 11 tests, 0 failures
 
 - [ ] **Step 5: Commit**
 
@@ -1064,7 +1066,7 @@ Expected: PASS — 9 tests, 0 failures
 - [ ] **Step 5: Run the whole toolkit suite**
 
 Run: `cd tools/audit && npm test`
-Expected: PASS — 38 tests total, 0 failures
+Expected: PASS — 39 tests total, 0 failures
 
 - [ ] **Step 6: Commit**
 
