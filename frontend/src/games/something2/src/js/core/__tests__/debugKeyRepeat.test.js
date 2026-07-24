@@ -51,11 +51,11 @@ describe('Game debug key repeat guard', () => {
     expect(g.renderSystem.toggleTileTextures).toHaveBeenCalledTimes(1);
   });
 
-  it("does not re-cycle the render-mode override on OS auto-repeat while 'm' is held", () => {
+  it("does not re-cycle the render-mode override on OS auto-repeat while Shift+M is held", () => {
     const g = makeGame();
-    g._keydownHandler({ key: 'm', repeat: false });
-    g._keydownHandler({ key: 'm', repeat: true });
-    g._keydownHandler({ key: 'm', repeat: true });
+    g._keydownHandler({ key: 'm', shiftKey: true, repeat: false });
+    g._keydownHandler({ key: 'm', shiftKey: true, repeat: true });
+    g._keydownHandler({ key: 'm', shiftKey: true, repeat: true });
     expect(g.renderSystem.cycleRenderModeOverride).toHaveBeenCalledTimes(1);
   });
 
