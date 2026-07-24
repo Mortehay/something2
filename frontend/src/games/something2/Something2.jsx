@@ -17,6 +17,7 @@ import EntityTypesAdmin from "./EntityTypesAdmin";
 import ItemTypesAdmin from "./ItemTypesAdmin";
 import MapsAdmin from "./MapsAdmin";
 import WorldPreview from "./WorldPreview.jsx";
+import Minimap from "./Minimap.jsx";
 
 const StyledGameContainer = styled.div`
   position: relative;
@@ -683,6 +684,7 @@ export default function Something2() {
               {isFullscreen ? <HiArrowsPointingIn /> : <HiArrowsPointingOut />}
             </FullscreenToggle>
           )}
+          {isPlaying && <Minimap gameRef={gameRef} tileColors={tileColors} />}
           {!isPlaying && (
             <UIOverlay>
                 <Panel>
