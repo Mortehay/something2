@@ -704,17 +704,19 @@ export default function Something2() {
                               chunk_size {world.chunk_size || 64}{world.seed != null ? ` · seed ${world.seed}` : ''}
                             </div>
                           </div>
-                          <HiOutlineTrash
-                            style={{ color: '#ef4444', cursor: 'pointer', flexShrink: 0 }}
-                            title="Delete world"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (window.confirm(`Delete world "${world.name}"? This removes its chunks, creatures, and loot.`)) {
-                                if (selectedWorldId === world.id) setSelectedWorldId(null);
-                                deleteWorldMutation.mutate(world.id);
-                              }
-                            }}
-                          />
+                          {isAdmin && (
+                            <HiOutlineTrash
+                              style={{ color: '#ef4444', cursor: 'pointer', flexShrink: 0 }}
+                              title="Delete world"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (window.confirm(`Delete world "${world.name}"? This removes its chunks, creatures, and loot.`)) {
+                                  if (selectedWorldId === world.id) setSelectedWorldId(null);
+                                  deleteWorldMutation.mutate(world.id);
+                                }
+                              }}
+                            />
+                          )}
                         </MapItem>
                       ))}
                       {worlds?.length === 0 && (
@@ -723,31 +725,33 @@ export default function Something2() {
                     </MapList>
                   )}
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '15px' }}>
-                    <Input
-                      placeholder="New world name"
-                      value={newWorldName}
-                      onChange={(e) => setNewWorldName(e.target.value)}
-                    />
-                    <Input
-                      placeholder="Seed (optional)"
-                      value={newWorldSeed}
-                      onChange={(e) => setNewWorldSeed(e.target.value)}
-                    />
-                    <Input
-                      type="number"
-                      placeholder="Chunk size (1-256)"
-                      value={newWorldChunkSize}
-                      onChange={(e) => setNewWorldChunkSize(e.target.value)}
-                    />
-                    <Button
-                      onClick={handleCreateWorld}
-                      disabled={createWorldMutation.isPending || !newWorldName.trim()}
-                      style={{ width: '100%' }}
-                    >
-                      Create World
-                    </Button>
-                  </div>
+                  {isAdmin && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '15px' }}>
+                      <Input
+                        placeholder="New world name"
+                        value={newWorldName}
+                        onChange={(e) => setNewWorldName(e.target.value)}
+                      />
+                      <Input
+                        placeholder="Seed (optional)"
+                        value={newWorldSeed}
+                        onChange={(e) => setNewWorldSeed(e.target.value)}
+                      />
+                      <Input
+                        type="number"
+                        placeholder="Chunk size (1-256)"
+                        value={newWorldChunkSize}
+                        onChange={(e) => setNewWorldChunkSize(e.target.value)}
+                      />
+                      <Button
+                        onClick={handleCreateWorld}
+                        disabled={createWorldMutation.isPending || !newWorldName.trim()}
+                        style={{ width: '100%' }}
+                      >
+                        Create World
+                      </Button>
+                    </div>
+                  )}
 
                   <Button
                     onClick={() => handleEnterChunkedWorld()}
