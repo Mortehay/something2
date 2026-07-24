@@ -344,7 +344,7 @@ module.exports = { normalizeClaim, stripLine, fingerprint, validate };
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `cd tools/audit && node --test test/finding.test.js`
-Expected: PASS — 12 tests, 0 failures
+Expected: PASS — 13 tests, 0 failures
 
 - [ ] **Step 7: Commit**
 
@@ -1064,7 +1064,7 @@ Expected: PASS — 9 tests, 0 failures
 - [ ] **Step 5: Run the whole toolkit suite**
 
 Run: `cd tools/audit && npm test`
-Expected: PASS — 37 tests total, 0 failures
+Expected: PASS — 38 tests total, 0 failures
 
 - [ ] **Step 6: Commit**
 
