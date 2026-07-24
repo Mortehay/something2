@@ -94,6 +94,19 @@ test('reconcile is idempotent: a second run creates nothing', async () => {
 
   assert.strictEqual(client.creates.length, 1);
   assert.deepStrictEqual(second.created, []);
+  assert.strictEqual(client.patches.length, 0);
+});
+
+test('reconcile creates a pre-fixed finding directly into the done state', async () => {
+  const client = new FakeClient();
+  const doc = { version: 1, findings: [finding({ status: 'fixed', plane_id: null })] };
+
+  const result = await reconcile({ doc, client, epicId: 'epic-1', labelIds: [] });
+
+  assert.strictEqual(client.creates.length, 1);
+  assert.strictEqual(client.creates[0].state, PLANE.doneStateId);
+  assert.deepStrictEqual(result.closed, ['F-001']);
+  assert.deepStrictEqual(result.created, []);
 });
 
 test('reconcile patches an issue whose severity changed', async () => {

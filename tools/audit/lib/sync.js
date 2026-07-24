@@ -6,7 +6,9 @@ function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function summarize(claim) {
@@ -49,15 +51,24 @@ async function reconcile({ doc, client, epicId, labelIds = [], dryRun = false })
     }
 
     if (!f.plane_id) {
-      created.push(f.id);
+      const isFixed = f.status === 'fixed';
+      if (isFixed) {
+        closed.push(f.id);
+      } else {
+        created.push(f.id);
+      }
       if (dryRun) continue;
-      const issue = await client.createIssue({
+      const payload = {
         name: renderTitle(f),
         description_html: renderBody(f),
         priority: PRIORITY_BY_SEVERITY[f.severity],
         labels: labelIds,
         parent: epicId,
-      });
+      };
+      if (isFixed) {
+        payload.state = PLANE.doneStateId;
+      }
+      const issue = await client.createIssue(payload);
       f.plane_id = issue.id;
       f.plane_key = issue.sequence_id ? `SOMET-${issue.sequence_id}` : undefined;
       f.synced_snapshot = snapshot(f);
