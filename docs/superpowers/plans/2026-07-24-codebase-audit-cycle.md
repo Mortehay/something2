@@ -520,7 +520,7 @@ Expected: FAIL — `Cannot find module '../lib/store.js'`
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { fingerprint, validate } = require('./finding.js');
+const { fingerprint, validate, stripLine } = require('./finding.js');
 const { STATUSES } = require('./config.js');
 
 // Fields a re-audit is allowed to overwrite. Everything else — id, plane_id,
@@ -559,6 +559,21 @@ function nextId(doc) {
   return `F-${String(highest + 1).padStart(3, '0')}`;
 }
 
+// Fingerprint dedupe matches on the *exact* normalized claim (see
+// finding.js's normalizeClaim), so it is stable across line-number churn and
+// cosmetic rewording but not across a genuine re-description of the same
+// defect — an LLM-driven re-audit describing the same bug in different words
+// gets a different fingerprint and slips past dedupe as a "new" finding.
+// That is not solvable by loosening the fingerprint without risking false
+// merges of genuinely distinct findings (semantic matching is out of scope
+// here), so instead we warn: a new finding that lands on the same
+// surface+location+lens as one already on file is *suspicious*, even though
+// it is not provably the same finding. This never blocks the merge — it is
+// a hint for the operator to eyeball before syncing to Plane, not a gate.
+function duplicateKey(f) {
+  return `${f.surface}|${stripLine(f.file)}|${f.lens}`;
+}
+
 function merge(doc, incoming) {
   // Copy each finding: a shallow slice() would share the objects with the
   // caller, so merging would silently rewrite the document it was handed.
@@ -566,6 +581,7 @@ function merge(doc, incoming) {
   const byFingerprint = new Map(next.findings.map((f) => [f.fingerprint, f]));
   const added = [];
   const updated = [];
+  const suspected = [];
 
   for (const raw of incoming) {
     const fp = fingerprint(raw);
@@ -589,12 +605,44 @@ function merge(doc, incoming) {
     });
     const errors = validate(created);
     if (errors.length) throw new Error(`${created.id}: ${errors.join('; ')}`);
+
+    const key = duplicateKey(created);
+    for (const other of next.findings) {
+      if (duplicateKey(other) === key) {
+        suspected.push({ newId: created.id, existingId: other.id });
+      }
+    }
+
     next.findings.push(created);
     byFingerprint.set(fp, created);
     added.push(created.id);
   }
 
-  return { doc: next, added, updated };
+  return { doc: next, added, updated, suspected };
+}
+
+// Whole-doc version of the same check `merge` runs incrementally: every pair
+// of findings sharing a surface+location+lens, regardless of when either was
+// added. `bin/sync.js` runs this against the loaded doc immediately before
+// syncing, so a near-duplicate pair is visible to the operator right before
+// the write that would file it as a second Plane issue — whether it arrived
+// via `merge` moments ago or was already sitting in findings.json from
+// before this check existed.
+function findSuspectedDuplicates(findings) {
+  const byKey = new Map();
+  for (const f of findings) {
+    const key = duplicateKey(f);
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(f);
+  }
+  const suspected = [];
+  for (const group of byKey.values()) {
+    if (group.length < 2) continue;
+    for (let i = 1; i < group.length; i += 1) {
+      suspected.push({ newId: group[i].id, existingId: group[0].id });
+    }
+  }
+  return suspected;
 }
 
 // The narrow, explicit path for lifecycle status changes. `merge` deliberately
@@ -612,7 +660,7 @@ function setStatus(doc, id, status) {
   return doc;
 }
 
-module.exports = { emptyDoc, load, save, nextId, merge, setStatus, MUTABLE };
+module.exports = { emptyDoc, load, save, nextId, merge, setStatus, findSuspectedDuplicates, MUTABLE };
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -935,6 +983,13 @@ const { execFile } = require('node:child_process');
 
 const STATUS_MARKER = '\n__PLANE_AUDIT_CURL_STATUS__:';
 
+// `--silent` suppresses curl's own progress/error chatter, so without a
+// timeout a hung connection blocks the whole sync forever with zero output —
+// indistinguishable from the process just being slow. Overridable per
+// transport via createCurlTransport's options.
+const DEFAULT_CONNECT_TIMEOUT_SECONDS = 10;
+const DEFAULT_MAX_TIME_SECONDS = 30;
+
 function escapeConfigValue(value) {
   return String(value)
     .replace(/\\/g, '\\\\')
@@ -996,14 +1051,29 @@ function defaultRunner({ command, args, input }) {
 // Fetch-like function: (url, { method, headers, body }) =>
 // Promise<{ ok, status, text() }>. Drops straight into PlaneClient's
 // `fetchImpl` constructor option.
-function createCurlTransport({ runner = defaultRunner, curlPath = 'curl' } = {}) {
+function createCurlTransport({
+  runner = defaultRunner,
+  curlPath = 'curl',
+  connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+  maxTimeSeconds = DEFAULT_MAX_TIME_SECONDS,
+} = {}) {
   return async function curlFetch(url, { method = 'GET', headers = {}, body } = {}) {
     const input = buildConfig({ url, method, headers, body });
     // Only fixed, non-secret flags belong in argv — `--config -` routes the
     // URL, method, headers (including X-API-Key), and body through stdin
     // instead, so the key is never visible via `ps`. No `-L`: curl never
-    // follows a redirect into a different host.
-    const args = ['--silent', '--show-error', '--config', '-'];
+    // follows a redirect into a different host. `--connect-timeout`/
+    // `--max-time` bound a hung connection (see the constants above).
+    const args = [
+      '--silent',
+      '--show-error',
+      '--connect-timeout',
+      String(connectTimeoutSeconds),
+      '--max-time',
+      String(maxTimeSeconds),
+      '--config',
+      '-',
+    ];
 
     const result = await runner({ command: curlPath, args, input });
 
@@ -1045,7 +1115,14 @@ function createCurlTransport({ runner = defaultRunner, curlPath = 'curl' } = {})
   };
 }
 
-module.exports = { createCurlTransport, buildConfig, escapeConfigValue, STATUS_MARKER };
+module.exports = {
+  createCurlTransport,
+  buildConfig,
+  escapeConfigValue,
+  STATUS_MARKER,
+  DEFAULT_CONNECT_TIMEOUT_SECONDS,
+  DEFAULT_MAX_TIME_SECONDS,
+};
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -1319,6 +1396,7 @@ function renderTitle(f) {
 
 function renderBody(f) {
   return [
+    `<p><strong>Status:</strong> ${encodeFindingText(f.status)}</p>`,
     `<p><strong>Location:</strong> <code>${encodeFindingText(f.file)}</code></p>`,
     `<p><strong>Lens:</strong> ${encodeFindingText(f.lens)} &middot; <strong>Source:</strong> ${encodeFindingText(f.source)}</p>`,
     `<p><strong>Claim:</strong> ${encodeFindingText(f.claim)}</p>`,
@@ -1333,6 +1411,14 @@ function renderBody(f) {
 // it on the finding avoids a read of every issue on every run.
 function snapshot(f) {
   return `${renderTitle(f)}||${renderBody(f)}||${PRIORITY_BY_SEVERITY[f.severity]}||${f.status}`;
+}
+
+// `fixed` and `demoted` both mean "do not leave this open in the tracker" —
+// a demoted finding was downgraded/retracted (typically by the browser
+// phase) rather than shipped-and-done, but either way the issue must land in
+// the done state, not stay open or get silently patched with no state field.
+function isTerminalStatus(status) {
+  return status === 'fixed' || status === 'demoted';
 }
 
 async function reconcile({
@@ -1367,12 +1453,14 @@ async function reconcile({
     }
 
     if (!f.plane_id) {
-      // A finding can already be `fixed` the first time it is synced. Creating
-      // it in the default open state would strand it: the snapshot stamped
-      // below already encodes status `fixed`, so the drift check matches on
-      // every later run and nothing ever patches it to Done.
-      const isFixed = f.status === 'fixed';
-      if (isFixed) closed.push(f.id);
+      // A finding can already be `fixed` or `demoted` the first time it is
+      // synced. Creating it in the default open state would strand it: the
+      // snapshot stamped below already encodes that status, so the drift
+      // check matches on every later run and nothing ever patches it to
+      // Done — this is exactly what happened for `demoted` before this
+      // check existed (it fell through to the open/create path below).
+      const isTerminal = isTerminalStatus(f.status);
+      if (isTerminal) closed.push(f.id);
       else created.push(f.id);
       if (dryRun) continue;
       const payload = {
@@ -1382,7 +1470,7 @@ async function reconcile({
         labels: labelIds,
         parent: epicId,
       };
-      if (isFixed) payload.state = PLANE.doneStateId;
+      if (isTerminal) payload.state = PLANE.doneStateId;
       await throttleBeforeWrite();
       const issue = await client.createIssue(payload);
       f.plane_id = issue.id;
@@ -1399,7 +1487,7 @@ async function reconcile({
       description_html: renderBody(f),
       priority: PRIORITY_BY_SEVERITY[f.severity],
     };
-    if (f.status === 'fixed') {
+    if (isTerminalStatus(f.status)) {
       patch.state = PLANE.doneStateId;
       closed.push(f.id);
     } else {
@@ -1530,6 +1618,13 @@ function parseArgs(argv) {
 // reconcile already created before the failure.
 async function syncDocument({ findingsPath, client, epicId, labelIds, dryRun = false, delayMs, sleepImpl }) {
   const doc = store.load(findingsPath);
+
+  // Computed up front, before any write: a near-duplicate pair (same
+  // surface+location+lens, different fingerprint) is a sign that a re-audit
+  // re-described an existing defect in different words and is about to file
+  // it as a second Plane issue. Warn-only, never blocks the sync.
+  const suspected = store.findSuspectedDuplicates(doc.findings);
+
   const reconcileArgs = { doc, client, epicId, labelIds, dryRun };
   if (delayMs !== undefined && delayMs !== null) reconcileArgs.delayMs = delayMs;
   if (sleepImpl !== undefined) reconcileArgs.sleepImpl = sleepImpl;
@@ -1547,6 +1642,7 @@ async function syncDocument({ findingsPath, client, epicId, labelIds, dryRun = f
     closed: result.closed.length,
     skipped: result.skipped.length,
     total: doc.findings.length,
+    suspected,
   };
 }
 
@@ -1571,6 +1667,19 @@ async function main() {
     dryRun: args.dryRun,
     delayMs: args.delayMs,
   });
+
+  if (summary.suspected.length) {
+    console.warn(
+      `\n⚠ ${summary.suspected.length} suspected near-duplicate finding pair(s) — ` +
+      'same surface+file+lens, different fingerprint. Not blocked, but check by hand ' +
+      'before trusting the tracker: a re-audit may have re-described an existing ' +
+      'finding in different words instead of matching it.'
+    );
+    for (const { newId, existingId } of summary.suspected) {
+      console.warn(`  ${newId} looks like it may duplicate ${existingId}`);
+    }
+    console.warn('');
+  }
 
   console.log(JSON.stringify(summary, null, 2));
 }
@@ -1817,7 +1926,7 @@ computes fingerprints, and rejects invalid findings:
 ```js
 const store = require('./tools/audit/lib/store.js');
 const path = 'docs/audits/2026-07-24/findings.json';
-const { doc, added, updated } = store.merge(store.load(path), [
+const { doc, added, updated, suspected } = store.merge(store.load(path), [
   {
     surface: 'backend-api',
     file: 'backend/src/index.js:412',
@@ -1831,11 +1940,20 @@ const { doc, added, updated } = store.merge(store.load(path), [
   },
 ]);
 store.save(path, doc);
-console.log({ added, updated });
+console.log({ added, updated, suspected });
 ```
 
 `merge` throws on an invalid finding. A throw is the schema telling you the finding
 is not yet good enough to file — fix the finding, not the schema.
+
+Read `suspected` before moving on. `merge` dedupes by fingerprint, which matches the
+same surface+location+lens and a *near-verbatim* claim — it is stable across
+line-number churn and cosmetic rewording, not across a genuine re-description of the
+same defect. A finding that lands on the same surface+file+lens as one already on
+file, but with a different fingerprint, comes back in `suspected` as a warning, not a
+block: it may be the same defect worded differently (fold it into the existing
+finding instead of filing a duplicate), or it may be a second, genuinely distinct
+defect at the same location (leave both). Either way, look before syncing to Plane.
 
 ## Procedure
 
@@ -1845,8 +1963,11 @@ is not yet good enough to file — fix the finding, not the schema.
 2. For each lens, sweep the surface and note candidates.
 3. For each candidate, construct the failure scenario. Candidates that cannot get
    one are either P3 or dropped.
-4. Emit via `store.merge`. Re-running on a surface updates its existing findings
-   rather than duplicating them.
+4. Emit via `store.merge`. Re-running on a surface updates a finding whose fingerprint
+   still matches, rather than duplicating it — but re-describing an existing defect in
+   materially different words changes its fingerprint and files it as new; check
+   `suspected` (surface+file+lens matches with no fingerprint match) before assuming
+   re-running never duplicates.
 5. Commit `findings.json` with a message naming the surface and the count.
 
 ## Scoping
@@ -2079,8 +2200,16 @@ description: Use when pushing something2 audit findings into Plane as work items
 
 # Plane Sync
 
-Mirror `findings.json` into Plane. One finding, one task, forever — re-running the
-audit updates its tasks instead of duplicating them.
+Mirror `findings.json` into Plane. Re-running the audit updates a finding's existing
+task instead of duplicating it — but only for the same finding, and "same" means the
+same surface, location (independent of line number), lens, and *near-verbatim* claim
+text; fingerprinting is not semantic, so the same defect described in materially
+different words is a new fingerprint and files as a new task. `store.merge` warns
+(`suspected`, in its return value) when a newly-added finding shares surface+file+lens
+with one already on file, and `bin/sync.js` prints those warnings before it writes —
+treat them as a prompt to check by hand, not as proof either way. On a re-run, read
+the dry-run's `created` count against what you expect and read any near-duplicate
+warnings before running for real.
 
 ## Constants
 
@@ -2323,10 +2452,21 @@ findings closed.
 ## Re-running later
 
 The cycle is designed to be re-run against a changed codebase. Fingerprints are
-computed from surface, file basename, lens, and normalised claim — deliberately not
-the line number — so a fix that shifts code does not resurrect its own finding as a
-new one. Re-running produces: new findings created, changed findings patched, fixed
-findings closed.
+computed from surface, the full file path with its trailing line number stripped, lens,
+and normalised claim — moving a file to a different directory changes its fingerprint
+(the full path is part of it), but a fix that only shifts *line numbers* within the same
+file does not resurrect its own finding as a new one. Re-running produces: new findings
+created, changed findings patched, fixed findings closed.
+
+Fingerprint dedupe is exact-claim matching underneath the normalisation (case,
+punctuation, whitespace only) — it is stable across line-number churn and cosmetic
+rewording, but NOT across a genuine re-description of the same defect. An LLM-driven
+re-audit that describes an existing bug in different words will not match the old
+fingerprint and will look like a new finding. `store.merge` warns about this (a
+`suspected` near-duplicate: same surface+file+lens, different fingerprint) rather than
+silently duplicating, but it does not catch every case. On a re-run, check the
+dry-run's `created` count against your expectation and read any near-duplicate
+warnings before trusting the sync.
 ````
 
 - [ ] **Step 2: Add the cycle to the agent index**

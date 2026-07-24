@@ -2,7 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { fingerprint, validate } = require('./finding.js');
+const { fingerprint, validate, stripLine } = require('./finding.js');
 const { STATUSES } = require('./config.js');
 
 // Fields a re-audit is allowed to overwrite. Everything else — id, plane_id,
@@ -41,11 +41,27 @@ function nextId(doc) {
   return `F-${String(highest + 1).padStart(3, '0')}`;
 }
 
+// Fingerprint dedupe matches on the *exact* normalized claim (see
+// finding.js's normalizeClaim), so it is stable across line-number churn and
+// cosmetic rewording but not across a genuine re-description of the same
+// defect — an LLM-driven re-audit describing the same bug in different words
+// gets a different fingerprint and slips past dedupe as a "new" finding.
+// That is not solvable by loosening the fingerprint without risking false
+// merges of genuinely distinct findings (semantic matching is out of scope
+// here), so instead we warn: a new finding that lands on the same
+// surface+location+lens as one already on file is *suspicious*, even though
+// it is not provably the same finding. This never blocks the merge — it is
+// a hint for the operator to eyeball before syncing to Plane, not a gate.
+function duplicateKey(f) {
+  return `${f.surface}|${stripLine(f.file)}|${f.lens}`;
+}
+
 function merge(doc, incoming) {
   const next = { version: doc.version || 1, findings: doc.findings.map((f) => Object.assign({}, f)) };
   const byFingerprint = new Map(next.findings.map((f) => [f.fingerprint, f]));
   const added = [];
   const updated = [];
+  const suspected = [];
 
   for (const raw of incoming) {
     const fp = fingerprint(raw);
@@ -69,12 +85,44 @@ function merge(doc, incoming) {
     });
     const errors = validate(created);
     if (errors.length) throw new Error(`${created.id}: ${errors.join('; ')}`);
+
+    const key = duplicateKey(created);
+    for (const other of next.findings) {
+      if (duplicateKey(other) === key) {
+        suspected.push({ newId: created.id, existingId: other.id });
+      }
+    }
+
     next.findings.push(created);
     byFingerprint.set(fp, created);
     added.push(created.id);
   }
 
-  return { doc: next, added, updated };
+  return { doc: next, added, updated, suspected };
+}
+
+// Whole-doc version of the same check `merge` runs incrementally: every pair
+// of findings sharing a surface+location+lens, regardless of when either was
+// added. `bin/sync.js` runs this against the loaded doc immediately before
+// syncing, so a near-duplicate pair is visible to the operator right before
+// the write that would file it as a second Plane issue — whether it arrived
+// via `merge` moments ago or was already sitting in findings.json from
+// before this check existed.
+function findSuspectedDuplicates(findings) {
+  const byKey = new Map();
+  for (const f of findings) {
+    const key = duplicateKey(f);
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(f);
+  }
+  const suspected = [];
+  for (const group of byKey.values()) {
+    if (group.length < 2) continue;
+    for (let i = 1; i < group.length; i += 1) {
+      suspected.push({ newId: group[i].id, existingId: group[0].id });
+    }
+  }
+  return suspected;
 }
 
 // The narrow, explicit path for lifecycle status changes. `merge` deliberately
@@ -92,4 +140,4 @@ function setStatus(doc, id, status) {
   return doc;
 }
 
-module.exports = { emptyDoc, load, save, nextId, merge, setStatus, MUTABLE };
+module.exports = { emptyDoc, load, save, nextId, merge, setStatus, findSuspectedDuplicates, MUTABLE };

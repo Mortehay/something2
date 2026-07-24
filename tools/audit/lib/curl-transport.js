@@ -18,6 +18,19 @@ const { execFile } = require('node:child_process');
 
 const STATUS_MARKER = '\n__PLANE_AUDIT_CURL_STATUS__:';
 
+// `--silent` suppresses curl's own progress/error chatter, which is exactly
+// what makes a hung connection dangerous here: with no timeout, a stalled
+// TCP handshake or a server that accepts the connection but never responds
+// blocks the whole sync indefinitely with zero output on stdout or stderr —
+// indistinguishable from the process simply being slow. These bound both
+// failure modes (can't connect vs. connected but silent) and are
+// deliberately generous, since a real 403/429 retry-with-backoff cycle (see
+// plane.js) already accounts for Cloudflare being slow, not just wrong.
+// Overridable per-transport (e.g. a test that wants to assert on the exact
+// value) via createCurlTransport's options.
+const DEFAULT_CONNECT_TIMEOUT_SECONDS = 10;
+const DEFAULT_MAX_TIME_SECONDS = 30;
+
 function escapeConfigValue(value) {
   // curl's config-file quoting: inside a double-quoted value, `\` and `"`
   // must be backslash-escaped, and a *literal* control character (a real
@@ -100,10 +113,24 @@ function defaultRunner({ command, args, input }) {
 // Promise<{ ok, status, text() }>. Matches the subset of the `fetch` surface
 // that PlaneClient#request already relies on, so it drops straight into the
 // `fetchImpl` constructor option.
-function createCurlTransport({ runner = defaultRunner, curlPath = 'curl' } = {}) {
+function createCurlTransport({
+  runner = defaultRunner,
+  curlPath = 'curl',
+  connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+  maxTimeSeconds = DEFAULT_MAX_TIME_SECONDS,
+} = {}) {
   return async function curlFetch(url, { method = 'GET', headers = {}, body } = {}) {
     const input = buildConfig({ url, method, headers, body });
-    const args = ['--silent', '--show-error', '--config', '-'];
+    const args = [
+      '--silent',
+      '--show-error',
+      '--connect-timeout',
+      String(connectTimeoutSeconds),
+      '--max-time',
+      String(maxTimeSeconds),
+      '--config',
+      '-',
+    ];
 
     const result = await runner({ command: curlPath, args, input });
 
@@ -146,4 +173,11 @@ function createCurlTransport({ runner = defaultRunner, curlPath = 'curl' } = {})
   };
 }
 
-module.exports = { createCurlTransport, buildConfig, escapeConfigValue, STATUS_MARKER };
+module.exports = {
+  createCurlTransport,
+  buildConfig,
+  escapeConfigValue,
+  STATUS_MARKER,
+  DEFAULT_CONNECT_TIMEOUT_SECONDS,
+  DEFAULT_MAX_TIME_SECONDS,
+};

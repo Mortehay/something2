@@ -26,9 +26,22 @@ function finding(overrides) {
   }, overrides);
 }
 
+// Every test gets its own temp dir, tracked here and removed in `after()` —
+// otherwise every run of this suite leaks a directory under the OS temp dir
+// forever.
+const tmpDirs = [];
+
 function tmpPath() {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'audit-cli-')), 'findings.json');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-cli-'));
+  tmpDirs.push(dir);
+  return path.join(dir, 'findings.json');
 }
+
+test.after(() => {
+  for (const dir of tmpDirs) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 // Fake client that succeeds for the first `failAfter` createIssue calls, then
 // throws on the next one — simulating a rate limit or dropped connection

@@ -49,6 +49,7 @@ function renderTitle(f) {
 
 function renderBody(f) {
   return [
+    `<p><strong>Status:</strong> ${encodeFindingText(f.status)}</p>`,
     `<p><strong>Location:</strong> <code>${encodeFindingText(f.file)}</code></p>`,
     `<p><strong>Lens:</strong> ${encodeFindingText(f.lens)} &middot; <strong>Source:</strong> ${encodeFindingText(f.source)}</p>`,
     `<p><strong>Claim:</strong> ${encodeFindingText(f.claim)}</p>`,
@@ -63,6 +64,17 @@ function renderBody(f) {
 // it on the finding avoids a read of every issue on every run.
 function snapshot(f) {
   return `${renderTitle(f)}||${renderBody(f)}||${PRIORITY_BY_SEVERITY[f.severity]}||${f.status}`;
+}
+
+// `fixed` and `demoted` both mean "do not leave this open in the tracker" —
+// a demoted finding was downgraded/retracted (typically by the browser
+// phase, per audit-browser's arbitration step) rather than shipped-and-done,
+// but either way the issue must land in the done state, not stay open. See
+// docs/audits/2026-07-24 review notes: before this, `demoted` fell through
+// to the open/create path (Scenario A) or left an already-open issue
+// untouched because no field in the patch encoded status (Scenario B).
+function isTerminalStatus(status) {
+  return status === 'fixed' || status === 'demoted';
 }
 
 async function reconcile({
@@ -97,8 +109,8 @@ async function reconcile({
     }
 
     if (!f.plane_id) {
-      const isFixed = f.status === 'fixed';
-      if (isFixed) {
+      const isTerminal = isTerminalStatus(f.status);
+      if (isTerminal) {
         closed.push(f.id);
       } else {
         created.push(f.id);
@@ -111,7 +123,7 @@ async function reconcile({
         labels: labelIds,
         parent: epicId,
       };
-      if (isFixed) {
+      if (isTerminal) {
         payload.state = PLANE.doneStateId;
       }
       await throttleBeforeWrite();
@@ -130,7 +142,7 @@ async function reconcile({
       description_html: renderBody(f),
       priority: PRIORITY_BY_SEVERITY[f.severity],
     };
-    if (f.status === 'fixed') {
+    if (isTerminalStatus(f.status)) {
       patch.state = PLANE.doneStateId;
       closed.push(f.id);
     } else {

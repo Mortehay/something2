@@ -5,8 +5,16 @@ description: Use when pushing something2 audit findings into Plane as work items
 
 # Plane Sync
 
-Mirror `findings.json` into Plane. One finding, one task, forever — re-running the
-audit updates its tasks instead of duplicating them.
+Mirror `findings.json` into Plane. Re-running the audit updates a finding's existing
+task instead of duplicating it — but only for the same finding, and "same" means the
+same surface, location (independent of line number), lens, and *near-verbatim* claim
+text; fingerprinting is not semantic, so the same defect described in materially
+different words is a new fingerprint and files as a new task. `store.merge` warns
+(`suspected`, in its return value) when a newly-added finding shares surface+file+lens
+with one already on file, and `bin/sync.js` prints those warnings before it writes —
+treat them as a prompt to check by hand, not as proof either way. On a re-run, read
+the dry-run's `created` count against what you expect and read any near-duplicate
+warnings before running for real.
 
 ## Constants
 

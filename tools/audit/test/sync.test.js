@@ -93,6 +93,17 @@ test('renderBody includes every field a fixer needs', () => {
   }
 });
 
+// Regression coverage for the demoted-status gap: before this, the tracker
+// had no way to show a reader whether a finding was open, fixed, or demoted
+// short of cross-referencing findings.json by hand.
+test('renderBody includes the finding status', () => {
+  for (const status of ['open', 'fixed', 'unverified', 'demoted']) {
+    const body = renderBody(finding({ status }));
+    const decoded = decodeEntities(body);
+    assert.ok(decoded.includes(status), `decoded body should mention status "${status}"`);
+  }
+});
+
 // Regression coverage for the WAF block established by bisecting F-002: line
 // 5 (the Verification field) contains the path-traversal payload `..%2F`
 // inside a curl command and alone was enough to trip Cloudflare's 403.
@@ -211,6 +222,24 @@ test('reconcile creates a pre-fixed finding directly into the done state', async
   assert.deepStrictEqual(result.created, []);
 });
 
+// Regression coverage: `demoted` is the browser phase's safeguard against an
+// audit inflating its own severity counts (see audit-browser's arbitration
+// step). Before this fix, a finding demoted before its first sync had no
+// plane_id and no status other than `fixed` was special-cased, so it took
+// the create branch and was filed as a normal open task — the exact
+// inflated count the safeguard exists to prevent.
+test('reconcile creates a pre-demoted finding directly into the done state, not as an open task', async () => {
+  const client = new FakeClient();
+  const doc = { version: 1, findings: [finding({ status: 'demoted', plane_id: null })] };
+
+  const result = await reconcile({ doc, client, epicId: 'epic-1', labelIds: [] });
+
+  assert.strictEqual(client.creates.length, 1);
+  assert.strictEqual(client.creates[0].state, PLANE.doneStateId);
+  assert.deepStrictEqual(result.closed, ['F-001']);
+  assert.deepStrictEqual(result.created, []);
+});
+
 test('reconcile patches an issue whose severity changed', async () => {
   const client = new FakeClient();
   const doc = { version: 1, findings: [finding()] };
@@ -232,6 +261,24 @@ test('reconcile closes an issue whose finding is fixed', async () => {
   const second = await reconcile({ doc, client, epicId: 'epic-1', labelIds: [] });
 
   assert.deepStrictEqual(second.closed, ['F-001']);
+  assert.strictEqual(client.patches.at(-1).patch.state, PLANE.doneStateId);
+});
+
+// Regression coverage: Scenario B from the review — a synced finding later
+// demoted changed its `snapshot` (drift fires because renderBody now
+// encodes status), but the old patch body of {name, description_html,
+// priority} had no field that encoded status. The issue stayed open and the
+// write was a silent no-op, while the operator was told `updated: 1`.
+test('reconcile closes an issue whose finding is later demoted, not merely updated', async () => {
+  const client = new FakeClient();
+  const doc = { version: 1, findings: [finding()] };
+
+  await reconcile({ doc, client, epicId: 'epic-1', labelIds: [] });
+  doc.findings[0].status = 'demoted';
+  const second = await reconcile({ doc, client, epicId: 'epic-1', labelIds: [] });
+
+  assert.deepStrictEqual(second.closed, ['F-001']);
+  assert.deepStrictEqual(second.updated, []);
   assert.strictEqual(client.patches.at(-1).patch.state, PLANE.doneStateId);
 });
 

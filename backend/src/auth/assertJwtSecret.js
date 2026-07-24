@@ -16,8 +16,12 @@
 
 const MIN_LENGTH = 32;
 
-// Every placeholder value ever shipped in .env.example. Add to this set (do
-// NOT remove entries) if the placeholder text is ever changed.
+// The instructional placeholder text F-038 found still live in this
+// project's .env — there is no .env.example file in this repo (checked at
+// the time this guard was written; see docs/audits/2026-07-24/browser-run.md),
+// so this set, not a template file, is the authoritative record of the
+// placeholder(s) to reject. Add to it (do NOT remove entries) if a new
+// placeholder value is ever used in setup instructions or a future template.
 const KNOWN_PLACEHOLDERS = new Set([
   'replace-me-with-a-long-random-string-min-32-chars',
 ]);
@@ -27,7 +31,7 @@ const KNOWN_PLACEHOLDERS = new Set([
 // value itself in the reason.
 function invalidJwtSecretReason(value) {
   if (!value) return 'missing';
-  if (KNOWN_PLACEHOLDERS.has(value)) return 'the placeholder value shipped in .env.example';
+  if (KNOWN_PLACEHOLDERS.has(value)) return 'a known placeholder value, not a real secret';
   if (value.length < MIN_LENGTH) return `too short (must be at least ${MIN_LENGTH} characters)`;
   return null;
 }

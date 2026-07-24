@@ -21,12 +21,33 @@ function incoming(overrides) {
   }, overrides);
 }
 
-function tmpPath() {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'audit-')), 'findings.json');
+// Every test gets its own temp dir, tracked here and removed in `after()` —
+// otherwise every run of this suite leaks a directory under the OS temp dir
+// forever.
+const tmpDirs = [];
+
+function tmpDir() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-'));
+  tmpDirs.push(dir);
+  return dir;
 }
 
+function tmpPath() {
+  return path.join(tmpDir(), 'findings.json');
+}
+
+test.after(() => {
+  for (const dir of tmpDirs) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('load returns an empty doc when the file is absent', () => {
-  const doc = store.load(path.join(os.tmpdir(), 'definitely-absent-findings.json'));
+  // A path inside a temp dir we control (and never write to), not a fixed
+  // shared path under os.tmpdir() — a fixed path flips this test to failing
+  // if anything else on the machine ever creates a file at that name.
+  const missing = path.join(tmpDir(), 'definitely-absent-findings.json');
+  const doc = store.load(missing);
   assert.deepStrictEqual(doc, { version: 1, findings: [] });
 });
 
@@ -120,6 +141,58 @@ test('merge still does not change status; setStatus remains the only path', () =
   const second = store.merge(first.doc, [incoming({ status: 'demoted', severity: 'P1' })]);
   assert.strictEqual(second.doc.findings[0].status, 'fixed');
   assert.strictEqual(second.doc.findings[0].severity, 'P1');
+});
+
+// Regression coverage for the fingerprint-wording gap: fingerprint's claim
+// component is otherwise-verbatim (see finding.js's normalizeClaim), so an
+// LLM-driven re-audit describing the same defect in different words gets a
+// different fingerprint and merge treats it as brand new. Loosening the
+// fingerprint to catch this would risk merging genuinely distinct findings
+// (semantic matching is out of scope), so instead `merge` warns rather than
+// silently filing a second Plane issue for the same defect.
+test('merge reports a near-duplicate in suspected when a new finding shares surface+file+lens with an existing one', () => {
+  const first = store.merge(store.emptyDoc(), [
+    incoming({ claim: 'DELETE /maps/:id has no admin guard.' }),
+  ]);
+  assert.deepStrictEqual(first.suspected, []);
+
+  const second = store.merge(first.doc, [
+    incoming({ claim: 'DELETE /maps/:id lacks an authorization check.' }),
+  ]);
+
+  // Still adds the finding rather than blocking the merge.
+  assert.strictEqual(second.doc.findings.length, 2);
+  assert.deepStrictEqual(second.added, ['F-002']);
+  assert.strictEqual(second.suspected.length, 1);
+  assert.deepStrictEqual(second.suspected[0], { newId: 'F-002', existingId: 'F-001' });
+});
+
+test('merge does not report a near-duplicate when surface, file, or lens differ', () => {
+  const first = store.merge(store.emptyDoc(), [
+    incoming({ claim: 'DELETE /maps/:id has no admin guard.' }),
+  ]);
+
+  const differentFile = store.merge(first.doc, [
+    incoming({ file: 'backend/src/other.js:9', claim: 'Different route, different bug.' }),
+  ]);
+  assert.deepStrictEqual(differentFile.suspected, []);
+
+  const differentLens = store.merge(first.doc, [
+    incoming({ lens: 'dry', claim: 'Duplicated validation logic here.' }),
+  ]);
+  assert.deepStrictEqual(differentLens.suspected, []);
+
+  const differentSurface = store.merge(first.doc, [
+    incoming({ surface: 'frontend-admin', claim: 'Unrelated admin UI issue.' }),
+  ]);
+  assert.deepStrictEqual(differentSurface.suspected, []);
+});
+
+test('merge treats a line-number-only change as the same finding, not a suspected duplicate', () => {
+  const first = store.merge(store.emptyDoc(), [incoming({ file: 'backend/src/index.js:42' })]);
+  const second = store.merge(first.doc, [incoming({ file: 'backend/src/index.js:915' })]);
+  assert.deepStrictEqual(second.suspected, []);
+  assert.deepStrictEqual(second.added, []);
 });
 
 test('merge returns a document independent of the input; does not mutate the input', () => {

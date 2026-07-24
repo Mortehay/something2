@@ -89,7 +89,7 @@ computes fingerprints, and rejects invalid findings:
 ```js
 const store = require('./tools/audit/lib/store.js');
 const path = 'docs/audits/2026-07-24/findings.json';
-const { doc, added, updated } = store.merge(store.load(path), [
+const { doc, added, updated, suspected } = store.merge(store.load(path), [
   {
     surface: 'backend-api',
     file: 'backend/src/index.js:412',
@@ -103,11 +103,20 @@ const { doc, added, updated } = store.merge(store.load(path), [
   },
 ]);
 store.save(path, doc);
-console.log({ added, updated });
+console.log({ added, updated, suspected });
 ```
 
 `merge` throws on an invalid finding. A throw is the schema telling you the finding
 is not yet good enough to file — fix the finding, not the schema.
+
+Read `suspected` before moving on. `merge` dedupes by fingerprint, which matches the
+same surface+location+lens and a *near-verbatim* claim — it is stable across
+line-number churn and cosmetic rewording, not across a genuine re-description of the
+same defect. A finding that lands on the same surface+file+lens as one already on
+file, but with a different fingerprint, comes back in `suspected` as a warning, not a
+block: it may be the same defect worded differently (fold it into the existing
+finding instead of filing a duplicate), or it may be a second, genuinely distinct
+defect at the same location (leave both). Either way, look before syncing to Plane.
 
 ## Procedure
 
@@ -117,8 +126,11 @@ is not yet good enough to file — fix the finding, not the schema.
 2. For each lens, sweep the surface and note candidates.
 3. For each candidate, construct the failure scenario. Candidates that cannot get
    one are either P3 or dropped.
-4. Emit via `store.merge`. Re-running on a surface updates its existing findings
-   rather than duplicating them.
+4. Emit via `store.merge`. Re-running on a surface updates a finding whose fingerprint
+   still matches, rather than duplicating it — but re-describing an existing defect in
+   materially different words changes its fingerprint and files it as new; check
+   `suspected` (surface+file+lens matches with no fingerprint match) before assuming
+   re-running never duplicates.
 5. Commit `findings.json` with a message naming the surface and the count.
 
 ## Scoping

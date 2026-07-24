@@ -2,7 +2,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { createCurlTransport, escapeConfigValue, STATUS_MARKER } = require('../lib/curl-transport.js');
+const {
+  createCurlTransport,
+  escapeConfigValue,
+  STATUS_MARKER,
+  DEFAULT_CONNECT_TIMEOUT_SECONDS,
+  DEFAULT_MAX_TIME_SECONDS,
+} = require('../lib/curl-transport.js');
 
 // Fakes the injectable process runner so no real `curl` (or any subprocess)
 // is ever spawned by this suite. Mirrors defaultRunner's contract:
@@ -41,7 +47,16 @@ test('GET builds argv with no secrets and a config-file body on stdin', async ()
   assert.strictEqual(call.command, 'curl');
   // Only non-secret, fixed flags belong in argv. `--config -` is what routes
   // everything else (url, method, headers, body) through stdin instead.
-  assert.deepStrictEqual(call.args, ['--silent', '--show-error', '--config', '-']);
+  assert.deepStrictEqual(call.args, [
+    '--silent',
+    '--show-error',
+    '--connect-timeout',
+    String(DEFAULT_CONNECT_TIMEOUT_SECONDS),
+    '--max-time',
+    String(DEFAULT_MAX_TIME_SECONDS),
+    '--config',
+    '-',
+  ]);
   assert.ok(!call.args.join(' ').includes('plane_api_supersecret123'), 'argv must not carry the API key');
   // The key does reach curl — just via stdin, not argv.
   assert.ok(call.input.includes('X-API-Key: plane_api_supersecret123'));
@@ -187,6 +202,40 @@ test('a non-2xx HTTP response (e.g. a Cloudflare block page) is returned, not th
   assert.strictEqual(res.ok, false);
   assert.strictEqual(res.status, 403);
   assert.strictEqual(await res.text(), html);
+});
+
+// Regression coverage: `--silent` suppresses curl's own error output, so
+// without a timeout a hung connection (bad host that accepts but never
+// responds, a dropped connection mid-handshake) blocks the sync forever with
+// no output at all — indistinguishable from the process just being slow.
+test('every request carries a connect and overall timeout in argv, with sensible defaults', async () => {
+  const runner = fakeRunner([okResult('{}', 200)]);
+  const fetchImpl = createCurlTransport({ runner });
+
+  await fetchImpl('https://api.plane.so/api/v1/labels/', { method: 'GET', headers: {} });
+
+  const call = runner.calls[0];
+  assert.ok(call.args.includes('--connect-timeout'), 'argv must include --connect-timeout');
+  assert.ok(call.args.includes('--max-time'), 'argv must include --max-time');
+  assert.strictEqual(
+    call.args[call.args.indexOf('--connect-timeout') + 1],
+    String(DEFAULT_CONNECT_TIMEOUT_SECONDS)
+  );
+  assert.strictEqual(
+    call.args[call.args.indexOf('--max-time') + 1],
+    String(DEFAULT_MAX_TIME_SECONDS)
+  );
+});
+
+test('connect and overall timeouts are overridable per transport', async () => {
+  const runner = fakeRunner([okResult('{}', 200)]);
+  const fetchImpl = createCurlTransport({ runner, connectTimeoutSeconds: 3, maxTimeSeconds: 12 });
+
+  await fetchImpl('https://api.plane.so/api/v1/labels/', { method: 'GET', headers: {} });
+
+  const call = runner.calls[0];
+  assert.strictEqual(call.args[call.args.indexOf('--connect-timeout') + 1], '3');
+  assert.strictEqual(call.args[call.args.indexOf('--max-time') + 1], '12');
 });
 
 test('missing status marker in stdout raises a clear parse error instead of silently miscounting', async () => {

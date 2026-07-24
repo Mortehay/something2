@@ -101,7 +101,18 @@ findings closed.
 ## Re-running later
 
 The cycle is designed to be re-run against a changed codebase. Fingerprints are
-computed from surface, file basename, lens, and normalised claim — deliberately not
-the line number — so a fix that shifts code does not resurrect its own finding as a
-new one. Re-running produces: new findings created, changed findings patched, fixed
-findings closed.
+computed from surface, the full file path with its trailing line number stripped, lens,
+and normalised claim — moving a file to a different directory changes its fingerprint
+(the full path is part of it), but a fix that only shifts *line numbers* within the same
+file does not resurrect its own finding as a new one. Re-running produces: new findings
+created, changed findings patched, fixed findings closed.
+
+Fingerprint dedupe is exact-claim matching underneath the normalisation (case,
+punctuation, whitespace only) — it is stable across line-number churn and cosmetic
+rewording, but NOT across a genuine re-description of the same defect. An LLM-driven
+re-audit that describes an existing bug in different words will not match the old
+fingerprint and will look like a new finding. `store.merge` warns about this (a
+`suspected` near-duplicate: same surface+file+lens, different fingerprint) rather than
+silently duplicating, but it does not catch every case. On a re-run, check the
+dry-run's `created` count against your expectation and read any near-duplicate
+warnings before trusting the sync.
