@@ -133,6 +133,7 @@ test('PUT /api/worlds/:id deletes chunks + clears cache when bounds change', asy
   const pool = mockPool([
     [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],
     [/DELETE FROM world_chunks WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],
+    [/UPDATE world_players SET/i, () => ({ rows: [], rowCount: 0 })],
     [/UPDATE worlds SET/i, (p) => ({ rows: [{ id: 'w1', name: p[0] }] })],
   ]);
   __setPool(pool);
@@ -141,6 +142,44 @@ test('PUT /api/worlds/:id deletes chunks + clears cache when bounds change', asy
   assert.equal(res.status, 200);
   const deleted = pool.calls.some(c => /DELETE FROM world_chunks WHERE world_id/i.test(c.sql));
   assert.ok(deleted, 'chunks invalidated on bounds change');
+});
+
+// F-049 (SOMET-229): shrinking a bounded world's ring can strand an already-
+// persisted world_players row outside the new walkable interior -- same
+// symptom class as F-004/SOMET-184 (entry_spawn), but for existing players
+// rather than a fresh join. chooseSpawn() hands a persisted position straight
+// to the client with only a Number.isFinite check, so a stranded player loads
+// inside (or beyond) the new wall ring and cannot move.
+test('PUT /api/worlds/:id clamps persisted world_players into the new bounds when shrinking', async () => {
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 300, height: 300 }] })],
+    [/DELETE FROM world_chunks WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],
+    [/UPDATE world_players SET/i, (p) => ({ rows: [], rowCount: 1 })],
+    [/UPDATE worlds SET/i, (p) => ({ rows: [{ id: 'w1', name: p[0] }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).put('/api/worlds/w1').set(...AUTH)
+    .send({ name: 'Shrunk', width: 100, height: 100 });
+  assert.equal(res.status, 200);
+  const clamp = pool.calls.find(c => /UPDATE world_players SET/i.test(c.sql));
+  assert.ok(clamp, 'world_players must be clamped into the new bounds on a shrink');
+  assert.equal(clamp.params[0], 'w1');
+  const [, minPx, maxX, maxY] = clamp.params;
+  assert.equal(minPx, 100);           // CREATURE_TILE_PX: first walkable tile in from the wall
+  assert.equal(maxX, 99 * 100 - 1);   // (nextW-1)*100 - 1, strictly clear of the east wall
+  assert.equal(maxY, 99 * 100 - 1);
+});
+
+test('PUT /api/worlds/:id does not touch world_players when bounds are unchanged', async () => {
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],
+    [/UPDATE worlds SET/i, (p) => ({ rows: [{ id: 'w1', name: p[0] }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).put('/api/worlds/w1').set(...AUTH)
+    .send({ name: 'Same', width: 24, height: 24 });
+  assert.equal(res.status, 200);
+  assert.ok(!pool.calls.some(c => /UPDATE world_players SET/i.test(c.sql)));
 });
 
 const TILE_ROWS = [

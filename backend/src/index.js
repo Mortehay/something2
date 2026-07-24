@@ -1158,6 +1158,27 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
       await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [id]);
       worldPreviewCache.delete(id);
     }
+    // Same symptom class as the entry_spawn check above (SOMET-184 / F-004),
+    // but for players who already joined and persisted a position: a shrink
+    // (or an unbounded->bounded transition) can leave a world_players row
+    // outside the new wall ring, and chooseSpawn() hands that stored position
+    // straight to the client with no bounds check of its own (SOMET-229 /
+    // F-049). Clamp every persisted position into the new interior here, in
+    // the same non-transactional sequence the rest of this route already
+    // uses for the chunk wipe. LEAST/GREATEST is a no-op for players already
+    // inside the new bounds (including every case where bounds only grew),
+    // so this is safe to run unconditionally whenever the world remains (or
+    // becomes) bounded.
+    if (boundsChanged && nextW != null && nextH != null) {
+      const minPx = CREATURE_TILE_PX;
+      const maxX = (nextW - 1) * CREATURE_TILE_PX - 1;
+      const maxY = (nextH - 1) * CREATURE_TILE_PX - 1;
+      await pool.query(
+        `UPDATE world_players SET x = LEAST(GREATEST(x, $2), $3), y = LEAST(GREATEST(y, $2), $4)
+         WHERE world_id = $1`,
+        [id, minPx, maxX, maxY],
+      );
+    }
 
     const result = await pool.query(
       `UPDATE worlds SET name = $1, width = $2, height = $3, creature_count = $4,
