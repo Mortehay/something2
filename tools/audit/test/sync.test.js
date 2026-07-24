@@ -44,15 +44,23 @@ class FakeClient {
   }
 }
 
+// Numeric-entity decoder mirroring what Plane's HTML renderer does on read —
+// used to assert against the *decoded* form wherever the raw substring would
+// legitimately contain characters renderTitle/renderBody now encode.
+function decodeEntities(s) {
+  return s.replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)));
+}
+
 test('renderTitle carries the finding id, severity and a summary', () => {
   const title = renderTitle(finding());
-  assert.ok(title.includes('F-001'));
+  assert.ok(decodeEntities(title).includes('F-001'));
   assert.ok(title.includes('P0'));
   assert.ok(title.includes('authorization'));
 });
 
 test('renderBody includes every field a fixer needs', () => {
   const body = renderBody(finding());
+  const decoded = decodeEntities(body);
   for (const needle of [
     'backend/src/index.js:42',
     'A player token reaches POST /maps',
@@ -60,8 +68,81 @@ test('renderBody includes every field a fixer needs', () => {
     'expect 403',
     'security',
   ]) {
-    assert.ok(body.includes(needle), `body should mention ${needle}`);
+    assert.ok(decoded.includes(needle), `decoded body should mention ${needle}`);
   }
+});
+
+// Regression coverage for the WAF block established by bisecting F-002: line
+// 5 (the Verification field) contains the path-traversal payload `..%2F`
+// inside a curl command and alone was enough to trip Cloudflare's 403.
+test('renderBody entity-encodes attack-signature text instead of sending it raw', () => {
+  const f = finding({
+    id: 'F-002',
+    verification: 'curl -s "http://localhost:13101/api/tile-jobs/..%2Fcapability"',
+  });
+  const body = renderBody(f);
+
+  assert.ok(!body.includes('..%2F'), 'raw path-traversal payload must not appear on the wire');
+  // '.' -> &#46;, '%' -> &#37;; '2' and 'F' are alphanumeric and stay literal.
+  assert.ok(body.includes('&#46;&#46;&#37;2F'), 'the payload should appear entity-encoded instead');
+});
+
+test('renderBody round-trips: decoding the entities recovers the original finding text exactly', () => {
+  const f = finding({
+    id: 'F-002',
+    file: 'backend/src/tile-jobs.js:12',
+    claim: 'Path traversal via job id: "../../etc/passwd" & <script>alert(1)</script>',
+    verification: 'curl -s "http://localhost:13101/api/tile-jobs/..%2Fcapability"',
+  });
+  const body = renderBody(f);
+  const decoded = decodeEntities(body);
+
+  assert.ok(decoded.includes(f.claim), 'decoded body should contain the exact original claim text');
+  assert.ok(decoded.includes(f.verification), 'decoded body should contain the exact original verification text');
+  assert.ok(decoded.includes(f.file), 'decoded body should contain the exact original file path');
+});
+
+test('renderBody keeps the surrounding HTML structure as literal markup', () => {
+  const body = renderBody(finding());
+  for (const tag of ['<p>', '</p>', '<strong>', '</strong>', '<code>', '</code>', '<em>', '</em>', '&middot;']) {
+    assert.ok(body.includes(tag), `body should retain literal ${tag}`);
+  }
+});
+
+test('renderBody still encodes HTML metacharacters in finding text (no injection regression)', () => {
+  const f = finding({
+    claim: `<script>alert('xss')</script> & "quoted" <img src=x onerror=alert(1)>`,
+  });
+  const body = renderBody(f);
+
+  assert.ok(!body.includes("<script>alert('xss')</script>"), 'raw script tag must not appear');
+  assert.ok(!/<img[^>]*onerror/.test(body), 'raw injected tag must not appear');
+
+  // Every metacharacter contributed by the claim text must be encoded. Pull
+  // just the Claim line back out, strip away the legitimate `&#NN;` entities
+  // it should be made of, and confirm nothing raw is left — the surrounding
+  // template (e.g. `<p>`) legitimately uses '<' and '>', so this must be
+  // scoped to the encoded field, not the whole body.
+  const claimLine = body.split('\n').find((line) => line.includes('<strong>Claim:</strong>'));
+  const claimValue = claimLine.replace('<p><strong>Claim:</strong> ', '').replace('</p>', '');
+  const claimValueWithoutEntities = claimValue.replace(/&#\d+;/g, '');
+  for (const raw of ['<', '>', '&', '"', "'"]) {
+    assert.ok(!claimValueWithoutEntities.includes(raw), `encoded claim field must not contain raw ${JSON.stringify(raw)} outside of an entity`);
+  }
+
+  const decoded = decodeEntities(body);
+  assert.ok(decoded.includes(f.claim), 'decoded body should recover the exact original (unsafe) claim text');
+});
+
+test('renderBody round-trips a non-ASCII / astral character correctly', () => {
+  const f = finding({
+    claim: 'Unicode check: café, 日本語, and an emoji \u{1F41B} (bug) in the text.',
+  });
+  const body = renderBody(f);
+  const decoded = decodeEntities(body);
+
+  assert.ok(decoded.includes(f.claim), 'astral and multi-byte characters must round-trip exactly');
+  assert.ok(!body.includes('\u{1F41B}'), 'the raw emoji character must not appear unencoded on the wire');
 });
 
 test('reconcile creates an issue for a finding with no plane_id', async () => {
