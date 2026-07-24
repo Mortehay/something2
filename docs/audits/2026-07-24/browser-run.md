@@ -488,3 +488,212 @@ now demonstrated with two real accounts rather than inferred from code
 reading. Two new client-side defects (F-045, F-046) surfaced only because
 this flow drove real auth-state transitions and role combinations through
 the actual game shell, which static review has no way to do.
+
+---
+
+## Flow D — combat, items, economy
+
+Driven against the live stack primarily via raw authority WebSocket
+connections (`ws://localhost:13101/authority`), opened both through Chrome
+DevTools MCP `evaluate_script` from the page origin (matching Flows A-C's
+approach) and, for checks needing true concurrent sockets or a confusing
+observation that needed isolating outside any one browser page, through
+standalone Node scripts using the same `ws` package the backend itself
+depends on (`backend/node_modules/ws`) — both paths hit the identical live
+authority process; the canvas UI's shop/inventory panels are pixel
+click-hit-tested and unsuitable for the exact gold/item deltas this flow
+needs to assert. Preconditions re-checked clean at the start (frontend 200,
+backend 200, six containers up, pre-audit dump present, 7.8MB unchanged).
+
+Eight fresh player accounts were registered for this flow
+(`audit_flowD_user1/user2/ghost/iso/race1/race2/f019/f016`) to keep economy
+state isolated from earlier flows' fixtures. Two disposable villages were
+created on two different pre-existing bounded worlds (`BoundedArena`, then
+`test4` after `BoundedArena`'s live simulation got stuck — see below) via
+the real admin API, positioned far enough apart to require genuine walking
+for the cross-village test.
+
+### Six positive checks — all passed
+
+| Check | Result |
+|---|---|
+| 1. Attack a creature | Melee swing broadcast in `state.attacks` with `hit:true` and `v:"sweep_arc"` — the exact VFX descriptor the client's `addEffects()` renders. Damage was real and observable (creature/player hp moved). |
+| 2. Die, respawn | In a dense creature swarm, hp cycled 100→0→100 repeatedly across many ticks (`resolveDeaths()` resets hp/mana/stamina and teleports to spawn). Inventory (3 items) and gold (500) were byte-for-byte unchanged across several death cycles. |
+| 3. Kill → loot drop → pickup, inventory +1 | Killed creatures dropped ground items at the death position (`world_items`); one `pickup` frame granted exactly +1 to `player_items` (DB count 2→3, confirmed before/after). |
+| 4. Equip/unequip, survives reload | Equipped the starting vest into `chest`; `player_equipment` row appeared. A clean disconnect+reconnect (properly awaited `close` event, not a rushed one — see the ghost-session note below) showed the equipment still bound in the fresh `joined` frame. Unequip cleared the row. |
+| 5. Buy, sufficient gold | Bought a dagger (price 26) with 500 gold on hand: `bought`/`wallet` frames and the `users.gold` column both landed at exactly 474. |
+| 6. Buy, insufficient gold | Set gold to 10 via DB, attempted to buy a 46-gold halberd: `{"error":"not enough gold"}`, gold stayed 10, no item granted. |
+
+### Five abuse cases — none exploitable
+
+| Attack | Result |
+|---|---|
+| Buy with `quantity: -5` | The wire protocol has **no quantity field** for `buy` at all (`{type:'buy', stockId}` — one stock row is always exactly one unit). The extra field is silently ignored; exactly one unit purchases at the real price. Not exploitable by construction, not merely by validation. |
+| Sell with a client-supplied price | Tested both directions: `buy` with `price:1` against a 46-gold item, and `sell` with `price:999999` against a 13-gold item. Both client-supplied price fields were completely ignored; the server-computed price won every time. |
+| Two simultaneous pickups of one drop | Two fresh accounts, driven from a single Node process (true concurrent sockets, not just two browser tabs racing on human timing), walked to the same dropped item and fired `pickup` back-to-back. Exactly one player gained the item; `player_items` shows the new instance under only one account, and the ground-item row was deleted exactly once. The `entry.claiming` in-memory guard plus the atomic claim CTE both held — the buyback-race class of bug the task brief called out as historically the worst in this subsystem stayed fixed. |
+| Buy an item the merchant does not stock | Random UUID stockId → `{"error":"that item is no longer for sale"}`. |
+| Equip an item not in inventory | Random UUID itemId → `{"error":"you do not own that item"}`. |
+
+### F-013 — confirmed, twice in a row
+
+This was the single most important thing to settle in this phase. Using a
+completely virgin account (`audit_flowD_race2`, gold 0, never previously
+touched): sold the starting dagger + leather-vest to a village merchant
+while standing at its merchant tile, then did a **clean, confirmed**
+reconnect (close event explicitly awaited, 800ms settle — a rushed
+reconnect produces a confusing false negative, see below) and rejoined the
+same world.
+
+The fresh join granted a **brand-new dagger and leather-vest** — different
+`player_items` instance ids from the ones just sold — plus **21 gold**
+(`floor(26/2) + floor(16/2)`, exactly matching the finding's predicted
+arithmetic). Repeated the entire cycle a second time on the same account:
+sold the fresh loadout again, reconnected again, got **another** fresh
+dagger+vest (yet a third distinct instance-id pair) and gold now at **42**
+(21+21).
+
+**Verdict: confirmed.** `grantStartingLoadout`'s only guard — "does this
+account currently own zero items" — is exactly as re-enterable as the
+finding claims, at will, by selling down to zero and reconnecting. Both
+cycles matched the predicted item and gold arithmetic exactly. This is
+live, working, unbounded item and currency generation from nothing,
+reachable by any player through the ordinary sell-then-reload path with no
+special tooling.
+
+### A note on `BoundedArena`
+
+While setting up combat fixtures on `BoundedArena` (re-rolling its 2000
+creature_count, then later re-rolling again via the real admin API while a
+player stayed connected, to test F-017), that world's **live simulation in
+the running backend process is now permanently stuck** serving ~1600-1700
+stale creature entries that do not exist in `world_creatures` (DB confirmed:
+only the 4 Village Guard rows remain). Reproduced 3 independent ways
+(two browser pages, one standalone Node script); does not clear on
+reconnect, even 10+ seconds after every socket cleanly disconnected. I
+switched the remaining economy testing to `test4` instead of chasing a full
+root cause under this phase's time budget — see
+`.superpowers/sdd/task-13-flowD-report.md` for the investigation trail,
+including the honest admission that repeated attempts to reproduce a
+*minimal* trigger for the "never self-heals" half of this (as opposed to
+the F-017 mechanism itself, which cleanly reproduces via the real API — see
+below) did not succeed. **Future test runs: don't reuse `BoundedArena` in
+this backend process without a restart.** This is not filed as its own
+finding — no reliable minimal trigger, which the flake-policy spirit argues
+against inflating into a tracked defect — but it is real, and it did serve
+as the vehicle that definitively confirmed F-017 below.
+
+A related, separately-observed and also-not-filed item: the very first
+reconnect attempt in this flow (close, reopen ~300ms later, same account)
+got a valid `joined` response and then went completely silent — zero
+further broadcasts, `input`/`unequip` silently no-op'd, though `ping` still
+got `pong` back — recoverable only by another, fully-awaited clean
+reconnect. Repeated deliberate attempts (including 6× rapid-fire
+reconnects) did not reproduce it again. Recorded, not filed, for the same
+reason as above.
+
+---
+
+## Static findings arbitrated in the Flow D sweep
+
+Ten static findings named a browser or curl check reachable through the
+economy/combat surface or the general infra checks left over from earlier
+flows. All ten held up — **none demoted**:
+
+- **F-002** (P1, unauthenticated job-status path traversal) — `curl -s
+  "http://localhost:13101/api/tile-jobs/..%2Fcapability"` with no
+  Authorization header returned HTTP 200 with the sprite-gen host
+  capability JSON.
+- **F-006** (P2, new item types never reach existing villages) — created a
+  village, then a new weapon item type (value backfilled via DB to isolate
+  this claim from the separately-confirmed F-003 value-not-persisted bug),
+  and confirmed the existing village's `merchant_stock` has zero rows for
+  it.
+- **F-008** (P2, no upper bound on `creature_count`), PUT half only —
+  `PUT /api/worlds/:id {"creature_count":200000}` returned 200 and
+  persisted. Did not additionally trigger the re-roll at that count — per
+  the finding's own text it would not return, judged too costly to
+  reproduce for a verification check, same reasoning Flow B used for
+  F-009's stress variant. Reset the value back to 0 immediately after.
+- **F-013** (P0, unbounded starting-loadout regrant) — see above. The
+  single highest-value result of this phase.
+- **F-016** (P1, non-transactional `dropItem`) — deleted a world's row out
+  from under a live connected session (the finding's own named practical
+  trigger, not a fault-injected pool), then sent a `drop` frame: server
+  replied `{"error":"drop failed"}` and the item existed nowhere
+  afterward (`player_items` count 0, world gone).
+- **F-017** (P1, `evictWorld` silently refused, admin edits never reach a
+  live world) — confirmed via the real admin re-roll endpoint (not a
+  synthetic repro): with a player connected, `POST /api/worlds/:id/creatures`
+  left that player's live view showing ~1600-1700 stale creatures for the
+  rest of the session, causing a sustained death-loop (hp oscillating
+  100→5→100) and zero drops/gold from kills against them (`world_items`
+  stayed empty across several confirmed hits) — a stronger real-world
+  consequence than the finding's own minimal repro.
+- **F-019** (P2, `buyStock` missing village/world ownership predicate) —
+  sold an item at village A to create a buyback row, walked to village B's
+  merchant in the same world, bought using village A's stockId: succeeded,
+  gold decreased by the correct price, row vanished from A's catalog.
+- **F-022** (P3, stacked items silently destroyed on sell) — confirmed live
+  quantity>1 count is 0, then set one row's quantity to 5 directly, sold
+  it: paid for exactly one unit (13 gold) while all 5 were destroyed in one
+  DELETE.
+- **F-039** (P1, Postgres/Redis bound to 0.0.0.0 with hardcoded creds) —
+  `ss -tlnp` confirmed both bound to 0.0.0.0/[::]; connected with `psql`
+  using the literal compose-file credentials and read the `users` table (16
+  rows) over the network.
+- **F-040** (P2, MinIO bound to 0.0.0.0 with default creds) — confirmed
+  the same binding via `ss -tlnp` plus a reachable, unauthenticated-at-the-
+  transport-level console root (HTTP 200) and the literal vendor-default
+  `minioadmin`/`minioadmin` in the tracked compose file. Did not drive a
+  full login through the third-party MinIO console UI itself — mechanism
+  confirmed, not the full external-device variant.
+
+### Not arbitrated
+
+Left untouched, with reasons:
+
+- **F-001, F-007, F-018** — each needs an in-process fault-injected DB pool
+  (`__setPool`, a query that rejects exactly once); not a browser/curl
+  check reachable against the live server.
+- **F-030, F-036, F-041** — each names a repo `grep`/`git diff` as its
+  verification, not a browser or curl check; out of scope for this sweep by
+  the letter of the instruction. (F-041's underlying fact — the literal
+  Postgres password committed in a tracked file — was independently
+  reconfirmed while arbitrating F-039.)
+- **F-033, F-034, F-035, F-037** — each sprite-gen finding's verification
+  would submit a real `/generate` request, which (per F-033's own text)
+  triggers genuine multi-minute-to-multi-hour sd-turbo compute as a side
+  effect of *any* valid submission, with no cancel endpoint once accepted.
+  Judged too costly/destructive to trigger for a verification check within
+  this phase's budget.
+- **F-042** — verification runs `make clean`, which deletes the
+  `postgres_data`/`minio_data` volumes; running it would destroy the entire
+  dev database and MinIO store mid-audit and end the ability to complete
+  this task. Not run.
+- **F-010, F-011, F-020, F-029, F-031** — deprioritized on time budget
+  against this flow's economy-focused mandate, not because they looked
+  unreachable. F-011 and F-020 also partially describe post-fix states that
+  aren't cleanly checkable against the current code as a single assertion.
+
+### New findings emitted by Flow D
+
+None. Every one of the skill's eleven Flow D checks (six positive, five
+abuse) held, and the two "ghost"/stuck-world observations above were
+deliberately left unfiled for lack of a reliable minimal trigger, per the
+flake policy's spirit.
+
+### Report
+
+Flow D's headline result is F-013: confirmed live, twice in a row, with
+gold/item arithmetic matching the finding's prediction exactly both times —
+unbounded currency and item generation from nothing, reachable by any
+player through an ordinary sell-then-reload cycle. Every abuse case the
+skill specifies (negative quantity, forged price on both buy and sell,
+concurrent double-pickup, unstocked purchase, unowned equip) held —
+this subsystem's previously-fixed buyback race and non-transactional
+mutations stayed fixed under renewed adversarial pressure, which is exactly
+the good-news outcome this audit exists to be able to report when it's
+true. The arbitration sweep converted ten more static findings (including
+the historically thorny F-017 world-staleness class) from code-reading
+inferences into live, DB-verified reproductions, with zero demotions —
+every one of them held up exactly as claimed.
