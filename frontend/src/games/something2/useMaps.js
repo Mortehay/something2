@@ -16,18 +16,6 @@ export async function throwApiError(res, fallback) {
   throw new Error(error.error || fallback);
 }
 
-export function useMaps(){
-  const { data: maps, isLoading: isLoadingMaps } = useQuery({
-    queryKey: ['maps'],
-    queryFn: async () => {
-      const res = await apiFetch(`${API_URL}/api/maps`);
-      if (!res.ok) throw new Error('Failed to fetch maps');
-      return res.json();
-    }
-  });
-  return { maps, isLoadingMaps };
-}
-
 export function useMapTiles(){
   const { data: mapTiles, isLoading: isLoadingMapTiles } = useQuery({
     queryKey: ['mapTiles'],
@@ -38,83 +26,6 @@ export function useMapTiles(){
     }
   });
   return { mapTiles, isLoadingMapTiles };
-}
-
-export function useGenerateMap(onSuccessCallback) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      const res = await apiFetch(`${API_URL}/api/maps/generate`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ name: `World ${new Date().toLocaleTimeString()}` })
-      });
-      if (!res.ok) throw new Error('Failed to generate map');
-      return res.json();
-    },
-    onSuccess: (newMap) => {
-      queryClient.invalidateQueries({ queryKey: ['maps'] });
-      if (onSuccessCallback) {
-        onSuccessCallback(newMap);
-      }
-      toast.success('New map generated!');
-    },
-    onError: (err) => toast.error(`Generation failed: ${err.message}`)
-  });
-}
-
-export async function fetchMap(selectedMapId) {
-  const res = await apiFetch(`${API_URL}/api/maps/${selectedMapId}`);
-  if (!res.ok) throw new Error("Failed to load map data");
-  return res.json();
-}
-
-export async function fetchMapEntities(selectedMapId) {
-  const res = await apiFetch(`${API_URL}/api/maps/${selectedMapId}/entities`);
-  if (!res.ok) throw new Error("Failed to load map entities");
-  return res.json();
-}
-
-export function useSaveEntities(onSuccessCallback) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id, entities }) => {
-      const res = await apiFetch(`${API_URL}/api/maps/${id}/entities`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ entities })
-      });
-      if (!res.ok) throw new Error('Failed to save entities');
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['maps'] });
-      if (onSuccessCallback) onSuccessCallback();
-    },
-    onError: (err) => toast.error(`Save entities failed: ${err.message}`)
-  });
-}
-
-export function useDeleteMap(onSuccessCallback) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (id) => {
-      const res = await apiFetch(`${API_URL}/api/maps/${id}`, {
-        method: 'DELETE',
-        headers: authHeaders(),
-      });
-      if (!res.ok) throw new Error('Failed to delete map');
-      return res.json();
-    },
-    onSuccess: (data, deletedId) => {
-      queryClient.invalidateQueries({ queryKey: ['maps'] });
-      if (onSuccessCallback) {
-        onSuccessCallback(deletedId);
-      }
-      toast.success('Map deleted!');
-    },
-    onError: (err) => toast.error(`Deletion failed: ${err.message}`)
-  });
 }
 
 export function useTileTypes() {
@@ -348,29 +259,6 @@ export function useDeleteItemType() {
       toast.success('Item type deleted!');
     },
     onError: (err) => toast.error(`Deletion failed: ${err.message}`)
-  });
-}
-
-export function useGenerateEntities(onSuccessCallback) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (id) => {
-      const res = await apiFetch(`${API_URL}/api/maps/${id}/generate-entities`, {
-        method: 'POST',
-        headers: authHeaders(),
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || 'Failed to generate entities');
-      }
-      return res.json();
-    },
-    onSuccess: (data, id) => {
-      queryClient.invalidateQueries({ queryKey: ['maps'] });
-      if (onSuccessCallback) onSuccessCallback(data);
-      toast.success(`Generated ${data.count} entities and saved to database!`);
-    },
-    onError: (err) => toast.error(`Generation failed: ${err.message}`)
   });
 }
 
