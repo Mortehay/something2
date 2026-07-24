@@ -48,13 +48,20 @@ test('skips an entity whose fingerprint is unchanged', async () => {
 
 test('--force regenerates even when unchanged', async () => {
   const preLock = { Wolf: { fingerprint: fingerprint(resolveEntity(DEFAULTS, WOLF)) } };
+  const preLockWolfOriginal = JSON.parse(JSON.stringify(preLock.Wolf));
   const client = fakeClient({ Wolf: { poll: { status: 'done', result: { atlas_key: 'k', manifest_key: 'm' } } } });
-  const { report } = await runGeneration({
+  const { report, lock } = await runGeneration({
     entities: [WOLF], defaults: DEFAULTS, lock: preLock, client, token: 'T',
     nameToId: { Wolf: 7 }, force: true, dryRun: false,
   });
   assert.equal(report[0].status, 'generated');
   assert.deepEqual(client.calls, ['Wolf']);
+  // Verify input lock is not mutated
+  assert.deepEqual(preLock.Wolf, preLockWolfOriginal);
+  // Verify returned lock is a different object
+  assert.notEqual(lock, preLock);
+  // Verify returned lock has the new data
+  assert.equal(lock.Wolf.atlas_key, 'k');
 });
 
 test('--dry-run plans without calling the client', async () => {
@@ -87,4 +94,15 @@ test('entityTypeId is null for names with no matching row (heroes)', async () =>
     nameToId: {}, force: false, dryRun: false,
   });
   assert.equal(report[0].entityTypeId, null);
+});
+
+test('startJob exception is caught, reported as failed, and does not update the lock', async () => {
+  const client = fakeClient({ Wolf: { startThrows: true } });
+  const { report, lock } = await runGeneration({
+    entities: [WOLF], defaults: DEFAULTS, lock: {}, client, token: 'T',
+    nameToId: { Wolf: 7 }, force: false, dryRun: false,
+  });
+  assert.equal(report[0].status, 'failed');
+  assert.equal(report[0].error, 'start failed');
+  assert.deepEqual(lock, {});
 });
