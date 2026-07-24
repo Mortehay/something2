@@ -88,7 +88,12 @@ async function getTileTypesMap() {
       image: row.image,
       sprite: row.sprite || null,
       render_mode: row.render_mode || 'color',
-      validNeighbors: row.valid_neighbors || []
+      validNeighbors: row.valid_neighbors || [],
+      // Cache-busting key for the client's asset URLs. Generated keys are
+      // stable (approving overwrites static.png in place) and /api/assets sends
+      // max-age=300, so without this an approved regeneration keeps rendering
+      // the previous texture for five minutes.
+      updated_at: row.updated_at
     };
   });
   return tileTypes;
@@ -126,7 +131,10 @@ async function getEntityTypesMap() {
       // showed up in game (tile_types has always exposed its equivalents).
       render_mode: row.render_mode,
       sprite: row.sprite,
-      prompt: row.prompt
+      prompt: row.prompt,
+      // See getTileTypesMap: versions the client's asset URLs so an approved
+      // regeneration is fetched instead of served stale from the browser cache.
+      updated_at: row.updated_at
     };
   });
   return entityTypes;

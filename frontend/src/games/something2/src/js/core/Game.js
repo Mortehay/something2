@@ -20,6 +20,7 @@ import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, a
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects } from "./vfx.js";
+import { assetUrl } from "../net/assets.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -170,19 +171,26 @@ export class Game {
         for (const name in entityTypes) {
             const def = entityTypes[name];
             if (!def) continue;
+            // URLs carry the row's updated_at so an approved regeneration is
+            // actually fetched (see assetUrl) — but the imageManager CACHE KEY
+            // stays the bare asset key, because RenderSystem looks entities up
+            // by `e.image` / `sprite.atlas_key`.
+            const v = def.updated_at;
             // Entities approved through the object pipeline carry a plain
             // `image` and no atlas; RenderSystem's single-image fallback needs
             // it loaded under that same key to find it.
             if (def.image) {
-                this.imageManager.load(def.image, `${API_URL}/api/assets/${def.image}`);
+                this.imageManager.load(def.image, assetUrl(API_URL, def.image, v));
             }
-            if (def.sprite && def.sprite.atlas_key) byAtlas[def.sprite.atlas_key] = def.sprite;
+            if (def.sprite && def.sprite.atlas_key) {
+                byAtlas[def.sprite.atlas_key] = { spr: def.sprite, v };
+            }
         }
         const manifests = {};
-        await Promise.all(Object.values(byAtlas).map(async (spr) => {
-            await this.imageManager.load(spr.atlas_key, `${API_URL}/api/assets/${spr.atlas_key}`);
+        await Promise.all(Object.values(byAtlas).map(async ({ spr, v }) => {
+            await this.imageManager.load(spr.atlas_key, assetUrl(API_URL, spr.atlas_key, v));
             try {
-                const res = await fetch(`${API_URL}/api/assets/${spr.manifest_key}`);
+                const res = await fetch(assetUrl(API_URL, spr.manifest_key, v));
                 if (res.ok) manifests[spr.atlas_key] = await res.json();
             } catch { /* leave unset -> rect fallback */ }
         }));
@@ -400,16 +408,19 @@ export class Game {
         if (!tileTypes) return;
         for (const def of Object.values(tileTypes)) {
             const mode = def.render_mode || def.renderMode;
+            // Versioned for the same reason as preloadSprites: a re-approved
+            // tile texture overwrites its key in place.
+            const v = def.updated_at;
             if (def.image) {
-                this.imageManager.load(def.image, `${API_URL}/api/assets/${def.image}`);
+                this.imageManager.load(def.image, assetUrl(API_URL, def.image, v));
             }
             if (mode === 'animated' && def.sprite) {
                 if (def.sprite.atlas_key) {
-                    this.imageManager.load(def.sprite.atlas_key, `${API_URL}/api/assets/${def.sprite.atlas_key}`);
+                    this.imageManager.load(def.sprite.atlas_key, assetUrl(API_URL, def.sprite.atlas_key, v));
                 }
                 if (def.sprite.manifest_key && !def._manifest) {
                     try {
-                        const r = await fetch(`${API_URL}/api/assets/${def.sprite.manifest_key}`);
+                        const r = await fetch(assetUrl(API_URL, def.sprite.manifest_key, v));
                         if (r.ok) def._manifest = await r.json();
                     } catch (_) { /* leave unset → renderer uses the static image or color */ }
                 }
