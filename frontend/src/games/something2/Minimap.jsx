@@ -111,6 +111,7 @@ export default function Minimap({ gameRef, tileColors }) {
 
   const persistVisible = useCallback((v) => {
     setVisible(v);
+    if (!v) setExpanded(false); // hiding the minimap also closes the expand modal
     localStorage.setItem(LS_KEY, v ? '1' : '0');
   }, []);
 
@@ -173,19 +174,24 @@ export default function Minimap({ gameRef, tileColors }) {
 
   // Esc, while the modal is open, closes it instead of pausing the game.
   // Capture phase wins over Game's window keydown (bubble phase) handler.
+  // Guarded on `visible` too (belt-and-suspenders with persistVisible closing the
+  // modal on hide): the modal can only be considered open while the minimap itself
+  // is visible, so if `visible` ever goes false while `expanded` is still true this
+  // listener must not remain attached.
   useEffect(() => {
-    if (!expanded) return undefined;
+    if (!expanded || !visible) return undefined;
     const onKey = (e) => {
       if (e.key === 'Escape') { e.stopImmediatePropagation(); e.preventDefault(); setExpanded(false); }
     };
     window.addEventListener('keydown', onKey, true); // capture
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [expanded]);
+  }, [expanded, visible]);
 
   // Modal rAF draw loop — larger box, wider window via a bigger cellW. Reuses
-  // the same overviewRef as the small minimap; no extra fetching.
+  // the same overviewRef as the small minimap; no extra fetching. Guarded on
+  // `visible` too, for the same reason as the Esc listener above.
   useEffect(() => {
-    if (!expanded) return undefined;
+    if (!expanded || !visible) return undefined;
     const canvas = modalCanvasRef.current;
     if (!canvas) return undefined;
     const ctx = canvas.getContext('2d');
@@ -200,7 +206,7 @@ export default function Minimap({ gameRef, tileColors }) {
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [expanded, gameRef]);
+  }, [expanded, visible, gameRef]);
 
   if (!visible) {
     return <ShowButton type="button" title="Show minimap (M)" aria-label="Show minimap" onClick={() => persistVisible(true)}>🗺</ShowButton>;
