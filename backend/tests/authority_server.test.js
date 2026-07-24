@@ -29,10 +29,21 @@ async function openPool() {
   }
 }
 
+// activateChunk (F-018 / SOMET-198) now opens a client via pool.connect() to
+// wrap the world_chunks INSERT and the creature INSERTs it gates in one
+// transaction, on top of the plain pool.query() every fake pool below
+// already answers. None of these fakes assert on BEGIN/COMMIT/ROLLBACK, so a
+// client that proxies straight back to the same `query` fn is a faithful
+// stand-in.
+function withConnect(pool) {
+  pool.connect = async () => ({ query: pool.query, release: () => {} });
+  return pool;
+}
+
 // Minimal pool: one world row, a couple of walkable tile types, no persisted
 // player rows, and a no-op upsert.
 function fakePool() {
-  return {
+  return withConnect({
     query: async (sql) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
         return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
@@ -45,7 +56,7 @@ function fakePool() {
       }
       // token_version lookup done on every upgrade: return the same version
       // token() signs with (1) so the fakePool sessions pass the version check.
-      if (/token_version FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+      if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
       if (/FROM item_types/i.test(sql)) {
@@ -68,7 +79,7 @@ function fakePool() {
       if (/INSERT INTO player_items/i.test(sql)) return { rows: [], rowCount: 1 };
       return { rows: [] };
     },
-  };
+  });
 }
 
 // Signs tv:1 to match the token_version the fakePool users lookup reports, so
@@ -139,7 +150,7 @@ function track(handle, server) {
 // never interleave the two).
 function delayedFakePool(delayMs, opts = {}) {
   const itemsDelayMs = opts.itemsDelayMs || 0;
-  return {
+  return withConnect({
     query: async (sql, ...args) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
         await new Promise((r) => setTimeout(r, delayMs));
@@ -150,7 +161,7 @@ function delayedFakePool(delayMs, opts = {}) {
       }
       return fakePool().query(sql, ...args);
     },
-  };
+  });
 }
 
 function connect(url, uid) {
@@ -231,6 +242,189 @@ test('two clients in one world see each other', async () => {
     if (ids.includes('1') && ids.includes('2')) both = true;
   }
   assert.ok(both, "a should see both players");
+  a.close(); b.close();
+  handle.close(); server.close();
+});
+
+// F-015 (SOMET-195): `new WebSocketServer({ noServer: true })` with no
+// maxPayload inherits ws's default of 100 MiB. Every real frame this
+// protocol defines is a small flat JSON object (the largest legitimate one,
+// `join`'s world_id, is well under 100 bytes), so a single authenticated
+// socket sending repeated ~100 MiB frames would have each one buffered and
+// JSON.parse'd, exhausting the process heap. Uses the boot()-default
+// maxPayload (4096) rather than the real 100 MiB default so the test stays
+// fast and deterministic — 4096 is small enough to trip in milliseconds
+// while still being ~40x the largest legitimate frame.
+test('a frame over maxPayload is rejected (closed 1009) instead of buffered', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  const oversized = JSON.stringify({ type: 'ping', pad: 'x'.repeat(8000) }); // > 4096
+  const closeCode = new Promise((res) => ws.on('close', (code) => res(code)));
+  ws.send(oversized);
+  const code = await Promise.race([closeCode, new Promise((res) => setTimeout(() => res(null), 2000))]);
+  assert.equal(code, 1009, 'an oversized frame must be rejected at the transport level, not buffered/parsed');
+  handle.close(); server.close();
+});
+
+test('a frame within maxPayload is processed normally', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  const joined = await nextMsg(ws, 'joined');
+  assert.equal(joined.type, 'joined', 'a normal, well-under-limit frame is unaffected by the cap');
+  ws.close(); handle.close(); server.close();
+});
+
+// Boot with caller-supplied rate-limit knobs (the reaper tests above use the
+// same bootWith-with-overrides pattern for their own opts).
+function bootRate(rateLimitCapacity, rateLimitPerSec) {
+  return new Promise((resolve) => {
+    const server = http.createServer();
+    const handle = attachAuthority(server, fakePool(), {
+      jwtSecret: SECRET, tickMs: 20, rateLimitCapacity, rateLimitPerSec,
+    });
+    track(handle, server);
+    server.listen(0, () => {
+      const port = server.address().port;
+      resolve({ url: `ws://127.0.0.1:${port}/authority`, handle, server });
+    });
+  });
+}
+
+// F-015 (SOMET-195): nothing bounded the rate of inbound frames. Several
+// handlers (attack-with-ammo, equip/unequip, pickup, drop, interact, buy,
+// sell) chain a DB round trip onto `ws._opChain` with no depth limit, so a
+// client streaming frames faster than the chain drains grows an ever-deeper
+// promise chain while monopolizing a pool connection. capacity=0 refill=0
+// isolates the bucket-exhaustion behavior deterministically: after `join`
+// spends the one token this test grants, every later frame in the same tick
+// must be dropped, not queued or errored.
+test('a token bucket of capacity 1 admits the join frame, then drops everything else', async () => {
+  const { url, handle, server } = await bootRate(1, 0);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined'); // spends the sole token
+
+  const pongs = [];
+  ws.on('message', (data) => { const m = JSON.parse(data); if (m.type === 'pong') pongs.push(m); });
+  for (let i = 0; i < 20; i++) ws.send(JSON.stringify({ type: 'ping' }));
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(pongs.length, 0, 'the bucket has zero tokens left and zero refill — every ping must be dropped');
+  ws.close(); handle.close(); server.close();
+});
+
+test('a burst beyond the token bucket capacity is dropped, not queued for later', async () => {
+  // capacity 5, refill 0/sec: `join` spends one token, leaving exactly 4 for
+  // the 20 ping frames that follow in the same burst.
+  const { url, handle, server } = await bootRate(5, 0);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const pongs = [];
+  ws.on('message', (data) => { const m = JSON.parse(data); if (m.type === 'pong') pongs.push(m); });
+  for (let i = 0; i < 20; i++) ws.send(JSON.stringify({ type: 'ping' }));
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(pongs.length, 4, 'only the tokens left after join are admitted; a flood does not queue behind them');
+  ws.close(); handle.close(); server.close();
+});
+
+test('frames sent well within the production rate limit are never dropped', async () => {
+  const { url, handle, server } = await bootRate(60, 40); // production defaults
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const pongs = [];
+  ws.on('message', (data) => { const m = JSON.parse(data); if (m.type === 'pong') pongs.push(m); });
+  for (let i = 0; i < 10; i++) ws.send(JSON.stringify({ type: 'ping' }));
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(pongs.length, 10, 'ordinary, well-under-capacity traffic must be completely unaffected');
+  ws.close(); handle.close(); server.close();
+});
+
+// F-020 (SOMET-200): the if-chain was replaced with a dispatch table keyed
+// on msg.type (messageHandlers[msg.type]). An unrecognized type must still
+// be silently ignored — same as falling off the end of the old if-chain —
+// not throw, not crash the process, and not block frames sent afterward.
+test('an unrecognized message type is silently ignored and does not disrupt later frames', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  ws.send(JSON.stringify({ type: 'this-type-does-not-exist', anything: 'goes' }));
+  ws.send(JSON.stringify({ type: 'ping' }));
+  const pong = await nextMsg(ws, 'pong');
+  assert.equal(pong.type, 'pong', 'a bogus type must not disrupt a normal frame sent right after it');
+  ws.close(); handle.close(); server.close();
+});
+
+test('the token bucket refills over time, so a client is not permanently penalized after one burst', async () => {
+  const { url, handle, server } = await bootRate(3, 1000); // tiny capacity, fast refill
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const pongs = [];
+  ws.on('message', (data) => { const m = JSON.parse(data); if (m.type === 'pong') pongs.push(m); });
+  for (let i = 0; i < 10; i++) ws.send(JSON.stringify({ type: 'ping' })); // exhausts the tiny bucket
+  await new Promise((r) => setTimeout(r, 50));
+  const afterBurst = pongs.length;
+  assert.ok(afterBurst < 10, 'sanity: the tiny bucket really did drop part of the burst');
+
+  await new Promise((r) => setTimeout(r, 100)); // >> one refill interval at 1000/sec
+  ws.send(JSON.stringify({ type: 'ping' }));
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(pongs.length, afterBurst + 1,
+    'a ping sent after the refill window is answered — the client is not permanently penalized after one burst');
+  ws.close(); handle.close(); server.close();
+});
+
+// F-014 (SOMET-194): Postgres uuid input is case-insensitive (and also
+// accepts braced / hyphenless spellings), so `SELECT ... WHERE id = $1`
+// finds the same row for any spelling of the id -- but loadWorld() used to
+// key the in-memory `worlds` Map on the client's RAW string, not on what the
+// SELECT actually returned. Two clients naming the same DB world with
+// different spellings therefore landed in two separate in-memory shards:
+// each only ever sees its own shard's sockets/players, so they are
+// invisible and untargetable to each other despite playing "the same"
+// world. fakePool's world lookup always returns `id: 'w1'` regardless of
+// what was queried, mirroring Postgres always returning the one canonical
+// text form no matter how the client spelled it — so this pool is a
+// faithful stand-in for the live case-insensitivity confirmed against
+// something2-db-1.
+test('two clients naming the same world with different id spellings still see each other', async () => {
+  const { url, handle, server } = await boot();
+  const a = connect(url, 1);
+  const b = connect(url, 2);
+  await Promise.all([
+    new Promise((r) => a.on('open', r)),
+    new Promise((r) => b.on('open', r)),
+  ]);
+  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  b.send(JSON.stringify({ type: 'join', world_id: 'W1' })); // same DB row, different spelling
+  await nextMsg(a, 'joined');
+  await nextMsg(b, 'joined');
+
+  // Exactly one in-memory world entry must back both sessions.
+  assert.equal(handle.worlds.size, 1,
+    'a differently-spelled world_id for the same DB row must not create a second in-memory shard');
+
+  let both = false;
+  for (let i = 0; i < 20 && !both; i++) {
+    const s = await nextMsg(a, 'state');
+    const ids = s.players.map((p) => p.id).sort();
+    if (ids.includes('1') && ids.includes('2')) both = true;
+  }
+  assert.ok(both, "a should see b (and vice versa) despite the different world_id spelling");
   a.close(); b.close();
   handle.close(); server.close();
 });
@@ -348,6 +542,67 @@ test('the authority rejects a connect whose token_version is stale', async (t) =
     });
     assert.ok(outcome === 'error' || outcome === 'close',
       `a stale token_version must be refused at upgrade, got ${outcome}`);
+  } finally {
+    if (userId != null) await pool.query('DELETE FROM users WHERE id = $1', [userId]).catch(() => {});
+    await pool.end().catch(() => {});
+  }
+});
+
+// F-021 (SOMET-201): the revocation check used to be two independent copies
+// (auth/middleware.js's HTTP guard, this file's WS upgrade handler) with no
+// test asserting they agreed — they could read different column lists and
+// drift, and a fix applied to only one would leave the other transport
+// silently unprotected. Both now call the SAME auth/tokens.js
+// currentUserForToken. This test is the one the finding asked for: mint a
+// token, revoke it exactly the way logout-all does (bump token_version),
+// and assert BOTH transports reject it for the SAME account in ONE test —
+// something no test did before this fix (the two existing coverage tests
+// above/nearby each exercise only one transport).
+test('a token revoked after minting is rejected by BOTH the HTTP guard and a live WS upgrade for the same account (F-021)', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — the shared revocation check is UNVERIFIED on this run`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  let userId;
+  try {
+    const username = `authshared-${process.pid}-${Date.now()}`;
+    const ins = await pool.query(
+      `INSERT INTO users (username, password_hash, role, token_version) VALUES ($1, 'x', 'player', 1) RETURNING id`,
+      [username],
+    );
+    userId = ins.rows[0].id;
+    const token = jwt.sign({ user_id: userId, username, role: 'player', tv: 1 }, SECRET, { algorithm: 'HS256' });
+
+    // Revoke it — the exact mutation POST /api/auth/logout-all performs.
+    await pool.query('UPDATE users SET token_version = token_version + 1 WHERE id = $1', [userId]);
+
+    // HTTP transport: auth/middleware.js's requireAuth against the real row.
+    const { requireAuth } = require('../src/auth/middleware.js');
+    const guard = requireAuth(pool);
+    const res = {
+      statusCode: null, body: null,
+      status(c) { this.statusCode = c; return this; },
+      json(b) { this.body = b; return this; },
+    };
+    let nextCalled = false;
+    await guard({ headers: { authorization: `Bearer ${token}` } }, res, () => { nextCalled = true; });
+    assert.equal(res.statusCode, 401, 'the HTTP guard must reject the revoked token');
+    assert.equal(nextCalled, false, 'a revoked token must never reach the route handler');
+
+    // WS transport: the SAME token against a live authority upgrade.
+    const { url } = await bootWith(pool);
+    const ws = new WebSocket(`${url}?token=${encodeURIComponent(token)}`);
+    openResources.push({ close() { ws.terminate(); } });
+    const outcome = await new Promise((res2) => {
+      ws.on('error', () => res2('error'));
+      ws.on('close', () => res2('close'));
+      ws.on('open', () => res2('open'));
+    });
+    assert.ok(outcome === 'error' || outcome === 'close',
+      `the WS upgrade must reject the same revoked token, got ${outcome}`);
   } finally {
     if (userId != null) await pool.query('DELETE FROM users WHERE id = $1', [userId]).catch(() => {});
     await pool.end().catch(() => {});
@@ -547,7 +802,7 @@ test('a second session for the same account kicks the first (newest wins)', asyn
 function equipRacePool(delayMs = 20) {
   const base = fakePool();
   const usedItemIds = new Set();
-  return {
+  return withConnect({
     query: async (sql, params) => {
       if (/INSERT INTO player_equipment/i.test(sql)) {
         await new Promise((r) => setTimeout(r, delayMs));
@@ -562,7 +817,7 @@ function equipRacePool(delayMs = 20) {
       }
       return base.query(sql, params);
     },
-  };
+  });
 }
 
 test('concurrent double-equip of the same item into two hand slots does not crash the process', async () => {
@@ -598,6 +853,30 @@ test('concurrent double-equip of the same item into two hand slots does not cras
   assert.equal(ws.readyState, ws.OPEN, 'the socket stays open despite the equip conflict');
 
   ws.close(); handle.close(); server.close();
+});
+
+// F-017 (SOMET-197): isWorldLive is the disambiguator evictOrWarn (index.js)
+// needs to tell "nothing loaded" apart from "a player is connected, eviction
+// refused" — both of which evictWorld() alone reports as `false`. This drives
+// it against a real joined session, not a synthetic entry.
+test('isWorldLive reflects a real connected player, then clears once they disconnect', async () => {
+  const { url, handle, server } = await boot();
+  assert.equal(handle.isWorldLive('w1'), false, 'not loaded yet');
+
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+  assert.equal(handle.isWorldLive('w1'), true, 'a connected player makes the world live');
+  assert.equal(handle.evictWorld('w1'), false, 'eviction must be refused while live');
+
+  const closed = new Promise((res) => ws.on('close', res));
+  ws.close();
+  await closed;
+  // The close handler removes the empty world entry synchronously.
+  assert.equal(handle.isWorldLive('w1'), false, 'no longer live once the only player disconnects');
+
+  handle.close(); server.close();
 });
 
 test('a second join on the same socket is rejected (no free re-heal / no ghost)', async () => {
@@ -672,7 +951,7 @@ async function mkAttackHarness(opts = {}) {
   // simulate the summed-across-stacks total draining shot by shot.
   const ammoCountFn = opts.ammoCountFn || (() => 5);
   const base = fakePool();
-  const pool = {
+  const pool = withConnect({
     query: async (sql, params) => {
       // Must be matched BEFORE the generic /FROM player_items/ branch: the
       // consume statement mentions player_items in its subquery too.
@@ -704,7 +983,7 @@ async function mkAttackHarness(opts = {}) {
       if (/FROM player_equipment/i.test(sql)) return { rows: [{ slot: 'main_hand', item_id: 'i9' }] };
       return base.query(sql, params);
     },
-  };
+  });
 
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);

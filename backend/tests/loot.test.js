@@ -114,23 +114,37 @@ test('rng closer to 1 never yields fewer items than rng closer to 0, even above 
   assert.ok(low.length <= 100 && high.length <= 100);
 });
 
-test('dropping a stack of N spawns one ground item of quantity N', async () => {
-  // The DELETE returns the dropped row's quantity; the INSERT must carry it.
-  // Without this a stack of 40 arrows drops as 1 and destroys 39.
-  const seen = [];
-  const pool = { query: async (sql, params) => {
-    seen.push({ sql, params });
-    if (/delete\s+from\s+player_items/i.test(sql)) {
-      return { rowCount: 1, rows: [{ item_type_id: 7, quantity: 40 }] };
-    }
+test('dropping a stack carries the DELETEd quantity through to the INSERT via SQL, not a JS param', async () => {
+  // dropItem's DELETE and INSERT are one CTE statement (F-016 / SOMET-196:
+  // they used to be two independent pool.query calls with no transaction,
+  // which could destroy a dropped item if the second failed after the first
+  // committed). Because the pair is now one statement, `quantity` for the
+  // INSERT can only come from the SQL projecting it out of the CTE's `d`
+  // (the deleted row) -- there is no JS-side params entry to inspect anymore.
+  // Without that projection a stack of 40 arrows would drop as 1 and destroy
+  // the other 39, so pin the SQL shape directly: the INSERT names `quantity`
+  // in its column list and the SELECT ... FROM d projects it (not a literal).
+  let sql = '';
+  const pool = { query: async (q) => {
+    sql = q;
     return { rowCount: 1, rows: [{ id: 'g1', item_type_id: 7, x: 0, y: 0, quantity: 40 }] };
   } };
   const entry = mkEntry();   // existing helper
   const r = await dropItem(pool, entry, 'u1', 'i1');
   assert.equal(r.ok, true);
-  const ins = seen.find((c) => /insert\s+into\s+world_items/i.test(c.sql));
-  assert.ok(ins.sql.includes('quantity'), 'the world_items INSERT must name quantity');
-  assert.ok(ins.params.includes(40), 'the dropped stack size must reach the INSERT');
+
+  const m = sql.match(/insert\s+into\s+world_items\s*\(([^)]*)\)/i);
+  assert.ok(m, 'could not locate the world_items INSERT column list');
+  const cols = m[1].split(',').map((c) => c.trim().toLowerCase());
+  assert.ok(cols.includes('quantity'), `the drop INSERT must name quantity (found: ${cols.join(', ')})`);
+
+  const sel = sql.match(/select\s+(.*?)\s+from\s+d/is);
+  assert.ok(sel, 'could not locate the SELECT ... FROM d projection');
+  const exprs = sel[1].split(',').map((e) => e.trim());
+  assert.equal(exprs.length, cols.length,
+    `the INSERT names ${cols.length} columns but the SELECT projects ${exprs.length} expressions — Postgres would reject this at runtime`);
+  assert.ok(exprs.some((e) => /^quantity$/i.test(e)),
+    'quantity must be projected FROM d (the deleted row), not a hardcoded literal');
 });
 
 test('claiming a stack grants the full quantity', async () => {

@@ -47,6 +47,28 @@ test('POST /api/worlds creates and returns the row', async () => {
   assert.equal(res.body.chunk_size, 32);
 });
 
+// F-044 (SOMET-224): worlds.name gained a unique constraint (migration
+// 1714440037000), matching tile_types/entity_types/item_types. POST
+// /api/worlds previously let a duplicate name through with 201 and no
+// warning -- two worlds with the same display name are indistinguishable in
+// the Maps admin list and every N/E/S/W link dropdown. A duplicate must now
+// surface as a clean 409, not the generic 500 catch-all a raw Postgres
+// unique_violation would otherwise produce.
+test('POST /api/worlds returns 409 on a duplicate name instead of a raw 500', async () => {
+  __setPool(mockPool([
+    [/INSERT INTO worlds/i, () => {
+      const err = new Error('duplicate key value violates unique constraint "worlds_name_unique"');
+      err.code = '23505';
+      throw err;
+    }],
+  ]));
+  const res = await request(app)
+    .post('/api/worlds').set(...AUTH)
+    .send({ name: 'AuditFlowBWorld', seed: 1 });
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /already exists/i);
+});
+
 test('GET /api/worlds lists worlds', async () => {
   __setPool(mockPool([
     [/FROM worlds/i, () => ({ rows: [{ id: 'w1', name: 'A' }, { id: 'w2', name: 'B' }] })],

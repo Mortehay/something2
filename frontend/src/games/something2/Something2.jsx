@@ -3,11 +3,12 @@ import styled from 'styled-components';
 import toast from 'react-hot-toast';
 import { HiOutlineTrash, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineMap } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
-import { getStoredToken, parseJwt, clearToken, authHeaders, AUTH_EXPIRED_EVENT } from "./src/js/net/EngineClient.js";
+import { getStoredToken, parseJwt, clearToken, authHeaders, AUTH_EXPIRED_EVENT } from "./src/js/net/auth.js";
 import Login from "../../pages/Login.jsx";
 import { useMapTiles, useMapConfig, useVfxEffects } from "./useMaps.js";
 import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";
 import { autoJoinTarget } from "./autoJoin.js";
+import { bindGameCanvas } from "./gameCanvasBinding.js";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
@@ -393,13 +394,12 @@ export default function Something2() {
   // Entity types keyed by name (same shape the legacy map path uses) — the
   // chunked renderer needs them to draw creatures with their approved sprite.
   const { mapConfig } = useMapConfig();
-  const { worlds, isLoadingWorlds, worldsError } = useWorlds();
+  // worldsError is toasted inside useWorlds() itself now (F-023) so every
+  // caller — including MapsAdmin, which used to render a silent "no maps
+  // yet" on a failed fetch — gets the signal without opting in.
+  const { worlds, isLoadingWorlds } = useWorlds();
   const createWorldMutation = useCreateWorld();
   const deleteWorldMutation = useDeleteWorld();
-
-  useEffect(() => {
-    if (worldsError) toast.error(`Failed to load worlds: ${worldsError.message}`);
-  }, [worldsError]);
 
   // name -> color for the minimap preview (mapTiles is keyed by tile name).
   const tileColors = useMemo(() => {
@@ -466,17 +466,21 @@ export default function Something2() {
     }
   };
 
+  // F-045: this used to only rerun on an activeTab change, so an authed
+  // false->true cycle (sign out, sign back in — same mechanism a
+  // token_version revocation mid-session routes through, see the apiFetch
+  // comment below) tore down and remounted the whole <canvas> node without
+  // ever telling the still-alive Game instance about it: Game.canvas kept
+  // pointing at the old, detached node while the authority socket and rAF
+  // loop kept running underneath, so the screen went blank while the
+  // player kept taking live damage. Rebinding is now `authed` too, and
+  // bindGameCanvas (unlike the old inline `new Game(canvasRef.current)`,
+  // which silently discarded that argument — see its own docs) always
+  // assigns canvas/ctx/size explicitly rather than leaning on construction.
   useEffect(() => {
     if (activeTab === 'game' && canvasRef.current) {
-      if (!gameRef.current) {
-        gameRef.current = new Game(canvasRef.current);
-      } else {
-        gameRef.current.canvas = canvasRef.current;
-        if (gameRef.current.init) {
-          gameRef.current.ctx = canvasRef.current.getContext('2d');
-        }
-      }
-      
+      gameRef.current = bindGameCanvas(gameRef.current, canvasRef.current, () => new Game());
+
       gameRef.current.setOnStateChange((newState) => {
         setIsPaused(newState === 'paused');
         if (newState === 'menu') {
@@ -505,7 +509,7 @@ export default function Something2() {
         engineRef.current = null;
       }
     };
-  }, [activeTab]);
+  }, [activeTab, authed]);
 
   // Mount-once effect whose cleanup only fires on true component unmount
   // (empty dep array), unlike the [activeTab] effect above whose cleanup
@@ -700,17 +704,19 @@ export default function Something2() {
                               chunk_size {world.chunk_size || 64}{world.seed != null ? ` · seed ${world.seed}` : ''}
                             </div>
                           </div>
-                          <HiOutlineTrash
-                            style={{ color: '#ef4444', cursor: 'pointer', flexShrink: 0 }}
-                            title="Delete world"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (window.confirm(`Delete world "${world.name}"? This removes its chunks, creatures, and loot.`)) {
-                                if (selectedWorldId === world.id) setSelectedWorldId(null);
-                                deleteWorldMutation.mutate(world.id);
-                              }
-                            }}
-                          />
+                          {isAdmin && (
+                            <HiOutlineTrash
+                              style={{ color: '#ef4444', cursor: 'pointer', flexShrink: 0 }}
+                              title="Delete world"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (window.confirm(`Delete world "${world.name}"? This removes its chunks, creatures, and loot.`)) {
+                                  if (selectedWorldId === world.id) setSelectedWorldId(null);
+                                  deleteWorldMutation.mutate(world.id);
+                                }
+                              }}
+                            />
+                          )}
                         </MapItem>
                       ))}
                       {worlds?.length === 0 && (
@@ -719,31 +725,33 @@ export default function Something2() {
                     </MapList>
                   )}
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '15px' }}>
-                    <Input
-                      placeholder="New world name"
-                      value={newWorldName}
-                      onChange={(e) => setNewWorldName(e.target.value)}
-                    />
-                    <Input
-                      placeholder="Seed (optional)"
-                      value={newWorldSeed}
-                      onChange={(e) => setNewWorldSeed(e.target.value)}
-                    />
-                    <Input
-                      type="number"
-                      placeholder="Chunk size (1-256)"
-                      value={newWorldChunkSize}
-                      onChange={(e) => setNewWorldChunkSize(e.target.value)}
-                    />
-                    <Button
-                      onClick={handleCreateWorld}
-                      disabled={createWorldMutation.isPending || !newWorldName.trim()}
-                      style={{ width: '100%' }}
-                    >
-                      Create World
-                    </Button>
-                  </div>
+                  {isAdmin && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '15px' }}>
+                      <Input
+                        placeholder="New world name"
+                        value={newWorldName}
+                        onChange={(e) => setNewWorldName(e.target.value)}
+                      />
+                      <Input
+                        placeholder="Seed (optional)"
+                        value={newWorldSeed}
+                        onChange={(e) => setNewWorldSeed(e.target.value)}
+                      />
+                      <Input
+                        type="number"
+                        placeholder="Chunk size (1-256)"
+                        value={newWorldChunkSize}
+                        onChange={(e) => setNewWorldChunkSize(e.target.value)}
+                      />
+                      <Button
+                        onClick={handleCreateWorld}
+                        disabled={createWorldMutation.isPending || !newWorldName.trim()}
+                        style={{ width: '100%' }}
+                      >
+                        Create World
+                      </Button>
+                    </div>
+                  )}
 
                   <Button
                     onClick={() => handleEnterChunkedWorld()}

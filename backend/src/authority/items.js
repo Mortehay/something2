@@ -86,11 +86,31 @@ async function loadInventory(pool, userId) {
   };
 }
 
-// Grant the starter set to a user who owns nothing. Idempotent: a user with
-// any item is left alone. Returns whether anything was granted.
+// Grant the starter set, once per ACCOUNT, ever. F-013 (P0): this used to be
+// gated on "the account currently owns zero items" (a SELECT against
+// player_items), which a player can re-enter at will by selling or dropping
+// the starter items and reconnecting — the join handler saw an empty
+// inventory and granted a fresh set every time. Confirmed live, twice: sell
+// the dagger+vest to a merchant and reconnect for free gold (0 -> 21 -> 42),
+// or drop them and reconnect for a free duplicate pair.
+//
+// Gated instead on users.starting_loadout_granted_at, a fact about the
+// account rather than a snapshot of current ownership, via a single
+// conditional UPDATE ... WHERE ... IS NULL RETURNING. This is a single
+// statement specifically so two concurrent joins on the same fresh account
+// cannot both read "not granted yet" before either writes: Postgres takes
+// the row lock on the first UPDATE that reaches it, the second blocks until
+// that transaction commits, then re-evaluates the WHERE clause against the
+// now-committed row and affects zero rows. The winner grants; the loser sees
+// rowCount 0 and skips — no read-then-write race window exists to lose.
 async function grantStartingLoadout(pool, userId, itemTypes) {
-  const existing = await pool.query('SELECT id FROM player_items WHERE user_id = $1 LIMIT 1', [userId]);
-  if (existing.rows.length) return false;
+  const claim = await pool.query(
+    `UPDATE users SET starting_loadout_granted_at = now()
+      WHERE id = $1 AND starting_loadout_granted_at IS NULL
+      RETURNING id`,
+    [userId],
+  );
+  if (claim.rowCount === 0) return false;
   const byName = new Map();
   for (const t of itemTypes.values()) byName.set(t.name, t.id);
   for (const name of STARTING_LOADOUT) {

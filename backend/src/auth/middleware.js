@@ -1,4 +1,4 @@
-const { verifyToken } = require('./tokens.js');
+const { verifyToken, currentUserForToken } = require('./tokens.js');
 
 function extractBearerToken(req) {
   const header = req.headers && req.headers.authorization;
@@ -9,7 +9,10 @@ function extractBearerToken(req) {
 // Shared core: verify the token, then check the account's CURRENT token_version
 // against the token's version — this is what makes revocation real. A token
 // whose version is behind the row is rejected even though its signature is valid
-// (e.g. password change / logout-everywhere bumps token_version).
+// (e.g. password change / logout-everywhere bumps token_version). The
+// revocation check itself (currentUserForToken) is shared with the WS upgrade
+// path in authority/server.js (F-021 / SOMET-201) — this function only owns
+// the HTTP-specific response shape.
 // Returns the { id, username, role } to attach as req.user, or null if the
 // caller already sent a response.
 async function authenticate(pool, req, res) {
@@ -32,21 +35,20 @@ async function authenticate(pool, req, res) {
   // co-hosted WS authority and every connected player down with it. The
   // sibling WS auth path is hardened against exactly this (authority/server.js);
   // this path must be too. A transient failure is a 500, not a crash.
-  let userRow;
+  let user;
   try {
-    const { rows } = await pool.query('SELECT token_version, role FROM users WHERE id = $1', [payload.user_id]);
-    userRow = rows[0];
+    user = await currentUserForToken(pool, payload);
   } catch (err) {
     console.error('auth token_version lookup failed:', err);
     res.status(500).json({ error: 'auth check failed' });
     return null;
   }
-  if (!userRow || userRow.token_version !== payload.tv) {
+  if (!user) {
     res.status(401).json({ error: 'token revoked' });
     return null;
   }
 
-  return { id: payload.user_id, username: payload.username, role: userRow.role };
+  return user;
 }
 
 // Named function (not an anonymous arrow) + an `isAuthGuard` marker property so a

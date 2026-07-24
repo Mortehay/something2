@@ -1,19 +1,19 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from 'react-hot-toast';
-import { authHeaders, apiFetch } from "./src/js/net/EngineClient.js";
+import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
 
-export function useMaps(){
-  const { data: maps, isLoading: isLoadingMaps } = useQuery({
-    queryKey: ['maps'],
-    queryFn: async () => {
-      const res = await apiFetch(`${API_URL}/api/maps`);
-      if (!res.ok) throw new Error('Failed to fetch maps');
-      return res.json();
-    }
-  });
-  return { maps, isLoadingMaps };
+// F-024/SOMET-204: the entity-type and tile-type mutations used to throw a
+// fixed generic string on a non-ok response and discard the backend's real
+// {error: "..."} body, while the item-type mutations parsed it (so e.g. a
+// 404 from a concurrent delete surfaced as "Entity type not found" for items
+// but only the generic "Failed to update entity type" for entities). Shared
+// here so all three catalogs use the same parse-and-throw path and can't
+// drift again.
+export async function throwApiError(res, fallback) {
+  const error = await res.json().catch(() => ({}));
+  throw new Error(error.error || fallback);
 }
 
 export function useMapTiles(){
@@ -26,83 +26,6 @@ export function useMapTiles(){
     }
   });
   return { mapTiles, isLoadingMapTiles };
-}
-
-export function useGenerateMap(onSuccessCallback) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      const res = await apiFetch(`${API_URL}/api/maps/generate`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ name: `World ${new Date().toLocaleTimeString()}` })
-      });
-      if (!res.ok) throw new Error('Failed to generate map');
-      return res.json();
-    },
-    onSuccess: (newMap) => {
-      queryClient.invalidateQueries({ queryKey: ['maps'] });
-      if (onSuccessCallback) {
-        onSuccessCallback(newMap);
-      }
-      toast.success('New map generated!');
-    },
-    onError: (err) => toast.error(`Generation failed: ${err.message}`)
-  });
-}
-
-export async function fetchMap(selectedMapId) {
-  const res = await apiFetch(`${API_URL}/api/maps/${selectedMapId}`);
-  if (!res.ok) throw new Error("Failed to load map data");
-  return res.json();
-}
-
-export async function fetchMapEntities(selectedMapId) {
-  const res = await apiFetch(`${API_URL}/api/maps/${selectedMapId}/entities`);
-  if (!res.ok) throw new Error("Failed to load map entities");
-  return res.json();
-}
-
-export function useSaveEntities(onSuccessCallback) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id, entities }) => {
-      const res = await apiFetch(`${API_URL}/api/maps/${id}/entities`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ entities })
-      });
-      if (!res.ok) throw new Error('Failed to save entities');
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['maps'] });
-      if (onSuccessCallback) onSuccessCallback();
-    },
-    onError: (err) => toast.error(`Save entities failed: ${err.message}`)
-  });
-}
-
-export function useDeleteMap(onSuccessCallback) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (id) => {
-      const res = await apiFetch(`${API_URL}/api/maps/${id}`, {
-        method: 'DELETE',
-        headers: authHeaders(),
-      });
-      if (!res.ok) throw new Error('Failed to delete map');
-      return res.json();
-    },
-    onSuccess: (data, deletedId) => {
-      queryClient.invalidateQueries({ queryKey: ['maps'] });
-      if (onSuccessCallback) {
-        onSuccessCallback(deletedId);
-      }
-      toast.success('Map deleted!');
-    },
-    onError: (err) => toast.error(`Deletion failed: ${err.message}`)
-  });
 }
 
 export function useTileTypes() {
@@ -126,7 +49,7 @@ export function useCreateTileType() {
         headers: authHeaders(),
         body: JSON.stringify(newTileType)
       });
-      if (!res.ok) throw new Error('Failed to create tile type');
+      if (!res.ok) await throwApiError(res, 'Failed to create tile type');
       return res.json();
     },
     onSuccess: () => {
@@ -148,7 +71,7 @@ export function useUpdateTileType() {
         headers: authHeaders(),
         body: JSON.stringify(data)
       });
-      if (!res.ok) throw new Error('Failed to update tile type');
+      if (!res.ok) await throwApiError(res, 'Failed to update tile type');
       return res.json();
     },
     onSuccess: () => {
@@ -168,7 +91,7 @@ export function useDeleteTileType() {
         method: 'DELETE',
         headers: authHeaders(),
       });
-      if (!res.ok) throw new Error('Failed to delete tile type');
+      if (!res.ok) await throwApiError(res, 'Failed to delete tile type');
       return res.json();
     },
     onSuccess: () => {
@@ -213,7 +136,7 @@ export function useCreateEntityType() {
         headers: authHeaders(),
         body: JSON.stringify(newEntityType)
       });
-      if (!res.ok) throw new Error('Failed to create entity type');
+      if (!res.ok) await throwApiError(res, 'Failed to create entity type');
       return res.json();
     },
     onSuccess: () => {
@@ -235,7 +158,7 @@ export function useUpdateEntityType() {
         headers: authHeaders(),
         body: JSON.stringify(data)
       });
-      if (!res.ok) throw new Error('Failed to update entity type');
+      if (!res.ok) await throwApiError(res, 'Failed to update entity type');
       return res.json();
     },
     onSuccess: () => {
@@ -255,7 +178,7 @@ export function useDeleteEntityType() {
         method: 'DELETE',
         headers: authHeaders(),
       });
-      if (!res.ok) throw new Error('Failed to delete entity type');
+      if (!res.ok) await throwApiError(res, 'Failed to delete entity type');
       return res.json();
     },
     onSuccess: () => {
@@ -288,10 +211,7 @@ export function useCreateItemType() {
         headers: authHeaders(),
         body: JSON.stringify(newItemType)
       });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(error.error || 'Failed to create item type');
-      }
+      if (!res.ok) await throwApiError(res, 'Failed to create item type');
       return res.json();
     },
     onSuccess: () => {
@@ -312,10 +232,7 @@ export function useUpdateItemType() {
         headers: authHeaders(),
         body: JSON.stringify(data)
       });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(error.error || 'Failed to update item type');
-      }
+      if (!res.ok) await throwApiError(res, 'Failed to update item type');
       return res.json();
     },
     onSuccess: () => {
@@ -334,10 +251,7 @@ export function useDeleteItemType() {
         method: 'DELETE',
         headers: authHeaders(),
       });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(error.error || 'Failed to delete item type');
-      }
+      if (!res.ok) await throwApiError(res, 'Failed to delete item type');
       return true;
     },
     onSuccess: () => {
@@ -345,29 +259,6 @@ export function useDeleteItemType() {
       toast.success('Item type deleted!');
     },
     onError: (err) => toast.error(`Deletion failed: ${err.message}`)
-  });
-}
-
-export function useGenerateEntities(onSuccessCallback) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (id) => {
-      const res = await apiFetch(`${API_URL}/api/maps/${id}/generate-entities`, {
-        method: 'POST',
-        headers: authHeaders(),
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || 'Failed to generate entities');
-      }
-      return res.json();
-    },
-    onSuccess: (data, id) => {
-      queryClient.invalidateQueries({ queryKey: ['maps'] });
-      if (onSuccessCallback) onSuccessCallback(data);
-      toast.success(`Generated ${data.count} entities and saved to database!`);
-    },
-    onError: (err) => toast.error(`Generation failed: ${err.message}`)
   });
 }
 

@@ -1,6 +1,7 @@
 from typing import Optional, Tuple
 from PIL import Image
 from ..config import settings
+from .base import seeded_generator
 
 class SDTurboBackend:
     name = "sd-turbo"
@@ -34,20 +35,11 @@ class SDTurboBackend:
             self._img2img = self._build_pipeline()
         return self._img2img
 
-    def _generator(self, seed: int):
-        try:
-            import torch
-            return torch.Generator(device=settings.device).manual_seed(seed)
-        except ModuleNotFoundError:
-            # torch is a hard requirement in production (see requirements.txt);
-            # this only triggers when a pipeline builder is monkeypatched in tests.
-            return None
-
     def generate(self, prompt: str, pose: Optional[Image.Image], seed: int,
                  steps: int, size: Tuple[int, int]) -> Image.Image:
         # sd-turbo uses its distilled few-step schedule with no CFG (guidance 0).
         n = max(1, min(steps, 4))
-        gen = self._generator(seed)
+        gen = seeded_generator(seed, settings.device)
         if pose is None:
             # Poseless (tile / texture) request: pure text2img at native res so
             # the prompt actually drives the image, then downscale to target.

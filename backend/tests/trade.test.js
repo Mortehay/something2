@@ -145,6 +145,35 @@ test('sellItem removes the item, credits gold, and inserts a buyback row', async
   assert.match(pool.seen[pool.seen.length - 1], /^COMMIT$/i);
 });
 
+// F-022 (SOMET-202): player_items.quantity is read and preserved by every
+// writer/reader in the tree but never written above 1 by any of them —
+// confirmed by grep across the whole repo (trade.js's own INSERT is
+// hardcoded to 1, items.js/index.js's grants omit quantity and take the
+// column default of 1, and loot.js's claimItem only ever copies quantity
+// from a world_items row that spawnDrops itself always inserts as 1). If a
+// stack >1 ever DID appear (e.g. a future write path), sellItem as written
+// would silently destroy every unit but one: it DELETEs the whole row and
+// pays for exactly ONE unit. Rather than try to make the whole stack
+// concept real end-to-end (merchant_stock's own buyback quantity has the
+// same unaddressed generality), sellItem refuses a stacked row outright —
+// loud and rolled-back beats silent data loss.
+test('sellItem refuses to sell a stacked item (quantity > 1) and rolls back instead of destroying units (F-022)', async () => {
+  const p = PLAYER(); p.inv.items = [{ id: 'i1', typeId: 3, quantity: 5 }];
+  const pool = mkPool([
+    [/DELETE FROM player_items/i, () => ({ rowCount: 1, rows: [{ item_type_id: 3, quantity: 5 }] })],
+  ]);
+  const r = await sellItem(pool, mkEntry(p), 1, 'v1', 'i1');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /stack/i);
+  assert.ok(!pool.seen.some((s) => /SELECT value FROM item_types/i.test(s)), 'must not price a stack it refuses to sell');
+  assert.ok(!pool.seen.some((s) => /UPDATE users SET gold \+/i.test(s)), 'no credit on refusal');
+  assert.ok(!pool.seen.some((s) => /INSERT INTO merchant_stock/i.test(s)), 'no buyback row on refusal');
+  assert.equal(pool.committed, false);
+  assert.equal(pool.rolledBack, true, 'the DELETE must be rolled back — the stack must survive intact, not be half-destroyed');
+  assert.equal(p.gold, 100, 'wallet untouched');
+  assert.equal(p.inv.items.length, 1, 'item not removed from in-memory inventory — the sale never happened');
+});
+
 test('sellItem refuses an equipped item, mutates nothing, and never opens a transaction', async () => {
   const p = PLAYER(); p.inv.equipment = { main_hand: 'i1' };
   const pool = {
@@ -175,4 +204,43 @@ test('buyStock requires an inventory (fails loud like sellItem, not silently)', 
   const r = await buyStock(pool, mkEntry(p), 1, 's1');
   assert.equal(r.ok, false);
   assert.match(r.reason, /no player/i);
+});
+
+test('buyStock refuses a stock row that does not belong to the village the player is standing at (F-019)', async () => {
+  const p = PLAYER();
+  // Mimics the real predicate: the row exists (village A's buyback listing)
+  // but the caller is standing at village B, so the locked read must come
+  // back empty rather than handing the row over regardless of location.
+  const pool = mkPool([
+    [/FROM merchant_stock WHERE id/i, (sql, params) => {
+      assert.match(sql, /village_id\s*=\s*\$2/i, 'the locked read must filter by the village the player is at');
+      const [, villageId] = params;
+      if (villageId !== 'village-a') return { rows: [] };
+      return { rows: [{ id: 's1', item_type_id: 3, price: 20, seller_user_id: 7, village_id: 'village-a' }] };
+    }],
+  ]);
+  // Player is standing at village B but sends village A's stockId.
+  const r = await buyStock(pool, mkEntry(p), 1, 's1', 'village-b');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /no longer for sale/i);
+  assert.equal(pool.rolledBack, true, 'must roll back — no gold debited, no item granted');
+  assert.equal(pool.committed, false);
+  assert.equal(p.gold, 100, 'wallet untouched');
+  assert.equal(p.inv.items.length, 1, 'inventory unchanged');
+});
+
+test('buyStock scopes the locked read to the village and world the player is at', async () => {
+  const p = PLAYER();
+  let sawParams = null;
+  const pool = mkPool([
+    [/FROM merchant_stock WHERE id/i, (sql, params) => {
+      sawParams = params;
+      return { rows: [{ id: 's1', item_type_id: 3, price: 20, seller_user_id: null, village_id: 'village-a' }] };
+    }],
+    [/UPDATE users SET gold = gold - /i, () => ({ rowCount: 1, rows: [{ gold: 80 }] })],
+    [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new1', item_type_id: 3, quantity: 1 }] })],
+  ]);
+  const r = await buyStock(pool, mkEntry(p, 'world-1'), 1, 's1', 'village-a');
+  assert.equal(r.ok, true);
+  assert.deepEqual(sawParams, ['s1', 'village-a', 'world-1']);
 });

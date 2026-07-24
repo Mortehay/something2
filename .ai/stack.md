@@ -31,11 +31,12 @@ Source of truth for each piece is the linked config file. Update those, then upd
 
 ## Infra — [compose/docker-compose.yml](compose/docker-compose.yml)
 
-- Postgres — db `game_db`, user `user` (compose default), host port 15432
-- Redis — live runtime state for the engine, image `redis:7-alpine`, host port 16379
+- Postgres — db `game_db`, user `user` (compose default), host port 15432 (bound to 127.0.0.1 — host/container-network only, not the LAN)
+- Redis — live runtime state for the engine, image `redis:7-alpine`, host port 16379 (also 127.0.0.1-only)
 - MinIO — asset storage
 - Docker Compose orchestrates frontend + backend + game-engine + db + redis + minio for dev
 - Required env: `JWT_SECRET` (engine refuses to start without it; shared secret with backend) — see [.env](.env) and [engine/README.md](engine/README.md)
+- Required env: `SPRITE_GEN_SHARED_SECRET` (backend and sprite-gen both refuse to start without it; sprite-gen's `POST /generate` rejects any call missing this header — see [.env](.env))
 
 ## Port convention
 

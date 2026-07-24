@@ -56,6 +56,26 @@ test('POST /api/tile-types/:id/image sets image and flips render_mode to image',
   assert.equal(res.body.render_mode, 'image');
 });
 
+// F-011 (SOMET-191): entity-types/:id/image already clears `sprite` when a
+// static image is approved, so the atlas path (RenderSystem.resolveSprite())
+// can't keep winning over the newly-approved image. tile-types/:id/image did
+// not -- one of the two near-verbatim approve routes had already drifted
+// from the other. Harmless today only because resolveTileVisual gates on
+// render_mode === 'animated' rather than sprite presence, but a trap for the
+// day the tile renderer adopts the same precedence entity rendering uses.
+test('POST /api/tile-types/:id/image clears sprite so the atlas path cannot keep winning', async () => {
+  const pool = mockPool([
+    [/UPDATE sprite_sets/i, () => ({ rows: [{ job_id: 'job1' }] })],
+    [/UPDATE tile_types SET image/i, (p) => ({ rows: [{ id: Number(p[1]), image: p[0], render_mode: 'image' }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).post('/api/tile-types/5/image').set(...AUTH)
+    .send({ image_key: 'sprites/tiles/grass/static.png', job_id: 'job1' });
+  assert.equal(res.status, 200);
+  const upd = pool.calls.find((c) => /UPDATE tile_types SET image/i.test(c.sql));
+  assert.match(upd.sql, /sprite\s*=\s*NULL/i, 'approving a static image must clear a previously-approved sprite atlas');
+});
+
 test('POST /api/tile-types/:id/sprite sets sprite jsonb and flips render_mode to animated', async () => {
   const pool = mockPool([
     [/UPDATE sprite_sets/i, () => ({ rows: [{ job_id: 'job1' }] })],

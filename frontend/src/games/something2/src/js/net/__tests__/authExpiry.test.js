@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   storeToken, clearToken, getStoredToken, noteAuthFailure, apiFetch, AUTH_EXPIRED_EVENT,
-} from "../EngineClient.js";
+} from "../auth.js";
 
 // A token that is well-formed and NOT expired — the shape that broke things.
 // getStoredToken() only rejects expired/malformed tokens, so a REVOKED one

@@ -5,7 +5,7 @@
 
 const { sellPriceFor, insertBuyback, BUYBACK_DAYS } = require('../services/merchantStock');
 
-async function buyStock(pool, entry, userId, stockId) {
+async function buyStock(pool, entry, userId, stockId, villageId) {
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
 
@@ -13,9 +13,16 @@ async function buyStock(pool, entry, userId, stockId) {
   try {
     await client.query('BEGIN');
 
+    // village_id + world_id scope this locked read to the merchant the
+    // caller was actually gated against (server.js's "no merchant nearby"
+    // check resolves a specific village and must be the ONLY village whose
+    // stock this call can touch — F-019 / SOMET-199). The expires_at
+    // predicate closes the same gap fetchShop only sweeps lazily: a lapsed
+    // buyback row must stop being purchasable the instant it expires, not
+    // whenever someone next opens that village's shop.
     const sr = await client.query(
-      'SELECT id, item_type_id, price, seller_user_id, village_id FROM merchant_stock WHERE id = $1 FOR UPDATE',
-      [stockId],
+      'SELECT id, item_type_id, price, seller_user_id, village_id FROM merchant_stock WHERE id = $1 AND village_id = $2 AND world_id = $3 AND (expires_at IS NULL OR expires_at > now()) FOR UPDATE',
+      [stockId, villageId, entry.worldId],
     );
     if (sr.rows.length !== 1) {
       await client.query('ROLLBACK');
@@ -87,6 +94,21 @@ async function sellItem(pool, entry, userId, villageId, itemId) {
       return { ok: false, reason: 'you do not own that item' };
     }
     const itemTypeId = del.rows[0].item_type_id;
+
+    // Nothing in this codebase currently grants a player_items row with
+    // quantity > 1 (grep confirms it: trade.js's own buy INSERT hardcodes 1,
+    // items.js/index.js's grants take the column default of 1, and
+    // claimItem only ever copies a world_items quantity that spawnDrops
+    // itself always inserts as 1 — F-022 / SOMET-202). If a stack ever DID
+    // appear, the code below would price and pay for exactly ONE unit while
+    // deleting the whole row — silently destroying every unit but one.
+    // Refuse instead of risking that: the DELETE above already removed the
+    // row, so this must roll back, not merely return an error.
+    const quantity = Number(del.rows[0].quantity) || 1;
+    if (quantity !== 1) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'cannot sell a stacked item' };
+    }
 
     const vr = await client.query('SELECT value FROM item_types WHERE id = $1', [itemTypeId]);
     const value = vr.rows.length ? Number(vr.rows[0].value) || 0 : 0;

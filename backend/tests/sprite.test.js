@@ -89,6 +89,51 @@ test('GET /api/sprite-jobs/:id proxies status', async () => {
   assert.equal(res.body.status, 'done');
 });
 
+// F-002 (SOMET-182): an encoded ../ in :jobId let an unauthenticated caller
+// escape /jobs/ and reach arbitrary GET endpoints on the internal sprite-gen
+// service (confirmed live: /api/tile-jobs/..%2Fcapability returned the host
+// capability JSON). Express decodes the param before routing, so req.params.jobId
+// arrives as the literal string '../capability' -- the three proxies below must
+// reject anything that isn't a bare job id before calling spriteGen.getJob.
+test('GET /api/sprite-jobs/:jobId rejects a path-traversal jobId without proxying', async () => {
+  let getJobCalled = false;
+  __setSpriteGen({ postGenerate: async () => ({}), getJob: async () => { getJobCalled = true; return { secret: 'leaked' }; } });
+  __setPool({ query: async () => ({ rows: [] }) });
+
+  const res = await request(app).get('/api/sprite-jobs/..%2Fcapability');
+  assert.equal(res.status, 400);
+  assert.equal(getJobCalled, false, 'spriteGen.getJob must not be called with a traversal jobId');
+});
+
+test('GET /api/entity-jobs/:jobId rejects a path-traversal jobId without proxying', async () => {
+  let getJobCalled = false;
+  __setSpriteGen({ postGenerate: async () => ({}), getJob: async () => { getJobCalled = true; return { secret: 'leaked' }; } });
+  __setPool({ query: async () => ({ rows: [] }) });
+
+  const res = await request(app).get('/api/entity-jobs/..%2Fcapability');
+  assert.equal(res.status, 400);
+  assert.equal(getJobCalled, false, 'spriteGen.getJob must not be called with a traversal jobId');
+});
+
+test('GET /api/tile-jobs/:jobId rejects a path-traversal jobId without proxying', async () => {
+  let getJobCalled = false;
+  __setSpriteGen({ postGenerate: async () => ({}), getJob: async () => { getJobCalled = true; return { secret: 'leaked' }; } });
+  __setPool({ query: async () => ({ rows: [] }) });
+
+  const res = await request(app).get('/api/tile-jobs/..%2Fcapability');
+  assert.equal(res.status, 400);
+  assert.equal(getJobCalled, false, 'spriteGen.getJob must not be called with a traversal jobId');
+});
+
+test('GET /api/tile-jobs/:jobId still proxies a well-formed job id', async () => {
+  __setSpriteGen({ postGenerate: async () => ({}), getJob: async (id) => ({ id, status: 'done' }) });
+  __setPool({ query: async () => ({ rows: [] }) });
+
+  const res = await request(app).get('/api/tile-jobs/job-abc123_XYZ');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, 'done');
+});
+
 test('POST /api/entity-types/:id/sprite approves a sprite set and links it', async () => {
   __setSpriteGen({ postGenerate: async () => ({}), getJob: async () => ({}) });
   __setPool({

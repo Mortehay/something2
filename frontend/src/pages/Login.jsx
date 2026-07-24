@@ -1,6 +1,6 @@
 import { useState } from "react";
 import styled from "styled-components";
-import { login, register, storeToken } from "../games/something2/src/js/net/EngineClient.js";
+import { login, register, storeToken } from "../games/something2/src/js/net/auth.js";
 
 const Screen = styled.div`
   display: flex;
@@ -75,7 +75,7 @@ const ErrorText = styled.p`
 `;
 
 // Login / register screen. Pure UI + the two auth calls; the token storage and
-// parsing logic lives in (unit-tested) helpers in EngineClient.js. On success
+// parsing logic lives in (unit-tested) helpers in net/auth.js. On success
 // it stores the returned token and calls onAuthed() so the parent can show the
 // game.
 export default function Login({ apiUrl, onAuthed }) {

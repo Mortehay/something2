@@ -20,15 +20,44 @@ function mapRow(r) {
   };
 }
 
-// One base-catalog row per sellable catalog item. Idempotent per village only in
-// the sense that callers seed once at village creation.
+// One base-catalog row per sellable catalog item. The NOT EXISTS guard makes
+// this safe to call more than once for the same village (village creation is
+// still the only caller today, but seedItemAcrossVillages below shares this
+// same "don't duplicate an existing base-catalog row" invariant, so both
+// functions need it to stay correct together).
 async function seedBaseCatalog(pool, worldId, villageId) {
   await pool.query(
     `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity)
      SELECT $1, $2, id, value, NULL, NULL, 1
        FROM item_types
-      WHERE category IN ('weapon','armor') AND value > 0`,
+      WHERE category IN ('weapon','armor') AND value > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM merchant_stock ms
+           WHERE ms.village_id = $2 AND ms.item_type_id = item_types.id AND ms.seller_user_id IS NULL
+        )`,
     [worldId, villageId],
+  );
+}
+
+// SOMET-186 / F-006: seedBaseCatalog only ever ran at village creation, so an
+// item type added afterward never reached any village that already existed --
+// permanently, with no recovery short of deleting and recreating the village
+// (which loses its buyback rows) or a manual SQL insert. Call this once, right
+// after a weapon/armor item type is created, to backfill a base-catalog row
+// for that one item type into every village that doesn't already have one.
+// NOT EXISTS makes it safe to call redundantly (e.g. a retried request).
+async function seedItemAcrossVillages(pool, itemTypeId) {
+  await pool.query(
+    `INSERT INTO merchant_stock (world_id, village_id, item_type_id, price, seller_user_id, expires_at, quantity)
+     SELECT v.world_id, v.id, it.id, it.value, NULL, NULL, 1
+       FROM villages v
+       JOIN item_types it ON it.id = $1
+      WHERE it.category IN ('weapon','armor') AND it.value > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM merchant_stock ms
+           WHERE ms.village_id = v.id AND ms.item_type_id = it.id AND ms.seller_user_id IS NULL
+        )`,
+    [itemTypeId],
   );
 }
 
@@ -61,4 +90,7 @@ async function insertBuyback(pool, worldId, villageId, itemTypeId, price, seller
   return r.rows[0];
 }
 
-module.exports = { SELL_FRACTION, BUYBACK_DAYS, sellPriceFor, seedBaseCatalog, fetchShop, insertBuyback };
+module.exports = {
+  SELL_FRACTION, BUYBACK_DAYS, sellPriceFor,
+  seedBaseCatalog, seedItemAcrossVillages, fetchShop, insertBuyback,
+};

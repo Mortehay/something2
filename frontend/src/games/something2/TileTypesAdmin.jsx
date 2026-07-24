@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { useTileTypes, useCreateTileType, useUpdateTileType, useDeleteTileType } from './useMaps.js';
+import { useTileTypes, useCreateTileType, useUpdateTileType, useDeleteTileType, useEntityTypes } from './useMaps.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import { useGenerateTileJob, useTileJob, useApproveTileImage, useApproveTileSprite, assetUrl } from './useTileSprites.js';
 import { useSpriteCapability } from './useSprites.js';
+import { validateTileType } from './catalogValidation.js';
+import { entityTypesReferencingTile } from './catalogReferences.js';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -358,6 +360,9 @@ function TileSpritePanel({ tile }) {
 
 function TileTypesAdmin() {
   const { tileTypes, isLoadingTileTypes } = useTileTypes();
+  // F-027/SOMET-207: only needed to warn before a delete orphans a reference
+  // -- see handleDelete below.
+  const { entityTypes } = useEntityTypes();
   const createMutation = useCreateTileType();
   const updateMutation = useUpdateTileType();
   const deleteMutation = useDeleteTileType();
@@ -411,13 +416,15 @@ function TileTypesAdmin() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
-    // Validation
-    if (!formData.name.trim()) {
-      toast.error("Name is required");
+
+    // F-025/SOMET-205: this used to only check that name was non-empty, so a
+    // negative (or > 2) speed multiplier saved silently.
+    const problem = validateTileType(formData);
+    if (problem) {
+      toast.error(problem);
       return;
     }
-    
+
     if (editingTile) {
       updateMutation.mutate({ id: editingTile.id, ...formData }, {
         onSuccess: () => setIsModalOpen(false)
@@ -429,9 +436,19 @@ function TileTypesAdmin() {
     }
   };
 
-  const handleDelete = (id) => {
-    if (window.confirm("Are you sure you want to delete this tile type?")) {
-      deleteMutation.mutate(id);
+  // F-027/SOMET-207: entity_types.spawn_tiles references this tile by name
+  // with no server-side integrity check (DELETE /api/tile-types/:id has no
+  // FK/consistency guard), so a delete here can silently orphan another
+  // catalog's data. The honest fix is server-side; this is the bounded
+  // client-side version -- name the entity types that still reference the
+  // tile so the admin isn't deleting it blind.
+  const handleDelete = (tile) => {
+    const refs = entityTypesReferencingTile(tile.name, entityTypes);
+    const warning = refs.length
+      ? `Warning: entity type(s) ${refs.join(', ')} still list "${tile.name}" as a spawn tile. Deleting it will leave that reference dangling.\n\n`
+      : '';
+    if (window.confirm(`${warning}Are you sure you want to delete this tile type?`)) {
+      deleteMutation.mutate(tile.id);
     }
   };
 
@@ -470,7 +487,7 @@ function TileTypesAdmin() {
                 <IconButton onClick={() => handleOpenEdit(tile)} title="Edit">
                   <HiOutlinePencil />
                 </IconButton>
-                <IconButton $delete onClick={() => handleDelete(tile.id)} title="Delete">
+                <IconButton $delete onClick={() => handleDelete(tile)} title="Delete">
                   <HiOutlineTrash />
                 </IconButton>
               </ActionButtons>

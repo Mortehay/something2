@@ -51,6 +51,15 @@ class Settings:
     minio_secret_key: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
     minio_bucket: str = os.getenv("MINIO_BUCKET", "sprites")
     minio_secure: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
+    # Shared secret the Node backend sends on every call (F-033/SOMET-213):
+    # POST /generate had no authentication, so anything that could reach the
+    # port (the whole LAN, before F-039's compose fix) could queue unbounded
+    # CPU work. Empty string means "not configured" — main.py's
+    # require_shared_secret() fails CLOSED on that, not open. docker-compose
+    # requires this var via the same `${VAR:?msg}` convention as JWT_SECRET,
+    # so an unconfigured deploy never even starts; this default only matters
+    # for direct/non-compose runs (bare uvicorn, this test suite).
+    sprite_gen_shared_secret: str = os.getenv("SPRITE_GEN_SHARED_SECRET", "")
 
     def capability(self) -> dict:
         return build_capability(self.device)

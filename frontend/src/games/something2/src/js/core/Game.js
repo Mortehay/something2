@@ -3,7 +3,6 @@ import { RenderSystem } from "../systems/RenderSystem.js";
 import { Player } from "../entities/Player.js";
 import { ImageManager } from "../managers/ImageManager.js";
 import { Camera } from "./Camera.js";
-import { Map as GameMap } from "./Map.js";
 import { ChunkedMap } from "./ChunkedMap.js";
 import { ChunkStreamer } from "../net/ChunkStreamer.js";
 import { makeChunkFetcher } from "../net/chunkFetcher.js";
@@ -11,7 +10,7 @@ import { CreatureManager } from "../entities/CreatureManager.js";
 import { ProjectileManager } from "../entities/ProjectileManager.js";
 import { GroundItemManager } from "../entities/GroundItemManager.js";
 import { WorldAuthorityClient } from "../net/WorldAuthorityClient.js";
-import { getStoredToken, parseJwt } from "../net/EngineClient.js";
+import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
@@ -36,15 +35,6 @@ const NativeMap = globalThis.Map;
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
 
-// Reconciliation tunables (pixel space). The local player runs prediction; on
-// each engine tick we compare the server-authoritative position to ours.
-//   diff <= SOFT  → ignore (trust local prediction)
-//   diff <= HARD  → lerp toward server over a few frames
-//   diff >  HARD  → snap (cheating / desync / teleport)
-const RECONCILE_SOFT_PX = 20;
-const RECONCILE_HARD_PX = 200;
-const RECONCILE_LERP = 0.25;
-
 export class Game {
     constructor() {
         console.log("Game constructor");
@@ -54,7 +44,6 @@ export class Game {
 
         this.player = new Player();
         this.camera = new Camera();
-        this.map = new GameMap();
 
         this.chunked = false;
         this.chunkedMap = null;
@@ -65,7 +54,10 @@ export class Game {
         this.state = 'menu';
         this.onStateChange = null;
 
-        // Networking — set via setEngineClient before init().
+        // Networking — set via setEngineClient. Something2.jsx only ever
+        // calls this with (null, null) as teardown (the live path is
+        // initChunked's WorldAuthorityClient below); kept only so that
+        // teardown call has something to no-op against.
         this.engine = null;
         this.localUserId = null;
         this.remotePlayers = new NativeMap(); // user_id -> {x, y, hp}
@@ -133,10 +125,6 @@ export class Game {
     setEngineClient(engine, localUserId) {
         this.engine = engine;
         this.localUserId = localUserId;
-        if (engine) {
-            engine.onState = (msg) => this._onServerState(msg);
-            engine.onCollision = (msg) => console.log("collision:", msg);
-        }
     }
 
     setOnStateChange(callback) {
@@ -153,6 +141,23 @@ export class Game {
             if (this.onStateChange) {
                 this.onStateChange(newState);
             }
+        }
+    }
+
+    // WorldAuthorityClient's onClose fires for every close, including ones
+    // Game itself triggered on purpose (a doorway transition's re-entry
+    // guard, the 'kicked' flow's own disconnect(), destroy() on unmount).
+    // `wasIntentional` (WorldAuthorityClient's _closed, set synchronously
+    // before it calls ws.close()) tells those apart from the socket simply
+    // dying under us (backend restart/crash/network blip). Only the latter
+    // is fatal: it leaves state=='playing' with input handlers silently
+    // dropping every send against a dead socket (F-028) unless we surface
+    // it. Mirrors the existing 'kicked' state transition/render branch.
+    _onAuthorityClose(wasIntentional) {
+        this.authorityJoined = false;
+        if (!wasIntentional && this.state === 'playing') {
+            console.warn('[authority] connection lost — no reconnect attempted, reload to resume');
+            this.setState('disconnected');
         }
     }
 
@@ -198,59 +203,6 @@ export class Game {
             const spr = entityTypes[name] && entityTypes[name].sprite;
             if (spr && spr.atlas_key && manifests[spr.atlas_key]) spr.manifest = manifests[spr.atlas_key];
         }
-        // Also attach to any entities whose sprite is a distinct object. The
-        // chunked world has no legacy Map entities, hence the guard.
-        for (const ent of (this.map && this.map.entities) || []) {
-            if (ent.sprite && ent.sprite.atlas_key && manifests[ent.sprite.atlas_key]) {
-                ent.sprite.manifest = manifests[ent.sprite.atlas_key];
-            }
-        }
-    }
-
-    async init(tiles = null, mapTiles = null, loadedEntities = null, entityTypes = null){
-        if (!this.canvas) {
-            console.error("Canvas not found!");
-            return;
-        }
-        this.ctx = this.canvas.getContext('2d');
-        this.state = 'playing';
-
-        this.renderSystem = new RenderSystem(this.canvas, this.imageManager);
-
-        const initPromises = [this.imageManager.loadAll()];
-        
-        if (tiles) {
-            this.map.init(tiles, mapTiles, loadedEntities, entityTypes);
-            // Load generated sprite atlases + manifests for any sprited types.
-            initPromises.push(this.preloadSprites(entityTypes));
-
-            // Find a safe spawn point for the player
-            const spawnPoint = this.map.findSafeSpawn();
-            if (spawnPoint) {
-                this.player.x = spawnPoint.x - this.player.width / 2;
-                this.player.y = spawnPoint.y - this.player.height / 2;
-                this.camera.update(this.player);
-            }
-        }
-
-        await Promise.all(initPromises);
-
-        this.resizeCanvas();
-        this._resizeHandler = () => this.resizeCanvas();
-        window.addEventListener('resize', this._resizeHandler);
-        this.setupInput();
-
-        //start game loop
-        if (this.animationFrameId) {
-            cancelAnimationFrame(this.animationFrameId);
-        }
-        this.lastTime = performance.now();
-        this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
-        console.log(`game loop started`)        
-    }
-
-    setMap(tiles, mapTiles, loadedEntities, entityTypes = null) {
-        this.map.init(tiles, mapTiles, loadedEntities, entityTypes);
     }
 
     async initChunked({ worldId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, spawnX = 0, spawnY = 0 }) {
@@ -370,7 +322,7 @@ export class Game {
                     // would just be noise (and may fire repeatedly).
                     if (e && e.isServerRejection && e.serverMessage) this._showToast(e.serverMessage);
                 },
-                onClose: () => { this.authorityJoined = false; },
+                onClose: (ev, wasIntentional) => this._onAuthorityClose(wasIntentional),
                 onKicked: () => {
                     console.warn('[authority] kicked: signed in elsewhere');
                     this.setState('kicked');
@@ -459,46 +411,6 @@ export class Game {
             this.camera.update(this.player);
             return;
         }
-        this.player.update(dt, this.keys, this.map);
-        this.camera.update(this.player);
-
-        // Push our (predicted) position to the engine. The client is
-        // throttled internally to ~20Hz so spamming this every frame is fine.
-        if (this.engine && this.engine.joined) {
-            const cx = this.player.x + this.player.width / 2;
-            const cy = this.player.y + this.player.height / 2;
-            this.engine.sendMove(cx, cy);
-        }
-    }
-
-    /**
-     * Apply an authoritative tick from the engine. We reconcile our own
-     * position softly (lerp / snap by distance) and overwrite remote players
-     * directly — the renderer reads whatever's in `this.remotePlayers`.
-     */
-    _onServerState(msg) {
-        this.lastServerTick = msg.tick || 0;
-        const next = new NativeMap();
-        for (const sp of msg.players || []) {
-            if (sp.user_id === this.localUserId) {
-                this._reconcileSelf(sp);
-                continue;
-            }
-            const px = sp.x - this.player.width / 2;
-            const py = sp.y - this.player.height / 2;
-            next.set(sp.user_id, { x: px, y: py, hp: sp.hp });
-        }
-        this.remotePlayers = next;
-
-        // Once per ~second, log a diagnostic snapshot so multiplayer is
-        // visible in the console without opening devtools to the network tab.
-        if (msg.tick && msg.tick % 60 === 0) {
-            console.log(
-                `[engine] tick=${msg.tick} map=${msg.map_id} self=${this.localUserId} ` +
-                `local=(${Math.round(this.player.x)},${Math.round(this.player.y)}) ` +
-                `remote=${this.remotePlayers.size} ids=[${[...this.remotePlayers.keys()].join(",")}]`
-            );
-        }
     }
 
     // Authoritative tick from the world authority. Reconcile the local player
@@ -559,25 +471,6 @@ export class Game {
         }
     }
 
-    _reconcileSelf(serverPlayer) {
-        // Server reports a center coordinate; convert back to top-left.
-        const sx = serverPlayer.x - this.player.width / 2;
-        const sy = serverPlayer.y - this.player.height / 2;
-        const dx = sx - this.player.x;
-        const dy = sy - this.player.y;
-        const dist = Math.hypot(dx, dy);
-
-        if (dist <= RECONCILE_SOFT_PX) return; // trust prediction
-        if (dist > RECONCILE_HARD_PX) {
-            this.player.x = sx;
-            this.player.y = sy;
-            return;
-        }
-        // Soft pull toward server.
-        this.player.x += dx * RECONCILE_LERP;
-        this.player.y += dy * RECONCILE_LERP;
-    }
-
     // The HUD weapon name: whatever occupies main_hand, else the default
     // weapon (mirrors the server's DEFAULT_WEAPON_NAME fallback).
     _resolveWeaponName() {
@@ -605,6 +498,20 @@ export class Game {
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'middle';
             this.ctx.fillText('Signed in elsewhere — this session was disconnected.', this.canvas.width / 2, this.canvas.height / 2);
+            this.ctx.restore();
+        } else if (this.state === 'disconnected') {
+            // Same freeze-and-explain treatment as 'kicked' above, for the
+            // other way the authority socket dies: it just closed on us
+            // (server restart/crash/network), rather than the server
+            // deliberately kicking this session (see _onAuthorityClose).
+            this.ctx.fillStyle = 'rgba(0,0,0,0.75)';
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            this.ctx.save();
+            this.ctx.fillStyle = '#ef4444';
+            this.ctx.font = '24px sans-serif';
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
+            this.ctx.fillText('Connection lost — reload to reconnect.', this.canvas.width / 2, this.canvas.height / 2);
             this.ctx.restore();
         } else if (this.chunked) {
             // Expire the toast here (once per frame) rather than on a timer,
@@ -648,8 +555,6 @@ export class Game {
                 // at their feet come from this.player.effects via drawCreature.
                 effects: this.player.effects || null,
             });
-        } else {
-            this.renderSystem.render(this.player, this.camera, this.map, this.remotePlayers, this.localUserId);
         }
     }
 
@@ -764,26 +669,21 @@ export class Game {
                 return;
             }
 
-            if (key === 'g' && this.state === 'playing') {
-                // Chunked mode: g loots. Legacy single-map mode keeps the grid toggle.
-                if (this.chunked) {
-                    // Match the mouse handler's rule: no game-world intents
-                    // fire while the inventory panel is open and consuming
-                    // input.
-                    if (!e.repeat && this.authorityClient && !this.inventoryOpen) this.authorityClient.sendPickup();
-                } else {
-                    this.map.toggleGrid();
-                }
+            if (key === 'g' && this.state === 'playing' && this.chunked) {
+                // Match the mouse handler's rule: no game-world intents
+                // fire while the inventory panel is open and consuming
+                // input.
+                if (!e.repeat && this.authorityClient && !this.inventoryOpen) this.authorityClient.sendPickup();
             }
 
             // Dev: cycle the global render-mode override (none -> rect -> static -> animated).
-            if(key === 'm' && this.state === 'playing'){
+            if(key === 'm' && this.state === 'playing' && !e.repeat){
                 const mode = this.renderSystem.cycleRenderModeOverride();
                 console.log(`Render-mode override: ${mode ?? 'off (per-entity)'}`);
             }
 
             // Dev: toggle tile textures on/off (falls back to flat color).
-            if (key === 't' && this.renderSystem && this.chunked) {
+            if (key === 't' && this.renderSystem && this.chunked && !e.repeat) {
                 const on = this.renderSystem.toggleTileTextures();
                 this._showToast(`Tile textures ${on ? 'on' : 'off'}`);
             }

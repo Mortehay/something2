@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { sellPriceFor, fetchShop, seedBaseCatalog, insertBuyback, SELL_FRACTION, BUYBACK_DAYS } =
+const { sellPriceFor, fetchShop, seedBaseCatalog, seedItemAcrossVillages, insertBuyback, SELL_FRACTION, BUYBACK_DAYS } =
   require('../src/services/merchantStock');
 
 test('sellPriceFor is half the value, floored, and never negative', () => {
@@ -43,6 +43,39 @@ test('seedBaseCatalog inserts only sellable weapon/armor types at price = value'
   assert.match(insertSql, /category IN \('weapon','armor'\)/i);
   assert.match(insertSql, /value > 0/i);
   assert.deepEqual(insertParams, ['w1', 'v1']);
+});
+
+// F-006 (SOMET-186): seedBaseCatalog only ever ran once, at village creation,
+// so an item type added afterward never reached a village that already
+// existed. Fixed by (1) making the base-catalog INSERT idempotent (a NOT
+// EXISTS guard) and (2) adding seedItemAcrossVillages, called right after an
+// item type is created, to backfill that one item type into every existing
+// village. Both need the guard so a retried/duplicate call never double-
+// inserts a base-catalog row for the same village+item.
+test('seedBaseCatalog is idempotent: it does not re-insert a row that already exists', async () => {
+  let insertSql = '';
+  const pool = { query: async (sql) => {
+    if (/INSERT INTO merchant_stock/i.test(sql)) { insertSql = sql; return { rows: [] }; }
+    throw new Error('unexpected ' + sql);
+  } };
+  await seedBaseCatalog(pool, 'w1', 'v1');
+  assert.match(insertSql, /NOT EXISTS/i, 'must guard against a duplicate base-catalog row');
+  assert.match(insertSql, /seller_user_id IS NULL/i, 'the guard must only match base-catalog rows, not buyback rows');
+});
+
+test('seedItemAcrossVillages backfills one item type into every village missing it', async () => {
+  let insertSql = '', insertParams = null;
+  const pool = { query: async (sql, params) => {
+    if (/INSERT INTO merchant_stock/i.test(sql)) { insertSql = sql; insertParams = params; return { rows: [] }; }
+    throw new Error('unexpected ' + sql);
+  } };
+  await seedItemAcrossVillages(pool, 76);
+  assert.match(insertSql, /FROM villages v/i, 'must fan out across every village, not one');
+  assert.match(insertSql, /JOIN item_types it ON it\.id = \$1/i);
+  assert.match(insertSql, /category IN \('weapon','armor'\)/i);
+  assert.match(insertSql, /value > 0/i);
+  assert.match(insertSql, /NOT EXISTS/i, 'must not duplicate a village that already has this item');
+  assert.deepEqual(insertParams, [76]);
 });
 
 test('insertBuyback stores the sold price, the seller, and an expiry', async () => {

@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import patch
 from app.backends.stub import StubBackend
+from app.main import app, require_shared_secret
 
 
 def _blocked_default_store(*args, **kwargs):
@@ -56,3 +57,24 @@ def _force_stub_backend_in_jobs():
     """
     with patch("app.orchestrator.get_backend", lambda name: StubBackend()):
         yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _bypass_shared_secret_for_generate():
+    """POST /generate is gated by require_shared_secret() (F-033/SOMET-213).
+
+    The rest of this suite exercises /generate's behavior — recipe
+    resolution, job lifecycle, storage, bounds — without simulating the
+    backend's shared-secret header on every single call site; rewriting every
+    existing test for a concern this fixture already covers once would be
+    pure churn. Override the FastAPI dependency for the whole session so
+    `client.post("/generate", ...)` keeps working everywhere else.
+
+    The real check is NOT weakened in production by this: dependency_overrides
+    only exists inside this test process, and the check itself is unit- and
+    end-to-end-tested directly in tests/test_auth.py (which temporarily pops
+    this override to prove the route still enforces it for real).
+    """
+    app.dependency_overrides[require_shared_secret] = lambda: None
+    yield
+    app.dependency_overrides.pop(require_shared_secret, None)
