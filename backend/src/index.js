@@ -581,8 +581,14 @@ app.delete('/api/maps/:id', adminGuard, async (req, res) => {
 // Persisted as row-per-entity in map_entities (type='obstacle', entity_type_id resolved by name,
 // x = col + 0.5, y = row + 0.5 in tile coords).
 app.post('/api/maps/:id/entities', adminGuard, async (req, res) => {
-  const client = await pool.connect();
+  // Acquired inside the try: pool.connect() can reject (DB restart, pool
+  // exhaustion) and Express 4.x does not catch async handler rejections, so
+  // an unguarded await here would escape as an unhandledRejection and kill
+  // the process (and every WS player co-hosted on it). Same hardening as
+  // auth/middleware.js.
+  let client = null;
   try {
+    client = await pool.connect();
     const { id } = req.params;
     const { entities } = req.body;
 
@@ -615,11 +621,11 @@ app.post('/api/maps/:id/entities', adminGuard, async (req, res) => {
     await client.query('COMMIT');
     res.json({ success: true });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client?.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Failed to save entities' });
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
@@ -654,8 +660,10 @@ app.get('/api/maps/:id/entities', async (req, res) => {
 // Generate static obstacles (type='obstacle') from entity_types.spawn_tiles + chance.
 app.post('/api/maps/:id/generate-entities', adminGuard, async (req, res) => {
   const { id } = req.params;
-  const client = await pool.connect();
+  // Acquired inside the try: see the /entities route above for why.
+  let client = null;
   try {
+    client = await pool.connect();
     const mapResult = await client.query('SELECT data FROM maps WHERE id = $1', [id]);
     if (mapResult.rows.length === 0) return res.status(404).json({ error: 'Map not found' });
     const tiles = mapResult.rows[0].data;
@@ -696,11 +704,11 @@ app.post('/api/maps/:id/generate-entities', adminGuard, async (req, res) => {
       entities: generated.map((g) => ({ type: g.name, name: g.name, row: g.row, col: g.col })),
     });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client?.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Generation failed: ' + err.message });
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
