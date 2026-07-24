@@ -35,6 +35,13 @@ const authRouter = require('./auth/routes.js');
 // Single admin guard applied to every mutating admin route below.
 const adminGuard = requireAdmin(guardPool);
 
+// Job ids returned by sprite-gen's /generate. These three routes proxy an
+// unauthenticated :jobId straight into a sprite-gen path segment (services/
+// spriteGen.js getJob), so a caller who slips in an encoded "../" can escape
+// /jobs/ and reach arbitrary GET endpoints on the internal service (SOMET-182).
+// Reject anything that isn't a bare job id before it ever reaches the proxy.
+const JOB_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
 // World preview memo
 const PREVIEW_DIM = 64;
 const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path grid)
@@ -755,6 +762,7 @@ app.post('/api/sprite-jobs', adminGuard, async (req, res) => {
 
 // Proxy job status from the sprite-gen service.
 app.get('/api/sprite-jobs/:jobId', async (req, res) => {
+  if (!JOB_ID_RE.test(req.params.jobId)) return res.status(400).json({ error: 'invalid job id' });
   try {
     const job = await spriteGen.getJob(req.params.jobId);
     res.json(job);
@@ -843,6 +851,7 @@ app.post('/api/entity-jobs', adminGuard, async (req, res) => {
 
 // Proxy entity job status (job ids are global to the sprite-gen job manager).
 app.get('/api/entity-jobs/:jobId', async (req, res) => {
+  if (!JOB_ID_RE.test(req.params.jobId)) return res.status(400).json({ error: 'invalid job id' });
   try {
     res.json(await spriteGen.getJob(req.params.jobId));
   } catch (err) {
@@ -904,6 +913,7 @@ app.post('/api/tile-jobs', adminGuard, async (req, res) => {
 
 // Proxy tile job status (job ids are global to the sprite-gen job manager).
 app.get('/api/tile-jobs/:jobId', async (req, res) => {
+  if (!JOB_ID_RE.test(req.params.jobId)) return res.status(400).json({ error: 'invalid job id' });
   try {
     res.json(await spriteGen.getJob(req.params.jobId));
   } catch (err) {

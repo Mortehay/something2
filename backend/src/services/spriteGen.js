@@ -21,7 +21,10 @@ async function postGenerate(body) {
 }
 
 async function getJob(jobId) {
-  const res = await _fetch(`/jobs/${jobId}`);
+  // Defense in depth: index.js validates jobId against a strict format before
+  // calling this, but encode here too so a caller of this module directly
+  // can't smuggle a "../" segment into the sprite-gen URL (SOMET-182).
+  const res = await _fetch(`/jobs/${encodeURIComponent(jobId)}`);
   if (!res.ok) throw new Error(`sprite-gen /jobs ${res.status}`);
   return res.json();
 }
