@@ -1,83 +1,22 @@
-function generateWFC(rows, cols, tileTypes) {
-    const tileNames = Object.keys(tileTypes);
-    const grid = Array(rows).fill(null).map(() => 
-        Array(cols).fill(null).map(() => [...tileNames])
-    );
-
-    const getEntropy = (r, c) => grid[r][c].length;
-
-    const getLowestEntropyCoords = () => {
-        let minEntropy = Infinity;
-        let coords = [];
-
-        for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-                if (grid[r][c].length > 1) {
-                    const entropy = getEntropy(r, c);
-                    if (entropy < minEntropy) {
-                        minEntropy = entropy;
-                        coords = [[r, c]];
-                    } else if (entropy === minEntropy) {
-                        coords.push([r, c]);
-                    }
-                }
-            }
-        }
-        return coords.length > 0 ? coords[Math.floor(Math.random() * coords.length)] : null;
-    };
-
-    const propagate = (r, c) => {
-        const stack = [[r, c]];
-        while (stack.length > 0) {
-            const [currR, currC] = stack.pop();
-            const currOptions = grid[currR][currC];
-
-            const neighbors = [
-                [currR - 1, currC], [currR + 1, currC],
-                [currR, currC - 1], [currR, currC + 1]
-            ];
-
-            for (const [nR, nC] of neighbors) {
-                if (nR >= 0 && nR < rows && nC >= 0 && nC < cols) {
-                    const neighborOptions = grid[nR][nC];
-                    if (neighborOptions.length <= 1) continue;
-
-                    const validForNeighbor = new Set();
-                    currOptions.forEach(opt => {
-                        const allowedNeighbors = tileTypes[opt]?.validNeighbors || [];
-                        allowedNeighbors.forEach(validOpt => validForNeighbor.add(validOpt));
-                    });
-
-                    const nextNeighborOptions = neighborOptions.filter(opt => validForNeighbor.has(opt));
-
-                    if (nextNeighborOptions.length < neighborOptions.length) {
-                        grid[nR][nC] = nextNeighborOptions;
-                        stack.push([nR, nC]);
-                    }
-                }
-            }
-        }
-    };
-
-    let next;
-    while (next = getLowestEntropyCoords()) {
-        const [r, c] = next;
-        const options = grid[r][c];
-        const pick = options[Math.floor(Math.random() * options.length)];
-        grid[r][c] = [pick];
-        propagate(r, c);
-    }
-
-    return grid.map(row => row.map(cell => cell[0] || tileNames[0] || 'grass'));
-}
+// generateWFC() (a wave-function-collapse generator driven by
+// tile_types.valid_neighbors) was removed here as dead code (F-010 /
+// SOMET-190): it had zero callers anywhere in the codebase outside its own
+// definition -- world generation goes through generateWorld/generateRegion
+// below instead, which never reads valid_neighbors. The valid_neighbors
+// column, its CRUD in index.js, and its checkbox editor in
+// frontend/src/games/something2/TileTypesAdmin.jsx were deliberately left in
+// place: removing them is a product decision (wire generateWorld to honour
+// the field, or drop the column/editor entirely) that spans a migration and
+// the frontend, both out of scope for this backend-api pass. See the
+// SOMET-190 fix commit message for the full reasoning.
 
 // --- Layered world generation (biomes -> paths) ---------------------------
 //
-// generateWFC only produces per-tile adjacency noise. generateWorld builds
-// large-scale structure the way a hand-authored overworld reads: cohesive
-// biome regions from low-frequency noise, then winding paths carved between
-// anchor points. Output is the same rows x cols grid of tile-type NAMES, so
-// storage/API/loader are unchanged. Deterministic for a given seed.
+// generateWorld builds large-scale structure the way a hand-authored
+// overworld reads: cohesive biome regions from low-frequency noise, then
+// winding paths carved between anchor points. Output is a rows x cols grid
+// of tile-type NAMES, so storage/API/loader are unchanged. Deterministic for
+// a given seed.
 
 // Small seeded PRNG (mulberry32): deterministic 0..1 stream from an integer.
 function makeRng(seed) {
@@ -330,14 +269,10 @@ function collectPathCells(cfg, rMin, cMin, rows, cols) {
   return set;
 }
 
-// Global object-density field at absolute coords. Independent frequency + seed
-// offset from the biome field so object clumps don't mirror biome bands. Read
-// by later phases to place clustered objects/creatures consistently across
-// chunk seams. Deterministic and continuous.
-function densityAt(world, gRow, gCol) {
-  const cfg = worldConfig(world);
-  return globalValueNoise((cfg.seed ^ 0x9e3779b9) >>> 0, gRow, gCol, cfg.cellSize);
-}
+// densityAt() (a global object-density field) was removed here as dead code
+// alongside generateWFC (F-010 / SOMET-190): despite its own comment
+// claiming it was "read by later phases to place clustered objects/
+// creatures", nothing in the codebase ever called it outside its own tests.
 
 const CREATURE_TILE_PX = 100;      // world px per tile (matches frontend MAP_TILE_SIZE)
 const CREATURE_SALT = 0x5eed1e;    // separate the creature roll from terrain fields
@@ -754,7 +689,6 @@ function placeEntities(tiles, entityDefs, options = {}) {
 }
 
 module.exports = {
-    generateWFC,
     generateWorld,
     placeEntities,
     // exported for unit testing / reuse
@@ -773,7 +707,6 @@ module.exports = {
     pathAnchor,
     pathSegmentCells,
     collectPathCells,
-    densityAt,
     spawnChunkCreatures,
     placeMapCreatures,
     stampBounds,

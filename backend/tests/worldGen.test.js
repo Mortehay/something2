@@ -185,25 +185,11 @@ test('paths stay continuous across seams even with large pathJitter (padding cov
   }
 });
 
-const { densityAt } = require('../src/services/mapService');
-
-test('densityAt is deterministic and in [0,1]', () => {
-  const world = { seed: 5, tileTypes: BIOMES };
-  const a = densityAt(world, 120, -40);
-  assert.equal(a, densityAt(world, 120, -40));
-  assert.ok(a >= 0 && a <= 1, `out of range: ${a}`);
-});
-
-test('densityAt is continuous across a chunk boundary', () => {
-  const world = { seed: 5, chunkSize: 16, tileTypes: BIOMES };
-  // Column 15 (last of chunk 0) vs column 16 (first of chunk 1): adjacent in
-  // the field, so the density jump must be small.
-  let maxJump = 0;
-  for (let r = 0; r < 64; r++) {
-    maxJump = Math.max(maxJump, Math.abs(densityAt(world, r, 16) - densityAt(world, r, 15)));
-  }
-  assert.ok(maxJump < 0.35, `density discontinuous at seam, maxJump ${maxJump}`);
-});
+// densityAt() was removed as dead code (F-010 / SOMET-190): it had zero
+// non-test callers anywhere in the codebase -- not even from generateWorld/
+// generateChunk despite the comment above its old definition claiming it was
+// "read by later phases to place clustered objects/creatures". Nothing in
+// this surface actually read it.
 
 const { spawnChunkCreatures } = require('../src/services/mapService');
 
