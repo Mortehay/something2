@@ -568,7 +568,7 @@
       "verification": "Sign a JWT locally with the placeholder secret and a small guessed user_id/tv pair; present it as a Bearer token to an admin-guarded route and as the WS authority's ?token= param; confirm both accept it. After rotating the secret, confirm the same token is rejected.",
       "id": "F-038",
       "fingerprint": "ca997a4c926a66e76264634994015790df60bc11",
-      "status": "open",
+      "status": "fixed",
       "plane_id": null
     },
     {
