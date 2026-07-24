@@ -5,7 +5,7 @@
 
 const { sellPriceFor, insertBuyback, BUYBACK_DAYS } = require('../services/merchantStock');
 
-async function buyStock(pool, entry, userId, stockId) {
+async function buyStock(pool, entry, userId, stockId, villageId) {
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
 
@@ -13,9 +13,16 @@ async function buyStock(pool, entry, userId, stockId) {
   try {
     await client.query('BEGIN');
 
+    // village_id + world_id scope this locked read to the merchant the
+    // caller was actually gated against (server.js's "no merchant nearby"
+    // check resolves a specific village and must be the ONLY village whose
+    // stock this call can touch — F-019 / SOMET-199). The expires_at
+    // predicate closes the same gap fetchShop only sweeps lazily: a lapsed
+    // buyback row must stop being purchasable the instant it expires, not
+    // whenever someone next opens that village's shop.
     const sr = await client.query(
-      'SELECT id, item_type_id, price, seller_user_id, village_id FROM merchant_stock WHERE id = $1 FOR UPDATE',
-      [stockId],
+      'SELECT id, item_type_id, price, seller_user_id, village_id FROM merchant_stock WHERE id = $1 AND village_id = $2 AND world_id = $3 AND (expires_at IS NULL OR expires_at > now()) FOR UPDATE',
+      [stockId, villageId, entry.worldId],
     );
     if (sr.rows.length !== 1) {
       await client.query('ROLLBACK');

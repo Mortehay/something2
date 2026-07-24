@@ -176,3 +176,42 @@ test('buyStock requires an inventory (fails loud like sellItem, not silently)', 
   assert.equal(r.ok, false);
   assert.match(r.reason, /no player/i);
 });
+
+test('buyStock refuses a stock row that does not belong to the village the player is standing at (F-019)', async () => {
+  const p = PLAYER();
+  // Mimics the real predicate: the row exists (village A's buyback listing)
+  // but the caller is standing at village B, so the locked read must come
+  // back empty rather than handing the row over regardless of location.
+  const pool = mkPool([
+    [/FROM merchant_stock WHERE id/i, (sql, params) => {
+      assert.match(sql, /village_id\s*=\s*\$2/i, 'the locked read must filter by the village the player is at');
+      const [, villageId] = params;
+      if (villageId !== 'village-a') return { rows: [] };
+      return { rows: [{ id: 's1', item_type_id: 3, price: 20, seller_user_id: 7, village_id: 'village-a' }] };
+    }],
+  ]);
+  // Player is standing at village B but sends village A's stockId.
+  const r = await buyStock(pool, mkEntry(p), 1, 's1', 'village-b');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /no longer for sale/i);
+  assert.equal(pool.rolledBack, true, 'must roll back — no gold debited, no item granted');
+  assert.equal(pool.committed, false);
+  assert.equal(p.gold, 100, 'wallet untouched');
+  assert.equal(p.inv.items.length, 1, 'inventory unchanged');
+});
+
+test('buyStock scopes the locked read to the village and world the player is at', async () => {
+  const p = PLAYER();
+  let sawParams = null;
+  const pool = mkPool([
+    [/FROM merchant_stock WHERE id/i, (sql, params) => {
+      sawParams = params;
+      return { rows: [{ id: 's1', item_type_id: 3, price: 20, seller_user_id: null, village_id: 'village-a' }] };
+    }],
+    [/UPDATE users SET gold = gold - /i, () => ({ rowCount: 1, rows: [{ gold: 80 }] })],
+    [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new1', item_type_id: 3, quantity: 1 }] })],
+  ]);
+  const r = await buyStock(pool, mkEntry(p, 'world-1'), 1, 's1', 'village-a');
+  assert.equal(r.ok, true);
+  assert.deepEqual(sawParams, ['s1', 'village-a', 'world-1']);
+});

@@ -755,10 +755,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
             const p = entry.world.getPlayer(ws.userId);
             if (!p) return;
             const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
-            if (!nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS)) {
-              send(ws, { type: 'error', message: 'no merchant nearby' }); return;
-            }
-            const r = await buyStock(pool, entry, ws.userId, msg.stockId);
+            const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
+            if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
+            const r = await buyStock(pool, entry, ws.userId, msg.stockId, village.id);
             if (r.ok) {
               send(ws, { type: 'bought', item: r.item, gold: r.gold });
               send(ws, { type: 'wallet', gold: r.gold });
