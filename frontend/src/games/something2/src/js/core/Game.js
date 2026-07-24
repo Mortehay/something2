@@ -677,13 +677,13 @@ export class Game {
             }
 
             // Dev: cycle the global render-mode override (none -> rect -> static -> animated).
-            if(key === 'm' && this.state === 'playing'){
+            if(key === 'm' && this.state === 'playing' && !e.repeat){
                 const mode = this.renderSystem.cycleRenderModeOverride();
                 console.log(`Render-mode override: ${mode ?? 'off (per-entity)'}`);
             }
 
             // Dev: toggle tile textures on/off (falls back to flat color).
-            if (key === 't' && this.renderSystem && this.chunked) {
+            if (key === 't' && this.renderSystem && this.chunked && !e.repeat) {
                 const on = this.renderSystem.toggleTileTextures();
                 this._showToast(`Tile textures ${on ? 'on' : 'off'}`);
             }
