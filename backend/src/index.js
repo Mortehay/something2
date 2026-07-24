@@ -8,7 +8,7 @@ const path = require('path');
 const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts, villageMerchantPost, CREATURE_TILE_PX } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages } = require('./services/villages');
-const { seedBaseCatalog } = require('./services/merchantStock');
+const { seedBaseCatalog, seedItemAcrossVillages } = require('./services/merchantStock');
 require('dotenv').config();
 
 const app = express();
@@ -507,7 +507,13 @@ app.post('/api/item-types', adminGuard, async (req, res) => {
        JSON.stringify(b.resistances ?? {}), b.icon ?? null,
        b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0],
     );
-    res.status(201).json(result.rows[0]);
+    const row = result.rows[0];
+    // SOMET-186 / F-006: without this, a weapon/armor type created after a
+    // village exists never reaches that village's shop -- seedBaseCatalog
+    // only ever ran once, at village creation. Backfill it into every
+    // existing village now instead of leaving that permanently missing.
+    await seedItemAcrossVillages(pool, row.id);
+    res.status(201).json(row);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create item type' });

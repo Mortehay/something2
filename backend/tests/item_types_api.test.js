@@ -42,13 +42,20 @@ test('GET /api/item-types returns the catalog', async () => {
 });
 
 test('POST /api/item-types creates a valid weapon (happy path)', async () => {
-  __setPool(mockPool([
+  const pool = mockPool([
     [/INSERT INTO item_types/i, (p) => ({ rows: [{ id: 10, name: p[0], category: p[1] }] })],
-  ]));
+    // F-006 / SOMET-186: creating an item type now backfills it into every
+    // existing village's shop.
+    [/INSERT INTO merchant_stock/i, () => ({ rows: [] })],
+  ]);
+  __setPool(pool);
   const res = await request(app).post('/api/item-types').set(...AUTH).send(VALID_MELEE);
   assert.equal(res.status, 201);
   assert.equal(res.body.id, 10);
   assert.equal(res.body.name, 'shortsword');
+  const seed = pool.calls.find((c) => /INSERT INTO merchant_stock/i.test(c.sql));
+  assert.ok(seed, 'a newly created weapon/armor type must be backfilled into existing villages');
+  assert.deepEqual(seed.params, [10], 'must seed the item type that was just created');
 });
 
 test('POST /api/item-types rejects an unknown element', async () => {
@@ -110,6 +117,7 @@ test('POST /api/item-types rejects a negative resistance value', async () => {
 test('POST /api/item-types accepts a valid in-range resistance value', async () => {
   __setPool(mockPool([
     [/INSERT INTO item_types/i, (p) => ({ rows: [{ id: 11, name: p[0], category: p[1] }] })],
+    [/INSERT INTO merchant_stock/i, () => ({ rows: [] })],
   ]));
   const res = await request(app).post('/api/item-types').set(...AUTH).send({
     name: 'x', category: 'armor', slot: 'chest', defense: 1, resistances: { fire: 0.25 },
@@ -250,6 +258,7 @@ const LOAD_BEARING_COLUMNS = [
 test('POST /api/item-types INSERT names every load-bearing column with a positionally-aligned placeholder', async () => {
   const pool = mockPool([
     [/INSERT INTO item_types/i, (p) => ({ rows: [{ id: 10, name: p[0], category: p[1] }] })],
+    [/INSERT INTO merchant_stock/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);
   const body = {
