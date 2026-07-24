@@ -7,6 +7,7 @@ import { getStoredToken, parseJwt, clearToken, authHeaders, AUTH_EXPIRED_EVENT }
 import Login from "../../pages/Login.jsx";
 import { useMapTiles, useMapConfig, useVfxEffects } from "./useMaps.js";
 import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";
+import { autoJoinTarget } from "./autoJoin.js";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
@@ -545,29 +546,26 @@ export default function Something2() {
   handleEnterRef.current = handleEnterChunkedWorld;
 
   // MISMATCH fix: a logged-in player should spawn straight into the canonical
-  // entry world, not a world-picker. Prefer the world flagged `is_entry`
-  // (Linked Maps); fall back to the migration-seeded world named "Overworld"
-  // (lowest id if test duplicates exist) for worlds without an entry flag set.
-  // Fires once worlds + the Game instance are ready. Admins keep the picker
-  // (they manage worlds). If the join throws, handleEnterChunkedWorld toasts
-  // and isPlaying stays false, so the picker remains as a safe fallback.
-  // autoJoinedRef guards against retries.
+  // entry world, not a world-picker. Target selection and the readiness rule
+  // live in autoJoin.js so they can be unit-tested. Fires once the Game
+  // instance, the world list AND the map assets are ready — see
+  // worldAssetsReady() for why joining early is not self-healing. Admins keep
+  // the picker (they manage worlds). If the join throws,
+  // handleEnterChunkedWorld toasts and isPlaying stays false, so the picker
+  // remains as a safe fallback. autoJoinedRef guards against retries.
   const autoJoinedRef = useRef(false);
   useEffect(() => {
-    if (isAdmin || isPlaying || autoJoinedRef.current) return;
-    if (!gameRef.current || !worlds || worlds.length === 0) return;
-    const entry = worlds.find(w => w.is_entry);
-    const overworld = worlds
-      .filter(w => w.name === 'Overworld')
-      .sort((a, b) => a.id - b.id)[0];
-    const target = entry || overworld;
-    if (!target) return;
+    const targetId = autoJoinTarget({
+      isAdmin, isPlaying, alreadyJoined: autoJoinedRef.current,
+      hasGame: !!gameRef.current, worlds, mapTiles, mapConfig,
+    });
+    if (targetId == null) return;
     autoJoinedRef.current = true;
-    handleEnterChunkedWorld(target.id);
+    handleEnterChunkedWorld(targetId);
     // handleEnterChunkedWorld is stable enough for this one-shot; deps kept
-    // minimal so it fires once when worlds/game become ready.
+    // minimal so it fires once the inputs become ready.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [worlds, isAdmin, isPlaying, activeTab]);
+  }, [worlds, mapTiles, mapConfig, isAdmin, isPlaying, activeTab]);
 
   const handleCreateWorld = () => {
     if (!newWorldName.trim()) return;

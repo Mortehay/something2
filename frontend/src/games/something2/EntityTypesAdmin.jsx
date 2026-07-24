@@ -5,7 +5,7 @@ import {
   useGenerateSprite, useSpriteJob, useApproveSprite, useSpriteCapability,
   useGenerateEntityJob, useEntityJob, useApproveEntityImage, useSpriteManifest,
 } from './useSprites.js';
-import { assetUrl } from './useTileSprites.js';
+import { assetUrlVersioned } from './useTileSprites.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 
@@ -17,12 +17,9 @@ function entityTextureUrl(entity) {
   const key = (mode === 'animated' && entity.sprite?.atlas_key)
     || entity.image
     || entity.sprite?.atlas_key;
-  if (!key) return null;
-  // Asset keys are stable across regenerations (sprites/objects/Tree/static.png
-  // is overwritten in place), so without a version the browser keeps showing
-  // the previous image. updated_at changes on every approval.
-  const v = entity.updated_at ? `?v=${encodeURIComponent(entity.updated_at)}` : '';
-  return `${assetUrl(key)}${v}`;
+  // Versioned by updated_at, which every approval bumps — see
+  // assetUrlVersioned() for why the bare key would show stale art.
+  return assetUrlVersioned(key, entity.updated_at);
 }
 
 const AdminContainer = styled.div`
@@ -116,7 +113,9 @@ const BadgeImage = styled.img`
 // entities have been generated yet.
 function EntityBadge({ entity }) {
   const animated = entity.render_mode === 'animated' && entity.sprite?.atlas_key;
-  const { data: manifest } = useSpriteManifest(animated ? entity.sprite.manifest_key : null);
+  const { data: manifest } = useSpriteManifest(
+    animated ? entity.sprite.manifest_key : null, entity.updated_at,
+  );
   const [frame, setFrame] = useState(0);
 
   // Frame keys are bare indices for the object/tile pipeline and "DIR/idx" for
@@ -144,7 +143,7 @@ function EntityBadge({ entity }) {
       <BadgeFrame
         title={`${entity.name} (animated)`}
         style={{
-          backgroundImage: `url(${assetUrl(entity.sprite.atlas_key)})`,
+          backgroundImage: `url(${assetUrlVersioned(entity.sprite.atlas_key, entity.updated_at)})`,
           backgroundSize: `${atlasW * scale}px ${atlasH * scale}px`,
           backgroundPosition: `${-rect[0] * scale}px ${-rect[1] * scale}px`,
         }}
@@ -515,7 +514,7 @@ function SpritePanel({ entity, capability, capabilityDown }) {
   // Through the backend asset proxy — MinIO itself isn't reachable from the
   // browser in every deployment, which is why this preview used to fall back
   // to a bare key label.
-  const atlasUrl = job?.result?.atlas_key ? `${assetUrl(job.result.atlas_key)}?v=${jobId}` : null;
+  const atlasUrl = assetUrlVersioned(job?.result?.atlas_key, jobId);
 
   return (
     <SpriteSection>
@@ -645,7 +644,7 @@ function EntityTexturePanel({ entity, prompt }) {
   // Asset keys are stable (e.g. sprites/objects/Tree/static.png), so the browser
   // caches them across regenerations. Bust the cache with the job id so a fresh
   // image actually shows instead of the previous one.
-  const previewUrl = previewKey ? `${assetUrl(previewKey)}?v=${jobId}` : null;
+  const previewUrl = assetUrlVersioned(previewKey, jobId);
 
   // Whatever is currently saved on the entity (from an earlier Approve).
   const savedUrl = entityTextureUrl(entity);

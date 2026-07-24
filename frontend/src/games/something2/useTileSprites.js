@@ -9,6 +9,17 @@ export function assetUrl(key) {
   return key ? `${API}/api/assets/${key}` : null;
 }
 
+// Same, with a cache-busting version. Asset keys are stable across regenerations
+// (sprites/objects/Tree/static.png is overwritten in place) and /api/assets sends
+// `max-age=300`, so without this the browser keeps serving the PREVIOUS art for
+// five minutes after an approval. Callers pass the row's updated_at, which the
+// approval bumps.
+export function assetUrlVersioned(key, version) {
+  const url = assetUrl(key);
+  if (!url) return null;
+  return version ? `${url}?v=${encodeURIComponent(version)}` : url;
+}
+
 export function useGenerateTileJob() {
   return useMutation({
     mutationFn: async (body) => {

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/EngineClient.js";
+import { assetUrlVersioned } from "./useTileSprites.js";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:13101";
 
@@ -103,16 +104,20 @@ export function useEntityJob(jobId) {
 // The atlas manifest ({ cell: [w,h], frames: { "0": [x,y,w,h], … } }) for a
 // generated sprite. Needed to show a single FRAME of an animated entity — the
 // atlas is a sprite sheet, so drawing it whole shows every frame at once.
-// Cached indefinitely: a manifest only changes when a new atlas is approved
-// under a new job, and the key is versioned by the caller.
-export function useSpriteManifest(manifestKey) {
+//
+// Cached indefinitely, so `version` is not optional in practice: the manifest
+// KEY is stable across regenerations (atlas.json is overwritten in place), and
+// re-approving with a different frame count leaves both this cache and the
+// browser's own `max-age=300` copy pointing at the old grid — the badge would
+// then crop frames that no longer exist. Pass the row's updated_at.
+export function useSpriteManifest(manifestKey, version = null) {
   return useQuery({
-    queryKey: ["sprite-manifest", manifestKey],
+    queryKey: ["sprite-manifest", manifestKey, version],
     enabled: !!manifestKey,
     staleTime: Infinity,
     retry: false,
     queryFn: async () => {
-      const res = await apiFetch(`${API}/api/assets/${manifestKey}`);
+      const res = await apiFetch(assetUrlVersioned(manifestKey, version));
       if (!res.ok) throw new Error("failed to fetch sprite manifest");
       return res.json();
     },

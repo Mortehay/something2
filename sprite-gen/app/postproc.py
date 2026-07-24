@@ -1,6 +1,9 @@
+import logging
 import math
 from typing import Dict, Tuple
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 def _rembg(img: Image.Image):
     """Matte the subject with rembg, or None when it isn't usable.
@@ -19,24 +22,69 @@ def _rembg(img: Image.Image):
     except Exception:
         return None
 
+# How much of the border may still be opaque before a matte counts as failed.
+# Real output separates cleanly: working sprites came back at 0% border-opaque,
+# the broken ones at 45-100%, so anything in between is already a bad sprite.
+MAX_BORDER_OPACITY = 0.25
+
+def border_opacity(img: Image.Image) -> float:
+    """Fraction of the outer ring of pixels that is still (near-)opaque.
+
+    The generation prompt asks for a subject "centered with a margin", so on a
+    correctly matted sprite this is ~0. It is the cheapest honest check that
+    background removal actually happened.
+    """
+    img = img.convert("RGBA")
+    w, h = img.size
+    if w == 0 or h == 0:
+        return 0.0
+    px = img.load()
+    ring = [(x, 0) for x in range(w)] + [(x, h - 1) for x in range(w)] \
+         + [(0, y) for y in range(h)] + [(w - 1, y) for y in range(h)]
+    opaque = sum(1 for x, y in ring if px[x, y][3] > 16)
+    return opaque / len(ring)
+
 def remove_background(img: Image.Image, matting: str = "auto") -> Image.Image:
     """Background removal for ENTITIES — they must never render a backdrop.
 
     matting="auto"   rembg (real subject matting), falling back to the border
-                     flood-fill when its runtime is missing.
+                     flood-fill when its runtime is missing OR when its matte
+                     is rejected (see below).
     matting="cutout" flood-fill only. For synthetic backends (stub) whose
                      backdrop is already one flat tone: the flood-fill is exact
                      there and instant, where u2net inference costs seconds a
                      frame for an identical result.
+
+    The matte is VERIFIED, not trusted. rembg succeeding is not the same as
+    rembg being right: on real sd-turbo output it has segmented a "subject"
+    that swallowed the backdrop, returning a matte still ~60% opaque around the
+    border, and the entity then rendered as a rectangle with its background
+    baked in. Checking the border costs one pass and turns that silent failure
+    into a fall back to the flood-fill.
 
     Deliberately never uses key_near_white()'s global near-white key, which
     also eats white pixels inside the subject and leaves sprites full of holes.
     """
     if matting != "cutout":
         matted = _rembg(img)
-        if matted is not None:
+        if matted is not None and border_opacity(matted) <= MAX_BORDER_OPACITY:
             return matted
-    return cutout_background(img)
+        # A rejected matte is discarded entirely: it may have chewed into the
+        # subject as well, so the flood-fill runs on the ORIGINAL image.
+    out = cutout_background(img)
+    # The flood-fill assumes the backdrop is one near-flat tone, which is what
+    # build_object_prompt() asks for. When the backend paints a gradient or a
+    # scene instead, neither path can clear it and the sprite ships with its
+    # background — say so, because the alternative is a silently bad sprite
+    # that only shows up as a rectangle in the game.
+    left = border_opacity(out)
+    if left > MAX_BORDER_OPACITY:
+        logger.warning(
+            "background removal left %.0f%% of the border opaque; the generated "
+            "backdrop is probably not a flat tone. Sprite will render with a "
+            "visible background.", left * 100,
+        )
+    return out
 
 def key_near_white(img: Image.Image) -> Image.Image:
     """Clear near-white pixels. Nothing else.
