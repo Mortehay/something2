@@ -77,15 +77,22 @@ A single new command layered on the **existing** infrastructure — no changes t
 the SD service's generation core, no client changes expected.
 
 ```
-sprites.manifest.json  ──►  gen-sprites runner  ──►  sprite-gen HTTP service
-   (committed)               (Node CLI)              (existing, unchanged)
-                                  │                        │
-                                  │                        ▼
-                                  │                    MinIO (existing keys)
-                                  ▼
-                          run report (stdout)
-                          + per-entity approve hint
+sprites.manifest.json ─► gen-sprites runner ─► backend admin API ─► sprite-gen ─► MinIO
+  (committed)             (Node CLI)            /api/sprite-jobs     (existing)   (existing
+                             │                  /api/entity-jobs                   keys)
+                             │                  (existing, unchanged)
+   sprites.manifest.lock ◄──┤ (fingerprints)
+   (committed)              ▼
+                     run report (stdout) + per-entity approve hint
 ```
+
+**Why through the backend admin API, not sprite-gen directly:** the approve
+endpoint (`POST /api/entity-types/:id/sprite`) updates a `sprite_sets` row keyed
+by `job_id`, and that row is created only by the backend's `/api/sprite-jobs` /
+`/api/entity-jobs` routes — never by a direct sprite-gen call. Driving the admin
+API is therefore what keeps "approve via the existing UI" working with **zero**
+backend/UI changes. The cost is that the runner authenticates as admin
+(`POST /api/auth/login`).
 
 ### 1. Manifest — `sprites.manifest.json` (repo root or `sprite-gen/`)
 
@@ -120,22 +127,31 @@ objects. Wolf/Slime/Skeleton/Bat/Tree/Stone/IceRock reuse the prompts already in
 
 `npm run sprites:gen -- [--only nameA,nameB] [--force] [--manifest path]`
 
+Setup: the runner logs in (`POST /api/auth/login`, admin creds from env) once to
+get a bearer token, and fetches `GET /api/entity-types` to map entity `name` →
+`id` for approve hints.
+
 Behavior per entity:
 1. Merge `defaults` + entity fields. `creature` → `frames: 1`, all 8 facings via
-   the service's directional path; `object` → flat single frame.
-2. Compute a **fingerprint** = hash(`kind|prompt|seed|size`). If a marker file
-   `sprites/<name>/.fingerprint` in MinIO matches and `--force` is absent, skip
-   (this is idempotent rerun). Otherwise POST `/generate`, poll `/jobs/{id}`.
-3. On success the service already writes `sprites/<name>/atlas.{png,json}` +
-   per-frame PNGs to MinIO. Runner writes/updates the `.fingerprint` marker.
+   the backend's `/api/sprite-jobs` (directional) path; `object` → flat single
+   frame via `/api/entity-jobs`.
+2. Compute a **fingerprint** = hash(`kind|prompt|seed|size`). If the committed
+   lockfile `sprites.manifest.lock.json` has a matching fingerprint for this
+   `name` and `--force` is absent, skip (idempotent rerun). Otherwise POST the
+   job, poll the matching `/api/{sprite,entity}-jobs/:jobId` until `done`/`error`.
+3. On success the sprite-gen service has already written
+   `sprites/<name>/atlas.{png,json}` + per-frame PNGs to MinIO, and the job
+   `result` carries `{atlas_key, manifest_key, frame_keys}`. Runner updates the
+   lockfile entry for `name` with the new fingerprint + `atlas_key`/`job_id`.
 4. Emit a run report: per-entity status (generated / skipped / failed), the
    atlas key, and — where the entity `name` matches an `entity_types` row — the
-   exact approve call (`POST /api/entity-types/:id/sprite`) so the developer can
-   approve straight from the report. Heroes (no matching row) are listed as
-   generated-only, awaiting the hero-chooser follow-up.
+   exact approve call (`POST /api/entity-types/:id/sprite` with
+   `{atlas_key, manifest_key, job_id, animated: true, frames: 1}`) so the
+   developer can approve straight from the report. Heroes (no matching row) are
+   listed as generated-only, awaiting the hero-chooser follow-up (Slice 3).
 
-The runner talks only to the SD service (reusing `backend/src/services/
-spriteGen.js` or a thin standalone HTTP client). No DB access.
+The runner reuses global `fetch` (Node 18+, as the existing bridge does); it
+needs no MinIO or DB client. Approval stays a deliberate manual step.
 
 ### 3. Directional static rendering — expected zero client change
 
@@ -184,11 +200,12 @@ full-roster manifest content; generate + store to MinIO; docs/skill note.
   may be weak. Mitigation: fixed per-entity seed; accept that static idle has a
   much lower consistency bar than animation. Revisit backend/recipe if quality
   is unacceptable.
-- **Approving runner-generated atlases.** The admin UI today generates-then-
-  approves in-session; approving a *pre-existing* atlas may need a small
-  "approve existing" affordance or a direct call to
-  `POST /api/entity-types/:id/sprite`. The runner report will print the exact
-  payload; a UI affordance is a possible small follow-up.
+- **Approving runner-generated atlases — resolved.** Because the runner drives
+  `/api/sprite-jobs` / `/api/entity-jobs`, each generation creates the
+  `sprite_sets` row the approve endpoint keys on, so the existing approve path
+  works unchanged. The report prints the exact `POST /api/entity-types/:id/sprite`
+  payload. (An "approve from the report/UI without pasting" affordance stays an
+  optional QoL follow-up.)
 - **Heroes have no `entity_types` rows.** Generate-only sidesteps this now; the
   hero-chooser follow-up will decide how hero skins are modeled.
 
