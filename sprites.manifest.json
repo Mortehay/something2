@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "defaults": { "backend": "sd-turbo", "size": [128, 160], "seed": 0 },
+  "entities": [
+    { "name": "Wolf", "kind": "creature", "seed": 101, "prompt": "a grey forest wolf, isometric game sprite, transparent background" },
+    { "name": "Slime", "kind": "creature", "seed": 102, "prompt": "a translucent green slime blob, isometric game sprite, transparent background" },
+    { "name": "Skeleton", "kind": "creature", "seed": 103, "prompt": "an undead skeleton warrior, isometric game sprite, transparent background" },
+    { "name": "Bat", "kind": "creature", "seed": 104, "prompt": "a small brown cave bat, isometric game sprite, transparent background" },
+    { "name": "Zombie", "kind": "creature", "seed": 105, "prompt": "a rotting green zombie, isometric game sprite, transparent background" },
+    { "name": "Leech", "kind": "creature", "seed": 106, "prompt": "a fat dark-red leech, isometric game sprite, transparent background" },
+    { "name": "VillageGuard", "kind": "creature", "seed": 107, "prompt": "a village guard in chainmail with a spear, isometric game sprite, transparent background" },
+    { "name": "Boar", "kind": "creature", "seed": 108, "prompt": "a wild brown boar with tusks, isometric game sprite, transparent background" },
+    { "name": "Rabbit", "kind": "creature", "seed": 109, "prompt": "a small grey rabbit, isometric game sprite, transparent background" },
+    { "name": "Gargoyle", "kind": "creature", "seed": 110, "prompt": "a stone gargoyle with wings, isometric game sprite, transparent background" },
+    { "name": "Fox", "kind": "creature", "seed": 111, "prompt": "a red fox, isometric game sprite, transparent background" },
+    { "name": "Hornet", "kind": "creature", "seed": 112, "prompt": "a large yellow-and-black hornet, isometric game sprite, transparent background" },
+    { "name": "hero_knight", "kind": "creature", "seed": 201, "prompt": "a human knight in plate armour with a sword, isometric game sprite, transparent background" },
+    { "name": "hero_mage", "kind": "creature", "seed": 202, "prompt": "a human mage in a blue robe with a staff, isometric game sprite, transparent background" },
+    { "name": "hero_ranger", "kind": "creature", "seed": 203, "prompt": "a human ranger in green leather with a bow, isometric game sprite, transparent background" },
+    { "name": "hero_rogue", "kind": "creature", "seed": 204, "prompt": "a hooded human rogue with daggers, isometric game sprite, transparent background" },
+    { "name": "hero_paladin", "kind": "creature", "seed": 205, "prompt": "a human paladin in golden armour with a warhammer, isometric game sprite, transparent background" },
+    { "name": "hero_barbarian", "kind": "creature", "seed": 206, "prompt": "a muscular human barbarian with a greataxe, isometric game sprite, transparent background" },
+    { "name": "hero_cleric", "kind": "creature", "seed": 207, "prompt": "a human cleric in white-and-gold robes with a mace, isometric game sprite, transparent background" },
+    { "name": "hero_druid", "kind": "creature", "seed": 208, "prompt": "a human druid in brown robes with a wooden staff, isometric game sprite, transparent background" },
+    { "name": "hero_warlock", "kind": "creature", "seed": 209, "prompt": "a human warlock in dark robes with glowing eyes, isometric game sprite, transparent background" },
+    { "name": "hero_monk", "kind": "creature", "seed": 210, "prompt": "a human monk in simple orange robes, bare-handed, isometric game sprite, transparent background" },
+    { "name": "Tree", "kind": "object", "seed": 301, "prompt": "a tall broadleaf tree with a thick trunk" },
+    { "name": "Bush", "kind": "object", "seed": 302, "prompt": "a round leafy green bush" },
+    { "name": "IceRock", "kind": "object", "seed": 303, "prompt": "a jagged pale blue ice boulder" },
+    { "name": "Stone", "kind": "object", "seed": 304, "prompt": "a mossy grey boulder" },
+    { "name": "Boulder", "kind": "object", "seed": 305, "prompt": "a large cracked granite boulder" }
+  ]
+}

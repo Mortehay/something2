@@ -9,7 +9,8 @@
     "dev": "nodemon src/index.js --inspect",
     "migrate": "node-pg-migrate",
     "migrate:up": "node-pg-migrate up",
-    "test": "node --test"
+    "test": "node --test",
+    "sprites:gen": "node scripts/gen-sprites.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
