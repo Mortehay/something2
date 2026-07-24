@@ -3,10 +3,10 @@ import styled from 'styled-components';
 import { useItemTypes, useCreateItemType, useUpdateItemType, useDeleteItemType } from './useMaps.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
 import toast from 'react-hot-toast';
-
-// Mirrors backend/src/index.js's ITEM_ELEMENTS / ITEM_SLOTS exactly.
-const ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
-const SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
+import {
+  ELEMENTS, SLOTS, WEAPON_DEFAULTS, ARMOR_DEFAULTS, AMMO_DEFAULTS,
+  emptyForm, formFromType, validateClient, buildPayload,
+} from './itemTypeForm.js';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -292,197 +292,6 @@ const InlineCheck = styled.div`
   label { font-size: 1.2rem; color: #facc15; }
 `;
 
-function num(v, fallback = null) {
-  if (v === '' || v == null) return fallback;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-const WEAPON_DEFAULTS = {
-  kind: 'melee',
-  damage: 10,
-  cooldown: 0.5,
-  two_handed: false,
-  mana_cost: 0,
-  stamina_cost: 0,
-  reach: 60,
-  arc_width: 0.5,
-  range: '',
-  projectile_speed: '',
-  projectile_radius: '',
-  pierce: '',
-  ammo_type_id: '',
-  aoe_radius: '',
-};
-
-const ARMOR_DEFAULTS = {
-  slot: 'chest',
-  defense: 1,
-};
-
-// The backend rejects a non-stackable ammo type outright, so the form starts
-// ammo off already stackable rather than letting the user submit an invalid one.
-const AMMO_DEFAULTS = {
-  stackable: true,
-  kind: '',
-};
-
-function emptyForm() {
-  return {
-    name: '',
-    category: 'weapon',
-    element: '',
-    stackable: false,
-    ...WEAPON_DEFAULTS,
-    slot: '',
-    defense: '',
-    resistanceRows: [],
-  };
-}
-
-function formFromType(t) {
-  const rows = Object.entries(t.resistances || {}).map(([element, value]) => ({ element, value: String(value) }));
-  return {
-    name: t.name,
-    category: t.category,
-    element: t.element || '',
-    kind: t.kind || 'melee',
-    damage: t.damage ?? 0,
-    cooldown: t.cooldown ?? 0,
-    two_handed: !!t.two_handed,
-    mana_cost: t.mana_cost ?? 0,
-    stamina_cost: t.stamina_cost ?? 0,
-    reach: t.reach ?? '',
-    arc_width: t.arc_width ?? '',
-    range: t.range ?? '',
-    projectile_speed: t.projectile_speed ?? '',
-    projectile_radius: t.projectile_radius ?? '',
-    pierce: t.pierce ?? '',
-    stackable: !!t.stackable,
-    ammo_type_id: t.ammo_type_id ?? '',
-    aoe_radius: t.aoe_radius ?? '',
-    slot: t.slot || '',
-    defense: t.defense ?? '',
-    resistanceRows: rows,
-  };
-}
-
-// Mirrors backend/src/index.js's validateItemType() so the user sees the
-// same problem before submitting instead of only on the 400 round-trip.
-function validateClient(f) {
-  if (!f.name.trim()) return 'Name is required';
-  if (!['weapon', 'armor', 'ammo'].includes(f.category)) return "category must be 'weapon', 'armor' or 'ammo'";
-  if (f.element && !ELEMENTS.includes(f.element)) return `element must be one of ${ELEMENTS.join(', ')}`;
-  if (f.category === 'armor' && f.slot && !SLOTS.includes(f.slot)) return `slot must be one of ${SLOTS.join(', ')}`;
-
-  if (f.category === 'weapon') {
-    if (!['melee', 'projectile'].includes(f.kind)) return "weapon kind must be 'melee' or 'projectile'";
-    if (f.kind === 'melee' && (f.reach === '' || f.reach == null || f.arc_width === '' || f.arc_width == null)) {
-      return 'melee weapons need reach and arc_width';
-    }
-    if (f.kind === 'projectile' && (f.range === '' || f.range == null || f.projectile_speed === '' || f.projectile_speed == null || f.projectile_radius === '' || f.projectile_radius == null)) {
-      return 'projectile weapons need range, projectile_speed and projectile_radius';
-    }
-    // Mirrors the DB CHECK: a detonating projectile cannot also pierce.
-    if (num(f.aoe_radius) != null && num(f.pierce, 0) > 1) {
-      return 'aoe_radius and pierce > 1 are mutually exclusive';
-    }
-  } else if (f.category === 'ammo') {
-    if (!f.stackable) return 'ammo must be stackable';
-  } else {
-    if (f.slot === '' || f.slot == null || f.defense === '' || f.defense == null) return 'armor needs slot and defense';
-  }
-  return null;
-}
-
-// Builds the API payload from form state. Category-inapplicable fields are
-// always nulled/zeroed here (not just left over from whatever the form last
-// showed) so switching weapon -> armor never sends a stale `kind`, and
-// switching melee <-> projectile never sends stale geometry.
-function buildPayload(f) {
-  const base = {
-    name: f.name.trim(),
-    category: f.category,
-    element: f.element || null,
-  };
-
-  if (f.category === 'weapon') {
-    return {
-      ...base,
-      kind: f.kind,
-      damage: num(f.damage, 0),
-      cooldown: num(f.cooldown, 0),
-      two_handed: !!f.two_handed,
-      mana_cost: num(f.mana_cost, 0),
-      stamina_cost: num(f.stamina_cost, 0),
-      reach: f.kind === 'melee' ? num(f.reach) : null,
-      arc_width: f.kind === 'melee' ? num(f.arc_width) : null,
-      range: f.kind === 'projectile' ? num(f.range) : null,
-      projectile_speed: f.kind === 'projectile' ? num(f.projectile_speed) : null,
-      projectile_radius: f.kind === 'projectile' ? num(f.projectile_radius) : null,
-      pierce: f.kind === 'projectile' ? num(f.pierce) : null,
-      // Only a projectile weapon may consume ammo (backend + DB CHECK), and a
-      // blast radius is meaningless on a melee swing.
-      ammo_type_id: f.kind === 'projectile' ? num(f.ammo_type_id) : null,
-      aoe_radius: f.kind === 'projectile' ? num(f.aoe_radius) : null,
-      stackable: !!f.stackable,
-      slot: null,
-      defense: null,
-      resistances: {},
-    };
-  }
-
-  if (f.category === 'ammo') {
-    return {
-      ...base,
-      kind: null,
-      damage: 0,
-      cooldown: 0,
-      two_handed: false,
-      mana_cost: 0,
-      stamina_cost: 0,
-      reach: null,
-      arc_width: null,
-      range: null,
-      projectile_speed: null,
-      projectile_radius: null,
-      pierce: null,
-      ammo_type_id: null,
-      aoe_radius: null,
-      stackable: true,
-      slot: null,
-      defense: null,
-      resistances: {},
-    };
-  }
-
-  const resistances = {};
-  for (const row of f.resistanceRows) {
-    if (row.element) resistances[row.element] = num(row.value, 0);
-  }
-  return {
-    ...base,
-    kind: null,
-    damage: 0,
-    cooldown: 0,
-    two_handed: false,
-    mana_cost: 0,
-    stamina_cost: 0,
-    reach: null,
-    arc_width: null,
-    range: null,
-    projectile_speed: null,
-    projectile_radius: null,
-    pierce: null,
-    ammo_type_id: null,
-    aoe_radius: null,
-    stackable: !!f.stackable,
-    slot: f.slot,
-    defense: num(f.defense, 0),
-    resistances,
-  };
-}
-
 function ItemTypesAdmin() {
   const { itemTypes, isLoadingItemTypes } = useItemTypes();
   const createMutation = useCreateItemType();
@@ -719,6 +528,18 @@ function ItemTypesAdmin() {
                   <option value="">none</option>
                   {ELEMENTS.map(el => <option key={el} value={el}>{el}</option>)}
                 </select>
+              </FormGroup>
+
+              <FormGroup>
+                <label>Value (gold)</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={formData.value}
+                  onChange={e => setFormData({ ...formData, value: e.target.value })}
+                  placeholder="0"
+                />
               </FormGroup>
 
               {formData.category === 'weapon' ? (
