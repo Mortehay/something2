@@ -9,6 +9,7 @@ import { assetUrlVersioned } from './useTileSprites.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
+import { orphanedSpawnTiles } from './catalogReferences.js';
 
 // The saved image/atlas for an entity type, served through the backend asset
 // proxy (same route tiles use) rather than hitting MinIO directly.
@@ -1068,12 +1069,27 @@ function EntityTypesAdmin() {
                 <MultiSelect>
                   {tileTypes?.map(t => (
                     <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem' }}>
-                      <input 
+                      <input
                         type="checkbox"
                         checked={formData.spawn_tiles.includes(t.name)}
                         onChange={() => toggleSpawnTile(t.name)}
                       />
                       {t.name}
+                    </div>
+                  ))}
+                  {/* F-027/SOMET-207: a spawn_tiles entry whose tile type was
+                      deleted used to just vanish from this list -- invisible
+                      and un-removable, so every Save Changes re-sent the
+                      dangling reference forever. Show it, greyed out with a
+                      warning, and let the admin uncheck it to actually clear it. */}
+                  {orphanedSpawnTiles(formData.spawn_tiles, tileTypes).map(name => (
+                    <div key={`orphan-${name}`} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem', color: '#f87171' }}>
+                      <input
+                        type="checkbox"
+                        checked={true}
+                        onChange={() => toggleSpawnTile(name)}
+                      />
+                      {name} <span style={{ opacity: 0.7 }}>(tile no longer exists)</span>
                     </div>
                   ))}
                 </MultiSelect>
