@@ -33,6 +33,7 @@ services:
       - MINIO_SECRET_KEY=minioadmin
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
       - SPRITE_GEN_URL=http://sprite-gen:8100
+      - SPRITE_GEN_SHARED_SECRET=${SPRITE_GEN_SHARED_SECRET:?SPRITE_GEN_SHARED_SECRET must be set in .env}
     depends_on:
       - db
       - minio
@@ -76,6 +77,7 @@ services:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
       - MINIO_BUCKET=sprites
+      - SPRITE_GEN_SHARED_SECRET=${SPRITE_GEN_SHARED_SECRET:?SPRITE_GEN_SHARED_SECRET must be set in .env}
     volumes:
       - sprite-models:/root/.cache/huggingface
     depends_on:
