@@ -32,23 +32,32 @@ anything else if you are debugging a sync failure right now:
   alone returned 403. Nothing about the client, headers, or timing mattered —
   only that one field's content. At least 4 of the first 46 findings
   (F-002, F-005, F-008, F-045) carry payload text like this; assume more will
-  as the audit grows. **The fix:** `renderTitle`/`renderBody` in
-  `tools/audit/lib/sync.js` numeric-HTML-entity-encode every finding-derived
-  character before it goes into `description_html` / `name` — not just the
-  five HTML metacharacters, but everything outside `[A-Za-z0-9 ]`. That
-  removes any recognizable attack signature from the wire bytes. Plane's HTML
-  renderer decodes the entities on its end, so the issue reads normally in
-  the UI and `description_stripped` comes back with the original text intact
-  — confirmed live: an entity-encoded version of F-002's verification line
+  as the audit grows. **The fix:** `renderBody` in `tools/audit/lib/sync.js`
+  numeric-HTML-entity-encodes every finding-derived character before it goes
+  into `description_html` — not just the five HTML metacharacters, but
+  everything outside `[A-Za-z0-9 ]`. That removes any recognizable attack
+  signature from the wire bytes. Plane's HTML renderer decodes the entities
+  on its end, so the issue body reads normally in the UI and
+  `description_stripped` comes back with the original text intact —
+  confirmed live: an entity-encoded version of F-002's verification line
   returned 201, and the issue read back with
   `curl -s "http://localhost:13101/api/tile-jobs/..%2Fcapability"` fully
-  readable. **If you see a hard 403 HTML block that correlates with a
-  specific finding's content** (not with write volume or client identity),
-  this is it — do not waste time re-checking the transport or the rate limit,
-  they are not the cause. If a *new* finding still 403s after encoding,
-  something about that specific character content is still slipping through
-  as a recognizable signature; isolate it the same way (bisect the rendered
-  body field by field) before assuming the WAF rule changed.
+  readable. **`renderTitle` (the `name` field) does NOT encode, and must
+  not** — Plane's `name` field is plain text, not HTML, so it is never
+  decoded on read; entity-encoding it would just show literal `&#45;` garbage
+  in the tracker UI instead of a readable title. This is safe because the
+  WAF payload strings live in body-only fields like Verification, confirmed
+  by a title-only probe against the live API with fully raw text (hyphens,
+  apostrophes, parentheses and all) returning 201. **If you see a hard 403
+  HTML block that correlates with a specific finding's content** (not with
+  write volume or client identity), this is it — do not waste time
+  re-checking the transport or the rate limit, they are not the cause. If a
+  *new* finding still 403s after encoding, something about that specific
+  character content is still slipping through as a recognizable signature;
+  isolate it the same way (bisect the rendered body field by field) before
+  assuming the WAF rule changed. Do not "fix" a title-readability complaint
+  by encoding `renderTitle` again — that is the regression this note exists
+  to prevent; fix `summarize`/`renderTitle` in plain text instead.
 - **Cloudflare fingerprints the HTTP client itself, not the `User-Agent`
   header — and writes from Node's `fetch` are blocked no matter what
   `User-Agent` you send.** This was originally misdiagnosed as a UA problem
@@ -132,11 +141,12 @@ request will 403 every time, from any client, because the WAF is reading the
 body and matching an attack-signature string inside the finding text itself
 (see the first operational fact above). The tell: the *same* finding fails on
 attempt 1 with a fresh delay and a confirmed-curl transport, while other
-findings around it sync fine. If `renderTitle`/`renderBody` are still
-entity-encoding finding text as designed, you should not hit this at all; if
-you do, something in that finding's content is still reaching the wire
-unencoded — check that the finding actually went through `renderBody`/
-`renderTitle` and not some other path to `description_html`/`name`.
+findings around it sync fine. If `renderBody` is still entity-encoding
+finding text as designed, you should not hit this at all; if you do,
+something in that finding's content is still reaching the wire unencoded —
+check that the finding actually went through `renderBody` and not some other
+path to `description_html`. (`renderTitle`/`name` is plain text by design and
+is not part of this defense — see the first operational fact above.)
 
 ## Closing a task
 

@@ -51,11 +51,32 @@ function decodeEntities(s) {
   return s.replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)));
 }
 
-test('renderTitle carries the finding id, severity and a summary', () => {
+test('renderTitle carries the finding id, severity, surface and a readable summary as literal characters', () => {
   const title = renderTitle(finding());
-  assert.ok(decodeEntities(title).includes('F-001'));
+  assert.ok(title.includes('F-001'));
   assert.ok(title.includes('P0'));
+  assert.ok(title.includes('backend-api'));
   assert.ok(title.includes('authorization'));
+});
+
+// Regression coverage for the title-encoding bug: Plane's issue `name` field
+// is plain text, not HTML, so it is never decoded on read. A finding whose
+// text contains hyphens, apostrophes and parentheses must come through
+// renderTitle completely unencoded, or the tracker shows literal "&#45;"
+// garbage instead of a readable title.
+test('renderTitle emits plain text with no HTML entities, even for hyphens, apostrophes and parentheses', () => {
+  const f = finding({
+    id: 'F-046',
+    surface: 'frontend-game',
+    claim: "The Worlds picker's delete-world control (a trash icon) fires without confirmation.",
+  });
+  const title = renderTitle(f);
+
+  assert.ok(!title.includes('&#'), `title must contain no HTML entities, got: ${title}`);
+  assert.ok(title.includes('F-046'));
+  assert.ok(title.includes('P0'));
+  assert.ok(title.includes('frontend-game'));
+  assert.ok(title.includes("The Worlds picker's delete-world control (a trash icon) fires without confirmation."));
 });
 
 test('renderBody includes every field a fixer needs', () => {

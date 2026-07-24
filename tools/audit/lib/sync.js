@@ -19,6 +19,8 @@ const DEFAULT_WRITE_DELAY_MS = 500;
 // non-alphanumeric character of finding-derived text (not just the five HTML
 // metacharacters) removes any recognizable payload from the wire bytes while
 // Plane's HTML renderer reconstructs and stores the original text exactly.
+// Used by renderBody (`description_html`, which Plane parses as HTML) only —
+// see renderTitle below for why the title must NOT go through this.
 // See .claude/skills/plane-sync/SKILL.md for the full incident writeup.
 //
 // Iterates by code point (via the string's default iterator, which pairs
@@ -35,8 +37,14 @@ function summarize(claim) {
   return trimmed.length <= 90 ? trimmed : `${trimmed.slice(0, 87)}...`;
 }
 
+// Plane's issue `name` field is plain text, not HTML — it is never decoded
+// on read, so entity-encoding it (as renderBody must, for the WAF reason
+// above) only produces literal "&#45;" garbage in the tracker UI. A
+// title-only probe against the live API with fully raw text returned 201:
+// the WAF payload strings that need encoding live in the `verification`
+// field, which appears only in the body. Keep this plain.
 function renderTitle(f) {
-  return `[${encodeFindingText(f.id)}] ${encodeFindingText(f.severity)} ${encodeFindingText(f.surface)}: ${encodeFindingText(summarize(f.claim))}`;
+  return `[${f.id}] ${f.severity} ${f.surface}: ${summarize(f.claim)}`;
 }
 
 function renderBody(f) {
