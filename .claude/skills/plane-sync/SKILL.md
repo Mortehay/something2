@@ -45,10 +45,21 @@ idempotent.
 
 ## Closing a task
 
-Set the finding's `status` to `fixed` in `findings.json`, then sync. `reconcile`
-patches the issue to the Done state. Do not close tasks by hand in the Plane UI —
-`findings.json` is the source of truth, and a hand-closed task will be reopened in
-spirit by the next sync's drift check.
+Set the finding's `status` to `fixed` with `store.setStatus` — this is the only
+sanctioned way to change `status`; `store.merge` deliberately excludes it so a
+re-audit cannot silently reset a fixed finding back to open:
+
+```js
+const store = require('./tools/audit/lib/store.js');
+const path = 'docs/audits/2026-07-24/findings.json';
+const doc = store.load(path);
+store.setStatus(doc, 'F-042', 'fixed');
+store.save(path, doc);
+```
+
+Then sync. `reconcile` patches the issue to the Done state. Do not close tasks by
+hand in the Plane UI — `findings.json` is the source of truth, and a hand-closed
+task will be reopened in spirit by the next sync's drift check.
 
 ## Recovering from a partial sync
 

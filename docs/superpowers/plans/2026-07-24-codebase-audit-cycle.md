@@ -362,13 +362,16 @@ git commit -m "feat(audit): finding schema, fingerprint and verification bar"
 - Test: `tools/audit/test/store.test.js`
 
 **Interfaces:**
-- Consumes: `finding.fingerprint`, `finding.validate`
+- Consumes: `finding.fingerprint`, `finding.validate`, `config.STATUSES`
 - Produces:
   - `store.emptyDoc(): { version: 1, findings: [] }`
   - `store.load(path: string): doc` — returns `emptyDoc()` if the file does not exist
   - `store.save(path: string, doc): void` — atomic, 2-space JSON, trailing newline
   - `store.nextId(doc): string`
   - `store.merge(doc, incoming: object[]): { doc, added: string[], updated: string[] }`
+  - `store.setStatus(doc, id: string, status: string): doc` — the only sanctioned
+    way to change a finding's `status`; `merge` deliberately excludes it from
+    `MUTABLE` so a re-audit cannot silently reset a `fixed` finding back to `open`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -470,6 +473,34 @@ test('nextId continues past the highest existing id', () => {
   const doc = { version: 1, findings: [{ id: 'F-007' }, { id: 'F-003' }] };
   assert.strictEqual(store.nextId(doc), 'F-008');
 });
+
+test('setStatus sets a valid status on the matching finding', () => {
+  const { doc } = store.merge(store.emptyDoc(), [incoming()]);
+  const id = doc.findings[0].id;
+  store.setStatus(doc, id, 'fixed');
+  assert.strictEqual(doc.findings[0].status, 'fixed');
+});
+
+test('setStatus rejects an unknown status', () => {
+  const { doc } = store.merge(store.emptyDoc(), [incoming()]);
+  const id = doc.findings[0].id;
+  assert.throws(() => store.setStatus(doc, id, 'not-a-real-status'), /status/);
+});
+
+test('setStatus throws on an unknown id', () => {
+  const { doc } = store.merge(store.emptyDoc(), [incoming()]);
+  assert.throws(() => store.setStatus(doc, 'F-999', 'fixed'), /F-999/);
+});
+
+test('merge still does not change status; setStatus remains the only path', () => {
+  const first = store.merge(store.emptyDoc(), [incoming()]);
+  const id = first.doc.findings[0].id;
+  store.setStatus(first.doc, id, 'fixed');
+
+  const second = store.merge(first.doc, [incoming({ status: 'demoted', severity: 'P1' })]);
+  assert.strictEqual(second.doc.findings[0].status, 'fixed');
+  assert.strictEqual(second.doc.findings[0].severity, 'P1');
+});
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -487,6 +518,7 @@ Expected: FAIL — `Cannot find module '../lib/store.js'`
 const fs = require('node:fs');
 const path = require('node:path');
 const { fingerprint, validate } = require('./finding.js');
+const { STATUSES } = require('./config.js');
 
 // Fields a re-audit is allowed to overwrite. Everything else — id, plane_id,
 // status — belongs to the lifecycle, not to the observation, and survives.
@@ -562,13 +594,28 @@ function merge(doc, incoming) {
   return { doc: next, added, updated };
 }
 
-module.exports = { emptyDoc, load, save, nextId, merge, MUTABLE };
+// The narrow, explicit path for lifecycle status changes. `merge` deliberately
+// excludes `status` from MUTABLE so a re-audit cannot silently reset a `fixed`
+// finding back to `open`; this is the only sanctioned way to change it.
+function setStatus(doc, id, status) {
+  if (!STATUSES.includes(status)) {
+    throw new Error(`setStatus: unknown status '${status}' (expected one of ${STATUSES.join(', ')})`);
+  }
+  const finding = doc.findings.find((f) => f.id === id);
+  if (!finding) {
+    throw new Error(`setStatus: no finding with id '${id}'`);
+  }
+  finding.status = status;
+  return doc;
+}
+
+module.exports = { emptyDoc, load, save, nextId, merge, setStatus, MUTABLE };
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd tools/audit && node --test test/store.test.js`
-Expected: PASS — 11 tests, 0 failures
+Expected: PASS — 15 tests, 0 failures
 
 - [ ] **Step 5: Commit**
 
@@ -1092,7 +1139,7 @@ Expected: PASS — 10 tests, 0 failures
 - [ ] **Step 5: Run the whole toolkit suite**
 
 Run: `cd tools/audit && npm test`
-Expected: PASS — 40 tests total, 0 failures
+Expected: PASS — 44 tests total, 0 failures
 
 - [ ] **Step 6: Commit**
 
@@ -1251,7 +1298,7 @@ in `syncDocument`, a mid-sync failure persists nothing and the next run
 duplicates every issue already created.
 
 Run: `cd tools/audit && npm test`
-Expected: PASS — 47 tests total, 0 failures
+Expected: PASS — 51 tests total, 0 failures
 
 - [ ] **Step 4: Verify the CLI fails cleanly with no arguments**
 
@@ -1555,7 +1602,7 @@ errors as findings.
 | | Check |
 |---|---|
 | Frontend | `curl -sf -o /dev/null http://localhost:15173` |
-| Backend | `curl -sf -o /dev/null http://localhost:13101/health \|\| curl -sf -o /dev/null http://localhost:13101` |
+| Backend | `curl -sf -o /dev/null http://localhost:13101/api/health` |
 | Containers | `docker ps --filter name=something2 --format '{{.Names}}'` lists frontend, backend, db, redis |
 
 ## Credentials
@@ -1652,8 +1699,18 @@ For every finding already in `findings.json` with `source: 'static'` whose
 `verification` names a browser check, run that check.
 
 - Confirmed → leave the severity, append `confirmed in browser` to `verification`.
-- Blocked upstream → set `status: 'demoted'`, `severity: 'P3'`, and record in
-  `verification` what actually blocked it.
+- Blocked upstream → set `severity: 'P3'` via `store.merge`, record in
+  `verification` what actually blocked it, then demote the status with
+  `store.setStatus` (the only path that can change `status` — `merge` deliberately
+  cannot):
+
+```js
+const store = require('./tools/audit/lib/store.js');
+const path = 'docs/audits/2026-07-24/findings.json';
+const doc = store.load(path);
+store.setStatus(doc, 'F-042', 'demoted');
+store.save(path, doc);
+```
 
 This is the safeguard against an audit that inflates its own severity counts. Use
 it honestly: a static P0 that turns out to be unreachable is a *good* outcome to
@@ -1750,10 +1807,21 @@ idempotent.
 
 ## Closing a task
 
-Set the finding's `status` to `fixed` in `findings.json`, then sync. `reconcile`
-patches the issue to the Done state. Do not close tasks by hand in the Plane UI —
-`findings.json` is the source of truth, and a hand-closed task will be reopened in
-spirit by the next sync's drift check.
+Set the finding's `status` to `fixed` with `store.setStatus` — this is the only
+sanctioned way to change `status`; `store.merge` deliberately excludes it so a
+re-audit cannot silently reset a fixed finding back to open:
+
+```js
+const store = require('./tools/audit/lib/store.js');
+const path = 'docs/audits/2026-07-24/findings.json';
+const doc = store.load(path);
+store.setStatus(doc, 'F-042', 'fixed');
+store.save(path, doc);
+```
+
+Then sync. `reconcile` patches the issue to the Done state. Do not close tasks by
+hand in the Plane UI — `findings.json` is the source of truth, and a hand-closed
+task will be reopened in spirit by the next sync's drift check.
 
 ## Recovering from a partial sync
 
@@ -1854,7 +1922,10 @@ Record every failure by name in `docs/audits/2026-07-24/baseline.md`. Then snaps
 the database:
 
 ```bash
-docker exec something2-db-1 pg_dump -U postgres game_db > "$SCRATCHPAD/game_db-pre-audit.sql"
+AUDIT_DUMP="${AUDIT_DUMP:-/tmp/something2-audit/game_db-pre-audit.sql}"
+mkdir -p "$(dirname "$AUDIT_DUMP")"
+docker exec something2-db-1 pg_dump -U user game_db > "$AUDIT_DUMP"
+wc -c "$AUDIT_DUMP"   # sanity-check: must be well above 1000 bytes
 ```
 
 The browser phase has free rein on this database. The dump is the only recovery
@@ -1950,7 +2021,7 @@ name of every failing test.
 
 Run the `pg_dump` command from the Phase 0 block. Verify the dump is non-trivial:
 
-Run: `wc -c "$SCRATCHPAD/game_db-pre-audit.sql"`
+Run: `wc -c "$AUDIT_DUMP"`
 Expected: a byte count well above 1000
 
 - [ ] **Step 3: Record the environment**
@@ -2052,7 +2123,7 @@ do not file connection errors as findings.
 
 - [ ] **Step 2: Verify the database dump exists**
 
-Run: `ls -l "$SCRATCHPAD/game_db-pre-audit.sql"`
+Run: `ls -l "$AUDIT_DUMP"`
 Expected: the file from Task 11 exists. This phase can destroy dev content; do not
 start without it.
 
@@ -2207,7 +2278,8 @@ For each finding in the current band:
 4. Run the targeted tests.
 5. For any finding whose failure scenario is a UI or flow behaviour, re-run its
    browser check from `audit-browser`.
-6. Set the finding's `status` to `fixed` in `findings.json`.
+6. Set the finding's `status` to `fixed` with `store.setStatus(doc, id, 'fixed')`
+   (see `plane-sync`'s "Closing a task" section), then `store.save`.
 7. Commit:
 
 ```bash
@@ -2276,7 +2348,7 @@ exist — is structural, not a placeholder: Task 15 gives the per-finding proced
 in full, and the findings themselves are produced by Tasks 12 and 13.
 
 **Type consistency.** `fingerprint`, `validate`, `normalizeClaim`, `stripLine`
-(finding.js); `emptyDoc`, `load`, `save`, `nextId`, `merge`, `MUTABLE` (store.js);
+(finding.js); `emptyDoc`, `load`, `save`, `nextId`, `merge`, `setStatus`, `MUTABLE` (store.js);
 `PlaneClient` with `request`, `paginate`, `listLabels`, `createLabel`, `listIssues`,
 `createIssue`, `updateIssue`, `deleteIssue` (plane.js); `renderTitle`, `renderBody`,
 `snapshot`, `reconcile` (sync.js). Every name used in a later task is defined in an

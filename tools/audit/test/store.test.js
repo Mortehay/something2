@@ -94,6 +94,34 @@ test('nextId continues past the highest existing id', () => {
   assert.strictEqual(store.nextId(doc), 'F-008');
 });
 
+test('setStatus sets a valid status on the matching finding', () => {
+  const { doc } = store.merge(store.emptyDoc(), [incoming()]);
+  const id = doc.findings[0].id;
+  store.setStatus(doc, id, 'fixed');
+  assert.strictEqual(doc.findings[0].status, 'fixed');
+});
+
+test('setStatus rejects an unknown status', () => {
+  const { doc } = store.merge(store.emptyDoc(), [incoming()]);
+  const id = doc.findings[0].id;
+  assert.throws(() => store.setStatus(doc, id, 'not-a-real-status'), /status/);
+});
+
+test('setStatus throws on an unknown id', () => {
+  const { doc } = store.merge(store.emptyDoc(), [incoming()]);
+  assert.throws(() => store.setStatus(doc, 'F-999', 'fixed'), /F-999/);
+});
+
+test('merge still does not change status; setStatus remains the only path', () => {
+  const first = store.merge(store.emptyDoc(), [incoming()]);
+  const id = first.doc.findings[0].id;
+  store.setStatus(first.doc, id, 'fixed');
+
+  const second = store.merge(first.doc, [incoming({ status: 'demoted', severity: 'P1' })]);
+  assert.strictEqual(second.doc.findings[0].status, 'fixed');
+  assert.strictEqual(second.doc.findings[0].severity, 'P1');
+});
+
 test('merge returns a document independent of the input; does not mutate the input', () => {
   const before = store.merge(store.emptyDoc(), [incoming({ severity: 'P0' })]).doc;
   const beforeSeverity = before.findings[0].severity;

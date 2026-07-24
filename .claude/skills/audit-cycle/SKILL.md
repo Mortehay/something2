@@ -44,7 +44,10 @@ Record every failure by name in `docs/audits/2026-07-24/baseline.md`. Then snaps
 the database:
 
 ```bash
-docker exec something2-db-1 pg_dump -U postgres game_db > "$SCRATCHPAD/game_db-pre-audit.sql"
+AUDIT_DUMP="${AUDIT_DUMP:-/tmp/something2-audit/game_db-pre-audit.sql}"
+mkdir -p "$(dirname "$AUDIT_DUMP")"
+docker exec something2-db-1 pg_dump -U user game_db > "$AUDIT_DUMP"
+wc -c "$AUDIT_DUMP"   # sanity-check: must be well above 1000 bytes
 ```
 
 The browser phase has free rein on this database. The dump is the only recovery

@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { fingerprint, validate } = require('./finding.js');
+const { STATUSES } = require('./config.js');
 
 // Fields a re-audit is allowed to overwrite. Everything else — id, plane_id,
 // status — belongs to the lifecycle, not to the observation, and survives.
@@ -76,4 +77,19 @@ function merge(doc, incoming) {
   return { doc: next, added, updated };
 }
 
-module.exports = { emptyDoc, load, save, nextId, merge, MUTABLE };
+// The narrow, explicit path for lifecycle status changes. `merge` deliberately
+// excludes `status` from MUTABLE so a re-audit cannot silently reset a `fixed`
+// finding back to `open`; this is the only sanctioned way to change it.
+function setStatus(doc, id, status) {
+  if (!STATUSES.includes(status)) {
+    throw new Error(`setStatus: unknown status '${status}' (expected one of ${STATUSES.join(', ')})`);
+  }
+  const finding = doc.findings.find((f) => f.id === id);
+  if (!finding) {
+    throw new Error(`setStatus: no finding with id '${id}'`);
+  }
+  finding.status = status;
+  return doc;
+}
+
+module.exports = { emptyDoc, load, save, nextId, merge, setStatus, MUTABLE };

@@ -17,7 +17,7 @@ errors as findings.
 | | Check |
 |---|---|
 | Frontend | `curl -sf -o /dev/null http://localhost:15173` |
-| Backend | `curl -sf -o /dev/null http://localhost:13101/health \|\| curl -sf -o /dev/null http://localhost:13101` |
+| Backend | `curl -sf -o /dev/null http://localhost:13101/api/health` |
 | Containers | `docker ps --filter name=something2 --format '{{.Names}}'` lists frontend, backend, db, redis |
 
 ## Credentials
@@ -114,8 +114,18 @@ For every finding already in `findings.json` with `source: 'static'` whose
 `verification` names a browser check, run that check.
 
 - Confirmed → leave the severity, append `confirmed in browser` to `verification`.
-- Blocked upstream → set `status: 'demoted'`, `severity: 'P3'`, and record in
-  `verification` what actually blocked it.
+- Blocked upstream → set `severity: 'P3'` via `store.merge`, record in
+  `verification` what actually blocked it, then demote the status with
+  `store.setStatus` (the only path that can change `status` — `merge` deliberately
+  cannot):
+
+```js
+const store = require('./tools/audit/lib/store.js');
+const path = 'docs/audits/2026-07-24/findings.json';
+const doc = store.load(path);
+store.setStatus(doc, 'F-042', 'demoted');
+store.save(path, doc);
+```
 
 This is the safeguard against an audit that inflates its own severity counts. Use
 it honestly: a static P0 that turns out to be unreachable is a *good* outcome to
