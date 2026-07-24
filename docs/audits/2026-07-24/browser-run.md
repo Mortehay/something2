@@ -127,5 +127,167 @@ check, held. No `source: 'browser'` findings were filed for this flow.
 
 ---
 
-*(Flows B, C, D and the full arbitration sweep are run by later agents, which
-append their sections below.)*
+*(Flows C, D and the remainder of the arbitration sweep are run by later
+agents, which append their sections below.)*
+
+---
+
+## Flow B — admin CRUD
+
+Driven live against the running stack via Chrome DevTools MCP, continuing in
+the same authenticated admin session Flow A left behind (re-logged-in as
+`admin` after Flow A's negative-auth testing, since the rotated `JWT_SECRET`
+invalidated the prior session). Preconditions re-checked: frontend/backend
+health both `200`, all six `something2-*` containers up, and the pre-audit
+dump still present at `/tmp/something2-audit/game_db-pre-audit.sql` (7.8 MB,
+unchanged).
+
+**Method note:** per the skill, most checks were driven through the real UI
+(fill/click) so React state and toasts render exactly as an admin would see
+them; the empty-field and oversized-name edges of check 3/4, and a handful of
+raw status/body assertions, were driven with `evaluate_script` issuing `fetch`
+from the page origin, matching Flow A's approach. All seven admin panels'
+worth of `list_console_messages` output was checked after every mutating
+step; no uncaught exception was observed at any point in this flow.
+
+**Fixtures:** all destructive/edge-case testing used freshly created rows
+prefixed `AuditFixture*` / `AuditFlowB*`, all deleted again before this flow
+ended. `grass` (tile type) and `Tree` (entity type) were never edited,
+deleted, or sent to sprite/tile generation — confirmed both still carry their
+original `image`/`render_mode` at the end of the run. Generation was
+triggered exactly twice (one tile texture, one entity image), both against
+the `auditfixturetile` / `AuditFixtureCritter` fixtures, each ~66s on the CPU
+backend as expected — read as normal, not a hang.
+
+### Per-panel results (checks 1–7 from the skill)
+
+| Check | Maps (worlds) | Tile Types | Entity Types | Item Types |
+|---|---|---|---|---|
+| 1. Create valid → appears without reload | Pass | Pass | Pass | Pass |
+| 2. Duplicate name → visible error | **Fail** — silently accepted, HTTP 201, no unique constraint (new finding F-044) | Pass — toast shown, though backend returns a raw 500 rather than 409 | Pass — same 500-but-toasted pattern | Pass — toast shown (backend 500 too) |
+| 3. Empty required fields → blocked client-side AND API-side | Pass (client blocks; direct `POST /api/worlds` with `name:""` → 400) | Pass (400 `"Name and color are required"`) | Pass (400 `"Name and color are required"`) | Pass (400 `"Name is required"`) |
+| 4. 10,000-char name → rejected, not truncated/500 | **Fail** — accepted verbatim, HTTP 201 (text column, no cap) | **Fail** — HTTP 500, raw Postgres varchar(255) overflow | **Fail** — same 500 pattern (varchar(255)) | **Fail** — accepted verbatim, HTTP 201 (text column, no cap) |
+| 5. Edit → visible + survives reload | Pass | Pass | Pass (see note below on a self-inflicted false start) | Pass |
+| 6. Delete → gone + dependent view degrades | Pass — Maps panel's creature-type checkbox grid drops a deleted entity type with no crash | Pass — no crash; only known dependent (an entity's `spawn_tiles`) degrades exactly as F-027 describes | Pass — no crash | Pass — no crash |
+| 7. Asset upload / generation trigger | N/A — no asset/generation UI in this panel (terrain "Regenerate"/"Re-roll" are procedural, not AI asset jobs, and were exercised incidentally under F-005/F-008 below) | Pass — job accepted, UI showed `Generating… (0/0)` → preview → `Approve texture`, approve persisted `render_mode:"image"` | Pass — identical lifecycle, approve persisted `render_mode:"static"` | N/A — no asset/generation UI in this panel |
+
+Check 4's failure is one coherent defect, not four independent ones: it comes
+down to which Postgres column type each table's `name` happens to use
+(`varchar(255)` for tile_types/entity_types → raw 500; unbounded `text` for
+item_types/worlds → silent unlimited acceptance). Filed as **F-043** (new,
+P2). Check 2's Maps-panel gap is a second, smaller defect — `worlds.name` has
+no unique constraint at all, unlike the other three catalogs — filed as
+**F-044** (new, P3, since world identity is by UUID everywhere it's actually
+used, confirmed by reading `MapsAdmin.jsx`'s link-dropdown `option value`).
+
+**Check 5 false start (not a finding):** the first two attempts to edit
+`AuditFixtureCritter`'s Spawn Chance to `0.33` silently failed to submit — no
+network request fired at all. Root cause: the `<input type="number"
+step="0.05">` field's native HTML5 constraint validation blocked the browser
+from submitting the form (`0.33` isn't a multiple of the step; DevTools
+showed `invalid="true"` and a native "nearest valid values are 0.3 and 0.35"
+tooltip). Retrying with a step-aligned value (`0.35`) submitted normally, and
+persisted across a reload. This was my test data being invalid input, not a
+product defect — recorded here only so it isn't a mystery in the working
+notes.
+
+### Static findings arbitrated in Flow B
+
+Every `source: 'static'` finding whose `verification` field named a check
+reachable through one of the four admin panels was run. All eight were
+**confirmed in browser** — none demoted. `verification` was updated on each
+via `store.merge` to record exactly what was run; severities are unchanged.
+
+- **F-003** (item value never written, P1) — `POST /api/item-types` with
+  `{"value":25}` returned the row with `value:0`; confirmed the admin form
+  also has no field for it at all.
+- **F-004** (bounded-world spawn OOB, P1) — settled decisively. Set
+  `entry_spawn:{x:99999,y:99999}` on a 24×24 world (`PUT` accepted it with no
+  validation, 200), joined that world over a live WebSocket as a fresh player,
+  and sent 41 movement-input frames over ~2 seconds. The player spawned at
+  `(99999,99999)` and **did not move by even one pixel** across 50 state
+  frames. This was not an assumption — the player is provably, completely
+  stuck, with no in-game recovery. Backend stayed healthy throughout (no
+  crash, no restart).
+- **F-005** (entity-type rename orphans world references, P1) — built a
+  disposable bounded world with one allowed creature type; re-roll placed 5/5
+  as a baseline. Renamed the entity type via `PUT` (accepted, no reference
+  check). Re-rolling again on the same world returned `HTTP 200
+  {"placed":0}` — the exact silent-failure shape the finding describes.
+- **F-009** (50MB global body limit, P2) — settled the mechanism without the
+  full stress test the finding's own `verification` specifies (20 concurrent
+  50MB requests), per the audit brief's explicit instruction not to risk
+  exhausting the host. Instead: one unauthenticated ~44MB JSON POST to
+  `/api/health` (a route that accepts no body and needs no auth) was fully
+  buffered and parsed *before* the 404 was produced, and `something2-backend-1`
+  RSS jumped from ~37MiB to ~181MiB for that single request and had not
+  settled several seconds later. This proves the claim's core mechanism (the
+  global limit runs pre-auth, pre-routing, on every path) with a real
+  measurement; I did not attempt the 20-concurrent variant. Container stayed
+  up (`RestartCount: 0`) throughout.
+- **F-023** (MapsAdmin swallows `worldsError`, P1) — patched `fetch` via
+  `navigate_page`'s `initScript` to reject only `/api/worlds` while leaving
+  every other endpoint (including auth) working, then opened the Maps tab.
+  After the query settled it rendered "No bounded maps yet. Generate one
+  above." — no toast, no error banner, nothing in the console.
+  Indistinguishable from a genuinely empty catalog, exactly as claimed.
+- **F-024** (generic vs. specific mutation errors, P2) — opened Edit on a
+  fresh entity type, deleted that same row via a background request
+  (simulating a second admin's tab), then clicked Save Changes in the
+  still-open first tab. Backend correctly returned `404 {"error":"Entity type
+  not found"}`; the toast shown read the generic hardcoded `"Update failed:
+  Failed to update entity type"` — the specific, actionable reason was
+  discarded exactly as claimed.
+- **F-025** (no stat validation, P2) — edited the real `Wolf` entity type's
+  Max HP to `-50`. No client-side error, `PUT` returned 200, and a follow-up
+  `GET` confirmed `max_hp:-50` persisted with no error surfaced anywhere.
+  Reverted `Wolf` to `max_hp:12` immediately after so later flows aren't
+  handed a broken shared fixture.
+- **F-027** (orphaned `spawn_tiles`, P2) — created an entity type with
+  `spawn_tiles:["auditfixturetile"]`, deleted that tile type, reloaded, and
+  reopened the entity's edit modal: the `auditfixturetile` checkbox was
+  simply gone with no warning, while `GET /api/entity-types` confirmed the
+  row's `spawn_tiles` array still held the dangling string.
+
+**On F-027 vs. F-005 (task asked whether these are one defect):** they are
+the same root defect *class* — a name-keyed reference into an admin catalog
+with zero integrity checking on rename/delete — but they are not the same
+finding and I did not merge them. They differ in trigger (F-005: renaming an
+*entity type* breaks `worlds.allowed_creature_types` / `world_creatures.type`;
+F-027: deleting a *tile type* breaks `entity_types.spawn_tiles`), in the
+table/column pair involved, and in consequence (F-005 silently zeroes
+creature placement and can wipe village guards; F-027 silently drops object
+spawn density on that tile with no gameplay-visible signal at all, since
+nothing else reads the stale name after the checkbox disappears). A correct
+fix for one would not by itself fix the other — they'd share a fix *pattern*
+(referential check or cascade on catalog rename/delete), not a fix
+*location*. Recommend keeping them as two separate Plane tasks tagged with a
+shared root-cause note, rather than merging.
+
+### New findings emitted by Flow B
+
+Two, both `source: 'browser'`, both backend-api:
+
+- **F-043** (P2, user-logic) — none of the four admin-catalog create routes
+  validates name length; a 10,000-character name either 500s (tile-types,
+  entity-types — `varchar(255)` columns, raw Postgres overflow error
+  uncaught) or is silently accepted without limit (item-types, worlds —
+  unbounded `text` columns). Neither matches the "rejected cleanly" behavior
+  the checklist (and any reasonable admin) would expect.
+- **F-044** (P3, kiss) — `worlds.name` has no unique constraint, so creating
+  a world with a name that duplicates an existing one succeeds silently
+  (201, no error), unlike the other three catalogs. Confirmed the live dev
+  DB already had duplicate-named worlds from prior seed data before this
+  session touched anything. Not a data-integrity risk since every actual
+  reference (links, joins) resolves by world UUID, not name — purely an
+  admin-usability gap, hence P3.
+
+That's a real, non-trivial yield from this phase: two static P0/P1 findings
+that were filed on inference (F-004, F-005) are now proven with a live
+reproduction instead of a plausible story, one P2 (F-009) got a real
+measurement instead of an inferred consequence, and two defects (F-043,
+F-044) existed only because static review doesn't drive four separate admin
+forms with the same edge-case input and compare what actually comes back.
+
+No finding was demoted in this flow — everything arbitrated held up exactly
+as claimed. No assertion needed a flake retry.
