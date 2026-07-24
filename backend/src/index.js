@@ -5,7 +5,7 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts, villageMerchantPost, CREATURE_TILE_PX } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts, villageMerchantPost, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages } = require('./services/villages');
 const { seedBaseCatalog, seedItemAcrossVillages } = require('./services/merchantStock');
@@ -106,6 +106,17 @@ const MAX_MAP_DIM = 500;
 // World preview memo
 const PREVIEW_DIM = 64;
 const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path grid)
+
+// World overview memo (player-centered minimap window, SOMET minimap HUD)
+const OVERVIEW_SPAN = 256;   // tiles per side of the player-centered window
+const OVERVIEW_STEP = 4;     // downsample factor -> 64x64 coarse cells
+const worldOverviewCache = new Map(); // "worldId:snappedCol:snappedRow" -> payload
+
+function clearOverviewCache(worldId) {
+  for (const key of worldOverviewCache.keys()) {
+    if (key.startsWith(`${worldId}:`)) worldOverviewCache.delete(key);
+  }
+}
 
 // Handle to the running authority (set only when this module is the entrypoint;
 // null under tests, or under a test that injects a fake one via
@@ -1257,6 +1268,7 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     if (boundsChanged) {
       await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [id]);
       worldPreviewCache.delete(id);
+      clearOverviewCache(id);
     }
     // Same symptom class as the entry_spawn check above (SOMET-184 / F-004),
     // but for players who already joined and persisted a position: a shrink
@@ -1312,6 +1324,7 @@ app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
     // guards, since the wipe above has no village_id to spare them by.
     await insertVillageGuards(pool, id, await fetchVillages(pool, id));
     worldPreviewCache.delete(id);
+    clearOverviewCache(id);
     const result = await pool.query(
       'UPDATE worlds SET seed = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
       [newSeed, id],
@@ -1423,6 +1436,7 @@ app.get('/api/worlds/:id/links', async (req, res) => {
 async function invalidateWorld(worldId) {
   await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [worldId]);
   worldPreviewCache.delete(worldId);
+  clearOverviewCache(worldId);
   return evictOrWarn(worldId);
 }
 
@@ -1686,6 +1700,38 @@ app.get('/api/worlds/:id/preview', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to generate world preview' });
+  }
+});
+
+app.get('/api/worlds/:id/overview', async (req, res) => {
+  try {
+    const worldId = req.params.id;
+    const centerCol = Number(req.query.cx), centerRow = Number(req.query.cy);
+    if (!Number.isFinite(centerCol) || !Number.isFinite(centerRow)) {
+      return res.status(400).json({ error: 'cx and cy (tile coords) are required' });
+    }
+    const { snappedCol, snappedRow } = overviewOrigin(centerCol, centerRow, OVERVIEW_SPAN);
+    const cacheKey = `${worldId}:${snappedCol}:${snappedRow}`;
+    if (worldOverviewCache.has(cacheKey)) return res.json(worldOverviewCache.get(cacheKey));
+
+    const worldRes = await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
+    const world = worldRes.rows[0];
+    if (!world) return res.status(404).json({ error: 'world not found' });
+
+    const tileTypes = await getTileTypesMap();
+    const data = generateWorldOverview(
+      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
+        width: world.width, height: world.height,
+        doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
+        villages: await fetchVillages(pool, world.id) },
+      centerCol, centerRow, OVERVIEW_SPAN, OVERVIEW_STEP,
+    );
+    const payload = { world_id: worldId, ...data };
+    worldOverviewCache.set(cacheKey, payload);
+    res.json(payload);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to generate world overview' });
   }
 });
 
