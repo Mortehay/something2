@@ -2,7 +2,7 @@ import hmac
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
+from typing import Literal, Optional, List
 from .config import settings
 from . import backends
 from .jobs import JobManager
@@ -37,7 +37,10 @@ MAX_SIZE_DIM = 512
 class GenerateRequest(BaseModel):
     creature: str
     base_prompt: str
-    kind: str = "creature"  # "creature" | "tile" | "object"
+    # F-034/SOMET-214: constrained so an unrecognized value is rejected with
+    # 422 at the boundary instead of silently falling through to the
+    # creature branch (8x the work, and a differently-shaped result).
+    kind: Literal["creature", "tile", "object"] = "creature"
     backend: Optional[str] = None
     seed: int = 0
     frames: Optional[int] = Field(default=None, ge=1, le=MAX_FRAMES)
