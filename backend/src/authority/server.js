@@ -100,7 +100,62 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const itemSweepMs = opts.itemSweepMs || 60000;
   const rng = opts.rng || Math.random;
 
-  const wss = new WebSocketServer({ noServer: true });
+  // Every inbound frame this protocol defines is a small flat JSON object
+  // (join/attack/equip/pickup/drop/interact/buy/sell/input/ping) — the
+  // largest legitimate one (`equip`, carrying a uuid itemId + a slot name)
+  // measures ~85 bytes. `ws` defaults maxPayload to 100 MiB with none set
+  // (F-015 / SOMET-195): one authenticated socket could send repeated
+  // ~100 MiB text frames, each buffered and JSON.parse'd, exhausting the
+  // container heap and OOM-killing the whole process (every player + the
+  // co-hosted HTTP API). 4096 bytes is ~48x the largest real frame —
+  // generous enough that no legitimate client can ever brush it, tight
+  // enough that an oversized frame is rejected (socket closed, code 1009)
+  // before it is ever buffered.
+  const MAX_INBOUND_FRAME_BYTES = opts.maxPayload || 4096;
+  // Per-socket token bucket applied to EVERY inbound frame, before any
+  // handler runs. This is the actual bound on the second attack vector F-015
+  // describes: several handlers (attack-with-ammo, equip/unequip, pickup,
+  // drop, interact, buy, sell) chain a DB round trip onto `ws._opChain` with
+  // no depth limit, so a client streaming frames faster than the chain
+  // drains grows an ever-deeper promise chain of retained closures while
+  // monopolizing a pool connection. Sizing (confirmed against the live
+  // client, WorldAuthorityClient.js): a well-behaved client's highest
+  // steady-state rate is `input` at a fixed 20 Hz (client-throttled to a
+  // 50ms interval, independent of frame rate); `attack` has NO client-side
+  // throttle and is additionally gated only by the equipped weapon's
+  // cooldown, which for a fast weapon can also approach ~20 Hz. Every other
+  // type is one frame per discrete UI action (click/keypress) and is far
+  // slower in practice. RATE_LIMIT_PER_SEC=40 is 2x the highest recorded
+  // legitimate steady rate — comfortable headroom for input+attack running
+  // together, plus incidental UI actions, with no observed play pattern
+  // that approaches it. RATE_LIMIT_CAPACITY=60 is a burst allowance on top
+  // of that for frames that land bunched by scheduling/network jitter. This
+  // does not attempt to rate-limit a SPECIFIC message type (e.g. a stricter
+  // cap on `interact` alone) — that would need real play data to size
+  // without risking legitimate combat/movement, which this fix does not
+  // have; a uniform, generous cap is the defensible bound given what is
+  // known.
+  const RATE_LIMIT_CAPACITY = opts.rateLimitCapacity || 60;
+  const RATE_LIMIT_PER_SEC = opts.rateLimitPerSec || 40;
+
+  // Refills `ws`'s bucket for elapsed time, then consumes one token if
+  // available. Returns false (frame dropped, nothing else runs — no parse
+  // work has happened yet beyond JSON.parse, no handler, no DB query) when
+  // the bucket is empty.
+  function consumeRateToken(ws, now = Date.now()) {
+    if (ws._rateTokens === undefined) {
+      ws._rateTokens = RATE_LIMIT_CAPACITY;
+      ws._rateStamp = now;
+    } else {
+      const elapsedSec = Math.max(0, now - ws._rateStamp) / 1000;
+      ws._rateTokens = Math.min(RATE_LIMIT_CAPACITY, ws._rateTokens + elapsedSec * RATE_LIMIT_PER_SEC);
+      ws._rateStamp = now;
+    }
+    if (ws._rateTokens < 1) return false;
+    ws._rateTokens -= 1;
+    return true;
+  }
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_FRAME_BYTES });
   const worlds = new Map(); // world_id -> { world, row, sockets: Map<userId, ws> }
   const loading = new Map(); // world_id -> in-flight loadWorld promise (cold-start dedupe)
   const sessionsByUser = new Map(); // userId -> ws (exactly one live authority session per account)
@@ -408,6 +463,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // undefined `.type` on primitives/arrays just falls through harmlessly
       // — but null is fatal). Reject anything that isn't a plain object here.
       if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
+
+      // Rate limit BEFORE any handler runs (F-015 / SOMET-195): a frame that
+      // loses here does zero further work — no world lookup, no DB query, no
+      // ws._opChain append. Dropped silently, matching this handler's
+      // existing house style for benign no-ops (e.g. pickup with nothing in
+      // range) — a flood is adversarial or a client bug either way, and an
+      // error reply for every dropped frame would itself be free work handed
+      // to whoever is flooding.
+      if (!consumeRateToken(ws)) return;
 
       if (msg.type === 'join') {
         // A second join on an already-joined socket bypasses the "newest

@@ -235,6 +235,130 @@ test('two clients in one world see each other', async () => {
   handle.close(); server.close();
 });
 
+// F-015 (SOMET-195): `new WebSocketServer({ noServer: true })` with no
+// maxPayload inherits ws's default of 100 MiB. Every real frame this
+// protocol defines is a small flat JSON object (the largest legitimate one,
+// `join`'s world_id, is well under 100 bytes), so a single authenticated
+// socket sending repeated ~100 MiB frames would have each one buffered and
+// JSON.parse'd, exhausting the process heap. Uses the boot()-default
+// maxPayload (4096) rather than the real 100 MiB default so the test stays
+// fast and deterministic — 4096 is small enough to trip in milliseconds
+// while still being ~40x the largest legitimate frame.
+test('a frame over maxPayload is rejected (closed 1009) instead of buffered', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  const oversized = JSON.stringify({ type: 'ping', pad: 'x'.repeat(8000) }); // > 4096
+  const closeCode = new Promise((res) => ws.on('close', (code) => res(code)));
+  ws.send(oversized);
+  const code = await Promise.race([closeCode, new Promise((res) => setTimeout(() => res(null), 2000))]);
+  assert.equal(code, 1009, 'an oversized frame must be rejected at the transport level, not buffered/parsed');
+  handle.close(); server.close();
+});
+
+test('a frame within maxPayload is processed normally', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  const joined = await nextMsg(ws, 'joined');
+  assert.equal(joined.type, 'joined', 'a normal, well-under-limit frame is unaffected by the cap');
+  ws.close(); handle.close(); server.close();
+});
+
+// Boot with caller-supplied rate-limit knobs (the reaper tests above use the
+// same bootWith-with-overrides pattern for their own opts).
+function bootRate(rateLimitCapacity, rateLimitPerSec) {
+  return new Promise((resolve) => {
+    const server = http.createServer();
+    const handle = attachAuthority(server, fakePool(), {
+      jwtSecret: SECRET, tickMs: 20, rateLimitCapacity, rateLimitPerSec,
+    });
+    track(handle, server);
+    server.listen(0, () => {
+      const port = server.address().port;
+      resolve({ url: `ws://127.0.0.1:${port}/authority`, handle, server });
+    });
+  });
+}
+
+// F-015 (SOMET-195): nothing bounded the rate of inbound frames. Several
+// handlers (attack-with-ammo, equip/unequip, pickup, drop, interact, buy,
+// sell) chain a DB round trip onto `ws._opChain` with no depth limit, so a
+// client streaming frames faster than the chain drains grows an ever-deeper
+// promise chain while monopolizing a pool connection. capacity=0 refill=0
+// isolates the bucket-exhaustion behavior deterministically: after `join`
+// spends the one token this test grants, every later frame in the same tick
+// must be dropped, not queued or errored.
+test('a token bucket of capacity 1 admits the join frame, then drops everything else', async () => {
+  const { url, handle, server } = await bootRate(1, 0);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined'); // spends the sole token
+
+  const pongs = [];
+  ws.on('message', (data) => { const m = JSON.parse(data); if (m.type === 'pong') pongs.push(m); });
+  for (let i = 0; i < 20; i++) ws.send(JSON.stringify({ type: 'ping' }));
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(pongs.length, 0, 'the bucket has zero tokens left and zero refill — every ping must be dropped');
+  ws.close(); handle.close(); server.close();
+});
+
+test('a burst beyond the token bucket capacity is dropped, not queued for later', async () => {
+  // capacity 5, refill 0/sec: `join` spends one token, leaving exactly 4 for
+  // the 20 ping frames that follow in the same burst.
+  const { url, handle, server } = await bootRate(5, 0);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const pongs = [];
+  ws.on('message', (data) => { const m = JSON.parse(data); if (m.type === 'pong') pongs.push(m); });
+  for (let i = 0; i < 20; i++) ws.send(JSON.stringify({ type: 'ping' }));
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(pongs.length, 4, 'only the tokens left after join are admitted; a flood does not queue behind them');
+  ws.close(); handle.close(); server.close();
+});
+
+test('frames sent well within the production rate limit are never dropped', async () => {
+  const { url, handle, server } = await bootRate(60, 40); // production defaults
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const pongs = [];
+  ws.on('message', (data) => { const m = JSON.parse(data); if (m.type === 'pong') pongs.push(m); });
+  for (let i = 0; i < 10; i++) ws.send(JSON.stringify({ type: 'ping' }));
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(pongs.length, 10, 'ordinary, well-under-capacity traffic must be completely unaffected');
+  ws.close(); handle.close(); server.close();
+});
+
+test('the token bucket refills over time, so a client is not permanently penalized after one burst', async () => {
+  const { url, handle, server } = await bootRate(3, 1000); // tiny capacity, fast refill
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const pongs = [];
+  ws.on('message', (data) => { const m = JSON.parse(data); if (m.type === 'pong') pongs.push(m); });
+  for (let i = 0; i < 10; i++) ws.send(JSON.stringify({ type: 'ping' })); // exhausts the tiny bucket
+  await new Promise((r) => setTimeout(r, 50));
+  const afterBurst = pongs.length;
+  assert.ok(afterBurst < 10, 'sanity: the tiny bucket really did drop part of the burst');
+
+  await new Promise((r) => setTimeout(r, 100)); // >> one refill interval at 1000/sec
+  ws.send(JSON.stringify({ type: 'ping' }));
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(pongs.length, afterBurst + 1,
+    'a ping sent after the refill window is answered — the client is not permanently penalized after one burst');
+  ws.close(); handle.close(); server.close();
+});
+
 // F-014 (SOMET-194): Postgres uuid input is case-insensitive (and also
 // accepts braced / hyphenless spellings), so `SELECT ... WHERE id = $1`
 // finds the same row for any spelling of the id -- but loadWorld() used to
