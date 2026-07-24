@@ -63,7 +63,13 @@ export class WorldAuthorityClient {
     });
     this.ws.addEventListener('error', () => this.onError(new Error('websocket error')));
     this.ws.addEventListener('close', (ev) => {
-      this.connected = false; this.joined = false; this.onClose(ev);
+      this.connected = false; this.joined = false;
+      // Second arg: whether THIS close was self-inflicted (disconnect()
+      // already set _closed before calling ws.close()) vs. the socket just
+      // dying under us — callers need that distinction to tell a deliberate
+      // teardown (doorway transition, kick, unmount) apart from a fatal,
+      // unannounced drop that otherwise leaves them silently stuck (F-028).
+      this.onClose(ev, this._closed);
     });
   }
 

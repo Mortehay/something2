@@ -156,6 +156,23 @@ export class Game {
         }
     }
 
+    // WorldAuthorityClient's onClose fires for every close, including ones
+    // Game itself triggered on purpose (a doorway transition's re-entry
+    // guard, the 'kicked' flow's own disconnect(), destroy() on unmount).
+    // `wasIntentional` (WorldAuthorityClient's _closed, set synchronously
+    // before it calls ws.close()) tells those apart from the socket simply
+    // dying under us (backend restart/crash/network blip). Only the latter
+    // is fatal: it leaves state=='playing' with input handlers silently
+    // dropping every send against a dead socket (F-028) unless we surface
+    // it. Mirrors the existing 'kicked' state transition/render branch.
+    _onAuthorityClose(wasIntentional) {
+        this.authorityJoined = false;
+        if (!wasIntentional && this.state === 'playing') {
+            console.warn('[authority] connection lost — no reconnect attempted, reload to resume');
+            this.setState('disconnected');
+        }
+    }
+
     // Load each sprited entity type's atlas image + manifest and attach the
     // manifest to the type's sprite descriptor. Because entity instances share
     // that descriptor object (Object.assign copies the ref), attaching here
@@ -370,7 +387,7 @@ export class Game {
                     // would just be noise (and may fire repeatedly).
                     if (e && e.isServerRejection && e.serverMessage) this._showToast(e.serverMessage);
                 },
-                onClose: () => { this.authorityJoined = false; },
+                onClose: (ev, wasIntentional) => this._onAuthorityClose(wasIntentional),
                 onKicked: () => {
                     console.warn('[authority] kicked: signed in elsewhere');
                     this.setState('kicked');
@@ -605,6 +622,20 @@ export class Game {
             this.ctx.textAlign = 'center';
             this.ctx.textBaseline = 'middle';
             this.ctx.fillText('Signed in elsewhere — this session was disconnected.', this.canvas.width / 2, this.canvas.height / 2);
+            this.ctx.restore();
+        } else if (this.state === 'disconnected') {
+            // Same freeze-and-explain treatment as 'kicked' above, for the
+            // other way the authority socket dies: it just closed on us
+            // (server restart/crash/network), rather than the server
+            // deliberately kicking this session (see _onAuthorityClose).
+            this.ctx.fillStyle = 'rgba(0,0,0,0.75)';
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            this.ctx.save();
+            this.ctx.fillStyle = '#ef4444';
+            this.ctx.font = '24px sans-serif';
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
+            this.ctx.fillText('Connection lost — reload to reconnect.', this.canvas.width / 2, this.canvas.height / 2);
             this.ctx.restore();
         } else if (this.chunked) {
             // Expire the toast here (once per frame) rather than on a timer,
