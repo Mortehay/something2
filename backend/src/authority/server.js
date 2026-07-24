@@ -957,6 +957,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
       worlds.delete(worldId);
       return true;
     },
+    // True iff `worldId` is currently loaded AND has at least one connected
+    // socket. evictWorld() alone cannot distinguish "refused because a
+    // player is connected" from "there was nothing loaded to evict" — both
+    // return false — so admin routes that need to tell an operator WHY their
+    // world-content edit did not reach the live simulation (F-017 / SOMET-197)
+    // call this after evictWorld() returns false.
+    isWorldLive(worldId) {
+      const entry = worlds.get(worldId);
+      return !!(entry && entry.sockets && entry.sockets.size > 0);
+    },
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);

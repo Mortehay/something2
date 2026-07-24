@@ -641,6 +641,30 @@ test('concurrent double-equip of the same item into two hand slots does not cras
   ws.close(); handle.close(); server.close();
 });
 
+// F-017 (SOMET-197): isWorldLive is the disambiguator evictOrWarn (index.js)
+// needs to tell "nothing loaded" apart from "a player is connected, eviction
+// refused" — both of which evictWorld() alone reports as `false`. This drives
+// it against a real joined session, not a synthetic entry.
+test('isWorldLive reflects a real connected player, then clears once they disconnect', async () => {
+  const { url, handle, server } = await boot();
+  assert.equal(handle.isWorldLive('w1'), false, 'not loaded yet');
+
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+  assert.equal(handle.isWorldLive('w1'), true, 'a connected player makes the world live');
+  assert.equal(handle.evictWorld('w1'), false, 'eviction must be refused while live');
+
+  const closed = new Promise((res) => ws.on('close', res));
+  ws.close();
+  await closed;
+  // The close handler removes the empty world entry synchronously.
+  assert.equal(handle.isWorldLive('w1'), false, 'no longer live once the only player disconnects');
+
+  handle.close(); server.close();
+});
+
 test('a second join on the same socket is rejected (no free re-heal / no ghost)', async () => {
   // Regression test: prev === ws used to skip the kick check entirely, so a
   // client could join twice on one socket. Re-joining the SAME world calls

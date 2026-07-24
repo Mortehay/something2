@@ -2,7 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { adminToken, isUserLookup, ADMIN_USER_ROW } = require('./helpers/auth.js');
 const request = require('supertest');
-const { app, __setPool } = require('../src/index.js');
+const { app, __setPool, __setAuthorityHandle } = require('../src/index.js');
+
+// Always leave the module-level authorityHandle clean for every OTHER test in
+// this process (node:test runs a file's tests sequentially by default, but
+// nothing enforces that a later test file wouldn't also see a handle a prior
+// test forgot to clear).
+test.afterEach(() => { __setAuthorityHandle(null); });
 
 const AUTH = ['Authorization', `Bearer ${adminToken()}`];
 
@@ -216,4 +222,43 @@ test('POST /api/worlds/:id/creatures places creatures and reports the count', as
   assert.equal(res.status, 200);
   assert.equal(res.body.placed, 8);
   assert.equal(inserted.length, 8);
+  assert.equal(res.body.liveWarning, undefined, 'no warning when the world was not live');
+});
+
+// F-017 (SOMET-197): evictWorld refuses to evict a world with live sockets
+// and returns false, and every admin caller (this route included) discarded
+// that return value outright — so a re-roll against a world with a connected
+// player replies 200 {"placed": N} while the live simulation keeps its OLD
+// in-memory creatures. Confirmed live via the real admin route: the
+// connected player kept receiving broadcast frames for ~1600-1700 creatures
+// the DB no longer had, and kills against them dropped no loot/gold at all
+// (commitCreatureDeath's DELETE matched nothing). This test does not
+// reproduce that live consequence (that needs a real authority + socket) —
+// it pins the narrower, directly-testable contract: when evictWorld refuses
+// because a player is connected, the admin response must say so rather than
+// silently claiming success.
+test('POST /api/worlds/:id/creatures warns when a player is connected so the re-roll cannot reach the live world', async () => {
+  const world = { id: 'w1', seed: '42', chunk_size: 64, width: 24, height: 24,
+    creature_count: 8, allowed_creature_types: ['goblin'] };
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [world] })],
+    [/SELECT .*FROM tile_types/i, () => ({ rows: TILE_ROWS })],
+    [/FROM map_links/i, () => ({ rows: [] })],
+    [/SELECT .*FROM entity_types WHERE is_creature/i, () => ({
+      rows: [{ id: 1, name: 'goblin', hp: 12, defense: 1, resistances: {} }] })],
+    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],
+    [/INSERT INTO world_creatures/i, () => ({ rows: [], rowCount: 1 })],
+  ]);
+  __setPool(pool);
+  // A fake authority handle whose evictWorld behaves exactly like the real
+  // one for a world with a connected socket: refuses (false) but the entry
+  // is still live.
+  __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
+
+  const res = await request(app).post('/api/worlds/w1/creatures').set(...AUTH).send({});
+  assert.equal(res.status, 200, 'the DB write still succeeds — only the live simulation is stale');
+  assert.equal(res.body.placed, 8);
+  assert.match(res.body.liveWarning, /connected/i,
+    'the response must say the change did not reach the live world, not silently claim success');
 });

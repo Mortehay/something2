@@ -25,3 +25,14 @@ test('evictWorld exposes a function on the handle', () => {
     assert.equal(typeof h.evictWorld, 'function');
   });
 });
+
+// F-017 (SOMET-197): evictWorld() returning false is ambiguous — "nothing was
+// loaded" and "a player is connected, refused" both return false. isWorldLive
+// disambiguates so an admin caller can tell the two apart and only warn in
+// the second case (see index.js's evictOrWarn / the worldsAdminRoutes and
+// villageRoutes/worldLinksRoutes live-warning tests for the caller side).
+test('isWorldLive returns false for a world that was never loaded', () => {
+  withAuthority((h) => {
+    assert.equal(h.isWorldLive('missing-id'), false);
+  });
+});

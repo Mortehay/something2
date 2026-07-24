@@ -47,11 +47,45 @@ const PREVIEW_DIM = 64;
 const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path grid)
 
 // Handle to the running authority (set only when this module is the entrypoint;
-// null under tests). Lets admin mutations evict an idle cached world so its next
-// load re-reads regenerated terrain/creatures from the DB.
+// null under tests, or under a test that injects a fake one via
+// __setAuthorityHandle — see the F-017/SOMET-197 tests). Lets admin mutations
+// evict an idle cached world so its next load re-reads regenerated
+// terrain/creatures from the DB.
 let authorityHandle = null;
+const __setAuthorityHandle = (impl) => { authorityHandle = impl; };
 function evictAuthorityWorld(worldId) {
   return authorityHandle?.evictWorld?.(worldId) ?? false;
+}
+// True iff `worldId` is currently loaded in the live authority AND has a
+// connected player. evictWorld() returning false is ambiguous — it means
+// EITHER "nothing was loaded" (fine: the DB is the source of truth, the next
+// join reads the fresh row) OR "a player is connected, so the eviction was
+// refused" (not fine: that world's live simulation just went stale). This
+// distinguishes the two so a caller can warn only in the second case.
+function isWorldLive(worldId) {
+  return authorityHandle?.isWorldLive?.(worldId) ?? false;
+}
+// A world-content admin mutation calls this right after its own DB writes.
+// Returns a warning string when the edit could NOT reach a live simulation
+// (a player is connected, so evictWorld refused), or undefined when there is
+// nothing to warn about — either the eviction succeeded or the world was
+// never loaded in the first place. Every one of these mutations previously
+// discarded evictWorld's return value outright and replied with a plain
+// success, so a re-roll (or village/link edit) against a world with even one
+// player online silently never reached that player's live session (F-017 /
+// SOMET-197) — confirmed live via the real admin re-roll route, with a
+// stronger consequence than the finding's own repro: a sustained
+// hp-oscillating death loop against ~1600 creatures the DB no longer had,
+// and zero drops/gold on every kill (commitCreatureDeath's DELETE matched no
+// row). This does not make the live simulation reconcile itself — the DB
+// write already happened either way — it only stops the admin response from
+// lying about whether that write actually reached the world people are
+// playing in.
+function evictOrWarn(worldId) {
+  if (evictAuthorityWorld(worldId)) return undefined;
+  return isWorldLive(worldId)
+    ? 'a player is connected to this world; this change will not reach the live simulation until it empties'
+    : undefined;
 }
 
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
@@ -1133,8 +1167,8 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
       [name.trim(), nextW, nextH, count, JSON.stringify(allowed), entry, spawn ? JSON.stringify(spawn) : null, id],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'world not found' });
-    if (boundsChanged) evictAuthorityWorld(id);
-    res.json(result.rows[0]);
+    const liveWarning = boundsChanged ? evictOrWarn(id) : undefined;
+    res.json(liveWarning ? { ...result.rows[0], liveWarning } : result.rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update world' });
@@ -1158,8 +1192,8 @@ app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
       'UPDATE worlds SET seed = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
       [newSeed, id],
     );
-    evictAuthorityWorld(id);
-    res.json(result.rows[0]);
+    const liveWarning = evictOrWarn(id);
+    res.json(liveWarning ? { ...result.rows[0], liveWarning } : result.rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to regenerate world' });
@@ -1215,8 +1249,8 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
     await pool.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`, [id, GUARD_TYPE]);
     await insertVillageGuards(id, villages);
 
-    evictAuthorityWorld(id);
-    res.json({ placed });
+    const liveWarning = evictOrWarn(id);
+    res.json(liveWarning ? { placed, liveWarning } : { placed });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to re-roll creatures' });
@@ -1237,11 +1271,14 @@ app.get('/api/worlds/:id/links', async (req, res) => {
 
 // A link change flips an edge between a doorway gap and a solid wall, reshaping
 // the wall ring exactly like a bounds change: invalidate persisted + preview
-// terrain and evict the idle authority copy for the given world.
+// terrain and evict the idle authority copy for the given world. Returns the
+// evictOrWarn() warning string (or undefined) so callers with a JSON body can
+// surface it (F-017 / SOMET-197) instead of discarding it like every caller
+// used to.
 async function invalidateWorld(worldId) {
   await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [worldId]);
   worldPreviewCache.delete(worldId);
-  evictAuthorityWorld(worldId);
+  return evictOrWarn(worldId);
 }
 
 // Two guards per village, standing on the interior tiles flanking the gate.
@@ -1326,8 +1363,8 @@ app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
       width: row.width, height: row.height, gateEdge: row.gate_edge,
     }]);
     await seedBaseCatalog(pool, id, row.id);
-    await invalidateWorld(id);
-    res.json(ins.rows[0]);
+    const liveWarning = await invalidateWorld(id);
+    res.json(liveWarning ? { ...ins.rows[0], liveWarning } : ins.rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to create village' });
@@ -1346,7 +1383,11 @@ app.delete('/api/worlds/:id/villages/:villageId', adminGuard, async (req, res) =
     // rest's guards intact, and deleting the last village leaves zero.
     await pool.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`, [id, GUARD_TYPE]);
     await insertVillageGuards(id, await fetchVillages(pool, id));
-    await invalidateWorld(id);
+    const liveWarning = await invalidateWorld(id);
+    // 204 carries no body — a header is the only way this still-live-blocked
+    // signal (F-017 / SOMET-197) can reach a caller without changing the
+    // response contract every existing client/test relies on.
+    if (liveWarning) res.set('X-Live-World-Pending', 'true');
     res.status(204).end();
   } catch (err) {
     console.error(err);
@@ -1369,9 +1410,10 @@ app.post('/api/worlds/:id/links', adminGuard, async (req, res) => {
       return res.status(400).json({ error: 'both worlds must be bounded maps' });
     }
     await setLink(pool, id, edge, to_world_id);
-    await invalidateWorld(id);
-    await invalidateWorld(to_world_id);
-    res.json({ ok: true });
+    const w1 = await invalidateWorld(id);
+    const w2 = await invalidateWorld(to_world_id);
+    const liveWarning = w1 || w2;
+    res.json(liveWarning ? { ok: true, liveWarning } : { ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to set link' });
@@ -1384,8 +1426,10 @@ app.delete('/api/worlds/:id/links/:edge', adminGuard, async (req, res) => {
     if (!EDGES.has(edge)) return res.status(400).json({ error: 'edge must be one of N,E,S,W' });
     const cur = await pool.query('SELECT to_world_id FROM map_links WHERE from_world_id = $1 AND edge = $2', [id, edge]);
     await clearLink(pool, id, edge);
-    await invalidateWorld(id);
-    if (cur.rows[0]) await invalidateWorld(cur.rows[0].to_world_id);
+    const w1 = await invalidateWorld(id);
+    const w2 = cur.rows[0] ? await invalidateWorld(cur.rows[0].to_world_id) : undefined;
+    // See the villages DELETE route above: 204 carries no body.
+    if (w1 || w2) res.set('X-Live-World-Pending', 'true');
     res.status(204).end();
   } catch (err) {
     console.error(err);
@@ -1483,4 +1527,4 @@ if (require.main === module) {
   console.log('Authority WS attached at /authority');
 }
 
-module.exports = { app, __setSpriteGen, __setPool, validateItemType };
+module.exports = { app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType };

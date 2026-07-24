@@ -1,8 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
-const { app, __setPool } = require('../src/index.js');
+const { app, __setPool, __setAuthorityHandle } = require('../src/index.js');
 const { adminToken, isUserLookup, ADMIN_USER_ROW } = require('./helpers/auth.js');
+
+test.afterEach(() => { __setAuthorityHandle(null); });
 
 const AUTH = ['Authorization', `Bearer ${adminToken()}`];
 function mockPool(handlers) {
@@ -41,6 +43,30 @@ test('POST village inserts a valid village and invalidates the world', async () 
   assert.equal(pool.calls.filter((c) => /DELETE FROM world_chunks/i.test(c.sql)).length, 1);
   const guardInserts = pool.calls.filter((c) => /INSERT INTO world_creatures/i.test(c.sql));
   assert.equal(guardInserts.length, 2, 'village creation spawns exactly two guards');
+});
+
+// F-017 (SOMET-197): invalidateWorld's eviction result used to be discarded
+// by every route that calls it, including this one — a village created (with
+// a merchant) against a world with a connected player left entry.villages
+// empty in the live simulation, so interact() at the new merchant would
+// answer "no merchant nearby" indefinitely with nothing reporting why.
+test('POST village warns when a player is connected so the new village cannot reach the live world', async () => {
+  const pool = mockPool([
+    [/SELECT id, width, height FROM worlds WHERE id = \$1/i, (p) => ({ rows: [WORLD({ id: p[0] })] })],
+    [/FROM villages WHERE world_id = \$1/i, () => ({ rows: [] })],
+    [/INSERT INTO villages/i, () => ({ rows: [{ id: 'v1' }] })],
+    [/INSERT INTO world_creatures/i, () => ({ rows: [] })],
+    [/INSERT INTO merchant_stock/i, () => ({ rows: [] })],
+    [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
+  const res = await request(app).post('/api/worlds/w1/villages').set(...AUTH)
+    .send({ min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.id, 'v1');
+  assert.match(res.body.liveWarning, /connected/i,
+    'the response must say the new village did not reach the live world');
 });
 
 test('POST village rejects out-of-range dimensions', async () => {
@@ -96,6 +122,20 @@ test('DELETE village removes the row, re-derives guards, and invalidates the wor
   assert.ok(guardWipe.params.includes('Village Guard'));
   const guardInserts = pool.calls.filter((c) => /INSERT INTO world_creatures/i.test(c.sql));
   assert.equal(guardInserts.length, 2, 'guards are re-derived for the surviving village');
+});
+
+test('DELETE village sets a header when a player is connected (204 has no body to carry it)', async () => {
+  const pool = mockPool([
+    [/DELETE FROM villages WHERE id = \$1/i, () => ({ rows: [], rowCount: 1 })],
+    [/DELETE FROM world_creatures WHERE world_id = \$1 AND type = \$2/i, () => ({ rows: [], rowCount: 2 })],
+    [/FROM villages WHERE world_id = \$1/i, () => ({ rows: [] })],
+    [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
+  const res = await request(app).delete('/api/worlds/w1/villages/v1').set(...AUTH);
+  assert.equal(res.status, 204);
+  assert.equal(res.headers['x-live-world-pending'], 'true');
 });
 
 test('DELETE the only village leaves zero guards (no surviving villages)', async () => {

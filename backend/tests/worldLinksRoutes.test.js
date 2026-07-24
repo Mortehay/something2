@@ -2,7 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { adminToken, isUserLookup, ADMIN_USER_ROW } = require('./helpers/auth.js');
 const request = require('supertest');
-const { app, __setPool } = require('../src/index.js');
+const { app, __setPool, __setAuthorityHandle } = require('../src/index.js');
+
+test.afterEach(() => { __setAuthorityHandle(null); });
 
 const AUTH = ['Authorization', `Bearer ${adminToken()}`];
 function mockPool(handlers) {
@@ -72,4 +74,35 @@ test('DELETE links removes the link (204)', async () => {
   // chunks must be invalidated, not just the authority cache.
   const invalidated = pool.calls.filter(c => /DELETE FROM world_chunks/i.test(c.sql)).map(c => c.params[0]);
   assert.deepEqual(invalidated.sort(), ['A', 'B']);
+});
+
+// F-017 (SOMET-197): both invalidateWorld() calls' return values used to be
+// discarded, so a link edit against a world with a connected player silently
+// never reached that player's live session (its wall ring / doorway would
+// stay stale until the world emptied).
+test('POST links warns when either world is live (JSON body can carry it)', async () => {
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id = \$1/i, (p) => ({ rows: [{ id: p[0], width: 24, height: 24 }] })],
+    [/INSERT INTO map_links/i, () => ({ rows: [] })],
+    [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
+  const res = await request(app).post('/api/worlds/A/links').set(...AUTH).send({ edge: 'E', to_world_id: 'B' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.ok, true);
+  assert.match(res.body.liveWarning, /connected/i);
+});
+
+test('DELETE links sets a header when a world is live (204 has no body to carry it)', async () => {
+  const pool = mockPool([
+    [/SELECT to_world_id FROM map_links/i, () => ({ rows: [{ to_world_id: 'B' }] })],
+    [/DELETE FROM map_links/i, () => ({ rows: [] })],
+    [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
+  const res = await request(app).delete('/api/worlds/A/links/E').set(...AUTH);
+  assert.equal(res.status, 204);
+  assert.equal(res.headers['x-live-world-pending'], 'true');
 });
