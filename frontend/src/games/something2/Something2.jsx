@@ -393,13 +393,12 @@ export default function Something2() {
   // Entity types keyed by name (same shape the legacy map path uses) — the
   // chunked renderer needs them to draw creatures with their approved sprite.
   const { mapConfig } = useMapConfig();
-  const { worlds, isLoadingWorlds, worldsError } = useWorlds();
+  // worldsError is toasted inside useWorlds() itself now (F-023) so every
+  // caller — including MapsAdmin, which used to render a silent "no maps
+  // yet" on a failed fetch — gets the signal without opting in.
+  const { worlds, isLoadingWorlds } = useWorlds();
   const createWorldMutation = useCreateWorld();
   const deleteWorldMutation = useDeleteWorld();
-
-  useEffect(() => {
-    if (worldsError) toast.error(`Failed to load worlds: ${worldsError.message}`);
-  }, [worldsError]);
 
   // name -> color for the minimap preview (mapTiles is keyed by tile name).
   const tileColors = useMemo(() => {
