@@ -228,6 +228,7 @@ export class Game {
         this.ctx = this.canvas.getContext("2d");
         this.state = "playing";
         this.chunked = true;
+        this.worldId = worldId;
         this.renderSystem = new RenderSystem(this.canvas, this.imageManager);
         this.chunkedMap = new ChunkedMap(chunkSize, tileTypes);
         this._preloadTileAssets(tileTypes);
@@ -378,6 +379,28 @@ export class Game {
                 }
             }
         }
+    }
+
+    // Read-only live snapshot for the minimap HUD. Keeps Game the single source of
+    // truth so the React component never reaches into engine internals. Returns
+    // null unless we're actually in a playing chunked world.
+    getMinimapSnapshot() {
+        if (this.state !== 'playing' || !this.chunked || !this.player) return null;
+        const { dx, dy } = inputVector(this.keys || {});
+        if (dx !== 0 || dy !== 0) {
+            const m = Math.hypot(dx, dy) || 1;
+            this._minimapDir = { dx: dx / m, dy: dy / m };
+        }
+        return {
+            worldId: this.worldId ?? null,
+            chunkSize: this.chunkedMap ? this.chunkedMap.chunkSize : null,
+            player: {
+                x: this.player.x + (this.player.width || 0) / 2,
+                y: this.player.y + (this.player.height || 0) / 2,
+                dir: this._minimapDir || { dx: 0, dy: 1 },
+            },
+            creatures: (this.creatures ? this.creatures.all() : []).map((c) => ({ x: c.x, y: c.y, color: c.color })),
+        };
     }
 
     destroy() {
@@ -677,7 +700,8 @@ export class Game {
             }
 
             // Dev: cycle the global render-mode override (none -> rect -> static -> animated).
-            if(key === 'm' && this.state === 'playing' && !e.repeat){
+            // Moved to Shift+M so plain M can toggle the minimap HUD (handled in Minimap.jsx).
+            if(key === 'm' && e.shiftKey && this.state === 'playing' && !e.repeat){
                 const mode = this.renderSystem.cycleRenderModeOverride();
                 console.log(`Render-mode override: ${mode ?? 'off (per-entity)'}`);
             }
