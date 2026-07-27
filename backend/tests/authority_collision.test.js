@@ -2,6 +2,48 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { resolveMove, ServerMap, MAP_TILE_SIZE, MAX_CHUNKS } = require('../src/authority/collision.js');
 
+// --- Footprint collision golden vectors ---------------------------------
+// A column-based wall stub: tile column `blockedCol` (world x in
+// [blockedCol*100, blockedCol*100+100)) is unwalkable; everything else walks.
+function wallColumn(blockedCol) {
+  return {
+    isWalkable: (wx) => Math.floor(wx / 100) !== blockedCol,
+    speedAt: () => 1,
+  };
+}
+// A gate stub: ONLY tile column `openCol` is walkable (walls on both sides).
+function gateColumn(openCol) {
+  return {
+    isWalkable: (wx) => Math.floor(wx / 100) === openCol,
+    speedAt: () => 1,
+  };
+}
+
+test('footprint blocks when the box FRONT reaches a wall even though the CENTER has not', () => {
+  // Box 64 wide at x=0 -> center 32, front face 64. Wall in column 1 (x>=100).
+  // Step east 40: center reaches 72 (still column 0, walkable) but the front
+  // face reaches 104 (column 1) -> footprint blocks. Center-point logic moved.
+  const actor = { x: 0, y: 0, width: 64, height: 64, speed: 40 };
+  const r = resolveMove(wallColumn(1), actor, 1, 0, 1);
+  assert.deepEqual(r, { x: 0, y: 0, moved: false });
+});
+
+test('footprint lets an actor already overlapping a wall move AWAY from it', () => {
+  // Box sits at x=108 (spans 108..172), embedded in wall column 1. Moving west
+  // 40: the west leading edge reaches 68 (column 0, walkable) -> allowed.
+  const actor = { x: 108, y: 0, width: 64, height: 64, speed: 40 };
+  const r = resolveMove(wallColumn(1), actor, -1, 0, 1);
+  assert.deepEqual(r, { x: 68, y: 0, moved: true });
+});
+
+test('a 64-wide box threads a 100px-wide gate', () => {
+  // Gate = walkable column 1 only. Box centered in it (x=118, spans 118..182,
+  // both corners in column 1). Moving south 40 stays in the gate -> passes.
+  const actor = { x: 118, y: 150, width: 64, height: 64, speed: 40 };
+  const r = resolveMove(gateColumn(1), actor, 0, 1, 1);
+  assert.deepEqual(r, { x: 118, y: 190, moved: true });
+});
+
 // Stub map: everything walkable at speed 1 unless (wx,wy) falls in a blocked band.
 function stubMap({ blockX = null } = {}) {
   return {
@@ -23,12 +65,14 @@ test('resolveMove normalizes diagonals (not faster than an axis)', () => {
   assert.ok(Math.abs(diag.y - 70.7106) < 1e-3);
 });
 
-test('resolveMove blocks the X axis at an unwalkable tile but allows Y', () => {
-  // center starts at (95,50); moving +x would cross into blocked band at wx>=100.
-  const actor = { x: 63, y: 18, width: 64, height: 64, speed: 200 };
-  const r = resolveMove(stubMap({ blockX: 100 }), actor, 1, 1, 0.5);
-  assert.equal(r.x, 63);        // x blocked
-  assert.ok(r.y > 18);          // y moved
+test('resolveMove blocks the X axis at a wall but allows Y (footprint)', () => {
+  // Box 64 at (0,0) -> center (32,32). Wall column 1 (x>=100). Moving NE:
+  // the east leading edge enters column 1 (blocked), but the box's full width
+  // (0..64) stays in column 0 for the Y move, so Y is free.
+  const actor = { x: 0, y: 0, width: 64, height: 64, speed: 200 };
+  const r = resolveMove(wallColumn(1), actor, 1, 1, 0.5);
+  assert.equal(r.x, 0);              // x blocked by the wall column
+  assert.ok(r.y > 0);               // y slides free
   assert.equal(r.moved, true);
 });
 
