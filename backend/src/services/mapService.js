@@ -246,6 +246,78 @@ function generateChunk(world, cx, cy) {
   return generateRegion(world, cy * N, cx * N, N, N);
 }
 
+// Decoration placement tuning. The density field uses a seed derived from the
+// world seed (distinct from terrain) so decoration clumps don't align with
+// biome bands. GAIN expands a def's `chance` into contiguous area; FILL is the
+// fraction of an in-clump eligible tile that actually gets an object.
+const DECO_SEED_XOR = 0x9e3779b9;
+const DECO_FILL_XOR = 0x85ebca6b;
+const DECO_CELL = 6;
+const DECO_GAIN = 3;
+const DECO_FILL = 0.85;
+const SPAWN_CLEAR_RADIUS = 1; // Chebyshev tiles around entry spawn kept clear of blockers
+
+// Entry-spawn tile (row,col) for a bounded world, or null. entry_spawn is world
+// pixels; MAP_TILE_SIZE-agnostic here (100 px/tile, matching collision.js).
+function spawnTileCell(world) {
+  const sp = world.entry_spawn;
+  if (!sp || typeof sp.x !== 'number' || typeof sp.y !== 'number') return null;
+  return { row: Math.floor(sp.y / 100), col: Math.floor(sp.x / 100) };
+}
+
+// True when a BLOCKING decoration must not occupy this absolute cell: within the
+// spawn clear radius, or inside a village footprint. (Path cells are excluded by
+// the caller for ALL decorations, blocking or not.)
+function isExcludedBlockerCell(cfg, spawn, gRow, gCol) {
+  if (spawn && Math.max(Math.abs(gRow - spawn.row), Math.abs(gCol - spawn.col)) <= SPAWN_CLEAR_RADIUS) {
+    return true;
+  }
+  if (cfg.villages) {
+    for (const v of cfg.villages) {
+      if (gRow >= v.minRow && gRow < v.minRow + v.height &&
+          gCol >= v.minCol && gCol < v.minCol + v.width) return true;
+    }
+  }
+  return false;
+}
+
+// Deterministic per-chunk decoration placement. Pure fn of (world, cx, cy, the
+// chunk's generated tiles, decorationDefs). Reads the FINAL tile grid (so
+// stamped walls/gates/village tiles are never decorated) and samples a GLOBAL
+// density field at absolute coords, so clumps are continuous across chunk
+// borders. Returns chunk-local [{ name, row, col, blocking }].
+function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
+  if (!decorationDefs || decorationDefs.length === 0 || !tiles) return [];
+  const cfg = worldConfig(world);
+  const N = cfg.chunkSize;
+  const rMin = cy * N, cMin = cx * N;
+  const paths = collectPathCells(cfg, rMin, cMin, N, N);
+  const spawn = spawnTileCell(world);
+  const out = [];
+  for (let r = 0; r < N; r++) {
+    if (!tiles[r]) continue;
+    for (let c = 0; c < N; c++) {
+      const gRow = rMin + r, gCol = cMin + c;
+      if (cfg.bounds && (gRow < 0 || gCol < 0 || gRow >= cfg.bounds.height || gCol >= cfg.bounds.width)) continue;
+      if (paths.has(`${gRow},${gCol}`)) continue; // keep carved paths clear
+      const terrain = tiles[r][c];
+      const density = globalValueNoise((cfg.seed ^ DECO_SEED_XOR) >>> 0, gRow, gCol, DECO_CELL);
+      for (const def of decorationDefs) {
+        const spawnTiles = def.spawn_tiles || def.spawnTiles;
+        if (!spawnTiles || !spawnTiles.includes(terrain)) continue;
+        const threshold = 1 - clamp((def.chance || 0) * DECO_GAIN, 0, 1);
+        if (density < threshold) continue;
+        if (hash2((cfg.seed ^ DECO_FILL_XOR) >>> 0, gCol, gRow) >= DECO_FILL) continue;
+        const blocking = def.walkable === false;
+        if (blocking && isExcludedBlockerCell(cfg, spawn, gRow, gCol)) continue;
+        out.push({ name: def.name, row: r, col: c, blocking });
+        break; // one decoration per tile
+      }
+    }
+  }
+  return out;
+}
+
 // --- Global carved paths --------------------------------------------------
 //
 // Coarse path lattice: one anchor per `pathCell` tiles, jittered deterministically.
@@ -752,6 +824,7 @@ module.exports = {
     generateWorldOverview,
     generateRegion,
     generateChunk,
+    generateChunkDecorations,
     pathAnchor,
     pathSegmentCells,
     collectPathCells,
