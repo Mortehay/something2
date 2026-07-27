@@ -224,7 +224,9 @@ async function getTileTypesMap() {
       // stable (approving overwrites static.png in place) and /api/assets sends
       // max-age=300, so without this an approved regeneration keeps rendering
       // the previous texture for five minutes.
-      updated_at: row.updated_at
+      updated_at: row.updated_at,
+      wall_height: row.wall_height ?? 0,
+      place_order: row.place_order ?? 0
     };
   });
   return tileTypes;
@@ -265,7 +267,8 @@ async function getEntityTypesMap() {
       prompt: row.prompt,
       // See getTileTypesMap: versions the client's asset URLs so an approved
       // regeneration is fetched instead of served stale from the browser cache.
-      updated_at: row.updated_at
+      updated_at: row.updated_at,
+      place_order: row.place_order ?? 0
     };
   });
   return entityTypes;
