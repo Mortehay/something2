@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { wallFaces, compareDrawables, wallRevealed, shadeColor } from '../wallRenderer.js';
+import { wallFaces, compareDrawables, wallRevealed, shadeColor, drawWall } from '../wallRenderer.js';
 
 describe('wallFaces', () => {
   it('lifts the top diamond by H and builds the two south faces', () => {
@@ -61,5 +61,48 @@ describe('shadeColor', () => {
   it('returns input unchanged for unparseable colors', () => {
     const result = shadeColor('nope', -0.5);
     expect(result).toBe('nope');
+  });
+});
+
+describe('drawWall textured side faces', () => {
+  // A recording 2D-context stub: captures the ordered method calls so we can
+  // assert HOW the side texture is drawn (composed vs. matrix-replaced).
+  function recordingCtx() {
+    const calls = [];
+    const rec = (name) => (...args) => calls.push({ name, args });
+    return {
+      calls,
+      save: rec('save'), restore: rec('restore'),
+      beginPath: rec('beginPath'), moveTo: rec('moveTo'), lineTo: rec('lineTo'),
+      closePath: rec('closePath'), clip: rec('clip'),
+      transform: rec('transform'), setTransform: rec('setTransform'),
+      drawImage: rec('drawImage'), fill: rec('fill'),
+      set fillStyle(v) { calls.push({ name: 'fillStyle', args: [v] }); },
+      set globalAlpha(v) { calls.push({ name: 'globalAlpha', args: [v] }); },
+    };
+  }
+
+  const visual = { img: { width: 32, height: 32 }, crop: null, cacheKey: 'k' };
+  const tileCache = { get: () => ({ fake: 'canvas' }) };
+  const args = () => ({
+    s: { x: 500, y: 400 }, def: { color: '#abcabc' }, visual,
+    H: 48, alpha: 1, halfW: 64, halfH: 32, tileCache,
+  });
+
+  it('composes the affine onto the camera transform (never replaces it) for side faces', () => {
+    const ctx = recordingCtx();
+    drawWall(ctx, args());
+    const names = ctx.calls.map((c) => c.name);
+    // The two side faces must compose via transform()...
+    expect(names.filter((n) => n === 'transform').length).toBe(2);
+    // ...and MUST NOT call setTransform, which would drop the camera pan (the bug).
+    expect(names).not.toContain('setTransform');
+  });
+
+  it('draws the side texture image (not just a solid fill)', () => {
+    const ctx = recordingCtx();
+    drawWall(ctx, args());
+    // 2 side-face images + 1 top = 3 drawImage calls.
+    expect(ctx.calls.filter((c) => c.name === 'drawImage').length).toBe(3);
   });
 });

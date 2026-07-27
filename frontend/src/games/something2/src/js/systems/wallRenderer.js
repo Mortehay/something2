@@ -48,14 +48,18 @@ function drawTexturedFace(ctx, img, crop, p0, p1, p3, p2, shade) {
   ctx.beginPath();
   ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y); ctx.closePath();
   ctx.clip();
-  // Affine: image (sw×sh) -> parallelogram p0->p1 (x), p0->p3 (y).
+  // Affine: image (sw×sh) -> parallelogram p0->p1 (x), p0->p3 (y). COMPOSE onto
+  // the current (camera) transform via transform() — setTransform() would REPLACE
+  // it and drop the camera pan, drawing the texture far off its clipped face
+  // (the bug that left the sides showing the flat canvas background).
   const ux = (p1.x - p0.x) / sw, uy = (p1.y - p0.y) / sw;
   const vx = (p3.x - p0.x) / sh, vy = (p3.y - p0.y) / sh;
-  ctx.setTransform(ux, uy, vx, vy, p0.x, p0.y);
+  ctx.save();
+  ctx.transform(ux, uy, vx, vy, p0.x, p0.y);
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.restore(); // back to the camera transform; the clip path is still current
   ctx.fillStyle = shade;
-  ctx.fill();
+  ctx.fill(); // shade the same clipped parallelogram, in camera space
   ctx.restore();
 }
 
@@ -78,17 +82,17 @@ export function drawWall(ctx, { s, def, visual, H, alpha, halfW, halfH, tileCach
     const crop = visual.crop || null;
     if (H > 0) {
       // left face p0=liftedLeft, p1=liftedBottom, p3=groundLeft, p2=groundBottom
-      drawTexturedFace(ctx, visual.img, crop, f.left[0], f.left[1], f.left[3], f.left[2], 'rgba(0,0,0,0.28)');
+      drawTexturedFace(ctx, visual.img, crop, f.left[0], f.left[1], f.left[3], f.left[2], 'rgba(0,0,0,0.12)');
       // right face p0=liftedBottom, p1=liftedRight, p3=groundBottom, p2=groundRight
-      drawTexturedFace(ctx, visual.img, crop, f.right[0], f.right[1], f.right[3], f.right[2], 'rgba(0,0,0,0.45)');
+      drawTexturedFace(ctx, visual.img, crop, f.right[0], f.right[1], f.right[3], f.right[2], 'rgba(0,0,0,0.22)');
     }
     // top diamond via the existing tile cache, lifted by H
     const cv = tileCache.get(visual.cacheKey, visual.img, visual.crop);
     ctx.drawImage(cv, s.x - halfW, (s.y - H) - halfH);
   } else {
     if (H > 0) {
-      fillQuad(ctx, f.left, shadeColor(color, -0.28));
-      fillQuad(ctx, f.right, shadeColor(color, -0.45));
+      fillQuad(ctx, f.left, shadeColor(color, -0.12));
+      fillQuad(ctx, f.right, shadeColor(color, -0.22));
     }
     fillQuad(ctx, f.top, color);
   }
