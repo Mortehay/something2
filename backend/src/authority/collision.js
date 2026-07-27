@@ -4,7 +4,7 @@
 // ServerMap lazily generates chunks via mapService.generateChunk — the server
 // has the whole world, so (unlike the client's streaming ChunkedMap) an
 // unknown tile only happens on a malformed grid, and is treated as blocked.
-const { generateChunk } = require('../services/mapService');
+const { generateChunk, generateChunkDecorations } = require('../services/mapService');
 
 const MAP_TILE_SIZE = 100; // must match frontend core/constants.js
 const MAX_CHUNKS = 512; // per-ServerMap LRU cap on memoized chunk grids
@@ -88,6 +88,8 @@ class ServerMap {
     this.chunkSize = world.chunkSize;
     this.tileTypes = world.tileTypes;
     this.chunks = new Map(); // "cx,cy" -> string[][]
+    this.decorationDefs = world.decorationDefs || [];
+    this.blockedDecoTiles = new Map(); // "cx,cy" -> Set<"lr,lc"> of blocking decoration cells
   }
 
   getChunk(cx, cy) {
@@ -121,11 +123,43 @@ class ServerMap {
     return t === undefined ? null : t;
   }
 
+  // Lazily builds (and memoizes, LRU-capped like getChunk) the set of
+  // chunk-local "row,col" cells occupied by a BLOCKING decoration, using the
+  // same generateChunkDecorations the /chunk endpoint uses — the parity
+  // mechanism that keeps client-visible decorations and server collision in
+  // lockstep.
+  blockedDecorationsFor(cx, cy) {
+    const key = `${cx},${cy}`;
+    let set = this.blockedDecoTiles.get(key);
+    if (set !== undefined) return set;
+    set = new Set();
+    if (this.decorationDefs.length > 0) {
+      const grid = this.getChunk(cx, cy);
+      for (const d of generateChunkDecorations(this.world, cx, cy, grid, this.decorationDefs)) {
+        if (d.blocking) set.add(`${d.row},${d.col}`);
+      }
+    }
+    this.blockedDecoTiles.set(key, set);
+    if (this.blockedDecoTiles.size > MAX_CHUNKS) {
+      this.blockedDecoTiles.delete(this.blockedDecoTiles.keys().next().value);
+    }
+    return set;
+  }
+
   isWalkable(worldX, worldY) {
     const t = this.getTileAt(worldX, worldY);
     if (t === null) return false;
     const def = this.tileTypes[t];
-    return def ? def.walkable !== false : true;
+    if (def && def.walkable === false) return false;
+    // Decoration overlay: a blocking decoration makes its whole tile non-walkable.
+    const gCol = Math.floor(worldX / MAP_TILE_SIZE);
+    const gRow = Math.floor(worldY / MAP_TILE_SIZE);
+    const cx = Math.floor(gCol / this.chunkSize);
+    const cy = Math.floor(gRow / this.chunkSize);
+    const lc = gCol - cx * this.chunkSize;
+    const lr = gRow - cy * this.chunkSize;
+    if (this.blockedDecorationsFor(cx, cy).has(`${lr},${lc}`)) return false;
+    return true;
   }
 
   speedAt(worldX, worldY) {

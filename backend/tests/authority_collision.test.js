@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { resolveMove, ServerMap, MAP_TILE_SIZE, MAX_CHUNKS } = require('../src/authority/collision.js');
+const { generateChunk, generateChunkDecorations } = require('../src/services/mapService');
 
 // --- Footprint collision golden vectors ---------------------------------
 // A column-based wall stub: tile column `blockedCol` (world x in
@@ -182,4 +183,83 @@ test('evicted chunk regenerates identically (eviction is memory-only)', () => {
   assert.ok(!m.chunks.has('0,0'));
   const regen = m.getChunk(0, 0);
   assert.equal(JSON.stringify(regen), snapshot, 'regenerated chunk is identical');
+});
+
+// --- Decoration overlay ---------------------------------------------------
+
+test('ServerMap.isWalkable blocks a tile occupied by a blocking decoration', () => {
+  const world = {
+    seed: 999, chunkSize: 8, width: 8, height: 8,
+    tileTypes: { grass: { walkable: true, speed: 1 } },
+    decorationDefs: [{ name: 'Tree', walkable: false, spawn_tiles: ['grass'], chance: 1 }],
+  };
+  const map = new ServerMap(world);
+  // Find a placed blocking decoration in chunk (0,0) and assert its tile blocks,
+  // while a decoration-free grass tile stays walkable.
+  const decos = generateChunkDecorations(world, 0, 0, generateChunk(world, 0, 0), world.decorationDefs);
+  assert.ok(decos.length > 0, 'expected at least one decoration');
+  const d = decos[0];
+  const bx = d.col * 100 + 50, by = d.row * 100 + 50; // tile center, world px
+  assert.equal(map.isWalkable(bx, by), false, 'decoration tile blocks');
+});
+
+test('ServerMap.isWalkable ignores a passable (walkable) decoration', () => {
+  const world = {
+    seed: 999, chunkSize: 8, width: 8, height: 8,
+    tileTypes: { grass: { walkable: true, speed: 1 } },
+    decorationDefs: [{ name: 'Bush', walkable: true, spawn_tiles: ['grass'], chance: 1 }],
+  };
+  const map = new ServerMap(world);
+  const decos = generateChunkDecorations(world, 0, 0, generateChunk(world, 0, 0), world.decorationDefs);
+  // Pick a placed passable decoration on an INTERIOR tile (avoid the 8x8 boundary walls at row/col 0 and 7).
+  const p = decos.find((d) => !d.blocking && d.row > 0 && d.row < 7 && d.col > 0 && d.col < 7);
+  assert.ok(p, 'expected an interior passable decoration to place');
+  // Its tile must stay walkable — a passable decoration never blocks.
+  assert.equal(map.isWalkable(p.col * 100 + 50, p.row * 100 + 50), true);
+});
+
+test('ServerMap.isWalkable applies the decoration overlay in a NON-zero chunk (exercises the cx/cy offset math)', () => {
+  // Chunk (0,0) alone would mask a bug in isWalkable's world-px -> chunk-local
+  // conversion (cx*chunkSize / cy*chunkSize terms reading as 0 either way).
+  // Use a world large enough that chunk (1,0) is in-bounds and derive a
+  // blocking placement there directly, then assert against its WORLD-px
+  // center (chunk offset + local col/row), not chunk-local coords.
+  const world = {
+    seed: 999, chunkSize: 8, width: 24, height: 24,
+    tileTypes: { grass: { walkable: true, speed: 1 } },
+    decorationDefs: [{ name: 'Tree', walkable: false, spawn_tiles: ['grass'], chance: 1 }],
+  };
+  const map = new ServerMap(world);
+  const decos = generateChunkDecorations(world, 1, 0, generateChunk(world, 1, 0), world.decorationDefs);
+  const d = decos.find((dd) => dd.blocking);
+  assert.ok(d, 'expected a blocking decoration to place in chunk (1,0)');
+  const worldCol = 1 * world.chunkSize + d.col; // chunk (1,0) offset in the col axis
+  const worldRow = d.row; // cy=0, no row offset
+  const bx = worldCol * 100 + 50, by = worldRow * 100 + 50;
+  assert.equal(map.isWalkable(bx, by), false, 'decoration tile in a non-zero chunk blocks');
+});
+
+test('ServerMap.isWalkable keeps the entry-spawn tile clear of blocking decorations (spawn-clear-radius exclusion is live end-to-end)', () => {
+  // entry_spawn (row=4,col=4) sits well inside chunk (0,0) (chunkSize 8). A
+  // dense (chance:1) blocking def would, absent the exclusion, very likely
+  // land on the spawn tile too. generateChunkDecorations' isExcludedBlockerCell
+  // keeps the spawn tile (and its Chebyshev-1 ring) clear; this proves that
+  // exclusion is actually reachable through ServerMap (i.e. `entry_spawn` is
+  // wired into the world config passed to `new ServerMap(...)`), not just
+  // exercised when calling generateChunkDecorations directly.
+  const world = {
+    seed: 999, chunkSize: 8, width: 8, height: 8,
+    tileTypes: { grass: { walkable: true, speed: 1 } },
+    decorationDefs: [{ name: 'Tree', walkable: false, spawn_tiles: ['grass'], chance: 1 }],
+    entry_spawn: { x: 450, y: 450 }, // tile center of (row=4, col=4)
+  };
+  const map = new ServerMap(world);
+  assert.equal(map.isWalkable(450, 450), true, 'entry spawn tile must not be blocked');
+  // Prove the def is actually placing (not vacuously true because nothing spawned
+  // at all): some tile outside the spawn clear radius is blocked.
+  const decos = generateChunkDecorations(world, 0, 0, generateChunk(world, 0, 0), world.decorationDefs);
+  const blockingElsewhere = decos.some(
+    (d) => d.blocking && Math.max(Math.abs(d.row - 4), Math.abs(d.col - 4)) > 1,
+  );
+  assert.ok(blockingElsewhere, 'expected a blocking decoration outside the spawn clear radius');
 });

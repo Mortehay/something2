@@ -22,6 +22,20 @@ const MAP_TILE_SIZE = 100;
 // via JSON, e.g. 1e999 parses to Infinity).
 function finiteOr(v, fallback) { return Number.isFinite(v) ? v : fallback; }
 
+// Decoration defs feed ServerMap's blocking-decoration overlay (collision.js)
+// via the same generateChunkDecorations the /chunk endpoint uses, so server
+// collision and client-visible decorations stay in lockstep.
+async function loadDecorationDefs(pool) {
+  const { rows } = await pool.query(
+    `SELECT name, walkable, spawn_tiles, chance
+       FROM entity_types
+      WHERE is_creature = false
+        AND spawn_tiles IS NOT NULL
+        AND jsonb_array_length(spawn_tiles) > 0`,
+  );
+  return rows;
+}
+
 // Pure: given a player's current tile + this world's links, decide whether to
 // teleport. Returns { toWorldId, arriveX, arriveY } or null.
 function planTransition({ tileName, gRow, gCol, worldRow, links, now, cdUntil }) {
@@ -241,10 +255,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const linkRows = await fetchLinks(pool, canonicalId);
         const links = new Map(linkRows.map((l) => [l.edge, { toWorldId: l.to_world_id, toWidth: l.to_width, toHeight: l.to_height }]));
         const villages = await fetchVillages(pool, canonicalId);
+        const decorationDefs = await loadDecorationDefs(pool);
         const map = new ServerMap({
           seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes,
           width: row.width, height: row.height, doorways: [...links.keys()],
-          villages,
+          villages, decorationDefs, entry_spawn: row.entry_spawn,
         });
         const entry = {
           worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
