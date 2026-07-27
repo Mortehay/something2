@@ -76,16 +76,20 @@ export function drawWall(ctx, { s, def, visual, H, alpha, halfW, halfH, tileCach
   const color = (def && def.color) || '#555555';
   if (visual && visual.img) {
     const crop = visual.crop || null;
-    // left face p0=liftedLeft, p1=liftedBottom, p3=groundLeft, p2=groundBottom
-    drawTexturedFace(ctx, visual.img, crop, f.left[0], f.left[1], f.left[3], f.left[2], 'rgba(0,0,0,0.28)');
-    // right face p0=liftedBottom, p1=liftedRight, p3=groundBottom, p2=groundRight
-    drawTexturedFace(ctx, visual.img, crop, f.right[0], f.right[1], f.right[3], f.right[2], 'rgba(0,0,0,0.45)');
+    if (H > 0) {
+      // left face p0=liftedLeft, p1=liftedBottom, p3=groundLeft, p2=groundBottom
+      drawTexturedFace(ctx, visual.img, crop, f.left[0], f.left[1], f.left[3], f.left[2], 'rgba(0,0,0,0.28)');
+      // right face p0=liftedBottom, p1=liftedRight, p3=groundBottom, p2=groundRight
+      drawTexturedFace(ctx, visual.img, crop, f.right[0], f.right[1], f.right[3], f.right[2], 'rgba(0,0,0,0.45)');
+    }
     // top diamond via the existing tile cache, lifted by H
     const cv = tileCache.get(visual.cacheKey, visual.img, visual.crop);
     ctx.drawImage(cv, s.x - halfW, (s.y - H) - halfH);
   } else {
-    fillQuad(ctx, f.left, shadeColor(color, -0.28));
-    fillQuad(ctx, f.right, shadeColor(color, -0.45));
+    if (H > 0) {
+      fillQuad(ctx, f.left, shadeColor(color, -0.28));
+      fillQuad(ctx, f.right, shadeColor(color, -0.45));
+    }
     fillQuad(ctx, f.top, color);
   }
   ctx.globalAlpha = 1;
