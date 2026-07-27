@@ -18,6 +18,10 @@ function isNonNegFinite(n) {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0;
 }
 
+function isNonNegInt(n) {
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0;
+}
+
 const ENTITY_STAT_FIELDS = [
   'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma',
   'hp', 'max_hp', 'hp_regen_rate', 'mana', 'max_mana', 'mana_regen_rate',
@@ -31,6 +35,7 @@ export function validateEntityType(f) {
   for (const key of ENTITY_STAT_FIELDS) {
     if (!isNonNegFinite(f[key])) return `${key} must be a non-negative number`;
   }
+  if (!isNonNegInt(f.place_order)) return 'Place Order must be a non-negative integer';
   return null;
 }
 
@@ -38,5 +43,7 @@ export function validateTileType(f) {
   if (!f.name.trim()) return 'Name is required';
   if (f.name.length > MAX_CATALOG_NAME_LEN) return `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer`;
   if (!isNonNegFinite(f.speed) || f.speed > 2) return 'Speed must be a number between 0 and 2';
+  if (!isNonNegInt(f.wall_height)) return 'Wall Height must be a non-negative integer';
+  if (!isNonNegInt(f.place_order)) return 'Place Order must be a non-negative integer';
   return null;
 }

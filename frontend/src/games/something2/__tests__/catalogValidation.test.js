@@ -18,6 +18,7 @@ function baseEntityForm(overrides = {}) {
     strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
     hp: 12, max_hp: 12, hp_regen_rate: 1, mana: 0, max_mana: 0, mana_regen_rate: 0,
     display_width: 64, display_height: 64,
+    place_order: 0,
     ...overrides,
   };
 }
@@ -41,6 +42,14 @@ describe('validateEntityType', () => {
     expect(problem).toMatch(/200/);
   });
 
+  it('rejects a negative place_order', () => {
+    expect(validateEntityType(baseEntityForm({ place_order: -1 }))).toMatch(/place order/i);
+  });
+
+  it('rejects a non-integer place_order', () => {
+    expect(validateEntityType(baseEntityForm({ place_order: 1.5 }))).toMatch(/place order/i);
+  });
+
   it('accepts a normal, in-range entity form', () => {
     expect(validateEntityType(baseEntityForm())).toBeNull();
   });
@@ -48,18 +57,26 @@ describe('validateEntityType', () => {
 
 describe('validateTileType', () => {
   it('rejects a negative speed', () => {
-    expect(validateTileType({ name: 'lava', speed: -1 })).toMatch(/speed/i);
+    expect(validateTileType({ name: 'lava', speed: -1, wall_height: 0, place_order: 0 })).toMatch(/speed/i);
   });
 
   it('rejects a speed above 2', () => {
-    expect(validateTileType({ name: 'ice', speed: 3 })).toMatch(/speed/i);
+    expect(validateTileType({ name: 'ice', speed: 3, wall_height: 0, place_order: 0 })).toMatch(/speed/i);
   });
 
   it('rejects a name over the 200-char server cap', () => {
-    expect(validateTileType({ name: 'x'.repeat(MAX_CATALOG_NAME_LEN + 1), speed: 1 })).toMatch(/200/);
+    expect(validateTileType({ name: 'x'.repeat(MAX_CATALOG_NAME_LEN + 1), speed: 1, wall_height: 0, place_order: 0 })).toMatch(/200/);
+  });
+
+  it('rejects a negative wall_height', () => {
+    expect(validateTileType({ name: 'wall', speed: 1, wall_height: -1, place_order: 0 })).toMatch(/wall height/i);
+  });
+
+  it('rejects a non-integer place_order', () => {
+    expect(validateTileType({ name: 'wall', speed: 1, wall_height: 0, place_order: 1.5 })).toMatch(/place order/i);
   });
 
   it('accepts a normal in-range tile form', () => {
-    expect(validateTileType({ name: 'grass', speed: 1 })).toBeNull();
+    expect(validateTileType({ name: 'grass', speed: 1, wall_height: 0, place_order: 0 })).toBeNull();
   });
 });

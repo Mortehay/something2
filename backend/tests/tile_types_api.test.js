@@ -35,19 +35,22 @@ test('POST /api/tile-types sends prompt as INSERT param $7 and echoes it', async
   assert.equal(res.body.prompt, 'molten glowing lava');
 });
 
-test('PUT /api/tile-types/:id sends prompt as UPDATE param $7 and id as $8', async () => {
+test('PUT /api/tile-types/:id sends prompt as UPDATE param $7, wall_height/place_order as $8/$9, and id as $10', async () => {
   const pool = mockPool([
-    [/UPDATE tile_types/i, (p) => ({ rows: [{ id: Number(p[7]), name: p[0], prompt: p[6] }] })],
+    [/UPDATE tile_types/i, (p) => ({ rows: [{ id: Number(p[9]), name: p[0], prompt: p[6] }] })],
   ]);
   __setPool(pool);
   const res = await request(app).put('/api/tile-types/9').set(...AUTH).send({
     name: 'grass', color: '#0f0', walkable: true, speed: 1,
     image: '', valid_neighbors: ['grass'], prompt: 'edited meadow grass',
+    wall_height: 40, place_order: 1,
   });
   assert.equal(res.status, 200);
   const call = pool.calls.find((c) => /UPDATE tile_types/i.test(c.sql));
   assert.equal(call.params[6], 'edited meadow grass', 'prompt must be UPDATE $7');
-  assert.equal(String(call.params[7]), '9', 'id must be UPDATE $8');
+  assert.equal(call.params[7], 40, 'wall_height must be UPDATE $8');
+  assert.equal(call.params[8], 1, 'place_order must be UPDATE $9');
+  assert.equal(String(call.params[9]), '9', 'id must be UPDATE $10');
   assert.equal(res.body.prompt, 'edited meadow grass');
 });
 

@@ -345,7 +345,7 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       name, color, walkable, spawn_tiles, chance,
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-      display_width, display_height, render_mode, is_creature, prompt
+      display_width, display_height, render_mode, is_creature, prompt, place_order
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
     if (catalogNameTooLong(name)) {
@@ -357,13 +357,13 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         name, color, walkable, spawn_tiles, chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-        display_width, display_height, render_mode, is_creature, prompt
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23) RETURNING *`,
+        display_width, display_height, render_mode, is_creature, prompt, place_order
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
-        display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? ''
+        display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -380,7 +380,7 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       name, color, walkable, spawn_tiles, chance,
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-      display_width, display_height, render_mode, is_creature, prompt
+      display_width, display_height, render_mode, is_creature, prompt, place_order
     } = req.body;
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
@@ -419,14 +419,14 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         strength = $6, dexterity = $7, constitution = $8, intelligence = $9, wisdom = $10, charisma = $11,
         hp = $12, max_hp = $13, hp_regen_rate = $14, mana = $15, max_mana = $16, mana_regen_rate = $17,
         image = $18, display_width = $19, display_height = $20, render_mode = $21, is_creature = $22,
-        prompt = COALESCE($23, prompt), updated_at = CURRENT_TIMESTAMP
-      WHERE id = $24 RETURNING *`,
+        prompt = COALESCE($23, prompt), place_order = $24, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $25 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false,
-        prompt ?? null, id
+        prompt ?? null, Number(place_order) || 0, id
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
@@ -636,7 +636,7 @@ app.get('/api/tile-types', async (req, res) => {
 
 app.post('/api/tile-types', adminGuard, async (req, res) => {
   try {
-    const { name, color, walkable, speed, image, valid_neighbors, prompt } = req.body;
+    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order } = req.body;
 
     // Simple validation
     if (!name || !color) {
@@ -647,8 +647,8 @@ app.post('/api/tile-types', adminGuard, async (req, res) => {
     }
 
     const result = await pool.query(
-      'INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors, prompt) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-      [name, color, walkable ?? true, speed ?? 1.0, image || '', JSON.stringify(valid_neighbors || []), prompt || '']
+      'INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
+      [name, color, walkable ?? true, speed ?? 1.0, image || '', JSON.stringify(valid_neighbors || []), prompt || '', Number(wall_height) || 0, Number(place_order) || 0]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -660,7 +660,7 @@ app.post('/api/tile-types', adminGuard, async (req, res) => {
 app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, color, walkable, speed, image, valid_neighbors, prompt } = req.body;
+    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order } = req.body;
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
@@ -671,8 +671,8 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
     // just-approved texture back to ''. COALESCE(NULLIF(...)) preserves the stored
     // image when the form sends '' or nothing; an explicit key still updates it.
     const result = await pool.query(
-      "UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4, image = COALESCE(NULLIF($5, ''), image), valid_neighbors = $6, prompt = $7, updated_at = CURRENT_TIMESTAMP WHERE id = $8 RETURNING *",
-      [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '', id]
+      "UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4, image = COALESCE(NULLIF($5, ''), image), valid_neighbors = $6, prompt = $7, wall_height = $8, place_order = $9, updated_at = CURRENT_TIMESTAMP WHERE id = $10 RETURNING *",
+      [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '', Number(wall_height) || 0, Number(place_order) || 0, id]
     );
     
     if (result.rows.length === 0) {

@@ -375,6 +375,8 @@ function TileTypesAdmin() {
     color: '#000000',
     walkable: true,
     speed: 1.0,
+    wall_height: 0,
+    place_order: 0,
     image: '',
     prompt: '',
     valid_neighbors: []
@@ -387,6 +389,8 @@ function TileTypesAdmin() {
         color: editingTile.color,
         walkable: editingTile.walkable,
         speed: editingTile.speed,
+        wall_height: editingTile.wall_height || 0,
+        place_order: editingTile.place_order || 0,
         image: editingTile.image || '',
         prompt: editingTile.prompt || '',
         valid_neighbors: editingTile.valid_neighbors || []
@@ -397,6 +401,8 @@ function TileTypesAdmin() {
         color: '#00ff00',
         walkable: true,
         speed: 1.0,
+        wall_height: 0,
+        place_order: 0,
         image: '',
         prompt: '',
         valid_neighbors: []
@@ -579,13 +585,37 @@ function TileTypesAdmin() {
 
                 <FormGroup style={{ flex: 1 }}>
                   <label>Speed (0 - 2)</label>
-                  <input 
+                  <input
                     type="number"
                     step="0.1"
                     min="0"
                     max="2"
                     value={formData.speed}
                     onChange={e => setFormData({...formData, speed: parseFloat(e.target.value)})}
+                  />
+                </FormGroup>
+              </div>
+
+              <div style={{ display: 'flex', gap: '2rem' }}>
+                <FormGroup style={{ flex: 1 }}>
+                  <label>Wall Height</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={formData.wall_height}
+                    onChange={e => setFormData({...formData, wall_height: parseInt(e.target.value, 10) || 0})}
+                  />
+                </FormGroup>
+
+                <FormGroup style={{ flex: 1 }}>
+                  <label>Place Order</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={formData.place_order}
+                    onChange={e => setFormData({...formData, place_order: parseInt(e.target.value, 10) || 0})}
                   />
                 </FormGroup>
               </div>

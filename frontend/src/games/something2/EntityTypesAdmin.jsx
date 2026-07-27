@@ -736,7 +736,8 @@ function EntityTypesAdmin() {
     max_mana: 0,
     mana_regen_rate: 0,
     display_width: 0,
-    display_height: 0
+    display_height: 0,
+    place_order: 0
   });
 
   useEffect(() => {
@@ -764,7 +765,8 @@ function EntityTypesAdmin() {
         max_mana: editingEntity.max_mana || 0,
         mana_regen_rate: editingEntity.mana_regen_rate || 0,
         display_width: editingEntity.display_width || 0,
-        display_height: editingEntity.display_height || 0
+        display_height: editingEntity.display_height || 0,
+        place_order: editingEntity.place_order || 0
       });
     } else {
       setFormData({
@@ -790,7 +792,8 @@ function EntityTypesAdmin() {
         max_mana: 50,
         mana_regen_rate: 0.5,
         display_width: 64,
-        display_height: 64
+        display_height: 64,
+        place_order: 0
       });
     }
   }, [editingEntity, isModalOpen]);
@@ -1063,6 +1066,17 @@ function EntityTypesAdmin() {
                 <FormGroup><label>Display Width</label><input type="number" value={formData.display_width} onChange={e => setFormData({...formData, display_width: parseInt(e.target.value)})}/></FormGroup>
                 <FormGroup><label>Display Height</label><input type="number" value={formData.display_height} onChange={e => setFormData({...formData, display_height: parseInt(e.target.value)})}/></FormGroup>
               </div>
+
+              <FormGroup>
+                <label>Place Order</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={formData.place_order}
+                  onChange={e => setFormData({...formData, place_order: parseInt(e.target.value, 10) || 0})}
+                />
+              </FormGroup>
 
               <FormGroup>
                 <label>Spawn Tiles</label>
