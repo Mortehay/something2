@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
-import { HiOutlineTrash, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineMap } from "react-icons/hi2";
+import { HiOutlineTrash, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineMap, HiOutlineQuestionMarkCircle } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
 import { getStoredToken, parseJwt, clearToken, authHeaders, AUTH_EXPIRED_EVENT } from "./src/js/net/auth.js";
 import Login from "../../pages/Login.jsx";
@@ -126,6 +126,13 @@ const HELP_SECTIONS = [
     ],
   },
   {
+    title: 'Merchants & map',
+    rows: [
+      { k: [['E']], d: 'Trade with a village merchant — stand next to the merchant and press E to open the market' },
+      { k: [['M']], d: 'Toggle the minimap (top-right corner); click the minimap to expand it' },
+    ],
+  },
+  {
     title: 'Session',
     rows: [
       { k: [['Esc']], d: 'Pause / resume' },
@@ -211,6 +218,33 @@ const FullscreenToggle = styled.button`
   font-size: 20px;
   transition: background 0.15s, color 0.15s;
 
+  &:hover { background: rgba(46, 46, 74, 0.95); color: #4a9eff; }
+`;
+
+// "How to play" affordance pinned directly under the minimap (minimap is
+// top:64 + 180px tall). Opens the same Help panel as the top-right "?" — added
+// because the controls (trading with a merchant especially) weren't discoverable.
+const HowToButton = styled.button`
+  position: absolute;
+  top: 252px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #2e2e3e;
+  background: rgba(26, 26, 46, 0.8);
+  backdrop-filter: blur(8px);
+  color: #e6e6f0;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 0.15s, color 0.15s;
+
+  svg { font-size: 16px; }
   &:hover { background: rgba(46, 46, 74, 0.95); color: #4a9eff; }
 `;
 
@@ -610,35 +644,6 @@ export default function Something2() {
         ?
       </HelpButton>
 
-      {helpOpen && (
-        <HelpBackdrop onClick={() => setHelpOpen(false)}>
-          <HelpCard onClick={(e) => e.stopPropagation()}>
-            <HelpCloseButton aria-label="Close help" onClick={() => setHelpOpen(false)}>×</HelpCloseButton>
-            <h2>Help</h2>
-            <p className="sub">Controls and main operations.</p>
-            {HELP_SECTIONS.map((section) => (
-              <div key={section.title}>
-                <h3>{section.title}</h3>
-                <table>
-                  <tbody>
-                    {section.rows.map((row, i) => (
-                      <tr key={i}>
-                        <td className="k">
-                          {row.k.map((keyGroup, gi) => (
-                            <kbd key={gi}>{keyGroup[0]}</kbd>
-                          ))}
-                        </td>
-                        <td>{row.d}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-          </HelpCard>
-        </HelpBackdrop>
-      )}
-
       <TabBar>
         <TabButton $active={activeTab === 'game'} onClick={() => setActiveTab('game')}>
           <HiOutlinePuzzlePiece /> Game View
@@ -672,6 +677,37 @@ export default function Something2() {
       </TabBar>
 
       <ContentArea ref={contentRef}>
+        {/* Rendered INSIDE contentRef (the fullscreen element) so the panel is
+            part of the fullscreen top layer. Rendered at the top level it was
+            painted behind the fullscreen game canvas — invisible while playing. */}
+        {helpOpen && (
+          <HelpBackdrop onClick={() => setHelpOpen(false)}>
+            <HelpCard onClick={(e) => e.stopPropagation()}>
+              <HelpCloseButton aria-label="Close help" onClick={() => setHelpOpen(false)}>×</HelpCloseButton>
+              <h2>Help</h2>
+              <p className="sub">Controls and main operations.</p>
+              {HELP_SECTIONS.map((section) => (
+                <div key={section.title}>
+                  <h3>{section.title}</h3>
+                  <table>
+                    <tbody>
+                      {section.rows.map((row, i) => (
+                        <tr key={i}>
+                          <td className="k">
+                            {row.k.map((keyGroup, gi) => (
+                              <kbd key={gi}>{keyGroup[0]}</kbd>
+                            ))}
+                          </td>
+                          <td>{row.d}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </HelpCard>
+          </HelpBackdrop>
+        )}
         {activeTab === 'game' && (
           <>
           {isPlaying && (
@@ -685,6 +721,16 @@ export default function Something2() {
             </FullscreenToggle>
           )}
           {isPlaying && <Minimap gameRef={gameRef} tileColors={tileColors} />}
+          {isPlaying && (
+            <HowToButton
+              type="button"
+              title="How to play — controls, trading & the minimap"
+              aria-label="How to play"
+              onClick={() => setHelpOpen(true)}
+            >
+              <HiOutlineQuestionMarkCircle /> How to play
+            </HowToButton>
+          )}
           {!isPlaying && (
             <UIOverlay>
                 <Panel>
