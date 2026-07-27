@@ -1,5 +1,6 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
+import { compareDrawables, wallRevealed, drawWall } from "./wallRenderer.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual } from "./spriteAtlas.js";
 import { TileDiamondCache } from "./tileTexture.js";
@@ -14,6 +15,10 @@ import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffe
 // player is actually close enough to loot it). Keep the two in sync, or the
 // label will appear at a different range than looting actually works.
 const PICKUP_RADIUS = 80;
+
+// Radius (world px) around an actor within which an occluding wall fades to
+// let the player see themselves/nearby creatures behind it.
+const WALL_REVEAL_R = 150;
 
 export class RenderSystem {
   constructor(canvas, imageManager) {
@@ -71,6 +76,20 @@ export class RenderSystem {
     return out;
   }
 
+  // Actor centres (world px) + iso depth, for the wall reveal check. Players
+  // and creatures store TOP-LEFT x/y; add half-extents to reach the centre.
+  static collectActors(player, remotePlayers, creatures = []) {
+    const out = [];
+    const push = (o) => {
+      const cx = o.x + (o.width || 64) / 2, cy = o.y + (o.height || 64) / 2;
+      out.push({ x: cx, y: cy, depth: depthKey(cx, cy) });
+    };
+    if (player) push(player);
+    if (remotePlayers) for (const [, p] of remotePlayers) push(p);
+    for (const c of creatures) push(c);
+    return out;
+  }
+
   renderChunked({
     player, camera, chunkedMap, remotePlayers, localUserId,
     creatures = [], projectiles = [], mana = null, maxMana = null,
@@ -91,6 +110,7 @@ export class RenderSystem {
     const halfW = ISO_TILE_W / 2;
     const halfH = ISO_TILE_H / 2;
     const mapTiles = chunkedMap.mapTiles;
+    const wallDrawables = [];
     for (const cell of chunkTileCells(chunkedMap, camera)) {
       const s = worldToScreen(cell.worldX, cell.worldY);
       const relX = s.x - camera.screenX;
@@ -99,6 +119,17 @@ export class RenderSystem {
       const def = mapTiles ? (mapTiles[cell.tile] || (Array.isArray(mapTiles) ? mapTiles.find(t => t.name === cell.tile || t.type === cell.tile) : null)) : null;
       const visual = this.tileTexturesOff ? null
         : resolveTileVisual(cell.tile, def, this.imageManager, this.nowMs);
+      const H = def ? (def.wall_height || 0) : 0;
+      const order = def ? (def.place_order || 0) : 0;
+      if (H > 0 || order !== 0) {
+        // Wall (or manually-layered) tile: defer to the depth-sorted Pass B.
+        wallDrawables.push({
+          kind: "wall", s, def, visual, H, order,
+          x: cell.worldX, y: cell.worldY, depth: depthKey(cell.worldX, cell.worldY),
+        });
+        continue;
+      }
+      // Pass A: flat floor tile (unchanged).
       if (visual) {
         const cv = this._tileCache.get(visual.cacheKey, visual.img, visual.crop);
         this.ctx.drawImage(cv, s.x - halfW, s.y - halfH);
@@ -114,10 +145,13 @@ export class RenderSystem {
       }
     }
 
-    // Players + creatures + ground items, all depth-sorted together — ground
-    // items must join the same sort rather than being drawn in a later pass,
-    // or they would render on top of entities they are actually behind.
+    // Players + creatures + ground items + walls, all depth-sorted together
+    // (Pass B) — ground items must join the same sort rather than being
+    // drawn in a later pass, or they would render on top of entities they
+    // are actually behind; walls join it too so entities can occlude behind
+    // them instead of always drawing on top.
     const drawables = RenderSystem.buildDrawables(player, { entities: creatures }, remotePlayers);
+    for (const d of drawables) d.order = d.kind === "entity" ? (d.ref.place_order || 0) : 0;
     for (const gi of groundItems) {
       // Every other drawable's depth key is computed from its raw stored
       // x/y, which are TOP-LEFT corners (drawCreature/drawEntity add w/2,h/2
@@ -127,18 +161,24 @@ export class RenderSystem {
       // back out here. Do not "simplify" this to depthKey(gi.x, gi.y) —
       // that reintroduces up to a tile's worth of depth error against
       // players/creatures.
-      drawables.push({ kind: "grounditem", ref: gi, depth: depthKey(gi.x - gi.width / 2, gi.y - gi.height / 2) });
+      drawables.push({ kind: "grounditem", ref: gi, order: 0, depth: depthKey(gi.x - gi.width / 2, gi.y - gi.height / 2) });
     }
     // Merchants are a fixed world point (village.merchantX/Y from the join
     // frame), not an entity with a stored top-left corner — depth-sort on
     // the point directly, the same origin ground items are adjusted back to
     // above.
     for (const m of merchants) {
-      drawables.push({ kind: "merchant", ref: m, depth: depthKey(m.x, m.y) });
+      drawables.push({ kind: "merchant", ref: m, order: 0, depth: depthKey(m.x, m.y) });
     }
-    drawables.sort((a, b) => a.depth - b.depth);
+    for (const w of wallDrawables) drawables.push(w);
+    drawables.sort(compareDrawables);
+
+    const actors = RenderSystem.collectActors(player, remotePlayers, creatures);
     for (const d of drawables) {
-      if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
+      if (d.kind === "wall") {
+        const alpha = wallRevealed(d, actors, WALL_REVEAL_R) ? 0.3 : 1;
+        drawWall(this.ctx, { s: d.s, def: d.def, visual: d.visual, H: d.H, alpha, halfW, halfH, tileCache: this._tileCache });
+      } else if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
       else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
       else if (d.kind === "merchant") this.drawMerchant(d.ref);

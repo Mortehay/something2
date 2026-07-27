@@ -25,6 +25,7 @@ export class CreatureManager {
     // Two shapes reach this: /api/entity-types rows (snake_case) and
     // /api/map/config's entityTypes map (camelCase). Accept either.
     creature.render_mode = def.render_mode || def.renderMode;
+    creature.place_order = def.place_order || 0;
     creature.image = def.image || null;
     creature.sprite = def.sprite || null;
     const w = def.display_width || def.displayWidth;
