@@ -73,7 +73,7 @@ function fillQuad(ctx, quad, style) {
 export function drawWall(ctx, { s, def, visual, H, alpha, halfW, halfH, tileCache }) {
   const f = wallFaces(s, halfW, halfH, H);
   ctx.globalAlpha = alpha;
-  const color = (def && def.color) || '#555';
+  const color = (def && def.color) || '#555555';
   if (visual && visual.img) {
     const crop = visual.crop || null;
     // left face p0=liftedLeft, p1=liftedBottom, p3=groundLeft, p2=groundBottom
@@ -91,10 +91,22 @@ export function drawWall(ctx, { s, def, visual, H, alpha, halfW, halfH, tileCach
   ctx.globalAlpha = 1;
 }
 
-// Darken a #rrggbb (or #rrggbbaa) hex by `amt` in [-1,0]; falls back to input.
-function shadeColor(hex, amt) {
-  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex || '');
-  if (!m) return hex;
-  const f = (h) => Math.max(0, Math.min(255, Math.round(parseInt(h, 16) * (1 + amt))));
-  return `rgb(${f(m[1])}, ${f(m[2])}, ${f(m[3])})`;
+// Darken a #rrggbb (or #abc shorthand, or #rrggbbaa) hex by `amt` in [-1,0]; falls back to input.
+export function shadeColor(hex, amt) {
+  // Try 6-digit match first: #rrggbb or rrggbb
+  let m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex || '');
+  if (m) {
+    const f = (h) => Math.max(0, Math.min(255, Math.round(parseInt(h, 16) * (1 + amt))));
+    return `rgb(${f(m[1])}, ${f(m[2])}, ${f(m[3])})`;
+  }
+  // Try 3-digit shorthand: #abc or abc (expand to #aabbcc)
+  m = /^#?([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(hex || '');
+  if (m) {
+    const expand = (c) => c + c;
+    const r = expand(m[1]), g = expand(m[2]), b = expand(m[3]);
+    const f = (h) => Math.max(0, Math.min(255, Math.round(parseInt(h, 16) * (1 + amt))));
+    return `rgb(${f(r)}, ${f(g)}, ${f(b)})`;
+  }
+  // Unparseable: return input unchanged
+  return hex;
 }

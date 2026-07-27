@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { wallFaces, compareDrawables, wallRevealed } from '../wallRenderer.js';
+import { wallFaces, compareDrawables, wallRevealed, shadeColor } from '../wallRenderer.js';
 
 describe('wallFaces', () => {
   it('lifts the top diamond by H and builds the two south faces', () => {
@@ -40,5 +40,26 @@ describe('wallRevealed', () => {
   });
   it('is false with no actors', () => {
     expect(wallRevealed(wall, [], 150)).toBe(false);
+  });
+});
+
+describe('shadeColor', () => {
+  it('darkens a 6-digit hex color', () => {
+    const result = shadeColor('#808080', -0.5);
+    // #808080 = rgb(128, 128, 128); darken by 50% => rgb(64, 64, 64)
+    expect(result).toBe('rgb(64, 64, 64)');
+  });
+  it('darkens a 3-digit shorthand hex color the same way', () => {
+    const result = shadeColor('#888', -0.5);
+    // #888 expands to #888888 = rgb(136, 136, 136); darken by 50% => rgb(68, 68, 68)
+    expect(result).toBe('rgb(68, 68, 68)');
+  });
+  it('returns the same channels when amt is 0 (no darkening)', () => {
+    const result = shadeColor('#808080', 0);
+    expect(result).toBe('rgb(128, 128, 128)');
+  });
+  it('returns input unchanged for unparseable colors', () => {
+    const result = shadeColor('nope', -0.5);
+    expect(result).toBe('nope');
   });
 });
