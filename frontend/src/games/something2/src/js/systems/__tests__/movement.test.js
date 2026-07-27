@@ -34,7 +34,7 @@ describe("resolveMove", () => {
     // actor center near right edge of tile (0,0) so a small east step crosses into (0,1)
     const a = { x: T - 30, y: 10, width: 20, height: 20, speed: 100 };
     const r = resolveMove(m, a, 1, 0, 1);
-    expect(r.x).toBe(a.x); // blocked east
+    expect(r.x).toBeCloseTo(79.99, 2); // clamps up to the wall face (was: stayed put)
   });
 
   it("scales step by the current tile's speed", () => {
@@ -56,7 +56,7 @@ describe("resolveMove", () => {
     // actor near the east edge of chunk (0,0); a step east crosses into chunk (1,0), unloaded.
     const a = { x: N * T - 30, y: 10, width: 20, height: 20, speed: 100 };
     const r = resolveMove(m, a, 1, 0, 1);
-    expect(r.x).toBe(a.x); // blocked at the frontier
+    expect(r.x).toBeCloseTo(379.99, 2); // clamps up to the frontier (was: stayed put)
   });
 
   it("does not mutate the actor", () => {
@@ -78,9 +78,11 @@ describe("resolveMove", () => {
     speedAt: () => 1,
   });
 
-  it("footprint blocks when the box FRONT reaches a wall, not just the center", () => {
+  it("a blocked step clamps the box up to the wall face", () => {
     const r = resolveMove(wallColumn(1), { x: 0, y: 0, width: 64, height: 64, speed: 40 }, 1, 0, 1);
-    expect(r).toEqual({ x: 0, y: 0, moved: false });
+    expect(r.x).toBeCloseTo(35.99, 2);
+    expect(r.y).toBe(0);
+    expect(r.moved).toBe(true);
   });
 
   it("footprint lets an actor overlapping a wall move away from it", () => {
@@ -104,5 +106,24 @@ describe("resolveMove", () => {
   it("footprint tests BOTH leading-edge corners (one corner in a wall tile blocks)", () => {
     const r = resolveMove(wallTile(1, 1), { x: 40, y: 90, width: 64, height: 64, speed: 40 }, 1, 0, 1);
     expect(r).toEqual({ x: 40, y: 90, moved: false });
+  });
+
+  it("collision is dt-invariant near a wall (one big step == many small steps)", () => {
+    const run = (dt, n) => {
+      const a = { x: 0, y: 0, width: 64, height: 64, speed: 200 };
+      for (let i = 0; i < n; i++) { const r = resolveMove(wallColumn(1), a, 1, 0, dt); a.x = r.x; a.y = r.y; }
+      return a.x;
+    };
+    const big = run(0.05, 10);
+    const small = run(0.05 / 3, 30);
+    expect(Math.abs(big - small)).toBeLessThan(1e-9);
+    expect(big).toBeCloseTo(35.99, 5);
+  });
+
+  it("flush against a wall, a parallel move slides at full speed", () => {
+    const r = resolveMove(wallColumn(1), { x: 36, y: 0, width: 64, height: 64, speed: 200 }, 0, 1, 0.05);
+    expect(r.y).toBe(10);
+    expect(r.x).toBe(36);
+    expect(r.moved).toBe(true);
   });
 });

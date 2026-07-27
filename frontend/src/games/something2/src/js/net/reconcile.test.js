@@ -29,10 +29,12 @@ describe('reconcile', () => {
     expect(out.buffer).toEqual([]);
   });
 
-  it('replay respects walls (blocked axis does not advance)', () => {
+  it('replay respects walls (blocked axis clamps to the tile face)', () => {
     const buffer = [{ seq: 2, dx: 1, dy: 0, dt: 1 }];
-    // base at x=45, wall at 50: center+step crosses wall → blocked.
+    // base at x=45, wall at 50: destination (145) is unwalkable, so the swept
+    // clamp stops at the tile boundary (x=100) minus WALL_EPS, not at the
+    // stub's mid-tile wall (walls are assumed tile-aligned; see movement.js).
     const out = reconcile({ x: 45, y: 0 }, 1, buffer, stubMap(50), dims);
-    expect(out.x).toBe(45);
+    expect(out.x).toBeCloseTo(99.99, 2);
   });
 });
