@@ -6,13 +6,14 @@
 export function resolveMove(map, actor, dirX, dirY, dt) {
   if (dirX === 0 && dirY === 0) return { x: actor.x, y: actor.y, moved: false };
 
-  // Normalize so diagonal isn't faster.
   const len = Math.hypot(dirX, dirY);
   const nx = dirX / len;
   const ny = dirY / len;
 
-  const cx = actor.x + actor.width / 2;
-  const cy = actor.y + actor.height / 2;
+  const hw = actor.width / 2;
+  const hh = actor.height / 2;
+  const cx = actor.x + hw;
+  const cy = actor.y + hh;
 
   const tileSpeed = map.speedAt(cx, cy);
   const stepX = nx * actor.speed * dt * tileSpeed;
@@ -22,14 +23,24 @@ export function resolveMove(map, actor, dirX, dirY, dt) {
   let y = actor.y;
   let moved = false;
 
-  // Test each axis independently at the (moved) center.
-  if (stepX !== 0 && map.isWalkable(cx + stepX, cy)) {
-    x += stepX;
-    moved = true;
+  // Footprint collision: block a step only if the box's LEADING EDGE in the
+  // step direction would enter an unwalkable tile. Test the edge's two corners
+  // (the box is <= a tile wide, so 2 corners cover every tile it can touch).
+  // Testing only the leading edge — not the whole box — lets an actor already
+  // overlapping a wall still move away from it.
+  if (stepX !== 0) {
+    const leadX = cx + stepX + (stepX > 0 ? hw : -hw);
+    if (map.isWalkable(leadX, cy - hh) && map.isWalkable(leadX, cy + hh)) {
+      x += stepX;
+      moved = true;
+    }
   }
-  if (stepY !== 0 && map.isWalkable(cx, cy + stepY)) {
-    y += stepY;
-    moved = true;
+  if (stepY !== 0) {
+    const leadY = cy + stepY + (stepY > 0 ? hh : -hh);
+    if (map.isWalkable(cx - hw, leadY) && map.isWalkable(cx + hw, leadY)) {
+      y += stepY;
+      moved = true;
+    }
   }
 
   return { x, y, moved };

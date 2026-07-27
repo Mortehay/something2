@@ -65,4 +65,31 @@ describe("resolveMove", () => {
     expect(a.x).toBe(10);
     expect(a.y).toBe(10);
   });
+
+  // Footprint golden vectors — identical inputs & expected outputs to the
+  // backend suite (backend/tests/authority_collision.test.js). If these two
+  // ever disagree, client prediction has diverged from the server authority.
+  const wallColumn = (blockedCol) => ({
+    isWalkable: (wx) => Math.floor(wx / 100) !== blockedCol,
+    speedAt: () => 1,
+  });
+  const gateColumn = (openCol) => ({
+    isWalkable: (wx) => Math.floor(wx / 100) === openCol,
+    speedAt: () => 1,
+  });
+
+  it("footprint blocks when the box FRONT reaches a wall, not just the center", () => {
+    const r = resolveMove(wallColumn(1), { x: 0, y: 0, width: 64, height: 64, speed: 40 }, 1, 0, 1);
+    expect(r).toEqual({ x: 0, y: 0, moved: false });
+  });
+
+  it("footprint lets an actor overlapping a wall move away from it", () => {
+    const r = resolveMove(wallColumn(1), { x: 108, y: 0, width: 64, height: 64, speed: 40 }, -1, 0, 1);
+    expect(r).toEqual({ x: 68, y: 0, moved: true });
+  });
+
+  it("a 64-wide box threads a 100px gate", () => {
+    const r = resolveMove(gateColumn(1), { x: 118, y: 150, width: 64, height: 64, speed: 40 }, 0, 1, 1);
+    expect(r).toEqual({ x: 118, y: 190, moved: true });
+  });
 });
