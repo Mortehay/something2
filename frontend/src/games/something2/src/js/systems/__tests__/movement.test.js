@@ -92,4 +92,17 @@ describe("resolveMove", () => {
     const r = resolveMove(gateColumn(1), { x: 118, y: 150, width: 64, height: 64, speed: 40 }, 0, 1, 1);
     expect(r).toEqual({ x: 118, y: 190, moved: true });
   });
+
+  // Single wall TILE (depends on wy) so the two leading-edge corners can
+  // disagree — pins the TWO-corner footprint. Same input/expected as the
+  // backend suite's wallTile test.
+  const wallTile = (col, row) => ({
+    isWalkable: (wx, wy) => !(Math.floor(wx / 100) === col && Math.floor(wy / 100) === row),
+    speedAt: () => 1,
+  });
+
+  it("footprint tests BOTH leading-edge corners (one corner in a wall tile blocks)", () => {
+    const r = resolveMove(wallTile(1, 1), { x: 40, y: 90, width: 64, height: 64, speed: 40 }, 1, 0, 1);
+    expect(r).toEqual({ x: 40, y: 90, moved: false });
+  });
 });

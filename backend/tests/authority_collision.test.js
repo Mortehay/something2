@@ -19,6 +19,26 @@ function gateColumn(openCol) {
   };
 }
 
+// A single wall TILE (not a column): unwalkable only where BOTH column and row
+// match, so it depends on wy — unlike wallColumn/gateColumn. This lets the two
+// leading-edge corner checks disagree, pinning the TWO-corner footprint: a
+// one-corner regression would let this vector move.
+function wallTile(col, row) {
+  return {
+    isWalkable: (wx, wy) => !(Math.floor(wx / 100) === col && Math.floor(wy / 100) === row),
+    speedAt: () => 1,
+  };
+}
+
+test('footprint tests BOTH leading-edge corners (one corner in a wall tile blocks)', () => {
+  // Box 64x64 at (40,90) -> center (72,122). Move east 40: east face at x=144
+  // (column 1). Top corner y=90 is row 0 (open); bottom corner y=154 is row 1,
+  // the wall tile -> two-corner test blocks; a one-corner test would move to 80.
+  const actor = { x: 40, y: 90, width: 64, height: 64, speed: 40 };
+  const r = resolveMove(wallTile(1, 1), actor, 1, 0, 1);
+  assert.deepEqual(r, { x: 40, y: 90, moved: false });
+});
+
 test('footprint blocks when the box FRONT reaches a wall even though the CENTER has not', () => {
   // Box 64 wide at x=0 -> center 32, front face 64. Wall in column 1 (x>=100).
   // Step east 40: center reaches 72 (still column 0, walkable) but the front
