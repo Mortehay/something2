@@ -8,6 +8,7 @@ const { generateChunk } = require('../services/mapService');
 
 const MAP_TILE_SIZE = 100; // must match frontend core/constants.js
 const MAX_CHUNKS = 512; // per-ServerMap LRU cap on memoized chunk grids
+const WALL_EPS = 0.01; // clamp/inset margin so a clamped face stays inside the walkable tile
 
 function resolveMove(map, actor, dirX, dirY, dt) {
   if (dirX === 0 && dirY === 0) return { x: actor.x, y: actor.y, moved: false };
@@ -29,23 +30,51 @@ function resolveMove(map, actor, dirX, dirY, dt) {
   let y = actor.y;
   let moved = false;
 
-  // Footprint collision: block a step only if the box's LEADING EDGE in the
-  // step direction would enter an unwalkable tile. Test the edge's two corners
-  // (the box is <= a tile wide, so 2 corners cover every tile it can touch).
-  // Testing only the leading edge — not the whole box — lets an actor already
-  // overlapping a wall still move away from it.
+  // Swept clamp per axis. The leading face is the box edge in the travel
+  // direction; a sub-tile step crosses at most one boundary.
+  // Assumes tile-aligned walls (isWalkable is per-tile) and sub-tile steps (dt small); both hold in-game.
+  // If the destination corners are blocked, clamp the face to WALL_EPS shy of the
+  // wall boundary and move only that far (dt-invariant: any timestep lands on
+  // the same face). Perpendicular corners are inset by WALL_EPS so an edge
+  // exactly on a tile line is not read as inside the next tile.
   if (stepX !== 0) {
-    const leadX = cx + stepX + (stepX > 0 ? hw : -hw);
-    if (map.isWalkable(leadX, cy - hh) && map.isWalkable(leadX, cy + hh)) {
+    const dir = stepX > 0 ? 1 : -1;
+    const face = dir > 0 ? actor.x + actor.width : actor.x;
+    const destFace = face + stepX;
+    const top = cy - hh + WALL_EPS;
+    const bot = cy + hh - WALL_EPS;
+    if (map.isWalkable(destFace, top) && map.isWalkable(destFace, bot)) {
       x += stepX;
       moved = true;
+    } else {
+      const boundary = dir > 0
+        ? Math.floor(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE
+        : Math.ceil(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE;
+      const move = (boundary - dir * WALL_EPS) - face;
+      if (move * dir > 0) {
+        x += move;
+        moved = true;
+      }
     }
   }
   if (stepY !== 0) {
-    const leadY = cy + stepY + (stepY > 0 ? hh : -hh);
-    if (map.isWalkable(cx - hw, leadY) && map.isWalkable(cx + hw, leadY)) {
+    const dir = stepY > 0 ? 1 : -1;
+    const face = dir > 0 ? actor.y + actor.height : actor.y;
+    const destFace = face + stepY;
+    const left = cx - hw + WALL_EPS;
+    const right = cx + hw - WALL_EPS;
+    if (map.isWalkable(left, destFace) && map.isWalkable(right, destFace)) {
       y += stepY;
       moved = true;
+    } else {
+      const boundary = dir > 0
+        ? Math.floor(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE
+        : Math.ceil(destFace / MAP_TILE_SIZE) * MAP_TILE_SIZE;
+      const move = (boundary - dir * WALL_EPS) - face;
+      if (move * dir > 0) {
+        y += move;
+        moved = true;
+      }
     }
   }
 

@@ -37,12 +37,18 @@ test('tick advances a player on open ground', () => {
   assert.ok(w.getPlayer('u1').x > 0);
 });
 
-test('tick blocks movement into an unwalkable tile', () => {
-  const w = new World(stubMap(50)); // wall at x=50
-  w.addPlayer('u1', { x: 0, y: 0 }); // center at (32,32); +x step would cross wall quickly
-  w.setInput('u1', 1, 1, 0);
-  w.tick(1); // large dt: step is huge, center+step >= 50 → blocked
-  assert.equal(w.getPlayer('u1').x, 0);
+test('tick clamps a player to the wall face instead of entering an unwalkable tile', () => {
+  const w = new World(stubMap(100)); // wall at the x=100 tile boundary (tile-aligned)
+  w.addPlayer('u1', { x: 30, y: 0 }); // 64-wide box, east face at 94 — just shy of the wall
+  w.setInput('u1', 1, 1, 0); // seq=1, dx=1 (east), dy=0
+  w.tick(0.05); // realistic sub-tile step
+  const p = w.getPlayer('u1');
+  // Deterministic clamp: box east face stops flush at WALL_EPS shy of x=100.
+  // (World's player state has no `moved` field — only resolveMove's return
+  // shape does, and World.tick discards it — so the exact x pin below is
+  // both the determinism check and the "it moved" check: x=35.99 is only
+  // reachable if the player actually moved from its spawn at x=30.)
+  assert.ok(Math.abs(p.x - 35.99) < 1e-6, `x=${p.x}`);
 });
 
 test('ackSeq tracks the latest input seq; snapshot has the right shape', () => {

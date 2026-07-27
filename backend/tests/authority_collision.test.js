@@ -39,13 +39,15 @@ test('footprint tests BOTH leading-edge corners (one corner in a wall tile block
   assert.deepEqual(r, { x: 40, y: 90, moved: false });
 });
 
-test('footprint blocks when the box FRONT reaches a wall even though the CENTER has not', () => {
-  // Box 64 wide at x=0 -> center 32, front face 64. Wall in column 1 (x>=100).
-  // Step east 40: center reaches 72 (still column 0, walkable) but the front
-  // face reaches 104 (column 1) -> footprint blocks. Center-point logic moved.
+test('a blocked step CLAMPS the box up to the wall face (not reject)', () => {
+  // Box 64 wide at x=0 -> east face 64. Wall column 1 (x>=100). Step east 40
+  // would put the face at 104 (into the wall); clamp the face to 100-EPS, so
+  // x moves from 0 to 35.99 instead of staying put.
   const actor = { x: 0, y: 0, width: 64, height: 64, speed: 40 };
   const r = resolveMove(wallColumn(1), actor, 1, 0, 1);
-  assert.deepEqual(r, { x: 0, y: 0, moved: false });
+  assert.ok(Math.abs(r.x - 35.99) < 1e-6, `x=${r.x}`);
+  assert.equal(r.y, 0);
+  assert.equal(r.moved, true);
 });
 
 test('footprint lets an actor already overlapping a wall move AWAY from it', () => {
@@ -85,14 +87,37 @@ test('resolveMove normalizes diagonals (not faster than an axis)', () => {
   assert.ok(Math.abs(diag.y - 70.7106) < 1e-3);
 });
 
-test('resolveMove blocks the X axis at a wall but allows Y (footprint)', () => {
-  // Box 64 at (0,0) -> center (32,32). Wall column 1 (x>=100). Moving NE:
-  // the east leading edge enters column 1 (blocked), but the box's full width
-  // (0..64) stays in column 0 for the Y move, so Y is free.
+test('X clamps to the wall face while Y slides free (footprint)', () => {
+  // Box 64x64 at (0,0). Wall column 1. Moving NE: east face clamps to 100-EPS
+  // (x -> 35.99); Y is free (box stays in column 0 for the Y move).
   const actor = { x: 0, y: 0, width: 64, height: 64, speed: 200 };
   const r = resolveMove(wallColumn(1), actor, 1, 1, 0.5);
-  assert.equal(r.x, 0);              // x blocked by the wall column
-  assert.ok(r.y > 0);               // y slides free
+  assert.ok(Math.abs(r.x - 35.99) < 1e-6, `x=${r.x}`); // clamped, not 0
+  assert.ok(r.y > 0);                                   // y slides free
+  assert.equal(r.moved, true);
+});
+
+test('collision is dt-invariant near a wall: one big step == many small steps', () => {
+  // The bug: step-rejection made the stop distance depend on dt, so the client
+  // (16ms) and server (50ms) disagreed near walls. Clamping makes them equal.
+  const run = (dt, n) => {
+    const a = { x: 0, y: 0, width: 64, height: 64, speed: 200 };
+    for (let i = 0; i < n; i++) { const r = resolveMove(wallColumn(1), a, 1, 0, dt); a.x = r.x; a.y = r.y; }
+    return a.x;
+  };
+  const big = run(0.05, 10);
+  const small = run(0.05 / 3, 30);
+  assert.ok(Math.abs(big - small) < 1e-9, `dt divergence: big=${big} small=${small}`);
+  assert.ok(Math.abs(big - 35.99) < 1e-6, `x=${big}`);
+});
+
+test('flush against a wall, a parallel move slides at full speed (EPS corner inset)', () => {
+  // East face EXACTLY on the tile line x=100 (x=36, width 64). Moving south
+  // along the column-1 wall must advance the full step (10). Without the EPS
+  // inset the right corner at x=100 would floor into the wall column and block.
+  const r = resolveMove(wallColumn(1), { x: 36, y: 0, width: 64, height: 64, speed: 200 }, 0, 1, 0.05);
+  assert.equal(r.y, 10);
+  assert.equal(r.x, 36);
   assert.equal(r.moved, true);
 });
 
