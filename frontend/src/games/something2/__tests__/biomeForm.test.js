@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { emptyBiomeForm, biomeToForm, biomeFormToPayload } from '../biomeForm.js';
+import { emptyBiomeForm, biomeToForm, biomeFormToPayload, orderBiomeNames } from '../biomeForm.js';
 
 const ROW = {
   id: 1, name: 'Meadow', terrain_tiles: ['grass', 'earth'], flora_types: ['bush'],
@@ -44,5 +44,50 @@ describe('biomeForm', () => {
     const p = biomeFormToPayload(f);
     expect(p.name).toBe('Mire');
     expect(p.terrain_tiles).toEqual(['swamp', 'water']);
+  });
+});
+
+// worlds.biomes is order-sensitive on the backend (biome i owns noise band
+// i, and the update route diffs it with an order-sensitive JSON.stringify).
+// A world's selected biomes are tracked client-side as a Set, and a JS Set's
+// iteration order moves an entry to the end on delete+re-add -- so
+// unchecking then rechecking the same biome (a visual no-op) must NOT change
+// the emitted payload order, or an unrelated save silently wipes that
+// world's cached terrain.
+describe('orderBiomeNames', () => {
+  const catalog = [
+    { id: 1, name: 'Meadow' },
+    { id: 2, name: 'Desert' },
+    { id: 3, name: 'Swamp' },
+  ];
+
+  it('orders selected names by catalog (id ASC) order, not Set insertion order', () => {
+    const reversed = new Set(['Swamp', 'Desert', 'Meadow']);
+    expect(orderBiomeNames(reversed, catalog)).toEqual(['Meadow', 'Desert', 'Swamp']);
+  });
+
+  it('uncheck-then-recheck of the same biome yields a byte-identical payload', () => {
+    const before = new Set(['Meadow', 'Desert', 'Swamp']);
+    const beforePayload = orderBiomeNames(before, catalog);
+
+    // Simulate a click sequence: uncheck Meadow, then recheck it. A Set
+    // moves 'Meadow' to the end of its iteration order as a result.
+    const afterClicks = new Set(before);
+    afterClicks.delete('Meadow');
+    afterClicks.add('Meadow');
+    expect([...afterClicks]).toEqual(['Desert', 'Swamp', 'Meadow']); // Set order DID shift
+
+    const afterPayload = orderBiomeNames(afterClicks, catalog);
+    expect(afterPayload).toEqual(beforePayload);
+    expect(afterPayload).toEqual(['Meadow', 'Desert', 'Swamp']);
+  });
+
+  it('drops names no longer present in the catalog and accepts a plain array', () => {
+    expect(orderBiomeNames(['Swamp', 'Ghost Biome', 'Meadow'], catalog)).toEqual(['Meadow', 'Swamp']);
+  });
+
+  it('handles an empty selection and a missing catalog without crashing', () => {
+    expect(orderBiomeNames(new Set(), catalog)).toEqual([]);
+    expect(orderBiomeNames(['Meadow'], undefined)).toEqual([]);
   });
 });

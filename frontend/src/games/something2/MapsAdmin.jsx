@@ -6,6 +6,7 @@ import { useWorlds, useCreateWorld, useDeleteWorld } from './useWorlds.js';
 import { useEntityTypes } from './useMaps.js';
 import { useUpdateWorld, useRegenerateWorld, useRerollCreatures, useWorldLinks, useSetLink, useClearLink, useWorldVillages, useAddVillage, useDeleteVillage } from './useMapsAdmin.js';
 import { useBiomes } from './useBiomes.js';
+import { orderBiomeNames } from './biomeForm.js';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: #eee; max-width: 1200px; margin: 0 auto;
@@ -68,7 +69,12 @@ function MapCard({ world, creatureTypes, allMaps, biomes }) {
     id: world.id, name, width: world.width, height: world.height,
     creature_count: Number(count), allowed_creature_types: [...allowed],
     is_entry: isEntry, entry_spawn: isEntry ? { x: Number(spawnX), y: Number(spawnY) } : null,
-    biomes: [...worldBiomes],
+    // Ordered by the biome CATALOG's own order (id ASC), not by checkbox
+    // click order -- worlds.biomes is order-sensitive on the backend (biome
+    // i owns noise band i), so a Set's click-order iteration would make an
+    // uncheck+recheck of the SAME biomes look like a real change and wipe
+    // this world's cached terrain for no visible reason. See biomeForm.js.
+    biomes: orderBiomeNames(worldBiomes, biomes),
     biome_cell: biomeCell === '' ? null : Number(biomeCell),
   });
 
@@ -131,6 +137,7 @@ function MapCard({ world, creatureTypes, allMaps, biomes }) {
       <Row>
         <span style={{ color: '#f59e0b', fontSize: '0.85em' }}>
           Changing biomes or region size regenerates this map's terrain and clears its cached chunks.
+          Regions are assigned to biomes in the order the biomes are listed above (catalog order — not click order).
         </span>
       </Row>
       <Row>

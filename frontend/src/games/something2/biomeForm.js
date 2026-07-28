@@ -41,3 +41,19 @@ export function biomeFormToPayload(form) {
     color: form.color || DEFAULT_COLOR,
   };
 }
+
+// Orders a set of selected biome names by the biome CATALOG's own order (the
+// order GET /api/biomes returns them in, ORDER BY id ASC) rather than by
+// checkbox click order. worlds.biomes is order-sensitive on the backend --
+// biome i owns noise band i, and PUT /api/worlds/:id detects a real change
+// with an order-sensitive JSON.stringify comparison. A JS Set's iteration
+// order moves an entry to the end on delete+re-add, so building the payload
+// from `[...selectedSet]` makes an uncheck-then-recheck of the exact same
+// biomes look like an order change and silently wipes that world's cached
+// terrain. Deriving the payload from the catalog's order instead makes
+// toggling idempotent: selecting the same names, in any click sequence,
+// always yields the same array.
+export function orderBiomeNames(selected, catalog) {
+  const selectedSet = selected instanceof Set ? selected : new Set(selected || []);
+  return (catalog || []).map((b) => b.name).filter((name) => selectedSet.has(name));
+}
