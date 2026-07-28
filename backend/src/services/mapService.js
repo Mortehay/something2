@@ -376,6 +376,12 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
       const density = globalValueNoise((cfg.seed ^ DECO_SEED_XOR) >>> 0, gRow, gCol, DECO_CELL);
       if (density < DECO_DENSITY) continue;
       if (hash2((cfg.seed ^ DECO_FILL_XOR) >>> 0, gCol, gRow) >= DECO_FILL) continue;
+      // WHICH types are eligible here at all: when the world has biomes, only
+      // the flora the owning biome lists. Empty flora_types is a legitimate
+      // authored choice ("this biome is barren"), not a config error -- there
+      // is deliberately no fallback to the global def list.
+      const region = sampleBiomeRegion(cfg, gRow, gCol);
+      const flora = region ? region.floraTypes : null;
       // WHICH object: weighted pick among ALL defs whose spawn_tiles match this
       // terrain, weighted by `chance`. (Not first-match — that shadowed every
       // type but the lowest-id one on shared terrain.) Deterministic: the roll
@@ -383,6 +389,7 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
       let totalW = 0;
       const matches = [];
       for (const def of decorationDefs) {
+        if (flora && !flora.includes(def.name)) continue;
         const spawnTiles = def.spawn_tiles || def.spawnTiles;
         if (spawnTiles && spawnTiles.includes(terrain)) { matches.push(def); totalW += (def.chance || 0); }
       }
