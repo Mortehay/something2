@@ -1,8 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
+import { liveWarningFromBody, liveWarningFromHeader, LIVE_WARNING_TOAST_OPTS } from "./liveWarning.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
+
+// A plain toast.success would tell the admin an edit fully landed when a
+// connected player kept it from reaching the live simulation -- surface
+// `liveWarning` (see liveWarning.js) as a separate, longer-lived warning
+// toast alongside the success toast.
+function warnIfLive(data) {
+  const msg = liveWarningFromBody(data);
+  if (msg) toast(msg, LIVE_WARNING_TOAST_OPTS);
+}
 
 export function useUpdateWorld() {
   const qc = useQueryClient();
@@ -16,7 +26,7 @@ export function useUpdateWorld() {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to update map");
       return res.json();
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success("Map saved"); },
+    onSuccess: (data) => { qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success("Map saved"); warnIfLive(data); },
     onError: (err) => toast.error(err.message),
   });
 }
@@ -32,7 +42,7 @@ export function useRegenerateWorld() {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to regenerate");
       return res.json();
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success("Terrain regenerated"); },
+    onSuccess: (data) => { qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success("Terrain regenerated"); warnIfLive(data); },
     onError: (err) => toast.error(err.message),
   });
 }
@@ -48,7 +58,7 @@ export function useRerollCreatures() {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to re-roll creatures");
       return res.json();
     },
-    onSuccess: (data) => { qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success(`Placed ${data.placed} creatures`); },
+    onSuccess: (data) => { qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success(`Placed ${data.placed} creatures`); warnIfLive(data); },
     onError: (err) => toast.error(err.message),
   });
 }
@@ -76,7 +86,7 @@ export function useSetLink() {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to set link");
       return res.json();
     },
-    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ["worldLinks", v.id] }); qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success("Link saved"); },
+    onSuccess: (data, v) => { qc.invalidateQueries({ queryKey: ["worldLinks", v.id] }); qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success("Link saved"); warnIfLive(data); },
     onError: (err) => toast.error(err.message),
   });
 }
@@ -87,9 +97,11 @@ export function useClearLink() {
     mutationFn: async ({ id, edge }) => {
       const res = await apiFetch(`${API_URL}/api/worlds/${id}/links/${edge}`, { method: "DELETE", headers: authHeaders() });
       if (!res.ok && res.status !== 204) throw new Error("Failed to clear link");
-      return true;
+      // 204 carries no body -- the live-connection warning travels as a
+      // header instead (see the matching backend comment on this route).
+      return { liveWarning: liveWarningFromHeader(res.headers.get("X-Live-World-Pending")) };
     },
-    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ["worldLinks", v.id] }); qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success("Link cleared"); },
+    onSuccess: (data, v) => { qc.invalidateQueries({ queryKey: ["worldLinks", v.id] }); qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success("Link cleared"); warnIfLive(data); },
     onError: (err) => toast.error(err.message),
   });
 }
@@ -117,7 +129,7 @@ export function useAddVillage() {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to add village");
       return res.json();
     },
-    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ["worldVillages", v.id] }); toast.success("Village added"); },
+    onSuccess: (data, v) => { qc.invalidateQueries({ queryKey: ["worldVillages", v.id] }); toast.success("Village added"); warnIfLive(data); },
     onError: (err) => toast.error(err.message),
   });
 }
@@ -130,8 +142,10 @@ export function useDeleteVillage() {
         method: "DELETE", headers: authHeaders(),
       });
       if (!res.ok) throw new Error("Failed to delete village");
+      // See useClearLink above: 204 carries no body, the warning is a header.
+      return { liveWarning: liveWarningFromHeader(res.headers.get("X-Live-World-Pending")) };
     },
-    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ["worldVillages", v.id] }); toast.success("Village deleted"); },
+    onSuccess: (data, v) => { qc.invalidateQueries({ queryKey: ["worldVillages", v.id] }); toast.success("Village deleted"); warnIfLive(data); },
     onError: (err) => toast.error(err.message),
   });
 }

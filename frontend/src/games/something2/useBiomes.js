@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
+import { liveWarningFromBody, LIVE_WARNING_TOAST_OPTS } from "./liveWarning.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
 
@@ -16,7 +17,15 @@ export function useBiomes() {
   return { biomes: data || [], isLoadingBiomes: isLoading };
 }
 
-function biomeMutation({ method, url, successMessage, failMessage }) {
+// Only PUT /api/biomes/:id can return `liveWarning` (F-017/SOMET-197): a
+// biome's terrain_tiles/flora_types/creature_types changed and a world using
+// it has a connected player that could not be evicted, so the live
+// simulation is still serving the pre-edit definition. POST (a brand new
+// biome, unused by any world yet) and DELETE (refused outright when any
+// world still lists the biome -- a 409, not a 200) can't produce it -- see
+// backend/src/index.js's PUT /api/biomes/:id handler, the only one that
+// calls invalidateWorld/evictOrWarn.
+function biomeMutation({ method, url, successMessage, failMessage, surfaceLiveWarning = false }) {
   return function useBiomeMutation() {
     const qc = useQueryClient();
     return useMutation({
@@ -29,7 +38,12 @@ function biomeMutation({ method, url, successMessage, failMessage }) {
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || failMessage);
         return res.status === 204 ? true : res.json();
       },
-      onSuccess: () => { qc.invalidateQueries({ queryKey: ["biomes"] }); toast.success(successMessage); },
+      onSuccess: (data) => {
+        qc.invalidateQueries({ queryKey: ["biomes"] });
+        toast.success(successMessage);
+        const warning = surfaceLiveWarning && liveWarningFromBody(data);
+        if (warning) toast(warning, LIVE_WARNING_TOAST_OPTS);
+      },
       onError: (err) => toast.error(err.message),
     });
   };
@@ -42,6 +56,7 @@ export const useCreateBiome = biomeMutation({
 export const useUpdateBiome = biomeMutation({
   method: "PUT", url: (a) => `${API_URL}/api/biomes/${a.id}`,
   successMessage: "Biome saved", failMessage: "Failed to update biome",
+  surfaceLiveWarning: true,
 });
 export const useDeleteBiome = biomeMutation({
   method: "DELETE", url: (a) => `${API_URL}/api/biomes/${a.id}`,
