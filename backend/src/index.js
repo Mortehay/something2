@@ -19,7 +19,20 @@ const app = express();
 const port = process.env.PORT || 3101;
 
 // Middleware
-app.use(cors());
+//
+// exposedHeaders: the API is cross-origin (frontend :15173 -> backend
+// :13101), and per the Fetch spec a cross-origin response only exposes the
+// safelisted response headers (content-type, content-length, etc.) to JS
+// unless the server explicitly lists more via Access-Control-Expose-Headers
+// -- plain cors() never sets that header. X-Live-World-Pending
+// (F-017/SOMET-197's liveWarning signal on the two 204 routes, see
+// evictOrWarn below) was invisible to the browser as a result: confirmed
+// live, a fetch from the running app saw only content-length/content-type,
+// and useMapsAdmin.js's `res.headers.get('X-Live-World-Pending')` read null
+// even though the server demonstrably sent it -- silently dropping the
+// warning that a village-delete/link-clear edit did not reach a connected
+// player's live session.
+app.use(cors({ exposedHeaders: ['X-Live-World-Pending'] }));
 
 // A modest global rate limit in front of the whole router (SOMET-189 /
 // F-009). /api/auth already has its own tighter, credential-aware limiter
