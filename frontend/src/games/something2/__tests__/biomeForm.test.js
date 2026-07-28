@@ -45,6 +45,35 @@ describe('biomeForm', () => {
     expect(p.name).toBe('Mire');
     expect(p.terrain_tiles).toEqual(['swamp', 'water']);
   });
+
+  // terrain_tiles is order-sensitive on the backend: sampleTerrain bands it
+  // by array index (biome i's terrain band i), and PUT /api/biomes/:id
+  // diffs it against the stored row with an order-sensitive JSON.stringify.
+  // BiomesAdmin's `toggle` appends a re-checked name to the END of the
+  // array (`[...f[k], name]`), so an uncheck-then-recheck of the SAME tile
+  // -- a visually invisible no-op in the checkbox UI -- genuinely shifts the
+  // raw array's order. Without ordering by the catalog at payload time, that
+  // shift reaches the backend as a real reorder and silently rewrites every
+  // world using this biome's terrain (92/256 tiles in one chunk, per the
+  // reviewer's live repro). Threading the tile-types catalog through
+  // biomeFormToPayload must make the payload immune to that shift.
+  it('an uncheck-then-recheck click sequence yields a byte-identical terrain_tiles payload', () => {
+    const tileNames = ['sand', 'rocks', 'dirt']; // catalog (id ASC) order
+    const before = { ...emptyBiomeForm(), name: 'Arid Dunes', terrain_tiles: ['sand', 'rocks', 'dirt'] };
+    const beforePayload = biomeFormToPayload(before, { tileNames });
+
+    // Simulate the exact click sequence: untick "sand" (filter it out), then
+    // re-tick it (append to the end) -- mirroring BiomesAdmin's `toggle`.
+    let terrain_tiles = before.terrain_tiles.filter((n) => n !== 'sand');
+    terrain_tiles = [...terrain_tiles, 'sand'];
+    expect(terrain_tiles).toEqual(['rocks', 'dirt', 'sand']); // raw order DID shift
+
+    const after = { ...before, terrain_tiles };
+    const afterPayload = biomeFormToPayload(after, { tileNames });
+
+    expect(afterPayload).toEqual(beforePayload);
+    expect(afterPayload.terrain_tiles).toEqual(['sand', 'rocks', 'dirt']);
+  });
 });
 
 // worlds.biomes is order-sensitive on the backend (biome i owns noise band

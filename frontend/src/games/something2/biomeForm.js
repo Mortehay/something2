@@ -29,12 +29,22 @@ export function biomeToForm(row) {
   };
 }
 
-export function biomeFormToPayload(form) {
+// `catalogs` carries the three name catalogs (tile types, flora entity
+// types, creature entity types) that terrain_tiles/flora_types/creature_types
+// are each drawn from, so their orderBiomeNames() call below can order the
+// payload by CATALOG order instead of checkbox click order -- see
+// orderBiomeNames for why click order is dangerous here. Optional and
+// defaulted to {} so existing callers/tests that don't care about ordering
+// (e.g. a freshly round-tripped form with no reordering pressure) keep
+// working: orderBiomeNames' own empty-catalog fallback then preserves the
+// form's array order as-is.
+export function biomeFormToPayload(form, catalogs = {}) {
+  const { tileNames, floraNames, creatureNames } = catalogs;
   return {
     name: (form.name || '').trim(),
-    terrain_tiles: names(form.terrain_tiles),
-    flora_types: names(form.flora_types),
-    creature_types: names(form.creature_types),
+    terrain_tiles: orderBiomeNames(names(form.terrain_tiles), tileNames),
+    flora_types: orderBiomeNames(names(form.flora_types), floraNames),
+    creature_types: orderBiomeNames(names(form.creature_types), creatureNames),
     palette: names((form.palette || '').split(',')),
     art_style: form.art_style || '',
     exclusions: form.exclusions || '',
@@ -68,9 +78,15 @@ export function biomeFormToPayload(form) {
 // save is a far smaller harm than silently erasing the world's biomes.
 // Dropping a name that is genuinely absent from a NON-empty, loaded catalog
 // is still correct and unchanged.
+// `catalog` entries may be either plain name strings (tile-types/entity-types
+// catalogs, as consumed by BiomesAdmin) or `{ name }` records (the biome
+// catalog itself, as consumed by MapsAdmin) -- both shapes are used to order
+// a biome/world's own name selections against a wider catalog's own order.
 export function orderBiomeNames(selected, catalog) {
   const selectedSet = selected instanceof Set ? selected : new Set(selected || []);
   const catalogArr = Array.isArray(catalog) ? catalog : [];
   if (catalogArr.length === 0) return [...selectedSet];
-  return catalogArr.map((b) => b.name).filter((name) => selectedSet.has(name));
+  return catalogArr
+    .map((b) => (typeof b === 'string' ? b : b?.name))
+    .filter((name) => selectedSet.has(name));
 }

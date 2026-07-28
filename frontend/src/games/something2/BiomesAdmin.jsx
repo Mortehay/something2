@@ -55,7 +55,14 @@ function BiomeCard({ biome, tileNames, floraNames, creatureNames }) {
   }));
 
   const save = () => {
-    const payload = biomeFormToPayload(form);
+    // Ordered by each CATALOG's own order (tile-types / entity-types, id
+    // ASC), not checkbox click order -- terrain_tiles is order-sensitive on
+    // the backend (sampleTerrain bands it by array index, and PUT
+    // /api/biomes/:id diffs it with an order-sensitive JSON.stringify), so
+    // building the payload straight from `form[k]`'s click-order array would
+    // make an uncheck+recheck of the SAME tiles look like a real reorder and
+    // wipe cached terrain for every world using this biome. See biomeForm.js.
+    const payload = biomeFormToPayload(form, { tileNames, floraNames, creatureNames });
     if (isNew) create.mutate(payload, { onSuccess: () => setForm(emptyBiomeForm()) });
     else update.mutate({ id: biome.id, body: payload });
   };
