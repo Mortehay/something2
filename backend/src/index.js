@@ -9,6 +9,7 @@ const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateC
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages } = require('./services/villages');
 const { seedBaseCatalog, seedItemAcrossVillages } = require('./services/merchantStock');
+const { loadDecorationDefs } = require('./services/decorationDefs');
 require('dotenv').config();
 
 const app = express();
@@ -232,20 +233,10 @@ async function getTileTypesMap() {
   return tileTypes;
 }
 
-// Decoration defs for GET /chunk's generateChunkDecorations call. Same query
-// as authority/server.js's loadDecorationDefs (not imported: that module
-// doesn't export it) -- keep the two in sync so the REST preview and the
-// authority's blocking overlay place decorations identically.
-async function getDecorationDefs() {
-  const { rows } = await pool.query(
-    `SELECT name, walkable, spawn_tiles, chance
-       FROM entity_types
-      WHERE is_creature = false
-        AND spawn_tiles IS NOT NULL
-        AND jsonb_array_length(spawn_tiles) > 0`,
-  );
-  return rows;
-}
+// Decoration defs for GET /chunk's generateChunkDecorations call. Shared with
+// authority/server.js via services/decorationDefs.js so the REST preview and
+// the authority's blocking overlay place decorations identically (see that
+// file for why the ORDER BY matters).
 
 // Helper to get entity types
 async function getEntityTypesMap() {
@@ -1690,13 +1681,19 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
     const world = worldRes.rows[0];
     if (!world) return res.status(404).json({ error: 'world not found' });
 
-    const tileTypes = await getTileTypesMap();
-    const decorationDefs = await getDecorationDefs();
+    // These four only depend on world.id (already resolved above), not on each
+    // other -- run them concurrently instead of one round-trip at a time.
+    const [tileTypes, decorationDefs, linkRows, villages] = await Promise.all([
+      getTileTypesMap(),
+      loadDecorationDefs(pool),
+      fetchLinks(pool, world.id),
+      fetchVillages(pool, world.id),
+    ]);
     const worldCfg = {
       seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
       width: world.width, height: world.height,
-      doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
-      villages: await fetchVillages(pool, world.id),
+      doorways: linkRows.map((l) => l.edge),
+      villages,
       entry_spawn: world.entry_spawn,
     };
 

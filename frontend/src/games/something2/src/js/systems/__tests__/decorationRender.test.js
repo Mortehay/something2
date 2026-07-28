@@ -34,7 +34,10 @@ describe("RenderSystem.collectDecorations", () => {
     expect(out).toHaveLength(1);
     expect(out[0].kind).toBe("decoration");
     expect(out[0].order).toBe(2);
-    expect(out[0].depth).toBe(depthKey(expectedX, expectedY));
+    // Depth sorts at the tile CENTER (matching walls/actors), not the
+    // top-left ref.x/ref.y used for drawing — see RenderSystem's comment at
+    // the collectDecorations depth push.
+    expect(out[0].depth).toBe(depthKey(expectedX + MAP_TILE_SIZE / 2, expectedY + MAP_TILE_SIZE / 2));
     expect(out[0].ref).toMatchObject({
       name: "Rock",
       displayWidth: 64,

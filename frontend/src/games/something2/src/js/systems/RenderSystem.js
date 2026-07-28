@@ -115,7 +115,14 @@ export class RenderSystem {
         // the tile's true center (x+50 for a 100px tile), floating the
         // decoration ~19px above its tile. displayWidth/displayHeight (from
         // `type`, spread in first) still control the drawn sprite size.
-        out.push({ kind: "decoration", ref: { ...type, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: type.place_order || 0, depth: depthKey(x, y) });
+        // Sort depth at the tile CENTER (matching walls/actors, e.g. line 67's
+        // depthKey(e.x, e.y) where e.x/e.y are already center-anchored) even
+        // though x/y above are top-left. Decorations are DRAWN centered (see
+        // the width/height=MAP_TILE_SIZE comment above), so sorting at
+        // top-left put a decoration's depth key one tile toward the back of
+        // its actual drawn position — wrongly occluded by an actor/wall a
+        // tile closer to the camera that should have been behind it.
+        out.push({ kind: "decoration", ref: { ...type, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: type.place_order || 0, depth: depthKey(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2) });
       }
     }
     return out;

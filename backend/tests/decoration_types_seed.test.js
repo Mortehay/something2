@@ -15,6 +15,8 @@ test('new decoration types are non-creature with spawn rules and sizes', () => {
   }
   assert.equal(byName.bush.walkable, true);
   assert.equal(byName.pine_tree.walkable, false);
+  assert.equal(byName.rose_bush.walkable, true);
+  assert.equal(byName.dead_tree.walkable, false);
 });
 
 test('size fixes give existing decorations non-zero display sizes', () => {

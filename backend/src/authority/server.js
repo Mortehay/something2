@@ -11,6 +11,7 @@ const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, opp
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
 const { fetchShop } = require('../services/merchantStock');
+const { loadDecorationDefs } = require('../services/decorationDefs');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive } = require('./loot');
 const { buyStock, sellItem } = require('./trade');
 const { consumeAmmo, ammoCount } = require('./ammo');
@@ -24,17 +25,9 @@ function finiteOr(v, fallback) { return Number.isFinite(v) ? v : fallback; }
 
 // Decoration defs feed ServerMap's blocking-decoration overlay (collision.js)
 // via the same generateChunkDecorations the /chunk endpoint uses, so server
-// collision and client-visible decorations stay in lockstep.
-async function loadDecorationDefs(pool) {
-  const { rows } = await pool.query(
-    `SELECT name, walkable, spawn_tiles, chance
-       FROM entity_types
-      WHERE is_creature = false
-        AND spawn_tiles IS NOT NULL
-        AND jsonb_array_length(spawn_tiles) > 0`,
-  );
-  return rows;
-}
+// collision and client-visible decorations stay in lockstep. Loader lives in
+// services/decorationDefs.js and is shared with index.js's /chunk handler --
+// see that file for why the ORDER BY matters.
 
 // Pure: given a player's current tile + this world's links, decide whether to
 // teleport. Returns { toWorldId, arriveX, arriveY } or null.
