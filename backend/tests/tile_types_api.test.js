@@ -37,6 +37,9 @@ test('POST /api/tile-types sends prompt as INSERT param $7 and echoes it', async
 
 test('PUT /api/tile-types/:id sends prompt as UPDATE param $7, wall_height/place_order as $8/$9, and id as $10', async () => {
   const pool = mockPool([
+    // name is unchanged ('grass' -> 'grass'), so the rename guard's reference
+    // checks are skipped entirely.
+    [/SELECT name FROM tile_types WHERE id/i, () => ({ rows: [{ name: 'grass' }] })],
     [/UPDATE tile_types/i, (p) => ({ rows: [{ id: Number(p[9]), name: p[0], prompt: p[6] }] })],
   ]);
   __setPool(pool);

@@ -24,7 +24,15 @@ test('POST /api/tile-types persists wall_height and place_order', async () => {
 
 test('PUT /api/tile-types/:id persists wall_height and place_order', async () => {
   let captured = null;
-  __setPool({ query: withAuth(async (sql, params) => { captured = { sql, params }; return { rows: [{ id: 9 }] }; }) });
+  __setPool({
+    query: withAuth(async (sql, params) => {
+      // name is unchanged ('brickwall' -> 'brickwall'), so the rename guard's
+      // reference checks are skipped and only the UPDATE itself is captured.
+      if (/SELECT name FROM tile_types WHERE id/i.test(sql)) return { rows: [{ name: 'brickwall' }] };
+      captured = { sql, params };
+      return { rows: [{ id: 9 }] };
+    }),
+  });
   const res = await request(app).put('/api/tile-types/9').set(...AUTH)
     .send({ name: 'brickwall', color: '#987', walkable: false, speed: 1, wall_height: 60, place_order: 2 });
   assert.strictEqual(res.status, 200);

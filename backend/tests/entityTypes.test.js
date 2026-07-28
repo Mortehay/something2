@@ -183,6 +183,7 @@ test('PUT /api/entity-types/:id 409s when the old name is still an allowed creat
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'AuditFixtureBeast' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [{ id: 'w1', name: 'Test World' }] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [] })],
+    [/FROM biomes WHERE/i, () => ({ rows: [] })],
   ]));
   const res = await request(app)
     .put('/api/entity-types/5')
@@ -198,6 +199,7 @@ test('PUT /api/entity-types/:id 409s when the old name still has placed creature
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'Village Guard' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [{ '?column?': 1 }] })],
+    [/FROM biomes WHERE/i, () => ({ rows: [] })],
   ]));
   const res = await request(app)
     .put('/api/entity-types/5')
@@ -213,6 +215,7 @@ test('PUT /api/entity-types/:id allows a rename when nothing references the old 
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'OldName' }] })],
     [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
     [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [] })],
+    [/FROM biomes WHERE/i, () => ({ rows: [] })],
     [/UPDATE entity_types SET/i, () => ({ rows: [{ id: 5, name: 'NewName' }] })],
   ]);
   __setPool(pool);

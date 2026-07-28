@@ -408,14 +408,22 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       if (cur.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
       const oldName = cur.rows[0].name;
       if (oldName !== name) {
-        const [worldsRef, creaturesRef] = await Promise.all([
+        const [worldsRef, creaturesRef, biomesRef] = await Promise.all([
           pool.query('SELECT id, name FROM worlds WHERE allowed_creature_types @> $1::jsonb', [JSON.stringify([oldName])]),
           pool.query('SELECT 1 FROM world_creatures WHERE type = $1 LIMIT 1', [oldName]),
+          // biomes.flora_types / creature_types reference entity_types by name
+          // with no FK, exactly like allowed_creature_types above. A rename
+          // that orphans them silently strips that biome's flora or fauna.
+          pool.query(
+            'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
+            [JSON.stringify([oldName])],
+          ),
         ]);
-        if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0) {
+        if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0) {
           return res.status(409).json({
-            error: `Cannot rename '${oldName}': still referenced by allowed_creature_types or placed creatures`,
+            error: `Cannot rename '${oldName}': still referenced by allowed_creature_types, placed creatures, or a biome`,
             referencing_worlds: worldsRef.rows.map((w) => ({ id: w.id, name: w.name })),
+            referencing_biomes: biomesRef.rows.map((b) => ({ id: b.id, name: b.name })),
             has_placed_creatures: creaturesRef.rows.length > 0,
           });
         }
@@ -674,6 +682,29 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
 
+    // tile_types.name is referenced by entity_types.spawn_tiles and
+    // biomes.terrain_tiles, both jsonb name arrays with no FK (F-027 /
+    // SOMET-207). A free rename orphans them silently: the entity stops
+    // spawning and the biome quietly loses that terrain.
+    if (name != null) {
+      const cur = await pool.query('SELECT name FROM tile_types WHERE id = $1', [id]);
+      if (cur.rows.length === 0) return res.status(404).json({ error: 'Tile type not found' });
+      const oldName = cur.rows[0].name;
+      if (oldName !== name) {
+        const [entityRef, biomeRef] = await Promise.all([
+          pool.query('SELECT id, name FROM entity_types WHERE spawn_tiles @> $1::jsonb', [JSON.stringify([oldName])]),
+          pool.query('SELECT id, name FROM biomes WHERE terrain_tiles @> $1::jsonb', [JSON.stringify([oldName])]),
+        ]);
+        if (entityRef.rows.length > 0 || biomeRef.rows.length > 0) {
+          return res.status(409).json({
+            error: `Cannot rename '${oldName}': still referenced by an entity type's spawn tiles or a biome`,
+            referencing_entity_types: entityRef.rows.map((e) => ({ id: e.id, name: e.name })),
+            referencing_biomes: biomeRef.rows.map((b) => ({ id: b.id, name: b.name })),
+          });
+        }
+      }
+    }
+
     // image/render_mode/sprite are owned by the generate+approve flow, NOT this
     // property-edit form. The form captures `image` at modal-open (often empty,
     // before the user approves a texture), so writing it verbatim would clobber a
@@ -699,15 +730,137 @@ app.delete('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('DELETE FROM tile_types WHERE id = $1 RETURNING id', [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Tile type not found' });
     }
-    
+
     res.json({ success: true, id: result.rows[0].id });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete tile type' });
+  }
+});
+
+// --- Biomes ---------------------------------------------------------------
+// A biome owns a terrain palette, its flora and fauna, and its art context.
+// Read is public (the admin UI and the maps editor both need it); writes are
+// admin-only, matching the tile-types routes above.
+
+// jsonb name arrays, normalized the same way everywhere: strings only.
+function nameArray(v) {
+  return Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()) : [];
+}
+
+// Worlds that still list `name` in their biome set. worlds.biomes is a jsonb
+// array of names with no FK (same as allowed_creature_types), so a rename or
+// delete here would silently orphan the reference and quietly revert those
+// worlds to global terrain banding on their next chunk generation.
+async function worldsReferencingBiome(name) {
+  const { rows } = await pool.query(
+    'SELECT id, name FROM worlds WHERE biomes @> $1::jsonb', [JSON.stringify([name])],
+  );
+  return rows;
+}
+
+app.get('/api/biomes', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM biomes ORDER BY id ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch biomes' });
+  }
+});
+
+app.post('/api/biomes', adminGuard, async (req, res) => {
+  try {
+    const { name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    if (catalogNameTooLong(name)) {
+      return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
+    }
+    const result = await pool.query(
+      `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color)
+       VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6, $7, $8) RETURNING *`,
+      [
+        name.trim(),
+        JSON.stringify(nameArray(terrain_tiles)), JSON.stringify(nameArray(flora_types)),
+        JSON.stringify(nameArray(creature_types)), JSON.stringify(nameArray(palette)),
+        art_style || '', exclusions || '', color || '#888888',
+      ],
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (isUniqueViolation(err)) return res.status(409).json({ error: 'a biome with that name already exists' });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create biome' });
+  }
+});
+
+app.put('/api/biomes/:id', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    if (catalogNameTooLong(name)) {
+      return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
+    }
+    const cur = await pool.query('SELECT name FROM biomes WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Biome not found' });
+    const oldName = cur.rows[0].name;
+    if (oldName !== name.trim()) {
+      const refs = await worldsReferencingBiome(oldName);
+      if (refs.length > 0) {
+        return res.status(409).json({
+          error: `Cannot rename '${oldName}': still listed by one or more worlds`,
+          referencing_worlds: refs.map((w) => ({ id: w.id, name: w.name })),
+        });
+      }
+    }
+    const result = await pool.query(
+      `UPDATE biomes SET name = $1, terrain_tiles = $2::jsonb, flora_types = $3::jsonb,
+         creature_types = $4::jsonb, palette = $5::jsonb, art_style = $6, exclusions = $7,
+         color = $8, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $9 RETURNING *`,
+      [
+        name.trim(),
+        JSON.stringify(nameArray(terrain_tiles)), JSON.stringify(nameArray(flora_types)),
+        JSON.stringify(nameArray(creature_types)), JSON.stringify(nameArray(palette)),
+        art_style || '', exclusions || '', color || '#888888', id,
+      ],
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Biome not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (isUniqueViolation(err)) return res.status(409).json({ error: 'a biome with that name already exists' });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update biome' });
+  }
+});
+
+app.delete('/api/biomes/:id', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const cur = await pool.query('SELECT name FROM biomes WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Biome not found' });
+    const refs = await worldsReferencingBiome(cur.rows[0].name);
+    if (refs.length > 0) {
+      return res.status(409).json({
+        error: `Cannot delete '${cur.rows[0].name}': still listed by one or more worlds`,
+        referencing_worlds: refs.map((w) => ({ id: w.id, name: w.name })),
+      });
+    }
+    const result = await pool.query('DELETE FROM biomes WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Biome not found' });
+    res.json({ success: true, id: result.rows[0].id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete biome' });
   }
 });
 
@@ -1231,7 +1384,7 @@ app.get('/api/worlds/:id', async (req, res) => {
 app.put('/api/worlds/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, width, height, creature_count, allowed_creature_types, is_entry, entry_spawn } = req.body;
+    const { name, width, height, creature_count, allowed_creature_types, is_entry, entry_spawn, biomes, biome_cell } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'name is required' });
     }
@@ -1263,7 +1416,7 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     const entry = is_entry === true;
     const spawn = entry_spawn && typeof entry_spawn === 'object' ? entry_spawn : null;
 
-    const cur = await pool.query('SELECT id, width, height FROM worlds WHERE id = $1', [id]);
+    const cur = await pool.query('SELECT id, width, height, biomes, biome_cell FROM worlds WHERE id = $1', [id]);
     if (cur.rows.length === 0) return res.status(404).json({ error: 'world not found' });
     const before = cur.rows[0];
     // Bounds are omitted entirely on updates that only touch other fields (e.g.
@@ -1274,6 +1427,24 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     const nextW = boundsProvided ? w : (before.width ?? null);
     const nextH = boundsProvided ? h : (before.height ?? null);
     const boundsChanged = (before.width ?? null) !== nextW || (before.height ?? null) !== nextH;
+    // Same trap as width/height above: an unrelated PUT (e.g. toggling
+    // is_entry) omits these entirely, and defaulting them to empty/null would
+    // silently strip a world's biome set and regenerate its terrain.
+    const biomesProvided = biomes !== undefined;
+    const nextBiomes = biomesProvided
+      ? (Array.isArray(biomes) ? biomes.filter((b) => typeof b === 'string' && b.trim()).map((b) => b.trim()) : [])
+      : (before.biomes || []);
+    const cellProvided = biome_cell !== undefined;
+    const nextCell = cellProvided
+      ? (Number.isFinite(biome_cell) && biome_cell > 0 ? Math.floor(biome_cell) : null)
+      : (before.biome_cell ?? null);
+    // Both inputs decide which tile each cell gets, so a change to either
+    // invalidates every materialized chunk of this world -- otherwise the
+    // cached grid the client renders and the terrain the authority regenerates
+    // disagree, which is client/server divergence and rubber-banding.
+    const biomesChanged =
+      JSON.stringify(before.biomes || []) !== JSON.stringify(nextBiomes)
+      || (before.biome_cell ?? null) !== nextCell;
 
     // A bounded world's outer ring is always solid wall (stampBounds(), map
     // Service.js), so an entry_spawn must land strictly inside it or the first
@@ -1296,8 +1467,10 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     if (entry) {
       await pool.query('UPDATE worlds SET is_entry = false WHERE is_entry = true AND id <> $1', [id]);
     }
-    // A bounds change reshapes the wall ring: invalidate persisted + preview terrain.
-    if (boundsChanged) {
+    // A bounds change reshapes the wall ring, and a biome-set/biome_cell change
+    // reshapes the terrain those bounds contain: either invalidates persisted +
+    // preview terrain the same way.
+    if (boundsChanged || biomesChanged) {
       await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [id]);
       worldPreviewCache.delete(id);
       clearOverviewCache(id);
@@ -1327,12 +1500,16 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     const result = await pool.query(
       `UPDATE worlds SET name = $1, width = $2, height = $3, creature_count = $4,
          allowed_creature_types = $5::jsonb, is_entry = $6, entry_spawn = $7::jsonb,
+         biomes = $8::jsonb, biome_cell = $9,
          updated_at = CURRENT_TIMESTAMP
-       WHERE id = $8 RETURNING *`,
-      [name.trim(), nextW, nextH, count, JSON.stringify(allowed), entry, spawn ? JSON.stringify(spawn) : null, id],
+       WHERE id = $10 RETURNING *`,
+      [
+        name.trim(), nextW, nextH, count, JSON.stringify(allowed), entry, spawn ? JSON.stringify(spawn) : null,
+        JSON.stringify(nextBiomes), nextCell, id,
+      ],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'world not found' });
-    const liveWarning = boundsChanged ? evictOrWarn(id) : undefined;
+    const liveWarning = (boundsChanged || biomesChanged) ? evictOrWarn(id) : undefined;
     res.json(liveWarning ? { ...result.rows[0], liveWarning } : result.rows[0]);
   } catch (err) {
     if (isUniqueViolation(err)) {
