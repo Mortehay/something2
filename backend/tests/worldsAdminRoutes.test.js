@@ -318,6 +318,42 @@ test('POST /api/worlds/:id/creatures places creatures and reports the count', as
   assert.equal(res.body.liveWarning, undefined, 'no warning when the world was not live');
 });
 
+// The re-roll builds placeMapCreatures's config inline inside a DB
+// transaction; before this it hand-built a config literal that never
+// resolved the world's declared biomes. A later task makes placeMapCreatures
+// biome-aware (restricting which creature types spawn to the owning biome's
+// creature_types); if this call site silently drops biomes, that feature
+// would never activate in production even though its unit tests (which call
+// placeMapCreatures directly) would still pass. Pin that the re-roll now
+// resolves biomes via loadBiomes -- on the SAME transaction client, not a
+// separate pool.query() -- whenever the world declares any.
+test('POST /api/worlds/:id/creatures threads the world\'s declared biomes into placeMapCreatures', async () => {
+  const world = { id: 'w1', seed: '42', chunk_size: 64, width: 24, height: 24,
+    creature_count: 8, allowed_creature_types: ['goblin'], biomes: ['Meadow'] };
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [world] })],
+    [/SELECT .*FROM tile_types/i, () => ({ rows: TILE_ROWS })],
+    [/FROM map_links/i, () => ({ rows: [] })],
+    [/SELECT .*FROM entity_types WHERE is_creature/i, () => ({
+      rows: [{ id: 1, name: 'goblin', hp: 12, defense: 1, resistances: {} }] })],
+    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
+    [/FROM biomes/i, () => ({ rows: [
+      { id: 1, name: 'Meadow', terrain_tiles: ['grass'], flora_types: [], creature_types: ['goblin'],
+        palette: [], art_style: '', exclusions: '', color: '#5aa84f' },
+    ] })],
+    [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],
+    [/INSERT INTO world_creatures/i, () => ({ rows: [], rowCount: 1 })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).post('/api/worlds/w1/creatures').set(...AUTH).send({});
+  assert.equal(res.status, 200);
+  assert.equal(res.body.placed, 8, 'placement still succeeds once biomes are threaded in');
+  assert.ok(
+    pool.calls.some((c) => /FROM biomes/i.test(c.sql) && c.params?.[0]?.includes('Meadow')),
+    'the re-roll must resolve the world\'s declared biomes via loadBiomes instead of skipping past them',
+  );
+});
+
 // F-017 (SOMET-197): evictWorld refuses to evict a world with live sockets
 // and returns false, and every admin caller (this route included) discarded
 // that return value outright — so a re-roll against a world with a connected

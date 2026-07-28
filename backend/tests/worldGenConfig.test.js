@@ -65,6 +65,21 @@ test('the built config generates real biome-restricted terrain', () => {
   assert.ok(seen.has('grass') || seen.has('snow'));
 });
 
+test('a missing biome_cell field produces exactly null, not undefined', () => {
+  // assert.equal (loose ==) treats null and undefined as equal, so the tests
+  // above alone don't pin this: a `biomeCell: row.biome_cell` passthrough
+  // (dropping the Number.isFinite guard entirely) still satisfies
+  // `assert.equal(c.biomeCell, null)` above because `undefined == null`, yet
+  // would hand worldConfig `undefined` -- the two are NOT equivalent inputs
+  // to worldConfig's `Number.isFinite(world.biomeCell)` check, they just
+  // happen to both fail it the same way here. Pin the exact value with
+  // assert.strictEqual so removing the guard fails loudly.
+  const { biome_cell, ...rowWithoutBiomeCell } = ROW;
+  const c = buildWorldGenConfig(cfgArgs({ row: rowWithoutBiomeCell }));
+  assert.strictEqual(c.biomeCell, null);
+  assert.strictEqual(worldConfig(c).biomeCell, 10); // floor(min(30,30)/3)
+});
+
 test('a world with no biomes builds an empty biome list, not undefined', () => {
   const c = buildWorldGenConfig(cfgArgs({ biomes: [] }));
   assert.deepEqual(c.biomes, []);

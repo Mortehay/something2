@@ -1405,11 +1405,14 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
         const hostileTypes = et.rows.filter((t) => (t.faction || 'hostile') !== 'guard');
         if (hostileTypes.length > 0) {
           const tileTypes = await getTileTypesMap();
+          const doorways = (await fetchLinks(client, world.id)).map((l) => l.edge);
+          // Same client as the surrounding transaction -- loadBiomes is a
+          // plain read (SELECT ... FROM biomes) and belongs on this
+          // transaction's connection, not a separate pool.query(), so it
+          // sees a consistent snapshot with everything else read here.
+          const biomes = await loadBiomes(client, world.biomes);
           const rows = placeMapCreatures(
-            { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-              width: world.width, height: world.height,
-              doorways: (await fetchLinks(client, world.id)).map((l) => l.edge),
-              villages },
+            buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes }),
             count, hostileTypes, Math.floor(Math.random() * 2 ** 31),
           );
           for (const c of rows) {
@@ -1733,10 +1736,11 @@ app.get('/api/worlds/:id/preview', async (req, res) => {
     if (!world) return res.status(404).json({ error: 'world not found' });
 
     const tileTypes = await getTileTypesMap();
+    const doorways = (await fetchLinks(pool, world.id)).map((l) => l.edge);
+    const villages = await fetchVillages(pool, world.id);
+    const biomes = await loadBiomes(pool, world.biomes);
     const data = generateWorldPreview(
-      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
-        villages: await fetchVillages(pool, world.id) },
+      buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes }),
       PREVIEW_DIM,
     );
     worldPreviewCache.set(worldId, data);
@@ -1763,11 +1767,11 @@ app.get('/api/worlds/:id/overview', async (req, res) => {
     if (!world) return res.status(404).json({ error: 'world not found' });
 
     const tileTypes = await getTileTypesMap();
+    const doorways = (await fetchLinks(pool, world.id)).map((l) => l.edge);
+    const villages = await fetchVillages(pool, world.id);
+    const biomes = await loadBiomes(pool, world.biomes);
     const data = generateWorldOverview(
-      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-        width: world.width, height: world.height,
-        doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
-        villages: await fetchVillages(pool, world.id) },
+      buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes }),
       centerCol, centerRow, OVERVIEW_SPAN, OVERVIEW_STEP,
     );
     const payload = { world_id: worldId, ...data };
