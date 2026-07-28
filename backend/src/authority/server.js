@@ -12,6 +12,8 @@ const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
 const { fetchShop } = require('../services/merchantStock');
 const { loadDecorationDefs } = require('../services/decorationDefs');
+const { loadBiomes } = require('../services/biomes');
+const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive } = require('./loot');
 const { buyStock, sellItem } = require('./trade');
 const { consumeAmmo, ammoCount } = require('./ammo');
@@ -218,7 +220,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     let pending = loading.get(worldId);
     if (!pending) {
       pending = (async () => {
-        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn FROM worlds WHERE id = $1', [worldId]);
+        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         // Postgres uuid input is case-insensitive and also accepts braced /
@@ -249,10 +251,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const links = new Map(linkRows.map((l) => [l.edge, { toWorldId: l.to_world_id, toWidth: l.to_width, toHeight: l.to_height }]));
         const villages = await fetchVillages(pool, canonicalId);
         const decorationDefs = await loadDecorationDefs(pool);
+        const biomes = await loadBiomes(pool, row.biomes);
         const map = new ServerMap({
-          seed: Number(row.seed), chunkSize: row.chunk_size, tileTypes,
-          width: row.width, height: row.height, doorways: [...links.keys()],
-          villages, decorationDefs, entry_spawn: row.entry_spawn,
+          ...buildWorldGenConfig({
+            row, tileTypes, doorways: [...links.keys()], villages, biomes,
+          }),
+          decorationDefs,
         });
         const entry = {
           worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),

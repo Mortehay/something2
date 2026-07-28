@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const request = require('supertest');
 const { app, __setPool } = require('../src/index.js');
 const { generateChunk, generateChunkDecorations } = require('../src/services/mapService');
+const { buildWorldGenConfig } = require('../src/services/worldGenConfig');
 
 function mockPool(handlers) {
   const calls = [];
@@ -22,6 +23,7 @@ function mockPool(handlers) {
 // independently in this test.
 const WORLD_ROW = {
   id: 'w1', seed: '12345', chunk_size: 8, width: 8, height: 8, entry_spawn: null,
+  biomes: [],
 };
 const TILE_ROWS = { rows: [{ id: 1, name: 'grass', color: '#3a3', walkable: true, speed: 1 }] };
 const DECORATION_DEF = { name: 'Tree', walkable: false, spawn_tiles: ['grass'], chance: 1 };
@@ -38,17 +40,15 @@ function poolFor({ world = WORLD_ROW, cached = null } = {}) {
   ]);
 }
 
-// The worldCfg the handler is expected to build, mirroring authority/server.js's
-// ServerMap config (seed, chunkSize, tileTypes, width, height, doorways,
-// villages, entry_spawn) closely enough that generateChunk/generateChunkDecorations
-// reproduce the exact same output the endpoint should return.
+// The worldCfg the handler is expected to build. Uses the same builder the
+// handler calls (services/worldGenConfig.js) instead of a second hand-written
+// literal, so this test compares against the real construction path rather
+// than a copy that can drift from it.
 function expectedWorldCfg(world = WORLD_ROW) {
-  return {
-    seed: Number(world.seed), chunkSize: world.chunk_size,
-    tileTypes: { grass: { walkable: true, speed: 1 } },
-    width: world.width, height: world.height,
-    doorways: [], villages: [], entry_spawn: world.entry_spawn,
-  };
+  return buildWorldGenConfig({
+    row: world, tileTypes: { grass: { walkable: true, speed: 1 } },
+    doorways: [], villages: [], biomes: [],
+  });
 }
 
 test('GET /chunk (cache miss) returns decorations matching generateChunkDecorations', async () => {

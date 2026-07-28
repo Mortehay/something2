@@ -10,6 +10,8 @@ const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages } = require('./services/villages');
 const { seedBaseCatalog, seedItemAcrossVillages } = require('./services/merchantStock');
 const { loadDecorationDefs } = require('./services/decorationDefs');
+const { loadBiomes } = require('./services/biomes');
+const { buildWorldGenConfig } = require('./services/worldGenConfig');
 require('dotenv').config();
 
 const app = express();
@@ -1672,30 +1674,28 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
     // Loaded on BOTH the cache-hit and cache-miss paths below: decorations are
     // derived from the tile grid regardless of whether that grid came from the
     // world_chunks cache or was just generated, so the world config + defs are
-    // needed either way. Mirror authority/server.js's loadWorld -> ServerMap
-    // config field-for-field (seed, chunkSize, tileTypes, width, height,
-    // doorways, villages, entry_spawn) so this endpoint's generateChunkDecorations
-    // call agrees with the authority's, including which cells are excluded
-    // around entry_spawn.
+    // needed either way. worldCfg is built by services/worldGenConfig.js, the
+    // same builder authority/server.js's loadWorld uses for its ServerMap, so
+    // this endpoint's generateChunkDecorations call agrees with the
+    // authority's field-for-field -- including which cells are excluded
+    // around entry_spawn -- by construction instead of by convention.
     const worldRes = await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
     const world = worldRes.rows[0];
     if (!world) return res.status(404).json({ error: 'world not found' });
 
-    // These four only depend on world.id (already resolved above), not on each
-    // other -- run them concurrently instead of one round-trip at a time.
-    const [tileTypes, decorationDefs, linkRows, villages] = await Promise.all([
+    // These five only depend on world.id/world.biomes (already resolved
+    // above), not on each other -- run them concurrently instead of one
+    // round-trip at a time.
+    const [tileTypes, decorationDefs, linkRows, villages, biomes] = await Promise.all([
       getTileTypesMap(),
       loadDecorationDefs(pool),
       fetchLinks(pool, world.id),
       fetchVillages(pool, world.id),
+      loadBiomes(pool, world.biomes),
     ]);
-    const worldCfg = {
-      seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-      width: world.width, height: world.height,
-      doorways: linkRows.map((l) => l.edge),
-      villages,
-      entry_spawn: world.entry_spawn,
-    };
+    const worldCfg = buildWorldGenConfig({
+      row: world, tileTypes, doorways: linkRows.map((l) => l.edge), villages, biomes,
+    });
 
     // Cache hit?
     const cached = await pool.query(
