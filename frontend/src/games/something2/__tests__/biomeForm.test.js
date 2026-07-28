@@ -86,8 +86,22 @@ describe('orderBiomeNames', () => {
     expect(orderBiomeNames(['Swamp', 'Ghost Biome', 'Meadow'], catalog)).toEqual(['Meadow', 'Swamp']);
   });
 
-  it('handles an empty selection and a missing catalog without crashing', () => {
+  it('handles an empty selection without crashing', () => {
     expect(orderBiomeNames(new Set(), catalog)).toEqual([]);
-    expect(orderBiomeNames(['Meadow'], undefined)).toEqual([]);
+  });
+
+  // The catalog is [] both while GET /api/biomes is still in flight
+  // (useBiomes() defaults to `data || []` before it resolves) and if it
+  // genuinely has zero rows -- there is no way to tell those apart from an
+  // empty array alone. Filtering a real, non-empty selection against that
+  // ambiguous [] must NOT collapse it to [] : that would emit `biomes: []`
+  // for a world that still has biomes selected, trip the backend's
+  // order-sensitive diff, and wipe the world's cached terrain -- the exact
+  // failure this helper exists to prevent, just triggered by a load-timing
+  // window instead of click order. The selection must round-trip instead.
+  it('round-trips a non-empty selection when the catalog is empty or missing, instead of collapsing to []', () => {
+    expect(orderBiomeNames(['Meadow', 'Desert'], [])).toEqual(['Meadow', 'Desert']);
+    expect(orderBiomeNames(['Meadow'], undefined)).toEqual(['Meadow']);
+    expect(orderBiomeNames(new Set(['Swamp', 'Meadow']), null)).toEqual(['Swamp', 'Meadow']);
   });
 });

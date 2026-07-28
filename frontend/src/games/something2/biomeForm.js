@@ -53,7 +53,24 @@ export function biomeFormToPayload(form) {
 // terrain. Deriving the payload from the catalog's order instead makes
 // toggling idempotent: selecting the same names, in any click sequence,
 // always yields the same array.
+//
+// An EMPTY catalog array is ambiguous: it means either "the catalog really
+// has zero biomes" or "the /api/biomes query hasn't resolved yet" (useBiomes
+// defaults to [] while loading -- there is no `undefined` state visible
+// here). Filtering the selection against an empty catalog in either case
+// would collapse a real, non-empty selection down to [], which is exactly
+// the false "this world now has zero biomes" signal that trips the
+// backend's order-sensitive diff and wipes the world's cached terrain --
+// the same failure mode this helper exists to prevent, just triggered by a
+// load-timing window instead of click order. So when the catalog can't be
+// used to order/filter (empty or missing), the selection is preserved
+// as-is rather than discarded; losing the ordering guarantee for one rare
+// save is a far smaller harm than silently erasing the world's biomes.
+// Dropping a name that is genuinely absent from a NON-empty, loaded catalog
+// is still correct and unchanged.
 export function orderBiomeNames(selected, catalog) {
   const selectedSet = selected instanceof Set ? selected : new Set(selected || []);
-  return (catalog || []).map((b) => b.name).filter((name) => selectedSet.has(name));
+  const catalogArr = Array.isArray(catalog) ? catalog : [];
+  if (catalogArr.length === 0) return [...selectedSet];
+  return catalogArr.map((b) => b.name).filter((name) => selectedSet.has(name));
 }

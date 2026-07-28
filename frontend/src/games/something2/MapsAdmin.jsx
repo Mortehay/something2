@@ -28,7 +28,7 @@ const CheckGrid = styled.div`display: flex; flex-wrap: wrap; gap: 0.75rem; margi
 
 function bounded(w) { return !!(w.width && w.height); }
 
-function MapCard({ world, creatureTypes, allMaps, biomes }) {
+function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
   const update = useUpdateWorld();
   const regen = useRegenerateWorld();
   const reroll = useRerollCreatures();
@@ -65,18 +65,26 @@ function MapCard({ world, creatureTypes, allMaps, biomes }) {
   const toggleBiome = (n) => setWorldBiomes(prev => {
     const next = new Set(prev); next.has(n) ? next.delete(n) : next.add(n); return next;
   });
-  const save = () => update.mutate({
-    id: world.id, name, width: world.width, height: world.height,
-    creature_count: Number(count), allowed_creature_types: [...allowed],
-    is_entry: isEntry, entry_spawn: isEntry ? { x: Number(spawnX), y: Number(spawnY) } : null,
-    // Ordered by the biome CATALOG's own order (id ASC), not by checkbox
-    // click order -- worlds.biomes is order-sensitive on the backend (biome
-    // i owns noise band i), so a Set's click-order iteration would make an
-    // uncheck+recheck of the SAME biomes look like a real change and wipe
-    // this world's cached terrain for no visible reason. See biomeForm.js.
-    biomes: orderBiomeNames(worldBiomes, biomes),
-    biome_cell: biomeCell === '' ? null : Number(biomeCell),
-  });
+  // Belt-and-braces alongside orderBiomeNames' own empty-catalog fallback:
+  // block the save outright while the biome catalog is still loading, so a
+  // save triggered by an unrelated field (e.g. renaming the map) can never
+  // fire against a `biomes` prop that is [] only because the query hasn't
+  // resolved yet -- not because the world actually has zero biomes selected.
+  const save = () => {
+    if (biomesLoading) return;
+    update.mutate({
+      id: world.id, name, width: world.width, height: world.height,
+      creature_count: Number(count), allowed_creature_types: [...allowed],
+      is_entry: isEntry, entry_spawn: isEntry ? { x: Number(spawnX), y: Number(spawnY) } : null,
+      // Ordered by the biome CATALOG's own order (id ASC), not by checkbox
+      // click order -- worlds.biomes is order-sensitive on the backend (biome
+      // i owns noise band i), so a Set's click-order iteration would make an
+      // uncheck+recheck of the SAME biomes look like a real change and wipe
+      // this world's cached terrain for no visible reason. See biomeForm.js.
+      biomes: orderBiomeNames(worldBiomes, biomes),
+      biome_cell: biomeCell === '' ? null : Number(biomeCell),
+    });
+  };
 
   return (
     <Card $entry={world.is_entry}>
@@ -113,7 +121,8 @@ function MapCard({ world, creatureTypes, allMaps, biomes }) {
         </>)}
       </Row>
       <Row>
-        <Button onClick={save} disabled={update.isPending}>Save</Button>
+        <Button onClick={save} disabled={update.isPending || biomesLoading}
+          title={biomesLoading ? 'Waiting for the biome catalog to load…' : undefined}>Save</Button>
         <Button $bg="#8b5cf6" onClick={() => regen.mutate(world.id)} disabled={regen.isPending}>
           <HiOutlineArrowPath /> Regenerate terrain
         </Button>
@@ -185,7 +194,7 @@ function MapCard({ world, creatureTypes, allMaps, biomes }) {
 function MapsAdmin() {
   const { worlds, isLoadingWorlds } = useWorlds();
   const { entityTypes } = useEntityTypes();
-  const { biomes } = useBiomes();
+  const { biomes, isLoadingBiomes } = useBiomes();
   const createWorld = useCreateWorld();
   const [name, setName] = useState('');
   const [width, setWidth] = useState(24);
@@ -216,7 +225,7 @@ function MapsAdmin() {
         </Row>
       </Card>
       {boundedMaps.length === 0 && <p style={{ color: '#888' }}>No bounded maps yet. Generate one above.</p>}
-      {boundedMaps.map(w => <MapCard key={w.id} world={w} creatureTypes={creatureTypes} allMaps={boundedMaps} biomes={biomes} />)}
+      {boundedMaps.map(w => <MapCard key={w.id} world={w} creatureTypes={creatureTypes} allMaps={boundedMaps} biomes={biomes} biomesLoading={isLoadingBiomes} />)}
     </AdminContainer>
   );
 }
