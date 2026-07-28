@@ -1,4 +1,4 @@
-import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W } from "../core/constants.js";
+import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { compareDrawables, wallRevealed, drawWall } from "./wallRenderer.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
@@ -90,6 +90,37 @@ export class RenderSystem {
     return out;
   }
 
+  // Decorations from every loaded chunk in view -> drawables. worldX/worldY are
+  // the tile TOP-LEFT (drawEntity centers via +width/2), matching creatures.
+  // Camera is accepted for interface symmetry with the other visible-chunk
+  // collectors, but every currently-loaded chunk is iterated (same as
+  // collectActors and the wall pass) rather than culled here — chunk
+  // streaming already keeps `chunkedMap` limited to the camera's
+  // neighborhood.
+  static collectDecorations(chunkedMap, camera, decoTypes) {
+    const out = [];
+    const N = chunkedMap.chunkSize;
+    for (const key of chunkedMap.loadedKeys()) {
+      const [cx, cy] = key.split(",").map(Number);
+      for (const d of chunkedMap.decorationsInChunk(cx, cy)) {
+        const type = decoTypes && decoTypes.get(d.name);
+        if (!type) continue; // type/sprite not loaded yet -> skip (no hole)
+        const x = (cx * N + d.col) * MAP_TILE_SIZE;
+        const y = (cy * N + d.row) * MAP_TILE_SIZE;
+        // width/height = MAP_TILE_SIZE anchors drawEntity's centering math
+        // (worldToScreen(e.x + (e.width||40)/2, ...)) on the tile CENTER.
+        // Backend entity types only ever carry displayWidth/displayHeight
+        // (see getEntityTypesMap) — never width/height — so without this,
+        // drawEntity's `(e.width||40)/2` fallback anchors at x+20 instead of
+        // the tile's true center (x+50 for a 100px tile), floating the
+        // decoration ~19px above its tile. displayWidth/displayHeight (from
+        // `type`, spread in first) still control the drawn sprite size.
+        out.push({ kind: "decoration", ref: { ...type, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: type.place_order || 0, depth: depthKey(x, y) });
+      }
+    }
+    return out;
+  }
+
   renderChunked({
     player, camera, chunkedMap, remotePlayers, localUserId,
     creatures = [], projectiles = [], mana = null, maxMana = null,
@@ -97,7 +128,7 @@ export class RenderSystem {
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
     groundItems = [], autoLoot = false, gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
-    merchants = [], shop = null, shopOpen = false,
+    merchants = [], shop = null, shopOpen = false, decoTypes = null,
   }) {
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
@@ -171,6 +202,7 @@ export class RenderSystem {
       drawables.push({ kind: "merchant", ref: m, order: 0, depth: depthKey(m.x, m.y) });
     }
     for (const w of wallDrawables) drawables.push(w);
+    for (const d of RenderSystem.collectDecorations(chunkedMap, camera, decoTypes)) drawables.push(d);
     drawables.sort(compareDrawables);
 
     const actors = RenderSystem.collectActors(player, remotePlayers, creatures);
@@ -182,6 +214,7 @@ export class RenderSystem {
       else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
       else if (d.kind === "merchant") this.drawMerchant(d.ref);
+      else if (d.kind === "decoration") this.drawEntity(d.ref);
       else this.drawEntity(d.ref);
     }
 

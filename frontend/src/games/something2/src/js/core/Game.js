@@ -244,6 +244,14 @@ export class Game {
 
         this.creatures = new CreatureManager(entityTypes);
         this.projectiles = new ProjectileManager();
+        // Non-creature entity types (map decorations: rocks, bushes, ...),
+        // keyed by name for RenderSystem.collectDecorations. Built once here
+        // rather than re-filtered every frame in render().
+        this.decoTypes = new Map();
+        for (const name in (entityTypes || {})) {
+            const def = entityTypes[name];
+            if (def && def.isCreature === false) this.decoTypes.set(name, def);
+        }
 
         // Fresh inventory state per join (re-entry guard above tears down the
         // previous authority connection, so mirror that for the paper-doll).
@@ -567,6 +575,7 @@ export class Game {
                 merchants: this.merchants,
                 shop: this.shop,
                 shopOpen: this.shopOpen,
+                decoTypes: this.decoTypes,
                 toast: this.toast,
                 blasts: this.blasts,
                 vfx: this.vfx,
