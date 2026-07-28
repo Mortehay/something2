@@ -2,9 +2,9 @@ import { chunkOf, CHUNK_KEY, parseKey } from "../core/worldCoords.js";
 import { neighborhoodKeys, diffNeighborhoods } from "../core/NeighborhoodManager.js";
 
 // Keeps a ChunkedMap populated with the (2*radius+1)^2 neighborhood around the
-// player. Fetching is injected (async fetchChunk(cx,cy) -> grid) so this is
-// transport-agnostic and unit-testable. Phase 4b supplies a real HTTP/TanStack
-// fetch; Phase 4b also calls update() from the game loop.
+// player. Fetching is injected (async fetchChunk(cx,cy) -> { tiles, decorations })
+// so this is transport-agnostic and unit-testable. Phase 4b supplies a real
+// HTTP/TanStack fetch; Phase 4b also calls update() from the game loop.
 export class ChunkStreamer {
   constructor(chunkedMap, fetchChunk, radius = 1) {
     this.map = chunkedMap;
@@ -48,9 +48,9 @@ export class ChunkStreamer {
         const { cx: lcx, cy: lcy } = parseKey(k);
         this.inflight.add(k);
         try {
-          const grid = await this.fetchChunk(lcx, lcy);
+          const chunk = await this.fetchChunk(lcx, lcy);
           if (!this.wanted.has(k)) return; // neighborhood moved on; discard stale load
-          this.map.setChunk(lcx, lcy, grid);
+          this.map.setChunk(lcx, lcy, chunk.tiles, chunk.decorations);
           loaded.push(k);
         } catch (err) {
           // Leave unloaded; a later update() retries. Don't crash the loop.

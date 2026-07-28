@@ -11,12 +11,20 @@ export class ChunkedMap {
     this.tileSize = MAP_TILE_SIZE;
     this.mapTiles = mapTiles;
     this.chunks = new Map(); // "cx,cy" -> string[][]
+    this.decorations = new Map(); // "cx,cy" -> { list, blocked: Set<"row,col"> }
   }
 
-  setChunk(cx, cy, grid) { this.chunks.set(CHUNK_KEY(cx, cy), grid); }
+  setChunk(cx, cy, grid, decorations = []) {
+    this.chunks.set(CHUNK_KEY(cx, cy), grid);
+    // Precompute the blocking-tile set for O(1) walkability checks.
+    const blocked = new Set();
+    for (const d of decorations) if (d.blocking) blocked.add(`${d.row},${d.col}`);
+    this.decorations.set(CHUNK_KEY(cx, cy), { list: decorations, blocked });
+  }
   hasChunk(cx, cy) { return this.chunks.has(CHUNK_KEY(cx, cy)); }
-  removeChunk(cx, cy) { this.chunks.delete(CHUNK_KEY(cx, cy)); }
+  removeChunk(cx, cy) { this.chunks.delete(CHUNK_KEY(cx, cy)); this.decorations.delete(CHUNK_KEY(cx, cy)); }
   getChunk(cx, cy) { return this.chunks.get(CHUNK_KEY(cx, cy)) || null; }
+  decorationsInChunk(cx, cy) { const e = this.decorations.get(CHUNK_KEY(cx, cy)); return e ? e.list : []; }
   loadedKeys() { return [...this.chunks.keys()]; }
 
   getTileAt(worldX, worldY) {
@@ -39,7 +47,13 @@ export class ChunkedMap {
     const tile = this.getTileAt(worldX, worldY);
     if (tile === null) return false; // unloaded/unknown -> blocked (streaming frontier)
     const def = this._tileDef(tile);
-    return def ? def.walkable !== false : true;
+    if (def && def.walkable === false) return false;
+    // Blocking-decoration overlay mirrors the server's ServerMap.isWalkable
+    // so client-side prediction and server authority agree.
+    const { cx, cy, lr, lc } = worldToChunkLocal(worldX, worldY, this.chunkSize);
+    const e = this.decorations.get(CHUNK_KEY(cx, cy));
+    if (e && e.blocked.has(`${lr},${lc}`)) return false;
+    return true;
   }
 
   speedAt(worldX, worldY) {

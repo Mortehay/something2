@@ -6,12 +6,21 @@ function fakeFetch(response, ok = true) {
 }
 
 describe("makeChunkFetcher", () => {
-  it("returns the bare data grid, not the envelope", async () => {
+  it("returns { tiles, decorations }, not the envelope", async () => {
     const grid = [["grass", "grass"], ["dirt", "water"]];
-    const fetchImpl = fakeFetch({ world_id: "w1", cx: 2, cy: -1, data: grid });
+    const decorations = [{ name: "Tree", row: 0, col: 1, blocking: true }];
+    const fetchImpl = fakeFetch({ world_id: "w1", cx: 2, cy: -1, data: grid, decorations });
     const fetchChunk = makeChunkFetcher("w1", "http://api", fetchImpl);
     const out = await fetchChunk(2, -1);
-    expect(out).toEqual(grid); // NOT { data: grid, ... }
+    expect(out).toEqual({ tiles: grid, decorations }); // NOT { data: grid, ... }
+  });
+
+  it("defaults decorations to [] when the envelope omits it", async () => {
+    const grid = [["grass"]];
+    const fetchImpl = fakeFetch({ world_id: "w1", cx: 0, cy: 0, data: grid });
+    const fetchChunk = makeChunkFetcher("w1", "http://api", fetchImpl);
+    const out = await fetchChunk(0, 0);
+    expect(out).toEqual({ tiles: grid, decorations: [] });
   });
 
   it("builds the correct URL incl. negative coords", async () => {

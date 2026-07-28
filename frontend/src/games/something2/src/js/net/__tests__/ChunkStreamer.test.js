@@ -6,12 +6,14 @@ import { MAP_TILE_SIZE } from "../../core/constants.js";
 const N = 4;                       // tiles per chunk
 const CHUNK_PX = N * MAP_TILE_SIZE; // px per chunk
 
-// fake fetch: records requested keys, returns a grid tagged with its coords.
+// fake fetch: records requested keys, returns { tiles, decorations } tagged
+// with its coords (matches the real fetchChunk's { tiles, decorations } shape).
 function makeFetch() {
   const requested = [];
   const fetchChunk = async (cx, cy) => {
     requested.push(`${cx},${cy}`);
-    return Array.from({ length: N }, () => Array.from({ length: N }, () => `t-${cx}-${cy}`));
+    const tiles = Array.from({ length: N }, () => Array.from({ length: N }, () => `t-${cx}-${cy}`));
+    return { tiles, decorations: [] };
   };
   return { fetchChunk, requested };
 }
@@ -53,7 +55,8 @@ it("retries a chunk whose fetch failed, even when the center chunk is unchanged"
       failedOnce = true;
       throw new Error("simulated transient network failure");
     }
-    return Array.from({ length: N }, () => Array.from({ length: N }, () => `t-${cx}-${cy}`));
+    const tiles = Array.from({ length: N }, () => Array.from({ length: N }, () => `t-${cx}-${cy}`));
+    return { tiles, decorations: [] };
   };
   const s = new ChunkStreamer(map, fetchChunk, 1);
 
@@ -112,8 +115,10 @@ it("discards a stale in-flight load whose chunk was dropped before it resolved",
   // Deferred fetch: hold each chunk's resolver so we control timing.
   const resolvers = {};
   const fetchChunk = (cx, cy) => new Promise((resolve) => {
-    resolvers[`${cx},${cy}`] = () => resolve(
-      Array.from({ length: N }, () => Array.from({ length: N }, () => `t-${cx}-${cy}`)));
+    resolvers[`${cx},${cy}`] = () => resolve({
+      tiles: Array.from({ length: N }, () => Array.from({ length: N }, () => `t-${cx}-${cy}`)),
+      decorations: [],
+    });
   });
   const s = new ChunkStreamer(map, fetchChunk, 1);
 

@@ -85,6 +85,31 @@ describe("ChunkedMap.isWalkable / speedAt", () => {
   });
 });
 
+describe("ChunkedMap decorations overlay", () => {
+  it("blocks a tile occupied by a blocking decoration", () => {
+    const m = new ChunkedMap(8, { grass: { walkable: true, speed: 1 } });
+    const grid = Array.from({ length: 8 }, () => Array(8).fill("grass"));
+    m.setChunk(0, 0, grid, [{ name: "Tree", row: 2, col: 3, blocking: true }]);
+    // tile (col3,row2) center world px = (350,250)
+    expect(m.isWalkable(350, 250)).toBe(false);
+    // a neighboring grass tile stays walkable
+    expect(m.isWalkable(50, 50)).toBe(true);
+  });
+
+  it("ignores a passable decoration for walkability", () => {
+    const m = new ChunkedMap(8, { grass: { walkable: true, speed: 1 } });
+    const grid = Array.from({ length: 8 }, () => Array(8).fill("grass"));
+    m.setChunk(0, 0, grid, [{ name: "Bush", row: 0, col: 0, blocking: false }]);
+    expect(m.isWalkable(50, 50)).toBe(true);
+  });
+
+  it("setChunk with no decorations keeps tiles walkable (back-compat)", () => {
+    const m = new ChunkedMap(8, { grass: { walkable: true, speed: 1 } });
+    m.setChunk(0, 0, Array.from({ length: 8 }, () => Array(8).fill("grass")));
+    expect(m.isWalkable(50, 50)).toBe(true);
+  });
+});
+
 describe("ChunkedMap resolves a chunk offset in both cx and cy", () => {
   it("indexes grid[lr][lc] correctly for chunk (2,-1) at an off-diagonal cell", () => {
     const m = new ChunkedMap(N);
