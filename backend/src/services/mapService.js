@@ -223,8 +223,9 @@ function sampleBiomeRegion(cfg, gRow, gCol) {
 // world has biomes, else every non-structural tile (the pre-biome behaviour,
 // preserved bit-for-bit: same seed, same field, same name list). A biome whose
 // list filtered down to nothing falls back to the global list rather than
-// producing undefined tiles. The path tile is excluded from both lists --
-// paths are stamped separately.
+// producing undefined tiles. Only the global list excludes the path tile; a
+// biome's own list keeps it if authored that way (see biomeTerrainNames) --
+// paths are stamped separately over whichever terrain sampleTerrain picked.
 function sampleTerrain(cfg, gRow, gCol) {
   const region = sampleBiomeRegion(cfg, gRow, gCol);
   const names = (region && region.terrainNames.length) ? region.terrainNames : cfg.terrainNames;

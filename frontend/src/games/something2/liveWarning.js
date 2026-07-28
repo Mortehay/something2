@@ -18,7 +18,7 @@ export const LIVE_WARNING_TOAST_OPTS = { icon: '⚠️', duration: 6000 };
 // routes that can only signal the condition via a response header (see
 // liveWarningFromHeader below) with no room to carry the string itself.
 export const DEFAULT_LIVE_WARNING =
-  'a player is connected to this world; this change will not reach the live simulation until it empties';
+  'a player is connected to this world; the running simulation is still serving the old, pre-edit map and will not reflect this change until the world is emptied and reloaded';
 
 // Most routes reply 200 with `{ ...row, liveWarning }` (or omit the key
 // entirely). Returns the message to show, or undefined when there is

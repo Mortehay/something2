@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  worldConfig, sampleBiomeRegion, sampleTerrain, generateRegion,
+  worldConfig, sampleBiomeRegion, sampleTerrain, generateRegion, collectPathCells,
 } = require('../src/services/mapService');
 const GOLDEN = require('./fixtures/terrain-golden-preBiome.json');
 
@@ -106,9 +106,23 @@ test('REGRESSION (D1): a sand-listing biome actually generates sand, using the r
   assert.deepEqual(cfg.biomes[0].terrainNames, ['sand', 'rocks', 'dirt']);
 
   const grid = generateRegion(world, 0, 0, 48, 48);
-  const seen = new Set();
-  for (const row of grid) for (const t of row) seen.add(t);
-  assert.ok(seen.has('sand'), 'Arid Dunes must actually place sand tiles, not just rocks/dirt');
+  // `seen.has('sand')` alone is vacuous here: generateRegion stamps
+  // cfg.pathTile onto every carved path cell regardless of biome, and sand
+  // IS the detected path tile in this fixture -- so that assertion passed
+  // under the OLD buggy behaviour too (pre-fix: sandTotal 255,
+  // sandOnNonPathCells 0, i.e. every 'sand' tile in the grid came from the
+  // path stamp, never from terrain banding). Assert sand actually appears
+  // on a cell the path carver did NOT touch, which can only happen if
+  // Arid Dunes' terrain banding is really placing it.
+  const paths = collectPathCells(cfg, 0, 0, 48, 48);
+  let sandOnNonPathCells = 0;
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      if (grid[r][c] === 'sand' && !paths.has(`${r},${c}`)) sandOnNonPathCells++;
+    }
+  }
+  assert.ok(sandOnNonPathCells > 0,
+    'Arid Dunes must actually place sand tiles via terrain banding, not just via the pathTile stamp (sand is also this fixture\'s detected path tile)');
 });
 
 test('normalizeBiomes drops malformed entries but keeps the valid ones', () => {

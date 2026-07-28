@@ -187,7 +187,15 @@ function isWorldLive(worldId) {
 function evictOrWarn(worldId) {
   if (evictAuthorityWorld(worldId)) return undefined;
   return isWorldLive(worldId)
-    ? 'a player is connected to this world; this change will not reach the live simulation until it empties'
+    // The DB write already happened; only the live authority is stale. The
+    // caller (invalidateWorld) also deletes this world's cached chunks as
+    // part of the same edit, so a connected client can go on to refetch NEW
+    // terrain from a REST route while the authority's WebSocket session
+    // keeps serving its old, frozen map -- the two would then visibly
+    // disagree, not just "not yet be updated". Say so plainly, and say what
+    // fixes it (the world must empty and be reloaded), rather than wording
+    // that reads as "this edit was simply skipped, nothing else to know".
+    ? 'a player is connected to this world; the running simulation is still serving the old, pre-edit map and will not reflect this change until the world is emptied and reloaded'
     : undefined;
 }
 
