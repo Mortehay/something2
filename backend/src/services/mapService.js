@@ -250,12 +250,13 @@ function generateChunk(world, cx, cy) {
 // world seed (distinct from terrain) so decoration clumps don't align with
 // biome bands. GAIN expands a def's `chance` into contiguous area; FILL is the
 // fraction of an in-clump eligible tile that actually gets an object.
-const DECO_SEED_XOR = 0x9e3779b9;
-const DECO_FILL_XOR = 0x85ebca6b;
-const DECO_CELL = 6;
-const DECO_GAIN = 3;
-const DECO_FILL = 0.85;
-const SPAWN_CLEAR_RADIUS = 1; // Chebyshev tiles around entry spawn kept clear of blockers
+const DECO_SEED_XOR = 0x9e3779b9; // density-field seed (where clumps form)
+const DECO_FILL_XOR = 0x85ebca6b; // gap roll seed (holes inside a clump)
+const DECO_PICK_XOR = 0x27d4eb2d; // weighted type-pick seed (which def wins a tile)
+const DECO_CELL = 6;              // clump cell size (smaller = tighter stands)
+const DECO_DENSITY = 0.58;        // a tile is "in a clump" when the density field >= this
+const DECO_FILL = 0.6;            // fraction of in-clump tiles that actually get an object
+const SPAWN_CLEAR_RADIUS = 1;     // Chebyshev tiles around entry spawn kept clear of blockers
 
 // Entry-spawn tile (row,col) for a bounded world, or null. entry_spawn is world
 // pixels; MAP_TILE_SIZE-agnostic here (100 px/tile, matching collision.js).
@@ -301,18 +302,30 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
       if (cfg.bounds && (gRow < 0 || gCol < 0 || gRow >= cfg.bounds.height || gCol >= cfg.bounds.width)) continue;
       if (paths.has(`${gRow},${gCol}`)) continue; // keep carved paths clear
       const terrain = tiles[r][c];
+      // Two independent gates decide IF a tile gets an object: the density
+      // field (where clumps form) and a per-tile fill roll (holes in a clump).
       const density = globalValueNoise((cfg.seed ^ DECO_SEED_XOR) >>> 0, gRow, gCol, DECO_CELL);
+      if (density < DECO_DENSITY) continue;
+      if (hash2((cfg.seed ^ DECO_FILL_XOR) >>> 0, gCol, gRow) >= DECO_FILL) continue;
+      // WHICH object: weighted pick among ALL defs whose spawn_tiles match this
+      // terrain, weighted by `chance`. (Not first-match — that shadowed every
+      // type but the lowest-id one on shared terrain.) Deterministic: the roll
+      // is a seeded per-tile hash and `decorationDefs` is ORDER BY id.
+      let totalW = 0;
+      const matches = [];
       for (const def of decorationDefs) {
         const spawnTiles = def.spawn_tiles || def.spawnTiles;
-        if (!spawnTiles || !spawnTiles.includes(terrain)) continue;
-        const threshold = 1 - clamp((def.chance || 0) * DECO_GAIN, 0, 1);
-        if (density < threshold) continue;
-        if (hash2((cfg.seed ^ DECO_FILL_XOR) >>> 0, gCol, gRow) >= DECO_FILL) continue;
-        const blocking = def.walkable === false;
-        if (blocking && isExcludedBlockerCell(cfg, spawn, gRow, gCol)) continue;
-        out.push({ name: def.name, row: r, col: c, blocking });
-        break; // one decoration per tile
+        if (spawnTiles && spawnTiles.includes(terrain)) { matches.push(def); totalW += (def.chance || 0); }
       }
+      if (matches.length === 0 || totalW <= 0) continue;
+      let roll = hash2((cfg.seed ^ DECO_PICK_XOR) >>> 0, gCol, gRow) * totalW;
+      let picked = matches[matches.length - 1];
+      for (const def of matches) { roll -= (def.chance || 0); if (roll <= 0) { picked = def; break; } }
+      const blocking = picked.walkable === false;
+      // A blocking pick near spawn / in a village would trap the player -> skip
+      // the tile entirely (leave it open) rather than force a passable type.
+      if (blocking && isExcludedBlockerCell(cfg, spawn, gRow, gCol)) continue;
+      out.push({ name: picked.name, row: r, col: c, blocking });
     }
   }
   return out;

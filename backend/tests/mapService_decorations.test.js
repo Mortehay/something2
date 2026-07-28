@@ -55,3 +55,27 @@ test('the entry-spawn tile and its clear radius get no BLOCKING decoration', () 
     assert.ok(!(d.blocking && cheb <= 1), `blocking deco too close to spawn at (${d.row},${d.col})`);
   }
 });
+
+test('weighted selection lets multiple types share a terrain (no first-match shadowing)', () => {
+  // Two types on the SAME terrain — both must appear across a chunk. The old
+  // break-on-first-match placed only the lowest-id one; weighted pick surfaces both.
+  const w = world({ seed: 7, chunkSize: 24, width: 24, height: 24 });
+  const defs = [
+    { name: 'Tree', walkable: false, spawn_tiles: ['grass'], chance: 0.5 },
+    { name: 'Bush', walkable: true, spawn_tiles: ['grass'], chance: 0.5 },
+  ];
+  const decos = generateChunkDecorations(w, 0, 0, generateChunk(w, 0, 0), defs);
+  const names = new Set(decos.map((d) => d.name));
+  assert.ok(names.has('Tree') && names.has('Bush'), `both types should place, saw ${[...names]}`);
+});
+
+test('density is bounded — a chunk is nowhere near fully covered', () => {
+  // The density + fill gates keep coverage well below "every eligible tile"
+  // (the old chance*GAIN saturation filled ~85%).
+  const w = world({ seed: 3, chunkSize: 24, width: 24, height: 24 });
+  const defs = [{ name: 'Tree', walkable: false, spawn_tiles: ['grass', 'rocks'], chance: 1 }];
+  const decos = generateChunkDecorations(w, 0, 0, generateChunk(w, 0, 0), defs);
+  const coverage = decos.length / (24 * 24);
+  assert.ok(decos.length > 0, 'some decorations should place');
+  assert.ok(coverage < 0.5, `coverage ${(coverage * 100).toFixed(0)}% should be well under 50%`);
+});

@@ -33,14 +33,15 @@ function world(overrides = {}) {
   };
 }
 
-// Two defs that both always match 'grass' (chance: 1 => threshold 0) but
-// disagree on walkable. Whichever def comes FIRST in the array wins for
-// every eligible tile in generateChunkDecorations (break-on-first-match).
-// `id` mirrors the DB column loadDecorationDefs sorts by.
+// Two defs that both always match 'grass' but disagree on walkable.
+// generateChunkDecorations resolves a shared tile with a seeded WEIGHTED pick
+// that iterates the defs in ARRAY ORDER (cumulative subtraction), so which def
+// wins a given tile depends on that order — which is why the two callers must
+// query with the same ORDER BY. `id` mirrors the DB column it sorts by.
 const BLOCKER = { id: 1, name: 'Blocker', walkable: false, spawn_tiles: ['grass'], chance: 1 };
 const PASSABLE = { id: 2, name: 'Passable', walkable: true, spawn_tiles: ['grass'], chance: 1 };
 
-test('def order changes which walkable flag wins on an overlapping tile (documents the bug)', () => {
+test('def order changes which type wins on a shared tile (parity needs a stable order)', () => {
   const w = world();
   const tiles = generateChunk(w, 0, 0);
 
@@ -50,13 +51,18 @@ test('def order changes which walkable flag wins on an overlapping tile (documen
   assert.ok(blockerFirst.length > 0, 'fixture should place at least one decoration');
   assert.ok(passableFirst.length > 0, 'fixture should place at least one decoration');
 
-  // Same tiles get decorated either way (fill-check is per-tile, not per-def)...
+  // Same tiles get decorated either way (the density + fill gates are
+  // order-independent; only the type PICK depends on def order)...
   const keyOf = (d) => `${d.row},${d.col}`;
   assert.deepEqual(blockerFirst.map(keyOf).sort(), passableFirst.map(keyOf).sort());
 
-  // ...but EVERY one of them disagrees on name/blocking depending on array order.
-  assert.ok(blockerFirst.every((d) => d.name === 'Blocker' && d.blocking === true));
-  assert.ok(passableFirst.every((d) => d.name === 'Passable' && d.blocking === false));
+  // ...but the weighted pick is order-sensitive: at least one tile disagrees on
+  // name/blocking between the two orders. So the /chunk and authority callers
+  // MUST query with the same ORDER BY or client-render and server-collision
+  // would diverge (rubber-banding). This is what services/decorationDefs.js fixes.
+  const bfByKey = new Map(blockerFirst.map((d) => [keyOf(d), d]));
+  const disagreements = passableFirst.filter((d) => bfByKey.get(keyOf(d)).name !== d.name);
+  assert.ok(disagreements.length > 0, 'expected def order to change at least one tile\'s pick');
   assert.notDeepEqual(blockerFirst, passableFirst);
 });
 
