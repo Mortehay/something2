@@ -5,8 +5,10 @@ import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark } from "
 import toast from 'react-hot-toast';
 import { useGenerateTileJob, useTileJob, useApproveTileImage, useApproveTileSprite, assetUrl } from './useTileSprites.js';
 import { useSpriteCapability } from './useSprites.js';
+import { useBiomes } from './useBiomes.js';
 import { validateTileType } from './catalogValidation.js';
 import { entityTypesReferencingTile } from './catalogReferences.js';
+import { withOptionalBiome } from './generationJobPayload.js';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -287,7 +289,9 @@ const SecondaryButton = styled.button`
 function TileSpritePanel({ tile }) {
   const [mode, setMode] = useState(null);     // 'image' | 'animated' while a job runs
   const [jobId, setJobId] = useState(null);
+  const [biome, setBiome] = useState('');     // '' = no biome art context
   const { data: capability } = useSpriteCapability();
+  const { biomes, isLoadingBiomes } = useBiomes();
   const generate = useGenerateTileJob();
   const { data: job } = useTileJob(jobId);
   const approveImage = useApproveTileImage();
@@ -297,7 +301,10 @@ function TileSpritePanel({ tile }) {
     setMode(which);
     setJobId(null);
     generate.mutate(
-      { tile_type: tile.name, base_prompt: tile.prompt || tile.name, frames: which === 'animated' ? 4 : 1 },
+      withOptionalBiome(
+        { tile_type: tile.name, base_prompt: tile.prompt || tile.name, frames: which === 'animated' ? 4 : 1 },
+        biome,
+      ),
       { onSuccess: (data) => setJobId(data.job_id) }
     );
   };
@@ -329,6 +336,23 @@ function TileSpritePanel({ tile }) {
       <div style={{ fontSize: '1rem', opacity: 0.7, marginBottom: '0.5rem' }}>
         {capability ? `Backend tier: ${capability.tier} (${capability.recommended_backend})` : 'Sprite service…'}
         {' · '}render mode: {tile.render_mode || 'color'}
+      </div>
+      <div style={{ marginBottom: '0.75rem' }}>
+        <label style={{ display: 'block', fontSize: '1.1rem', color: '#4a9eff', marginBottom: '0.25rem' }}>
+          Biome art context (optional)
+        </label>
+        <select
+          value={biome}
+          onChange={(e) => setBiome(e.target.value)}
+          disabled={isLoadingBiomes}
+          style={{ background: '#0f0f1a', border: '1px solid rgba(74, 158, 255, 0.3)', color: 'white', padding: '0.6rem', borderRadius: 8, fontSize: '1.2rem' }}
+        >
+          <option value="">— none —</option>
+          {biomes.map((b) => <option key={b.id} value={b.name}>{b.name}</option>)}
+        </select>
+        <div style={{ fontSize: '1rem', opacity: 0.6, marginTop: '0.25rem' }}>
+          Steers the generated art toward that biome's palette, style and exclusions.
+        </div>
       </div>
       <div style={{ display: 'flex', gap: '0.5rem' }}>
         <SecondaryButton type="button" onClick={() => start('image')} disabled={generate.isPending}>Generate texture</SecondaryButton>

@@ -6,10 +6,12 @@ import {
   useGenerateEntityJob, useEntityJob, useApproveEntityImage, useSpriteManifest,
 } from './useSprites.js';
 import { assetUrlVersioned } from './useTileSprites.js';
+import { useBiomes } from './useBiomes.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
 import { orphanedSpawnTiles } from './catalogReferences.js';
+import { withOptionalBiome } from './generationJobPayload.js';
 
 // The saved image/atlas for an entity type, served through the backend asset
 // proxy (same route tiles use) rather than hitting MinIO directly.
@@ -624,7 +626,9 @@ function SpritePanel({ entity, capability, capabilityDown }) {
 function EntityTexturePanel({ entity, prompt }) {
   const [mode, setMode] = useState(null);     // 'image' | 'animated' while a job runs
   const [jobId, setJobId] = useState(null);
+  const [biome, setBiome] = useState('');     // '' = no biome art context
   const { data: capability } = useSpriteCapability();
+  const { biomes, isLoadingBiomes } = useBiomes();
   const generate = useGenerateEntityJob();
   const { data: job } = useEntityJob(jobId);
   const approveImage = useApproveEntityImage();
@@ -635,7 +639,10 @@ function EntityTexturePanel({ entity, prompt }) {
     setMode(which);
     setJobId(null);
     generate.mutate(
-      { entity_type: entity.name, base_prompt: base, frames: which === 'animated' ? 4 : 1 },
+      withOptionalBiome(
+        { entity_type: entity.name, base_prompt: base, frames: which === 'animated' ? 4 : 1 },
+        biome,
+      ),
       { onSuccess: (data) => setJobId(data.job_id) }
     );
   };
@@ -669,6 +676,23 @@ function EntityTexturePanel({ entity, prompt }) {
       <div style={{ fontSize: '1rem', opacity: 0.7, marginBottom: '0.5rem' }}>
         {capability ? `Backend tier: ${capability.tier} (${capability.recommended_backend})` : 'Sprite service…'}
         {' · '}render mode: {entity.render_mode || 'rect'}
+      </div>
+      <div style={{ marginBottom: '0.75rem' }}>
+        <label style={{ display: 'block', fontSize: '1.1rem', color: '#4a9eff', marginBottom: '0.25rem' }}>
+          Biome art context (optional)
+        </label>
+        <select
+          value={biome}
+          onChange={(e) => setBiome(e.target.value)}
+          disabled={isLoadingBiomes}
+          style={{ background: '#0f0f1a', border: '1px solid rgba(74, 158, 255, 0.3)', color: 'white', padding: '0.6rem', borderRadius: 8, fontSize: '1.2rem' }}
+        >
+          <option value="">— none —</option>
+          {biomes.map((b) => <option key={b.id} value={b.name}>{b.name}</option>)}
+        </select>
+        <div style={{ fontSize: '1rem', opacity: 0.6, marginTop: '0.25rem' }}>
+          Steers the generated art toward that biome's palette, style and exclusions.
+        </div>
       </div>
       <div style={{ display: 'flex', gap: '0.5rem' }}>
         <SecondaryButton type="button" onClick={() => start('image')} disabled={generate.isPending}>Generate image</SecondaryButton>
