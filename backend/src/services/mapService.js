@@ -544,7 +544,17 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
       const def = world.tileTypes && world.tileTypes[name];
       if (def && def.walkable === false) continue;
       if (villageContaining(row, col, villages)) continue;
-      const t = allowedTypes[Math.floor(rng() * allowedTypes.length)];
+      // Narrow to the fauna native to the biome that owns this cell. The
+      // world's allowlist stays authoritative -- a biome can only remove
+      // candidates from it, never add one. An empty intersection means this
+      // biome has no fauna the world permits, so roll another cell rather
+      // than forcing a foreign creature into it.
+      const region = sampleBiomeRegion(cfg, row, col);
+      const candidates = region
+        ? allowedTypes.filter((t) => region.creatureTypes.includes(t.name))
+        : allowedTypes;
+      if (candidates.length === 0) continue;
+      const t = candidates[Math.floor(rng() * candidates.length)];
       out.push({
         type: t.name,
         x: col * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
