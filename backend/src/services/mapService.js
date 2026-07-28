@@ -104,25 +104,34 @@ function detectPathTile(tileNames, override) {
 }
 
 // A biome's terrain list, reduced to tiles this world can actually place:
-// present in the catalog, not a structural overlay tile, not the path tile.
+// present in the catalog, not a structural overlay tile. Unlike the global
+// `cfg.terrainNames` list (which DOES exclude the path tile, so carved paths
+// read as distinct from the terrain around them, and preserves byte-identical
+// output for biome-less worlds — do not touch that exclusion), a biome's
+// terrain list is authored intent: if an admin lists the path tile as part of
+// a biome (e.g. `sand` in a desert biome), it must appear as regular terrain,
+// not just in carved path ribbons. The cost is only cosmetic — in a biome that
+// itself contains the path tile, carved paths blend into the terrain, which is
+// acceptable and arguably natural. Structural tiles stay excluded: those are
+// stamped overlays and would generate as impassable blobs if sampled as terrain.
 // A biome that filters down to nothing (references only deleted or structural
 // tiles) must not yield `undefined` tile names, so callers fall back to the
 // global list — see sampleTerrain.
-function biomeTerrainNames(biome, names, pathTile) {
+function biomeTerrainNames(biome, names) {
   return (biome.terrain_tiles || []).filter(
-    (n) => names.includes(n) && !STRUCTURAL_TILES.has(n) && n !== pathTile,
+    (n) => names.includes(n) && !STRUCTURAL_TILES.has(n),
   );
 }
 
 // Normalize raw biome rows (services/biomes.js shape) into the compact records
 // the samplers use. Done once per worldConfig call rather than per tile.
-function normalizeBiomes(rawBiomes, names, pathTile) {
+function normalizeBiomes(rawBiomes, names) {
   if (!Array.isArray(rawBiomes)) return [];
   return rawBiomes
     .filter((b) => b && typeof b.name === 'string')
     .map((b) => ({
       name: b.name,
-      terrainNames: biomeTerrainNames(b, names, pathTile),
+      terrainNames: biomeTerrainNames(b, names),
       floraTypes: Array.isArray(b.flora_types) ? b.flora_types : [],
       creatureTypes: Array.isArray(b.creature_types) ? b.creature_types : [],
     }));
@@ -173,7 +182,7 @@ function worldConfig(world = {}) {
     pathTile,
     names,
     terrainNames,
-    biomes: normalizeBiomes(world.biomes, names, pathTile),
+    biomes: normalizeBiomes(world.biomes, names),
     biomeCell: resolveBiomeCell(world),
     bounds: (world.width && world.height) ? {
       width: world.width,

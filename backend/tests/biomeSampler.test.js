@@ -57,11 +57,58 @@ test('worldConfig normalizes biome records and filters their terrain lists', () 
   assert.deepEqual(cfg.biomes[0].creatureTypes, ['Skeleton']);
 });
 
-test('worldConfig drops the path tile from a biome terrain list', () => {
+test('worldConfig keeps the path tile in a biome terrain list (authored intent wins)', () => {
+  // A biome's terrain list is authored intent: if an admin lists the world's
+  // path tile as part of a biome (e.g. sand in a desert), it must generate as
+  // real terrain, not just show up in carved path ribbons. Only the GLOBAL
+  // cfg.terrainNames excludes the path tile (pinned separately below and by
+  // the back-compat golden test) — a biome's own list does not.
   const cfg = worldConfig(biomeWorld({
     pathTile: 'sand', biomes: [{ ...DUNES, terrain_tiles: ['sand', 'rocks'] }],
   }));
-  assert.deepEqual(cfg.biomes[0].terrainNames, ['rocks']);
+  assert.deepEqual(cfg.biomes[0].terrainNames, ['sand', 'rocks']);
+});
+
+test('worldConfig still excludes the path tile from the global terrainNames list', () => {
+  const cfg = worldConfig(biomeWorld({ pathTile: 'sand', biomes: [] }));
+  assert.ok(!cfg.terrainNames.includes('sand'),
+    'the global list must still exclude the path tile so carved paths read as distinct');
+});
+
+test('REGRESSION (D1): a sand-listing biome actually generates sand, using the real catalog order', () => {
+  // Reproduces the live catalog ordering (grass, highgrass, leafs, sand, rocks,
+  // earth, dirt, snow, ice, swamp, water) where detectPathTile picks `sand` as
+  // the world's path tile -- and pins that the seeded "Arid Dunes" shape
+  // (['sand', 'rocks', 'dirt']) still generates sand tiles despite that.
+  const REAL_CATALOG_TILE_TYPES = {
+    grass: { walkable: true, speed: 1 },
+    highgrass: { walkable: true, speed: 1 },
+    leafs: { walkable: true, speed: 1 },
+    sand: { walkable: true, speed: 1 },
+    rocks: { walkable: true, speed: 1 },
+    earth: { walkable: true, speed: 1 },
+    dirt: { walkable: true, speed: 1 },
+    snow: { walkable: true, speed: 1 },
+    ice: { walkable: true, speed: 1 },
+    swamp: { walkable: true, speed: 1 },
+    water: { walkable: true, speed: 1 },
+  };
+  const AridDunes = {
+    name: 'Arid Dunes', terrain_tiles: ['sand', 'rocks', 'dirt'],
+    flora_types: ['dead_tree'], creature_types: ['Skeleton'],
+  };
+  const world = {
+    seed: 4242, chunkSize: 16, cellSize: 8,
+    tileTypes: REAL_CATALOG_TILE_TYPES, biomes: [AridDunes], biomeCell: 12,
+  };
+  const cfg = worldConfig(world);
+  assert.equal(cfg.pathTile, 'sand', 'sanity: sand is detected as the path tile in this catalog order');
+  assert.deepEqual(cfg.biomes[0].terrainNames, ['sand', 'rocks', 'dirt']);
+
+  const grid = generateRegion(world, 0, 0, 48, 48);
+  const seen = new Set();
+  for (const row of grid) for (const t of row) seen.add(t);
+  assert.ok(seen.has('sand'), 'Arid Dunes must actually place sand tiles, not just rocks/dirt');
 });
 
 test('normalizeBiomes drops malformed entries but keeps the valid ones', () => {
