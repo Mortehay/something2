@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
-import { HiOutlineTrash, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineMap, HiOutlineQuestionMarkCircle } from "react-icons/hi2";
+import { HiOutlineTrash, HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker, HiOutlineCube, HiArrowsPointingOut, HiArrowsPointingIn, HiOutlineMap, HiOutlineQuestionMarkCircle, HiOutlineGlobeAlt } from "react-icons/hi2";
 import { Game } from "./src/js/main.js";
 import { getStoredToken, parseJwt, clearToken, authHeaders, AUTH_EXPIRED_EVENT } from "./src/js/net/auth.js";
 import Login from "../../pages/Login.jsx";
@@ -16,6 +16,7 @@ import TileTypesAdmin from "./TileTypesAdmin";
 import EntityTypesAdmin from "./EntityTypesAdmin";
 import ItemTypesAdmin from "./ItemTypesAdmin";
 import MapsAdmin from "./MapsAdmin";
+import BiomesAdmin from "./BiomesAdmin";
 import WorldPreview from "./WorldPreview.jsx";
 import Minimap from "./Minimap.jsx";
 
@@ -662,6 +663,9 @@ export default function Something2() {
             <TabButton $active={activeTab === 'maps'} $adminType="maps" onClick={() => setActiveTab('maps')}>
               <HiOutlineMap /> Maps
             </TabButton>
+            <TabButton $active={activeTab === 'biomes'} $adminType="maps" onClick={() => setActiveTab('biomes')}>
+              <HiOutlineGlobeAlt /> Biomes
+            </TabButton>
           </>
         )}
         <TabButton
@@ -845,6 +849,7 @@ export default function Something2() {
         {isAdmin && activeTab === 'entity' && <EntityTypesAdmin />}
         {isAdmin && activeTab === 'items' && <ItemTypesAdmin />}
         {isAdmin && activeTab === 'maps' && <MapsAdmin />}
+        {isAdmin && activeTab === 'biomes' && <BiomesAdmin />}
         {/* Kept mounted across tab switches, NOT nested in the game tab's
             conditional. RenderSystem captures this element and its 2d context
             when the world is entered, so unmounting it on a tab switch left the

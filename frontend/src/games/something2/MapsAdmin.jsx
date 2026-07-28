@@ -5,6 +5,7 @@ import { HiOutlinePlus, HiOutlineTrash, HiOutlineArrowPath, HiOutlineSparkles, H
 import { useWorlds, useCreateWorld, useDeleteWorld } from './useWorlds.js';
 import { useEntityTypes } from './useMaps.js';
 import { useUpdateWorld, useRegenerateWorld, useRerollCreatures, useWorldLinks, useSetLink, useClearLink, useWorldVillages, useAddVillage, useDeleteVillage } from './useMapsAdmin.js';
+import { useBiomes } from './useBiomes.js';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: #eee; max-width: 1200px; margin: 0 auto;
@@ -26,7 +27,7 @@ const CheckGrid = styled.div`display: flex; flex-wrap: wrap; gap: 0.75rem; margi
 
 function bounded(w) { return !!(w.width && w.height); }
 
-function MapCard({ world, creatureTypes, allMaps }) {
+function MapCard({ world, creatureTypes, allMaps, biomes }) {
   const update = useUpdateWorld();
   const regen = useRegenerateWorld();
   const reroll = useRerollCreatures();
@@ -52,16 +53,23 @@ function MapCard({ world, creatureTypes, allMaps }) {
   const cy = world.height ? Math.floor((world.height * 100) / 2) : 0;
   const [spawnX, setSpawnX] = useState(world.entry_spawn?.x ?? cx);
   const [spawnY, setSpawnY] = useState(world.entry_spawn?.y ?? cy);
+  const [worldBiomes, setWorldBiomes] = useState(new Set(world.biomes || []));
+  const [biomeCell, setBiomeCell] = useState(world.biome_cell ?? '');
 
   useEffect(() => { setIsEntry(!!world.is_entry); }, [world.is_entry]);
 
   const toggle = (n) => setAllowed(prev => {
     const next = new Set(prev); next.has(n) ? next.delete(n) : next.add(n); return next;
   });
+  const toggleBiome = (n) => setWorldBiomes(prev => {
+    const next = new Set(prev); next.has(n) ? next.delete(n) : next.add(n); return next;
+  });
   const save = () => update.mutate({
     id: world.id, name, width: world.width, height: world.height,
     creature_count: Number(count), allowed_creature_types: [...allowed],
     is_entry: isEntry, entry_spawn: isEntry ? { x: Number(spawnX), y: Number(spawnY) } : null,
+    biomes: [...worldBiomes],
+    biome_cell: biomeCell === '' ? null : Number(biomeCell),
   });
 
   return (
@@ -108,6 +116,24 @@ function MapCard({ world, creatureTypes, allMaps }) {
         </Button>
       </Row>
       <Row>
+        <span style={{ color: '#aaa' }}>Biomes:</span>
+        {(biomes || []).map(b => (
+          <label key={b.id} style={{ color: '#ccc' }}>
+            <input type="checkbox" checked={worldBiomes.has(b.name)} onChange={() => toggleBiome(b.name)} />
+            <span style={{ display: 'inline-block', width: 10, height: 10, background: b.color, marginLeft: 4, marginRight: 3 }} />
+            {b.name}
+          </label>
+        ))}
+        <span style={{ color: '#888' }}>region size</span>
+        <Input type="number" min="8" placeholder="auto" value={biomeCell} style={{ width: 80 }}
+          onChange={e => setBiomeCell(e.target.value)} />
+      </Row>
+      <Row>
+        <span style={{ color: '#f59e0b', fontSize: '0.85em' }}>
+          Changing biomes or region size regenerates this map's terrain and clears its cached chunks.
+        </span>
+      </Row>
+      <Row>
         <span style={{ color: '#aaa' }}>Links:</span>
         {['N', 'E', 'S', 'W'].map(edge => (
           <label key={edge} style={{ color: '#ccc' }}>
@@ -152,6 +178,7 @@ function MapCard({ world, creatureTypes, allMaps }) {
 function MapsAdmin() {
   const { worlds, isLoadingWorlds } = useWorlds();
   const { entityTypes } = useEntityTypes();
+  const { biomes } = useBiomes();
   const createWorld = useCreateWorld();
   const [name, setName] = useState('');
   const [width, setWidth] = useState(24);
@@ -182,7 +209,7 @@ function MapsAdmin() {
         </Row>
       </Card>
       {boundedMaps.length === 0 && <p style={{ color: '#888' }}>No bounded maps yet. Generate one above.</p>}
-      {boundedMaps.map(w => <MapCard key={w.id} world={w} creatureTypes={creatureTypes} allMaps={boundedMaps} />)}
+      {boundedMaps.map(w => <MapCard key={w.id} world={w} creatureTypes={creatureTypes} allMaps={boundedMaps} biomes={biomes} />)}
     </AdminContainer>
   );
 }
