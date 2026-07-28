@@ -47,7 +47,7 @@ test('globalValueNoise agrees at negative coordinates too', () => {
 const {
   generateRegion,
   generateChunk,
-  sampleBiome,
+  sampleTerrain,
   worldConfig,
 } = require('../src/services/mapService');
 
@@ -58,7 +58,7 @@ test('worldConfig fills defaults and rejects empty tileTypes', () => {
   const cfg = worldConfig({ seed: 1, tileTypes: BIOMES });
   assert.equal(cfg.chunkSize, 64);
   assert.equal(cfg.cellSize, 8);
-  assert.deepEqual(cfg.biomeNames.sort(), ['forest', 'grass', 'meadow', 'water']);
+  assert.deepEqual(cfg.terrainNames.sort(), ['forest', 'grass', 'meadow', 'water']);
   assert.throws(() => worldConfig({ seed: 1, tileTypes: {} }));
 });
 

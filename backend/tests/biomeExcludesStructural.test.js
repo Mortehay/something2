@@ -3,7 +3,7 @@
 // Structural overlay tiles (map_wall, map_doorway, wooden_wall, village_gate)
 // must never be sampled as biome terrain — they are stamped explicitly by
 // stampBounds/stampVillage. Regression test for the biome-leak bug where
-// worldConfig's biomeNames included every non-path tile, letting the
+// worldConfig's terrainNames included every non-path tile, letting the
 // structural overlay tiles show up as random terrain blobs.
 const test = require('node:test');
 const assert = require('node:assert');
@@ -11,17 +11,17 @@ const { worldConfig, generateRegion } = require('../src/services/mapService');
 
 const STRUCTURAL = ['map_wall', 'map_doorway', 'wooden_wall', 'village_gate'];
 
-test('worldConfig.biomeNames excludes structural overlay tiles', () => {
+test('worldConfig.terrainNames excludes structural overlay tiles', () => {
   const cfg = worldConfig({
     tileTypes: {
       grass: {}, water: {},
       map_wall: {}, map_doorway: {}, wooden_wall: {}, village_gate: {},
     },
   });
-  assert.ok(cfg.biomeNames.includes('grass'));
-  assert.ok(cfg.biomeNames.includes('water'));
+  assert.ok(cfg.terrainNames.includes('grass'));
+  assert.ok(cfg.terrainNames.includes('water'));
   for (const name of STRUCTURAL) {
-    assert.ok(!cfg.biomeNames.includes(name), `biomeNames should not include ${name}`);
+    assert.ok(!cfg.terrainNames.includes(name), `terrainNames should not include ${name}`);
   }
 });
 
@@ -45,7 +45,7 @@ test('generateRegion never leaks structural tiles into biome-sampled terrain', (
 
 test('worldConfig falls back to structural tiles when they are the ONLY tiles (degenerate fixture)', () => {
   const cfg = worldConfig({ tileTypes: { map_wall: {} } });
-  assert.ok(Array.isArray(cfg.biomeNames));
-  assert.ok(cfg.biomeNames.length > 0, 'biomeNames must never be empty');
-  assert.deepEqual(cfg.biomeNames, ['map_wall']);
+  assert.ok(Array.isArray(cfg.terrainNames));
+  assert.ok(cfg.terrainNames.length > 0, 'terrainNames must never be empty');
+  assert.deepEqual(cfg.terrainNames, ['map_wall']);
 });

@@ -15,7 +15,7 @@ test('generateWorldPreview returns a dim x dim grid of biome or path names', () 
   assert.equal(grid.length, 64);
   assert.ok(grid.every((row) => row.length === 64));
   const cfg = worldConfig(world);
-  const allowed = new Set([...cfg.biomeNames, cfg.pathTile]); // ['grass','water','path']
+  const allowed = new Set([...cfg.terrainNames, cfg.pathTile]); // ['grass','water','path']
   for (const row of grid) {
     for (const cell of row) assert.ok(allowed.has(cell), `unexpected cell ${cell}`);
   }

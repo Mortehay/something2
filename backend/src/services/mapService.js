@@ -103,6 +103,44 @@ function detectPathTile(tileNames, override) {
     return tileNames.find((n) => PATH_NAME_RE.test(n)) || null;
 }
 
+// A biome's terrain list, reduced to tiles this world can actually place:
+// present in the catalog, not a structural overlay tile, not the path tile.
+// A biome that filters down to nothing (references only deleted or structural
+// tiles) must not yield `undefined` tile names, so callers fall back to the
+// global list — see sampleTerrain.
+function biomeTerrainNames(biome, names, pathTile) {
+  return (biome.terrain_tiles || []).filter(
+    (n) => names.includes(n) && !STRUCTURAL_TILES.has(n) && n !== pathTile,
+  );
+}
+
+// Normalize raw biome rows (services/biomes.js shape) into the compact records
+// the samplers use. Done once per worldConfig call rather than per tile.
+function normalizeBiomes(rawBiomes, names, pathTile) {
+  if (!Array.isArray(rawBiomes)) return [];
+  return rawBiomes
+    .filter((b) => b && typeof b.name === 'string')
+    .map((b) => ({
+      name: b.name,
+      terrainNames: biomeTerrainNames(b, names, pathTile),
+      floraTypes: Array.isArray(b.flora_types) ? b.flora_types : [],
+      creatureTypes: Array.isArray(b.creature_types) ? b.creature_types : [],
+    }));
+}
+
+// Biome-field noise cell size, in tiles. A world wants roughly
+// min(width, height) / 3 so each biome gets a visible region instead of one
+// biome swallowing the map; that is the derived default when the world does
+// not pin `biomeCell`. Unbounded worlds have no size to derive from.
+const DEFAULT_BIOME_CELL = 24;
+function resolveBiomeCell(world) {
+  if (Number.isFinite(world.biomeCell) && world.biomeCell > 0) return Math.floor(world.biomeCell);
+  if (world.width && world.height) {
+    return Math.max(8, Math.floor(Math.min(world.width, world.height) / 3));
+  }
+  return DEFAULT_BIOME_CELL;
+}
+
 // Normalize a world config, applying defaults and deriving name lists. Throws
 // on empty tileTypes (a world must have at least one tile).
 function worldConfig(world = {}) {
@@ -114,7 +152,7 @@ function worldConfig(world = {}) {
     : detectPathTile(names);
   const nonStructural = names.filter((n) => !STRUCTURAL_TILES.has(n));
   const biomeSource = nonStructural.length > 0 ? nonStructural : names;
-  const biomeNames = pathTile && biomeSource.length > 1
+  const terrainNames = pathTile && biomeSource.length > 1
     ? biomeSource.filter((n) => n !== pathTile)
     : biomeSource;
   return {
@@ -125,7 +163,9 @@ function worldConfig(world = {}) {
     pathJitter: world.pathJitter || 6,
     pathTile,
     names,
-    biomeNames,
+    terrainNames,
+    biomes: normalizeBiomes(world.biomes, names, pathTile),
+    biomeCell: resolveBiomeCell(world),
     bounds: (world.width && world.height) ? {
       width: world.width,
       height: world.height,
@@ -146,12 +186,32 @@ function worldConfig(world = {}) {
   };
 }
 
-// Biome tile name at absolute world coords: band the global noise value across
-// the biome names (path tile excluded — paths are stamped separately).
-function sampleBiome(cfg, gRow, gCol) {
+// Decorrelates the biome field from the terrain field. Sharing a seed would
+// put every region border exactly on a terrain-band border and collapse the
+// two-level sampler back into one level.
+const BIOME_FIELD_XOR = 0x6a09e667;
+
+// Which biome owns this absolute cell, or null when the world declares none.
+// Coarse global noise (biomeCell >> cellSize), so regions read as places and
+// stay continuous across chunk borders for the same reason terrain does.
+function sampleBiomeRegion(cfg, gRow, gCol) {
+  if (cfg.biomes.length === 0) return null;
+  const v = globalValueNoise((cfg.seed ^ BIOME_FIELD_XOR) >>> 0, gRow, gCol, cfg.biomeCell);
+  return cfg.biomes[Math.min(cfg.biomes.length - 1, Math.floor(v * cfg.biomes.length))];
+}
+
+// Terrain tile name at absolute world coords: band the global terrain noise
+// across the names available AT THIS CELL -- the owning biome's list when the
+// world has biomes, else every non-structural tile (the pre-biome behaviour,
+// preserved bit-for-bit: same seed, same field, same name list). A biome whose
+// list filtered down to nothing falls back to the global list rather than
+// producing undefined tiles. The path tile is excluded from both lists --
+// paths are stamped separately.
+function sampleTerrain(cfg, gRow, gCol) {
+  const region = sampleBiomeRegion(cfg, gRow, gCol);
+  const names = (region && region.terrainNames.length) ? region.terrainNames : cfg.terrainNames;
   const v = globalValueNoise(cfg.seed, gRow, gCol, cfg.cellSize);
-  const idx = Math.min(cfg.biomeNames.length - 1, Math.floor(v * cfg.biomeNames.length));
-  return cfg.biomeNames[idx];
+  return names[Math.min(names.length - 1, Math.floor(v * names.length))];
 }
 
 // Coherent overview grid for a world preview: a dim x dim CONTIGUOUS window of
@@ -229,7 +289,7 @@ function generateRegion(world, rMin, cMin, rows, cols) {
       const gRow = rMin + r, gCol = cMin + c;
       row[c] = cfg.pathTile && paths.has(`${gRow},${gCol}`)
         ? cfg.pathTile
-        : sampleBiome(cfg, gRow, gCol);
+        : sampleTerrain(cfg, gRow, gCol);
     }
     grid[r] = row;
   }
@@ -831,7 +891,9 @@ module.exports = {
     hash2,
     globalValueNoise,
     worldConfig,
-    sampleBiome,
+    sampleTerrain,
+    sampleBiomeRegion,
+    biomeTerrainNames,
     generateWorldPreview,
     overviewOrigin,
     generateWorldOverview,
