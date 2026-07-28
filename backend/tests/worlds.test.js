@@ -106,11 +106,12 @@ test('GET chunk cache MISS generates and returns an NxN grid WITHOUT inserting',
     [/SELECT .* FROM world_chunks/i, () => ({ rows: [] })],               // cache miss
     [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42', chunk_size: 8 }] })],
     [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
+    [/FROM entity_types/i, () => ({ rows: [] })],                        // decoration defs (Task C)
     [/FROM map_links/i, () => ({ rows: [] })],
     [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
-    // NO INSERT INTO world_chunks / entity_types / world_creatures handlers:
-    // the authority alone materializes chunks and spawns creatures now, so if
-    // the route issues any of those queries, mockPool throws.
+    // NO INSERT INTO world_chunks / world_creatures handlers: the authority
+    // alone materializes chunks and spawns creatures now, so if the route
+    // issues either of those queries, mockPool throws.
   ]);
   __setPool(pool);
   const res = await request(app).get('/api/worlds/w1/chunk?cx=1&cy=-2');
@@ -120,6 +121,7 @@ test('GET chunk cache MISS generates and returns an NxN grid WITHOUT inserting',
   assert.equal(res.body.cy, -2);
   assert.equal(res.body.data.length, 8);        // chunk_size rows
   assert.equal(res.body.data[0].length, 8);     // chunk_size cols
+  assert.deepEqual(res.body.decorations, []);   // no decoration defs in this fixture
   assert.ok(
     !pool.calls.some((c) => /INSERT INTO world_chunks/i.test(c.sql)),
     'GET /chunk must not insert into world_chunks',
@@ -130,16 +132,23 @@ test('GET chunk cache MISS generates and returns an NxN grid WITHOUT inserting',
   );
 });
 
-test('GET chunk cache HIT returns cached data without regenerating', async () => {
+test('GET chunk cache HIT returns cached data without regenerating, plus decorations', async () => {
   const cached = [['grass', 'grass'], ['dirt', 'water']];
   const pool = mockPool([
     [/SELECT .* FROM world_chunks/i, () => ({ rows: [{ data: cached }] })],  // cache hit
-    // No worlds/tile_types handlers: if the route queries them on a hit, mockPool throws.
+    // A hit still needs the world config + decoration defs (Task C): decorations
+    // are derived from the tile grid regardless of where the grid came from.
+    [/FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', seed: '42', chunk_size: 8 }] })],
+    [/FROM tile_types/i, () => ({ rows: TILE_ROWS })],
+    [/FROM entity_types/i, () => ({ rows: [] })],
+    [/FROM map_links/i, () => ({ rows: [] })],
+    [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);
   const res = await request(app).get('/api/worlds/w1/chunk?cx=0&cy=0');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.data, cached);
+  assert.deepEqual(res.body.decorations, []);
 });
 
 test('GET chunk returns 404 for an unknown world on cache miss', async () => {

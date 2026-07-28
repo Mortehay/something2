@@ -5,7 +5,7 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts, villageMerchantPost, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateChunkDecorations, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts, villageMerchantPost, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages } = require('./services/villages');
 const { seedBaseCatalog, seedItemAcrossVillages } = require('./services/merchantStock');
@@ -230,6 +230,21 @@ async function getTileTypesMap() {
     };
   });
   return tileTypes;
+}
+
+// Decoration defs for GET /chunk's generateChunkDecorations call. Same query
+// as authority/server.js's loadDecorationDefs (not imported: that module
+// doesn't export it) -- keep the two in sync so the REST preview and the
+// authority's blocking overlay place decorations identically.
+async function getDecorationDefs() {
+  const { rows } = await pool.query(
+    `SELECT name, walkable, spawn_tiles, chance
+       FROM entity_types
+      WHERE is_creature = false
+        AND spawn_tiles IS NOT NULL
+        AND jsonb_array_length(spawn_tiles) > 0`,
+  );
+  return rows;
 }
 
 // Helper to get entity types
@@ -1663,32 +1678,47 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
     }
     const worldId = req.params.id;
 
+    // Loaded on BOTH the cache-hit and cache-miss paths below: decorations are
+    // derived from the tile grid regardless of whether that grid came from the
+    // world_chunks cache or was just generated, so the world config + defs are
+    // needed either way. Mirror authority/server.js's loadWorld -> ServerMap
+    // config field-for-field (seed, chunkSize, tileTypes, width, height,
+    // doorways, villages, entry_spawn) so this endpoint's generateChunkDecorations
+    // call agrees with the authority's, including which cells are excluded
+    // around entry_spawn.
+    const worldRes = await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
+    const world = worldRes.rows[0];
+    if (!world) return res.status(404).json({ error: 'world not found' });
+
+    const tileTypes = await getTileTypesMap();
+    const decorationDefs = await getDecorationDefs();
+    const worldCfg = {
+      seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
+      width: world.width, height: world.height,
+      doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
+      villages: await fetchVillages(pool, world.id),
+      entry_spawn: world.entry_spawn,
+    };
+
     // Cache hit?
     const cached = await pool.query(
       'SELECT data FROM world_chunks WHERE world_id = $1 AND cx = $2 AND cy = $3',
       [worldId, cx, cy],
     );
     if (cached.rows[0]) {
-      return res.json({ world_id: worldId, cx, cy, data: cached.rows[0].data });
+      const data = cached.rows[0].data;
+      const decorations = generateChunkDecorations(worldCfg, cx, cy, data, decorationDefs);
+      return res.json({ world_id: worldId, cx, cy, data, decorations });
     }
 
     // Miss: generate terrain and return it WITHOUT persisting. The authority is
     // the sole writer of world_chunks (it materializes + spawns creatures on
     // chunk activation); terrain is deterministic so this unpersisted view
     // equals the row the authority later writes.
-    const worldRes = await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
-    const world = worldRes.rows[0];
-    if (!world) return res.status(404).json({ error: 'world not found' });
+    const data = generateChunk(worldCfg, cx, cy);
+    const decorations = generateChunkDecorations(worldCfg, cx, cy, data, decorationDefs);
 
-    const tileTypes = await getTileTypesMap();
-    const data = generateChunk(
-      { seed: Number(world.seed), chunkSize: world.chunk_size, tileTypes,
-        width: world.width, height: world.height, doorways: (await fetchLinks(pool, world.id)).map((l) => l.edge),
-        villages: await fetchVillages(pool, world.id) },
-      cx, cy,
-    );
-
-    res.json({ world_id: worldId, cx, cy, data });
+    res.json({ world_id: worldId, cx, cy, data, decorations });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch chunk' });
