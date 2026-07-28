@@ -134,7 +134,16 @@ function normalizeBiomes(rawBiomes, names, pathTile) {
 // not pin `biomeCell`. Unbounded worlds have no size to derive from.
 const DEFAULT_BIOME_CELL = 24;
 function resolveBiomeCell(world) {
-  if (Number.isFinite(world.biomeCell) && world.biomeCell > 0) return Math.floor(world.biomeCell);
+  if (Number.isFinite(world.biomeCell)) {
+    const floored = Math.floor(world.biomeCell);
+    // A floored value < 1 (fractional 0<x<1, zero, or negative) would divide
+    // globalValueNoise by zero or a negative cell size -- NaN propagates
+    // through Math.floor(NaN * length) into an out-of-bounds array index,
+    // silently returning `undefined` from sampleBiomeRegion in violation of
+    // its `record | null` contract. Fall through to the derived/default cell
+    // instead of trusting a value this small.
+    if (floored >= 1) return floored;
+  }
   if (world.width && world.height) {
     return Math.max(8, Math.floor(Math.min(world.width, world.height) / 3));
   }

@@ -64,6 +64,21 @@ test('worldConfig drops the path tile from a biome terrain list', () => {
   assert.deepEqual(cfg.biomes[0].terrainNames, ['rocks']);
 });
 
+test('normalizeBiomes drops malformed entries but keeps the valid ones', () => {
+  // Regression pin for the `.filter((b) => b && typeof b.name === 'string')`
+  // guard in normalizeBiomes: deleting it leaves every other test green (none
+  // of them feed it garbage) yet `world.biomes = [null]` would throw when a
+  // later stage tries to read `.name` off it.
+  const cfg = worldConfig(biomeWorld({ biomes: [null, DUNES, {}, { name: 5 }] }));
+  assert.equal(cfg.biomes.length, 1);
+  assert.equal(cfg.biomes[0].name, 'Arid Dunes');
+});
+
+test('normalizeBiomes treats a non-array biomes value as no biomes', () => {
+  const cfg = worldConfig(biomeWorld({ biomes: 'nope' }));
+  assert.deepEqual(cfg.biomes, []);
+});
+
 test('EXCLUSION: every generated tile belongs to the biome that owns its cell', () => {
   const world = biomeWorld();
   const cfg = worldConfig(world);
@@ -134,7 +149,10 @@ test('DEGENERATE: a biome whose tiles are all unknown falls back to global terra
 
 test('sampleBiomeRegion returns null when the world declares no biomes', () => {
   const cfg = worldConfig(biomeWorld({ biomes: [] }));
-  assert.equal(sampleBiomeRegion(cfg, 3, 7), null);
+  // strictEqual, not equal: loose equality treats null and undefined as
+  // equal, so this would still pass if sampleBiomeRegion returned undefined
+  // -- violating its documented `record | null` contract.
+  assert.strictEqual(sampleBiomeRegion(cfg, 3, 7), null);
 });
 
 test('biomeCell: explicit value wins', () => {
@@ -154,6 +172,71 @@ test('biomeCell: derived value never drops below 8', () => {
 test('biomeCell: unbounded worlds fall back to 24', () => {
   const cfg = worldConfig(biomeWorld({ biomeCell: null }));
   assert.equal(cfg.biomeCell, 24);
+});
+
+test('biomeCell: a fractional value in (0,1) does not floor to a degenerate 0', () => {
+  // Math.floor(0.5) === 0, and globalValueNoise(..., cellSize: 0) divides by
+  // zero -> NaN -> Math.floor(NaN * length) is NaN -> cfg.biomes[NaN] is
+  // undefined, so sampleBiomeRegion would silently return undefined instead
+  // of a record, in violation of its documented `record | null` contract.
+  const cfg = worldConfig(biomeWorld({ biomeCell: 0.5 }));
+  assert.ok(cfg.biomeCell >= 1, `resolved biomeCell ${cfg.biomeCell} must never floor to < 1`);
+  const region = sampleBiomeRegion(cfg, 3, 7);
+  assert.ok(region && typeof region.name === 'string', 'must still resolve a real region');
+});
+
+test('biomeCell: zero and negative values also fall through to the derived/default cell', () => {
+  assert.ok(worldConfig(biomeWorld({ biomeCell: 0 })).biomeCell >= 1);
+  assert.ok(worldConfig(biomeWorld({ biomeCell: -5 })).biomeCell >= 1);
+});
+
+test('REGRESSION: sampleBiomeRegion must actually sample at cfg.biomeCell, not cfg.cellSize', () => {
+  // Mutating sampleBiomeRegion to read cfg.cellSize instead of cfg.biomeCell
+  // leaves all other tests green (biomeWorld's cellSize is fixed at 8, so the
+  // biomeCell-derivation tests above still pass -- they only check the
+  // resolved number on cfg, never that the sampler consumes it). Pin the
+  // actual field behaviour instead: a coarser biomeCell must produce visibly
+  // longer contiguous runs than a finer one, holding everything else fixed.
+  function meanRunLength(cfg, span) {
+    let runs = 1;
+    let prev = sampleBiomeRegion(cfg, 0, 0).name;
+    for (let c = 1; c < span; c++) {
+      const name = sampleBiomeRegion(cfg, 0, c).name;
+      if (name !== prev) { runs++; prev = name; }
+    }
+    return span / runs;
+  }
+  const span = 200;
+  const fineRun = meanRunLength(worldConfig(biomeWorld({ biomeCell: 8 })), span);
+  const coarseRun = meanRunLength(worldConfig(biomeWorld({ biomeCell: 64 })), span);
+  assert.ok(coarseRun > fineRun * 3,
+    `expected biomeCell=64 to produce much longer runs than biomeCell=8 (coarse=${coarseRun.toFixed(1)}, fine=${fineRun.toFixed(1)})`);
+});
+
+test('REGRESSION: sampleBiomeRegion is a continuous function of absolute coords, not periodic in a fixed window', () => {
+  // Injecting `gRow %= 16; gCol %= 16;` at the top of sampleBiomeRegion makes
+  // (r, c) and (r + 16, c) [or c + 16] agree 100% of the time, everywhere,
+  // for any biomeCell -- because JS's %-operator remainder is invariant
+  // under adding an exact multiple of 16, including for negative operands.
+  // A real continuous field sampled at a biomeCell that is not a divisor of
+  // 16 (40 here) should NOT agree with its +16 neighbour anywhere near that
+  // often. Sample many points, including large and negative coordinates, so
+  // this can't pass by chance the way a single-pair check could.
+  const cfg = worldConfig(biomeWorld({ biomeCell: 40 }));
+  const points = [];
+  for (let r = -500; r <= 500; r += 97) {
+    for (let c = -500; c <= 500; c += 131) points.push([r, c]);
+  }
+  assert.ok(points.length >= 50, 'sanity: enough sample points to be statistically meaningful');
+  let rowShiftMatches = 0, colShiftMatches = 0;
+  for (const [r, c] of points) {
+    if (sampleBiomeRegion(cfg, r, c).name === sampleBiomeRegion(cfg, r + 16, c).name) rowShiftMatches++;
+    if (sampleBiomeRegion(cfg, r, c).name === sampleBiomeRegion(cfg, r, c + 16).name) colShiftMatches++;
+  }
+  assert.ok(rowShiftMatches / points.length < 0.97,
+    `row+16 agreed ${(rowShiftMatches / points.length * 100).toFixed(1)}% of the time -- looks periodic`);
+  assert.ok(colShiftMatches / points.length < 0.97,
+    `col+16 agreed ${(colShiftMatches / points.length * 100).toFixed(1)}% of the time -- looks periodic`);
 });
 
 test('the biome field is decorrelated from the terrain field', () => {
