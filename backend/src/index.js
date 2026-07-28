@@ -810,7 +810,7 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
-    const cur = await pool.query('SELECT name FROM biomes WHERE id = $1', [id]);
+    const cur = await pool.query('SELECT name, terrain_tiles FROM biomes WHERE id = $1', [id]);
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Biome not found' });
     const oldName = cur.rows[0].name;
     if (oldName !== name.trim()) {
@@ -822,6 +822,18 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
         });
       }
     }
+    const nextTerrainTiles = nameArray(terrain_tiles);
+    // terrain_tiles is the one biome column baked into a WORLD's persisted
+    // world_chunks.data (services/mapService.js generateChunk picks each
+    // cell's tile from it). flora_types/creature_types only feed decorations
+    // and creature placement, and BOTH of those are recomputed fresh from the
+    // current biome row on every /chunk and creature-reroll request (never
+    // cached) -- so only a terrain_tiles change can leave a stale persisted
+    // grid behind. palette/art_style/exclusions/color are prompt-and-display
+    // only and never touch generation at all. Deliberately narrow: wiping
+    // every referencing world's terrain over an art-style typo fix would be
+    // its own bug.
+    const terrainChanged = JSON.stringify(nameArray(cur.rows[0].terrain_tiles)) !== JSON.stringify(nextTerrainTiles);
     const result = await pool.query(
       `UPDATE biomes SET name = $1, terrain_tiles = $2::jsonb, flora_types = $3::jsonb,
          creature_types = $4::jsonb, palette = $5::jsonb, art_style = $6, exclusions = $7,
@@ -829,12 +841,21 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
        WHERE id = $9 RETURNING *`,
       [
         name.trim(),
-        JSON.stringify(nameArray(terrain_tiles)), JSON.stringify(nameArray(flora_types)),
+        JSON.stringify(nextTerrainTiles), JSON.stringify(nameArray(flora_types)),
         JSON.stringify(nameArray(creature_types)), JSON.stringify(nameArray(palette)),
         art_style || '', exclusions || '', color || '#888888', id,
       ],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Biome not found' });
+    // Same divergence this file's world-PUT boundsChanged/biomesChanged branch
+    // exists to prevent, reached through the other door: a world doesn't need
+    // to be edited for its terrain to go stale, its biome definition can
+    // change out from under it. Reuse invalidateWorld() rather than a second
+    // ad hoc cache-clearing mechanism.
+    if (terrainChanged) {
+      const affected = await worldsReferencingBiome(name.trim());
+      await Promise.all(affected.map((w) => invalidateWorld(w.id)));
+    }
     res.json(result.rows[0]);
   } catch (err) {
     if (isUniqueViolation(err)) return res.status(409).json({ error: 'a biome with that name already exists' });
