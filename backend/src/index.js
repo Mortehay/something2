@@ -11,6 +11,7 @@ const { fetchVillages } = require('./services/villages');
 const { seedBaseCatalog, seedItemAcrossVillages } = require('./services/merchantStock');
 const { loadDecorationDefs } = require('./services/decorationDefs');
 const { loadBiomes } = require('./services/biomes');
+const { composeBiomePrompt } = require('./services/biomePrompt');
 const { buildWorldGenConfig } = require('./services/worldGenConfig');
 require('dotenv').config();
 
@@ -927,14 +928,20 @@ app.get('/api/sprite-capability', async (req, res) => {
 // for that tier.
 async function startGenerationJob(req, res, { subject, kind, defaultFrames, failureMessage }) {
   try {
-    const { base_prompt, backend, frames, seed = 0, tier } = req.body;
+    const { base_prompt, biome, backend, frames, seed = 0, tier } = req.body;
+    // Biome art context (palette / style / exclusions) is composed into the
+    // base prompt HERE so all three job kinds get it and sprite-gen's
+    // prompts.py stays untouched. An unknown biome name degrades to the plain
+    // base prompt rather than failing the job.
+    const [biomeRow] = biome ? await loadBiomes(pool, [biome]) : [];
+    const prompt = composeBiomePrompt(base_prompt, biomeRow || null);
     let effectiveTier = tier;
     if (!effectiveTier && !backend) {
       // Best-effort: if capability lookup fails, let sprite-gen use its own default.
       try { effectiveTier = (await spriteGen.getCapability()).tier; } catch (_) { /* ignore */ }
     }
     const gen = await spriteGen.postGenerate({
-      creature: subject, base_prompt, kind, backend, frames, seed, tier: effectiveTier,
+      creature: subject, base_prompt: prompt, kind, backend, frames, seed, tier: effectiveTier,
     });
     // Record the actually-chosen backend/frames (from the recipe when not pinned).
     const chosenBackend = backend || (gen.recipe && gen.recipe.backend) || 'stub';
