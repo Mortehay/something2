@@ -810,7 +810,9 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
-    const cur = await pool.query('SELECT name, terrain_tiles FROM biomes WHERE id = $1', [id]);
+    const cur = await pool.query(
+      'SELECT name, terrain_tiles, flora_types, creature_types FROM biomes WHERE id = $1', [id],
+    );
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Biome not found' });
     const oldName = cur.rows[0].name;
     if (oldName !== name.trim()) {
@@ -823,17 +825,36 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
       }
     }
     const nextTerrainTiles = nameArray(terrain_tiles);
+    const nextFlora = nameArray(flora_types);
+    const nextCreatures = nameArray(creature_types);
     // terrain_tiles is the one biome column baked into a WORLD's persisted
     // world_chunks.data (services/mapService.js generateChunk picks each
-    // cell's tile from it). flora_types/creature_types only feed decorations
-    // and creature placement, and BOTH of those are recomputed fresh from the
-    // current biome row on every /chunk and creature-reroll request (never
-    // cached) -- so only a terrain_tiles change can leave a stale persisted
-    // grid behind. palette/art_style/exclusions/color are prompt-and-display
-    // only and never touch generation at all. Deliberately narrow: wiping
-    // every referencing world's terrain over an art-style typo fix would be
-    // its own bug.
+    // cell's tile from it), so it's the only column whose change can leave a
+    // stale PERSISTED grid behind -- palette/art_style/exclusions/color are
+    // prompt-and-display only and never touch generation at all.
     const terrainChanged = JSON.stringify(nameArray(cur.rows[0].terrain_tiles)) !== JSON.stringify(nextTerrainTiles);
+    // flora_types/creature_types are never persisted, so they don't need a
+    // world_chunks wipe -- but they are NOT harmlessly re-resolved on every
+    // request like the (now-corrected) comment above used to claim. An idle
+    // world does re-resolve them on its next load, but a LIVE one does not:
+    // authority/server.js's loadWorld() resolves loadBiomes() exactly once,
+    // inside its memoized load promise, and bakes the result into that
+    // world's ServerMap config for the rest of the session; collision.js's
+    // blockedDecorationsFor() memoizes per chunk key off that same frozen
+    // config, not off a re-resolution, so every chunk it computes for the
+    // rest of the session -- including ones first visited long after this
+    // edit -- still uses activation-era flora_types. Meanwhile a fresh
+    // /chunk request re-resolves biomes every time. So removing a blocking
+    // flora entry here can leave a connected player's client rendering an
+    // open tile the live authority's isWalkable still refuses: a server
+    // correction / rubber-band, same failure class as the terrain case
+    // above, just reached through decorations instead of world_chunks. No DB
+    // row is stale, so this only needs evictOrWarn (idle world: nothing to
+    // do, it re-resolves on its next load; live world: warn, matching
+    // terrainChanged's warning).
+    const decorationChanged =
+      JSON.stringify(nameArray(cur.rows[0].flora_types)) !== JSON.stringify(nextFlora)
+      || JSON.stringify(nameArray(cur.rows[0].creature_types)) !== JSON.stringify(nextCreatures);
     const result = await pool.query(
       `UPDATE biomes SET name = $1, terrain_tiles = $2::jsonb, flora_types = $3::jsonb,
          creature_types = $4::jsonb, palette = $5::jsonb, art_style = $6, exclusions = $7,
@@ -841,8 +862,8 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
        WHERE id = $9 RETURNING *`,
       [
         name.trim(),
-        JSON.stringify(nextTerrainTiles), JSON.stringify(nameArray(flora_types)),
-        JSON.stringify(nameArray(creature_types)), JSON.stringify(nameArray(palette)),
+        JSON.stringify(nextTerrainTiles), JSON.stringify(nextFlora),
+        JSON.stringify(nextCreatures), JSON.stringify(nameArray(palette)),
         art_style || '', exclusions || '', color || '#888888', id,
       ],
     );
@@ -851,12 +872,23 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
     // exists to prevent, reached through the other door: a world doesn't need
     // to be edited for its terrain to go stale, its biome definition can
     // change out from under it. Reuse invalidateWorld() rather than a second
-    // ad hoc cache-clearing mechanism.
+    // ad hoc cache-clearing mechanism -- including surfacing its liveWarning,
+    // same as every other invalidateWorld() caller (F-017/SOMET-197, see the
+    // comment above evictOrWarn): a player connected to an affected world
+    // means the DB write happened but the live simulation is still serving
+    // pre-edit terrain, and the admin response must say so instead of a bare
+    // 200 that implies the edit fully landed.
+    let liveWarning;
     if (terrainChanged) {
       const affected = await worldsReferencingBiome(name.trim());
-      await Promise.all(affected.map((w) => invalidateWorld(w.id)));
+      const warnings = await Promise.all(affected.map((w) => invalidateWorld(w.id)));
+      liveWarning = warnings.find(Boolean);
+    } else if (decorationChanged) {
+      const affected = await worldsReferencingBiome(name.trim());
+      const warnings = affected.map((w) => evictOrWarn(w.id));
+      liveWarning = warnings.find(Boolean);
     }
-    res.json(result.rows[0]);
+    res.json(liveWarning ? { ...result.rows[0], liveWarning } : result.rows[0]);
   } catch (err) {
     if (isUniqueViolation(err)) return res.status(409).json({ error: 'a biome with that name already exists' });
     console.error(err);

@@ -4,9 +4,13 @@ const request = require('supertest');
 // helpers/auth.js MUST be required before ../src/index.js — it sets JWT_SECRET
 // before the guards read it.
 const { authHeaders, isUserLookup, ADMIN_USER_ROW } = require('./helpers/auth.js');
-const { app, __setPool } = require('../src/index.js');
+const { app, __setPool, __setAuthorityHandle } = require('../src/index.js');
 
 const ADMIN_HEADERS = authHeaders();
+
+// Always leave the module-level authorityHandle clean for every other test in
+// this process, mirroring tests/worldsAdminRoutes.test.js.
+test.afterEach(() => { __setAuthorityHandle(null); });
 
 function mockPool(handlers) {
   const calls = [];
@@ -74,7 +78,12 @@ test('PUT /api/biomes/:id allows a rename when nothing references the old name',
   // 'Meadow' -- the earlier 409 test alone can't distinguish "correctly
   // refused" from "always refuses").
   const pool = mockPool([
-    [/SELECT name.*FROM biomes WHERE id/i, () => ({ rows: [{ name: 'Meadow', terrain_tiles: ['grass'] }] })],
+    // flora_types/creature_types included and matching BIOME's so this test
+    // stays scoped to the rename guard: no decoration change means no second
+    // worldsReferencingBiome lookup or evictOrWarn call to account for.
+    [/SELECT name.*FROM biomes WHERE id/i, () => ({
+      rows: [{ name: 'Meadow', terrain_tiles: ['grass'], flora_types: ['bush'], creature_types: ['Slime'] }],
+    })],
     [/FROM worlds WHERE biomes/i, () => ({ rows: [] })],
     [/UPDATE biomes SET/i, () => ({ rows: [{ ...BIOME, name: 'Pasture' }] })],
   ]);
@@ -108,17 +117,86 @@ test('PUT /api/biomes/:id invalidates every world listing it when terrain_tiles 
 test('PUT /api/biomes/:id does NOT invalidate worlds when only cosmetic fields change', async () => {
   // palette/art_style/exclusions/color are prompt-and-display only -- wiping
   // every referencing world's terrain over an art-style typo fix would be a
-  // separate bug. No /FROM worlds WHERE biomes/i handler is registered below
-  // on purpose: if the route mistakenly looked up referencing worlds anyway,
-  // the mock's throw-on-unexpected-query guard would turn that into a 500.
+  // separate bug. terrain_tiles/flora_types/creature_types in the cur-select
+  // fixture all match what's sent below, so neither terrainChanged nor
+  // decorationChanged should fire. No /FROM worlds WHERE biomes/i handler is
+  // registered below on purpose: if the route mistakenly looked up
+  // referencing worlds anyway, the mock's throw-on-unexpected-query guard
+  // would turn that into a 500.
   const pool = mockPool([
-    [/SELECT name.*FROM biomes WHERE id/i, () => ({ rows: [{ name: 'Meadow', terrain_tiles: ['grass'] }] })],
+    [/SELECT name.*FROM biomes WHERE id/i, () => ({
+      rows: [{ name: 'Meadow', terrain_tiles: ['grass'], flora_types: ['bush'], creature_types: ['Slime'] }],
+    })],
     [/UPDATE biomes SET/i, () => ({ rows: [{ ...BIOME, color: '#123456' }] })],
   ]);
   __setPool(pool);
   const res = await request(app).put('/api/biomes/1').set(ADMIN_HEADERS)
     .send({ ...BIOME, terrain_tiles: ['grass'], color: '#123456' });
   assert.equal(res.status, 200);
+  assert.ok(!pool.calls.some((c) => /DELETE FROM world_chunks/i.test(c.sql)));
+  assert.equal(res.body.liveWarning, undefined, 'a cosmetic-only edit must not surface a live-world warning either');
+});
+
+test('PUT /api/biomes/:id surfaces a liveWarning when terrain_tiles changes on a world with a connected player', async () => {
+  // invalidateWorld() returns evictOrWarn()'s string; every other caller in
+  // this file surfaces it (F-017/SOMET-197). Dropping it here would mean the
+  // DB write (and the chunk wipe) happened but the admin got a bare 200 with
+  // no indication the live simulation is still serving pre-edit terrain.
+  const pool = mockPool([
+    [/SELECT name.*FROM biomes WHERE id/i, () => ({ rows: [{ name: 'Meadow', terrain_tiles: ['grass'] }] })],
+    [/UPDATE biomes SET/i, () => ({ rows: [{ ...BIOME, terrain_tiles: ['sand'] }] })],
+    [/FROM worlds WHERE biomes/i, () => ({ rows: [{ id: 'w1', name: 'Entry' }] })],
+    [/DELETE FROM world_chunks/i, () => ({ rows: [] })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
+  const res = await request(app).put('/api/biomes/1').set(ADMIN_HEADERS).send({ ...BIOME, terrain_tiles: ['sand'] });
+  assert.equal(res.status, 200, 'the DB write still succeeds -- only the live simulation is stale');
+  assert.match(res.body.liveWarning, /connected/i,
+    'the response must say the change did not reach the live world, not silently claim success');
+});
+
+test('PUT /api/biomes/:id evicts an idle referencing world when only flora_types/creature_types change', async () => {
+  // flora_types/creature_types are never persisted, so an idle world doesn't
+  // need world_chunks wiped -- it just needs to be evicted from the
+  // authority's in-memory registry so its NEXT load re-resolves biomes,
+  // instead of a live session silently keeping its activation-era config
+  // forever (see the decorationChanged comment in the route for why that
+  // config goes stale: loadWorld() resolves loadBiomes() once and bakes it
+  // into ServerMap; blockedDecorationsFor() memoizes per chunk off that same
+  // frozen config, not off a re-resolution).
+  const evicted = [];
+  const pool = mockPool([
+    [/SELECT name.*FROM biomes WHERE id/i, () => ({
+      rows: [{ name: 'Meadow', terrain_tiles: ['grass'], flora_types: ['bush'], creature_types: ['Slime'] }],
+    })],
+    [/UPDATE biomes SET/i, () => ({ rows: [{ ...BIOME, flora_types: ['pine_tree'] }] })],
+    [/FROM worlds WHERE biomes/i, () => ({ rows: [{ id: 'w1', name: 'Entry' }] })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: (id) => { evicted.push(id); return true; }, isWorldLive: () => false });
+  const res = await request(app).put('/api/biomes/1').set(ADMIN_HEADERS)
+    .send({ ...BIOME, flora_types: ['pine_tree'] });
+  assert.equal(res.status, 200);
+  assert.deepEqual(evicted, ['w1'], 'a flora_types change must evict every referencing world, not just terrain_tiles');
+  assert.ok(!pool.calls.some((c) => /DELETE FROM world_chunks/i.test(c.sql)),
+    'flora_types/creature_types are never persisted, so no chunk wipe is needed -- only eviction');
+  assert.equal(res.body.liveWarning, undefined, 'eviction succeeded, so there is nothing to warn about');
+});
+
+test('PUT /api/biomes/:id warns (without wiping chunks) when creature_types changes on a connected world', async () => {
+  const pool = mockPool([
+    [/SELECT name.*FROM biomes WHERE id/i, () => ({
+      rows: [{ name: 'Meadow', terrain_tiles: ['grass'], flora_types: ['bush'], creature_types: ['Slime'] }],
+    })],
+    [/UPDATE biomes SET/i, () => ({ rows: [{ ...BIOME, creature_types: ['Wolf'] }] })],
+    [/FROM worlds WHERE biomes/i, () => ({ rows: [{ id: 'w1', name: 'Entry' }] })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
+  const res = await request(app).put('/api/biomes/1').set(ADMIN_HEADERS).send({ ...BIOME, creature_types: ['Wolf'] });
+  assert.equal(res.status, 200);
+  assert.match(res.body.liveWarning, /connected/i);
   assert.ok(!pool.calls.some((c) => /DELETE FROM world_chunks/i.test(c.sql)));
 });
 
@@ -195,6 +273,28 @@ test('PUT /api/worlds/:id changing the biome set wipes that world\'s cached chun
   assert.equal(res.status, 200);
   assert.ok(pool.calls.some((c) => /DELETE FROM world_chunks/i.test(c.sql)),
     'changing the biome set changes terrain, so cached chunks must be invalidated');
+});
+
+test('PUT /api/worlds/:id changing the biome set surfaces a liveWarning for a connected world', async () => {
+  // Mirrors tests/worldsAdminRoutes.test.js's creature-reroll liveWarning
+  // test. The biomesChanged disjunct feeding evictOrWarn(id) here has no
+  // other test able to see it -- dropping it (mutation M8) still passes
+  // every OTHER test in this suite, since none of them set an authority
+  // handle.
+  const pool = mockPool([
+    [/SELECT id, width, height, biomes, biome_cell FROM worlds WHERE id/i,
+      () => ({ rows: [{ id: 'w1', width: 30, height: 30, biomes: [], biome_cell: null }] })],
+    [/DELETE FROM world_chunks/i, () => ({ rows: [] })],
+    [/UPDATE worlds SET/i, () => ({ rows: [{ id: 'w1', name: 'Entry', biomes: ['Meadow'] }] })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
+  const res = await request(app).put('/api/worlds/w1').set(ADMIN_HEADERS).send({
+    name: 'Entry', biomes: ['Meadow'],
+  });
+  assert.equal(res.status, 200, 'the DB write still succeeds -- only the live simulation is stale');
+  assert.match(res.body.liveWarning, /connected/i,
+    'a biome-set change on a world with a connected player must warn, exactly like a bounds change does');
 });
 
 test('PUT /api/worlds/:id with an unchanged biome set does NOT wipe chunks', async () => {
