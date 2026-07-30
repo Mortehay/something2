@@ -1619,6 +1619,33 @@ app.put('/api/worlds/:id/graph-position', adminGuard, async (req, res) => {
   }
 });
 
+// One snapshot for the World Map tab. Composes GET /api/worlds and the
+// per-world GET /api/worlds/:id/links (both already public) into a single
+// request — 17 worlds would otherwise be 1 + N round trips — and a single
+// snapshot avoids a torn read where a world is deleted between calls.
+//
+// `links` deliberately returns BOTH directions of every link, uncollapsed.
+// setLink writes a row and its mirror, so the client can pair them itself;
+// serving pre-collapsed pairs would destroy the evidence its missing-mirror
+// lint check depends on. Both queries are ORDER BY'd so the payload is stable
+// between requests.
+app.get('/api/world-graph', async (req, res) => {
+  try {
+    const [worldsRes, linksRes] = await Promise.all([
+      pool.query(
+        `SELECT id, name, width, height, is_entry, biomes, graph_x, graph_y
+           FROM worlds ORDER BY created_at DESC`),
+      pool.query(
+        `SELECT from_world_id, edge, to_world_id
+           FROM map_links ORDER BY from_world_id, edge`),
+    ]);
+    res.json({ worlds: worldsRes.rows, links: linksRes.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load world graph' });
+  }
+});
+
 app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
