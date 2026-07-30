@@ -43,7 +43,7 @@ const Button = styled.button`
 const bounded = (w) => !!(w.width && w.height);
 
 function MapGraphAdmin() {
-  const { worlds, links, isLoadingGraph } = useWorldGraph();
+  const { worlds, links, isLoadingGraph, graphError } = useWorldGraph();
   const { biomes } = useBiomes();
   const savePosition = useSaveGraphPosition();
   const setLink = useSetLink();
@@ -80,46 +80,62 @@ function MapGraphAdmin() {
       : { ...seedPositions(linkable, links), ...dragged }
   ), [linkable, links, dragged]);
 
-  // A signature of the SEEDED layout only -- computed straight from
-  // seedPositions(linkable, links), deliberately NOT filtered off `positions`
-  // or `dragged`. This feeds the re-fit effect below (auto-placed siblings
-  // can land off-screen after a re-anchor -- see that effect's comment for
-  // the full story); this memo exists to answer one question cheaply: did
-  // the CONFIRMED layout actually change.
+  // A signature of the AUTO-PLACED layout only -- computed from
+  // seedPositions(linkable, links) but restricted to worlds whose SERVER
+  // graph_x/graph_y (read off `linkable`, never off local `dragged` state --
+  // see below) are not finite. This feeds the re-fit effect below
+  // (auto-placed siblings can land off-screen after a re-anchor -- see that
+  // effect's comment for the full story); this memo exists to answer one
+  // question cheaply: did the CONFIRMED auto-placed layout actually change.
   //
-  // Why not `linkable.filter((w) => !dragged[w.id]).map(...positions[w.id])`
-  // (i.e. reuse `positions`, just excluding whatever's currently dragged):
-  // `dragged` gains the just-moved node's id synchronously inside
+  // Why restricted to the not-yet-stored subset, rather than every
+  // `linkable` world: seedPositions() echoes a stored world's own
+  // graph_x/graph_y straight back unchanged (that's what "stored" means --
+  // see its own comment). Including those entries here would mean EVERY
+  // persisted drag of an already-pinned node -- including a one-pixel nudge
+  // that sent no sibling off-screen -- changes the signature and fires a
+  // re-fit, discarding the admin's zoom/pan on every single edit. Node
+  // positions are cosmetic and links are the source of truth, but that does
+  // not make a drag's own framing free to blow away: the whole point of
+  // dragging is to choose where a node sits on screen, and a `fit()` right
+  // after undoes exactly that choice. Restricting to the unstored subset
+  // means a drag of an already-pinned node never appears in this signature at
+  // all, in either its pre- or post-persist state, so it can never trigger a
+  // re-fit by itself.
+  //
+  // Why read `Number.isFinite(w.graph_x)` off `linkable` and not off
+  // `dragged`: `dragged` gains the just-moved node's id synchronously inside
   // `onDragFree`, at `dragfree` time -- before `savePosition.mutate`'s
-  // network round-trip even starts, let alone finishes. Filtering by
-  // `dragged` would make that node's entry vanish from the joined string at
-  // that exact synchronous moment, which is itself a signature change --
-  // firing a re-fit on literally every drag, including a one-pixel nudge of
-  // an already-pinned node, before the drop is even confirmed to have
-  // persisted. Computing straight from `seedPositions(linkable, links)`
-  // instead means the entry set is always every `linkable` world (stable
-  // regardless of what's mid-drag), and no VALUE in it can change until
-  // `worlds`/`links` themselves change -- which only happens after
+  // network round-trip even starts, let alone finishes. Keying this off
+  // `dragged` would flip that node from "unstored" to "stored" (and vice
+  // versa, depending on which set the check used) at that exact synchronous
+  // moment, which is itself a signature change -- firing a re-fit on
+  // literally every drag before the drop is even confirmed to have
+  // persisted. `linkable`'s `graph_x`/`graph_y` only change once
   // `useSaveGraphPosition`'s onSuccess invalidates `["worldGraph"]` and the
   // refetch actually lands: dragfree -> setDragged -> mutate -> (network) ->
-  // invalidate -> refetch -> new worlds/links -> THIS memo recomputes. Only
-  // then can a sibling's re-anchored coordinate actually be different from
-  // what it was.
+  // invalidate -> refetch -> new worlds/links -> THIS memo recomputes.
   //
-  // Trade-off worth stating plainly: this still re-fits after ANY persisted
-  // drag that changes a stored world's graph_x/graph_y, including a small
-  // nudge of a world that was already pinned and never sent a neighbour
-  // off-screen. There is no cheap way to ask "is anything now actually
+  // Trade-off worth stating plainly: dragging a world that had NO stored
+  // position yet still re-fits once, after that drag's own mutation
+  // persists -- the dragged world itself drops out of the unstored set (it
+  // now has a finite graph_x/graph_y), and any remaining unstored sibling can
+  // legitimately have been re-walked to a new cell now that the walk anchors
+  // through it. There is no cheap way to ask "is anything now actually
   // outside the current viewport" short of measuring rendered bounding boxes
   // against the viewport rect, which is more machinery than this bug
-  // warrants. The accepted cost is one settle-then-reframe per persisted
-  // edit, not a jump mid-gesture and not a fit on every render.
+  // warrants. The accepted cost is one settle-then-reframe the first time a
+  // previously-unpositioned world is placed, not a jump mid-gesture and not a
+  // fit on every render or every re-drag of an already-pinned node.
   //
-  // Keys sorted before joining so the signature reflects only actual
-  // coordinate changes, never incidental object-key ordering.
+  // Ids sorted before joining so the signature reflects only actual
+  // coordinate (or set-membership) changes, never incidental ordering.
   const seededSignature = useMemo(() => {
     const seeded = seedPositions(linkable, links);
-    return Object.keys(seeded).sort()
+    const unstoredIds = linkable
+      .filter((w) => !Number.isFinite(w.graph_x) || !Number.isFinite(w.graph_y))
+      .map((w) => w.id);
+    return unstoredIds.sort()
       .map((id) => `${id}:${seeded[id].x},${seeded[id].y}`)
       .join('|');
   }, [linkable, links]);
@@ -166,7 +182,16 @@ function MapGraphAdmin() {
 
   const colourOf = useMemo(() => {
     const map = new Map((biomes || []).map((b) => [b.name, b.color]));
-    return (names) => (names || []).map((n) => map.get(n)).filter(Boolean);
+    // Not `.filter(Boolean)`: biomeRingSvg is built (and tested — see its
+    // 'substitutes the neutral colour for a rejected entry, keeping arc
+    // count' test) to substitute the neutral colour for an entry it can't
+    // resolve while PRESERVING the arc count. Filtering here first strips a
+    // biome name absent from the catalog before biomeRingSvg ever sees it, so
+    // a 3-biome world renders a 2-biome ring -- misrepresenting the banding
+    // order the ring exists to show. `|| ''` hands biomeRingSvg a value that
+    // fails SAFE_COLOR_RE (same as any other unresolvable colour), which is
+    // exactly the substitution path it already covers.
+    return (names) => (names || []).map((n) => map.get(n) || '');
   }, [biomes]);
 
   const warnings = useMemo(
@@ -482,17 +507,36 @@ function MapGraphAdmin() {
   const commitPending = async () => {
     if (!pending) return;
     const plan = planLinkChange({ links, ...pending });
+    // Full rows, not just plan.clears' {fromId, edge}: naming what was
+    // destroyed (not just where) needs the old to_world_id too. Same
+    // deterministic inputs as plan.clears, so it iterates in the same order.
+    const clearRows = linksReplacedBy({ links, fromId: pending.fromId, edge: pending.edge, toId: pending.toId });
+    let destroyedCount = 0;
     setBusy(true);
     try {
       for (const c of plan.clears) {
         await clearLink.mutateAsync({ id: c.fromId, edge: c.edge });
+        destroyedCount += 1;
       }
       await setLink.mutateAsync({ id: plan.create.fromId, edge: plan.create.edge, to_world_id: plan.create.toId });
       setPending(null);
     } catch {
       // The hooks already toast the underlying failure. Say what state we
-      // are actually in.
-      toast.error('Link change did not complete — the diagram has been refreshed to show the real state.');
+      // are actually in: `clearRows` up to `destroyedCount` are the clears
+      // that actually completed before the failure (the for-loop above stops
+      // at the first rejection, so anything after that index never ran).
+      // This is the only data-destroying action in the tab, so a generic
+      // "did not complete" leaves the admin with no idea what to re-create by
+      // hand -- name them, using the same nameOf() the rest of this panel
+      // does.
+      if (destroyedCount > 0) {
+        const lost = clearRows.slice(0, destroyedCount)
+          .map((r) => `${nameOf(r.from_world_id)} ${r.edge} → ${nameOf(r.to_world_id)}`)
+          .join('; ');
+        toast.error(`Link change did not complete — these links were destroyed and NOT recreated: ${lost}`);
+      } else {
+        toast.error('Link change did not complete — the diagram has been refreshed to show the real state.');
+      }
     } finally {
       setBusy(false);
       qc.invalidateQueries({ queryKey: ['worldGraph'] });
@@ -500,6 +544,12 @@ function MapGraphAdmin() {
   };
 
   if (isLoadingGraph) return <AdminContainer>Loading world graph…</AdminContainer>;
+  // useWorldGraph already toasts this (see toastGraphError in useMapGraph.js);
+  // render an explicit error state too, rather than falling through to the
+  // canvas with empty `worlds`/`links` -- that would show a green "No
+  // problems found." consistency panel, a positive claim about state this
+  // component never actually received.
+  if (graphError) return <AdminContainer>Failed to load the world graph: {graphError.message}</AdminContainer>;
 
   return (
     <AdminContainer>

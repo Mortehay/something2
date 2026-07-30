@@ -1,12 +1,26 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
 
+// F-023 (see useWorlds.js): a caller that destructures only {worlds, links,
+// isLoadingGraph} and skips the error sees a failed fetch render as an
+// indistinguishable-from-empty graph (isLoadingGraph -> false, worlds/links
+// stay []), which MapGraphAdmin's consistency panel then reports as "No
+// problems found." -- a positive claim about state the client never received.
+// Exported standalone so the error->message mapping is unit-testable without
+// a query/render harness.
+export function toastGraphError(graphError) {
+  if (graphError) toast.error(`Failed to load the world graph: ${graphError.message}`);
+}
+
 // One snapshot of every world plus every link row (both directions).
 export function useWorldGraph() {
-  const { data, isLoading } = useQuery({
+  // TanStack Query v5 removed per-query `onError` from useQuery options, so
+  // errors are surfaced via the returned `error`.
+  const { data, isLoading, error: graphError } = useQuery({
     queryKey: ["worldGraph"],
     queryFn: async () => {
       const res = await apiFetch(`${API_URL}/api/world-graph`);
@@ -14,10 +28,12 @@ export function useWorldGraph() {
       return res.json();
     },
   });
+  useEffect(() => { toastGraphError(graphError); }, [graphError]);
   return {
     worlds: data?.worlds || [],
     links: data?.links || [],
     isLoadingGraph: isLoading,
+    graphError,
   };
 }
 
