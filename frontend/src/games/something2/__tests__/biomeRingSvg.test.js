@@ -69,4 +69,24 @@ describe('biomeRingSvg', () => {
     expect(svg).toContain('width="100"');
     expect(svg).toContain('stroke-width="12"');
   });
+
+  // `empty` reaches the same `stroke` attribute as the caller's colours, so it
+  // has to clear the same bar.
+  it('sanitises the `empty` option too', () => {
+    const svg = decode(biomeRingSvg(['not-a-colour'], { empty: '" onload="alert(1)' }));
+    expect(svg).not.toContain('onload');
+    expect(svg).not.toContain('alert');
+    expect(svg).toContain('#555555');
+  });
+
+  it('honours a safe custom `empty` colour', () => {
+    const svg = decode(biomeRingSvg([], { empty: '#abc' }));
+    expect(svg).toContain('#abc');
+  });
+
+  it('falls back to neutral for every rejected entry, keeping arc count', () => {
+    const svg = decode(biomeRingSvg(['bad', 'also-bad']));
+    expect(svg.match(/<circle/g)).toHaveLength(2);
+    expect(svg).toContain('#555555');
+  });
 });

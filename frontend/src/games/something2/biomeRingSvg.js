@@ -13,9 +13,15 @@ export const SAFE_COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const NEUTRAL = '#555555';
 
 export function biomeRingSvg(colors, { size = 64, thickness = 8, empty = NEUTRAL } = {}) {
+  // `empty` lands in the same `stroke` attribute as the caller's colours, so it
+  // goes through the same allowlist. Without this it would be a second, entirely
+  // unguarded way into the SVG.
+  const fallback = typeof empty === 'string' && SAFE_COLOR_RE.test(empty.trim())
+    ? empty.trim()
+    : NEUTRAL;
   const list = (Array.isArray(colors) ? colors : [])
-    .map((c) => (typeof c === 'string' && SAFE_COLOR_RE.test(c.trim()) ? c.trim() : empty));
-  const arcs = list.length > 0 ? list : [empty];
+    .map((c) => (typeof c === 'string' && SAFE_COLOR_RE.test(c.trim()) ? c.trim() : fallback));
+  const arcs = list.length > 0 ? list : [fallback];
 
   const radius = (size - thickness) / 2;
   const centre = size / 2;
