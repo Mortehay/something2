@@ -86,6 +86,26 @@ describe('cross-tab invalidation', () => {
     expect(exportedBlock(src('useMapGraph.js'), 'useWorldGraph')).toContain('/api/world-graph');
   });
 
+  // World create/update/delete all change what the World Map tab should draw
+  // (a new node, a bounds/biome change, a node disappearing). Without this,
+  // App.jsx's 60s staleTime hides the change from a remounted World Map tab —
+  // and for delete specifically, a stale diagram lets an admin draw a new link
+  // to a world that no longer exists (see item A of the final review wave).
+  it('useUpdateWorld invalidates the worldGraph query key on success', () => {
+    const handler = onSuccessOf(exportedBlock(src('useMapsAdmin.js'), 'useUpdateWorld'));
+    expect(handler).toContain('queryKey: ["worldGraph"]');
+  });
+
+  it('useCreateWorld invalidates the worldGraph query key on success', () => {
+    const handler = onSuccessOf(exportedBlock(src('useWorlds.js'), 'useCreateWorld'));
+    expect(handler).toContain('queryKey: ["worldGraph"]');
+  });
+
+  it('useDeleteWorld invalidates the worldGraph query key on success', () => {
+    const handler = onSuccessOf(exportedBlock(src('useWorlds.js'), 'useDeleteWorld'));
+    expect(handler).toContain('queryKey: ["worldGraph"]');
+  });
+
   // Guards the instrument itself: if onSuccessOf ever stopped narrowing, every
   // test above would quietly go back to matching the whole function body.
   it('the onSuccess slice excludes the error handler', () => {
