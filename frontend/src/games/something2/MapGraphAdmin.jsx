@@ -80,6 +80,50 @@ function MapGraphAdmin() {
       : { ...seedPositions(linkable, links), ...dragged }
   ), [linkable, links, dragged]);
 
+  // A signature of the SEEDED layout only -- computed straight from
+  // seedPositions(linkable, links), deliberately NOT filtered off `positions`
+  // or `dragged`. This feeds the re-fit effect below (auto-placed siblings
+  // can land off-screen after a re-anchor -- see that effect's comment for
+  // the full story); this memo exists to answer one question cheaply: did
+  // the CONFIRMED layout actually change.
+  //
+  // Why not `linkable.filter((w) => !dragged[w.id]).map(...positions[w.id])`
+  // (i.e. reuse `positions`, just excluding whatever's currently dragged):
+  // `dragged` gains the just-moved node's id synchronously inside
+  // `onDragFree`, at `dragfree` time -- before `savePosition.mutate`'s
+  // network round-trip even starts, let alone finishes. Filtering by
+  // `dragged` would make that node's entry vanish from the joined string at
+  // that exact synchronous moment, which is itself a signature change --
+  // firing a re-fit on literally every drag, including a one-pixel nudge of
+  // an already-pinned node, before the drop is even confirmed to have
+  // persisted. Computing straight from `seedPositions(linkable, links)`
+  // instead means the entry set is always every `linkable` world (stable
+  // regardless of what's mid-drag), and no VALUE in it can change until
+  // `worlds`/`links` themselves change -- which only happens after
+  // `useSaveGraphPosition`'s onSuccess invalidates `["worldGraph"]` and the
+  // refetch actually lands: dragfree -> setDragged -> mutate -> (network) ->
+  // invalidate -> refetch -> new worlds/links -> THIS memo recomputes. Only
+  // then can a sibling's re-anchored coordinate actually be different from
+  // what it was.
+  //
+  // Trade-off worth stating plainly: this still re-fits after ANY persisted
+  // drag that changes a stored world's graph_x/graph_y, including a small
+  // nudge of a world that was already pinned and never sent a neighbour
+  // off-screen. There is no cheap way to ask "is anything now actually
+  // outside the current viewport" short of measuring rendered bounding boxes
+  // against the viewport rect, which is more machinery than this bug
+  // warrants. The accepted cost is one settle-then-reframe per persisted
+  // edit, not a jump mid-gesture and not a fit on every render.
+  //
+  // Keys sorted before joining so the signature reflects only actual
+  // coordinate changes, never incidental object-key ordering.
+  const seededSignature = useMemo(() => {
+    const seeded = seedPositions(linkable, links);
+    return Object.keys(seeded).sort()
+      .map((id) => `${id}:${seeded[id].x},${seeded[id].y}`)
+      .join('|');
+  }, [linkable, links]);
+
   // A drag-to-connect gesture never writes anything by itself -- it only
   // proposes { fromId, edge, toId } here. The confirm panel is what calls
   // commitPending(). `selectedEdge` is the delete-side counterpart: which
@@ -371,6 +415,36 @@ function MapGraphAdmin() {
     };
   }, [cy, savePosition.mutate]);
 
+  // `preset` (the layout below) only fits the viewport once, at mount:
+  // react-cytoscapejs's patchLayout only re-runs a layout when the `layout`
+  // prop itself diffs, and it diffs by VALUE (shallowObjDiff), so
+  // `{ name: 'preset' }` compared to the exact same object on every
+  // subsequent render is never "different" -- the layout (and its implicit
+  // `fit: true`) never runs again after mount. Meanwhile `seedPositions`
+  // legitimately re-measures every auto-placed (unsaved) world relative to
+  // whichever of its neighbours DOES have a saved position -- so the moment
+  // an admin drags a previously-unpositioned world and that drag persists,
+  // its unsaved siblings can be walked to a genuinely different cell, one
+  // that may be outside whatever the viewport was fit to at mount. Without
+  // this effect that sibling sits off-screen until a full page reload.
+  //
+  // Keyed on `seededSignature`, not `positions`/`dragged`/every render: see
+  // that memo's own comment for why it only changes once a drag's mutation
+  // is confirmed by a refetch, never mid-gesture and never merely because a
+  // node entered `dragged`.
+  //
+  // `cy.fit(undefined, 30)` on an empty collection is a harmless no-op --
+  // confirmed in cytoscape/src/core/viewport.mjs's `getFitViewport`:
+  // `elements` defaults to `this.mutableElements()` when omitted, and
+  // `if (elements.empty()) return;` fires before `fit()` ever reads or
+  // writes zoom/pan -- so this is safe to call before any world has
+  // rendered (e.g. an empty or entirely-unbounded world list).
+  useEffect(() => {
+    if (!cy) return undefined;
+    cy.fit(undefined, 30);
+    return undefined;
+  }, [cy, seededSignature]);
+
   // Toggling link mode on ungrabifies every node (see the `ehRef`/`linkMode`
   // state comment) -- so this is a genuine mode switch the admin has to
   // choose, not two gestures that happily coexist. Reads `ehRef.current` at
@@ -438,6 +512,19 @@ function MapGraphAdmin() {
             layout={{ name: 'preset' }}
             style={{ width: '100%', height: '100%' }}
             cy={setCy}
+            // Cytoscape's own default maxZoom is 1e50 (effectively
+            // unbounded) -- `fit()`'s zoom crop (viewport.mjs: `zoom = zoom
+            // > this._private.maxZoom ? this._private.maxZoom : zoom`) only
+            // helps if something has actually set a real ceiling. With a
+            // one- or two-node graph that meant fitting to roughly 6x/3.7x
+            // zoom. Now that fits happen repeatedly (see the re-fit effect
+            // below), not just once at mount, that is more likely to be hit.
+            // `maxZoom` is a supported, patched prop -- confirmed in
+            // react-cytoscapejs/src/types.js (declared in `types`, which
+            // `CytoscapeComponent.propTypes` is) and src/patch.js (`maxZoom`
+            // is one of the "simple keys that can be patched directly", via
+            // `cy.maxZoom(value)`).
+            maxZoom={1.5}
           />
         </CanvasCard>
         <Side>
