@@ -1594,6 +1594,31 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
   }
 });
 
+// Node position for the World Map tab. Deliberately its OWN route rather than
+// a field on PUT /api/worlds/:id: that route deletes world_chunks, clears the
+// preview/overview caches and evicts or warns connected players when bounds or
+// biomes change. A cosmetic node drag must not be able to reach any of that, so
+// this issues one UPDATE of two columns and nothing else.
+app.put('/api/worlds/:id/graph-position', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { x, y } = req.body;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return res.status(400).json({ error: 'x and y must be finite numbers' });
+    }
+    const result = await pool.query(
+      `UPDATE worlds SET graph_x = $1, graph_y = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3 RETURNING id, graph_x, graph_y`,
+      [x, y, id],
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'world not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save graph position' });
+  }
+});
+
 app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
