@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
 import CytoscapeComponent from 'react-cytoscapejs';
 import cytoscape from 'cytoscape';
@@ -83,11 +83,42 @@ function MapGraphAdmin() {
   // A drag-to-connect gesture never writes anything by itself -- it only
   // proposes { fromId, edge, toId } here. The confirm panel is what calls
   // commitPending(). `selectedEdge` is the delete-side counterpart: which
-  // drawn edge (by its Cytoscape id, `${fromId}|${edge}`) is currently
-  // selected on the canvas.
+  // drawn edge (identified by its Cytoscape id, `${fromId}|${edge}`) is
+  // currently selected on the canvas -- it stores only that key, not a
+  // snapshot of the row, so it can be re-checked against live `links` on
+  // every render instead of outliving the row it pointed at.
   const [pending, setPending] = useState(null); // { fromId, toId, edge }
-  const [selectedEdge, setSelectedEdge] = useState(null); // { fromId, edge, toId }
+  const [selectedEdge, setSelectedEdge] = useState(null); // { fromId, edge }
   const [busy, setBusy] = useState(false);
+  // The edgehandles instance, and whether the canvas is currently in
+  // "draw a link" mode. cytoscape-edgehandles v4 has no separate handle
+  // element on hover -- reading node_modules/cytoscape-edgehandles's bundled
+  // source (cy-listeners.js's addCytoscapeListeners), the ONLY place that
+  // calls this.start() is `cy.on('tapstart', 'node', e => { if (this.drawMode)
+  // this.start(e.target); })`. Without drawMode on, tapping/dragging a node
+  // only ever grabs and repositions it -- the gesture that creates a link
+  // literally cannot begin. drawMode is therefore a real, mutually exclusive
+  // mode switch (see toggleDrawMode in draw-mode.js: turning it on calls
+  // `cy.autoungrabify(true)`, so nodes stop being draggable for repositioning
+  // while link mode is on), not an optional nicety -- hence `linkMode` is
+  // surfaced as an explicit toggle in the side panel below rather than left
+  // implicit.
+  //
+  // The instance itself is a REF, not state, unlike `cy` above: `cy` has to
+  // be state because it is a dependency an effect re-runs on. `eh` is read
+  // only inside `toggleLinkMode`, an event handler that always reads
+  // whatever `ehRef.current` holds at click time -- it does not need a
+  // render to see a fresh value the way an effect's dependency array does.
+  // Setting it via `setState` inside the effect below would itself be a
+  // lint violation (react-hooks/set-state-in-effect: synchronous setState in
+  // an effect body triggers a needless cascading re-render) with no
+  // corresponding benefit here, since nothing renders differently once `eh`
+  // exists except the Mode button's `disabled` state, which is driven off
+  // `cy` instead (by the time `cy` is truthy in a committed render, this
+  // effect has already run and populated the ref -- effects run before the
+  // user can click anything).
+  const ehRef = useRef(null);
+  const [linkMode, setLinkMode] = useState(false);
 
   const colourOf = useMemo(() => {
     const map = new Map((biomes || []).map((b) => [b.name, b.color]));
@@ -162,6 +193,20 @@ function MapGraphAdmin() {
     },
     { selector: 'edge[mirrored = "false"]', style: { 'line-color': '#f59e0b', 'line-style': 'dashed' } },
     { selector: ':selected', style: { 'border-color': '#facc15', 'border-width': 3, 'line-color': '#facc15' } },
+    // Edgehandles' own classes -- checked against node_modules/cytoscape-
+    // edgehandles's bundled source (gesture-lifecycle.js's start/preview/
+    // unpreview): '.eh-source' is added to the node a drag gesture started
+    // from; '.eh-target'/'.eh-preview-active' mark the node currently
+    // snapped-to as the prospective target; '.eh-preview' marks the
+    // in-progress rubber-band edge (a real, temporary edge element, not the
+    // ghost line) once a target is snapped; '.eh-ghost-edge' is the line
+    // tracking the cursor before anything is snapped. Without these the
+    // in-progress gesture is nearly invisible -- it inherits the plain node/
+    // edge styles above.
+    { selector: '.eh-source', style: { 'border-color': '#4a9eff', 'border-width': 3 } },
+    { selector: '.eh-target', style: { 'border-color': '#22c55e', 'border-width': 3 } },
+    { selector: '.eh-preview', style: { 'line-color': '#22c55e', 'line-style': 'solid' } },
+    { selector: '.eh-ghost-edge', style: { 'line-color': '#4a9eff', 'line-style': 'dashed', width: 2 } },
   ]), []);
 
   // Persist a node's position when the admin finishes dragging it. Also
@@ -189,8 +234,18 @@ function MapGraphAdmin() {
   // (same reasoning as the comment on `useState(null)` above: it needs to
   // re-run once `cy` actually exists). `cy.edgehandles()` is started here too
   // rather than once at mount, since it needs the same live `cy` instance;
-  // `eh.destroy()` undoes it in the cleanup so a re-run (or unmount) never
-  // stacks a second edgehandles instance on the same core.
+  // `ehInstance.destroy()` undoes it in the cleanup so a re-run (or unmount)
+  // never stacks a second edgehandles instance on the same core.
+  //
+  // `snapFrequency: 15` is passed explicitly, not left to the documented
+  // default: reading node_modules/cytoscape-edgehandles's index.js, the snap
+  // throttle is built from the RAW options object (`1000 / options.
+  // snapFrequency`), not a version merged with defaults first. `{ snap: true }`
+  // alone leaves `options.snapFrequency` undefined, so the throttle wait is
+  // `1000 / undefined` = NaN, which lodash.throttle treats as a 0ms wait --
+  // the snap scan (a walk over every node's distance to the cursor) would run
+  // on literally every 'tapdrag' tick instead of at ~15Hz. `snap: true` is
+  // kept even though it's also the library default, purely as documentation.
   //
   // ehcomplete's 4th argument is technically a Cytoscape *collection*
   // (`cy.collection().merge(...)` internally), not a single edge element --
@@ -199,7 +254,24 @@ function MapGraphAdmin() {
   // the collection always holds exactly the one preview edge edgehandles just
   // added. It is removed immediately because this UI confirms before it
   // writes anything -- the pending proposal, not the edge itself, is what
-  // gets shown.
+  // gets shown. `ehInstance.disableDrawMode()` runs right after: it restores
+  // `cy.autoungrabify()` to whatever it was before link mode was switched on
+  // (see toggleDrawMode in draw-mode.js -- `enableDrawMode` snapshots the
+  // PRIOR autoungrabify state and `disableDrawMode` restores exactly that
+  // value, which is `false` here since nothing else in this component ever
+  // sets it), so node dragging/repositioning (and its `dragfree` persistence)
+  // is usable again the moment a link gesture completes, without the admin
+  // having to remember to flip the toggle back off themselves.
+  //
+  // `onSelect` ignores any edge id without a `|`: `elements` above is the
+  // only place this component builds a real edge, and it always ids one
+  // `${fromId}|${edge}`. Edgehandles' own preview/ghost edges get
+  // auto-generated ids with no `|` in them. Before link mode could actually
+  // run (see the `eh`/`linkMode` comment), that distinction was moot because
+  // those temporary edges are `.remove()`d before `select` could ever fire on
+  // one -- but they DO briefly exist as real elements mid-gesture, so this
+  // guard is defensive against a future gesture change routing a select event
+  // through here before cleanup.
   useEffect(() => {
     if (!cy) return undefined;
     const onDragFree = (evt) => {
@@ -208,16 +280,21 @@ function MapGraphAdmin() {
       setDragged((prev) => ({ ...prev, [node.id()]: { x, y } }));
       savePosition.mutate({ id: node.id(), x, y });
     };
-    const eh = cy.edgehandles({ snap: true });
-    const onComplete = (evt, source, target, addedEdge) => {
-      addedEdge.remove();
+    const ehInstance = cy.edgehandles({ snap: true, snapFrequency: 15 });
+    ehRef.current = ehInstance;
+    const onComplete = (evt, source, target, addedEles) => {
+      addedEles.remove();
+      ehInstance.disableDrawMode();
+      setLinkMode(false);
       const a = source.position();
       const b = target.position();
       setPending({ fromId: source.id(), toId: target.id(), edge: compassFromDelta(b.x - a.x, b.y - a.y) });
     };
     const onSelect = (evt) => {
-      const [fromId, edge] = evt.target.id().split('|');
-      setSelectedEdge({ fromId, edge, toId: evt.target.data('target') });
+      const id = evt.target.id();
+      if (!id.includes('|')) return;
+      const [fromId, edge] = id.split('|');
+      setSelectedEdge({ fromId, edge });
     };
     const onUnselect = () => setSelectedEdge(null);
     cy.on('dragfree', 'node', onDragFree);
@@ -229,14 +306,38 @@ function MapGraphAdmin() {
       cy.off('ehcomplete', onComplete);
       cy.off('select', 'edge', onSelect);
       cy.off('unselect', 'edge', onUnselect);
-      eh.destroy();
+      ehInstance.destroy();
+      ehRef.current = null;
     };
   }, [cy, savePosition.mutate]);
+
+  // Toggling link mode on ungrabifies every node (see the `ehRef`/`linkMode`
+  // state comment) -- so this is a genuine mode switch the admin has to
+  // choose, not two gestures that happily coexist. Reads `ehRef.current` at
+  // click time rather than closing over a state value.
+  const toggleLinkMode = () => {
+    const eh = ehRef.current;
+    if (!eh) return;
+    if (linkMode) {
+      eh.disableDrawMode();
+      setLinkMode(false);
+    } else {
+      eh.enableDrawMode();
+      setLinkMode(true);
+    }
+  };
 
   const nameOf = (id) => (worlds.find((w) => w.id === id) || {}).name || id;
   const replaced = pending
     ? linksReplacedBy({ links, fromId: pending.fromId, edge: pending.edge, toId: pending.toId })
     : [];
+  // Re-checked against the current `links` on every render, rather than
+  // trusting whatever `selectedEdge` was set to at select-time: if the link
+  // disappears underneath the selection (another admin, another tab, or this
+  // admin's own commit), `selectedRow` goes undefined and the panel below
+  // stops rendering itself -- it cannot outlive the row it points at.
+  const selectedRow = selectedEdge
+    && links.find((l) => l.from_world_id === selectedEdge.fromId && l.edge === selectedEdge.edge);
 
   // Runs the plan in order and reports a partial failure honestly: a create
   // that fails after the clears already landed leaves those worlds
@@ -304,15 +405,15 @@ function MapGraphAdmin() {
                 <Button onClick={commitPending} disabled={busy}>
                   {replaced.length > 0 ? 'Replace and link' : 'Create link'}
                 </Button>
-                <Button $bg="#555" onClick={() => setPending(null)}>Cancel</Button>
+                <Button $bg="#555" onClick={() => setPending(null)} disabled={busy}>Cancel</Button>
               </Row>
             </Card>
           )}
-          {selectedEdge && (
+          {selectedRow && (
             <Card>
               <strong style={{ color: '#aaa' }}>Selected link</strong>
               <Row>
-                {nameOf(selectedEdge.fromId)} {selectedEdge.edge} → {nameOf(selectedEdge.toId)}
+                {nameOf(selectedRow.from_world_id)} {selectedRow.edge} → {nameOf(selectedRow.to_world_id)}
               </Row>
               <Warn>Removing this clears BOTH directions, and rebuilds terrain for both worlds.</Warn>
               <Row>
@@ -322,8 +423,14 @@ function MapGraphAdmin() {
                   onClick={async () => {
                     setBusy(true);
                     try {
-                      await clearLink.mutateAsync({ id: selectedEdge.fromId, edge: selectedEdge.edge });
+                      await clearLink.mutateAsync({ id: selectedRow.from_world_id, edge: selectedRow.edge });
                       setSelectedEdge(null);
+                    } catch {
+                      // useClearLink already toasts the underlying failure;
+                      // this only stops the rejection from surfacing as an
+                      // unhandled promise rejection in the console, which
+                      // would otherwise be noise Task 10's browser pass has
+                      // to sift a real error out of.
                     } finally {
                       setBusy(false);
                       qc.invalidateQueries({ queryKey: ['worldGraph'] });
@@ -335,6 +442,19 @@ function MapGraphAdmin() {
               </Row>
             </Card>
           )}
+          <Card>
+            <strong style={{ color: '#aaa' }}>Mode</strong>
+            <Row>
+              <Button $bg={linkMode ? '#22c55e' : '#555'} onClick={toggleLinkMode} disabled={!cy}>
+                {linkMode ? 'Link mode: on' : 'Link mode: off'}
+              </Button>
+            </Row>
+            <Dim>
+              {linkMode
+                ? 'Drag from one world to another to propose a link. Nodes cannot be repositioned while this is on.'
+                : 'Drag a world to reposition it. Turn on link mode to draw a new link instead.'}
+            </Dim>
+          </Card>
           <Card>
             <strong style={{ color: '#aaa' }}>Consistency</strong>
             {warnings.length === 0 && <Dim>No problems found.</Dim>}
