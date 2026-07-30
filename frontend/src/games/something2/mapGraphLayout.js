@@ -31,10 +31,14 @@ export function seedPositions(worlds, links, { cell = 220 } = {}) {
   const list = Array.isArray(worlds) ? worlds : [];
   const out = {};
   const stored = new Set();
+  // Occupied grid cells, seeded from positions the admin already chose so the
+  // walk below cannot place a neighbour on top of one of them.
+  const taken = new Set();
   for (const w of list) {
     if (Number.isFinite(w.graph_x) && Number.isFinite(w.graph_y)) {
       out[w.id] = { x: w.graph_x, y: w.graph_y };
       stored.add(w.id);
+      taken.add(`${Math.round(w.graph_x / cell)},${Math.round(w.graph_y / cell)}`);
     }
   }
 
@@ -48,13 +52,14 @@ export function seedPositions(worlds, links, { cell = 220 } = {}) {
   }
 
   const cellOf = new Map();
-  const taken = new Set();
   const start = list.find((w) => w.is_entry && !stored.has(w.id))
     || list.find((w) => !stored.has(w.id));
   const queue = [];
   if (start) {
-    cellOf.set(start.id, [0, 0]);
-    taken.add('0,0');
+    let col = 0;
+    while (taken.has(`${col},0`)) col += 1;
+    cellOf.set(start.id, [col, 0]);
+    taken.add(`${col},0`);
     queue.push(start.id);
   }
   while (queue.length > 0) {
@@ -73,12 +78,16 @@ export function seedPositions(worlds, links, { cell = 220 } = {}) {
   }
   for (const [id, [col, row]] of cellOf) out[id] = { x: col * cell, y: row * cell };
 
+  // The spare row sits below everything already placed -- stored cells included,
+  // which is why maxRow reads `taken` rather than just the walk's own cells.
   let maxRow = 0;
-  for (const [, [, row]] of cellOf) maxRow = Math.max(maxRow, row);
+  for (const key of taken) maxRow = Math.max(maxRow, Number(key.split(',')[1]));
   let spare = 0;
   for (const w of list) {
     if (out[w.id]) continue;
+    while (taken.has(`${spare},${maxRow + 2}`)) spare += 1;
     out[w.id] = { x: spare * cell, y: (maxRow + 2) * cell };
+    taken.add(`${spare},${maxRow + 2}`);
     spare += 1;
   }
   return out;

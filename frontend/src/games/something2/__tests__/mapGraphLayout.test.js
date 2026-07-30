@@ -83,4 +83,37 @@ describe('seedPositions', () => {
     expect(pos.a).toEqual({ x: 0, y: 0 });
     expect(pos.b).toEqual({ x: 100, y: 0 });
   });
+
+  // The exact case the review reproduced: the walk's start cell and a stored
+  // position both resolved to (0,0).
+  it('never seeds a world on top of a stored one', () => {
+    const worlds = [W('a', { is_entry: true }), W('b', { graph_x: 0, graph_y: 0 })];
+    const pos = seedPositions(worlds, []);
+    expect(`${pos.a.x},${pos.a.y}`).not.toBe(`${pos.b.x},${pos.b.y}`);
+  });
+
+  it('does not walk a neighbour into a grid-aligned stored position', () => {
+    // b sits exactly one default cell east of the origin, which is where the
+    // a -E-> c link would otherwise put c.
+    const worlds = [W('a', { is_entry: true }), W('b', { graph_x: 220, graph_y: 0 }), W('c')];
+    const links = [{ from_world_id: 'a', edge: 'E', to_world_id: 'c' }];
+    const pos = seedPositions(worlds, links);
+    expect(pos.b).toEqual({ x: 220, y: 0 });
+    expect(`${pos.c.x},${pos.c.y}`).not.toBe('220,0');
+  });
+
+  it('gives every world a distinct coordinate across mixed input', () => {
+    const worlds = [
+      W('entry', { is_entry: true }), W('east'), W('south'),
+      W('placed', { graph_x: 0, graph_y: 0 }), W('alsoPlaced', { graph_x: 440, graph_y: 220 }),
+      W('orphan1'), W('orphan2'),
+    ];
+    const links = [
+      { from_world_id: 'entry', edge: 'E', to_world_id: 'east' },
+      { from_world_id: 'east', edge: 'S', to_world_id: 'south' },
+    ];
+    const pos = seedPositions(worlds, links);
+    const points = worlds.map((w) => `${pos[w.id].x},${pos[w.id].y}`);
+    expect(new Set(points).size).toBe(worlds.length);
+  });
 });
