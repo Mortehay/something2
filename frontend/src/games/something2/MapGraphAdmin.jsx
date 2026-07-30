@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import CytoscapeComponent from 'react-cytoscapejs';
 import { useWorldGraph, useSaveGraphPosition } from './useMapGraph.js';
@@ -28,47 +28,36 @@ function MapGraphAdmin() {
   const { worlds, links, isLoadingGraph } = useWorldGraph();
   const { biomes } = useBiomes();
   const savePosition = useSaveGraphPosition();
-  const cyRef = useRef(null);
-
-  // The single source of truth for the position Cytoscape's `elements` prop
-  // carries for each world. Populated once per world id (on first sight) and
-  // again only on drag end -- NEVER wholesale-recomputed from a fresh
-  // seedPositions() call once an id is already in here.
-  //
-  // react-cytoscapejs re-applies whatever `position` value is in `elements`
-  // on every prop diff (see node_modules/react-cytoscapejs/src/patch.js:
-  // patchElement() calls cyEle.json({position}) whenever the value differs
-  // from the previous render's value). seedPositions() is a pure function of
-  // (worlds, links) -- its BFS walk can reassign an unpositioned node's cell
-  // whenever the topology changes (e.g. another admin adds/removes a link
-  // while this admin is mid-drag on a node that has no stored graph_x/y
-  // yet). If `elements` fed that freshly-recomputed value straight through
-  // every render, a concurrent topology change could yank a node the admin
-  // is actively dragging out from under the cursor. Freezing each id's
-  // position after it is first seeded, and only ever updating it from an
-  // explicit drag-end read, removes that feedback path entirely: dragging
-  // sets this map, which is the only thing `elements` reads, so there is
-  // nothing left to fight over.
-  const [positions, setPositions] = useState({});
+  // Held in state, not a ref: the drag-end listener effect below needs a real
+  // dependency to re-run once the instance exists. `cyRef.current` would
+  // never trigger a re-run of an effect on its own, and since that effect's
+  // other dependency (`savePosition.mutate`) is permanently stable, an effect
+  // gated on a ref alone would only ever fire once, on the render where React
+  // first evaluates it -- which is BEFORE `CytoscapeComponent` has mounted on
+  // a first (uncached) visit, since `isLoadingGraph` is still true then. That
+  // combination meant the drag-end listener never attached on a first visit
+  // at all (see the fix report for the walk-through).
+  const [cy, setCy] = useState(null);
 
   const linkable = useMemo(() => worlds.filter(bounded), [worlds]);
   const unbounded = useMemo(() => worlds.filter((w) => !bounded(w)), [worlds]);
 
-  // Seed a position for any linkable world not yet in `positions` (first
-  // load, or a world that just became bounded). Ids already present are
-  // left untouched.
-  useEffect(() => {
-    setPositions((prev) => {
-      const missing = linkable.filter((w) => !prev[w.id]);
-      if (missing.length === 0) return prev;
-      const seeded = seedPositions(linkable, links);
-      const next = { ...prev };
-      for (const w of missing) {
-        if (seeded[w.id]) next[w.id] = seeded[w.id];
-      }
-      return next;
-    });
-  }, [linkable, links]);
+  // Drag-end positions only. Everything else is derived fresh from
+  // seedPositions() every render, so `positions` can never carry a world id
+  // that `linkable` no longer has (e.g. a world whose bounds were cleared
+  // from another session after this tab was already mounted). An id that
+  // outlived its world would emit an edge whose endpoint node got filtered
+  // out of `elements` -- and cy.add() THROWS on an edge with a nonexistent
+  // source/target, which would unmount this whole tab into the error
+  // boundary. `dragged` entries win over the fresh seed (spread last) so a
+  // hand-placed or dragged position is never silently reseeded out from
+  // under the admin.
+  const [dragged, setDragged] = useState({});
+  const positions = useMemo(() => (
+    linkable.every((w) => dragged[w.id])
+      ? dragged
+      : { ...seedPositions(linkable, links), ...dragged }
+  ), [linkable, links, dragged]);
 
   const colourOf = useMemo(() => {
     const map = new Map((biomes || []).map((b) => [b.name, b.color]));
@@ -91,8 +80,14 @@ function MapGraphAdmin() {
         },
         position: positions[w.id],
       }));
+    // Filtered against the node ids actually emitted above, not against
+    // `positions` directly: with a synchronously-derived `positions` the two
+    // sets agree in steady state, but deriving edges from the SAME set the
+    // nodes were built from removes any chance of the two ever drifting
+    // apart, which is exactly the drift that made cy.add() throw (Finding 3).
+    const ids = new Set(nodes.map((n) => n.data.id));
     const edges = collapseLinks(links)
-      .filter((l) => positions[l.fromId] && positions[l.toId])
+      .filter((l) => ids.has(l.fromId) && ids.has(l.toId))
       .map((l) => ({
         data: {
           id: `${l.fromId}|${l.edge}`,
@@ -140,27 +135,36 @@ function MapGraphAdmin() {
   ]), []);
 
   // Persist a node's position when the admin finishes dragging it. Also
-  // freezes it into `positions` immediately so the very next render feeds
+  // freezes it into `dragged` immediately so the very next render feeds
   // Cytoscape the exact value it already has -- no round trip to the server
   // needed before the picture agrees with itself.
   //
-  // Depends on `savePosition.mutate` rather than the whole mutation object:
-  // TanStack Query returns a new mutation object on every state transition
-  // (idle -> pending -> success), and `mutate` itself is the stable part of
-  // it. Depending on the object would re-subscribe this listener on every
-  // drag's own pending/success cycle for no reason.
+  // Depends on `cy` (state, so this effect actually re-runs once the
+  // instance shows up -- see the comment on `useState(null)` above) and on
+  // `savePosition.mutate` rather than the whole mutation object: TanStack
+  // Query returns a new mutation object on every state transition (idle ->
+  // pending -> success), and `mutate` itself is the stable part of it.
+  // Depending on the object would re-subscribe this listener on every drag's
+  // own pending/success cycle for no reason.
+  //
+  // Listens for `dragfree`, not `free`: Cytoscape emits `free` on every
+  // mouseup after a grab, including a plain click with no movement, but
+  // `dragfree` only fires `if (r.dragData.didDrag)`. Using `free` would PUT a
+  // graph-position (and promote an auto-seeded cell to a stored one,
+  // silencing its "unpositioned" lint warning and taking that cell out of
+  // circulation for seedPositions()'s BFS walk) on every click, never mind a
+  // drag.
   useEffect(() => {
-    const cy = cyRef.current;
     if (!cy) return undefined;
-    const onFree = (evt) => {
+    const onDragFree = (evt) => {
       const node = evt.target;
       const { x, y } = node.position();
-      setPositions((prev) => ({ ...prev, [node.id()]: { x, y } }));
+      setDragged((prev) => ({ ...prev, [node.id()]: { x, y } }));
       savePosition.mutate({ id: node.id(), x, y });
     };
-    cy.on('free', 'node', onFree);
-    return () => { cy.off('free', 'node', onFree); };
-  }, [savePosition.mutate]);
+    cy.on('dragfree', 'node', onDragFree);
+    return () => { cy.off('dragfree', 'node', onDragFree); };
+  }, [cy, savePosition.mutate]);
 
   if (isLoadingGraph) return <AdminContainer>Loading world graph…</AdminContainer>;
 
@@ -174,7 +178,7 @@ function MapGraphAdmin() {
             stylesheet={stylesheet}
             layout={{ name: 'preset' }}
             style={{ width: '100%', height: '100%' }}
-            cy={(cy) => { cyRef.current = cy; }}
+            cy={setCy}
           />
         </CanvasCard>
         <Side>
