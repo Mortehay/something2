@@ -123,11 +123,4 @@ describe('linksReplacedBy', () => {
     const links = [L('a', 'E', 'b'), L('b', 'W', 'a')];
     expect(linksReplacedBy({ links, fromId: 'a', edge: 'E', toId: 'b' })).toEqual([]);
   });
-
-  it('does not report the same row twice', () => {
-    const links = [L('a', 'E', 'c'), L('c', 'W', 'a')];
-    const out = linksReplacedBy({ links, fromId: 'a', edge: 'E', toId: 'b' });
-    const keys = out.map((l) => `${l.from_world_id}|${l.edge}`);
-    expect(new Set(keys).size).toBe(keys.length);
-  });
 });

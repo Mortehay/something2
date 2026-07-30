@@ -34,11 +34,4 @@ describe('planLinkChange', () => {
     expect(plan.clears).toEqual([]);
     expect(plan.create).toEqual({ fromId: 'a', edge: 'E', toId: 'b' });
   });
-
-  it('never emits a clear twice for the same slot', () => {
-    const links = [L('a', 'E', 'c'), L('c', 'W', 'a')];
-    const plan = planLinkChange({ links, fromId: 'a', edge: 'E', toId: 'b' });
-    const keys = plan.clears.map((c) => `${c.fromId}|${c.edge}`);
-    expect(new Set(keys).size).toBe(keys.length);
-  });
 });

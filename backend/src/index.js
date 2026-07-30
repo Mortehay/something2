@@ -1621,8 +1621,10 @@ app.put('/api/worlds/:id/graph-position', adminGuard, async (req, res) => {
 
 // One snapshot for the World Map tab. Composes GET /api/worlds and the
 // per-world GET /api/worlds/:id/links (both already public) into a single
-// request — 17 worlds would otherwise be 1 + N round trips — and a single
-// snapshot avoids a torn read where a world is deleted between calls.
+// request — 17 worlds would otherwise be 1 + N round trips. The two queries
+// below run under Promise.all with no transaction, so this is one round trip
+// instead of 1+N, not a torn-read guarantee — a world can still be deleted
+// between the worlds query and the links query.
 //
 // `links` deliberately returns BOTH directions of every link, uncollapsed.
 // setLink writes a row and its mirror, so the client can pair them itself;

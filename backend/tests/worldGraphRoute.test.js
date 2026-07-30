@@ -87,3 +87,22 @@ test('both queries are deterministically ordered', async () => {
   await request(app).get('/api/world-graph');
   for (const c of pool.calls) assert.match(c.sql, /ORDER BY/i);
 });
+
+// The mock handlers above match on /FROM worlds/i and return the canned
+// WORLDS rows whatever columns are actually requested, so nothing pins the
+// SELECT's column list -- dropping `biomes` or `graph_x` from the route would
+// break the client silently while every test above kept passing. All eight
+// columns are consumed client-side (id/name for labels and lookups,
+// width/height for the linkable/unbounded split, is_entry for layout
+// anchoring, biomes for the ring, graph_x/graph_y for seedPositions), so none
+// is dead weight worth trimming.
+test('the worlds query selects every column the client depends on', async () => {
+  const pool = poolFor();
+  __setPool(pool);
+  await request(app).get('/api/world-graph');
+  const worldsCall = pool.calls.find((c) => /FROM worlds/i.test(c.sql));
+  assert.ok(worldsCall, 'expected a query against worlds');
+  for (const col of ['id', 'name', 'width', 'height', 'is_entry', 'biomes', 'graph_x', 'graph_y']) {
+    assert.match(worldsCall.sql, new RegExp(`\\b${col}\\b`), `worlds SELECT must name ${col}`);
+  }
+});

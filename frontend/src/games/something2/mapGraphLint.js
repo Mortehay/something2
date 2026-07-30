@@ -122,13 +122,13 @@ export function linksReplacedBy({ links, fromId, edge, toId }) {
   const push = (row, wantedTarget) => {
     if (row && row.to_world_id !== wantedTarget) out.push(row);
   };
+  // Only two lookups ever happen -- (fromId, edge) and (toId, OPPOSITE[edge])
+  // -- and those two keys can never collide: edge !== OPPOSITE[edge] holds
+  // for every N/E/S/W value, so a trailing dedup pass here has nothing to
+  // ever remove. (An earlier version of this function had one; it was
+  // unreachable and was removed along with its equally-unreachable test --
+  // see the review notes on the final wave.)
   push(byKey.get(key(fromId, edge)), toId);
   push(byKey.get(key(toId, OPPOSITE[edge])), fromId);
-  const seen = new Set();
-  return out.filter((l) => {
-    const k = key(l.from_world_id, l.edge);
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  return out;
 }

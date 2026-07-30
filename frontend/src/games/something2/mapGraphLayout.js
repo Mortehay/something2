@@ -18,12 +18,17 @@ export function compassFromDelta(dx, dy) {
 }
 
 // A position for EVERY world passed in. Worlds with stored coordinates keep
-// them; the rest are seeded by walking links breadth-first from the entry
-// world, one grid cell per compass edge. A cell that is already occupied is
-// skipped rather than overwritten — the live topology is spatially
-// contradictory (every edge of one world pointing at the same neighbour), so
-// collisions are normal, not exceptional. Whatever the walk cannot place drops
-// into a row beneath it.
+// them exactly and ANCHOR the walk: their neighbours are seeded by walking
+// links breadth-first FROM the stored worlds, one grid cell per compass edge,
+// so a single drag never re-routes or relocates any other world's seeded
+// position. Whatever that walk can't reach (no stored world anywhere in its
+// cluster) starts its own breadth-first walk from its own root — entry world
+// first, then list order — dropped into a fresh row beneath whatever has been
+// placed so far, so each disconnected cluster keeps its own shape instead of
+// being flattened into one row. A cell that is already occupied is skipped
+// rather than overwritten — the live topology is spatially contradictory
+// (every edge of one world pointing at the same neighbour), so collisions are
+// normal, not exceptional.
 //
 // Callers must NOT persist these. They are a display fallback; graph_x/graph_y
 // stay null until an admin actually drags something.

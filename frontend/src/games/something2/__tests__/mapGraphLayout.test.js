@@ -133,6 +133,37 @@ describe('seedPositions', () => {
     expect(pos.c).toEqual({ x: 100, y: 300 });
   });
 
+  // The multi-root walk (whatever a stored anchor's walk cannot reach starts
+  // its own walk) is the newest code here, and until now the only coverage of
+  // it was a single-node orphan -- which can't tell a genuine per-cluster walk
+  // apart from a bug that just drops every unreachable world into one flat
+  // row regardless of how they link to each other. A two-node cluster can.
+  it('gives a second, unreachable cluster its own walk instead of flattening it into a row', () => {
+    // a is the stored anchor; a -E-> b is reachable from it. c -S-> d is a
+    // completely separate linked pair -- nothing links it to a's cluster, so
+    // it must start its own walk. If that walk used the c->d link (South),
+    // d lands directly below c, same column. A flat-row placement that
+    // ignored the link direction would instead put d beside c in the same
+    // row.
+    const worlds = [
+      W('a', { is_entry: true, graph_x: 0, graph_y: 0 }), W('b'), W('c'), W('d'),
+    ];
+    const links = [
+      { from_world_id: 'a', edge: 'E', to_world_id: 'b' },
+      { from_world_id: 'c', edge: 'S', to_world_id: 'd' },
+    ];
+    const pos = seedPositions(worlds, links, { cell: 100 });
+
+    // d keeps c -S-> d's own relative shape: directly south, same column.
+    expect(pos.d.x).toBe(pos.c.x);
+    expect(pos.d.y - pos.c.y).toBe(100);
+
+    // No two worlds land on the same point -- the original regression this
+    // function exists to avoid, now checked across two independent clusters.
+    const points = worlds.map((w) => `${pos[w.id].x},${pos[w.id].y}`);
+    expect(new Set(points).size).toBe(worlds.length);
+  });
+
   it('walks through a stored world to reach what lies beyond it', () => {
     const worlds = [W('a', { is_entry: true }), W('b', { graph_x: 0, graph_y: 0 }), W('c')];
     const links = [
