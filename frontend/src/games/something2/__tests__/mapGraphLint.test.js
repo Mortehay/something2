@@ -28,6 +28,16 @@ describe('collapseLinks', () => {
     const links = ['N', 'E', 'S', 'W'].flatMap((e) => [L('a', e, 'b'), L('b', { N: 'S', S: 'N', E: 'W', W: 'E' }[e], 'a')]);
     expect(collapseLinks(links)).toHaveLength(4);
   });
+
+  it('keeps an unrelated row when a duplicate (from, edge) key is present', () => {
+    // Two rows share (b, W). The DB's unique constraint makes this impossible
+    // from a clean fetch, but folding by key used to let one of them silently
+    // swallow the other.
+    const out = collapseLinks([L('a', 'E', 'b'), L('b', 'W', 'c'), L('b', 'W', 'a')]);
+    expect(out).toHaveLength(2);
+    expect(out).toContainEqual({ fromId: 'a', edge: 'E', toId: 'b', toEdge: 'W', mirrored: true });
+    expect(out.some((l) => l.fromId === 'b' && l.toId === 'c')).toBe(true);
+  });
 });
 
 describe('lintGraph', () => {
@@ -67,6 +77,27 @@ describe('lintGraph', () => {
     expect(mismatch.worldIds).toEqual(expect.arrayContaining(['a', 'b']));
     expect(typeof mismatch.message).toBe('string');
     expect(mismatch.message.length).toBeGreaterThan(0);
+  });
+
+  it('flags duplicate directions regardless of which endpoint came first', () => {
+    // Same graph as the test above with each pair's rows swapped, so
+    // collapseLinks picks b and c as the canonical `fromId` and a is only ever
+    // a target. a still has two neighbours drawn East.
+    const pos = { a: { x: 0, y: 0 }, b: { x: 200, y: 0 }, c: { x: 300, y: 0 } };
+    const links = [L('b', 'W', 'a'), L('a', 'E', 'b'), L('c', 'S', 'a'), L('a', 'N', 'c')];
+    const out = lintGraph({ worlds: [W('a'), W('b'), W('c')], links, positions: pos });
+    expect(out.map((w) => w.code)).toContain('duplicate-direction');
+  });
+
+  it('flags a world whose duplicates only show up from its own side', () => {
+    // b is the TARGET of both links, and both of its neighbours are drawn west
+    // of it -- a at (-200, 0) and c at (-300, -300), which ties to W.
+    const pos = { a: { x: 0, y: 0 }, b: { x: 200, y: 0 }, c: { x: -100, y: -300 } };
+    const links = [L('a', 'E', 'b'), L('b', 'W', 'a'), L('c', 'S', 'b'), L('b', 'N', 'c')];
+    const out = lintGraph({ worlds: [W('a'), W('b'), W('c')], links, positions: pos });
+    const dup = out.find((w) => w.code === 'duplicate-direction');
+    expect(dup).toBeDefined();
+    expect(dup.worldIds).toContain('b');
   });
 });
 

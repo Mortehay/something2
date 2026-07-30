@@ -11,23 +11,28 @@ const key = (fromId, edge) => `${fromId}|${edge}`;
 // never creates but the schema permits.
 export function collapseLinks(links) {
   const rows = Array.isArray(links) ? links : [];
-  const byKey = new Map(rows.map((l) => [key(l.from_world_id, l.edge), l]));
-  const done = new Set();
+  const done = new Set(); // row INDICES already folded into a line
   const out = [];
-  for (const l of rows) {
-    const k = key(l.from_world_id, l.edge);
-    if (done.has(k)) continue;
-    const mirrorKey = key(l.to_world_id, OPPOSITE[l.edge]);
-    const mirror = byKey.get(mirrorKey);
-    const mirrored = Boolean(mirror && mirror.to_world_id === l.from_world_id);
-    done.add(k);
-    if (mirrored) done.add(mirrorKey);
+  for (let i = 0; i < rows.length; i += 1) {
+    if (done.has(i)) continue;
+    const l = rows[i];
+    done.add(i);
+    // The mirror is a DIFFERENT row pointing back: (to, opposite(edge)) -> from.
+    // Matched by row identity rather than by a (from, edge) key, so a duplicate
+    // key in malformed input cannot make an unrelated row disappear.
+    const mirrorIndex = rows.findIndex((r, j) => (
+      !done.has(j)
+      && r.from_world_id === l.to_world_id
+      && r.edge === OPPOSITE[l.edge]
+      && r.to_world_id === l.from_world_id
+    ));
+    if (mirrorIndex !== -1) done.add(mirrorIndex);
     out.push({
       fromId: l.from_world_id,
       edge: l.edge,
       toId: l.to_world_id,
       toEdge: OPPOSITE[l.edge],
-      mirrored,
+      mirrored: mirrorIndex !== -1,
     });
   }
   return out;
@@ -44,6 +49,24 @@ export function lintGraph({ worlds, links, positions }) {
 
   const collapsed = collapseLinks(links);
   const drawnByWorld = new Map();
+  // Drawn direction of each neighbour, per world. Registered from BOTH ends of
+  // every line: which endpoint collapseLinks picked as `fromId` depends on the
+  // order rows arrived in, so keying only on that would miss a world's own
+  // duplicates whenever it happened to be the target both times.
+  const noteDrawn = (worldId, direction, neighbourId) => {
+    if (!drawnByWorld.has(worldId)) drawnByWorld.set(worldId, new Map());
+    const seen = drawnByWorld.get(worldId);
+    if (seen.has(direction)) {
+      out.push({
+        code: 'duplicate-direction',
+        message: `${nameOf.get(worldId) || worldId} has two links drawn ${direction}; `
+          + `move one of the neighbours apart.`,
+        worldIds: [worldId, neighbourId, seen.get(direction)],
+      });
+      return;
+    }
+    seen.set(direction, neighbourId);
+  };
 
   for (const link of collapsed) {
     if (!link.mirrored) {
@@ -67,18 +90,8 @@ export function lintGraph({ worlds, links, positions }) {
         worldIds: [link.fromId, link.toId],
       });
     }
-    if (!drawnByWorld.has(link.fromId)) drawnByWorld.set(link.fromId, new Map());
-    const seen = drawnByWorld.get(link.fromId);
-    if (seen.has(drawn)) {
-      out.push({
-        code: 'duplicate-direction',
-        message: `${nameOf.get(link.fromId) || link.fromId} has two links drawn ${drawn}; `
-          + `move one of the neighbours apart.`,
-        worldIds: [link.fromId, link.toId, seen.get(drawn)],
-      });
-    } else {
-      seen.set(drawn, link.toId);
-    }
+    noteDrawn(link.fromId, drawn, link.toId);
+    noteDrawn(link.toId, compassFromDelta(a.x - b.x, a.y - b.y), link.fromId);
   }
 
   for (const w of list) {
