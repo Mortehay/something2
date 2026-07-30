@@ -38,12 +38,14 @@ test('saves a position and echoes it back', async () => {
 test('a position save NEVER invalidates terrain or caches', async () => {
   const pool = mockPool([OK]);
   __setPool(pool);
-  await request(app).put('/api/worlds/w1/graph-position').set(ADMIN).send({ x: 1, y: 2 });
+  const res = await request(app).put('/api/worlds/w1/graph-position').set(ADMIN).send({ x: 1, y: 2 });
+  assert.equal(res.status, 200);
   for (const c of pool.calls) {
     assert.ok(!/DELETE FROM world_chunks/i.test(c.sql), `must not wipe chunks: ${c.sql}`);
     assert.ok(!/DELETE FROM world_creatures/i.test(c.sql), `must not touch creatures: ${c.sql}`);
   }
   assert.equal(pool.calls.length, 1, 'exactly one UPDATE, nothing else');
+  assert.ok(/UPDATE worlds SET graph_x/i.test(pool.calls[0].sql), 'the one call must be the graph_x UPDATE');
 });
 
 test('rejects non-finite coordinates rather than coercing them', async () => {
