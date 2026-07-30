@@ -45,6 +45,9 @@ export function useCreateWorld() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["worlds"] });
+      // The World Map tab reads worlds through ["worldGraph"]; without this a
+      // world created here does not appear on the diagram for up to staleTime.
+      queryClient.invalidateQueries({ queryKey: ["worldGraph"] });
       toast.success("World created");
     },
     onError: (e) => toast.error(e.message),
@@ -64,6 +67,11 @@ export function useDeleteWorld() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["worlds"] });
+      // The World Map tab reads worlds through ["worldGraph"]; without this a
+      // deleted world keeps being drawn (and its links stay clickable) for up
+      // to staleTime -- see useMapGraph.test.js's cross-tab invalidation
+      // suite for the failure this produces.
+      queryClient.invalidateQueries({ queryKey: ["worldGraph"] });
       toast.success("World deleted");
     },
     onError: (e) => toast.error(e.message),

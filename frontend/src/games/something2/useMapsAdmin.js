@@ -26,7 +26,15 @@ export function useUpdateWorld() {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to update map");
       return res.json();
     },
-    onSuccess: (data) => { qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success("Map saved"); warnIfLive(data); },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["worlds"] });
+      // The World Map tab reads worlds (bounds, biomes, name) through
+      // ["worldGraph"]; without this a bounds change made here leaves a world
+      // stuck in "Not linkable" for up to staleTime, or vice versa.
+      qc.invalidateQueries({ queryKey: ["worldGraph"] });
+      toast.success("Map saved");
+      warnIfLive(data);
+    },
     onError: (err) => toast.error(err.message),
   });
 }
@@ -86,7 +94,15 @@ export function useSetLink() {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to set link");
       return res.json();
     },
-    onSuccess: (data, v) => { qc.invalidateQueries({ queryKey: ["worldLinks", v.id] }); qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success("Link saved"); warnIfLive(data); },
+    onSuccess: (data, v) => {
+      qc.invalidateQueries({ queryKey: ["worldLinks", v.id] });
+      qc.invalidateQueries({ queryKey: ["worlds"] });
+      // The World Map tab reads links through ["worldGraph"]; without this it
+      // keeps drawing a link the Maps tab just changed.
+      qc.invalidateQueries({ queryKey: ["worldGraph"] });
+      toast.success("Link saved");
+      warnIfLive(data);
+    },
     onError: (err) => toast.error(err.message),
   });
 }
@@ -101,7 +117,13 @@ export function useClearLink() {
       // header instead (see the matching backend comment on this route).
       return { liveWarning: liveWarningFromHeader(res.headers.get("X-Live-World-Pending")) };
     },
-    onSuccess: (data, v) => { qc.invalidateQueries({ queryKey: ["worldLinks", v.id] }); qc.invalidateQueries({ queryKey: ["worlds"] }); toast.success("Link cleared"); warnIfLive(data); },
+    onSuccess: (data, v) => {
+      qc.invalidateQueries({ queryKey: ["worldLinks", v.id] });
+      qc.invalidateQueries({ queryKey: ["worlds"] });
+      qc.invalidateQueries({ queryKey: ["worldGraph"] });
+      toast.success("Link cleared");
+      warnIfLive(data);
+    },
     onError: (err) => toast.error(err.message),
   });
 }

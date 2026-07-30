@@ -1594,6 +1594,60 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
   }
 });
 
+// Node position for the World Map tab. Deliberately its OWN route rather than
+// a field on PUT /api/worlds/:id: that route deletes world_chunks, clears the
+// preview/overview caches and evicts or warns connected players when bounds or
+// biomes change. A cosmetic node drag must not be able to reach any of that, so
+// this issues one UPDATE of two columns and nothing else.
+app.put('/api/worlds/:id/graph-position', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { x, y } = req.body;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return res.status(400).json({ error: 'x and y must be finite numbers' });
+    }
+    const result = await pool.query(
+      `UPDATE worlds SET graph_x = $1, graph_y = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3 RETURNING id, graph_x, graph_y`,
+      [x, y, id],
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'world not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save graph position' });
+  }
+});
+
+// One snapshot for the World Map tab. Composes GET /api/worlds and the
+// per-world GET /api/worlds/:id/links (both already public) into a single
+// request — 17 worlds would otherwise be 1 + N round trips. The two queries
+// below run under Promise.all with no transaction, so this is one round trip
+// instead of 1+N, not a torn-read guarantee — a world can still be deleted
+// between the worlds query and the links query.
+//
+// `links` deliberately returns BOTH directions of every link, uncollapsed.
+// setLink writes a row and its mirror, so the client can pair them itself;
+// serving pre-collapsed pairs would destroy the evidence its missing-mirror
+// lint check depends on. Both queries are ORDER BY'd so the payload is stable
+// between requests.
+app.get('/api/world-graph', async (req, res) => {
+  try {
+    const [worldsRes, linksRes] = await Promise.all([
+      pool.query(
+        `SELECT id, name, width, height, is_entry, biomes, graph_x, graph_y
+           FROM worlds ORDER BY created_at DESC`),
+      pool.query(
+        `SELECT from_world_id, edge, to_world_id
+           FROM map_links ORDER BY from_world_id, edge`),
+    ]);
+    res.json({ worlds: worldsRes.rows, links: linksRes.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load world graph' });
+  }
+});
+
 app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
