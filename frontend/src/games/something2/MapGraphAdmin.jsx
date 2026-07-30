@@ -507,10 +507,6 @@ function MapGraphAdmin() {
   const commitPending = async () => {
     if (!pending) return;
     const plan = planLinkChange({ links, ...pending });
-    // Full rows, not just plan.clears' {fromId, edge}: naming what was
-    // destroyed (not just where) needs the old to_world_id too. Same
-    // deterministic inputs as plan.clears, so it iterates in the same order.
-    const clearRows = linksReplacedBy({ links, fromId: pending.fromId, edge: pending.edge, toId: pending.toId });
     let destroyedCount = 0;
     setBusy(true);
     try {
@@ -522,15 +518,16 @@ function MapGraphAdmin() {
       setPending(null);
     } catch {
       // The hooks already toast the underlying failure. Say what state we
-      // are actually in: `clearRows` up to `destroyedCount` are the clears
-      // that actually completed before the failure (the for-loop above stops
-      // at the first rejection, so anything after that index never ran).
-      // This is the only data-destroying action in the tab, so a generic
-      // "did not complete" leaves the admin with no idea what to re-create by
-      // hand -- name them, using the same nameOf() the rest of this panel
-      // does.
+      // are actually in: `replaced` (defined above, from the same `pending`
+      // and computed via the identical linksReplacedBy call plan.clears is
+      // built from) up to `destroyedCount` are the clears that actually
+      // completed before the failure (the for-loop above stops at the first
+      // rejection, so anything after that index never ran). This is the only
+      // data-destroying action in the tab, so a generic "did not complete"
+      // leaves the admin with no idea what to re-create by hand -- name them,
+      // using the same nameOf() the rest of this panel does.
       if (destroyedCount > 0) {
-        const lost = clearRows.slice(0, destroyedCount)
+        const lost = replaced.slice(0, destroyedCount)
           .map((r) => `${nameOf(r.from_world_id)} ${r.edge} → ${nameOf(r.to_world_id)}`)
           .join('; ');
         toast.error(`Link change did not complete — these links were destroyed and NOT recreated: ${lost}`);
@@ -544,12 +541,21 @@ function MapGraphAdmin() {
   };
 
   if (isLoadingGraph) return <AdminContainer>Loading world graph…</AdminContainer>;
-  // useWorldGraph already toasts this (see toastGraphError in useMapGraph.js);
-  // render an explicit error state too, rather than falling through to the
-  // canvas with empty `worlds`/`links` -- that would show a green "No
-  // problems found." consistency panel, a positive claim about state this
-  // component never actually received.
-  if (graphError) return <AdminContainer>Failed to load the world graph: {graphError.message}</AdminContainer>;
+  // useWorldGraph already toasts this (see toastGraphError in useMapGraph.js).
+  // Gated on `worlds.length === 0`, not on `graphError` alone: TanStack Query
+  // retains the previous `data` when a background refetch fails (it only
+  // flips `status`/`error`), so `graphError` can be truthy while a perfectly
+  // usable worlds/links snapshot is still cached -- e.g. commitPending's
+  // `finally` invalidates `["worldGraph"]` right after the mutation that just
+  // failed, so the resulting refetch is likely to fail too. Collapsing to
+  // this error screen in that case would drop the open `pending`/`replaced`
+  // partial-failure panel (deliberately kept open above so the admin can see
+  // what to re-create) and unmount Cytoscape, losing zoom/pan, at exactly the
+  // moment the admin most needs the diagram to still be there. Only render
+  // this in place of the canvas when there is truly nothing to show.
+  if (graphError && worlds.length === 0) {
+    return <AdminContainer>Failed to load the world graph: {graphError.message}</AdminContainer>;
+  }
 
   return (
     <AdminContainer>
