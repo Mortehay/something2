@@ -1,11 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import CytoscapeComponent from 'react-cytoscapejs';
+import cytoscape from 'cytoscape';
+import edgehandles from 'cytoscape-edgehandles';
+import { useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import { useWorldGraph, useSaveGraphPosition } from './useMapGraph.js';
 import { useBiomes } from './useBiomes.js';
-import { seedPositions } from './mapGraphLayout.js';
-import { collapseLinks, lintGraph } from './mapGraphLint.js';
+import { useSetLink, useClearLink } from './useMapsAdmin.js';
+import { seedPositions, compassFromDelta, OPPOSITE } from './mapGraphLayout.js';
+import { collapseLinks, lintGraph, linksReplacedBy } from './mapGraphLint.js';
+import { planLinkChange } from './mapGraphActions.js';
 import { biomeRingSvg } from './biomeRingSvg.js';
+
+// Registered once at module scope, not inside the component: `cytoscape.use`
+// mutates the shared cytoscape module-level registry, so re-registering on
+// every render would be redundant at best. Cytoscape itself no-ops a repeat
+// registration, but there's no reason to call it more than once.
+cytoscape.use(edgehandles);
 
 const AdminContainer = styled.div`
   padding: 2rem; color: #eee; max-width: 1400px; margin: 0 auto;
@@ -21,6 +33,12 @@ const Side = styled.div`width: 260px; flex-shrink: 0;`;
 const Card = styled.div`background: #23233f; border: 1px solid #333; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;`;
 const Warn = styled.div`color: #f59e0b; font-size: 0.85em; margin: 0.25rem 0;`;
 const Dim = styled.div`color: #888; font-size: 0.9em; margin: 0.2rem 0;`;
+const Row = styled.div`display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin: 0.4rem 0;`;
+const Button = styled.button`
+  background: ${(p) => p.$bg || '#4a9eff'}; color: white; border: none; border-radius: 6px;
+  padding: 0.5rem 1rem; font-weight: bold; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  &:disabled { opacity: 0.5; cursor: default; }
+`;
 
 const bounded = (w) => !!(w.width && w.height);
 
@@ -28,6 +46,9 @@ function MapGraphAdmin() {
   const { worlds, links, isLoadingGraph } = useWorldGraph();
   const { biomes } = useBiomes();
   const savePosition = useSaveGraphPosition();
+  const setLink = useSetLink();
+  const clearLink = useClearLink();
+  const qc = useQueryClient();
   // Held in state, not a ref: the drag-end listener effect below needs a real
   // dependency to re-run once the instance exists. `cyRef.current` would
   // never trigger a re-run of an effect on its own, and since that effect's
@@ -58,6 +79,15 @@ function MapGraphAdmin() {
       ? dragged
       : { ...seedPositions(linkable, links), ...dragged }
   ), [linkable, links, dragged]);
+
+  // A drag-to-connect gesture never writes anything by itself -- it only
+  // proposes { fromId, edge, toId } here. The confirm panel is what calls
+  // commitPending(). `selectedEdge` is the delete-side counterpart: which
+  // drawn edge (by its Cytoscape id, `${fromId}|${edge}`) is currently
+  // selected on the canvas.
+  const [pending, setPending] = useState(null); // { fromId, toId, edge }
+  const [selectedEdge, setSelectedEdge] = useState(null); // { fromId, edge, toId }
+  const [busy, setBusy] = useState(false);
 
   const colourOf = useMemo(() => {
     const map = new Map((biomes || []).map((b) => [b.name, b.color]));
@@ -154,6 +184,22 @@ function MapGraphAdmin() {
   // silencing its "unpositioned" lint warning and taking that cell out of
   // circulation for seedPositions()'s BFS walk) on every click, never mind a
   // drag.
+  //
+  // Edgehandles, edge-select and edge-unselect are bound in this SAME effect
+  // (same reasoning as the comment on `useState(null)` above: it needs to
+  // re-run once `cy` actually exists). `cy.edgehandles()` is started here too
+  // rather than once at mount, since it needs the same live `cy` instance;
+  // `eh.destroy()` undoes it in the cleanup so a re-run (or unmount) never
+  // stacks a second edgehandles instance on the same core.
+  //
+  // ehcomplete's 4th argument is technically a Cytoscape *collection*
+  // (`cy.collection().merge(...)` internally), not a single edge element --
+  // but `.remove()` is a Collection method that removes every element in it,
+  // so calling it here is correct regardless: this graph is not compound, so
+  // the collection always holds exactly the one preview edge edgehandles just
+  // added. It is removed immediately because this UI confirms before it
+  // writes anything -- the pending proposal, not the edge itself, is what
+  // gets shown.
   useEffect(() => {
     if (!cy) return undefined;
     const onDragFree = (evt) => {
@@ -162,9 +208,61 @@ function MapGraphAdmin() {
       setDragged((prev) => ({ ...prev, [node.id()]: { x, y } }));
       savePosition.mutate({ id: node.id(), x, y });
     };
+    const eh = cy.edgehandles({ snap: true });
+    const onComplete = (evt, source, target, addedEdge) => {
+      addedEdge.remove();
+      const a = source.position();
+      const b = target.position();
+      setPending({ fromId: source.id(), toId: target.id(), edge: compassFromDelta(b.x - a.x, b.y - a.y) });
+    };
+    const onSelect = (evt) => {
+      const [fromId, edge] = evt.target.id().split('|');
+      setSelectedEdge({ fromId, edge, toId: evt.target.data('target') });
+    };
+    const onUnselect = () => setSelectedEdge(null);
     cy.on('dragfree', 'node', onDragFree);
-    return () => { cy.off('dragfree', 'node', onDragFree); };
+    cy.on('ehcomplete', onComplete);
+    cy.on('select', 'edge', onSelect);
+    cy.on('unselect', 'edge', onUnselect);
+    return () => {
+      cy.off('dragfree', 'node', onDragFree);
+      cy.off('ehcomplete', onComplete);
+      cy.off('select', 'edge', onSelect);
+      cy.off('unselect', 'edge', onUnselect);
+      eh.destroy();
+    };
   }, [cy, savePosition.mutate]);
+
+  const nameOf = (id) => (worlds.find((w) => w.id === id) || {}).name || id;
+  const replaced = pending
+    ? linksReplacedBy({ links, fromId: pending.fromId, edge: pending.edge, toId: pending.toId })
+    : [];
+
+  // Runs the plan in order and reports a partial failure honestly: a create
+  // that fails after the clears already landed leaves those worlds
+  // UNLINKED, not still linked to their old neighbours, so a plain "it
+  // failed, nothing changed" toast would be a lie. `pending` is only cleared
+  // on full success, so the confirm panel stays open (re-deriving `replaced`
+  // from whatever `links` now actually is) rather than silently vanishing.
+  const commitPending = async () => {
+    if (!pending) return;
+    const plan = planLinkChange({ links, ...pending });
+    setBusy(true);
+    try {
+      for (const c of plan.clears) {
+        await clearLink.mutateAsync({ id: c.fromId, edge: c.edge });
+      }
+      await setLink.mutateAsync({ id: plan.create.fromId, edge: plan.create.edge, to_world_id: plan.create.toId });
+      setPending(null);
+    } catch {
+      // The hooks already toast the underlying failure. Say what state we
+      // are actually in.
+      toast.error('Link change did not complete — the diagram has been refreshed to show the real state.');
+    } finally {
+      setBusy(false);
+      qc.invalidateQueries({ queryKey: ['worldGraph'] });
+    }
+  };
 
   if (isLoadingGraph) return <AdminContainer>Loading world graph…</AdminContainer>;
 
@@ -182,6 +280,61 @@ function MapGraphAdmin() {
           />
         </CanvasCard>
         <Side>
+          {pending && (
+            <Card>
+              <strong style={{ color: '#aaa' }}>New link</strong>
+              <Row>
+                {nameOf(pending.fromId)} edge{' '}
+                <select value={pending.edge} onChange={(e) => setPending({ ...pending, edge: e.target.value })}>
+                  {['N', 'E', 'S', 'W'].map((x) => <option key={x} value={x}>{x}</option>)}
+                </select>
+                {' → '}{nameOf(pending.toId)} gets {OPPOSITE[pending.edge]}
+              </Row>
+              <Warn>
+                Creating this link rebuilds terrain for both worlds, the same as any other terrain
+                change — a player currently in either one will be evicted or warned.
+              </Warn>
+              {replaced.length > 0 && (
+                <Warn>
+                  This replaces {replaced.length} existing link{replaced.length > 1 ? 's' : ''}:{' '}
+                  {replaced.map((r) => `${nameOf(r.from_world_id)} ${r.edge} → ${nameOf(r.to_world_id)}`).join('; ')}
+                </Warn>
+              )}
+              <Row>
+                <Button onClick={commitPending} disabled={busy}>
+                  {replaced.length > 0 ? 'Replace and link' : 'Create link'}
+                </Button>
+                <Button $bg="#555" onClick={() => setPending(null)}>Cancel</Button>
+              </Row>
+            </Card>
+          )}
+          {selectedEdge && (
+            <Card>
+              <strong style={{ color: '#aaa' }}>Selected link</strong>
+              <Row>
+                {nameOf(selectedEdge.fromId)} {selectedEdge.edge} → {nameOf(selectedEdge.toId)}
+              </Row>
+              <Warn>Removing this clears BOTH directions, and rebuilds terrain for both worlds.</Warn>
+              <Row>
+                <Button
+                  $bg="#ef4444"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await clearLink.mutateAsync({ id: selectedEdge.fromId, edge: selectedEdge.edge });
+                      setSelectedEdge(null);
+                    } finally {
+                      setBusy(false);
+                      qc.invalidateQueries({ queryKey: ['worldGraph'] });
+                    }
+                  }}
+                >
+                  Remove link
+                </Button>
+              </Row>
+            </Card>
+          )}
           <Card>
             <strong style={{ color: '#aaa' }}>Consistency</strong>
             {warnings.length === 0 && <Dim>No problems found.</Dim>}
