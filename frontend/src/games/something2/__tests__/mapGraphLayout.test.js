@@ -116,4 +116,31 @@ describe('seedPositions', () => {
     const points = worlds.map((w) => `${pos[w.id].x},${pos[w.id].y}`);
     expect(new Set(points).size).toBe(worlds.length);
   });
+
+  it('anchors the walk at a stored world instead of re-routing around it', () => {
+    // The regression this guards: the admin drags A, so A gains a stored
+    // position. Its neighbours must stay measured from A -- previously the walk
+    // restarted from B and dumped C into a spare row, teleporting two nodes from
+    // one drag of a third and inventing direction-mismatch warnings.
+    const worlds = [W('a', { is_entry: true, graph_x: 100, graph_y: 200 }), W('b'), W('c')];
+    const links = [
+      { from_world_id: 'a', edge: 'E', to_world_id: 'b' },
+      { from_world_id: 'a', edge: 'S', to_world_id: 'c' },
+    ];
+    const pos = seedPositions(worlds, links, { cell: 100 });
+    expect(pos.a).toEqual({ x: 100, y: 200 });
+    expect(pos.b).toEqual({ x: 200, y: 200 });
+    expect(pos.c).toEqual({ x: 100, y: 300 });
+  });
+
+  it('walks through a stored world to reach what lies beyond it', () => {
+    const worlds = [W('a', { is_entry: true }), W('b', { graph_x: 0, graph_y: 0 }), W('c')];
+    const links = [
+      { from_world_id: 'b', edge: 'E', to_world_id: 'c' },
+      { from_world_id: 'a', edge: 'E', to_world_id: 'b' },
+    ];
+    const pos = seedPositions(worlds, links, { cell: 100 });
+    expect(pos.b).toEqual({ x: 0, y: 0 });
+    expect(pos.c).toEqual({ x: 100, y: 0 });
+  });
 });

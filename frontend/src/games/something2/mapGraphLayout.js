@@ -34,11 +34,20 @@ export function seedPositions(worlds, links, { cell = 220 } = {}) {
   // Occupied grid cells, seeded from positions the admin already chose so the
   // walk below cannot place a neighbour on top of one of them.
   const taken = new Set();
+  // Grid cell per world. Stored worlds ANCHOR the walk: their neighbours are
+  // measured from where the admin actually dropped them, and the walk passes
+  // straight through them. Without that, one world gaining a saved position
+  // re-routes the walk for every OTHER world -- so a single drag would relocate
+  // the whole diagram and invent direction-mismatch warnings for correct links.
+  const cellOf = new Map();
   for (const w of list) {
     if (Number.isFinite(w.graph_x) && Number.isFinite(w.graph_y)) {
       out[w.id] = { x: w.graph_x, y: w.graph_y };
       stored.add(w.id);
-      taken.add(`${Math.round(w.graph_x / cell)},${Math.round(w.graph_y / cell)}`);
+      const col = Math.round(w.graph_x / cell);
+      const row = Math.round(w.graph_y / cell);
+      taken.add(`${col},${row}`);
+      cellOf.set(w.id, [col, row]);
     }
   }
 
@@ -51,44 +60,52 @@ export function seedPositions(worlds, links, { cell = 220 } = {}) {
     adjacency.get(l.from_world_id).push(l);
   }
 
-  const cellOf = new Map();
-  const start = list.find((w) => w.is_entry && !stored.has(w.id))
-    || list.find((w) => !stored.has(w.id));
-  const queue = [];
-  if (start) {
-    let col = 0;
-    while (taken.has(`${col},0`)) col += 1;
-    cellOf.set(start.id, [col, 0]);
-    taken.add(`${col},0`);
-    queue.push(start.id);
-  }
-  while (queue.length > 0) {
-    const id = queue.shift();
-    const [col, row] = cellOf.get(id);
-    for (const l of adjacency.get(id) || []) {
-      const target = l.to_world_id;
-      if (cellOf.has(target) || stored.has(target)) continue;
-      const [dc, dr] = STEP[l.edge];
-      const key = `${col + dc},${row + dr}`;
-      if (taken.has(key)) continue;
-      cellOf.set(target, [col + dc, row + dr]);
-      taken.add(key);
-      queue.push(target);
+  const queue = [...cellOf.keys()];
+  const walk = () => {
+    while (queue.length > 0) {
+      const id = queue.shift();
+      const [col, row] = cellOf.get(id);
+      for (const l of adjacency.get(id) || []) {
+        const target = l.to_world_id;
+        if (cellOf.has(target)) continue;
+        const [dc, dr] = STEP[l.edge];
+        const key = `${col + dc},${row + dr}`;
+        if (taken.has(key)) continue;
+        cellOf.set(target, [col + dc, row + dr]);
+        taken.add(key);
+        queue.push(target);
+      }
     }
-  }
-  for (const [id, [col, row]] of cellOf) out[id] = { x: col * cell, y: row * cell };
+  };
+  walk();
 
-  // The spare row sits below everything already placed -- stored cells included,
-  // which is why maxRow reads `taken` rather than just the walk's own cells.
-  let maxRow = 0;
-  for (const key of taken) maxRow = Math.max(maxRow, Number(key.split(',')[1]));
-  let spare = 0;
-  for (const w of list) {
-    if (out[w.id]) continue;
-    while (taken.has(`${spare},${maxRow + 2}`)) spare += 1;
-    out[w.id] = { x: spare * cell, y: (maxRow + 2) * cell };
-    taken.add(`${spare},${maxRow + 2}`);
-    spare += 1;
+  // Whatever the stored anchors could not reach starts its own walk, so a cluster
+  // with no stored world in it still keeps its own shape instead of being dumped
+  // into a flat row. Entry world first, then list order.
+  const deepestRow = () => {
+    let deepest = -Infinity;
+    for (const [, [, row]] of cellOf) deepest = Math.max(deepest, row);
+    return deepest;
+  };
+  const roots = [...list].sort((a, b) => (b.is_entry ? 1 : 0) - (a.is_entry ? 1 : 0));
+  let nextRow = cellOf.size > 0 ? deepestRow() + 2 : 0;
+  for (const w of roots) {
+    if (cellOf.has(w.id)) continue;
+    let col = 0;
+    while (taken.has(`${col},${nextRow}`)) col += 1;
+    cellOf.set(w.id, [col, nextRow]);
+    taken.add(`${col},${nextRow}`);
+    queue.push(w.id);
+    walk();
+    // If this root's cluster spilled onto lower rows, keep the next root clear.
+    const deepest = deepestRow();
+    if (deepest >= nextRow + 1) nextRow = deepest + 2;
+  }
+
+  for (const [id, [col, row]] of cellOf) {
+    // Stored worlds keep the admin's EXACT pixels, not their rounded grid cell.
+    if (stored.has(id)) continue;
+    out[id] = { x: col * cell, y: row * cell };
   }
   return out;
 }
