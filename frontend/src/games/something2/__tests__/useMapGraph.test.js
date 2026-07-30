@@ -19,6 +19,29 @@ function exportedBlock(source, name) {
   return source.slice(start, next === -1 ? source.length : next);
 }
 
+// vitest runs with environment: "node" here, so a hook body cannot be executed
+// and these tests read source text instead. Two hazards come with that
+// instrument, and these helpers exist to close them.
+
+// Comments are not behaviour. The worldGraph invalidation is documented by a
+// comment containing the literal word "worldGraph", so a bare substring check
+// against the raw block would pass even if the CALL were deleted and only the
+// comment survived.
+// Caveat: this also eats "//" inside string literals. Safe here because every
+// slice it is applied to is a handler body containing no URLs.
+function withoutComments(block) {
+  return block.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+}
+
+// The success handler alone. An invalidation that landed in onError must not be
+// able to satisfy an assertion about what happens on success.
+function onSuccessOf(block) {
+  const start = block.indexOf('onSuccess:');
+  if (start === -1) throw new Error('no onSuccess handler found');
+  const end = block.indexOf('onError:', start);
+  return withoutComments(block.slice(start, end === -1 ? block.length : end));
+}
+
 describe('useMapGraph', () => {
   it('exports the graph query and the position mutation', () => {
     expect(typeof graphHooks.useWorldGraph).toBe('function');
@@ -35,29 +58,39 @@ describe('cross-tab invalidation', () => {
   // Both the Maps tab and the World Map tab edit map_links. If a link mutation
   // does not invalidate the graph query, the diagram silently keeps showing a
   // link that no longer exists.
-  it('useSetLink invalidates the worldGraph query key', () => {
-    expect(exportedBlock(src('useMapsAdmin.js'), 'useSetLink')).toContain('worldGraph');
+  it('useSetLink invalidates the worldGraph query key on success', () => {
+    const handler = onSuccessOf(exportedBlock(src('useMapsAdmin.js'), 'useSetLink'));
+    expect(handler).toContain('queryKey: ["worldGraph"]');
   });
 
-  it('useClearLink invalidates the worldGraph query key', () => {
-    expect(exportedBlock(src('useMapsAdmin.js'), 'useClearLink')).toContain('worldGraph');
+  it('useClearLink invalidates the worldGraph query key on success', () => {
+    const handler = onSuccessOf(exportedBlock(src('useMapsAdmin.js'), 'useClearLink'));
+    expect(handler).toContain('queryKey: ["worldGraph"]');
   });
 
   it('useSetLink still invalidates the keys the Maps tab depends on', () => {
-    const block = exportedBlock(src('useMapsAdmin.js'), 'useSetLink');
-    expect(block).toContain('worldLinks');
-    expect(block).toContain('"worlds"');
+    const handler = onSuccessOf(exportedBlock(src('useMapsAdmin.js'), 'useSetLink'));
+    expect(handler).toContain('queryKey: ["worldLinks", v.id]');
+    expect(handler).toContain('queryKey: ["worlds"]');
   });
 
-  it('the position mutation does NOT invalidate the whole worlds list', () => {
+  it('the position mutation invalidates only the graph, never the worlds list', () => {
     // Dragging a node is cosmetic; blowing away the shared ["worlds"] cache on
     // every drag would refetch the game's world picker for nothing.
-    const block = exportedBlock(src('useMapGraph.js'), 'useSaveGraphPosition');
-    expect(block).toContain('worldGraph');
-    expect(block).not.toContain('"worlds"');
+    const handler = onSuccessOf(exportedBlock(src('useMapGraph.js'), 'useSaveGraphPosition'));
+    expect(handler).toContain('queryKey: ["worldGraph"]');
+    expect(handler).not.toContain('"worlds"');
   });
 
   it('the graph query targets the aggregate endpoint', () => {
-    expect(src('useMapGraph.js')).toContain('/api/world-graph');
+    expect(exportedBlock(src('useMapGraph.js'), 'useWorldGraph')).toContain('/api/world-graph');
+  });
+
+  // Guards the instrument itself: if onSuccessOf ever stopped narrowing, every
+  // test above would quietly go back to matching the whole function body.
+  it('the onSuccess slice excludes the error handler', () => {
+    const handler = onSuccessOf(exportedBlock(src('useMapsAdmin.js'), 'useSetLink'));
+    expect(handler).not.toContain('onError');
+    expect(handler).toContain('invalidateQueries');
   });
 });
