@@ -166,17 +166,33 @@ function MapGraphAdmin() {
       selector: 'node',
       style: {
         'background-color': '#23233f',
-        'background-image': 'data(ring)',
         'background-fit': 'cover',
         'border-width': 1,
         'border-color': '#444',
         width: 64, height: 64,
-        label: 'data(label)',
         color: '#eee',
         'font-size': 11,
         'text-valign': 'bottom',
         'text-margin-y': 6,
       },
+    },
+    // The `data(...)` mappers live in their own rule, scoped to elements
+    // that actually carry both fields: with link mode reachable (see the
+    // interaction effect below), edgehandles now creates real ghost/preview
+    // elements that match the plain `node`/`edge` selectors above but have
+    // neither `ring` nor `label` in their data. Cytoscape's own apply.mjs
+    // (`printMappingErr`, ~line 502) calls `util.warn(...)` -- "Do not
+    // assign mappings to elements without corresponding data ... try a
+    // `[field]` selector to limit scope" -- for every element a `data(x)`
+    // mapper is applied to when it lacks that field, once per property per
+    // restyle. `node[ring][label]` (rather than just `node[ring]`) is
+    // belt-and-suspenders: on every node this component builds (see
+    // `elements` above) the two fields are always set together, so gating on
+    // either alone would work today, but gating on both doesn't depend on
+    // that co-occurrence continuing to hold.
+    {
+      selector: 'node[ring][label]',
+      style: { 'background-image': 'data(ring)', label: 'data(label)' },
     },
     {
       selector: 'edge',
@@ -184,25 +200,35 @@ function MapGraphAdmin() {
         'curve-style': 'straight',
         'line-color': '#4a9eff',
         width: 2,
-        label: 'data(label)',
         color: '#9bb',
         'font-size': 10,
         'text-background-color': '#12121f',
         'text-background-opacity': 0.8,
       },
     },
+    // Same reasoning as `node[ring][label]` above: edgehandles' ghost and
+    // preview edges have no `label` field.
+    { selector: 'edge[label]', style: { label: 'data(label)' } },
     { selector: 'edge[mirrored = "false"]', style: { 'line-color': '#f59e0b', 'line-style': 'dashed' } },
     { selector: ':selected', style: { 'border-color': '#facc15', 'border-width': 3, 'line-color': '#facc15' } },
     // Edgehandles' own classes -- checked against node_modules/cytoscape-
-    // edgehandles's bundled source (gesture-lifecycle.js's start/preview/
-    // unpreview): '.eh-source' is added to the node a drag gesture started
-    // from; '.eh-target'/'.eh-preview-active' mark the node currently
-    // snapped-to as the prospective target; '.eh-preview' marks the
-    // in-progress rubber-band edge (a real, temporary edge element, not the
-    // ghost line) once a target is snapped; '.eh-ghost-edge' is the line
-    // tracking the cursor before anything is snapped. Without these the
-    // in-progress gesture is nearly invisible -- it inherits the plain node/
-    // edge styles above.
+    // edgehandles's bundled source (module 9, `start`/`preview`/`unpreview`):
+    // '.eh-source' is added to the node a drag gesture started from.
+    // '.eh-target' marks the node currently snapped-to as the prospective
+    // target. '.eh-preview' is added to TWO different elements at once --
+    // the snapped target node itself (`target.addClass('eh-preview')` inside
+    // `preview()`'s `applyPreview`), AND the real, temporary rubber-band edge
+    // `makePreview()` creates right after (`makeEdges(true)` classes the new
+    // edge 'eh-preview' too) -- so this selector matches both a node and an
+    // edge simultaneously; the `line-*` properties below are simply inert on
+    // the node match, which is harmless but worth knowing before adding
+    // anything less inert to this rule. '.eh-ghost-edge' is the line
+    // tracking the cursor before anything is snapped. (`.eh-preview-active`
+    // also exists in the library, applied to source/target/ghost during a
+    // preview, but is left unstyled here -- '.eh-source'/'.eh-target'
+    // already cover the node feedback it would add.) Without the four
+    // selectors below the in-progress gesture is nearly invisible -- it
+    // inherits the plain node/edge styles above.
     { selector: '.eh-source', style: { 'border-color': '#4a9eff', 'border-width': 3 } },
     { selector: '.eh-target', style: { 'border-color': '#22c55e', 'border-width': 3 } },
     { selector: '.eh-preview', style: { 'line-color': '#22c55e', 'line-style': 'solid' } },
@@ -236,6 +262,35 @@ function MapGraphAdmin() {
   // rather than once at mount, since it needs the same live `cy` instance;
   // `ehInstance.destroy()` undoes it in the cleanup so a re-run (or unmount)
   // never stacks a second edgehandles instance on the same core.
+  //
+  // `ehInstance.destroy()` alone is NOT enough if link mode is on when this
+  // effect re-runs: reading node_modules/cytoscape-edgehandles's index.js,
+  // `destroy()` is only `this.removeListeners()` -- it never touches
+  // `drawMode` or calls `cy.autoungrabify(false)`. A fresh instance created
+  // right after (this effect re-running) starts with its OWN `drawMode` back
+  // at `false`, while the CORE is still ungrabified from the old instance's
+  // `enableDrawMode()` call -- so neither dragging (still ungrabified) nor
+  // linking (new instance isn't in draw mode) would work, and the toggle
+  // button's own recovery path is a dead end: clicking it while `linkMode`
+  // is (stale-)true calls `disableDrawMode()` on the NEW instance, whose
+  // `prevUngrabifyState` was never captured (nothing called `enableDrawMode`
+  // on it) and is `undefined` -- `cy.autoungrabify(undefined)` is a GETTER
+  // (core/viewport.mjs: `if (bool !== undefined) { set } else { return
+  // get }`), so it is a silent no-op rather than clearing the flag. The
+  // cleanup below closes this instead of leaving it to a getter: it resets
+  // `cy.autoungrabify(false)` and `linkMode` UNCONDITIONALLY, rather than
+  // conditionally calling `disableDrawMode()` only `if (linkMode)` -- the
+  // conditional form would depend on `linkMode` being current inside this
+  // closure, but `linkMode` is deliberately not in this effect's dependency
+  // array (adding it would re-run the whole listener setup on every mode
+  // toggle for no reason), so the closure's `linkMode` would be whatever it
+  // was when the effect last ran, not necessarily what's true "now". This
+  // path is unreachable in production today (`cy` transitions once,
+  // `savePosition.mutate` is stable, and React's dev-mode double-invoke of
+  // effects lands before any user interaction, so `linkMode` is always still
+  // `false` when it happens) -- but IS reachable under Vite Fast Refresh
+  // while an admin has link mode on mid-edit, which is exactly Task 10's
+  // environment.
   //
   // `snapFrequency: 15` is passed explicitly, not left to the documented
   // default: reading node_modules/cytoscape-edgehandles's index.js, the snap
@@ -308,6 +363,11 @@ function MapGraphAdmin() {
       cy.off('unselect', 'edge', onUnselect);
       ehInstance.destroy();
       ehRef.current = null;
+      // destroy() leaves draw mode's autoungrabify set -- see the comment
+      // above. Unconditional, not `linkMode && ...disableDrawMode()`: see
+      // above for why the conditional form is the less robust of the two.
+      cy.autoungrabify(false);
+      setLinkMode(false);
     };
   }, [cy, savePosition.mutate]);
 
