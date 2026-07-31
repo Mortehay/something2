@@ -6,26 +6,26 @@ import { useBiomes, useCreateBiome, useUpdateBiome, useDeleteBiome } from './use
 import { emptyBiomeForm, biomeToForm, biomeFormToPayload } from './biomeForm.js';
 
 const AdminContainer = styled.div`
-  padding: 2rem; color: #eee; max-width: 1200px; margin: 0 auto;
-  height: 100%; overflow-y: auto; background-color: #1a1a2e;
+  padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
+  height: 100%; overflow-y: auto; background-color: var(--s2-surface);
 `;
 const Header = styled.div`display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;`;
 const Button = styled.button`
-  background: ${p => p.$bg || '#4a9eff'}; color: white; border: none; border-radius: 6px;
+  background: ${p => p.$bg || 'var(--s2-accent)'}; color: white; border: none; border-radius: 6px;
   padding: 0.5rem 1rem; font-weight: bold; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
   &:disabled { opacity: 0.5; cursor: default; }
 `;
 const Card = styled.div`
-  background: #23233f; border: 1px solid #333; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;
+  background: var(--s2-surface-raised); border: 1px solid var(--s2-border); border-radius: 8px; padding: 1rem; margin-bottom: 1rem;
 `;
 const Row = styled.div`display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin: 0.4rem 0;`;
-const Input = styled.input`background: #12121f; color: #eee; border: 1px solid #333; border-radius: 4px; padding: 0.4rem;`;
+const Input = styled.input`background: var(--s2-bg-sunken); color: var(--s2-text); border: 1px solid var(--s2-border); border-radius: 4px; padding: 0.4rem;`;
 const CheckGrid = styled.div`display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0.4rem 0;`;
-const Label = styled.span`color: #aaa; min-width: 90px;`;
+const Label = styled.span`color: var(--s2-text-muted); min-width: 90px;`;
 
 const Swatch = styled.span`
   display: inline-block; width: 14px; height: 14px; border-radius: 3px;
-  border: 1px solid #555; background: ${p => p.$color};
+  border: 1px solid var(--s2-swatch-border); background: ${p => p.$color};
 `;
 
 // One checkbox row bound to a string-array field of the form.
@@ -33,7 +33,7 @@ function NameChecks({ options, selected, onToggle }) {
   return (
     <CheckGrid>
       {options.map(name => (
-        <label key={name} style={{ color: '#ccc' }}>
+        <label key={name} style={{ color: 'var(--s2-text-secondary)' }}>
           <input type="checkbox" checked={selected.includes(name)} onChange={() => onToggle(name)} /> {name}
         </label>
       ))}
@@ -75,7 +75,7 @@ function BiomeCard({ biome, tileNames, floraNames, creatureNames }) {
         <input type="color" value={form.color} onChange={e => set('color', e.target.value)}
           title="Display colour (admin lists and map markers)" />
         {!isNew && (
-          <HiOutlineTrash style={{ color: '#ef4444', cursor: 'pointer', marginLeft: 'auto' }}
+          <HiOutlineTrash style={{ color: 'var(--s2-danger)', cursor: 'pointer', marginLeft: 'auto' }}
             title="Delete biome"
             onClick={() => window.confirm(`Delete biome "${biome.name}"?`) && del.mutate({ id: biome.id })} />
         )}
@@ -109,7 +109,7 @@ function BiomeCard({ biome, tileNames, floraNames, creatureNames }) {
         <Button onClick={save} disabled={create.isPending || update.isPending}>
           {isNew ? <><HiOutlinePlus /> Create biome</> : 'Save'}
         </Button>
-        <span style={{ color: '#888', fontSize: '0.85em' }}>
+        <span style={{ color: 'var(--s2-text-dim)', fontSize: '0.85em' }}>
           Palette, art style and exclusions are composed into image-generation prompts.
         </span>
       </Row>
@@ -133,7 +133,7 @@ function BiomesAdmin() {
     <AdminContainer>
       <Header><h2>Biomes</h2></Header>
       <BiomeCard biome={null} {...lists} />
-      {biomes.length === 0 && <p style={{ color: '#888' }}>No biomes yet. Create one above.</p>}
+      {biomes.length === 0 && <p style={{ color: 'var(--s2-text-dim)' }}>No biomes yet. Create one above.</p>}
       {biomes.map(b => <BiomeCard key={b.id} biome={b} {...lists} />)}
     </AdminContainer>
   );

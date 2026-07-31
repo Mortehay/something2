@@ -64,3 +64,51 @@ describe('--s2-* theme tokens', () => {
     expect(dark).not.toContain('&.light-mode');
   });
 });
+
+const IN_SCOPE = [
+  'Something2.jsx', 'TileTypesAdmin.jsx', 'EntityTypesAdmin.jsx',
+  'ItemTypesAdmin.jsx', 'BiomesAdmin.jsx', 'MapsAdmin.jsx', 'MapGraphAdmin.jsx',
+];
+
+// Files not yet swept. Each sweep task deletes its own entry. Must reach [].
+const PENDING = [
+  'Something2.jsx', 'TileTypesAdmin.jsx', 'EntityTypesAdmin.jsx',
+  'ItemTypesAdmin.jsx', 'MapsAdmin.jsx', 'MapGraphAdmin.jsx',
+];
+
+const read = (name) => readFileSync(
+  fileURLToPath(new URL(`../${name}`, import.meta.url)), 'utf8',
+);
+
+// Strip sentinel-marked regions and single-line exemptions, then find any surviving hex.
+function offendingLiterals(source) {
+  const withoutBlocks = source.replace(
+    /\/\*\s*s2-theme-exempt:start[\s\S]*?s2-theme-exempt:end\s*\*\//g, '',
+  );
+  return withoutBlocks
+    .split('\n')
+    .filter((line) => !/s2-theme-exempt/.test(line))
+    .flatMap((line) => line.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []);
+}
+
+describe('Something2 admin theme gate', () => {
+  const swept = IN_SCOPE.filter((f) => !PENDING.includes(f));
+
+  it.each(swept)('%s has no untokenized colour literals', (file) => {
+    expect(offendingLiterals(read(file))).toEqual([]);
+  });
+
+  // Reverse assertion: a PENDING file that is already clean means someone swept it
+  // and forgot to remove it from the list — or misspelled a filename.
+  it.each(PENDING)('%s is still pending and still dirty', (file) => {
+    expect(offendingLiterals(read(file)).length).toBeGreaterThan(0);
+  });
+
+  it('every PENDING entry is a real in-scope file', () => {
+    for (const file of PENDING) expect(IN_SCOPE).toContain(file);
+  });
+
+  it('has at least one swept file under the gate', () => {
+    expect(swept.length).toBeGreaterThan(0);
+  });
+});
