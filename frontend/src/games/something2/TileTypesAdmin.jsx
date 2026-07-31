@@ -39,7 +39,7 @@ const TileGrid = styled.div`
 `;
 
 const TileCard = styled.div`
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--s2-overlay);
   border: 1px solid color-mix(in srgb, var(--s2-accent) 20%, transparent);
   border-radius: 12px;
   padding: 1.5rem;
@@ -48,7 +48,7 @@ const TileCard = styled.div`
   &:hover {
     border-color: var(--s2-accent);
     transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(74, 158, 255, 0.1);
+    box-shadow: 0 4px 20px var(--s2-accent-tint);
   }
 `;
 
@@ -70,7 +70,7 @@ const ColorBadge = styled.div`
   height: 40px;
   border-radius: 8px;
   background-color: ${props => props.color};
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 2px solid var(--s2-hairline);
 `;
 
 const TextureBadge = styled.img`
@@ -79,7 +79,7 @@ const TextureBadge = styled.img`
   border-radius: 8px;
   object-fit: cover;
   image-rendering: pixelated;
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 2px solid var(--s2-hairline);
 `;
 
 // URL of a tile's rendered texture (static image or animation atlas), or null
@@ -117,7 +117,7 @@ const IconButton = styled.button`
 
   &:hover {
     color: ${props => props.$delete ? 'var(--s2-danger)' : 'var(--s2-accent)'};
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--s2-overlay);
   }
 `;
 
@@ -146,7 +146,7 @@ const StatItem = styled.div`
 const NeighborsList = styled.div`
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--s2-hairline);
 
   span:first-child {
     display: block;
@@ -165,8 +165,8 @@ const TagCloud = styled.div`
 `;
 
 const Tag = styled.span`
-  background: rgba(74, 158, 255, 0.1);
-  border: 1px solid rgba(74, 158, 255, 0.3);
+  background: var(--s2-accent-tint);
+  border: 1px solid var(--s2-accent-tint-strong);
   padding: 0.2rem 0.6rem;
   border-radius: 4px;
   font-size: 1rem;
@@ -179,7 +179,7 @@ const Overlay = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--s2-scrim);
   backdrop-filter: blur(5px);
   display: flex;
   justify-content: center;
@@ -194,7 +194,7 @@ const Modal = styled.div`
   width: 90%;
   max-width: 500px;
   padding: 2.5rem;
-  box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 40px var(--s2-scrim-soft);
 `;
 
 const Form = styled.form`
@@ -216,8 +216,8 @@ const FormGroup = styled.div`
 
   input, select, textarea {
     background: var(--s2-bg);
-    border: 1px solid rgba(74, 158, 255, 0.3);
-    color: white;
+    border: 1px solid var(--s2-accent-tint-strong);
+    color: var(--s2-text-strong);
     padding: 1rem;
     border-radius: 8px;
     font-size: 1.4rem;
@@ -250,7 +250,7 @@ const MultiSelect = styled.div`
   padding: 1rem;
   background: var(--s2-bg);
   border-radius: 8px;
-  border: 1px solid rgba(74, 158, 255, 0.3);
+  border: 1px solid var(--s2-accent-tint-strong);
 `;
 
 const FormActions = styled.div`
@@ -261,8 +261,8 @@ const FormActions = styled.div`
 `;
 
 const MainButton = styled.button`
-  background: var(--s2-accent);
-  color: white;
+  background: var(--s2-btn-primary);
+  color: var(--s2-on-accent);
   border: none;
   padding: 1rem 2rem;
   border-radius: 8px;
@@ -276,14 +276,14 @@ const MainButton = styled.button`
 
 const SecondaryButton = styled.button`
   background: transparent;
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: var(--s2-text-strong);
+  border: 1px solid var(--s2-hairline-strong);
   padding: 1rem 2rem;
   border-radius: 8px;
   font-size: 1.4rem;
   cursor: pointer;
-  
-  &:hover { background: rgba(255, 255, 255, 0.05); }
+
+  &:hover { background: var(--s2-overlay); }
 `;
 
 function TileSpritePanel({ tile }) {
@@ -345,7 +345,7 @@ function TileSpritePanel({ tile }) {
           value={biome}
           onChange={(e) => setBiome(e.target.value)}
           disabled={isLoadingBiomes}
-          style={{ background: 'var(--s2-bg)', border: '1px solid rgba(74, 158, 255, 0.3)', color: 'white', padding: '0.6rem', borderRadius: 8, fontSize: '1.2rem' }}
+          style={{ background: 'var(--s2-bg)', border: '1px solid var(--s2-accent-tint-strong)', color: 'var(--s2-text-strong)', padding: '0.6rem', borderRadius: 8, fontSize: '1.2rem' }}
         >
           <option value="">— none —</option>
           {biomes.map((b) => <option key={b.id} value={b.name}>{b.name}</option>)}

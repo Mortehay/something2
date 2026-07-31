@@ -11,7 +11,7 @@ const AdminContainer = styled.div`
 `;
 const Header = styled.div`display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;`;
 const Button = styled.button`
-  background: ${p => p.$bg || 'var(--s2-accent)'}; color: white; border: none; border-radius: 6px;
+  background: ${p => p.$bg || 'var(--s2-accent)'}; color: var(--s2-on-accent); border: none; border-radius: 6px;
   padding: 0.5rem 1rem; font-weight: bold; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
   &:disabled { opacity: 0.5; cursor: default; }
 `;

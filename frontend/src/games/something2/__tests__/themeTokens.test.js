@@ -35,7 +35,41 @@ const TOKENS = [
   ['--s2-warning-soft', '#fcd34d', '#946005'],
   ['--s2-warning-bright', '#fde047', '#854d0e'],
   ['--s2-warning-mid', '#eab308', '#854d0e'],
+
+  // Amendment 1 -- extended solids
+  ['--s2-row', '#1f1f35', '#eaeaf2'],
+  ['--s2-btn-primary', '#3a7ed8', '#1d4ed8'],
+  ['--s2-btn-info', '#3b82f6', '#1d4ed8'],
+  ['--s2-btn-grey', '#4b5563', '#d0d0dc'],
+  ['--s2-btn-purple', '#8b5cf6', '#6d28d9'],
+  ['--s2-variant-gpu', '#4ade80', '#15803d'],
+  ['--s2-tab-entity', '#facc15', '#946005'],
+  ['--s2-tab-items', '#f472b6', '#be185d'],
+  ['--s2-tab-maps', '#34d399', '#047857'],
+
+  // Amendment 1 -- translucent (light counterparts invert direction: on dark a white
+  // overlay lifts, on light the equivalent must darken)
+  ['--s2-overlay-subtle', 'rgba(255,255,255,0.03)', 'rgba(0,0,0,0.02)'],
+  ['--s2-overlay', 'rgba(255,255,255,0.05)', 'rgba(0,0,0,0.035)'],
+  ['--s2-hairline', 'rgba(255,255,255,0.1)', 'rgba(0,0,0,0.08)'],
+  ['--s2-hairline-strong', 'rgba(255,255,255,0.3)', 'rgba(0,0,0,0.18)'],
+  ['--s2-text-ghost', 'rgba(255,255,255,0.4)', 'rgba(0,0,0,0.45)'],
+  ['--s2-scrim', 'rgba(0,0,0,0.8)', 'rgba(0,0,0,0.45)'],
+  ['--s2-scrim-soft', 'rgba(0,0,0,0.5)', 'rgba(0,0,0,0.28)'],
+  ['--s2-shadow', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.14)'],
+  ['--s2-panel-veil', 'rgba(26,26,46,0.85)', 'rgba(255,255,255,0.9)'],
+  ['--s2-panel-veil-solid', 'rgba(46,46,74,0.95)', 'rgba(255,255,255,0.96)'],
+  ['--s2-accent-tint', 'rgba(74,158,255,0.1)', 'rgba(37,99,235,0.08)'],
+  ['--s2-accent-tint-strong', 'rgba(74,158,255,0.3)', 'rgba(37,99,235,0.22)'],
+  ['--s2-selected-tint', 'rgba(250,204,21,0.1)', 'rgba(148,96,5,0.10)'],
+  ['--s2-selected-tint-strong', 'rgba(250,204,21,0.3)', 'rgba(148,96,5,0.28)'],
 ];
+
+// Token values now include rgba()/rgb() forms, whose parentheses are regex
+// metacharacters -- escape a value before splicing it into a RegExp source, or a
+// `(` in a token's own value would open a capture group instead of matching a
+// literal paren and every translucent-token assertion would silently mismatch.
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Slice the two mode blocks apart so a token defined in only one is caught.
 function modeBlocks(source) {
@@ -52,11 +86,11 @@ describe('--s2-* theme tokens', () => {
   const { light, dark } = modeBlocks(globalStyles);
 
   it.each(TOKENS)('defines %s in the light block as %s', (token, _darkValue, lightValue) => {
-    expect(light).toMatch(new RegExp(`${token}\\s*:\\s*${lightValue}\\s*;`, 'i'));
+    expect(light).toMatch(new RegExp(`${token}\\s*:\\s*${escapeRegex(lightValue)}\\s*;`, 'i'));
   });
 
   it.each(TOKENS)('defines %s in the dark block as %s', (token, darkValue) => {
-    expect(dark).toMatch(new RegExp(`${token}\\s*:\\s*${darkValue}\\s*;`, 'i'));
+    expect(dark).toMatch(new RegExp(`${token}\\s*:\\s*${escapeRegex(darkValue)}\\s*;`, 'i'));
   });
 
   it('slices two non-empty, non-overlapping mode blocks', () => {
@@ -104,6 +138,34 @@ describe('offendingLiterals sentinel handling', () => {
       '/* s2-theme-exempt:end */',
     ].join('\n');
     expect(offendingLiterals(source)).toEqual([]);
+  });
+});
+
+describe('offendingLiterals widened matcher (rgba + colour keywords)', () => {
+  it('catches an rgba() literal', () => {
+    expect(offendingLiterals('background: rgba(255, 255, 255, 0.05);')).toEqual(['rgba(255, 255, 255, 0.05)']);
+  });
+
+  it('catches a bare colour keyword in colour position', () => {
+    expect(offendingLiterals('color: white;')).toEqual(['white']);
+  });
+
+  it('leaves transparent alone -- it is a legitimate value', () => {
+    expect(offendingLiterals('background: transparent;')).toEqual([]);
+  });
+
+  it('leaves a var() reference alone', () => {
+    expect(offendingLiterals('color: var(--s2-text);')).toEqual([]);
+  });
+
+  it('does not flag "green" in prose or an identifier like greenfield', () => {
+    expect(offendingLiterals('// the greenfield rewrite is green-lit')).toEqual([]);
+  });
+
+  it('exempts a named rgba() value even though its own parens would otherwise break the sentinel', () => {
+    expect(offendingLiterals(
+      "border: 1px solid rgba(0,0,0,0.5); // s2-theme-exempt(rgba(0,0,0,0.5)): x",
+    )).toEqual([]);
   });
 });
 

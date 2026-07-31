@@ -75,6 +75,33 @@ const GlobalStyles = createGlobalStyle`
     --s2-warning-soft: #946005;
     --s2-warning-bright: #854d0e;
     --s2-warning-mid: #854d0e;
+
+    /* s2: extended solids */
+    --s2-row: #eaeaf2;
+    --s2-btn-primary: #1d4ed8;
+    --s2-btn-info: #1d4ed8;
+    --s2-btn-grey: #d0d0dc;
+    --s2-btn-purple: #6d28d9;
+    --s2-variant-gpu: #15803d;
+    --s2-tab-entity: #946005;
+    --s2-tab-items: #be185d;
+    --s2-tab-maps: #047857;
+
+    /* s2: translucent */
+    --s2-overlay-subtle: rgba(0,0,0,0.02);
+    --s2-overlay: rgba(0,0,0,0.035);
+    --s2-hairline: rgba(0,0,0,0.08);
+    --s2-hairline-strong: rgba(0,0,0,0.18);
+    --s2-text-ghost: rgba(0,0,0,0.45);
+    --s2-scrim: rgba(0,0,0,0.45);
+    --s2-scrim-soft: rgba(0,0,0,0.28);
+    --s2-shadow: rgba(0,0,0,0.14);
+    --s2-panel-veil: rgba(255,255,255,0.9);
+    --s2-panel-veil-solid: rgba(255,255,255,0.96);
+    --s2-accent-tint: rgba(37,99,235,0.08);
+    --s2-accent-tint-strong: rgba(37,99,235,0.22);
+    --s2-selected-tint: rgba(148,96,5,0.10);
+    --s2-selected-tint-strong: rgba(148,96,5,0.28);
   }
   &.dark-mode{
 
@@ -147,6 +174,33 @@ const GlobalStyles = createGlobalStyle`
     --s2-warning-soft: #fcd34d;
     --s2-warning-bright: #fde047;
     --s2-warning-mid: #eab308;
+
+    /* s2: extended solids */
+    --s2-row: #1f1f35;
+    --s2-btn-primary: #3a7ed8;
+    --s2-btn-info: #3b82f6;
+    --s2-btn-grey: #4b5563;
+    --s2-btn-purple: #8b5cf6;
+    --s2-variant-gpu: #4ade80;
+    --s2-tab-entity: #facc15;
+    --s2-tab-items: #f472b6;
+    --s2-tab-maps: #34d399;
+
+    /* s2: translucent */
+    --s2-overlay-subtle: rgba(255,255,255,0.03);
+    --s2-overlay: rgba(255,255,255,0.05);
+    --s2-hairline: rgba(255,255,255,0.1);
+    --s2-hairline-strong: rgba(255,255,255,0.3);
+    --s2-text-ghost: rgba(255,255,255,0.4);
+    --s2-scrim: rgba(0,0,0,0.8);
+    --s2-scrim-soft: rgba(0,0,0,0.5);
+    --s2-shadow: rgba(0,0,0,0.4);
+    --s2-panel-veil: rgba(26,26,46,0.85);
+    --s2-panel-veil-solid: rgba(46,46,74,0.95);
+    --s2-accent-tint: rgba(74,158,255,0.1);
+    --s2-accent-tint-strong: rgba(74,158,255,0.3);
+    --s2-selected-tint: rgba(250,204,21,0.1);
+    --s2-selected-tint-strong: rgba(250,204,21,0.3);
   }
 
 

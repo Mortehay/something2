@@ -37,7 +37,7 @@ const EntityGrid = styled.div`
 `;
 
 const EntityCard = styled.div`
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--s2-overlay);
   border: 1px solid color-mix(in srgb, var(--s2-selected) 20%, transparent);
   border-radius: 12px;
   padding: 1.5rem;
@@ -46,7 +46,7 @@ const EntityCard = styled.div`
   &:hover {
     border-color: var(--s2-selected);
     transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(250, 204, 21, 0.1);
+    box-shadow: 0 4px 20px var(--s2-selected-tint);
   }
 `;
 
@@ -75,7 +75,7 @@ const CategoryBadge = styled.div`
   text-transform: uppercase;
   background-color: ${props => props.$category === 'weapon' ? '#7f1d1d' : props.$category === 'ammo' ? '#14532d' : '#1e3a8a'}; /* s2-theme-exempt(#7f1d1d, #14532d, #1e3a8a): fixed category chip colour (weapon/ammo/armor) -- a data-style swatch, not a themed surface; stays constant across modes */
   color: var(--s2-on-accent);
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 2px solid var(--s2-hairline);
 `;
 
 const EntityName = styled.h3`
@@ -101,7 +101,7 @@ const IconButton = styled.button`
 
   &:hover {
     color: ${props => props.$delete ? 'var(--s2-danger)' : 'var(--s2-selected)'};
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--s2-overlay);
   }
 `;
 
@@ -130,7 +130,7 @@ const StatItem = styled.div`
 const SpawnList = styled.div`
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--s2-hairline);
 
   span:first-child {
     display: block;
@@ -149,8 +149,8 @@ const TagCloud = styled.div`
 `;
 
 const Tag = styled.span`
-  background: rgba(250, 204, 21, 0.1);
-  border: 1px solid rgba(250, 204, 21, 0.3);
+  background: var(--s2-selected-tint);
+  border: 1px solid var(--s2-selected-tint-strong);
   padding: 0.2rem 0.6rem;
   border-radius: 4px;
   font-size: 1rem;
@@ -163,7 +163,7 @@ const Overlay = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--s2-scrim);
   backdrop-filter: blur(5px);
   display: flex;
   justify-content: center;
@@ -180,7 +180,7 @@ const Modal = styled.div`
   max-height: 90vh;
   overflow-y: auto;
   padding: 2.5rem;
-  box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 40px var(--s2-scrim-soft);
 `;
 
 const Form = styled.form`
@@ -202,8 +202,8 @@ const FormGroup = styled.div`
 
   input, select, textarea {
     background: var(--s2-bg);
-    border: 1px solid rgba(250, 204, 21, 0.3);
-    color: white;
+    border: 1px solid var(--s2-selected-tint-strong);
+    color: var(--s2-text-strong);
     padding: 1rem;
     border-radius: 8px;
     font-size: 1.4rem;
@@ -226,7 +226,7 @@ const FormActions = styled.div`
 
 const MainButton = styled.button`
   background: var(--s2-warning-mid);
-  color: white;
+  color: var(--s2-on-accent);
   border: none;
   padding: 1rem 2rem;
   border-radius: 8px;
@@ -240,27 +240,27 @@ const MainButton = styled.button`
 
 const SecondaryButton = styled.button`
   background: transparent;
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: var(--s2-text-strong);
+  border: 1px solid var(--s2-hairline-strong);
   padding: 1rem 2rem;
   border-radius: 8px;
   font-size: 1.4rem;
   cursor: pointer;
 
-  &:hover { background: rgba(255, 255, 255, 0.05); }
+  &:hover { background: var(--s2-overlay); }
 `;
 
 const SmallButton = styled.button`
   background: transparent;
   color: var(--s2-selected);
-  border: 1px dashed rgba(250, 204, 21, 0.5);
+  border: 1px dashed var(--s2-selected-tint-strong);
   padding: 0.6rem 1rem;
   border-radius: 6px;
   font-size: 1.2rem;
   cursor: pointer;
   align-self: flex-start;
 
-  &:hover { background: rgba(250, 204, 21, 0.08); }
+  &:hover { background: var(--s2-selected-tint); }
   &:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
 
