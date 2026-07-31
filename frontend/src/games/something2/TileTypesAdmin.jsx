@@ -12,12 +12,12 @@ import { withOptionalBiome } from './generationJobPayload.js';
 
 const AdminContainer = styled.div`
   padding: 2rem;
-  color: #eee;
+  color: var(--s2-text);
   max-width: 1200px;
   margin: 0 auto;
   height: 100%;
   overflow-y: auto;
-  background-color: #1a1a2e;
+  background-color: var(--s2-surface);
 `;
 
 const Header = styled.div`
@@ -25,10 +25,10 @@ const Header = styled.div`
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
-  
+
   h2 {
     font-size: 2.4rem;
-    color: #4a9eff;
+    color: var(--s2-accent);
   }
 `;
 
@@ -40,13 +40,13 @@ const TileGrid = styled.div`
 
 const TileCard = styled.div`
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid #4a9eff33;
+  border: 1px solid color-mix(in srgb, var(--s2-accent) 20%, transparent);
   border-radius: 12px;
   padding: 1.5rem;
   transition: all 0.3s ease;
-  
+
   &:hover {
-    border-color: #4a9eff;
+    border-color: var(--s2-accent);
     transform: translateY(-2px);
     box-shadow: 0 4px 20px rgba(74, 158, 255, 0.1);
   }
@@ -108,15 +108,15 @@ const ActionButtons = styled.div`
 const IconButton = styled.button`
   background: none;
   border: none;
-  color: #aaa;
+  color: var(--s2-text-muted);
   cursor: pointer;
   padding: 0.5rem;
   font-size: 1.8rem;
   border-radius: 4px;
   transition: all 0.2s;
-  
+
   &:hover {
-    color: ${props => props.$delete ? '#ef4444' : '#4a9eff'};
+    color: ${props => props.$delete ? 'var(--s2-danger)' : 'var(--s2-accent)'};
     background: rgba(255, 255, 255, 0.05);
   }
 `;
@@ -137,7 +137,7 @@ const StatItem = styled.div`
   
   span:first-child {
     font-weight: bold;
-    color: #4a9eff;
+    color: var(--s2-accent);
     font-size: 1rem;
     text-transform: uppercase;
   }
@@ -147,11 +147,11 @@ const NeighborsList = styled.div`
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  
+
   span:first-child {
     display: block;
     font-weight: bold;
-    color: #4a9eff;
+    color: var(--s2-accent);
     font-size: 1rem;
     text-transform: uppercase;
     margin-bottom: 0.5rem;
@@ -188,8 +188,8 @@ const Overlay = styled.div`
 `;
 
 const Modal = styled.div`
-  background: #1a1a2e;
-  border: 2px solid #4a9eff;
+  background: var(--s2-surface);
+  border: 2px solid var(--s2-accent);
   border-radius: 16px;
   width: 90%;
   max-width: 500px;
@@ -210,12 +210,12 @@ const FormGroup = styled.div`
   
   label {
     font-size: 1.2rem;
-    color: #4a9eff;
+    color: var(--s2-accent);
     font-weight: bold;
   }
-  
+
   input, select, textarea {
-    background: #0f0f1a;
+    background: var(--s2-bg);
     border: 1px solid rgba(74, 158, 255, 0.3);
     color: white;
     padding: 1rem;
@@ -225,7 +225,7 @@ const FormGroup = styled.div`
 
     &:focus {
       outline: none;
-      border-color: #4a9eff;
+      border-color: var(--s2-accent);
     }
   }
 `;
@@ -248,7 +248,7 @@ const MultiSelect = styled.div`
   max-height: 150px;
   overflow-y: auto;
   padding: 1rem;
-  background: #0f0f1a;
+  background: var(--s2-bg);
   border-radius: 8px;
   border: 1px solid rgba(74, 158, 255, 0.3);
 `;
@@ -261,7 +261,7 @@ const FormActions = styled.div`
 `;
 
 const MainButton = styled.button`
-  background: #3a7ed8;
+  background: var(--s2-accent);
   color: white;
   border: none;
   padding: 1rem 2rem;
@@ -269,9 +269,9 @@ const MainButton = styled.button`
   font-size: 1.4rem;
   cursor: pointer;
   transition: all 0.2s;
-  
-  &:hover { background: #4a9eff; }
-  &:disabled { background: #555; cursor: not-allowed; }
+
+  &:hover { background: var(--s2-accent); }
+  &:disabled { background: var(--s2-disabled-bg); color: var(--s2-text-dim); cursor: not-allowed; }
 `;
 
 const SecondaryButton = styled.button`
@@ -338,14 +338,14 @@ function TileSpritePanel({ tile }) {
         {' · '}render mode: {tile.render_mode || 'color'}
       </div>
       <div style={{ marginBottom: '0.75rem' }}>
-        <label style={{ display: 'block', fontSize: '1.1rem', color: '#4a9eff', marginBottom: '0.25rem' }}>
+        <label style={{ display: 'block', fontSize: '1.1rem', color: 'var(--s2-accent)', marginBottom: '0.25rem' }}>
           Biome art context (optional)
         </label>
         <select
           value={biome}
           onChange={(e) => setBiome(e.target.value)}
           disabled={isLoadingBiomes}
-          style={{ background: '#0f0f1a', border: '1px solid rgba(74, 158, 255, 0.3)', color: 'white', padding: '0.6rem', borderRadius: 8, fontSize: '1.2rem' }}
+          style={{ background: 'var(--s2-bg)', border: '1px solid rgba(74, 158, 255, 0.3)', color: 'white', padding: '0.6rem', borderRadius: 8, fontSize: '1.2rem' }}
         >
           <option value="">— none —</option>
           {biomes.map((b) => <option key={b.id} value={b.name}>{b.name}</option>)}
@@ -360,17 +360,17 @@ function TileSpritePanel({ tile }) {
       </div>
       {savedUrl && status !== 'done' && (
         <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <img src={savedUrl} alt="current texture" style={{ width: 64, height: 64, imageRendering: 'pixelated', background: '#0f0f1a', borderRadius: 6 }} />
+          <img src={savedUrl} alt="current texture" style={{ width: 64, height: 64, imageRendering: 'pixelated', background: 'var(--s2-bg)', borderRadius: 6 }} />
           <span style={{ fontSize: '1rem', opacity: 0.7 }}>Current {tile.render_mode} texture</span>
         </div>
       )}
       {jobId && (
         <div style={{ marginTop: '0.75rem', fontSize: '1.1rem' }}>
           {status && status !== 'done' && status !== 'error' && <span>Generating… ({job?.progress?.done ?? 0}/{job?.progress?.total ?? 0})</span>}
-          {status === 'error' && <span style={{ color: '#ef4444' }}>Generation failed: {job?.error}</span>}
+          {status === 'error' && <span style={{ color: 'var(--s2-danger)' }}>Generation failed: {job?.error}</span>}
           {status === 'done' && result && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
-              {previewUrl && <img src={previewUrl} alt="preview" style={{ width: 64, height: 64, imageRendering: 'pixelated', background: '#0f0f1a', borderRadius: 6 }} />}
+              {previewUrl && <img src={previewUrl} alt="preview" style={{ width: 64, height: 64, imageRendering: 'pixelated', background: 'var(--s2-bg)', borderRadius: 6 }} />}
               <MainButton type="button" onClick={approve} disabled={approveImage.isPending || approveSprite.isPending}>
                 Approve {mode === 'animated' ? 'animation' : 'texture'}
               </MainButton>
@@ -396,7 +396,7 @@ function TileTypesAdmin() {
   
   const [formData, setFormData] = useState({
     name: '',
-    color: '#000000',
+    color: '#000000', // s2-theme-exempt(#000000): tile data default, not chrome
     walkable: true,
     speed: 1.0,
     wall_height: 0,
@@ -422,7 +422,7 @@ function TileTypesAdmin() {
     } else {
       setFormData({
         name: '',
-        color: '#00ff00',
+        color: '#00ff00', // s2-theme-exempt(#00ff00): tile data default, not chrome
         walkable: true,
         speed: 1.0,
         wall_height: 0,

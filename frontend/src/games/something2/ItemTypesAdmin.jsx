@@ -10,12 +10,12 @@ import {
 
 const AdminContainer = styled.div`
   padding: 2rem;
-  color: #eee;
+  color: var(--s2-text);
   max-width: 1200px;
   margin: 0 auto;
   height: 100%;
   overflow-y: auto;
-  background-color: #1a1a2e;
+  background-color: var(--s2-surface);
 `;
 
 const Header = styled.div`
@@ -26,7 +26,7 @@ const Header = styled.div`
 
   h2 {
     font-size: 2.4rem;
-    color: #facc15;
+    color: var(--s2-selected);
   }
 `;
 
@@ -38,13 +38,13 @@ const EntityGrid = styled.div`
 
 const EntityCard = styled.div`
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid #facc1533;
+  border: 1px solid color-mix(in srgb, var(--s2-selected) 20%, transparent);
   border-radius: 12px;
   padding: 1.5rem;
   transition: all 0.3s ease;
 
   &:hover {
-    border-color: #facc15;
+    border-color: var(--s2-selected);
     transform: translateY(-2px);
     box-shadow: 0 4px 20px rgba(250, 204, 21, 0.1);
   }
@@ -73,7 +73,8 @@ const CategoryBadge = styled.div`
   font-size: 1.2rem;
   font-weight: bold;
   text-transform: uppercase;
-  background-color: ${props => props.$category === 'weapon' ? '#7f1d1d' : props.$category === 'ammo' ? '#14532d' : '#1e3a8a'};
+  background-color: ${props => props.$category === 'weapon' ? '#7f1d1d' : props.$category === 'ammo' ? '#14532d' : '#1e3a8a'}; /* s2-theme-exempt(#7f1d1d, #14532d, #1e3a8a): fixed category chip colour (weapon/ammo/armor) -- a data-style swatch, not a themed surface; stays constant across modes */
+  color: var(--s2-on-accent);
   border: 2px solid rgba(255, 255, 255, 0.1);
 `;
 
@@ -91,7 +92,7 @@ const ActionButtons = styled.div`
 const IconButton = styled.button`
   background: none;
   border: none;
-  color: #aaa;
+  color: var(--s2-text-muted);
   cursor: pointer;
   padding: 0.5rem;
   font-size: 1.8rem;
@@ -99,7 +100,7 @@ const IconButton = styled.button`
   transition: all 0.2s;
 
   &:hover {
-    color: ${props => props.$delete ? '#ef4444' : '#facc15'};
+    color: ${props => props.$delete ? 'var(--s2-danger)' : 'var(--s2-selected)'};
     background: rgba(255, 255, 255, 0.05);
   }
 `;
@@ -120,7 +121,7 @@ const StatItem = styled.div`
 
   span:first-child {
     font-weight: bold;
-    color: #facc15;
+    color: var(--s2-selected);
     font-size: 1rem;
     text-transform: uppercase;
   }
@@ -134,7 +135,7 @@ const SpawnList = styled.div`
   span:first-child {
     display: block;
     font-weight: bold;
-    color: #facc15;
+    color: var(--s2-selected);
     font-size: 1rem;
     text-transform: uppercase;
     margin-bottom: 0.5rem;
@@ -171,8 +172,8 @@ const Overlay = styled.div`
 `;
 
 const Modal = styled.div`
-  background: #1a1a2e;
-  border: 2px solid #facc15;
+  background: var(--s2-surface);
+  border: 2px solid var(--s2-selected);
   border-radius: 16px;
   width: 90%;
   max-width: 560px;
@@ -195,12 +196,12 @@ const FormGroup = styled.div`
 
   label {
     font-size: 1.2rem;
-    color: #facc15;
+    color: var(--s2-selected);
     font-weight: bold;
   }
 
   input, select, textarea {
-    background: #0f0f1a;
+    background: var(--s2-bg);
     border: 1px solid rgba(250, 204, 21, 0.3);
     color: white;
     padding: 1rem;
@@ -211,7 +212,7 @@ const FormGroup = styled.div`
 
     &:focus {
       outline: none;
-      border-color: #facc15;
+      border-color: var(--s2-selected);
     }
   }
 `;
@@ -224,7 +225,7 @@ const FormActions = styled.div`
 `;
 
 const MainButton = styled.button`
-  background: #eab308;
+  background: var(--s2-warning-mid);
   color: white;
   border: none;
   padding: 1rem 2rem;
@@ -233,8 +234,8 @@ const MainButton = styled.button`
   cursor: pointer;
   transition: all 0.2s;
 
-  &:hover { background: #facc15; }
-  &:disabled { background: #555; cursor: not-allowed; }
+  &:hover { background: var(--s2-selected); }
+  &:disabled { background: var(--s2-disabled-bg); color: var(--s2-text-dim); cursor: not-allowed; }
 `;
 
 const SecondaryButton = styled.button`
@@ -251,7 +252,7 @@ const SecondaryButton = styled.button`
 
 const SmallButton = styled.button`
   background: transparent;
-  color: #facc15;
+  color: var(--s2-selected);
   border: 1px dashed rgba(250, 204, 21, 0.5);
   padding: 0.6rem 1rem;
   border-radius: 6px;
@@ -275,12 +276,12 @@ const ResistanceRow = styled.div`
 const RemoveRowButton = styled.button`
   background: none;
   border: none;
-  color: #ef4444;
+  color: var(--s2-danger);
   cursor: pointer;
   font-size: 1.6rem;
   padding: 0.4rem;
 
-  &:hover { color: #f87171; }
+  &:hover { color: var(--s2-danger-soft); }
 `;
 
 const InlineCheck = styled.div`
@@ -289,7 +290,7 @@ const InlineCheck = styled.div`
   gap: 1rem;
 
   input { width: 20px; height: 20px; }
-  label { font-size: 1.2rem; color: #facc15; }
+  label { font-size: 1.2rem; color: var(--s2-selected); }
 `;
 
 function ItemTypesAdmin() {

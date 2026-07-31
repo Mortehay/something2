@@ -73,8 +73,8 @@ const IN_SCOPE = [
 
 // Files not yet swept. Each sweep task deletes its own entry. Must reach [].
 const PENDING = [
-  'Something2.jsx', 'TileTypesAdmin.jsx', 'EntityTypesAdmin.jsx',
-  'ItemTypesAdmin.jsx', 'MapsAdmin.jsx', 'MapGraphAdmin.jsx',
+  'Something2.jsx', 'EntityTypesAdmin.jsx',
+  'MapsAdmin.jsx', 'MapGraphAdmin.jsx',
 ];
 
 const read = (name) => readFileSync(
