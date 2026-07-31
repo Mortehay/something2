@@ -10,12 +10,12 @@ import {
 
 const AdminContainer = styled.div`
   padding: 2rem;
-  color: #eee;
+  color: var(--s2-text);
   max-width: 1200px;
   margin: 0 auto;
   height: 100%;
   overflow-y: auto;
-  background-color: #1a1a2e;
+  background-color: var(--s2-surface);
 `;
 
 const Header = styled.div`
@@ -26,7 +26,7 @@ const Header = styled.div`
 
   h2 {
     font-size: 2.4rem;
-    color: #facc15;
+    color: var(--s2-selected);
   }
 `;
 
@@ -37,16 +37,16 @@ const EntityGrid = styled.div`
 `;
 
 const EntityCard = styled.div`
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid #facc1533;
+  background: var(--s2-overlay);
+  border: 1px solid color-mix(in srgb, var(--s2-selected) 20%, transparent);
   border-radius: 12px;
   padding: 1.5rem;
   transition: all 0.3s ease;
 
   &:hover {
-    border-color: #facc15;
+    border-color: var(--s2-selected);
     transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(250, 204, 21, 0.1);
+    box-shadow: 0 4px 20px var(--s2-selected-tint);
   }
 `;
 
@@ -73,8 +73,9 @@ const CategoryBadge = styled.div`
   font-size: 1.2rem;
   font-weight: bold;
   text-transform: uppercase;
-  background-color: ${props => props.$category === 'weapon' ? '#7f1d1d' : props.$category === 'ammo' ? '#14532d' : '#1e3a8a'};
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  background-color: ${props => props.$category === 'weapon' ? '#7f1d1d' : props.$category === 'ammo' ? '#14532d' : '#1e3a8a'}; /* s2-theme-exempt(#7f1d1d, #14532d, #1e3a8a): fixed category chip colour (weapon/ammo/armor) -- a data-style swatch, not a themed surface; stays constant across modes */
+  color: var(--s2-on-accent);
+  border: 2px solid var(--s2-hairline);
 `;
 
 const EntityName = styled.h3`
@@ -91,7 +92,7 @@ const ActionButtons = styled.div`
 const IconButton = styled.button`
   background: none;
   border: none;
-  color: #aaa;
+  color: var(--s2-text-muted);
   cursor: pointer;
   padding: 0.5rem;
   font-size: 1.8rem;
@@ -99,8 +100,8 @@ const IconButton = styled.button`
   transition: all 0.2s;
 
   &:hover {
-    color: ${props => props.$delete ? '#ef4444' : '#facc15'};
-    background: rgba(255, 255, 255, 0.05);
+    color: ${props => props.$delete ? 'var(--s2-danger)' : 'var(--s2-selected)'};
+    background: var(--s2-overlay);
   }
 `;
 
@@ -109,7 +110,7 @@ const EntityStats = styled.div`
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
   font-size: 1.2rem;
-  opacity: 0.8;
+  opacity: var(--s2-stat-dim);
   margin-bottom: 1rem;
 `;
 
@@ -120,7 +121,7 @@ const StatItem = styled.div`
 
   span:first-child {
     font-weight: bold;
-    color: #facc15;
+    color: var(--s2-selected);
     font-size: 1rem;
     text-transform: uppercase;
   }
@@ -129,12 +130,12 @@ const StatItem = styled.div`
 const SpawnList = styled.div`
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--s2-hairline);
 
   span:first-child {
     display: block;
     font-weight: bold;
-    color: #facc15;
+    color: var(--s2-selected);
     font-size: 1rem;
     text-transform: uppercase;
     margin-bottom: 0.5rem;
@@ -148,8 +149,8 @@ const TagCloud = styled.div`
 `;
 
 const Tag = styled.span`
-  background: rgba(250, 204, 21, 0.1);
-  border: 1px solid rgba(250, 204, 21, 0.3);
+  background: var(--s2-selected-tint);
+  border: 1px solid var(--s2-selected-tint-strong);
   padding: 0.2rem 0.6rem;
   border-radius: 4px;
   font-size: 1rem;
@@ -162,7 +163,7 @@ const Overlay = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--s2-scrim);
   backdrop-filter: blur(5px);
   display: flex;
   justify-content: center;
@@ -171,15 +172,15 @@ const Overlay = styled.div`
 `;
 
 const Modal = styled.div`
-  background: #1a1a2e;
-  border: 2px solid #facc15;
+  background: var(--s2-surface);
+  border: 2px solid var(--s2-selected);
   border-radius: 16px;
   width: 90%;
   max-width: 560px;
   max-height: 90vh;
   overflow-y: auto;
   padding: 2.5rem;
-  box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 40px var(--s2-scrim-soft);
 `;
 
 const Form = styled.form`
@@ -195,14 +196,14 @@ const FormGroup = styled.div`
 
   label {
     font-size: 1.2rem;
-    color: #facc15;
+    color: var(--s2-selected);
     font-weight: bold;
   }
 
   input, select, textarea {
-    background: #0f0f1a;
-    border: 1px solid rgba(250, 204, 21, 0.3);
-    color: white;
+    background: var(--s2-bg);
+    border: 1px solid var(--s2-border-strong);
+    color: var(--s2-text-strong);
     padding: 1rem;
     border-radius: 8px;
     font-size: 1.4rem;
@@ -211,7 +212,7 @@ const FormGroup = styled.div`
 
     &:focus {
       outline: none;
-      border-color: #facc15;
+      border-color: var(--s2-selected);
     }
   }
 `;
@@ -224,8 +225,8 @@ const FormActions = styled.div`
 `;
 
 const MainButton = styled.button`
-  background: #eab308;
-  color: white;
+  background: var(--s2-warning-mid);
+  color: var(--s2-on-accent);
   border: none;
   padding: 1rem 2rem;
   border-radius: 8px;
@@ -233,33 +234,33 @@ const MainButton = styled.button`
   cursor: pointer;
   transition: all 0.2s;
 
-  &:hover { background: #facc15; }
-  &:disabled { background: #555; cursor: not-allowed; }
+  &:hover { background: var(--s2-selected); }
+  &:disabled { background: var(--s2-disabled-bg); color: var(--s2-text-dim); cursor: not-allowed; }
 `;
 
 const SecondaryButton = styled.button`
   background: transparent;
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: var(--s2-text-strong);
+  border: 1px solid var(--s2-hairline-strong);
   padding: 1rem 2rem;
   border-radius: 8px;
   font-size: 1.4rem;
   cursor: pointer;
 
-  &:hover { background: rgba(255, 255, 255, 0.05); }
+  &:hover { background: var(--s2-overlay); }
 `;
 
 const SmallButton = styled.button`
   background: transparent;
-  color: #facc15;
-  border: 1px dashed rgba(250, 204, 21, 0.5);
+  color: var(--s2-selected);
+  border: 1px dashed color-mix(in srgb, var(--s2-selected) 50%, transparent);
   padding: 0.6rem 1rem;
   border-radius: 6px;
   font-size: 1.2rem;
   cursor: pointer;
   align-self: flex-start;
 
-  &:hover { background: rgba(250, 204, 21, 0.08); }
+  &:hover { background: var(--s2-selected-tint); }
   &:disabled { opacity: 0.4; cursor: not-allowed; }
 `;
 
@@ -275,12 +276,12 @@ const ResistanceRow = styled.div`
 const RemoveRowButton = styled.button`
   background: none;
   border: none;
-  color: #ef4444;
+  color: var(--s2-danger);
   cursor: pointer;
   font-size: 1.6rem;
   padding: 0.4rem;
 
-  &:hover { color: #f87171; }
+  &:hover { color: var(--s2-danger-soft); }
 `;
 
 const InlineCheck = styled.div`
@@ -289,7 +290,7 @@ const InlineCheck = styled.div`
   gap: 1rem;
 
   input { width: 20px; height: 20px; }
-  label { font-size: 1.2rem; color: #facc15; }
+  label { font-size: 1.2rem; color: var(--s2-selected); }
 `;
 
 function ItemTypesAdmin() {

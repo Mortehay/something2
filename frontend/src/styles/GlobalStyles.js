@@ -41,6 +41,71 @@ const GlobalStyles = createGlobalStyle`
 
     --image-grayscale: 0;
     --image-opacity: 100%;
+
+    /* s2: surfaces */
+    --s2-bg: #f4f4f8;
+    --s2-bg-sunken: #ececf3;
+    --s2-surface-subtle: #f7f7fb;
+    --s2-surface: #ffffff;
+    --s2-surface-raised: #f0f0f6;
+
+    /* s2: text */
+    --s2-border: #d4d4e0;
+    --s2-border-strong: #7d7d95;
+    --s2-text-strong: #12121f;
+    --s2-on-accent: #ffffff;
+    --s2-text: #1a1a2e;
+    --s2-text-secondary: #33334a;
+    --s2-text-muted: #4a4a5e;
+    --s2-text-dim: #6b6b80;
+    /* stat-grid ancestor opacity: light has no headroom for a flat 0.8 dim on
+       10px bold labels (composites to <3.5:1), so light drops the dimming to
+       full opacity. Dark keeps 0.8 verbatim -- see Fix 2, final-fix-report.md. */
+    --s2-stat-dim: 1;
+
+    /* s2: controls */
+    --s2-btn-neutral: #6b6b80;
+    --s2-disabled-bg: #ececf3;
+    --s2-swatch-border: #8b8ba3;
+
+    /* s2: accents */
+    --s2-accent: #2563eb;
+    --s2-selected: #946005;
+    --s2-danger: #b91c1c;
+    --s2-danger-soft: #c81e1e;
+    --s2-success: #15803d;
+    --s2-success-alt: #047857;
+    --s2-warning: #b45309;
+    --s2-warning-soft: #946005;
+    --s2-warning-bright: #854d0e;
+    --s2-warning-mid: #854d0e;
+
+    /* s2: extended solids */
+    --s2-row: #eaeaf2;
+    --s2-btn-primary: #1d4ed8;
+    --s2-btn-info: #1d4ed8;
+    --s2-btn-grey: #5a6472;
+    --s2-btn-purple: #6d28d9;
+    --s2-variant-gpu: #15803d;
+    --s2-tab-entity: #946005;
+    --s2-tab-items: #be185d;
+    --s2-tab-maps: #047857;
+
+    /* s2: translucent */
+    --s2-overlay-subtle: rgba(0,0,0,0.02);
+    --s2-overlay: rgba(0,0,0,0.035);
+    --s2-hairline: rgba(0,0,0,0.08);
+    --s2-hairline-strong: rgba(0,0,0,0.18);
+    --s2-text-ghost: rgba(0,0,0,0.45);
+    --s2-scrim: rgba(0,0,0,0.45);
+    --s2-scrim-soft: rgba(0,0,0,0.28);
+    --s2-shadow: rgba(0,0,0,0.14);
+    --s2-panel-veil: rgba(255,255,255,0.9);
+    --s2-panel-veil-solid: rgba(255,255,255,0.96);
+    --s2-accent-tint: rgba(37,99,235,0.08);
+    --s2-accent-tint-strong: rgba(37,99,235,0.22);
+    --s2-selected-tint: rgba(148,96,5,0.10);
+    --s2-selected-tint-strong: rgba(148,96,5,0.28);
   }
   &.dark-mode{
 
@@ -79,6 +144,68 @@ const GlobalStyles = createGlobalStyle`
 
     --image-grayscale: 10%;
     --image-opacity: 90%;
+
+    /* s2: surfaces */
+    --s2-bg: #0f0f1a;
+    --s2-bg-sunken: #12121f;
+    --s2-surface-subtle: #161625;
+    --s2-surface: #1a1a2e;
+    --s2-surface-raised: #23233f;
+
+    /* s2: text */
+    --s2-border: #2e2e3e;
+    --s2-border-strong: #3a3a4e;
+    --s2-text-strong: #fff;
+    --s2-on-accent: #fff;
+    --s2-text: #eee;
+    --s2-text-secondary: #ccc;
+    --s2-text-muted: #aaa;
+    --s2-text-dim: #888;
+    --s2-stat-dim: 0.8;
+
+    /* s2: controls */
+    --s2-btn-neutral: #555;
+    --s2-disabled-bg: #555;
+    --s2-swatch-border: #555;
+
+    /* s2: accents */
+    --s2-accent: #4a9eff;
+    --s2-selected: #facc15;
+    --s2-danger: #ef4444;
+    --s2-danger-soft: #f87171;
+    --s2-success: #22c55e;
+    --s2-success-alt: #10b981;
+    --s2-warning: #f59e0b;
+    --s2-warning-soft: #fcd34d;
+    --s2-warning-bright: #fde047;
+    --s2-warning-mid: #eab308;
+
+    /* s2: extended solids */
+    --s2-row: #1f1f35;
+    --s2-btn-primary: #3a7ed8;
+    --s2-btn-info: #3b82f6;
+    --s2-btn-grey: #4b5563;
+    --s2-btn-purple: #8b5cf6;
+    --s2-variant-gpu: #4ade80;
+    --s2-tab-entity: #facc15;
+    --s2-tab-items: #f472b6;
+    --s2-tab-maps: #34d399;
+
+    /* s2: translucent */
+    --s2-overlay-subtle: rgba(255,255,255,0.03);
+    --s2-overlay: rgba(255,255,255,0.05);
+    --s2-hairline: rgba(255,255,255,0.1);
+    --s2-hairline-strong: rgba(255,255,255,0.3);
+    --s2-text-ghost: rgba(255,255,255,0.4);
+    --s2-scrim: rgba(0,0,0,0.8);
+    --s2-scrim-soft: rgba(0,0,0,0.5);
+    --s2-shadow: rgba(0,0,0,0.4);
+    --s2-panel-veil: rgba(26,26,46,0.85);
+    --s2-panel-veil-solid: rgba(46,46,74,0.95);
+    --s2-accent-tint: rgba(74,158,255,0.1);
+    --s2-accent-tint-strong: rgba(74,158,255,0.3);
+    --s2-selected-tint: rgba(250,204,21,0.1);
+    --s2-selected-tint-strong: rgba(250,204,21,0.3);
   }
 
 
