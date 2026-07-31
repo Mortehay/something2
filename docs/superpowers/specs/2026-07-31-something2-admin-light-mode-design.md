@@ -141,10 +141,26 @@ where they overlap.
 
 ## Interaction states
 
-- **Selected** — the largest visual risk. Dark mode uses `#facc15` as a bright glow against
-  near-black. On a white surface a saturated yellow reads as a warning, not a selection.
-  Light mode uses a filled tint: background `#fef3c7` with a `#946005` border/text, never
-  bare yellow on white.
+- **Selected** — the largest visual risk, and the one place this contract's own prediction
+  was wrong. Dark mode uses `#facc15` as a bright glow against near-black. The original
+  concern: on a white surface a *saturated* yellow reads as a warning, not a selection — so
+  the plan called for a filled tint, background `#fef3c7` with a `#946005` border/text,
+  never bare yellow on white.
+
+  That rule assumed light mode would carry the raw `#facc15` forward. It doesn't: per the
+  Accents table above, `--s2-selected` is itself remapped to `#946005` — a dark gold at
+  5.34:1 on white, already legible as text/border, not a saturated warning-yellow — before
+  it ever reaches a selection site. The failure mode the filled-tint rule was guarding
+  against (bare saturated yellow on white) cannot occur once the token itself is darkened,
+  so the `#fef3c7` tint was never implemented and no `#fef3c7` token exists anywhere in
+  `GlobalStyles.js`. The darkened `--s2-selected` supersedes the filled-tint rule.
+  Confirmed post hoc: `--s2-selected`/border on white reads as a normal outline, not an
+  alert.
+
+  The only site this rule ever governed is `MapsAdmin.jsx:22`, the entry-world card's
+  `$entry` outline (`border: 1px solid var(--s2-selected)`). That site is left as-is —
+  `MapsAdmin.jsx` is under a colour-literals-only freeze in this pass, and the outline
+  already reads correctly per the paragraph above.
 - **Hover** — one step along the surface ramp (`--s2-surface` → `--s2-surface-raised`),
   same in both modes.
 - **Focus** — 2px `--s2-accent` outline. Must remain visible in both modes; do not rely on
@@ -290,3 +306,43 @@ was exempted as fixed category styling. It is chrome, not per-record data, so it
 in light mode rather than getting purpose-built values — inconsistent with the rest of the
 ramp. It renders legibly either way (white on saturated fill). Either promote to three
 category-identity tokens alongside `--s2-tab-*`, or ratify the exemption class.
+
+## Amendment 3 — final pre-merge fix wave
+
+**Found during whole-branch final review.** Five findings, all light-mode-only (invisible to
+the `environment: "node"` suite). Full arithmetic in
+`.superpowers/sdd/2026-07-31-something2-admin-light-mode/final-fix-report.md`; summary here.
+
+### New token: `--s2-stat-dim`
+
+`EntityStats`/`TileStats` (the per-record stat grids in `EntityTypesAdmin.jsx`,
+`ItemTypesAdmin.jsx`, `TileTypesAdmin.jsx`) set a flat `opacity: 0.8` on the whole grid —
+pre-existing, undocumented in the original ramp. At 10px bold, `StatItem span:first-child`
+is body text (4.5:1 required), and 0.8 composited opacity pushed all three files below it in
+light (~3.42–3.43:1). Dark already had headroom (label tokens are much brighter there) and
+was not the problem.
+
+`opacity: 0.8` was replaced with `opacity: var(--s2-stat-dim)`:
+
+| Token | Dark | Light | Role |
+|---|---|---|---|
+| `--s2-stat-dim` | `0.8` | `1` | stat-grid ancestor opacity (verbatim in dark; light drops the dim, headroom is too thin at 10px bold) |
+
+Dark is byte-identical (`0.8` in, `0.8` out — same composited pixels). Light drops the dim
+entirely; both label and value render at full token strength, still clearing AA. See
+`final-fix-report.md` Fix 2 for the per-file numbers.
+
+One pre-existing, out-of-scope gap surfaced while computing this: `TileTypesAdmin.jsx`'s
+label token (`--s2-accent`, dark `#4a9eff`) composited at the old flat `opacity: 0.8`
+already read ~4.00:1 in **dark** — under the 4.5:1 body-text threshold, independent of this
+branch. `--s2-stat-dim` preserves that number exactly (unchanged, per the "don't touch dark"
+instruction for this fix wave) rather than silently fixing it. Flagged for a follow-up
+ticket, not fixed here.
+
+### Interaction states — selection rule superseded
+
+See the rewritten "Selected" paragraph under Interaction states above: the `#fef3c7`
+filled-tint rule assumed light mode would carry `#facc15` forward unchanged. It doesn't —
+`--s2-selected` is remapped to `#946005` (5.34:1 on white) before it reaches any selection
+site, so the saturated-yellow failure mode the rule guarded against cannot occur. No code
+changed; `MapsAdmin.jsx:22` (the only site the rule ever governed) was left as-is.

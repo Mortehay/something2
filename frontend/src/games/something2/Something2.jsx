@@ -347,7 +347,7 @@ const PausePanel = styled(Panel)`
 
 const Input = styled.input`
   background: var(--s2-surface-subtle);
-  border: 1px solid var(--s2-border);
+  border: 1px solid var(--s2-border-strong);
   border-radius: 6px;
   color: var(--s2-text-strong);
   padding: 8px 10px;

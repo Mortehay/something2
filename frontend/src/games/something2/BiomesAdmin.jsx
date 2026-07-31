@@ -19,7 +19,7 @@ const Card = styled.div`
   background: var(--s2-surface-raised); border: 1px solid var(--s2-border); border-radius: 8px; padding: 1rem; margin-bottom: 1rem;
 `;
 const Row = styled.div`display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin: 0.4rem 0;`;
-const Input = styled.input`background: var(--s2-bg-sunken); color: var(--s2-text); border: 1px solid var(--s2-border); border-radius: 4px; padding: 0.4rem;`;
+const Input = styled.input`background: var(--s2-bg-sunken); color: var(--s2-text); border: 1px solid var(--s2-border-strong); border-radius: 4px; padding: 0.4rem;`;
 const CheckGrid = styled.div`display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0.4rem 0;`;
 const Label = styled.span`color: var(--s2-text-muted); min-width: 90px;`;
 

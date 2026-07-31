@@ -22,6 +22,7 @@ const TOKENS = [
   ['--s2-text-secondary', '#ccc', '#33334a'],
   ['--s2-text-muted', '#aaa', '#4a4a5e'],
   ['--s2-text-dim', '#888', '#6b6b80'],
+  ['--s2-stat-dim', '0.8', '1'],
   ['--s2-btn-neutral', '#555', '#6b6b80'],
   ['--s2-disabled-bg', '#555', '#ececf3'],
   ['--s2-swatch-border', '#555', '#8b8ba3'],

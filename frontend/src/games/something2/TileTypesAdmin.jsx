@@ -126,7 +126,7 @@ const TileStats = styled.div`
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
   font-size: 1.2rem;
-  opacity: 0.8;
+  opacity: var(--s2-stat-dim);
   margin-bottom: 1rem;
 `;
 
@@ -216,7 +216,7 @@ const FormGroup = styled.div`
 
   input, select, textarea {
     background: var(--s2-bg);
-    border: 1px solid var(--s2-accent-tint-strong);
+    border: 1px solid var(--s2-border-strong);
     color: var(--s2-text-strong);
     padding: 1rem;
     border-radius: 8px;
@@ -250,7 +250,7 @@ const MultiSelect = styled.div`
   padding: 1rem;
   background: var(--s2-bg);
   border-radius: 8px;
-  border: 1px solid var(--s2-accent-tint-strong);
+  border: 1px solid var(--s2-border-strong);
 `;
 
 const FormActions = styled.div`

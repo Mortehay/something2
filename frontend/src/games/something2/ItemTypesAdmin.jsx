@@ -110,7 +110,7 @@ const EntityStats = styled.div`
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
   font-size: 1.2rem;
-  opacity: 0.8;
+  opacity: var(--s2-stat-dim);
   margin-bottom: 1rem;
 `;
 
@@ -202,7 +202,7 @@ const FormGroup = styled.div`
 
   input, select, textarea {
     background: var(--s2-bg);
-    border: 1px solid var(--s2-selected-tint-strong);
+    border: 1px solid var(--s2-border-strong);
     color: var(--s2-text-strong);
     padding: 1rem;
     border-radius: 8px;
@@ -253,7 +253,7 @@ const SecondaryButton = styled.button`
 const SmallButton = styled.button`
   background: transparent;
   color: var(--s2-selected);
-  border: 1px dashed var(--s2-selected-tint-strong);
+  border: 1px dashed color-mix(in srgb, var(--s2-selected) 50%, transparent);
   padding: 0.6rem 1rem;
   border-radius: 6px;
   font-size: 1.2rem;

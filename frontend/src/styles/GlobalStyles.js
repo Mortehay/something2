@@ -58,6 +58,10 @@ const GlobalStyles = createGlobalStyle`
     --s2-text-secondary: #33334a;
     --s2-text-muted: #4a4a5e;
     --s2-text-dim: #6b6b80;
+    /* stat-grid ancestor opacity: light has no headroom for a flat 0.8 dim on
+       10px bold labels (composites to <3.5:1), so light drops the dimming to
+       full opacity. Dark keeps 0.8 verbatim -- see Fix 2, final-fix-report.md. */
+    --s2-stat-dim: 1;
 
     /* s2: controls */
     --s2-btn-neutral: #6b6b80;
@@ -157,6 +161,7 @@ const GlobalStyles = createGlobalStyle`
     --s2-text-secondary: #ccc;
     --s2-text-muted: #aaa;
     --s2-text-dim: #888;
+    --s2-stat-dim: 0.8;
 
     /* s2: controls */
     --s2-btn-neutral: #555;

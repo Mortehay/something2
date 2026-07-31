@@ -194,7 +194,7 @@ const EntityStats = styled.div`
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
   font-size: 1.2rem;
-  opacity: 0.8;
+  opacity: var(--s2-stat-dim);
   margin-bottom: 1rem;
 `;
 
@@ -309,7 +309,7 @@ const FormGroup = styled.div`
 
   input, select, textarea {
     background: var(--s2-bg);
-    border: 1px solid var(--s2-selected-tint-strong);
+    border: 1px solid var(--s2-border-strong);
     color: var(--s2-text-strong);
     padding: 1rem;
     border-radius: 8px;
@@ -333,7 +333,7 @@ const MultiSelect = styled.div`
   padding: 1rem;
   background: var(--s2-bg);
   border-radius: 8px;
-  border: 1px solid var(--s2-selected-tint-strong);
+  border: 1px solid var(--s2-border-strong);
 `;
 
 const FormActions = styled.div`
@@ -390,7 +390,6 @@ const CapabilityBanner = styled.div`
 const SpriteHint = styled.div`
   font-size: 1.05rem;
   color: var(--s2-warning-soft);
-  opacity: 0.85;
 `;
 
 /* Sprite Panel Styles */
@@ -685,7 +684,7 @@ function EntityTexturePanel({ entity, prompt }) {
           value={biome}
           onChange={(e) => setBiome(e.target.value)}
           disabled={isLoadingBiomes}
-          style={{ background: 'var(--s2-bg)', border: '1px solid var(--s2-accent-tint-strong)', color: 'var(--s2-text-strong)', padding: '0.6rem', borderRadius: 8, fontSize: '1.2rem' }}
+          style={{ background: 'var(--s2-bg)', border: '1px solid var(--s2-border-strong)', color: 'var(--s2-text-strong)', padding: '0.6rem', borderRadius: 8, fontSize: '1.2rem' }}
         >
           <option value="">— none —</option>
           {biomes.map((b) => <option key={b.id} value={b.name}>{b.name}</option>)}
@@ -983,7 +982,7 @@ function EntityTypesAdmin() {
                   onChange={e => setFormData({...formData, name: e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1)})}
                   placeholder="e.g. Bush"
                   disabled={editingEntity}
-                  style={{ background: 'var(--s2-bg)', border: '1px solid var(--s2-selected-tint-strong)', color: 'var(--s2-text-strong)', padding: '1rem', borderRadius: '8px' }}
+                  style={{ background: 'var(--s2-bg)', border: '1px solid var(--s2-border-strong)', color: 'var(--s2-text-strong)', padding: '1rem', borderRadius: '8px' }}
                 />
               </FormGroup>
               
