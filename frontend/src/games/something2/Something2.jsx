@@ -21,6 +21,10 @@ import MapGraphAdmin from "./MapGraphAdmin";
 import WorldPreview from "./WorldPreview.jsx";
 import Minimap from "./Minimap.jsx";
 
+/* s2-theme-exempt:start — game canvas surface stays dark in both modes: this is the
+   root backdrop visible behind/around the <canvas> (contentRef/canvasRef below) before
+   a world is entered and through any gaps around it. Admin tabs render their own opaque
+   panels on top of this, so it never shows through admin chrome. */
 const StyledGameContainer = styled.div`
   position: relative;
   display: flex;
@@ -30,6 +34,7 @@ const StyledGameContainer = styled.div`
   background-color: #0f0f1a;
   overflow: hidden;
 `;
+/* s2-theme-exempt:end */
 
 // Small circular "?" button pinned to the top-right corner, above everything.
 const HelpButton = styled.button`
@@ -40,9 +45,9 @@ const HelpButton = styled.button`
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  border: 1px solid #4a9eff;
-  background: rgba(26, 26, 46, 0.85);
-  color: #4a9eff;
+  border: 1px solid var(--s2-accent);
+  background: var(--s2-panel-veil);
+  color: var(--s2-accent);
   font-size: 1.1rem;
   font-weight: bold;
   cursor: pointer;
@@ -51,7 +56,7 @@ const HelpButton = styled.button`
   justify-content: center;
   line-height: 1;
   transition: all 0.15s;
-  &:hover { background: #4a9eff; color: #fff; }
+  &:hover { background: var(--s2-accent); color: var(--s2-on-accent); }
 `;
 
 // Full-screen dim backdrop; clicking it closes the panel.
@@ -59,26 +64,26 @@ const HelpBackdrop = styled.div`
   position: absolute;
   inset: 0;
   z-index: 400;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--s2-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
 `;
 
 const HelpCard = styled.div`
-  background: #1a1a2e;
-  border: 1px solid #2e2e3e;
+  background: var(--s2-surface);
+  border: 1px solid var(--s2-border);
   border-radius: 10px;
   padding: 24px 28px;
   width: min(560px, 92vw);
   max-height: 86vh;
   overflow-y: auto;
-  color: #ddd;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  color: var(--s2-text);
+  box-shadow: 0 10px 40px var(--s2-scrim-soft);
 
-  h2 { margin: 0 0 4px; color: #fff; font-size: 1.5rem; }
-  h3 { margin: 20px 0 8px; color: #4a9eff; font-size: 1.05rem; }
-  p.sub { margin: 0 0 8px; color: #888; font-size: 0.9rem; }
+  h2 { margin: 0 0 4px; color: var(--s2-text-strong); font-size: 1.5rem; }
+  h3 { margin: 20px 0 8px; color: var(--s2-accent); font-size: 1.05rem; }
+  p.sub { margin: 0 0 8px; color: var(--s2-text-dim); font-size: 0.9rem; }
   table { width: 100%; border-collapse: collapse; }
   td { padding: 5px 0; vertical-align: top; font-size: 0.95rem; }
   td.k { width: 130px; white-space: nowrap; }
@@ -87,11 +92,11 @@ const HelpCard = styled.div`
     min-width: 18px;
     padding: 2px 7px;
     margin: 0 2px 2px 0;
-    background: #0f0f1a;
-    border: 1px solid #3a3a4e;
+    background: var(--s2-bg);
+    border: 1px solid var(--s2-border-strong);
     border-bottom-width: 2px;
     border-radius: 5px;
-    color: #eee;
+    color: var(--s2-text);
     font-size: 0.85rem;
     font-family: monospace;
     text-align: center;
@@ -102,11 +107,11 @@ const HelpCloseButton = styled.button`
   float: right;
   background: transparent;
   border: none;
-  color: #888;
+  color: var(--s2-text-dim);
   font-size: 1.4rem;
   line-height: 1;
   cursor: pointer;
-  &:hover { color: #fff; }
+  &:hover { color: var(--s2-text-strong); }
 `;
 
 // One place to describe the controls, so the panel can't drift from reality.
@@ -152,19 +157,19 @@ const HELP_SECTIONS = [
 
 const TabBar = styled.div`
   display: flex;
-  background: #1a1a2e;
-  border-bottom: 2px solid #2e2e3e;
+  background: var(--s2-surface);
+  border-bottom: 2px solid var(--s2-border);
   padding: 0 20px;
   z-index: 100;
 `;
 
-const ADMIN_TAB_COLORS = { entity: '#facc15', items: '#f472b6', maps: '#34d399' };
+const ADMIN_TAB_COLORS = { entity: 'var(--s2-tab-entity)', items: 'var(--s2-tab-items)', maps: 'var(--s2-tab-maps)' };
 
 const TabButton = styled.button`
-  background: ${props => props.$active ? 'rgba(74, 158, 255, 0.1)' : 'transparent'};
-  color: ${props => props.$active ? (ADMIN_TAB_COLORS[props.$adminType] || '#4a9eff') : '#aaa'};
+  background: ${props => props.$active ? 'var(--s2-accent-tint)' : 'transparent'};
+  color: ${props => props.$active ? (ADMIN_TAB_COLORS[props.$adminType] || 'var(--s2-accent)') : 'var(--s2-text-muted)'};
   border: none;
-  border-bottom: 3px solid ${props => props.$active ? (ADMIN_TAB_COLORS[props.$adminType] || '#4a9eff') : 'transparent'};
+  border-bottom: 3px solid ${props => props.$active ? (ADMIN_TAB_COLORS[props.$adminType] || 'var(--s2-accent)') : 'transparent'};
   padding: 1.5rem 2rem;
   font-size: 1.3rem;
   font-weight: bold;
@@ -173,12 +178,12 @@ const TabButton = styled.button`
   align-items: center;
   gap: 0.8rem;
   transition: all 0.2s;
-  
+
   &:hover {
-    color: ${props => props.$active ? (ADMIN_TAB_COLORS[props.$adminType] || '#4a9eff') : '#eee'};
-    background: rgba(255, 255, 255, 0.05);
+    color: ${props => props.$active ? (ADMIN_TAB_COLORS[props.$adminType] || 'var(--s2-accent)') : 'var(--s2-text)'};
+    background: var(--s2-overlay);
   }
-  
+
   svg {
     font-size: 1.6rem;
   }
@@ -212,15 +217,15 @@ const FullscreenToggle = styled.button`
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  border: 1px solid #2e2e3e;
-  background: rgba(26, 26, 46, 0.8);
+  border: 1px solid var(--s2-border);
+  background: var(--s2-panel-veil);
   backdrop-filter: blur(8px);
-  color: #e6e6f0;
+  color: var(--s2-text);
   cursor: pointer;
   font-size: 20px;
   transition: background 0.15s, color 0.15s;
 
-  &:hover { background: rgba(46, 46, 74, 0.95); color: #4a9eff; }
+  &:hover { background: var(--s2-panel-veil-solid); color: var(--s2-accent); }
 `;
 
 // "How to play" affordance pinned directly under the minimap (minimap is
@@ -236,10 +241,10 @@ const HowToButton = styled.button`
   gap: 6px;
   padding: 8px 12px;
   border-radius: 10px;
-  border: 1px solid #2e2e3e;
-  background: rgba(26, 26, 46, 0.8);
+  border: 1px solid var(--s2-border);
+  background: var(--s2-panel-veil);
   backdrop-filter: blur(8px);
-  color: #e6e6f0;
+  color: var(--s2-text);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -247,18 +252,18 @@ const HowToButton = styled.button`
   transition: background 0.15s, color 0.15s;
 
   svg { font-size: 16px; }
-  &:hover { background: rgba(46, 46, 74, 0.95); color: #4a9eff; }
+  &:hover { background: var(--s2-panel-veil-solid); color: var(--s2-accent); }
 `;
 
 const Panel = styled.div`
-  background: rgba(26, 26, 46, 0.9);
+  background: var(--s2-panel-veil);
   backdrop-filter: blur(8px);
-  border: 1px solid #2e2e3e;
+  border: 1px solid var(--s2-border);
   border-radius: 12px;
   padding: 20px;
   width: 320px;
   pointer-events: auto;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px var(--s2-shadow);
 `;
 
 const MapList = styled.div`
@@ -273,14 +278,14 @@ const MapList = styled.div`
     width: 6px;
   }
   &::-webkit-scrollbar-thumb {
-    background: #3a3a4e;
+    background: var(--s2-border-strong);
     border-radius: 3px;
   }
 `;
 
 const MapItem = styled.div`
-  background: ${props => props.selected ? 'rgba(74, 158, 255, 0.15)' : '#161625'};
-  border: 1px solid ${props => props.selected ? '#4a9eff' : '#2e2e3e'};
+  background: ${props => props.selected ? 'var(--s2-accent-tint)' : 'var(--s2-surface-subtle)'};
+  border: 1px solid ${props => props.selected ? 'var(--s2-accent)' : 'var(--s2-border)'};
   padding: 12px 15px;
   border-radius: 8px;
   cursor: pointer;
@@ -288,15 +293,15 @@ const MapItem = styled.div`
   justify-content: space-between;
   align-items: center;
   transition: all 0.2s;
-  
+
   &:hover {
-    background: ${props => props.selected ? 'rgba(74, 158, 255, 0.2)' : '#1f1f35'};
+    background: ${props => props.selected ? 'var(--s2-accent-tint-strong)' : 'var(--s2-row)'};
   }
 `;
 
 const Button = styled.button`
-  background: ${props => props.danger ? '#ef4444' : '#3b82f6'};
-  color: white;
+  background: ${props => props.danger ? 'var(--s2-danger)' : 'var(--s2-btn-info)'};
+  color: var(--s2-on-accent);
   border: none;
   padding: 10px 18px;
   border-radius: 6px;
@@ -304,13 +309,13 @@ const Button = styled.button`
   font-weight: 600;
   font-size: 14px;
   transition: filter 0.2s;
-  
+
   &:hover {
     filter: brightness(1.1);
   }
-  
+
   &:disabled {
-    background: #4b5563;
+    background: var(--s2-btn-grey);
     cursor: not-allowed;
   }
 `;
@@ -321,7 +326,7 @@ const PauseOverlay = styled.div`
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--s2-scrim);
   backdrop-filter: blur(4px);
   display: flex;
   flex-direction: column;
@@ -342,10 +347,10 @@ const PausePanel = styled(Panel)`
 `;
 
 const Input = styled.input`
-  background: #161625;
-  border: 1px solid #2e2e3e;
+  background: var(--s2-surface-subtle);
+  border: 1px solid var(--s2-border);
   border-radius: 6px;
-  color: white;
+  color: var(--s2-text-strong);
   padding: 8px 10px;
   font-size: 14px;
   width: 100%;
@@ -353,11 +358,11 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: #4a9eff;
+    border-color: var(--s2-accent);
   }
 
   &::placeholder {
-    color: #666;
+    color: var(--s2-text-dim);
   }
 `;
 
@@ -742,10 +747,10 @@ export default function Something2() {
           {!isPlaying && (
             <UIOverlay>
                 <Panel>
-                  <h2 style={{ color: 'white', margin: '0 0 15px 0', fontSize: '20px' }}>Worlds</h2>
+                  <h2 style={{ color: 'var(--s2-text-strong)', margin: '0 0 15px 0', fontSize: '20px' }}>Worlds</h2>
 
                   {isLoadingWorlds ? (
-                    <p style={{ color: '#aaa' }}>Loading worlds...</p>
+                    <p style={{ color: 'var(--s2-text-muted)' }}>Loading worlds...</p>
                   ) : (
                     <MapList style={{ marginTop: 0 }}>
                       {worlds?.map(world => (
@@ -755,14 +760,14 @@ export default function Something2() {
                           onClick={() => setSelectedWorldId(world.id)}
                         >
                           <div>
-                            <div style={{ color: 'white', fontWeight: 'bold' }}>{world.name}</div>
-                            <div style={{ color: '#888', fontSize: '12px' }}>
+                            <div style={{ color: 'var(--s2-text-strong)', fontWeight: 'bold' }}>{world.name}</div>
+                            <div style={{ color: 'var(--s2-text-dim)', fontSize: '12px' }}>
                               chunk_size {world.chunk_size || 64}{world.seed != null ? ` · seed ${world.seed}` : ''}
                             </div>
                           </div>
                           {isAdmin && (
                             <HiOutlineTrash
-                              style={{ color: '#ef4444', cursor: 'pointer', flexShrink: 0 }}
+                              style={{ color: 'var(--s2-danger)', cursor: 'pointer', flexShrink: 0 }}
                               title="Delete world"
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -776,7 +781,7 @@ export default function Something2() {
                         </MapItem>
                       ))}
                       {worlds?.length === 0 && (
-                        <p style={{ color: '#666', fontSize: '13px', margin: 0 }}>No worlds yet.</p>
+                        <p style={{ color: 'var(--s2-text-dim)', fontSize: '13px', margin: 0 }}>No worlds yet.</p>
                       )}
                     </MapList>
                   )}
@@ -812,7 +817,7 @@ export default function Something2() {
                   <Button
                     onClick={() => handleEnterChunkedWorld()}
                     disabled={!selectedWorldId}
-                    style={{ width: '100%', marginTop: '10px', background: '#10b981' }}
+                    style={{ width: '100%', marginTop: '10px', background: 'var(--s2-success-alt)' }}
                   >
                     Enter World (chunked)
                   </Button>
@@ -823,12 +828,12 @@ export default function Something2() {
           {isPaused && (
             <PauseOverlay>
               <PausePanel>
-                <h2 style={{ color: 'white', marginBottom: '20px' }}>Game Paused</h2>
+                <h2 style={{ color: 'var(--s2-text-strong)', marginBottom: '20px' }}>Game Paused</h2>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                  <Button onClick={handleResume} style={{ background: '#10b981', fontSize: '16px', padding: '12px' }}>
+                  <Button onClick={handleResume} style={{ background: 'var(--s2-success-alt)', fontSize: '16px', padding: '12px' }}>
                     Resume Game
                   </Button>
-                  <Button onClick={handleExit} style={{ background: '#ef4444', fontSize: '16px', padding: '12px' }}>
+                  <Button onClick={handleExit} style={{ background: 'var(--s2-danger)', fontSize: '16px', padding: '12px' }}>
                     Exit to Main Menu
                   </Button>
                 </div>
@@ -842,7 +847,12 @@ export default function Something2() {
           {!isPlaying && !selectedWorldId && (
             <div style={{
               width: '100%', height: '100%', display: 'flex', alignItems: 'center',
-              justifyContent: 'center', color: 'rgba(255,255,255,0.35)', fontSize: '15px'
+              justifyContent: 'center',
+              // Placeholder text painted directly over the always-dark canvas viewport
+              // backdrop (StyledGameContainer, sentinel-exempted above) -- that surface
+              // never lightens, so this can't be a token without going illegible.
+              color: 'rgba(255,255,255,0.35)', // s2-theme-exempt(rgba(255,255,255,0.35)): text over the always-dark canvas viewport
+              fontSize: '15px'
             }}>
               Select a world to preview it, then Enter World.
             </div>

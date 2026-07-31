@@ -106,9 +106,7 @@ const IN_SCOPE = [
 ];
 
 // Files not yet swept. Each sweep task deletes its own entry. Must reach [].
-const PENDING = [
-  'Something2.jsx',
-];
+const PENDING = [];
 
 const read = (name) => readFileSync(
   fileURLToPath(new URL(`../${name}`, import.meta.url)), 'utf8',
