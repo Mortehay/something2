@@ -21,20 +21,19 @@ import MapGraphAdmin from "./MapGraphAdmin";
 import WorldPreview from "./WorldPreview.jsx";
 import Minimap from "./Minimap.jsx";
 
-/* s2-theme-exempt:start — game canvas surface stays dark in both modes: this is the
-   root backdrop visible behind/around the <canvas> (contentRef/canvasRef below) before
-   a world is entered and through any gaps around it. Admin tabs render their own opaque
-   panels on top of this, so it never shows through admin chrome. */
+// Root of the WHOLE component -- wraps TabBar and every admin tab, not just the
+// game canvas. Its background is the page backdrop showing in the gutters beside
+// any centred, max-width admin panel (all six admin roots use max-width + margin:
+// 0 auto), so this must tokenize like any other chrome surface, not stay dark.
 const StyledGameContainer = styled.div`
   position: relative;
   display: flex;
   flex-direction: column;
   height: 100vh;
   width: 100%;
-  background-color: #0f0f1a;
+  background-color: var(--s2-bg);
   overflow: hidden;
 `;
-/* s2-theme-exempt:end */
 
 // Small circular "?" button pinned to the top-right corner, above everything.
 const HelpButton = styled.button`
@@ -78,7 +77,7 @@ const HelpCard = styled.div`
   width: min(560px, 92vw);
   max-height: 86vh;
   overflow-y: auto;
-  color: var(--s2-text);
+  color: var(--s2-text-secondary);
   box-shadow: 0 10px 40px var(--s2-scrim-soft);
 
   h2 { margin: 0 0 4px; color: var(--s2-text-strong); font-size: 1.5rem; }
@@ -848,9 +847,13 @@ export default function Something2() {
             <div style={{
               width: '100%', height: '100%', display: 'flex', alignItems: 'center',
               justifyContent: 'center',
-              // Placeholder text painted directly over the always-dark canvas viewport
-              // backdrop (StyledGameContainer, sentinel-exempted above) -- that surface
-              // never lightens, so this can't be a token without going illegible.
+              // This div fills the game tab's content area when nothing is being
+              // rendered by the (unconditionally-mounted, but display:none here)
+              // <canvas> below -- it IS the canvas surface in this state, not page
+              // chrome, so it stays dark in both modes like the canvas itself does.
+              background: '#0f0f1a', // s2-theme-exempt(#0f0f1a): game canvas viewport placeholder stays dark in both modes
+              // Placeholder text painted directly over that always-dark backdrop --
+              // it never lightens, so this can't be a token without going illegible.
               color: 'rgba(255,255,255,0.35)', // s2-theme-exempt(rgba(255,255,255,0.35)): text over the always-dark canvas viewport
               fontSize: '15px'
             }}>
@@ -878,6 +881,7 @@ export default function Something2() {
             width: '100%',
             height: '100%',
             display: activeTab === 'game' && isPlaying ? 'block' : 'none',
+            background: '#0f0f1a', // s2-theme-exempt(#0f0f1a): game canvas surface stays dark in both modes
           }}
         />
       </ContentArea>

@@ -90,11 +90,15 @@ dark-mode change; every other dark value stays verbatim.
 | Token | Dark | Light | Contrast on `#f4f4f8` |
 |---|---|---|---|
 | `--s2-text` | `#e6e6f0` / `#eee` | `#1a1a2e` | 15.55:1 |
+| `--s2-text-secondary` | `#ccc` (6 uses), `#ddd` (1 use — `Something2.jsx` `HelpCard`) | `#33334a` | 11.17:1 |
 | `--s2-text-muted` | `#aaa` (18 uses) | `#4a4a5e` | 7.87:1 |
 | `--s2-text-dim` | `#888` (13 uses) | `#6b6b80` | 4.74:1 |
 
 Verified: `#aaa`, `#888`, `#eee`, `#ccc` are used **exclusively** as `color:` — no role
-collapse in the text ramp.
+collapse in the text ramp. `#ddd` (`Something2.jsx`'s `HelpCard`, one site) is the same
+role as `#ccc` — secondary/de-emphasized body text — and converges into the same token;
+it gets *dimmer* in dark mode (`#ddd` 221 → `#ccc` 204), consistent with every other
+verbatim dark value in this table.
 
 ### Control surfaces — `#555` must split three ways
 
