@@ -320,6 +320,8 @@ describe('Something2 admin theme gate', () => {
 
 The reverse assertion is what stops this from decaying into a test that passes by exempting everything. The last test stops `PENDING === IN_SCOPE` from making the gate vacuous.
 
+> **Superseded during execution.** A review found the single-line exemption above was a bare substring match — any line containing `s2-theme-exempt` had *all* its hex ignored, so an unrelated trailing comment could hide a live literal. `offendingLiterals` now lives in `frontend/src/games/something2/__tests__/themeGate.js` and requires the exempted value to be named: `// s2-theme-exempt(#00ff00): reason`. A bare sentinel with no parentheses exempts nothing. The block form is unchanged. See commit `1f3d5f8`; the snippet above is kept for historical context only.
+
 - [ ] **Step 2: Run it and confirm it fails**
 
 Run: `cd frontend && npx vitest run src/games/something2/__tests__/themeTokens.test.js`
