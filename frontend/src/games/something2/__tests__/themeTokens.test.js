@@ -102,7 +102,7 @@ describe('--s2-* theme tokens', () => {
 });
 
 const IN_SCOPE = [
-  'Something2.jsx', 'TileTypesAdmin.jsx', 'EntityTypesAdmin.jsx',
+  'GameShell.jsx', 'GameView.jsx', 'TileTypesAdmin.jsx', 'EntityTypesAdmin.jsx',
   'ItemTypesAdmin.jsx', 'BiomesAdmin.jsx', 'MapsAdmin.jsx', 'MapGraphAdmin.jsx',
 ];
 
