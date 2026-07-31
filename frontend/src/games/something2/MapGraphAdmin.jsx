@@ -20,22 +20,22 @@ import { biomeRingSvg } from './biomeRingSvg.js';
 cytoscape.use(edgehandles);
 
 const AdminContainer = styled.div`
-  padding: 2rem; color: #eee; max-width: 1400px; margin: 0 auto;
-  height: 100%; overflow-y: auto; background-color: #1a1a2e;
+  padding: 2rem; color: var(--s2-text); max-width: 1400px; margin: 0 auto;
+  height: 100%; overflow-y: auto; background-color: var(--s2-surface);
 `;
 const Header = styled.div`display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;`;
 const Layout = styled.div`display: flex; gap: 1rem; align-items: flex-start;`;
 const CanvasCard = styled.div`
-  flex: 1; height: 600px; background: #12121f;
-  border: 1px solid #333; border-radius: 8px; overflow: hidden;
+  flex: 1; height: 600px; background: var(--s2-bg-sunken);
+  border: 1px solid var(--s2-border); border-radius: 8px; overflow: hidden;
 `;
 const Side = styled.div`width: 260px; flex-shrink: 0;`;
-const Card = styled.div`background: #23233f; border: 1px solid #333; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;`;
-const Warn = styled.div`color: #f59e0b; font-size: 0.85em; margin: 0.25rem 0;`;
-const Dim = styled.div`color: #888; font-size: 0.9em; margin: 0.2rem 0;`;
+const Card = styled.div`background: var(--s2-surface-raised); border: 1px solid var(--s2-border); border-radius: 8px; padding: 1rem; margin-bottom: 1rem;`;
+const Warn = styled.div`color: var(--s2-warning); font-size: 0.85em; margin: 0.25rem 0;`;
+const Dim = styled.div`color: var(--s2-text-dim); font-size: 0.9em; margin: 0.2rem 0;`;
 const Row = styled.div`display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin: 0.4rem 0;`;
 const Button = styled.button`
-  background: ${(p) => p.$bg || '#4a9eff'}; color: white; border: none; border-radius: 6px;
+  background: ${(p) => p.$bg || 'var(--s2-accent)'}; color: var(--s2-on-accent); border: none; border-radius: 6px;
   padding: 0.5rem 1rem; font-weight: bold; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
   &:disabled { opacity: 0.5; cursor: default; }
 `;
@@ -230,6 +230,9 @@ function MapGraphAdmin() {
     return [...nodes, ...edges];
   }, [linkable, links, positions, colourOf]);
 
+  /* s2-theme-exempt:start — cytoscape renders to canvas and cannot read CSS custom
+     properties; theming it needs a getComputedStyle bridge plus forced re-render.
+     Deliberately excluded, see docs/superpowers/specs/2026-07-31-something2-admin-light-mode-design.md */
   const stylesheet = useMemo(() => ([
     {
       selector: 'node',
@@ -303,6 +306,7 @@ function MapGraphAdmin() {
     { selector: '.eh-preview', style: { 'line-color': '#22c55e', 'line-style': 'solid' } },
     { selector: '.eh-ghost-edge', style: { 'line-color': '#4a9eff', 'line-style': 'dashed', width: 2 } },
   ]), []);
+  /* s2-theme-exempt:end */
 
   // Persist a node's position when the admin finishes dragging it. Also
   // freezes it into `dragged` immediately so the very next render feeds
@@ -586,7 +590,7 @@ function MapGraphAdmin() {
         <Side>
           {pending && (
             <Card>
-              <strong style={{ color: '#aaa' }}>New link</strong>
+              <strong style={{ color: 'var(--s2-text-muted)' }}>New link</strong>
               <Row>
                 {nameOf(pending.fromId)} edge{' '}
                 <select value={pending.edge} onChange={(e) => setPending({ ...pending, edge: e.target.value })}>
@@ -608,20 +612,20 @@ function MapGraphAdmin() {
                 <Button onClick={commitPending} disabled={busy}>
                   {replaced.length > 0 ? 'Replace and link' : 'Create link'}
                 </Button>
-                <Button $bg="#555" onClick={() => setPending(null)} disabled={busy}>Cancel</Button>
+                <Button $bg="var(--s2-btn-neutral)" onClick={() => setPending(null)} disabled={busy}>Cancel</Button>
               </Row>
             </Card>
           )}
           {selectedRow && (
             <Card>
-              <strong style={{ color: '#aaa' }}>Selected link</strong>
+              <strong style={{ color: 'var(--s2-text-muted)' }}>Selected link</strong>
               <Row>
                 {nameOf(selectedRow.from_world_id)} {selectedRow.edge} → {nameOf(selectedRow.to_world_id)}
               </Row>
               <Warn>Removing this clears BOTH directions, and rebuilds terrain for both worlds.</Warn>
               <Row>
                 <Button
-                  $bg="#ef4444"
+                  $bg="var(--s2-danger)"
                   disabled={busy}
                   onClick={async () => {
                     setBusy(true);
@@ -646,9 +650,9 @@ function MapGraphAdmin() {
             </Card>
           )}
           <Card>
-            <strong style={{ color: '#aaa' }}>Mode</strong>
+            <strong style={{ color: 'var(--s2-text-muted)' }}>Mode</strong>
             <Row>
-              <Button $bg={linkMode ? '#22c55e' : '#555'} onClick={toggleLinkMode} disabled={!cy}>
+              <Button $bg={linkMode ? 'var(--s2-success)' : 'var(--s2-btn-neutral)'} onClick={toggleLinkMode} disabled={!cy}>
                 {linkMode ? 'Link mode: on' : 'Link mode: off'}
               </Button>
             </Row>
@@ -659,12 +663,12 @@ function MapGraphAdmin() {
             </Dim>
           </Card>
           <Card>
-            <strong style={{ color: '#aaa' }}>Consistency</strong>
+            <strong style={{ color: 'var(--s2-text-muted)' }}>Consistency</strong>
             {warnings.length === 0 && <Dim>No problems found.</Dim>}
             {warnings.map((w, i) => <Warn key={`${w.code}-${i}`}>{w.message}</Warn>)}
           </Card>
           <Card>
-            <strong style={{ color: '#aaa' }}>Not linkable ({unbounded.length})</strong>
+            <strong style={{ color: 'var(--s2-text-muted)' }}>Not linkable ({unbounded.length})</strong>
             <Dim>These worlds have no width and height, so they cannot hold links. Set bounds in the Maps tab.</Dim>
             {unbounded.map((w) => <Dim key={w.id}>○ {w.name}</Dim>)}
           </Card>

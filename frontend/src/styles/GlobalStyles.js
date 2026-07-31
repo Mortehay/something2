@@ -80,7 +80,7 @@ const GlobalStyles = createGlobalStyle`
     --s2-row: #eaeaf2;
     --s2-btn-primary: #1d4ed8;
     --s2-btn-info: #1d4ed8;
-    --s2-btn-grey: #d0d0dc;
+    --s2-btn-grey: #5a6472;
     --s2-btn-purple: #6d28d9;
     --s2-variant-gpu: #15803d;
     --s2-tab-entity: #946005;

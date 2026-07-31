@@ -40,7 +40,7 @@ const TOKENS = [
   ['--s2-row', '#1f1f35', '#eaeaf2'],
   ['--s2-btn-primary', '#3a7ed8', '#1d4ed8'],
   ['--s2-btn-info', '#3b82f6', '#1d4ed8'],
-  ['--s2-btn-grey', '#4b5563', '#d0d0dc'],
+  ['--s2-btn-grey', '#4b5563', '#5a6472'],
   ['--s2-btn-purple', '#8b5cf6', '#6d28d9'],
   ['--s2-variant-gpu', '#4ade80', '#15803d'],
   ['--s2-tab-entity', '#facc15', '#946005'],
@@ -108,7 +108,6 @@ const IN_SCOPE = [
 // Files not yet swept. Each sweep task deletes its own entry. Must reach [].
 const PENDING = [
   'Something2.jsx',
-  'MapGraphAdmin.jsx',
 ];
 
 const read = (name) => readFileSync(

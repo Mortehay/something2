@@ -215,7 +215,7 @@ completeness was mechanically verified was false for a third of the surface.
 | `--s2-row` | `#1f1f35` | `#eaeaf2` | unselected list row |
 | `--s2-btn-primary` | `#3a7ed8` | `#1d4ed8` | primary button idle (white label 6.70:1) |
 | `--s2-btn-info` | `#3b82f6` | `#1d4ed8` | non-danger action button |
-| `--s2-btn-grey` | `#4b5563` | `#d0d0dc` | tertiary button |
+| `--s2-btn-grey` | `#4b5563` | `#5a6472` | tertiary button (white label 6.00:1, fill vs page 5.47:1) |
 | `--s2-btn-purple` | `#8b5cf6` | `#6d28d9` | purple action button (7.10:1) |
 | `--s2-variant-gpu` | `#4ade80` | `#15803d` | GPU-variant indicator (5.02:1) |
 | `--s2-tab-entity` | `#facc15` | `#946005` | tab identity (4.87:1 as text) |
