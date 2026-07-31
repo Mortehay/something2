@@ -739,3 +739,14 @@ git commit -m "docs(styleguide): scope the hardcoded-palette exemption to game s
 - **Disabled label contrast is 4.42:1** (`--s2-text-dim` on `--s2-disabled-bg`), just under AA. WCAG 1.4.3 exempts disabled controls, and the shortfall is the disabled signal. Intentional.
 - **Two of the three dark-mode convergences (`#e6e6f0`→`#eee`, `#666`→`#888`) were not explicitly approved** — they apply the principle approved for `#333`→`#2e2e3e`. Reject at Task 1 if unwanted; each becomes a separate token with an identical light value.
 - Literal counts come from `grep` over current `main` (`8ea4946`). If another session lands changes in these files first, counts shift and the gate — not the counts — is authoritative.
+
+---
+
+> **This plan is frozen history.** Token values drifted during execution as measurement
+> errors were found. The design contract
+> (`docs/superpowers/specs/2026-07-31-something2-admin-light-mode-design.md`, including its
+> Amendments) is authoritative — notably `--s2-border-strong` light is `#7d7d95` (not
+> `#8b8ba3`), `--s2-btn-neutral` light is `#6b6b80` (not `#e2e2ea`), `--s2-btn-grey` light is
+> `#5a6472` (not `#d0d0dc`), `--s2-danger-soft` light is `#c81e1e`, and the `#fef3c7`
+> selection-tint rule described above was superseded. The real colour surface was ~260 items
+> across three syntaxes, not the 217 hex literals this plan assumed.

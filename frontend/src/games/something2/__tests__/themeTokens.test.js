@@ -15,7 +15,7 @@ const TOKENS = [
   ['--s2-surface', '#1a1a2e', '#ffffff'],
   ['--s2-surface-raised', '#23233f', '#f0f0f6'],
   ['--s2-border', '#2e2e3e', '#d4d4e0'],
-  ['--s2-border-strong', '#3a3a4e', '#8b8ba3'],
+  ['--s2-border-strong', '#3a3a4e', '#7d7d95'],
   ['--s2-text-strong', '#fff', '#12121f'],
   ['--s2-on-accent', '#fff', '#ffffff'],
   ['--s2-text', '#eee', '#1a1a2e'],

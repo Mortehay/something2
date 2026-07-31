@@ -51,7 +51,7 @@ const GlobalStyles = createGlobalStyle`
 
     /* s2: text */
     --s2-border: #d4d4e0;
-    --s2-border-strong: #8b8ba3;
+    --s2-border-strong: #7d7d95;
     --s2-text-strong: #12121f;
     --s2-on-accent: #ffffff;
     --s2-text: #1a1a2e;

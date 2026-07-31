@@ -73,7 +73,7 @@ and borders, and a **neutral grey scale** for text.
 | `--s2-surface` | `#1a1a2e` | `#ffffff` | primary panel/card (12 uses) |
 | `--s2-surface-raised` | `#23233f` | `#f0f0f6` | inputs, elevated surfaces |
 | `--s2-border` | `#2e2e3e` | `#d4d4e0` | decorative separators |
-| `--s2-border-strong` | `#3a3a4e` | `#8b8ba3` | input/control outlines |
+| `--s2-border-strong` | `#3a3a4e` | `#7d7d95` | input/control outlines |
 
 **Approved deviation from pixel-identical dark:** `#333` (6 uses — cards and inputs in
 `MapGraphAdmin.jsx:30,33`, `BiomesAdmin.jsx:19,22`, `MapsAdmin.jsx:22,26`) does the same job
@@ -81,9 +81,16 @@ as `#2e2e3e` and **converges into `--s2-border`**. Those 6 sites shift `rgb(51,5
 `rgb(46,46,62)` — blue channel only, imperceptible in place. This is the single intentional
 dark-mode change; every other dark value stays verbatim.
 
-`--s2-border-strong` is the token for anything delineating an interactive control. At
-3.32:1 on white it meets WCAG 1.4.11 (3:1 non-text). `--s2-border` is decorative only
-(1.47:1) and must **not** be used for input outlines.
+`--s2-border-strong` is the token for anything delineating an interactive control.
+`--s2-border` is decorative only (1.47:1) and must **not** be used for input outlines.
+
+**Measure a border against the surface it actually sits on, not against white.** The light
+value was first set to `#8b8ba3`, quoted as "3.32:1" — true on `#ffffff`, but inputs sit on
+`--s2-bg-sunken` (`#ececf3`) inside `--s2-surface-raised` (`#f0f0f6`) cards, where it fell
+to **2.83:1** and failed WCAG 1.4.11. The value is now `#7d7d95`, which clears 3:1 against
+every surface in the app — worst case 3.41:1 on `#ececf3`, versus 4.01:1 on white. This
+mistake was made twice in this project; when specifying a border or a text colour, name the
+surface the ratio was computed against.
 
 ### Text
 
