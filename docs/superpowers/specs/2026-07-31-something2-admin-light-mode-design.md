@@ -257,3 +257,32 @@ above; exact alpha preservation is not required, and converging them is intended
 Where white sits on a coloured or accent fill, it is `--s2-on-accent` and stays white.
 Everywhere else it is `--s2-text-strong` and must invert. Decide per site by asking what is
 behind it — this is the same split already defined for `#fff`.
+
+## Amendment 2 — `color-mix()` for one-off tints
+
+Sanctioned technique for a translucent tint with no authored token:
+
+```css
+color-mix(in srgb, var(--s2-accent) 20%, transparent)
+```
+
+Because it derives from the *current mode's* token value, hue correctness across modes is
+automatic, and the neutral-overlay direction-inversion trap in Amendment 1 does not apply —
+these are coloured tints, not white/black lifts. Verified: the source gate still catches a
+raw literal hidden inside `color-mix()`, so this is not a detection bypass.
+
+Ratified on its own merits. It first appeared in commit `3f4ecb5` and was later justified as
+"existing precedent", which was circular — `color-mix` appears nowhere on `main`.
+
+**Known gap:** authored tint tokens deliberately reduce alpha in light mode
+(`--s2-accent-tint` 0.1 → 0.08, `--s2-accent-tint-strong` 0.3 → 0.22) because a tint reads
+stronger on a light surface. `color-mix()` uses the same percentage in both modes and does
+not get that tuning. The delta is small and acceptable for one-offs; a repeated family
+should become real tokens instead. `EntityTypesAdmin.jsx`'s `CapabilityBanner` (6 uses) is
+the outstanding candidate.
+
+**Also unratified:** `ItemTypesAdmin.jsx:76` `CategoryBadge` (`#7f1d1d`/`#14532d`/`#1e3a8a`)
+was exempted as fixed category styling. It is chrome, not per-record data, so it stays dark
+in light mode rather than getting purpose-built values — inconsistent with the rest of the
+ramp. It renders legibly either way (white on saturated fill). Either promote to three
+category-identity tokens alongside `--s2-tab-*`, or ratify the exemption class.
