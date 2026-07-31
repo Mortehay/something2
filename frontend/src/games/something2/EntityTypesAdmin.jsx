@@ -28,12 +28,12 @@ function entityTextureUrl(entity) {
 
 const AdminContainer = styled.div`
   padding: 2rem;
-  color: #eee;
+  color: var(--s2-text);
   max-width: 1200px;
   margin: 0 auto;
   height: 100%;
   overflow-y: auto;
-  background-color: #1a1a2e;
+  background-color: var(--s2-surface);
 `;
 
 const Header = styled.div`
@@ -41,10 +41,10 @@ const Header = styled.div`
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
-  
+
   h2 {
     font-size: 2.4rem;
-    color: #facc15;
+    color: var(--s2-tab-entity);
   }
 `;
 
@@ -55,16 +55,16 @@ const EntityGrid = styled.div`
 `;
 
 const EntityCard = styled.div`
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid #facc1533;
+  background: var(--s2-overlay);
+  border: 1px solid color-mix(in srgb, var(--s2-tab-entity) 20%, transparent);
   border-radius: 12px;
   padding: 1.5rem;
   transition: all 0.3s ease;
-  
+
   &:hover {
-    border-color: #facc15;
+    border-color: var(--s2-tab-entity);
     transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(250, 204, 21, 0.1);
+    box-shadow: 0 4px 20px var(--s2-selected-tint);
   }
 `;
 
@@ -86,15 +86,15 @@ const ColorBadge = styled.div`
   height: 40px;
   border-radius: 8px;
   background-color: ${props => props.color};
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 2px solid var(--s2-hairline);
 `;
 
 const BadgeFrame = styled.div`
   width: 40px;
   height: 40px;
   border-radius: 8px;
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  background-color: #0f0f1a;
+  border: 2px solid var(--s2-hairline);
+  background-color: var(--s2-bg);
   background-repeat: no-repeat;
   image-rendering: pixelated;
   flex-shrink: 0;
@@ -104,8 +104,8 @@ const BadgeImage = styled.img`
   width: 40px;
   height: 40px;
   border-radius: 8px;
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  background: #0f0f1a;
+  border: 2px solid var(--s2-hairline);
+  background: var(--s2-bg);
   object-fit: contain;
   image-rendering: pixelated;
   flex-shrink: 0;
@@ -176,16 +176,16 @@ const ActionButtons = styled.div`
 const IconButton = styled.button`
   background: none;
   border: none;
-  color: #aaa;
+  color: var(--s2-text-muted);
   cursor: pointer;
   padding: 0.5rem;
   font-size: 1.8rem;
   border-radius: 4px;
   transition: all 0.2s;
-  
+
   &:hover {
-    color: ${props => props.$delete ? '#ef4444' : '#facc15'};
-    background: rgba(255, 255, 255, 0.05);
+    color: ${props => props.$delete ? 'var(--s2-danger)' : 'var(--s2-tab-entity)'};
+    background: var(--s2-overlay);
   }
 `;
 
@@ -202,10 +202,10 @@ const StatItem = styled.div`
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  
+
   span:first-child {
     font-weight: bold;
-    color: #facc15;
+    color: var(--s2-tab-entity);
     font-size: 1rem;
     text-transform: uppercase;
   }
@@ -214,12 +214,12 @@ const StatItem = styled.div`
 const SpawnList = styled.div`
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  
+  border-top: 1px solid var(--s2-hairline);
+
   span:first-child {
     display: block;
     font-weight: bold;
-    color: #facc15;
+    color: var(--s2-tab-entity);
     font-size: 1rem;
     text-transform: uppercase;
     margin-bottom: 0.5rem;
@@ -233,8 +233,8 @@ const TagCloud = styled.div`
 `;
 
 const Tag = styled.span`
-  background: rgba(250, 204, 21, 0.1);
-  border: 1px solid rgba(250, 204, 21, 0.3);
+  background: var(--s2-selected-tint);
+  border: 1px solid var(--s2-selected-tint-strong);
   padding: 0.2rem 0.6rem;
   border-radius: 4px;
   font-size: 1rem;
@@ -247,7 +247,7 @@ const Overlay = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--s2-scrim);
   backdrop-filter: blur(5px);
   display: flex;
   justify-content: center;
@@ -257,14 +257,14 @@ const Overlay = styled.div`
 `;
 
 const Modal = styled.div`
-  background: #1a1a2e;
-  border: 2px solid #facc15;
+  background: var(--s2-surface);
+  border: 2px solid var(--s2-tab-entity);
   border-radius: 16px;
   width: 100%;
   max-width: 900px;
   max-height: 100%;
   padding: 2rem 2.5rem;
-  box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 40px var(--s2-scrim-soft);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -284,15 +284,15 @@ const Form = styled.form`
     width: 10px;
   }
   &::-webkit-scrollbar-track {
-    background: #0f0f1a;
+    background: var(--s2-bg);
     border-radius: 8px;
   }
   &::-webkit-scrollbar-thumb {
-    background: rgba(250, 204, 21, 0.4);
+    background: color-mix(in srgb, var(--s2-tab-entity) 40%, transparent);
     border-radius: 8px;
   }
   &::-webkit-scrollbar-thumb:hover {
-    background: rgba(250, 204, 21, 0.7);
+    background: color-mix(in srgb, var(--s2-tab-entity) 70%, transparent);
   }
 `;
 
@@ -300,17 +300,17 @@ const FormGroup = styled.div`
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  
+
   label {
     font-size: 1.2rem;
-    color: #facc15;
+    color: var(--s2-tab-entity);
     font-weight: bold;
   }
-  
+
   input, select, textarea {
-    background: #0f0f1a;
-    border: 1px solid rgba(250, 204, 21, 0.3);
-    color: white;
+    background: var(--s2-bg);
+    border: 1px solid var(--s2-selected-tint-strong);
+    color: var(--s2-text-strong);
     padding: 1rem;
     border-radius: 8px;
     font-size: 1.4rem;
@@ -319,7 +319,7 @@ const FormGroup = styled.div`
 
     &:focus {
       outline: none;
-      border-color: #facc15;
+      border-color: var(--s2-tab-entity);
     }
   }
 `;
@@ -331,9 +331,9 @@ const MultiSelect = styled.div`
   max-height: 150px;
   overflow-y: auto;
   padding: 1rem;
-  background: #0f0f1a;
+  background: var(--s2-bg);
   border-radius: 8px;
-  border: 1px solid rgba(250, 204, 21, 0.3);
+  border: 1px solid var(--s2-selected-tint-strong);
 `;
 
 const FormActions = styled.div`
@@ -343,35 +343,35 @@ const FormActions = styled.div`
   margin-top: 1rem;
   position: sticky;
   bottom: 0;
-  background: #1a1a2e;
+  background: var(--s2-surface);
   padding: 1rem 0 0;
-  border-top: 1px solid rgba(250, 204, 21, 0.2);
+  border-top: 1px solid color-mix(in srgb, var(--s2-tab-entity) 20%, transparent);
 `;
 
 const MainButton = styled.button`
-  background: #eab308;
-  color: white;
+  background: var(--s2-warning-mid);
+  color: var(--s2-on-accent);
   border: none;
   padding: 1rem 2rem;
   border-radius: 8px;
   font-size: 1.4rem;
   cursor: pointer;
   transition: all 0.2s;
-  
-  &:hover { background: #facc15; }
-  &:disabled { background: #555; cursor: not-allowed; }
+
+  &:hover { background: var(--s2-tab-entity); }
+  &:disabled { background: var(--s2-disabled-bg); color: var(--s2-text-dim); cursor: not-allowed; }
 `;
 
 const SecondaryButton = styled.button`
   background: transparent;
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: var(--s2-text-strong);
+  border: 1px solid var(--s2-hairline-strong);
   padding: 1rem 2rem;
   border-radius: 8px;
   font-size: 1.4rem;
   cursor: pointer;
-  
-  &:hover { background: rgba(255, 255, 255, 0.05); }
+
+  &:hover { background: var(--s2-overlay); }
 `;
 
 /* Capability banner */
@@ -382,14 +382,14 @@ const CapabilityBanner = styled.div`
   font-size: 1.2rem;
   border: 1px solid;
   /* gpu = green, cpu = amber, down = red */
-  color: ${p => p.$variant === 'gpu' ? '#4ade80' : p.$variant === 'down' ? '#f87171' : '#fcd34d'};
-  border-color: ${p => p.$variant === 'gpu' ? '#4ade8055' : p.$variant === 'down' ? '#f8717155' : '#fcd34d55'};
-  background: ${p => p.$variant === 'gpu' ? '#4ade8011' : p.$variant === 'down' ? '#f8717111' : '#fcd34d11'};
+  color: ${p => p.$variant === 'gpu' ? 'var(--s2-variant-gpu)' : p.$variant === 'down' ? 'var(--s2-danger-soft)' : 'var(--s2-warning-soft)'};
+  border-color: ${p => p.$variant === 'gpu' ? 'color-mix(in srgb, var(--s2-variant-gpu) 33%, transparent)' : p.$variant === 'down' ? 'color-mix(in srgb, var(--s2-danger-soft) 33%, transparent)' : 'color-mix(in srgb, var(--s2-warning-soft) 33%, transparent)'};
+  background: ${p => p.$variant === 'gpu' ? 'color-mix(in srgb, var(--s2-variant-gpu) 7%, transparent)' : p.$variant === 'down' ? 'color-mix(in srgb, var(--s2-danger-soft) 7%, transparent)' : 'color-mix(in srgb, var(--s2-warning-soft) 7%, transparent)'};
 `;
 
 const SpriteHint = styled.div`
   font-size: 1.05rem;
-  color: #fcd34d;
+  color: var(--s2-warning-soft);
   opacity: 0.85;
 `;
 
@@ -397,7 +397,7 @@ const SpriteHint = styled.div`
 const SpriteSection = styled.div`
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--s2-hairline);
 `;
 
 const SpriteToggle = styled.button`
@@ -407,14 +407,14 @@ const SpriteToggle = styled.button`
   width: 100%;
   background: none;
   border: none;
-  color: #facc15;
+  color: var(--s2-tab-entity);
   font-weight: bold;
   font-size: 1.1rem;
   text-transform: uppercase;
   cursor: pointer;
   padding: 0;
 
-  &:hover { color: #fde047; }
+  &:hover { color: var(--s2-warning-bright); }
 `;
 
 const SpriteBody = styled.div`
@@ -434,16 +434,16 @@ const SpriteProgress = styled.div`
   justify-content: space-between;
   align-items: center;
   font-size: 1.1rem;
-  color: #ccc;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(250, 204, 21, 0.15);
+  color: var(--s2-text-secondary);
+  background: var(--s2-overlay-subtle);
+  border: 1px solid var(--s2-selected-tint);
   border-radius: 6px;
   padding: 0.6rem 1rem;
 `;
 
 const SpriteError = styled.div`
   font-size: 1.1rem;
-  color: #ef4444;
+  color: var(--s2-danger);
 `;
 
 const SpritePreview = styled.div`
@@ -451,8 +451,8 @@ const SpritePreview = styled.div`
   flex-direction: column;
   gap: 0.75rem;
   align-items: flex-start;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(250, 204, 21, 0.15);
+  background: var(--s2-overlay-subtle);
+  border: 1px solid var(--s2-selected-tint);
   border-radius: 8px;
   padding: 1rem;
 `;
@@ -461,14 +461,14 @@ const AtlasImage = styled.img`
   max-width: 100%;
   max-height: 200px;
   image-rendering: pixelated;
-  border: 1px solid rgba(250, 204, 21, 0.3);
+  border: 1px solid var(--s2-selected-tint-strong);
   border-radius: 4px;
-  background: #0f0f1a;
+  background: var(--s2-bg);
 `;
 
 const KeyLabel = styled.span`
   font-size: 1rem;
-  color: #aaa;
+  color: var(--s2-text-muted);
   word-break: break-all;
 `;
 
@@ -678,14 +678,14 @@ function EntityTexturePanel({ entity, prompt }) {
         {' · '}render mode: {entity.render_mode || 'rect'}
       </div>
       <div style={{ marginBottom: '0.75rem' }}>
-        <label style={{ display: 'block', fontSize: '1.1rem', color: '#4a9eff', marginBottom: '0.25rem' }}>
+        <label style={{ display: 'block', fontSize: '1.1rem', color: 'var(--s2-accent)', marginBottom: '0.25rem' }}>
           Biome art context (optional)
         </label>
         <select
           value={biome}
           onChange={(e) => setBiome(e.target.value)}
           disabled={isLoadingBiomes}
-          style={{ background: '#0f0f1a', border: '1px solid rgba(74, 158, 255, 0.3)', color: 'white', padding: '0.6rem', borderRadius: 8, fontSize: '1.2rem' }}
+          style={{ background: 'var(--s2-bg)', border: '1px solid var(--s2-accent-tint-strong)', color: 'var(--s2-text-strong)', padding: '0.6rem', borderRadius: 8, fontSize: '1.2rem' }}
         >
           <option value="">— none —</option>
           {biomes.map((b) => <option key={b.id} value={b.name}>{b.name}</option>)}
@@ -700,17 +700,17 @@ function EntityTexturePanel({ entity, prompt }) {
       </div>
       {savedUrl && status !== 'done' && (
         <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <img src={savedUrl} alt="current entity texture" style={{ width: 64, height: 64, objectFit: 'contain', imageRendering: 'pixelated', background: '#0f0f1a', borderRadius: 6 }} />
+          <img src={savedUrl} alt="current entity texture" style={{ width: 64, height: 64, objectFit: 'contain', imageRendering: 'pixelated', background: 'var(--s2-bg)', borderRadius: 6 }} />
           <span style={{ fontSize: '1rem', opacity: 0.7 }}>Current {entity.render_mode} image</span>
         </div>
       )}
       {jobId && (
         <div style={{ marginTop: '0.75rem', fontSize: '1.1rem' }}>
           {status && status !== 'done' && status !== 'error' && <span>Generating… ({job?.progress?.done ?? 0}/{job?.progress?.total ?? 0})</span>}
-          {status === 'error' && <span style={{ color: '#ef4444' }}>Generation failed: {job?.error}</span>}
+          {status === 'error' && <span style={{ color: 'var(--s2-danger)' }}>Generation failed: {job?.error}</span>}
           {status === 'done' && result && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
-              {previewUrl && <img src={previewUrl} alt="preview" style={{ width: 64, height: 64, objectFit: 'contain', imageRendering: 'pixelated', background: '#0f0f1a', borderRadius: 6 }} />}
+              {previewUrl && <img src={previewUrl} alt="preview" style={{ width: 64, height: 64, objectFit: 'contain', imageRendering: 'pixelated', background: 'var(--s2-bg)', borderRadius: 6 }} />}
               <MainButton type="button" onClick={approve} disabled={approveImage.isPending || approveSprite.isPending}>
                 Approve {mode === 'animated' ? 'animation' : 'image'}
               </MainButton>
@@ -739,7 +739,7 @@ function EntityTypesAdmin() {
   
   const [formData, setFormData] = useState({
     name: '',
-    color: '#ffffff',
+    color: '#ffffff', // s2-theme-exempt(#ffffff): entity data default, not chrome
     walkable: false,
     is_creature: false,
     spawn_tiles: [],
@@ -795,7 +795,7 @@ function EntityTypesAdmin() {
     } else {
       setFormData({
         name: '',
-        color: '#00ff00',
+        color: '#00ff00', // s2-theme-exempt(#00ff00): entity data default, not chrome
         walkable: false,
         is_creature: false,
         spawn_tiles: [],
@@ -940,7 +940,7 @@ function EntityTypesAdmin() {
               </StatItem>
             </EntityStats>
             
-            <EntityStats style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.5rem' }}>
+            <EntityStats style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginTop: '0.5rem', borderTop: '1px solid var(--s2-overlay)', paddingTop: '0.5rem' }}>
                <StatItem><span>STR</span>{entity.strength}</StatItem>
                <StatItem><span>DEX</span>{entity.dexterity}</StatItem>
                <StatItem><span>CON</span>{entity.constitution}</StatItem>
@@ -983,7 +983,7 @@ function EntityTypesAdmin() {
                   onChange={e => setFormData({...formData, name: e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1)})}
                   placeholder="e.g. Bush"
                   disabled={editingEntity}
-                  style={{ background: '#0f0f1a', border: '1px solid rgba(250, 204, 21, 0.3)', color: 'white', padding: '1rem', borderRadius: '8px' }}
+                  style={{ background: 'var(--s2-bg)', border: '1px solid var(--s2-selected-tint-strong)', color: 'var(--s2-text-strong)', padding: '1rem', borderRadius: '8px' }}
                 />
               </FormGroup>
               
@@ -1005,7 +1005,7 @@ function EntityTypesAdmin() {
                     onChange={e => setFormData({...formData, walkable: e.target.checked})}
                     style={{ width: '20px', height: '20px' }}
                   />
-                  <label style={{ fontSize: '1.2rem', color: '#facc15' }}>Walkable</label>
+                  <label style={{ fontSize: '1.2rem', color: 'var(--s2-selected)' }}>Walkable</label>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -1015,7 +1015,7 @@ function EntityTypesAdmin() {
                     onChange={e => setFormData({...formData, is_creature: e.target.checked})}
                     style={{ width: '20px', height: '20px' }}
                   />
-                  <label style={{ fontSize: '1.2rem', color: '#facc15' }}>Is creature (roams the world)</label>
+                  <label style={{ fontSize: '1.2rem', color: 'var(--s2-selected)' }}>Is creature (roams the world)</label>
                 </div>
 
                 <FormGroup style={{ flex: 1 }}>
@@ -1121,7 +1121,7 @@ function EntityTypesAdmin() {
                       dangling reference forever. Show it, greyed out with a
                       warning, and let the admin uncheck it to actually clear it. */}
                   {orphanedSpawnTiles(formData.spawn_tiles, tileTypes).map(name => (
-                    <div key={`orphan-${name}`} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem', color: '#f87171' }}>
+                    <div key={`orphan-${name}`} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem', color: 'var(--s2-danger-soft)' }}>
                       <input
                         type="checkbox"
                         checked={true}

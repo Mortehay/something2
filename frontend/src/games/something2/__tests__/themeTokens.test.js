@@ -107,7 +107,7 @@ const IN_SCOPE = [
 
 // Files not yet swept. Each sweep task deletes its own entry. Must reach [].
 const PENDING = [
-  'Something2.jsx', 'EntityTypesAdmin.jsx',
+  'Something2.jsx',
   'MapsAdmin.jsx', 'MapGraphAdmin.jsx',
 ];
 
