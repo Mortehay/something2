@@ -8,9 +8,17 @@ pnpm-debug.log*
 lerna-debug.log*
 
 # Dependencies
+# Both forms are needed: the trailing-slash patterns match real directories, the
+# bare ones also match a SYMLINK named node_modules. Scratchpad worktrees symlink
+# these back to the main checkout, and without the bare patterns `git add -A`
+# commits the symlink — which then replaces the real directory with a link to
+# itself on checkout. That happened once; keep both.
 node_modules/
+node_modules
 frontend/node_modules/
+frontend/node_modules
 backend/node_modules/
+backend/node_modules
 
 # Production builds
 dist/
