@@ -14,7 +14,13 @@ Reusable UI primitives in [frontend/src/ui/](../../frontend/src/ui/) are styled-
 
 For new UI primitives, use tokens — don't hardcode hex colors, radii, or shadows. If a token is missing, add one to `GlobalStyles.js` rather than inline-styling.
 
-The in-game UI (e.g. [frontend/src/games/something2/Something2.jsx](../../frontend/src/games/something2/Something2.jsx)) intentionally uses its own dark gaming palette with hardcoded hex (`#0f0f1a`, `#1a1a2e`, `#facc15`, `#4a9eff`, ...). This is deliberate visual separation from the admin/dashboard UI — don't "fix" it by replacing with tokens.
+The **game surfaces** — the `<canvas>` element and its idle placeholder in [Something2.jsx](../../frontend/src/games/something2/Something2.jsx), [Minimap.jsx](../../frontend/src/games/something2/Minimap.jsx), and the cytoscape stylesheet in [MapGraphAdmin.jsx](../../frontend/src/games/something2/MapGraphAdmin.jsx) — intentionally stay dark in both modes and keep hardcoded hex (`#0f0f1a`, `#4a9eff`, ...). This is deliberate visual separation from the admin/dashboard UI; don't "fix" it by replacing with tokens. Cytoscape in particular renders to a canvas and **cannot** read CSS custom properties — a `var()` there paints nothing.
+
+The **admin tabs** inside the game route (`TileTypesAdmin`, `EntityTypesAdmin`, `ItemTypesAdmin`, `BiomesAdmin`, `MapsAdmin`, `MapGraphAdmin`'s chrome, and `Something2.jsx`'s shell and tab strip) are admin UI and use `--s2-*` tokens, which swap per mode like every other token. [themeTokens.test.js](../../frontend/src/games/something2/__tests__/themeTokens.test.js) enforces this: any hex, `rgba()` or bare colour keyword added to those files fails the suite unless marked `s2-theme-exempt`. Exemptions come in two forms — a block `/* s2-theme-exempt:start … :end */`, or a single line that **names** the value, `// s2-theme-exempt(#00ff00): reason`. A bare sentinel with no parentheses exempts nothing.
+
+Prefer single-line, property-scoped exemptions over block sentinels. A block wrapping a JSX subtree or a broadly-scoped styled-component hides every literal inside it from the gate permanently — that mistake shipped once here, exempting the whole page backdrop instead of the canvas.
+
+Tile and entity `color` form defaults are **data**, not chrome, and are exempt. `color-mix(in srgb, var(--s2-token) N%, transparent)` is the sanctioned way to derive a one-off tint with no authored token.
 
 ### Rem base
 
