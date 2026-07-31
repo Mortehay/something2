@@ -117,13 +117,24 @@ Out-of-scope literals are wrapped in **sentinel comments**, never line ranges �
 /* s2-theme-exempt:end */
 ```
 
-Single-line form for data defaults:
+Single-line form for data defaults **must name the hex it exempts**, in parentheses:
 
 ```js
-color: '#00ff00', // s2-theme-exempt: tile data default, not chrome
+color: '#00ff00', // s2-theme-exempt(#00ff00): tile data default, not chrome
 ```
 
-The gate strips exempt regions, then flags **any** remaining `#hex`. Scanning for all hex rather than for CSS-declaration syntax is what makes it catch prop and inline-style literals automatically.
+A bare `// s2-theme-exempt: reason` with no parenthesised hex is **not a valid
+single-line exemption** — it exempts nothing on that line. This matters because a
+single-line sentinel only clears the literal(s) named in its parentheses; any other
+`#hex` on the same line — e.g. a stray or copy-pasted literal — is still flagged. The
+block form (`:start`/`:end`) is unaffected by this rule and continues to exclude its
+whole region wholesale, since it wraps things (like the cytoscape stylesheet) that
+have no single "the" literal to name.
+
+The gate strips block-sentinel regions first, then flags **any** remaining `#hex` not
+named by a same-line single-line sentinel. Scanning for all hex rather than for
+CSS-declaration syntax is what makes it catch prop and inline-style literals
+automatically.
 
 ---
 
@@ -363,13 +374,13 @@ Expected: FAIL — both files now under the gate with literals present.
 In `TileTypesAdmin.jsx`, mark the form-state colours — these are tile data, and tokenizing them changes what colour new tiles are created with:
 
 ```js
-    color: '#000000', // s2-theme-exempt: tile data default, not chrome
+    color: '#000000', // s2-theme-exempt(#000000): tile data default, not chrome
 ```
 
 at `:399`, and:
 
 ```js
-        color: '#00ff00', // s2-theme-exempt: tile data default, not chrome
+        color: '#00ff00', // s2-theme-exempt(#00ff00): tile data default, not chrome
 ```
 
 at `:425`.
@@ -412,13 +423,13 @@ Expected: FAIL listing its literals.
 - [ ] **Step 3: Exempt the two data defaults**
 
 ```js
-    color: '#ffffff', // s2-theme-exempt: entity data default, not chrome
+    color: '#ffffff', // s2-theme-exempt(#ffffff): entity data default, not chrome
 ```
 
 at `:742`, and:
 
 ```js
-        color: '#00ff00', // s2-theme-exempt: entity data default, not chrome
+        color: '#00ff00', // s2-theme-exempt(#00ff00): entity data default, not chrome
 ```
 
 at `:798`.

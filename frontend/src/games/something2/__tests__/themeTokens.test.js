@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { offendingLiterals } from './themeGate.js';
 
 const globalStyles = readFileSync(
   fileURLToPath(new URL('../../../styles/GlobalStyles.js', import.meta.url)), 'utf8',
@@ -80,16 +81,31 @@ const read = (name) => readFileSync(
   fileURLToPath(new URL(`../${name}`, import.meta.url)), 'utf8',
 );
 
-// Strip sentinel-marked regions and single-line exemptions, then find any surviving hex.
-function offendingLiterals(source) {
-  const withoutBlocks = source.replace(
-    /\/\*\s*s2-theme-exempt:start[\s\S]*?s2-theme-exempt:end\s*\*\//g, '',
-  );
-  return withoutBlocks
-    .split('\n')
-    .filter((line) => !/s2-theme-exempt/.test(line))
-    .flatMap((line) => line.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []);
-}
+describe('offendingLiterals sentinel handling', () => {
+  it('exempts a literal that the single-line sentinel names in parentheses', () => {
+    const line = "  color: '#00ff00', // s2-theme-exempt(#00ff00): tile data default, not chrome";
+    expect(offendingLiterals(line)).toEqual([]);
+  });
+
+  it('still reports a different literal on the same line the sentinel does not name', () => {
+    const line = "  color: '#abc123', // s2-theme-exempt(#00ff00): unrelated note";
+    expect(offendingLiterals(line)).toEqual(['#abc123']);
+  });
+
+  it('a bare sentinel with no parenthesised hex exempts nothing on that line', () => {
+    const line = "  color: '#abc123', // s2-theme-exempt: unrelated note";
+    expect(offendingLiterals(line)).toEqual(['#abc123']);
+  });
+
+  it('still exempts every literal inside a block-sentinel region', () => {
+    const source = [
+      '/* s2-theme-exempt:start — cytoscape renders to canvas, cannot read CSS vars */',
+      "const GRAPH_STYLE = [{ 'background-color': '#23233f', 'line-color': '#4a9eff' }];",
+      '/* s2-theme-exempt:end */',
+    ].join('\n');
+    expect(offendingLiterals(source)).toEqual([]);
+  });
+});
 
 describe('Something2 admin theme gate', () => {
   const swept = IN_SCOPE.filter((f) => !PENDING.includes(f));
