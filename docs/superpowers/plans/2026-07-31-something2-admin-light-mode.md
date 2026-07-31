@@ -70,11 +70,14 @@ Add to **both** the `&, &.light-mode{` block (ends `GlobalStyles.js:44`) and the
 
 | Token | Dark | Light | Replaces |
 |---|---|---|---|
-| `--s2-btn-neutral` | `#555` | `#e2e2ea` | `$bg="#555"` — `MapsAdmin.jsx:100,103`; `MapGraphAdmin.jsx:611,651` |
+| `--s2-btn-neutral` | `#555` | `#6b6b80` | `$bg="#555"` — `MapsAdmin.jsx:100,103`; `MapGraphAdmin.jsx:611,651` |
 | `--s2-disabled-bg` | `#555` | `#ececf3` | `&:disabled` — `ItemTypesAdmin.jsx:237`, `TileTypesAdmin.jsx:274`, `EntityTypesAdmin.jsx:362` |
 | `--s2-swatch-border` | `#555` | `#8b8ba3` | `BiomesAdmin.jsx:28` swatch outline |
 
-A neutral button in light mode needs `--s2-text` as its label colour; dark mode's `#555` background carried white text implicitly.
+The neutral button keeps a white label on a mid-grey fill in both modes (5.20:1 in light
+mode); dark mode's `#555` background carries white text implicitly, and light mode's
+`#6b6b80` is the same mid-grey chip translated, not a shift to a pale fill needing a
+different label colour.
 
 **Accents** — every dark accent fails WCAG AA on light surfaces (measured: `#facc15` 1.40:1, `#f59e0b` 1.96:1, `#22c55e` 2.08:1, `#10b981` 2.31:1, `#4a9eff` 2.51:1, `#ef4444` 3.43:1). None may be reused.
 
@@ -175,7 +178,7 @@ const TOKENS = [
   ['--s2-text-secondary', '#ccc', '#33334a'],
   ['--s2-text-muted', '#aaa', '#4a4a5e'],
   ['--s2-text-dim', '#888', '#6b6b80'],
-  ['--s2-btn-neutral', '#555', '#e2e2ea'],
+  ['--s2-btn-neutral', '#555', '#6b6b80'],
   ['--s2-disabled-bg', '#555', '#ececf3'],
   ['--s2-swatch-border', '#555', '#8b8ba3'],
   ['--s2-accent', '#4a9eff', '#2563eb'],
@@ -733,7 +736,6 @@ git commit -m "docs(styleguide): scope the hardcoded-palette exemption to game s
 - **Wrong-role tokens are invisible to every automated check.** Highest-value target for review and the browser pass.
 - **Selection styling is not a swap.** `--s2-selected` on white reads as a warning; the filled-tint rule must be applied wherever selection is drawn, and it is the most likely thing to be missed.
 - **Sentinel placement in `MapGraphAdmin.jsx` and `Something2.jsx`** is the one place a chrome literal could silently escape the gate by falling inside an exempt region. Reviewers should check the sentinel boundaries specifically.
-- **The neutral button's light fill is low-contrast against the page by necessity.** `--s2-btn-neutral` `#e2e2ea` sits at 1.17:1 against `#f4f4f8`; no light grey reaches 3:1 against a near-white page (`#9a9ab0` only gets to 2.51:1 and stops looking neutral). Its label is 13.24:1, so the control is identifiable by text and shape, which satisfies WCAG 1.4.11 — that clause governs boundaries that *carry* information, not every fill. The robust fix is a `border: 1px solid var(--s2-btn-neutral-border)` (dark `#555`, invisible against its own fill; light `#8b8ba3`, 3.32:1), but adding a border is a **non-colour change** and `MapsAdmin.jsx:100,103` is under a colours-only freeze. Left as a follow-up rather than smuggled in.
 - **Disabled label contrast is 4.42:1** (`--s2-text-dim` on `--s2-disabled-bg`), just under AA. WCAG 1.4.3 exempts disabled controls, and the shortfall is the disabled signal. Intentional.
 - **Two of the three dark-mode convergences (`#e6e6f0`→`#eee`, `#666`→`#888`) were not explicitly approved** — they apply the principle approved for `#333`→`#2e2e3e`. Reject at Task 1 if unwanted; each becomes a separate token with an identical light value.
 - Literal counts come from `grep` over current `main` (`8ea4946`). If another session lands changes in these files first, counts shift and the gate — not the counts — is authoritative.

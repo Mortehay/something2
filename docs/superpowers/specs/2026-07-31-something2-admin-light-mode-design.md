@@ -103,7 +103,7 @@ must diverge in light. Mapping them to one token is a defect, not a simplificati
 
 | Token | Dark | Light | Role and sites |
 |---|---|---|---|
-| `--s2-btn-neutral` | `#555` | `#e2e2ea` bg / `--s2-text` label | secondary buttons passed as props: `MapsAdmin.jsx:100,103`, `MapGraphAdmin.jsx:611` (Cancel), `:651` (Link mode off) |
+| `--s2-btn-neutral` | `#555` | `#6b6b80` bg / white label (5.20:1), same as dark | secondary buttons passed as props: `MapsAdmin.jsx:100,103`, `MapGraphAdmin.jsx:611` (Cancel), `:651` (Link mode off) |
 | `--s2-disabled-bg` | `#555` | `#ececf3` | `&:disabled` in `ItemTypesAdmin.jsx:237`, `TileTypesAdmin.jsx:274`, `EntityTypesAdmin.jsx:362` |
 | `--s2-swatch-border` | `#555` | `#8b8ba3` | colour-swatch outline, `BiomesAdmin.jsx:28` |
 

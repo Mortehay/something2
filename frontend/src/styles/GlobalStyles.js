@@ -60,7 +60,7 @@ const GlobalStyles = createGlobalStyle`
     --s2-text-dim: #6b6b80;
 
     /* s2: controls */
-    --s2-btn-neutral: #e2e2ea;
+    --s2-btn-neutral: #6b6b80;
     --s2-disabled-bg: #ececf3;
     --s2-swatch-border: #8b8ba3;
 
