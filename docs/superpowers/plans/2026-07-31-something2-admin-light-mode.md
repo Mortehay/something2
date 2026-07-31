@@ -405,6 +405,64 @@ git commit -m "feat(theme): tokenize TileTypesAdmin and ItemTypesAdmin"
 
 ---
 
+### Task 3.5: Widen the gate, add the missing tokens, repair Task 3
+
+Inserted mid-execution. Task 3 revealed that this plan's token table covered only high-frequency six-digit hex, and that the gate matches hex only — so 71 `rgba()` values and 14 `color: white` declarations (33% of the real surface) passed invisibly. See **Amendment 1** in the design contract for the full inventory and every new token value.
+
+**Files:**
+- Modify: `frontend/src/styles/GlobalStyles.js`, `frontend/src/games/something2/__tests__/themeGate.js`, `__tests__/themeTokens.test.js`
+- Modify: `frontend/src/games/something2/TileTypesAdmin.jsx`, `ItemTypesAdmin.jsx` (Task 3 repair)
+
+**Interfaces:**
+- Consumes: the `--s2-*` block (Task 1), `offendingLiterals` and `PENDING` (Task 2).
+- Produces: 23 further tokens, and a gate that also rejects `rgba()`/`rgb()` and bare colour keywords. Tasks 4-7 depend on both.
+
+- [ ] **Step 1: Extend the token test, and watch it fail**
+
+Add every row from Amendment 1's two token tables to the `TOKENS` array in `themeTokens.test.js`, using the exact values there. Run `cd frontend && npx vitest run src/games/something2/__tests__/themeTokens.test.js` — expect 46 new failures (23 tokens × 2 modes).
+
+- [ ] **Step 2: Add the tokens to `GlobalStyles.js`**
+
+Light values into `&, &.light-mode{`, dark into `&.dark-mode{`, grouped under new comments `/* s2: extended solids */` and `/* s2: translucent */`. Re-run: expect PASS.
+
+- [ ] **Step 3: Teach the gate to see `rgba()` and keywords — test first**
+
+In `themeTokens.test.js`, add cases calling the real `offendingLiterals` from `./themeGate.js` on string fixtures:
+
+```js
+expect(offendingLiterals('background: rgba(255, 255, 255, 0.05);')).toEqual(['rgba(255, 255, 255, 0.05)']);
+expect(offendingLiterals('color: white;')).toEqual(['white']);
+expect(offendingLiterals('background: transparent;')).toEqual([]);          // legitimate, stays allowed
+expect(offendingLiterals('color: var(--s2-text);')).toEqual([]);
+expect(offendingLiterals("border: 1px solid rgba(0,0,0,0.5); // s2-theme-exempt(rgba(0,0,0,0.5)): x")).toEqual([]);
+```
+
+Run and confirm these fail before touching `themeGate.js`.
+
+- [ ] **Step 4: Implement the wider matcher**
+
+Extend `offendingLiterals` to also match `rgba?\([^)]*\)` and the bare keywords `white|black|red|green|blue` **only in a colour position** (preceded by `color:`, `background:`, `border…:` or inside a quoted style value) so prose and identifiers like `greenfield` are not flagged. `transparent` stays allowed. Keep the named-hex exemption behaviour from commit `1f3d5f8` working for these new forms too. Re-run: expect PASS.
+
+- [ ] **Step 5: Repair Task 3's two defects**
+
+`TileTypesAdmin.jsx` `MainButton` idle background is `var(--s2-accent)` after Task 3, which collapsed idle and hover into one colour and removed the hover feedback. Set idle to `var(--s2-btn-primary)`, leaving hover on `var(--s2-accent)` — they differ by 1.30:1 in light mode.
+
+Then sweep the `rgba()` and `color: white` occurrences now exposed in both `TileTypesAdmin.jsx` and `ItemTypesAdmin.jsx`, per Amendment 1. `ItemTypesAdmin.jsx`'s `CategoryBadge` (`#7f1d1d`/`#14532d`/`#1e3a8a`) was exempted in Task 3 as fixed category styling; re-examine that call — if those chips carry white text on a saturated fill they work in both modes and the exemption stands, but it must be a decision, not an oversight.
+
+- [ ] **Step 6: Run the gate and the full suite**
+
+Run: `cd frontend && npx vitest run src/games/something2/__tests__/themeTokens.test.js && npm test`
+Expected: both green. `BiomesAdmin.jsx`, `TileTypesAdmin.jsx` and `ItemTypesAdmin.jsx` are the swept files and must now be clean under the *wider* matcher.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add frontend/src/styles/GlobalStyles.js frontend/src/games/something2/__tests__ frontend/src/games/something2/TileTypesAdmin.jsx frontend/src/games/something2/ItemTypesAdmin.jsx docs/superpowers/specs
+git commit -m "fix(theme): widen gate to rgba/keywords, add missing tokens, repair Task 3"
+```
+
+---
+
 ### Task 4: Sweep `EntityTypesAdmin.jsx`
 
 Largest admin tab, 50 literals.

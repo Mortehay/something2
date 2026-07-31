@@ -178,3 +178,82 @@ the UI. They are the most likely place for a missed token to survive.
    catch a token applied with the wrong role, which looks correct in dark and unreadable in
    light.
 3. **Styleguide amended** so `.ai/styleguides/frontend.md:17` matches the new boundary.
+
+---
+
+## Amendment 1 — the colour surface is larger than this contract first stated
+
+**Found during execution, after Task 3.** The original inventory was built from a
+frequency-sorted list of six-digit hex and covered only the head of it. The real surface:
+
+| File | hex | `rgba()` | `white`/`black` | total |
+|---|---|---|---|---|
+| `Something2.jsx` | 52 | 15 | 2 | 69 |
+| `EntityTypesAdmin.jsx` | 50 | 27 | 3 | 80 |
+| `MapsAdmin.jsx` | 32 | 0 | 1 | 33 |
+| `MapGraphAdmin.jsx` | 31 | 0 | 1 | 32 |
+| `TileTypesAdmin.jsx` | 4 | 15 | 3 | 22 |
+| `ItemTypesAdmin.jsx` | 6 | 14 | 3 | 23 |
+
+**~260 items, not 217.** The source gate matches hex only, so 71 `rgba()` values and 14
+colour keywords — 33% of the work — were invisible to it. `color: white` appears 14 times
+and becomes white-on-white in light mode while the gate reports green. The claim that
+completeness was mechanically verified was false for a third of the surface.
+
+### Gate must additionally catch
+
+- `rgba(...)` / `rgb(...)` in any property
+- bare colour keywords in a colour position: `white`, `black`, `red`, `green`, `blue`
+  (`transparent` is legitimate and stays allowed)
+- eight-digit hex with alpha (`#facc1533`, `#4ade8055`) — the existing `{3,8}` match already
+  covers these, but they need tokens rather than exemptions
+
+### Additional solid tokens
+
+| Token | Dark | Light | Role |
+|---|---|---|---|
+| `--s2-row` | `#1f1f35` | `#eaeaf2` | unselected list row |
+| `--s2-btn-primary` | `#3a7ed8` | `#1d4ed8` | primary button idle (white label 6.70:1) |
+| `--s2-btn-info` | `#3b82f6` | `#1d4ed8` | non-danger action button |
+| `--s2-btn-grey` | `#4b5563` | `#d0d0dc` | tertiary button |
+| `--s2-btn-purple` | `#8b5cf6` | `#6d28d9` | purple action button (7.10:1) |
+| `--s2-variant-gpu` | `#4ade80` | `#15803d` | GPU-variant indicator (5.02:1) |
+| `--s2-tab-entity` | `#facc15` | `#946005` | tab identity (4.87:1 as text) |
+| `--s2-tab-items` | `#f472b6` | `#be185d` | tab identity (5.50:1) |
+| `--s2-tab-maps` | `#34d399` | `#047857` | tab identity (5.00:1) |
+
+**Primary button hover must stay distinguishable.** `--s2-btn-primary` idle and
+`--s2-accent` hover differ by 1.30:1 in light mode. Task 3 collapsed both into
+`--s2-accent`, removing the hover feedback; that is a defect to repair.
+
+### Translucent tokens — light counterparts invert direction
+
+On a dark surface a white overlay *lifts*; on a light surface the equivalent must *darken*.
+A lighter white on white is invisible. This is the single most error-prone part of the
+remaining sweep.
+
+| Token | Dark | Light |
+|---|---|---|
+| `--s2-overlay-subtle` | `rgba(255,255,255,0.03)` | `rgba(0,0,0,0.02)` |
+| `--s2-overlay` | `rgba(255,255,255,0.05)` | `rgba(0,0,0,0.035)` |
+| `--s2-hairline` | `rgba(255,255,255,0.1)` | `rgba(0,0,0,0.08)` |
+| `--s2-hairline-strong` | `rgba(255,255,255,0.3)` | `rgba(0,0,0,0.18)` |
+| `--s2-text-ghost` | `rgba(255,255,255,0.4)` | `rgba(0,0,0,0.45)` |
+| `--s2-scrim` | `rgba(0,0,0,0.8)` | `rgba(0,0,0,0.45)` |
+| `--s2-scrim-soft` | `rgba(0,0,0,0.5)` | `rgba(0,0,0,0.28)` |
+| `--s2-shadow` | `rgba(0,0,0,0.4)` | `rgba(0,0,0,0.14)` |
+| `--s2-panel-veil` | `rgba(26,26,46,0.85)` | `rgba(255,255,255,0.9)` |
+| `--s2-panel-veil-solid` | `rgba(46,46,74,0.95)` | `rgba(255,255,255,0.96)` |
+| `--s2-accent-tint` | `rgba(74,158,255,0.1)` | `rgba(37,99,235,0.08)` |
+| `--s2-accent-tint-strong` | `rgba(74,158,255,0.3)` | `rgba(37,99,235,0.22)` |
+| `--s2-selected-tint` | `rgba(250,204,21,0.1)` | `rgba(148,96,5,0.10)` |
+| `--s2-selected-tint-strong` | `rgba(250,204,21,0.3)` | `rgba(148,96,5,0.28)` |
+
+Near-miss alpha values (`0.15`, `0.2`, `0.35`, `0.6`, `0.85`) map to the nearest token
+above; exact alpha preservation is not required, and converging them is intended.
+
+### `color: white`
+
+Where white sits on a coloured or accent fill, it is `--s2-on-accent` and stays white.
+Everywhere else it is `--s2-text-strong` and must invert. Decide per site by asking what is
+behind it — this is the same split already defined for `#fff`.
