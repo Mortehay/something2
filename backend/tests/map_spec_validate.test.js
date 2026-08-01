@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { validateMapSpec, EDGE_DELTA } = require('../seeds/mapSpec.js');
+const { edgeOfDoorwayTile } = require('../src/services/mapService.js');
 
 // A minimal two-world spec that is VALID: `b` sits one cell east of `a`,
 // and the link from a to b is edge E. Every negative case below is this
@@ -33,6 +34,13 @@ test('N is -y and S is +y, matching edgeOfDoorwayTile', () => {
   assert.deepEqual(EDGE_DELTA.S, [0, 1]);
   assert.deepEqual(EDGE_DELTA.E, [1, 0]);
   assert.deepEqual(EDGE_DELTA.W, [-1, 0]);
+  // Both assertions above encode the convention in the test itself -- they
+  // never actually consult mapService.js's real behavior, so a change to
+  // edgeOfDoorwayTile (e.g. flipping N to mean the bottom row) would leave
+  // this suite green while every seeded doorway led the wrong way. Tie
+  // EDGE_DELTA to the real source: row 0 of a doorway tile is documented as
+  // north, so it must match EDGE_DELTA.N's sign.
+  assert.equal(edgeOfDoorwayTile(0, 5, 64, 64), 'N');
 });
 
 test('accepts a well-formed spec', () => {
@@ -101,11 +109,16 @@ test('rejects two links leaving one world by the same edge', () => {
 });
 
 // The brief's "same edge twice" test above pushes a *second* link (a->c)
-// that is simultaneously a duplicate edge AND a grid contradiction (c sits
-// south of a, not east), so a validator that only checked grid contradiction
-// would pass that test too. This variant repeats the SAME link (a->b, edge
-// E, to a genuinely-east neighbour) so the grid check is satisfied both
-// times and only the duplicate-edge rule can be responsible for the error.
+// whose target cell [0,1] is south of a, not east -- so that fixture has TWO
+// simultaneous defects: a duplicate edge AND a grid contradiction. Disabling
+// the duplicate-edge guard alone still fails that test (verified by
+// mutation), because its regex happens to only match the duplicate message
+// -- but the fixture can never assert an exact error count, since both
+// checks always fire together there. This variant repeats the literal same
+// link (a->b, edge E, to the genuinely-east neighbor) so the grid check
+// passes cleanly and only the duplicate-edge rule can produce an error,
+// which lets this test assert `errs.length === 1` -- something the brief's
+// fixture structurally cannot do.
 test('rejects the same edge declared twice even when both point at the correctly-placed neighbor', () => {
   const spec = valid();
   spec.links.push({ from: 'a', edge: 'E', to: 'b' });
@@ -153,11 +166,60 @@ test('rejects duplicate keys and duplicate names', () => {
 
 test('rejects a link referencing an unknown key', () => {
   assert.ok(errorsFor((s) => { s.links[0].to = 'nope'; }).some((e) => /unknown/i.test(e)));
+  // Only the `to` side was covered above; replacing the `!from` guard with a
+  // silent `continue` (dropping the link instead of reporting it) left the
+  // suite green until this was added -- a typo'd `from` would otherwise
+  // vanish the link from the seeded map with no error at all.
+  assert.ok(errorsFor((s) => { s.links[0].from = 'nope'; }).some((e) => /unknown/i.test(e)));
 });
 
 test('rejects a world unreachable from the entry', () => {
   const errs = errorsFor((s) => { s.links = []; });
   assert.ok(errs.some((e) => /unreachable|not reachable/i.test(e)), errs.join('; '));
+});
+
+// Every link fixture above declares `from` as the entry side, so reachability
+// BFS starting at the entry always walks the SAME direction the link was
+// authored in. setLink writes both DB rows (from->to and its mirror), and
+// the validator's adjacency map pushes both directions to model that -- but
+// nothing pinned that down. Deleting the second `adjacency.get(l.to).push`
+// call left the suite green (verified by mutation) because it only matters
+// when a link is declared from the non-entry side, which no other test does.
+test('reachability is undirected: a link declared from the non-entry side still connects it', () => {
+  const spec = valid();
+  spec.links = [{ from: 'b', edge: 'W', to: 'a' }]; // b is non-entry; a is entry
+  assert.deepEqual(validateMapSpec(spec), []);
+});
+
+// The world loop reports a malformed grid and `continue`s past that world's
+// OWN checks, but the link loop still dereferences from.grid[0]/to.grid[0]
+// for any link touching it -- these three shapes throw instead of returning
+// errors unless guarded (verified by mutation: reverting hasValidGrid's link-
+// loop guard reproduces the crash for each). grid: [0.5, 0] in the "not two
+// integers" test above is the one malformed shape that happens not to crash
+// (it's a real 2-element array), so that test alone gave illusory coverage.
+test('does not throw when a linked world is missing its grid property', () => {
+  const spec = valid();
+  delete spec.worlds[0].grid; // 'a' is the `from` side of links[0]
+  let errs;
+  assert.doesNotThrow(() => { errs = validateMapSpec(spec); });
+  assert.ok(errs.some((e) => /world "a" grid must be two integers/i.test(e)), errs.join('; '));
+});
+
+test('does not throw when a linked world grid is null', () => {
+  const spec = valid();
+  spec.worlds[1].grid = null; // 'b' is the `to` side of links[0]
+  let errs;
+  assert.doesNotThrow(() => { errs = validateMapSpec(spec); });
+  assert.ok(errs.some((e) => /world "b" grid must be two integers/i.test(e)), errs.join('; '));
+});
+
+test('does not throw when a linked world grid is not an array', () => {
+  const spec = valid();
+  spec.worlds[0].grid = '0,0';
+  let errs;
+  assert.doesNotThrow(() => { errs = validateMapSpec(spec); });
+  assert.ok(errs.some((e) => /world "a" grid must be two integers/i.test(e)), errs.join('; '));
 });
 
 test('rejects a village outside the size limits the API enforces', () => {

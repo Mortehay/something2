@@ -11,6 +11,13 @@
 //
 // N is -y: edgeOfDoorwayTile (services/mapService.js:724) defines N as
 // gRow === 0, the top row.
+//
+// This object must stay byte-identical to STEP in
+// frontend/src/games/something2/mapGraphLayout.js:10, which lays out the
+// World Map tab's Cytoscape graph from the same grid coordinates. That file
+// is the likelier drift target day to day (it's touched for layout/UI work,
+// this file only for seeding) even though edgeOfDoorwayTile is the deeper
+// source of truth for the convention.
 const EDGE_DELTA = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
 
 // Single source of truth for village size limits, also imported by
@@ -21,6 +28,16 @@ const EDGE_DELTA = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
 // requires) have no top-level DB/pool creation, so this stays a pure,
 // database-free require.
 const { VILLAGE_LIMITS } = require('../src/services/villages.js');
+
+// True only when w.grid is a well-formed [int, int] pair. Shared by the
+// world loop (which reports the error) and the link loop (which must not
+// dereference grid[0]/grid[1] on a world that failed this check -- a link
+// naming a world with a missing/null/malformed grid must produce an error,
+// not throw).
+function hasValidGrid(w) {
+  return Array.isArray(w.grid) && w.grid.length === 2
+      && Number.isInteger(w.grid[0]) && Number.isInteger(w.grid[1]);
+}
 
 function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } = {}) {
   const errors = [];
@@ -39,8 +56,7 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     if (seenNames.has(w.name)) errors.push(`duplicate name "${w.name}"`);
     seenNames.add(w.name);
 
-    if (!Array.isArray(w.grid) || w.grid.length !== 2
-        || !Number.isInteger(w.grid[0]) || !Number.isInteger(w.grid[1])) {
+    if (!hasValidGrid(w)) {
       errors.push(`world "${w.key}" grid must be two integers`);
       continue;
     }
@@ -96,6 +112,17 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       errors.push(`world "${l.from}" already has a link on edge ${l.edge} — UNIQUE(from_world_id, edge) allows one`);
     }
     usedEdges.add(slot);
+
+    // A world with a malformed grid already produced a "grid must be two
+    // integers" error in the world loop above; here we must not dereference
+    // grid[0]/grid[1] on it (that throws instead of returning errors). Skip
+    // the geometry check but still record adjacency, so an otherwise-valid
+    // link doesn't also spuriously fail reachability.
+    if (!hasValidGrid(from) || !hasValidGrid(to)) {
+      adjacency.get(l.from).push(l.to);
+      adjacency.get(l.to).push(l.from);
+      continue;
+    }
 
     const [dx, dy] = EDGE_DELTA[l.edge];
     const wantX = from.grid[0] + dx;
