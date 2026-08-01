@@ -12,9 +12,9 @@ import { useAuth } from "../../context/AuthContext";
 
 // Root of the WHOLE layout route -- wraps the child-route Outlet and so every
 // admin panel, not just the game canvas. Its background is the page backdrop
-// showing in the gutters beside
-// any centred, max-width admin panel (all six admin roots use max-width + margin:
-// 0 auto), so this must tokenize like any other chrome surface, not stay dark.
+// showing in the gutters beside any centred, max-width admin panel (all six
+// admin roots use max-width + margin: 0 auto), so this must tokenize like any
+// other chrome surface, not stay dark.
 const StyledGameContainer = styled.div`
   position: relative;
   display: flex;
@@ -234,15 +234,15 @@ export default function GameShell() {
 
   // F-045: this used to only rerun on an activeTab change, so an authed
   // false->true cycle (sign out, sign back in — same mechanism a
-  // token_version revocation mid-session routes through, see the apiFetch
-  // comment below) tore down and remounted the whole <canvas> node without
-  // ever telling the still-alive Game instance about it: Game.canvas kept
-  // pointing at the old, detached node while the authority socket and rAF
-  // loop kept running underneath, so the screen went blank while the
-  // player kept taking live damage. Rebinding is now `authed` too, and
-  // bindGameCanvas (unlike the old inline `new Game(canvasRef.current)`,
-  // which silently discarded that argument — see its own docs) always
-  // assigns canvas/ctx/size explicitly rather than leaning on construction.
+  // token_version revocation mid-session routes through) tore down and
+  // remounted the whole <canvas> node without ever telling the still-alive
+  // Game instance about it: Game.canvas kept pointing at the old, detached
+  // node while the authority socket and rAF loop kept running underneath, so
+  // the screen went blank while the player kept taking live damage.
+  // Rebinding *was* keyed on `authed` too, and bindGameCanvas (unlike the old
+  // inline `new Game(canvasRef.current)`, which silently discarded that
+  // argument — see its own docs) always assigns canvas/ctx/size explicitly
+  // rather than leaning on construction.
   //
   // The old `authed` dependency is gone: sign-out now unmounts this whole
   // component via RequireAuth, so a sign-in always produces a fresh mount

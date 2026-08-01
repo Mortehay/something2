@@ -15,3 +15,11 @@ export function deriveAuth(token) {
     username: claims?.username ?? null,
   };
 }
+
+// Whether a /api/auth/me probe response means "this session is dead".
+// ONLY a literal 401 does. A network error or a 5xx must NOT sign the user out --
+// a flaky backend would otherwise log everyone out. Extracted from the provider
+// so this rule is testable in the node vitest env.
+export function shouldSignOutOnProbe(status) {
+  return status === 401;
+}

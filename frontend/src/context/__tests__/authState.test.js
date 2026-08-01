@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveAuth } from '../authState.js';
+import { deriveAuth, shouldSignOutOnProbe } from '../authState.js';
 
 // Mirrors what backend/src/auth/tokens.js signs: { user_id, username, role, tv }.
 // Padding is stripped, exactly as jsonwebtoken emits it.
@@ -29,5 +29,27 @@ describe('deriveAuth', () => {
   it('does not treat a role that merely contains "admin" as admin', () => {
     const t = makeToken({ user_id: 9, username: 'x', role: 'not-admin', tv: 1 });
     expect(deriveAuth(t).isAdmin).toBe(false);
+  });
+});
+
+describe('shouldSignOutOnProbe', () => {
+  it('signs out on a literal 401 (the token was actually revoked)', () => {
+    expect(shouldSignOutOnProbe(401)).toBe(true);
+  });
+
+  it('keeps the session on 200 (probe confirms the token is still good)', () => {
+    expect(shouldSignOutOnProbe(200)).toBe(false);
+  });
+
+  it('keeps the session on 403 (forbidden is not "session is dead")', () => {
+    expect(shouldSignOutOnProbe(403)).toBe(false);
+  });
+
+  it('keeps the session on a 500 (a flaky backend must not log everyone out)', () => {
+    expect(shouldSignOutOnProbe(500)).toBe(false);
+  });
+
+  it('keeps the session on 0 (network error / no response)', () => {
+    expect(shouldSignOutOnProbe(0)).toBe(false);
   });
 });

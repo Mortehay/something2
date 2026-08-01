@@ -5,7 +5,7 @@ description: Use when editing the canvas game under frontend/src/games/something
 
 # JS game dev (something2)
 
-The in-browser game is plain ES-module JS. Entry: `frontend/src/games/something2/src/js/main.js`. Mounted from React via `frontend/src/games/something2/Something2.jsx`.
+The in-browser game is plain ES-module JS. Entry: `frontend/src/games/something2/src/js/main.js`. Mounted from React via `frontend/src/games/something2/GameShell.jsx` (the layout route that owns the `<canvas>`) and `frontend/src/games/something2/GameView.jsx` (the game view UI).
 
 Structure:
 - `core/Game.js` — owns the loop (`requestAnimationFrame` → `update(dt)` + `render()`), input, state (`menu`/`playing`/`paused`), and reconciliation with the engine.

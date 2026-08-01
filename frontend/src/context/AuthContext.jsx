@@ -4,7 +4,7 @@ import { API_URL } from "../config";
 import {
   getStoredToken, clearToken, authHeaders, AUTH_EXPIRED_EVENT,
 } from "../games/something2/src/js/net/auth.js";
-import { deriveAuth } from "./authState";
+import { deriveAuth, shouldSignOutOnProbe } from "./authState";
 
 const AuthContext = createContext(null);
 
@@ -36,7 +36,7 @@ function AuthProvider({ children }) {
     (async () => {
       try {
         const res = await fetch(`${API_URL}/api/auth/me`, { headers: authHeaders() });
-        if (cancelled || res.status !== 401) return;   // network/5xx: keep the session
+        if (cancelled || !shouldSignOutOnProbe(res.status)) return;   // network/5xx: keep the session
         signOut();
         toast.error("Session expired — please sign in again");
       } catch { /* offline: leave the session alone rather than logging out */ }

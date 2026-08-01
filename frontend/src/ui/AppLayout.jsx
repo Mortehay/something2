@@ -12,10 +12,14 @@ const StyledAppLayout = styled.div`
 
 // Flush scroll container. No padding and no max-width wrapper: the game canvas
 // fills this cell edge to edge, and every admin panel already applies its own
-// padding + max-width + margin:0 auto. min-height:0 lets the grid cell actually
-// shrink -- without it the row refuses to be smaller than its content and the
-// page grows a second scrollbar. overflow:auto (not scroll) hides the bar when
-// nothing overflows.
+// padding + max-width + margin:0 auto. overflow:auto below is what actually
+// lets the grid cell shrink below its content's size: a non-`visible` overflow
+// value zeroes out the browser's automatic minimum size for the grid item. With
+// `overflow: visible` the row would refuse to be smaller than its content and
+// the page would grow a second scrollbar -- so removing overflow:auto (not
+// min-height:0) is what would reintroduce that bug. min-height:0 is kept as a
+// harmless, defensive value; it isn't load-bearing while overflow:auto is in
+// place. overflow:auto (not scroll) hides the bar when nothing overflows.
 const Main = styled.main`
     background-color: var(--color-grey-50);
     min-height: 0;
