@@ -1,6 +1,6 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
-        redis-shell admin-password admin-password-rotate
+        redis-shell admin-password admin-password-rotate seed-catalogs
 
 COMPOSE_FILE = compose/docker-compose.yml
 
@@ -86,3 +86,8 @@ admin-password:
 # Generate a fresh random password, write it to .env, then apply it.
 admin-password-rotate:
 	node backend/scripts/set-admin-password.js --rotate
+
+# Upsert the tile / biome / decoration catalogs. Idempotent and NON-destructive:
+# it never deletes, so a tile or biome added by hand in the admin UI survives.
+seed-catalogs:
+	node backend/scripts/seed-catalogs.js
