@@ -9,7 +9,7 @@ const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
-const { NEW_DECORATIONS, SIZE_FIXES } = require('../seeds/data/decorationTypes.js');
+const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
 
 async function seedCatalogs(pool) {
   let tiles = 0;
@@ -42,21 +42,16 @@ async function seedCatalogs(pool) {
     biomes += 1;
   }
 
-  // SIZE_FIXES: a corrective UPDATE for decorations (Tree/Stone/IceRock) that
-  // were seeded 0x0 by an earlier migration, mirrored from
-  // 1714440042000_decoration_types.js's `up`. Applied by name, same as the
-  // tile/biome upserts above — it does not delete or insert rows, only
-  // corrects display size on rows that already exist, so a hand-added tile
-  // or biome is never at risk. Included here (not just replayed once by the
-  // migration) because decorationTypes.js explicitly re-exports SIZE_FIXES
-  // for the seeder to read too — see that file's and the migration's header
-  // comments.
-  for (const [name, { w, h }] of Object.entries(SIZE_FIXES)) {
-    await pool.query(
-      'UPDATE entity_types SET display_width = $1, display_height = $2 WHERE name = $3',
-      [w, h, name],
-    );
-  }
+  // NOTE: decorationTypes.js also exports SIZE_FIXES (Tree/Stone/IceRock
+  // display size). Deliberately NOT consumed here. SIZE_FIXES is a ONE-TIME
+  // correction that belongs to migration 1714440042000_decoration_types.js —
+  // its own `down` reverts those columns back to 0x0, which only makes sense
+  // for a migration step, not something this idempotent seeder should
+  // replay on every run. Applying it here would silently stomp an admin's
+  // hand-resized decoration every time `make seed-catalogs` runs, which is
+  // exactly the "never cost an admin something they added by hand" rule
+  // this file exists to uphold. SIZE_FIXES stays exported for the
+  // migration's own use only.
 
   let decorations = 0;
   for (const d of NEW_DECORATIONS) {

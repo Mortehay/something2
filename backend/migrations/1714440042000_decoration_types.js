@@ -1,9 +1,13 @@
 exports.shorthands = undefined;
 
-// Data moved to backend/seeds/data/decorationTypes.js so `make seed-catalogs`
-// and this migration cannot drift apart. Re-exported because the seeder both
-// reads it. Migration behaviour is unchanged: the arrays are byte-identical
-// and migrations only ever run once.
+// NEW_DECORATIONS moved to backend/seeds/data/decorationTypes.js so
+// `make seed-catalogs` and this migration cannot drift apart; both read it.
+// SIZE_FIXES lives there too but is exported from here for this migration's
+// own use ONLY — it is a one-time correction (see `down` below, which
+// reverts it back to 0x0), not an ongoing invariant, so the seeder must NOT
+// replay it: doing so would silently stomp an admin's hand-resized
+// decoration on every seed run. Migration behaviour is unchanged: the
+// arrays are byte-identical and migrations only ever run once.
 const { NEW_DECORATIONS, SIZE_FIXES } = require('../seeds/data/decorationTypes.js');
 
 exports.up = (pgm) => {
