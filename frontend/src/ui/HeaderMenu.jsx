@@ -41,7 +41,7 @@ const Menu = styled.ul`
     position: absolute;
     top: calc(100% + 0.4rem);
     right: 0;
-    z-index: 50;
+    z-index: 2100; /* Above admin modals (2000) and GameShell help overlay (300/400) */
     min-width: 16rem;
     padding: 0.4rem;
     background-color: var(--color-grey-0);
