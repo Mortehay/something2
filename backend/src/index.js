@@ -5,10 +5,10 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateChunkDecorations, generateWorldPreview, placeMapCreatures, isBoundedWorld, villageGatePosts, villageMerchantPost, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateChunkDecorations, generateWorldPreview, placeMapCreatures, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
-const { fetchVillages } = require('./services/villages');
-const { seedBaseCatalog, seedItemAcrossVillages } = require('./services/merchantStock');
+const { fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS } = require('./services/villages');
+const { seedItemAcrossVillages } = require('./services/merchantStock');
 const { loadDecorationDefs } = require('./services/decorationDefs');
 const { loadBiomes } = require('./services/biomes');
 const { composeBiomePrompt } = require('./services/biomePrompt');
@@ -1780,31 +1780,12 @@ async function invalidateWorld(worldId) {
   return evictOrWarn(worldId);
 }
 
-// Two guards per village, standing on the interior tiles flanking the gate.
-// home_x/home_y is the post: the authority leashes a guard to it.
-// `db` is any queryable (the module-level pool, or a connected client mid-
-// transaction — village create/delete and the creature re-roll route all
-// pass their transaction's client so this participates in it (F-007 /
-// SOMET-187); regenerate isn't transactional and still passes the pool).
-const GUARD_TYPE = 'Village Guard';
-async function insertVillageGuards(db, worldId, villages) {
-  for (const v of villages) {
-    for (const post of villageGatePosts(v)) {
-      await db.query(
-        `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, home_x, home_y)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [worldId, GUARD_TYPE, post.x, post.y, 300, 'S', post.x, post.y],
-      );
-    }
-  }
-}
-
 function validateVillageBody(body, worldRow, existing) {
   const { min_row, min_col, width, height, gate_edge, spawn_x, spawn_y } = body || {};
   const ints = [min_row, min_col, width, height].every((n) => Number.isInteger(n));
   if (!ints) return 'min_row, min_col, width, height must be integers';
-  if (width < 3 || width > 8) return 'width must be between 3 and 8 tiles';
-  if (height < 3 || height > 6) return 'height must be between 3 and 6 tiles';
+  if (width < VILLAGE_LIMITS.minW || width > VILLAGE_LIMITS.maxW) return 'width must be between 3 and 8 tiles';
+  if (height < VILLAGE_LIMITS.minH || height > VILLAGE_LIMITS.maxH) return 'height must be between 3 and 6 tiles';
   if (!['N', 'E', 'S', 'W'].includes(gate_edge)) return 'gate_edge must be one of N,E,S,W';
   if (!Number.isFinite(spawn_x) || !Number.isFinite(spawn_y)) return 'spawn_x and spawn_y are required';
   if (min_row < 0 || min_col < 0) return 'min_row and min_col must be >= 0';
@@ -1854,10 +1835,6 @@ app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
     )).rows;
     const err = validateVillageBody(req.body, wr.rows[0], existing);
     if (err) return res.status(400).json({ error: err });
-    const { min_row, min_col, width, height, gate_edge, spawn_x, spawn_y } = req.body;
-    const mpost = villageMerchantPost({
-      minRow: min_row, minCol: min_col, width, height, gateEdge: gate_edge,
-    });
 
     // F-007 / SOMET-187: village row, guards and base catalog are three
     // dependent writes. Without a transaction, a failure partway through
@@ -1869,17 +1846,7 @@ app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
     await client.query('BEGIN');
     let row;
     try {
-      const ins = await client.query(
-        `INSERT INTO villages (world_id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-        [id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, mpost.x, mpost.y],
-      );
-      row = ins.rows[0];
-      await insertVillageGuards(client, id, [{
-        minRow: row.min_row, minCol: row.min_col,
-        width: row.width, height: row.height, gateEdge: row.gate_edge,
-      }]);
-      await seedBaseCatalog(client, id, row.id);
+      row = await createVillage(client, id, req.body);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
