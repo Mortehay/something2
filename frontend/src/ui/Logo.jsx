@@ -1,21 +1,21 @@
 import styled from "styled-components";
-import { useDarkMode } from "../context/DarkModeContext";
 
 const StyledLogo = styled.div`
   text-align: center;
+  padding: 0.8rem 0;
 `;
 
-const Img = styled.img`
-  height: 9.6rem;
-  width: auto;
+const Wordmark = styled.span`
+  font-size: 2.4rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-brand-600);
 `;
 
 function Logo() {
-    const { isDarkMode } = useDarkMode();
-    const src = isDarkMode ? "/logo-dark.png" : "/logo-light.png";
   return (
     <StyledLogo>
-      <Img src={src} alt="Logo" />
+      <Wordmark>Something2</Wordmark>
     </StyledLogo>
   );
 }
