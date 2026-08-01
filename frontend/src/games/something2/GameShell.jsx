@@ -1,0 +1,408 @@
+import { useEffect, useRef, useState } from 'react';
+import { Outlet, useMatch } from 'react-router-dom';
+import styled from 'styled-components';
+import toast from 'react-hot-toast';
+import { Game } from "./src/js/main.js";
+import { useMapTiles, useMapConfig, useVfxEffects } from "./useMaps.js";
+import { useWorlds } from "./useWorlds";
+import { autoJoinTarget } from "./autoJoin.js";
+import { bindGameCanvas } from "./gameCanvasBinding.js";
+import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
+import { useAuth } from "../../context/AuthContext";
+
+// Root of the WHOLE layout route -- wraps the child-route Outlet and so every
+// admin panel, not just the game canvas. Its background is the page backdrop
+// showing in the gutters beside any centred, max-width admin panel (all six
+// admin roots use max-width + margin: 0 auto), so this must tokenize like any
+// other chrome surface, not stay dark.
+const StyledGameContainer = styled.div`
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: var(--s2-bg);
+  overflow: hidden;
+`;
+
+// Small circular "?" button pinned to the top-right corner, above everything.
+const HelpButton = styled.button`
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 300;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--s2-accent);
+  background: var(--s2-panel-veil);
+  color: var(--s2-accent);
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: all 0.15s;
+  &:hover { background: var(--s2-accent); color: var(--s2-on-accent); }
+`;
+
+// Full-screen dim backdrop; clicking it closes the panel.
+const HelpBackdrop = styled.div`
+  position: absolute;
+  inset: 0;
+  z-index: 400;
+  background: var(--s2-scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`;
+
+const HelpCard = styled.div`
+  background: var(--s2-surface);
+  border: 1px solid var(--s2-border);
+  border-radius: 10px;
+  padding: 24px 28px;
+  width: min(560px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  color: var(--s2-text-secondary);
+  box-shadow: 0 10px 40px var(--s2-scrim-soft);
+
+  h2 { margin: 0 0 4px; color: var(--s2-text-strong); font-size: 1.5rem; }
+  h3 { margin: 20px 0 8px; color: var(--s2-accent); font-size: 1.05rem; }
+  p.sub { margin: 0 0 8px; color: var(--s2-text-dim); font-size: 0.9rem; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 5px 0; vertical-align: top; font-size: 0.95rem; }
+  td.k { width: 130px; white-space: nowrap; }
+  kbd {
+    display: inline-block;
+    min-width: 18px;
+    padding: 2px 7px;
+    margin: 0 2px 2px 0;
+    background: var(--s2-bg);
+    border: 1px solid var(--s2-border-strong);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    color: var(--s2-text);
+    font-size: 0.85rem;
+    font-family: monospace;
+    text-align: center;
+  }
+`;
+
+const HelpCloseButton = styled.button`
+  float: right;
+  background: transparent;
+  border: none;
+  color: var(--s2-text-dim);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  &:hover { color: var(--s2-text-strong); }
+`;
+
+// One place to describe the controls, so the panel can't drift from reality.
+// Keyboard/mouse bindings mirror core/Game.js and entities/Player.js.
+const HELP_SECTIONS = [
+  {
+    title: 'Movement & combat',
+    rows: [
+      { k: [['W'], ['A'], ['S'], ['D']], d: 'Move (arrow keys also work)' },
+      { k: [['Left-click']], d: 'Attack — fires toward the cursor with your equipped weapon' },
+    ],
+  },
+  {
+    title: 'Items & loot',
+    rows: [
+      { k: [['G']], d: 'Pick up the nearest ground item you are standing near' },
+      { k: [['Auto-loot']], d: 'Toggle in the HUD — walk over items to collect them without pressing G' },
+      { k: [['I']], d: 'Open the inventory / paper-doll: click an item then a slot to equip, click an equipped slot to unequip, and drop from the panel' },
+    ],
+  },
+  {
+    title: 'Merchants & map',
+    rows: [
+      { k: [['E']], d: 'Trade with a village merchant — stand next to the merchant and press E to open the market' },
+      { k: [['M']], d: 'Toggle the minimap (top-right corner); click the minimap to expand it' },
+    ],
+  },
+  {
+    title: 'Session',
+    rows: [
+      { k: [['Esc']], d: 'Pause / resume' },
+      { k: [['Sign out']], d: 'Bottom of the left sidebar — clears your session and returns to the login screen' },
+    ],
+  },
+  {
+    title: 'Worlds & admin (left sidebar)',
+    rows: [
+      { k: [['Game View']], d: 'Select a world in the right-hand list, then "Enter World (chunked)" to play it' },
+      { k: [['Admin']], d: 'Tile Types / Entities / Items / Maps / Biomes / World Map editors — visible to admin accounts only' },
+    ],
+  },
+];
+
+const ContentArea = styled.div`
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+`;
+
+export default function GameShell() {
+  const canvasRef = useRef(null);
+  const gameRef = useRef(null);
+  const contentRef = useRef(null); // fullscreen target (wraps the game canvas)
+  // Always holds the LATEST enterWorld. The doorway-transition callback is
+  // registered once (in the [isGameRoute] effect) and would otherwise capture a
+  // stale closure -- one built before the async map-tiles/worlds/vfx queries
+  // resolved -- making a mid-session transition re-init the world with empty
+  // tile defs (terrain then renders as the invisible fallback colour).
+  const handleEnterRef = useRef(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [selectedWorldId, setSelectedWorldId] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const { isAdmin } = useAuth();
+
+  // Replaces the old `activeTab === 'game'`. useMatch is an exact match, so this
+  // is false on /game/biomes and friends -- which is what hides the canvas
+  // without unmounting it.
+  const isGameRoute = !!useMatch('/game');
+
+  const { mapTiles } = useMapTiles();
+  const { vfxEffects } = useVfxEffects();
+  // Entity types keyed by name (same shape the legacy map path uses) — the
+  // chunked renderer needs them to draw creatures with their approved sprite.
+  const { mapConfig } = useMapConfig();
+  // worldsError is toasted inside useWorlds() itself (F-023), so every caller
+  // gets the signal without opting in. GameView calls useWorlds() too; TanStack
+  // dedupes them by query key, so this is one request, not two.
+  const { worlds } = useWorlds();
+
+  const resume = () => {
+    if (gameRef.current) gameRef.current.resume();
+  };
+
+  // --- Fullscreen (game canvas) ---
+  const enterGameFullscreen = () => {
+    const el = contentRef.current;
+    // requestFullscreen must run within the user gesture that started the game.
+    // The auto-join path has no gesture, so the promise rejects harmlessly and
+    // the game just plays windowed until the player clicks the toggle button.
+    if (el?.requestFullscreen) el.requestFullscreen().catch(() => {});
+  };
+
+  const exitGameFullscreen = () => {
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+  };
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) exitGameFullscreen();
+    else enterGameFullscreen();
+  };
+
+  // Keep the toggle button in sync with the real fullscreen state — including the
+  // user pressing Esc, which exits fullscreen without going through our button.
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // Enter fullscreen when the game starts. Driven off the isPlaying transition so
+  // the explicit "Enter World" click and the auto-join share one path; the click's
+  // transient activation is still valid through the quick world join.
+  useEffect(() => {
+    if (isPlaying) enterGameFullscreen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying]);
+
+  const exitToMenu = () => {
+    exitGameFullscreen();
+    setIsPlaying(false);
+    setIsPaused(false);
+    if (gameRef.current) {
+      gameRef.current.setState('menu');
+      gameRef.current.setEngineClient?.(null, null);
+    }
+  };
+
+  // F-045: this used to only rerun on an activeTab change, so an authed
+  // false->true cycle (sign out, sign back in — same mechanism a
+  // token_version revocation mid-session routes through) tore down and
+  // remounted the whole <canvas> node without ever telling the still-alive
+  // Game instance about it: Game.canvas kept pointing at the old, detached
+  // node while the authority socket and rAF loop kept running underneath, so
+  // the screen went blank while the player kept taking live damage.
+  // Rebinding *was* keyed on `authed` too, and bindGameCanvas (unlike the old
+  // inline `new Game(canvasRef.current)`, which silently discarded that
+  // argument — see its own docs) always assigns canvas/ctx/size explicitly
+  // rather than leaning on construction.
+  //
+  // The old `authed` dependency is gone: sign-out now unmounts this whole
+  // component via RequireAuth, so a sign-in always produces a fresh mount
+  // rather than an in-place canvas swap. bindGameCanvas stays because
+  // re-running it against the same node is idempotent and it is the tested path.
+  useEffect(() => {
+    if (isGameRoute && canvasRef.current) {
+      gameRef.current = bindGameCanvas(gameRef.current, canvasRef.current, () => new Game());
+
+      gameRef.current.setOnStateChange((newState) => {
+        setIsPaused(newState === 'paused');
+        if (newState === 'menu') {
+          setIsPlaying(false);
+          setIsPaused(false);
+        }
+      });
+
+      // Server-driven map transition (e.g. walking through a portal tile):
+      // the authority sends {type:'transition', toWorldId, arriveX, arriveY}
+      // and Game surfaces it here. Re-running enterWorld tears down the old
+      // authority connection and reconnects to the destination world; the
+      // server spawns the rejoining player at the pending arrival. Call through
+      // handleEnterRef (updated every render) rather than closing over
+      // enterWorld directly -- see the handleEnterRef declaration above.
+      gameRef.current.setOnTransition((msg) => {
+        if (msg?.toWorldId) handleEnterRef.current?.(msg.toWorldId);
+      });
+    }
+    // NOTE: no engine teardown on cleanup. The old cleanup disconnected
+    // `engineRef`, which was never assigned -- dead code. Real teardown is the
+    // mount-once destroy effect below.
+  }, [isGameRoute]);
+
+  // Mount-once effect whose cleanup only fires on true component unmount
+  // (empty dep array), unlike the [isGameRoute] effect above, which reruns on
+  // every navigation between /game and its children. Tears down the chunked Game instance
+  // (authority WebSocket + rAF loop) so leaving this component doesn't
+  // leave a ghost player connected to the server world sim.
+  useEffect(() => {
+    return () => {
+      gameRef.current?.destroy();
+    };
+  }, []);
+
+  const enterWorld = async (worldId = selectedWorldId) => {
+    if (!worldId || !gameRef.current) return;
+
+    try {
+      const world = worlds?.find(w => w.id === worldId);
+      const chunkSize = world?.chunk_size || 64;
+      const spawn = (chunkSize * MAP_TILE_SIZE) / 2;
+
+      await gameRef.current.initChunked({
+        worldId,
+        chunkSize,
+        tileTypes: mapTiles,
+        vfxEffects: vfxEffects || null,
+        entityTypes: mapConfig?.entityTypes || null,
+        spawnX: spawn,
+        spawnY: spawn,
+      });
+      setSelectedWorldId(worldId);
+      setIsPlaying(true);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+  // Keep the transition callback pointed at the current closure (fresh
+  // mapTiles/worlds/vfxEffects/mapConfig) — see handleEnterRef declaration above.
+  handleEnterRef.current = enterWorld;
+
+  // MISMATCH fix: a logged-in player should spawn straight into the canonical
+  // entry world, not a world-picker. Target selection and the readiness rule
+  // live in autoJoin.js so they can be unit-tested. Fires once the Game
+  // instance, the world list AND the map assets are ready — see
+  // worldAssetsReady() for why joining early is not self-healing. Admins keep
+  // the picker (they manage worlds). If the join throws, enterWorld toasts and
+  // isPlaying stays false, so the picker remains as a safe fallback.
+  // autoJoinedRef guards against retries.
+  const autoJoinedRef = useRef(false);
+  useEffect(() => {
+    const targetId = autoJoinTarget({
+      isAdmin, isPlaying, alreadyJoined: autoJoinedRef.current,
+      hasGame: !!gameRef.current, worlds, mapTiles, mapConfig,
+    });
+    if (targetId == null) return;
+    autoJoinedRef.current = true;
+    enterWorld(targetId);
+    // enterWorld is stable enough for this one-shot; deps kept
+    // minimal so it fires once the inputs become ready.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worlds, mapTiles, mapConfig, isAdmin, isPlaying, isGameRoute]);
+
+  return (
+    <StyledGameContainer>
+      <HelpButton
+        title="Help — controls & operations"
+        aria-label="Help"
+        onClick={() => setHelpOpen(true)}
+      >
+        ?
+      </HelpButton>
+
+      <ContentArea ref={contentRef}>
+        {/* Rendered INSIDE contentRef (the fullscreen element) so the panel is
+            part of the fullscreen top layer. Rendered at the top level it was
+            painted behind the fullscreen game canvas — invisible while playing. */}
+        {helpOpen && (
+          <HelpBackdrop onClick={() => setHelpOpen(false)}>
+            <HelpCard onClick={(e) => e.stopPropagation()}>
+              <HelpCloseButton aria-label="Close help" onClick={() => setHelpOpen(false)}>×</HelpCloseButton>
+              <h2>Help</h2>
+              <p className="sub">Controls and main operations.</p>
+              {HELP_SECTIONS.map((section) => (
+                <div key={section.title}>
+                  <h3>{section.title}</h3>
+                  <table>
+                    <tbody>
+                      {section.rows.map((row, i) => (
+                        <tr key={i}>
+                          <td className="k">
+                            {row.k.map((keyGroup, gi) => (
+                              <kbd key={gi}>{keyGroup[0]}</kbd>
+                            ))}
+                          </td>
+                          <td>{row.d}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </HelpCard>
+          </HelpBackdrop>
+        )}
+
+        <Outlet context={{
+          gameRef, isPlaying, isPaused, isFullscreen,
+          selectedWorldId, setSelectedWorldId,
+          enterWorld, resume, exitToMenu, toggleFullscreen,
+          openHelp: () => setHelpOpen(true),
+        }} />
+
+        {/* Kept mounted across route changes, NOT nested in the game route's
+            element. RenderSystem captures this element and its 2d context when
+            the world is entered, so unmounting it on a navigation left the
+            running render loop drawing into a detached canvas while React
+            mounted a fresh (blank) one — the game view came back empty.
+            Hiding it is enough; the rAF loop and authority socket keep running,
+            so returning to /game resumes the live world instead of reloading. */}
+        <canvas
+          ref={canvasRef}
+          style={{
+            width: '100%',
+            height: '100%',
+            display: isGameRoute && isPlaying ? 'block' : 'none',
+            background: '#0f0f1a', // s2-theme-exempt(#0f0f1a): game canvas surface stays dark in both modes
+          }}
+        />
+      </ContentArea>
+    </StyledGameContainer>
+  );
+}

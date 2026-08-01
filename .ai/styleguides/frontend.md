@@ -14,9 +14,9 @@ Reusable UI primitives in [frontend/src/ui/](../../frontend/src/ui/) are styled-
 
 For new UI primitives, use tokens — don't hardcode hex colors, radii, or shadows. If a token is missing, add one to `GlobalStyles.js` rather than inline-styling.
 
-The **game surfaces** — the `<canvas>` element and its idle placeholder in [Something2.jsx](../../frontend/src/games/something2/Something2.jsx), [Minimap.jsx](../../frontend/src/games/something2/Minimap.jsx), and the cytoscape stylesheet in [MapGraphAdmin.jsx](../../frontend/src/games/something2/MapGraphAdmin.jsx) — intentionally stay dark in both modes and keep hardcoded hex (`#0f0f1a`, `#4a9eff`, ...). This is deliberate visual separation from the admin/dashboard UI; don't "fix" it by replacing with tokens. Cytoscape in particular renders to a canvas and **cannot** read CSS custom properties — a `var()` there paints nothing.
+The **game surfaces** — the `<canvas>` element in [GameShell.jsx](../../frontend/src/games/something2/GameShell.jsx), its idle placeholder in [GameView.jsx](../../frontend/src/games/something2/GameView.jsx), [Minimap.jsx](../../frontend/src/games/something2/Minimap.jsx), and the cytoscape stylesheet in [MapGraphAdmin.jsx](../../frontend/src/games/something2/MapGraphAdmin.jsx) — intentionally stay dark in both modes and keep hardcoded hex (`#0f0f1a`, `#4a9eff`, ...). This is deliberate visual separation from the admin/dashboard UI; don't "fix" it by replacing with tokens. Cytoscape in particular renders to a canvas and **cannot** read CSS custom properties — a `var()` there paints nothing.
 
-The **admin tabs** inside the game route (`TileTypesAdmin`, `EntityTypesAdmin`, `ItemTypesAdmin`, `BiomesAdmin`, `MapsAdmin`, `MapGraphAdmin`'s chrome, and `Something2.jsx`'s shell and tab strip) are admin UI and use `--s2-*` tokens, which swap per mode like every other token. [themeTokens.test.js](../../frontend/src/games/something2/__tests__/themeTokens.test.js) enforces this: any hex, `rgba()` or bare colour keyword added to those files fails the suite unless marked `s2-theme-exempt`. Exemptions come in two forms — a block `/* s2-theme-exempt:start … :end */`, or a single line that **names** the value, `// s2-theme-exempt(#00ff00): reason`. A bare sentinel with no parentheses exempts nothing.
+The **admin tabs** inside the game route (`TileTypesAdmin`, `EntityTypesAdmin`, `ItemTypesAdmin`, `BiomesAdmin`, `MapsAdmin`, `MapGraphAdmin`'s chrome, and `GameShell.jsx`'s shell) are admin UI and use `--s2-*` tokens, which swap per mode like every other token. [themeTokens.test.js](../../frontend/src/games/something2/__tests__/themeTokens.test.js) enforces this: any hex, `rgba()` or bare colour keyword added to those files fails the suite unless marked `s2-theme-exempt`. Exemptions come in two forms — a block `/* s2-theme-exempt:start … :end */`, or a single line that **names** the value, `// s2-theme-exempt(#00ff00): reason`. A bare sentinel with no parentheses exempts nothing.
 
 Prefer single-line, property-scoped exemptions over block sentinels. A block wrapping a JSX subtree or a broadly-scoped styled-component hides every literal inside it from the gate permanently — that mistake shipped once here, exempting the whole page backdrop instead of the canvas.
 
@@ -24,7 +24,7 @@ Tile and entity `color` form defaults are **data**, not chrome, and are exempt. 
 
 ### Rem base
 
-[frontend/src/styles/GlobalStyles.js:113-115](../../frontend/src/styles/GlobalStyles.js#L113-L115) sets `html { font-size: 62.5% }`, so **`1rem = 10px`**. That's why padding values like `padding: 4rem 4.8rem 6.4rem` (e.g. [frontend/src/ui/AppLayout.jsx:14-15](../../frontend/src/ui/AppLayout.jsx#L14-L15)) read as 40px / 48px / 64px, not 64px / 76.8px / 102.4px.
+[frontend/src/styles/GlobalStyles.js:113-115](../../frontend/src/styles/GlobalStyles.js#L113-L115) sets `html { font-size: 62.5% }`, so **`1rem = 10px`**. That's why rem values like `grid-template-columns: 26rem 1fr` (e.g. [frontend/src/ui/AppLayout.jsx:9](../../frontend/src/ui/AppLayout.jsx#L9)) read as a 260px sidebar column, not 416px.
 
 ### Light/dark mode
 
@@ -41,7 +41,7 @@ Don't switch on string props inside a single template literal (i.e. `${props => 
 
 ### Transient props
 
-For props that drive styling but **must not reach the DOM**, use the styled-components 6 transient-prop syntax: prefix with `$`. See [frontend/src/games/something2/Something2.jsx:28-31](../../frontend/src/games/something2/Something2.jsx#L28-L31) — `$active`, `$adminType`. Without the `$`, React 19 will warn about unknown DOM attributes.
+For props that drive styling but **must not reach the DOM**, use the styled-components 6 transient-prop syntax: prefix with `$`. See [frontend/src/ui/MainNav.jsx:58](../../frontend/src/ui/MainNav.jsx#L58) — `$accent`. Without the `$`, React 19 will warn about unknown DOM attributes.
 
 ### `defaultProps` is legacy
 

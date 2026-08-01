@@ -17,7 +17,7 @@
 2. **JS client-side renderer — exists.** Substantial in-browser game under [frontend/src/games/something2/src/js/](../frontend/src/games/something2/src/js/) — `Game.js`, `Map.js`, `Camera.js`, `RenderSystem.js`, `Entity.js`, `Player.js`, etc. This is the rendering / input loop the player sees. It does **not** own authoritative state — once the Go engine is in place, the client should read from it.
 3. **Express REST API — exists.** [backend/src/index.js](../backend/src/index.js) provides content/admin endpoints: maps, tile types, entity types, WFC map generation, entity spawn generation. Not realtime — sits next to the realtime engine, not in front of it.
 
-Frontend pages mount the JS game from `frontend/src/games/something2/Something2.jsx` and admin UIs from `EntityTypesAdmin.jsx` / `TileTypesAdmin.jsx`.
+`App.jsx` mounts `GameShell` at the `/game` route, which owns the `<canvas>` and renders `GameView.jsx` and the admin UIs (`EntityTypesAdmin.jsx` / `TileTypesAdmin.jsx` / ...) as child routes.
 
 ## Goals of the Go engine
 
