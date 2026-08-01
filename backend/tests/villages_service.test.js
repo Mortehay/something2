@@ -31,7 +31,15 @@ test('createVillage inserts the row, then guards, then merchant stock', async ()
   });
 
   assert.equal(row.id, 'v1');
-  assert.match(seen[0], /INSERT INTO villages/i);
-  assert.ok(seen.some((s) => /INSERT INTO world_creatures/i.test(s)),
-    'no gate guards were inserted');
+  // Assert the SEQUENCE, not merely presence: a seeded village whose steps
+  // run out of order (or drop a step) still passes an "each ran somewhere"
+  // check but ships broken -- an undefended gate or an empty shop.
+  const kinds = seen.map((s) => {
+    if (/INSERT INTO villages/i.test(s)) return 'row';
+    if (/INSERT INTO world_creatures/i.test(s)) return 'guards';
+    if (/INSERT INTO merchant_stock/i.test(s)) return 'stock';
+    return 'other';
+  });
+  assert.deepEqual(kinds, ['row', 'guards', 'guards', 'stock'],
+    'createVillage must insert the row, then both gate guards, then merchant stock, in that order');
 });
