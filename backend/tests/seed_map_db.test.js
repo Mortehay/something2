@@ -28,16 +28,32 @@ async function openPool() {
 // step (index.js:1542's rule: setting one clears every other) would otherwise
 // silently steal is_entry from the developer's real map and never give it
 // back, since cleanup() below only deletes the zzTest rows.
+//
+// Grid is [5, -3] / [6, -3] rather than [0, 0] / [1, 0] deliberately: at the
+// origin, Number(null) === 0 too, so a graph_x/graph_y column that was never
+// written at all (NULL) would silently satisfy an `=== 0` assertion. Off the
+// origin, a NULL column fails loudly (Number(null) !== 1100 or -660) instead
+// of coincidentally matching.
+//
+// zzTestBeta also declares a village: this fixture is torn down by cleanup()
+// on every run (villages/world_creatures cascade from worlds via FK), so the
+// village-creation path -- villages row, gate guards, merchant stock -- gets
+// re-verified from scratch every run. The hub-vale checks in the "shipped
+// spec" test below can't do that: that test never tears down what it seeds,
+// so past the first-ever run against a given database, hub-vale's village
+// already exists and its checks are only reading prior runs' residue.
 const spec = () => ({
   name: 'zz-test-fixture',
   topology: 'spine',
   worlds: [
-    { key: 'a', name: 'zzTestAlpha', grid: [0, 0], seed: 991, width: 64, height: 64,
+    { key: 'a', name: 'zzTestAlpha', grid: [5, -3], seed: 991, width: 64, height: 64,
       chunk_size: 64, biomes: [], biome_cell: 32, creature_count: 0,
       allowed_creature_types: [], is_entry: true, entry_spawn: { x: 32, y: 32 } },
-    { key: 'b', name: 'zzTestBeta', grid: [1, 0], seed: 992, width: 64, height: 64,
+    { key: 'b', name: 'zzTestBeta', grid: [6, -3], seed: 992, width: 64, height: 64,
       chunk_size: 64, biomes: [], biome_cell: 32, creature_count: 2,
-      allowed_creature_types: [], is_entry: false },
+      allowed_creature_types: [], is_entry: false,
+      village: { min_row: 10, min_col: 10, width: 4, height: 3, gate_edge: 'S',
+                 spawn_x: 1150, spawn_y: 1150 } },
   ],
   links: [{ from: 'a', edge: 'E', to: 'b' }],
 });
@@ -79,8 +95,16 @@ test('applying a spec twice produces identical rows', async (t) => {
     const s = spec();
     await withEntryPreserved(pool, async () => {
       const result = await applyMapSpec(pool, s);
-      assert.deepEqual(result, { worlds: 2, links: 1, villages: 0 },
+      assert.deepEqual(result, { worlds: 2, links: 1, villages: 1 },
         'applyMapSpec must report exactly what it wrote, not just resolve');
+
+      // Correctness rule 3: is_entry must actually be set on the spec's
+      // declared entry world, globally -- not merely "not thrown". An
+      // applier that dropped the is_entry step entirely would still pass
+      // every other assertion in this test (see FINDING 2 mutation below).
+      const entryRow = await pool.query('SELECT name FROM worlds WHERE is_entry = true');
+      assert.deepEqual(entryRow.rows.map((r) => r.name), ['zzTestAlpha'],
+        'applyMapSpec must set is_entry on the spec\'s declared entry world, and only that world');
 
       const q = `SELECT name, seed, width, height, graph_x, graph_y FROM worlds
                  WHERE name LIKE 'zzTest%' ORDER BY name`;
@@ -91,8 +115,24 @@ test('applying a spec twice produces identical rows', async (t) => {
            JOIN worlds wt ON wt.id = ml.to_world_id
           WHERE wf.name LIKE 'zzTest%' ORDER BY wf.name, ml.edge`);
 
+      // Correctness rule "village wiring": zzTestBeta's village, guards, and
+      // (transitively, via createVillage) merchant stock must exist -- and
+      // because this whole fixture is deleted by cleanup() every run, this
+      // is a from-scratch check every time, not residue from a prior run.
+      const villageRow = await pool.query(
+        `SELECT v.id FROM villages v JOIN worlds w ON w.id = v.world_id WHERE w.name = 'zzTestBeta'`);
+      assert.equal(villageRow.rowCount, 1,
+        'applyMapSpec must have called createVillage for zzTestBeta, not just counted it');
+      const guardRow = await pool.query(
+        `SELECT count(*)::int AS n FROM world_creatures wc
+           JOIN worlds w ON w.id = wc.world_id
+          WHERE w.name = 'zzTestBeta' AND wc.type = 'Village Guard'`);
+      assert.equal(guardRow.rows[0].n, 2,
+        'createVillage should have placed two gate guards for zzTestBeta');
+
       const second = await applyMapSpec(pool, s);
-      assert.deepEqual(second, result, 'the second apply reported a different write than the first');
+      assert.deepEqual(second, { ...result, villages: 0 },
+        'the second apply must not report re-creating the village (idempotent), but worlds/links still match');
       const secondRows = await pool.query(q);
       const secondLinks = await pool.query(
         `SELECT ml.edge, wf.name AS from_name, wt.name AS to_name FROM map_links ml
@@ -115,15 +155,60 @@ test('applying a spec twice produces identical rows', async (t) => {
       );
 
       // graph_x/graph_y must be derived from grid * GRID_SPACING with NO sign
-      // flip: alpha sits at [0,0] (canvas origin) and beta at [1,0], one cell
-      // east. See tests/seed_map.test.js for the North/South sign case this
-      // fixture's east-west links can't exercise.
+      // flip: alpha sits at [5,-3] and beta at [6,-3], one cell east. Off the
+      // canvas origin so a NULL column (Number(null) === 0) can't coincide
+      // with the expected value at [0,0]. See tests/seed_map.test.js for the
+      // North/South sign case this fixture's east-west link can't exercise.
       const byName = Object.fromEntries(first.rows.map((r) => [r.name, r]));
-      assert.equal(Number(byName.zzTestAlpha.graph_x), 0);
-      assert.equal(Number(byName.zzTestAlpha.graph_y), 0);
-      assert.equal(Number(byName.zzTestBeta.graph_x), GRID_SPACING);
-      assert.equal(Number(byName.zzTestBeta.graph_y), 0);
+      assert.equal(typeof byName.zzTestAlpha.graph_x, 'number', 'graph_x must not be NULL');
+      assert.equal(typeof byName.zzTestAlpha.graph_y, 'number', 'graph_y must not be NULL');
+      assert.equal(Number(byName.zzTestAlpha.graph_x), 5 * GRID_SPACING);
+      assert.equal(Number(byName.zzTestAlpha.graph_y), -3 * GRID_SPACING);
+      assert.equal(Number(byName.zzTestBeta.graph_x), 6 * GRID_SPACING);
+      assert.equal(Number(byName.zzTestBeta.graph_y), -3 * GRID_SPACING);
     });
+  } finally { await cleanup(pool); await pool.end(); }
+});
+
+test('a spec that fails a DB constraint mid-apply rolls back completely', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — rollback is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await cleanup(pool);
+    // This spec PASSES validateMapSpec -- the validator never bounds-checks
+    // chunk_size -- but zzTestBeta's chunk_size overflows the `integer`
+    // (int4) column Postgres actually declared it as, so the INSERT for the
+    // SECOND world throws. That's the point: the "fails validation" test
+    // above throws inside applyMapSpec BEFORE pool.connect() is ever called,
+    // so the transaction/catch/ROLLBACK branch never executes there. This is
+    // the only test that exercises it. Confirmed manually first (safe, rolled
+    // back on purpose): `BEGIN; INSERT ... chunk_size=999999999999; ROLLBACK;`
+    // against the compose Postgres produced "ERROR: integer out of range".
+    const bad = {
+      name: 'zz-test-fixture-rollback',
+      topology: 'spine',
+      worlds: [
+        { key: 'a', name: 'zzTestAlpha', grid: [5, -3], seed: 991, width: 64, height: 64,
+          chunk_size: 64, biomes: [], biome_cell: 32, creature_count: 0,
+          allowed_creature_types: [], is_entry: true, entry_spawn: { x: 32, y: 32 } },
+        { key: 'b', name: 'zzTestBeta', grid: [6, -3], seed: 992, width: 64, height: 64,
+          chunk_size: 999999999999, biomes: [], biome_cell: 32, creature_count: 0,
+          allowed_creature_types: [], is_entry: false },
+      ],
+      links: [{ from: 'a', edge: 'E', to: 'b' }],
+    };
+    await assert.rejects(() => applyMapSpec(pool, bad), /range|integer/i);
+    // zzTestAlpha was inserted (and committed, if there were no transaction)
+    // BEFORE zzTestBeta's INSERT threw. If the whole apply isn't one
+    // transaction, zzTestAlpha survives here even though the spec as a whole
+    // failed -- exactly the "half-built map" correctness rule 2 forbids.
+    const r = await pool.query("SELECT name FROM worlds WHERE name LIKE 'zzTest%'");
+    assert.deepEqual(r.rows, [], 'a DB-constraint failure on a later world left an earlier world committed');
   } finally { await cleanup(pool); await pool.end(); }
 });
 
@@ -174,6 +259,12 @@ test('every shipped spec applies cleanly', async (t) => {
       const first = await applyMapSpec(pool, s);          // must not throw
       const second = await applyMapSpec(pool, s);          // idempotent
       results[s.name] = { spec: s, first, second };
+      // NOT tautological: applyMapSpec (scripts/seed-map.js) counts
+      // worlds/links from real loop iterations completed, not by echoing
+      // spec.worlds.length/spec.links.length back unconditionally. A
+      // regression that silently skipped an element inside either loop
+      // (stray `continue`, an off-by-one slice) would make these diverge
+      // from the spec's own length instead of trivially matching it.
       assert.equal(first.worlds, s.worlds.length, `${s.name}: reported world count doesn't match the spec`);
       assert.equal(first.links, s.links.length, `${s.name}: reported link count doesn't match the spec`);
       assert.deepEqual(second, { ...first, villages: 0 },

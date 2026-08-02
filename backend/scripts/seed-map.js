@@ -47,6 +47,16 @@ async function applyMapSpec(pool, spec) {
   try {
     await client.query('BEGIN');
 
+    // Counted per loop iteration actually completed, not read back from
+    // spec.worlds.length/spec.links.length -- a return value that only ever
+    // echoes the input's own length would still read as "correct" even if a
+    // future edit silently skipped an element inside either loop (e.g. a
+    // stray `continue`/`slice`), because the length of the input array never
+    // changes. Counting real iterations makes the return value witness what
+    // was actually written, the same way `villages` below already does.
+    let worldsWritten = 0;
+    let linksWritten = 0;
+
     for (const w of spec.worlds) {
       const pos = graphPosition(w.grid);
       const r = await client.query(
@@ -70,12 +80,14 @@ async function applyMapSpec(pool, spec) {
          pos.x, pos.y],
       );
       idByKey.set(w.key, r.rows[0].id);
+      worldsWritten += 1;
     }
 
     // After every world exists, so a link can never reference a missing target.
     // setLink writes the mirror edge itself -- never INSERT into map_links here.
     for (const l of spec.links) {
       await setLink(client, idByKey.get(l.from), l.edge, idByKey.get(l.to));
+      linksWritten += 1;
     }
 
     let villages = 0;
@@ -99,7 +111,7 @@ async function applyMapSpec(pool, spec) {
     }
 
     await client.query('COMMIT');
-    return { worlds: spec.worlds.length, links: spec.links.length, villages };
+    return { worlds: worldsWritten, links: linksWritten, villages };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
