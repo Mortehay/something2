@@ -26,7 +26,8 @@
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Deep Forest"], "biome_cell": 16,
       "creature_count": 4,
-      "allowed_creature_types": ["Bat", "Skeleton"]
+      "allowed_creature_types": ["Bat", "Skeleton"],
+      "is_entry": false
     },
     {
       "key": "dunes",
@@ -36,7 +37,8 @@
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Arid Dunes"], "biome_cell": 16,
       "creature_count": 5,
-      "allowed_creature_types": ["Skeleton"]
+      "allowed_creature_types": ["Skeleton"],
+      "is_entry": false
     },
     {
       "key": "frozen",
@@ -46,7 +48,8 @@
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Frozen Waste"], "biome_cell": 16,
       "creature_count": 6,
-      "allowed_creature_types": ["Bat", "Skeleton"]
+      "allowed_creature_types": ["Bat", "Skeleton"],
+      "is_entry": false
     },
     {
       "key": "mire",
@@ -56,7 +59,8 @@
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Mire"], "biome_cell": 16,
       "creature_count": 7,
-      "allowed_creature_types": ["Slime", "Bat"]
+      "allowed_creature_types": ["Slime", "Bat"],
+      "is_entry": false
     }
   ],
   "links": [

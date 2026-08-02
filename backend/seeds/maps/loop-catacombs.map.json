@@ -22,7 +22,8 @@
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Meadow"], "biome_cell": 16,
       "creature_count": 3,
-      "allowed_creature_types": ["Slime"]
+      "allowed_creature_types": ["Slime"],
+      "is_entry": false
     },
     {
       "key": "eastwing",
@@ -32,7 +33,8 @@
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Meadow", "Mire"], "biome_cell": 16,
       "creature_count": 4,
-      "allowed_creature_types": ["Slime", "Bat"]
+      "allowed_creature_types": ["Slime", "Bat"],
+      "is_entry": false
     },
     {
       "key": "southwing",
@@ -42,7 +44,8 @@
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Meadow", "Mire"], "biome_cell": 16,
       "creature_count": 5,
-      "allowed_creature_types": ["Slime", "Bat"]
+      "allowed_creature_types": ["Slime", "Bat"],
+      "is_entry": false
     },
     {
       "key": "farhall",
@@ -52,7 +55,8 @@
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Mire"], "biome_cell": 16,
       "creature_count": 6,
-      "allowed_creature_types": ["Slime", "Bat"]
+      "allowed_creature_types": ["Slime", "Bat"],
+      "is_entry": false
     },
     {
       "key": "deepvault",
@@ -62,7 +66,8 @@
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Mire"], "biome_cell": 16,
       "creature_count": 6,
-      "allowed_creature_types": ["Slime", "Bat"]
+      "allowed_creature_types": ["Slime", "Bat"],
+      "is_entry": false
     },
     {
       "key": "heart",
@@ -72,7 +77,8 @@
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Mire", "Frozen Waste"], "biome_cell": 16,
       "creature_count": 9,
-      "allowed_creature_types": ["Bat", "Skeleton"]
+      "allowed_creature_types": ["Bat", "Skeleton"],
+      "is_entry": false
     }
   ],
   "links": [

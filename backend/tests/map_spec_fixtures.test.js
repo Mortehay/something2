@@ -17,6 +17,65 @@ const CREATURES = new Set(['Slime', 'Skeleton', 'Bat']);
 
 const specFiles = () => fs.readdirSync(MAPS_DIR).filter((f) => f.endsWith('.map.json'));
 
+// BFS hop distance from the entry over the UNDIRECTED link graph. Shared by
+// the cycle test and the escalation test below so both reason about the same
+// graph shape.
+function bfsDistances(spec) {
+  const entry = spec.worlds.find((w) => w.is_entry);
+  const adjacency = new Map(spec.worlds.map((w) => [w.key, new Set()]));
+  for (const l of spec.links) {
+    adjacency.get(l.from).add(l.to);
+    adjacency.get(l.to).add(l.from);
+  }
+  const dist = new Map([[entry.key, 0]]);
+  const queue = [entry.key];
+  while (queue.length) {
+    const cur = queue.shift();
+    for (const next of adjacency.get(cur) ?? []) {
+      if (!dist.has(next)) {
+        dist.set(next, dist.get(cur) + 1);
+        queue.push(next);
+      }
+    }
+  }
+  return dist;
+}
+
+// True iff the UNDIRECTED graph, after collapsing any duplicate/mirror
+// declaration of the same unordered {a,b} pair down to one physical edge,
+// contains a cycle. A spec can legally re-declare a link's mirror explicitly
+// (setLink already writes the mirror edge physically either way), so a raw
+// links.length >= worlds.length count can be padded to look like a cycle by
+// re-stating an already-implied connection -- that inflates the edge count
+// without adding any new physical connection, so it must not count here.
+function hasCycle(spec) {
+  const adjacency = new Map(spec.worlds.map((w) => [w.key, new Set()]));
+  const seenPairs = new Set();
+  for (const l of spec.links) {
+    const pairKey = [l.from, l.to].sort().join('|');
+    if (seenPairs.has(pairKey)) continue; // duplicate/mirror of an existing edge
+    seenPairs.add(pairKey);
+    adjacency.get(l.from).add(l.to);
+    adjacency.get(l.to).add(l.from);
+  }
+  const visited = new Set();
+  const dfs = (node, parent) => {
+    visited.add(node);
+    for (const next of adjacency.get(node) ?? []) {
+      if (!visited.has(next)) {
+        if (dfs(next, node)) return true;
+      } else if (next !== parent) {
+        return true; // back edge to an already-visited, non-parent node
+      }
+    }
+    return false;
+  };
+  for (const key of adjacency.keys()) {
+    if (!visited.has(key) && dfs(key, null)) return true;
+  }
+  return false;
+}
+
 test('all three example topologies ship', () => {
   assert.deepEqual(specFiles().sort(),
     ['hub-vale.map.json', 'loop-catacombs.map.json', 'spine-descent.map.json']);
@@ -32,7 +91,11 @@ test('every shipped spec validates against the live catalogs', () => {
 
 test('difficulty escalates with distance from the entry', () => {
   // An adventure map whose creature counts are flat is not an adventure. This
-  // asserts the shape of the content, not just its syntax.
+  // asserts the shape of the content, not just its syntax -- specifically,
+  // that a world one hop farther from the entry never dips below what a
+  // closer world already offered, not merely that a single farthest world is
+  // the biggest number ("flat everywhere plus one outlier" would pass a
+  // max>min-and-entry-is-min check without ever escalating with distance).
   for (const f of specFiles()) {
     const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, f), 'utf8'));
     const entry = spec.worlds.find((w) => w.is_entry);
@@ -40,6 +103,22 @@ test('difficulty escalates with distance from the entry', () => {
     assert.ok(Math.max(...counts) > Math.min(...counts), `${f}: every world has the same creature_count`);
     assert.equal(entry.creature_count, Math.min(...counts),
       `${f}: the entry world should be the safest`);
+
+    const dist = bfsDistances(spec);
+    const minByDistance = new Map();
+    for (const w of spec.worlds) {
+      const d = dist.get(w.key);
+      const prev = minByDistance.get(d);
+      minByDistance.set(d, prev === undefined ? w.creature_count : Math.min(prev, w.creature_count));
+    }
+    const orderedDistances = [...minByDistance.keys()].sort((a, b) => a - b);
+    let prevMin = -Infinity;
+    for (const d of orderedDistances) {
+      const minAtD = minByDistance.get(d);
+      assert.ok(minAtD >= prevMin,
+        `${f}: distance ${d}'s safest world (creature_count ${minAtD}) is easier than a world closer to the entry (creature_count ${prevMin})`);
+      prevMin = minAtD;
+    }
   }
 });
 
@@ -53,7 +132,5 @@ test('hub-vale has a village in its hub and at most four spokes', () => {
 
 test('loop-catacombs actually contains a cycle', () => {
   const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, 'loop-catacombs.map.json'), 'utf8'));
-  // A connected undirected graph has a cycle iff edges >= nodes.
-  assert.ok(spec.links.length >= spec.worlds.length,
-    'no cycle: a loop topology needs at least as many links as worlds');
+  assert.ok(hasCycle(spec), 'no cycle: the loop topology does not close on the grid');
 });
