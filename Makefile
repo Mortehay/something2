@@ -1,6 +1,6 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
-        redis-shell admin-password admin-password-rotate seed-catalogs
+        redis-shell admin-password admin-password-rotate seed-catalogs seed-map
 
 COMPOSE_FILE = compose/docker-compose.yml
 
@@ -91,3 +91,9 @@ admin-password-rotate:
 # it never deletes, so a tile or biome added by hand in the admin UI survives.
 seed-catalogs:
 	node backend/scripts/seed-catalogs.js
+
+# Apply one map spec from backend/seeds/maps/<SPEC>.map.json. Idempotent:
+# re-running an unchanged spec is a no-op. Validates before writing anything.
+seed-map:
+	@[ -n "$(SPEC)" ] || (echo "usage: make seed-map SPEC=<name>  (see: make list-maps)"; exit 1)
+	SPEC=$(SPEC) node backend/scripts/seed-map.js
