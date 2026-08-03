@@ -62,8 +62,8 @@ async function applyMapSpec(pool, spec) {
       const r = await client.query(
         `INSERT INTO worlds (name, seed, chunk_size, width, height, creature_count,
                              allowed_creature_types, entry_spawn, biomes, biome_cell,
-                             graph_x, graph_y)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12)
+                             graph_x, graph_y, level_min, level_max)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12,$13,$14)
          ON CONFLICT (name) DO UPDATE
            SET seed = EXCLUDED.seed, chunk_size = EXCLUDED.chunk_size,
                width = EXCLUDED.width, height = EXCLUDED.height,
@@ -71,13 +71,16 @@ async function applyMapSpec(pool, spec) {
                allowed_creature_types = EXCLUDED.allowed_creature_types,
                entry_spawn = EXCLUDED.entry_spawn, biomes = EXCLUDED.biomes,
                biome_cell = EXCLUDED.biome_cell,
-               graph_x = EXCLUDED.graph_x, graph_y = EXCLUDED.graph_y
+               graph_x = EXCLUDED.graph_x, graph_y = EXCLUDED.graph_y,
+               level_min = EXCLUDED.level_min, level_max = EXCLUDED.level_max
          RETURNING id`,
         [w.name, w.seed, w.chunk_size ?? 64, w.width, w.height, w.creature_count ?? 0,
          JSON.stringify(w.allowed_creature_types ?? []),
          w.entry_spawn ? JSON.stringify(w.entry_spawn) : null,
          JSON.stringify(w.biomes ?? []), w.biome_cell ?? null,
-         pos.x, pos.y],
+         pos.x, pos.y,
+         w.level_band ? w.level_band[0] : 1,
+         w.level_band ? w.level_band[1] : 1],
       );
       idByKey.set(w.key, r.rows[0].id);
       worldsWritten += 1;

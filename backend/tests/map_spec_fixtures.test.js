@@ -154,3 +154,24 @@ test('loop-catacombs actually contains a cycle', () => {
   const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, 'loop-catacombs.map.json'), 'utf8'));
   assert.ok(hasCycle(spec), 'no cycle: the loop topology does not close on the grid');
 });
+
+test('spine-descent escalates its level bands with depth', () => {
+  // The point of a spine is a difficulty ramp. Without this, a spec could
+  // declare bands that wander or flatten and every other test would still be
+  // green -- the same shape of hole that let a dangling creature reference
+  // survive in biomes_seed.test.js.
+  const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, 'spine-descent.map.json'), 'utf8'));
+  const banded = spec.worlds.filter((w) => w.level_band);
+  assert.ok(banded.length >= 4, 'spine-descent should band most of its worlds');
+
+  const dist = bfsDistances(spec);
+  const sorted = [...banded].sort((a, b) => dist.get(a.key) - dist.get(b.key));
+  for (let i = 1; i < sorted.length; i++) {
+    assert.ok(
+      sorted[i].level_band[0] >= sorted[i - 1].level_band[0],
+      `${sorted[i].key} is deeper than ${sorted[i - 1].key} but its band starts lower`,
+    );
+  }
+  assert.ok(sorted[sorted.length - 1].level_band[1] > sorted[0].level_band[1] * 2,
+    'the deepest world should be meaningfully harder than the entry, not marginally');
+});

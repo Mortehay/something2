@@ -286,3 +286,30 @@ test('cross-checks creature type names when the catalog is supplied', () => {
   });
   assert.ok(errs.some((e) => /unknown creature type "Wolf"/i.test(e)), errs.join('; '));
 });
+
+test('level_band must be a two-element array of integers', () => {
+  const errs = errorsFor((s) => { s.worlds[0].level_band = [3]; });
+  assert.ok(errs.some((e) => /level_band/i.test(e)), errs.join('; '));
+});
+
+test('level_band rejects an inverted band', () => {
+  // The database CHECK would also catch this, but only after clear-maps has
+  // already destroyed every world -- reseed-map runs the clear first. Failing
+  // in the validator means the spec is rejected before anything is deleted.
+  const errs = errorsFor((s) => { s.worlds[0].level_band = [9, 3]; });
+  assert.ok(errs.some((e) => /level_band/i.test(e)), errs.join('; '));
+});
+
+test('level_band rejects a minimum below 1', () => {
+  const errs = errorsFor((s) => { s.worlds[0].level_band = [0, 4]; });
+  assert.ok(errs.some((e) => /level_band/i.test(e)), errs.join('; '));
+});
+
+test('level_band accepts a valid band and a fixed band', () => {
+  assert.deepEqual(errorsFor((s) => { s.worlds[0].level_band = [2, 6]; }), []);
+  assert.deepEqual(errorsFor((s) => { s.worlds[0].level_band = [4, 4]; }), []);
+});
+
+test('level_band is optional', () => {
+  assert.deepEqual(validateMapSpec(valid()), []);
+});

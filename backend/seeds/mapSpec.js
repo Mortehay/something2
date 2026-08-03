@@ -82,6 +82,22 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       errors.push(`world "${w.key}" height must be an integer`);
     }
 
+    // Optional. Validated here as well as by worlds_level_band_check because
+    // `make reseed-map` clears every world BEFORE seeding: a band rejected
+    // only by the database would fail after the destruction, leaving the
+    // developer with no maps at all.
+    if (w.level_band !== undefined) {
+      const b = w.level_band;
+      if (!Array.isArray(b) || b.length !== 2
+          || !Number.isInteger(b[0]) || !Number.isInteger(b[1])) {
+        errors.push(`world "${w.key}" level_band must be [min, max] with integer values`);
+      } else if (b[0] < 1) {
+        errors.push(`world "${w.key}" level_band minimum must be at least 1`);
+      } else if (b[1] < b[0]) {
+        errors.push(`world "${w.key}" level_band maximum must be >= its minimum`);
+      }
+    }
+
     if (w.village) {
       const v = w.village;
       if (!(v.width >= VILLAGE_LIMITS.minW && v.width <= VILLAGE_LIMITS.maxW)) {
