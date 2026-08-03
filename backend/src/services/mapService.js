@@ -537,8 +537,8 @@ function spawnChunkCreatures(world, cx, cy, creatureTypes) {
         damage: scaled.damage,
         level,
         facing: 'S',
-        // Carried from the entity type so a spawned creature arrives with the
-        // data CreatureSim builds its `mit` from.
+        // Scaled from the entity type's base defense so a spawned creature
+        // arrives with the data CreatureSim builds its `mit` from.
         defense: scaled.defense,
         resistances: t.resistances || {},
       });
