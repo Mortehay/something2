@@ -504,8 +504,10 @@ export class RenderSystem {
     const active = normalizeEffects(effects);
     if (active.length === 0) return;
     const size = 5, gap = 2;
-    // Sits above the HP bar's row (drawY - 8, height 4), so the two never
-    // overlap on an actor that is both damaged and affected.
+    // Sits above the HP bar's row (drawY - 8, height 4) and below the level
+    // tag's baseline (drawY - 18, ~drawY-26.5..drawY-18 for 12px bold
+    // monospace), so all three rows -- level tag, pips, HP bar -- stack
+    // without overlapping on an actor that is damaged, affected, AND leveled.
     const py = drawY - 16;
     this.ctx.save();
     active.forEach((key, i) => {
@@ -635,7 +637,7 @@ export class RenderSystem {
       this.ctx.fillStyle = "#ffd166";
       const label = `L${e.level}`;
       const lx = drawX + w / 2;
-      const ly = drawY - 6;
+      const ly = drawY - 18;
       this.ctx.strokeText(label, lx, ly);
       this.ctx.fillText(label, lx, ly);
       this.ctx.restore();

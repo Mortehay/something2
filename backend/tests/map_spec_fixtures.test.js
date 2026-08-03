@@ -165,13 +165,35 @@ test('spine-descent escalates its level bands with depth', () => {
   assert.ok(banded.length >= 4, 'spine-descent should band most of its worlds');
 
   const dist = bfsDistances(spec);
-  const sorted = [...banded].sort((a, b) => dist.get(a.key) - dist.get(b.key));
-  for (let i = 1; i < sorted.length; i++) {
-    assert.ok(
-      sorted[i].level_band[0] >= sorted[i - 1].level_band[0],
-      `${sorted[i].key} is deeper than ${sorted[i - 1].key} but its band starts lower`,
-    );
+  // Compare per BFS tier, not adjacent pairs in a flat sorted-by-distance
+  // list: cache/elite/gorge all sit at distance 2, so a flat sort's relative
+  // order among them is just file order. Reordering those entries in the
+  // JSON is semantically meaningless and must not be able to trip this
+  // check. Group by tier instead and require each tier's minimum band floor
+  // to be >= the previous tier's -- mirroring the creature_count escalation
+  // test above, which has the same three-way tie at distance 2.
+  const minFloorByDistance = new Map();
+  for (const w of banded) {
+    const d = dist.get(w.key);
+    const prev = minFloorByDistance.get(d);
+    minFloorByDistance.set(d, prev === undefined ? w.level_band[0] : Math.min(prev, w.level_band[0]));
   }
-  assert.ok(sorted[sorted.length - 1].level_band[1] > sorted[0].level_band[1] * 2,
+  const orderedDistances = [...minFloorByDistance.keys()].sort((a, b) => a - b);
+  let prevFloor = -Infinity;
+  for (const d of orderedDistances) {
+    const floorAtD = minFloorByDistance.get(d);
+    assert.ok(floorAtD >= prevFloor,
+      `distance ${d}'s lowest band floor (${floorAtD}) is lower than a tier closer to the entry (${prevFloor})`);
+    prevFloor = floorAtD;
+  }
+
+  // "Meaningfully harder", kept from the original check: the deepest tier's
+  // toughest band ceiling must clear double the entry's ceiling.
+  const entryBand = banded.find((w) => dist.get(w.key) === 0).level_band;
+  const deepestDistance = Math.max(...orderedDistances);
+  const deepestMax = Math.max(
+    ...banded.filter((w) => dist.get(w.key) === deepestDistance).map((w) => w.level_band[1]),
+  );
+  assert.ok(deepestMax > entryBand[1] * 2,
     'the deepest world should be meaningfully harder than the entry, not marginally');
 });

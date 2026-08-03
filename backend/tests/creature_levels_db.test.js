@@ -60,7 +60,12 @@ test('the level band constraint rejects an inverted band', async (t) => {
 test('existing creatures default to level 1 and damage 5', async (t) => {
   if (!requireTestDb(t, 'this test reads world_creatures defaults')) return;
   const pool = await openPool();
-  if (pool.unreachable) { t.skip(`NO DATABASE at ${DB_URL}`); return; }
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} -- the level/damage defaults are UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
   try {
     const r = await pool.query(
       `SELECT column_name, column_default FROM information_schema.columns
@@ -70,5 +75,35 @@ test('existing creatures default to level 1 and damage 5', async (t) => {
     assert.equal(r.rowCount, 2, 'both columns must exist');
     assert.equal(r.rows[0].column_default, '5');  // damage
     assert.equal(r.rows[1].column_default, '1');  // level
+  } finally { await pool.end(); }
+});
+
+// The load-bearing property of migration 1714440051000: world_creatures.defense
+// must be nullable with NO default. NULL is the signal authority/server.js's
+// COALESCE(wc.defense, et.defense) reads as "this creature predates level
+// scaling, fall back to the entity type's base defense". A `NOT NULL DEFAULT 0`
+// would satisfy "the column exists" while silently stripping defense from
+// every pre-existing creature the moment the migration ran.
+test('world_creatures.defense is nullable with no default', async (t) => {
+  if (!requireTestDb(t, 'this test reads world_creatures column metadata')) return;
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} -- the defense column's nullability is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    const r = await pool.query(
+      `SELECT is_nullable, column_default FROM information_schema.columns
+        WHERE table_name = 'world_creatures' AND column_name = 'defense'`,
+    );
+    assert.equal(r.rowCount, 1, 'world_creatures.defense must exist');
+    assert.equal(r.rows[0].is_nullable, 'YES',
+      'defense must stay nullable -- NULL is how a pre-migration creature signals '
+      + '"fall back to the entity type\'s base defense" in the authority SELECT');
+    assert.equal(r.rows[0].column_default, null,
+      'defense must have no default -- a NOT NULL DEFAULT 0 would silently give every '
+      + 'pre-existing creature defense 0 instead of falling back to the entity type\'s base');
   } finally { await pool.end(); }
 });

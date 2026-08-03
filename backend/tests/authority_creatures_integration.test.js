@@ -152,7 +152,28 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/le
 
   const sel = sqls.find((s) => /SELECT/i.test(s) && /FROM world_creatures/i.test(s));
   assert.ok(sel, 'chunk activation must SELECT from world_creatures');
-  for (const col of ['defense', 'resistances', 'level', 'damage']) {
+  // 'defense' is deliberately NOT in the generic word-list loop below: a bare
+  // \bdefense\b matches `et.defense` (the entity type's BASE defense) just as
+  // readily as it matches the real fix, so that check alone is satisfied by
+  // the exact regression this branch exists to prevent — a level-12 creature
+  // mitigating with the type's base defense (2) instead of its own scaled
+  // value (7.5). It is also satisfied by a weaker regression: keeping
+  // `wc.defense` but dropping the COALESCE wrapper, which sends every
+  // pre-migration creature (wc.defense IS NULL) into combat with defense 0
+  // instead of falling back to the entity type's base. Assert the exact
+  // shape instead: the per-creature value COALESCEd against the entity
+  // type's base and aliased back to `defense` (aliasing matters too — a bare
+  // `wc.defense, et.defense` pair returns one "defense" key to node-postgres
+  // and the later column silently wins).
+  assert.match(
+    sel,
+    /COALESCE\(\s*wc\.defense\s*,\s*et\.defense\s*\)\s+AS\s+defense/i,
+    'the world_creatures load must SELECT COALESCE(wc.defense, et.defense) AS defense — '
+    + 'selecting wc.defense or et.defense alone (with or without the alias) either loses '
+    + 'the per-creature scaled value or leaves pre-migration creatures (wc.defense IS NULL) '
+    + 'mitigating with 0 instead of the entity type\'s base',
+  );
+  for (const col of ['resistances', 'level', 'damage']) {
     assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
       `the world_creatures load must SELECT ${col} — without it every creature's mit/level/damage is wrong`);
   }
