@@ -32,21 +32,42 @@ function mapRow(r) {
 // several routes (the register endpoint, the admin seeder, the migration
 // backfill) and one lazy insert here covers all of them, where a hook on one
 // route would cover only that route.
-async function loadProgression(db, userId) {
+//
+// `forUpdate` takes a row lock (SELECT ... FOR UPDATE) instead of a plain
+// read. It only serialises anything when `db` is a client mid-transaction --
+// a bare pool.query commits (and releases the lock) before this function
+// even returns -- so it exists solely for awardXp, which is documented to
+// always run inside the caller's transaction. Every other caller stays on
+// the plain unlocked read.
+async function loadProgression(db, userId, { forUpdate = false } = {}) {
   await db.query(
     'INSERT INTO player_progression (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING',
     [userId],
   );
   const r = await db.query(
-    `SELECT ${COLUMNS} FROM player_progression WHERE user_id = $1`, [userId],
+    `SELECT ${COLUMNS} FROM player_progression WHERE user_id = $1${forUpdate ? ' FOR UPDATE' : ''}`,
+    [userId],
   );
   return r.rows.length ? mapRow(r.rows[0]) : { ...DEFAULT_PROGRESSION, user_id: userId };
 }
 
 // Takes `db`, not `pool`: the kill path calls this INSIDE its own transaction
 // so the XP award and the creature-death commit stand or fall together.
+//
+// The read below is a locked SELECT ... FOR UPDATE, not a plain read. A
+// single melee arc or AoE detonation can kill several creatures in one tick,
+// and onCreatureDeath is deliberately fire-and-forget (the tick loop must
+// not await it -- see server.js's own comment to that effect), so several
+// overlapping transactions can call awardXp for the SAME user before any of
+// them commits. Without a lock, every one of those reads the same starting
+// experience and the last UPDATE to commit wins, silently discarding every
+// other award -- and since level and stat_points are derived from that same
+// stale read, a level-up can be lost (or double-granted) right along with
+// the XP. The row lock forces the second-and-later transactions to block
+// until the first commits, so each one re-reads the just-committed value
+// rather than a stale one.
 async function awardXp(db, userId, amount, source) {
-  const before = await loadProgression(db, userId);
+  const before = await loadProgression(db, userId, { forUpdate: true });
   const amt = Math.floor(Number(amount) || 0);
   // An unrecognised source is refused rather than defaulted. `chest` and
   // `dungeon_clear` are accepted today and unused -- they are the seam B and

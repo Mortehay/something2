@@ -24,7 +24,13 @@ function requireTestDb(t, why) {
 }
 
 async function openPool() {
-  const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 2000, max: 4 });
+  // max: 8, not 4 -- the concurrent-award race test below holds 5 checked-out
+  // clients open simultaneously (one BEGIN'd transaction each) while the
+  // pool itself still needs a spare connection for its own pool.query calls;
+  // 4 would deadlock the 5th client's pool.connect() waiting on a slot that
+  // never frees until the held clients commit, which only happens after all
+  // 5 have started.
+  const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 2000, max: 8 });
   try { await pool.query('SELECT 1'); return pool; } catch (err) {
     await pool.end().catch(() => {});
     return { unreachable: err.message };
@@ -210,6 +216,68 @@ test('awardXp is callable inside the caller\'s own transaction and rolls back wi
     assert.equal(after.rows[0].n, 0, 'the award (and the lazy row it created) must not have survived the rollback');
   } finally {
     client.release();
+    await dropUser(pool, user);
+    await pool.end().catch(() => {});
+  }
+});
+
+// The lost-update hazard: a single melee arc or AoE detonation can kill
+// several creatures in one tick, and onCreatureDeath is deliberately
+// fire-and-forget (the tick loop must not await it), so several overlapping
+// transactions call awardXp for the SAME user before any of them commits.
+// awardXp reads experience, adds in JS, and writes the absolute result back
+// -- without a row lock, two overlapping calls both read the same starting
+// value and the later commit silently clobbers the earlier one.
+//
+// Fired via Promise.all across FIVE separate connections, each wrapped in
+// its own caller-managed transaction (matching awardXp's real contract: it
+// always runs inside a transaction the CALLER opened) -- NOT awaited one
+// after the other, for the same reason the allocateStat race above isn't
+// sequential. Both/all transactions must reach the locked read before any
+// commits, or they never actually contend; starting every awardXp call in
+// the same Promise.all, before any has committed, is what gives them the
+// chance to race.
+//
+// Two connections, not five, is what this test originally used, and it only
+// caught a deliberately-reintroduced missing lock in 2 of 10 runs -- too
+// flaky to trust. Empirically (10 runs each, see task-3-report.md) 5
+// concurrent awards on the same row reproduces the lost update 10/10 times
+// with the lock removed, and still sums correctly 10/10 times with the lock
+// present, so 5 is what's actually in this test rather than the more
+// "obvious" 2.
+test('awardXp serializes concurrent awards for the same user so none of them clobber each other', async (t) => {
+  if (!requireTestDb(t, 'this test creates a throwaway user and races five awardXp calls for it')) return;
+  const pool = await openPool();
+  if (pool.unreachable) { const m = skipMsg('concurrent-award row lock'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
+  const AWARDS = 5;
+  const AMOUNT = 10;
+  let user;
+  const clients = [];
+  try {
+    user = await createTestUser(pool, 'xp-race');
+    await loadProgression(pool, user); // row exists at level 1 / 0 xp before the race starts
+
+    for (let i = 0; i < AWARDS; i++) {
+      const c = await pool.connect();
+      await c.query('BEGIN');
+      clients.push(c);
+    }
+
+    await Promise.all(
+      clients.map((c) => awardXp(c, user, AMOUNT, 'kill').then(() => c.query('COMMIT'))),
+    );
+
+    const after = await loadProgression(pool, user);
+    // 5 awards of 10 -> 50, a literal expected value, not a recomputation of
+    // the sum under test. Staying well below the level-2 floor (100) keeps
+    // this test about the lost-update hazard alone, with no level/points
+    // interaction to reason about.
+    assert.equal(after.experience, 50, 'every concurrent award must land -- the sum, not just one of them');
+  } finally {
+    for (const c of clients) {
+      await c.query('ROLLBACK').catch(() => {});
+      c.release();
+    }
     await dropUser(pool, user);
     await pool.end().catch(() => {});
   }
