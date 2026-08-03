@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
+const { HOSTILE_CREATURES } = require('../seeds/data/entityTypes.js');
 
 // Terrain tile names that exist in the catalog (migrations 1714440002000,
 // 1714440027000, 1714440029000). A biome naming a tile outside this set would
@@ -10,10 +11,17 @@ const LIVE_TILES = new Set([
   'grass', 'highgrass', 'leafs', 'sand', 'rocks', 'earth', 'dirt',
   'snow', 'ice', 'swamp', 'water',
 ]);
-// Decoration + creature entity types seeded by migrations 1714440042000 and
-// the entity seeds.
+// Decoration entity types seeded by migrations 1714440003000 and 1714440042000.
 const LIVE_FLORA = new Set(['Tree', 'Stone', 'IceRock', 'bush', 'rose_bush', 'pine_tree', 'dead_tree']);
-const LIVE_CREATURES = new Set(['Slime', 'Bat', 'Skeleton', 'Wolf']);
+// DERIVED, not hand-listed. This used to be the literal
+// `['Slime','Bat','Skeleton','Wolf']`, which made the reference check below
+// vacuous in the one case that mattered: `Wolf` sat in this set AND in two
+// biomes, while no migration and no seed file created the row, so the
+// assertion compared the data against a restatement of itself and stayed
+// green through the entire period the reference was dangling. Reading the
+// creature catalog instead means deleting a creature from
+// seeds/data/entityTypes.js now fails every biome that references it.
+const LIVE_CREATURES = new Set(HOSTILE_CREATURES.map((c) => c.name));
 
 test('seeds exactly the five named starter biomes', () => {
   assert.deepEqual(

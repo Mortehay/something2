@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Upsert the tile / biome / decoration catalogs. Run via `make seed-catalogs`.
+// Upsert the tile / biome / decoration / creature catalogs. Run via
+// `make seed-catalogs`.
 //
 // UPSERT BY NAME, NEVER DELETE. The admin UI is the intended way to author
 // catalog entries; the seed files are a floor, not a replacement. A run of this
@@ -10,6 +11,7 @@ const { Pool } = require('pg');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
+const { HOSTILE_CREATURES, CREATURE_DROPS } = require('../seeds/data/entityTypes.js');
 
 async function seedCatalogs(pool) {
   let tiles = 0;
@@ -70,7 +72,49 @@ async function seedCatalogs(pool) {
     decorations += 1;
   }
 
-  return { tiles, biomes, decorations };
+  // Creatures, then their drop rules. DO NOTHING rather than DO UPDATE for
+  // the same reason as decorations above: a designer who has retuned Slime's
+  // hp in the admin UI must not have it reset by a seeder run. This makes the
+  // block a floor -- it restores a creature a biome references but that the
+  // database is missing, and is otherwise a no-op.
+  let creatures = 0;
+  for (const c of HOSTILE_CREATURES) {
+    const r = await pool.query(
+      `INSERT INTO entity_types
+        (name, color, walkable, spawn_tiles, chance, is_creature,
+         hp, max_hp, defense, resistances, prompt, gold_min, gold_max)
+       VALUES ($1,$2,$3,$4::jsonb,$5,true,$6,$7,$8,$9::jsonb,$10,$11,$12)
+       ON CONFLICT (name) DO NOTHING`,
+      [c.name, c.color, c.walkable, JSON.stringify(c.spawn_tiles), c.chance,
+       c.hp, c.max_hp, c.defense, JSON.stringify(c.resistances), c.prompt,
+       c.gold_min, c.gold_max],
+    );
+    creatures += r.rowCount;
+  }
+
+  // Guarded by NOT EXISTS, not ON CONFLICT: creature_drops has no unique
+  // constraint on (entity_type_id, item_type_id) -- see
+  // 1714440018000_create_loot.js -- so a bare INSERT would stack a duplicate
+  // rule on every single run, doubling the creature's effective drop odds.
+  // The name lookups are a cross-join in the same guarded style as the
+  // migration: a missing creature or item type inserts nothing rather than
+  // failing the seed.
+  let drops = 0;
+  for (const d of CREATURE_DROPS) {
+    const r = await pool.query(
+      `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
+       SELECT et.id, it.id, $3, $4, $5
+         FROM entity_types et, item_types it
+        WHERE et.name = $1 AND it.name = $2
+          AND NOT EXISTS (
+                SELECT 1 FROM creature_drops cd
+                 WHERE cd.entity_type_id = et.id AND cd.item_type_id = it.id)`,
+      [d.creature, d.item, d.chance, d.min_qty, d.max_qty],
+    );
+    drops += r.rowCount;
+  }
+
+  return { tiles, biomes, decorations, creatures, drops };
 }
 
 module.exports = { seedCatalogs };
@@ -81,7 +125,14 @@ if (require.main === module) {
   if (!url) { console.error('DATABASE_URL is not set in .env'); process.exit(1); }
   const pool = new Pool({ connectionString: url });
   seedCatalogs(pool)
-    .then((n) => { console.log(`seeded ${n.tiles} tiles, ${n.biomes} biomes, ${n.decorations} decorations`); })
+    .then((n) => {
+      console.log(`seeded ${n.tiles} tiles, ${n.biomes} biomes, ${n.decorations} decorations`);
+      // Creatures and drops report rows actually INSERTED (not rows
+      // attempted, as the three counts above do) because their DO NOTHING /
+      // NOT EXISTS guards make a repeat run legitimately write zero. Zero is
+      // the normal steady state here, so say so rather than look like a bug.
+      console.log(`restored ${n.creatures} missing creature types, ${n.drops} missing drop rules`);
+    })
     .catch((e) => { console.error(e.message); process.exitCode = 1; })
     .finally(() => pool.end());
 }

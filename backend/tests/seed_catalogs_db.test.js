@@ -5,6 +5,7 @@ const { seedCatalogs } = require('../scripts/seed-catalogs.js');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS, SIZE_FIXES } = require('../seeds/data/decorationTypes.js');
+const { HOSTILE_CREATURES, CREATURE_DROPS } = require('../seeds/data/entityTypes.js');
 
 // Every test in this file calls seedCatalogs(pool), which does
 // `ON CONFLICT DO UPDATE` over all 15 tile_types and all 5 biomes -- this is
@@ -225,4 +226,87 @@ test('seeding does not delete a hand-added decoration', async (t) => {
     await pool.query('DELETE FROM entity_types WHERE name = $1', [CANARY]).catch(() => {});
     await pool.end();
   }
+});
+
+// The drop-rule insert is the one statement in seedCatalogs with no unique
+// constraint behind it (creature_drops has only an index on entity_type_id --
+// see 1714440018000_create_loot.js), so its idempotency rests entirely on the
+// hand-written NOT EXISTS guard. Losing that guard would not fail any other
+// test: it would just stack a second identical rule on every run, and the
+// only symptom is Wolf quietly dropping daggers at ~1.75x the intended rate
+// after three seeds.
+test('re-seeding does not stack duplicate creature drop rules', async (t) => {
+  if (!requireTestDb(t, 'seedCatalogs inserts into creature_drops')) return;
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} — drop-rule idempotency is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await seedCatalogs(pool);
+    const count = async () => (await pool.query(
+      `SELECT count(*)::int AS n
+         FROM creature_drops cd
+         JOIN entity_types et ON et.id = cd.entity_type_id
+         JOIN item_types it ON it.id = cd.item_type_id
+        WHERE et.name = $1 AND it.name = $2`,
+      [CREATURE_DROPS[0].creature, CREATURE_DROPS[0].item],
+    )).rows[0].n;
+
+    const after1 = await count();
+    assert.equal(after1, 1, 'the seeded drop rule should exist exactly once');
+    await seedCatalogs(pool);
+    await seedCatalogs(pool);
+    assert.equal(await count(), 1, 'seeding stacked duplicate drop rules');
+  } finally { await pool.end(); }
+});
+
+// The actual repair this seed data exists for: a creature a biome references
+// has gone missing from entity_types (exactly what happened to Wolf when the
+// dev Postgres volume was rebuilt). Deleting and restoring is safe here only
+// because this test is gated to TEST_DATABASE_URL.
+test('seeding restores a creature that is missing from the catalog', async (t) => {
+  if (!requireTestDb(t, 'this test DELETEs a creature row before restoring it')) return;
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} — creature restoration is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  const wolf = HOSTILE_CREATURES.find((c) => c.name === 'Wolf');
+  try {
+    await seedCatalogs(pool);
+    // world_creatures references the type by name, and creature_drops by id
+    // with ON DELETE CASCADE, so clear the live spawns first (same ordering
+    // elements.js's own `down` uses).
+    await pool.query('DELETE FROM world_creatures WHERE type = $1', [wolf.name]);
+    await pool.query('DELETE FROM entity_types WHERE name = $1', [wolf.name]);
+    assert.equal(
+      (await pool.query('SELECT 1 FROM entity_types WHERE name = $1', [wolf.name])).rowCount,
+      0, 'setup failed: the creature was not actually removed',
+    );
+
+    await seedCatalogs(pool);
+
+    const r = await pool.query(
+      'SELECT hp, max_hp, is_creature, gold_min, gold_max FROM entity_types WHERE name = $1',
+      [wolf.name],
+    );
+    assert.equal(r.rowCount, 1, 'seeding did not restore the missing creature');
+    assert.equal(r.rows[0].hp, wolf.hp);
+    assert.equal(r.rows[0].max_hp, wolf.max_hp);
+    assert.equal(r.rows[0].is_creature, true, 'restored row must be a creature or it never spawns');
+    // The drop rule cascaded away with the row; the seeder must put it back
+    // or the restored creature dies yielding nothing and
+    // creature_drops_db.test.js's every-creature-has-a-drop invariant breaks.
+    const drops = await pool.query(
+      `SELECT count(*)::int AS n FROM creature_drops cd
+         JOIN entity_types et ON et.id = cd.entity_type_id
+        WHERE et.name = $1`, [wolf.name],
+    );
+    assert.ok(drops.rows[0].n >= 1, 'restored creature has no drop rule');
+  } finally { await pool.end(); }
 });

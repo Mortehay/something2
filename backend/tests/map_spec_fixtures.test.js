@@ -4,16 +4,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { validateMapSpec } = require('../seeds/mapSpec.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
+const { HOSTILE_CREATURES } = require('../seeds/data/entityTypes.js');
 
 const MAPS_DIR = path.join(__dirname, '..', 'seeds', 'maps');
 const BIOMES = new Set(STARTER_BIOMES.map((b) => b.name));
-// Corrected from the brief's ['Slime', 'Wolf', 'Skeleton', 'Bat']: Wolf is not
-// seeded by any migration (it was lost in the dev-Postgres volume rebuild
-// documented in progress.md and was never migration-seeded to begin with).
-// The live entity_types catalog has exactly four creatures -- Slime,
-// Skeleton, Bat, Village Guard -- and Village Guard is a village gate
-// defender, not a huntable overworld spawn, so it is excluded here too.
-const CREATURES = new Set(['Slime', 'Skeleton', 'Bat']);
+// Derived from the creature catalog, which is now the thing that decides
+// whether a creature exists. Wolf was excluded here for a while on the
+// grounds that no migration seeded it -- true at the time, and the opposite
+// of what biomes_seed.test.js asserted, with both files green. Now that
+// seeds/data/entityTypes.js restores Wolf, one source answers the question
+// for both. Village Guard is still excluded: it is a village gate defender
+// placed by insertVillageGuards, not a creature a world lists in
+// allowed_creature_types -- and HOSTILE_CREATURES leaves it out by design.
+const CREATURES = new Set(HOSTILE_CREATURES.map((c) => c.name));
 
 const specFiles = () => fs.readdirSync(MAPS_DIR).filter((f) => f.endsWith('.map.json'));
 
