@@ -225,12 +225,67 @@ test('applyDerivedStats lowering maxHp cannot kill the player', () => {
   assert.equal(p.hp, 1, 'hp must clamp at 1, never reach 0 or below from a respec');
 });
 
-// Source-text guard. The two cooldown sites are the spec's named hazard, and
-// a behavioural test only proves the paths it exercises. This proves there is
-// no THIRD site: the weapon's cooldown field must be read exactly once in the
-// file, inside applyAttackCooldown.
-test('the weapon cooldown is read in exactly one place', () => {
-  const src = fs.readFileSync(require.resolve('../src/authority/world.js'), 'utf8');
-  const hits = src.match(/w\.cooldown/g) || [];
-  assert.equal(hits.length, 1, `w.cooldown read at ${hits.length} sites; route them all through applyAttackCooldown`);
+// Strips block and line comments before a source-text guard counts anything.
+// Deliberate: an unstripped scan counts prose too (this file's own doc
+// comments had to be reworded around "w.cooldown" to avoid self-tripping the
+// very guard below), which silently couples code comments to a regex the
+// next editor won't know exists. Stripping first means comments are free to
+// say whatever they want.
+//
+// `(^|[^:])\/\/.*$` (not a bare `//.*$`) is deliberate too: it avoids eating
+// a `//` that appears inside a string/URL preceded by `:` (e.g. `'http://…'`),
+// which this codebase doesn't currently have in these two files but a naive
+// strip would silently mangle if one were added.
+function stripComments(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+const worldSrc = fs.readFileSync(require.resolve('../src/authority/world.js'), 'utf8');
+const projSrc = fs.readFileSync(require.resolve('../src/authority/projectiles.js'), 'utf8');
+const worldCode = stripComments(worldSrc);
+const projCode = stripComments(projSrc);
+
+// Source-text guard, narrowed to CODE only (comments stripped -- see above).
+// A raw-text scan has two problems: it counts comments/strings (coupling
+// prose to the regex), and it has false negatives -- a third stamping site
+// written as `const { cooldown } = w; p._attackCd = cooldown;` or
+// `w['cooldown']` would sail through a `w.cooldown`-count check untouched.
+// The second assertion below closes that gap by checking the INVARIANT
+// (how many places ever assign `_attackCd`) rather than one particular
+// spelling of a read.
+//
+// The count is 2, not 3: `_attackCd` is touched in three places in the
+// source (addPlayer's initializer, tick()'s per-frame decrement, and
+// applyAttackCooldown's stamp), but addPlayer's is an object-literal
+// initializer (`_attackCd: 0,`, a colon) rather than an assignment
+// (`_attackCd = ...`), so `/_attackCd\s*=/` does not match it. Verified
+// against the current source before writing this assertion, not tuned to
+// whatever number happened to pass.
+test('the weapon cooldown is read in exactly one place, and _attackCd is assigned in exactly two', () => {
+  const cooldownHits = worldCode.match(/w\.cooldown/g) || [];
+  assert.equal(cooldownHits.length, 1, `w.cooldown read at ${cooldownHits.length} sites; route them all through applyAttackCooldown`);
+
+  const assignHits = worldCode.match(/_attackCd\s*=/g) || [];
+  assert.equal(
+    assignHits.length,
+    2,
+    `_attackCd assigned at ${assignHits.length} sites (expected 2: tick()'s decrement and applyAttackCooldown's stamp); `
+    + 'a new stamping site -- however it spells the read -- must still route through applyAttackCooldown',
+  );
+});
+
+// Damage's structural guard. The plan's damage-site count was revised UPWARD
+// once already (two sites named, three actually existed -- see the
+// projectile-vs-players branch this task added). Cooldown got a structural
+// guard for its own named hazard; damage, the axis that was already
+// miscounted once, had none -- the behavioural tests above only prove the
+// paths they exercise, and a fourth damage site reading raw catalog damage
+// later would break nothing they check. Comment-stripped for the same
+// reason as the cooldown guard above.
+test('weapon damage is read in exactly one place in world.js, and one in projectiles.js', () => {
+  const worldHits = worldCode.match(/w\.damage/g) || [];
+  assert.equal(worldHits.length, 1, `w.damage read at ${worldHits.length} sites in world.js; route them all through weaponDamage(p, w)`);
+
+  const projHits = projCode.match(/weapon\.damage/g) || [];
+  assert.equal(projHits.length, 1, `weapon.damage read at ${projHits.length} sites in projectiles.js; only spawn()'s damage ?? weapon.damage fallback should read it`);
 });
