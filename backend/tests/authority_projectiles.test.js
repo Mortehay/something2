@@ -47,12 +47,12 @@ test('step despawns a projectile on an unwalkable tile', () => {
   assert.equal(sim.count(), 0);
 });
 
-test('step hits a creature in range: damages it, returns killed id, despawns (pierce 1)', () => {
+test('step hits a creature in range: damages it, returns the killed creature credited to the owner, despawns (pierce 1)', () => {
   const sim = new ProjectileSim();
   sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 100 } });
   const creatures = creaturesStub([{ id: 'c1', x: 30, y: -24, width: 48, height: 48, hp: 10 }]); // center 54,0
   const out = sim.step(0.1, { creatures, players: [], map: WALK_ALL }); // moves to x=90 → passes center 54
-  assert.deepEqual(out.killedCreatureIds, ['c1']);
+  assert.deepEqual(out.kills, [{ id: 'c1', killerUserId: 'u1' }]);
   assert.equal(sim.count(), 0);
 });
 
@@ -82,7 +82,8 @@ test('pierce: a pierce-2 projectile hits two creatures before despawning', () =>
     { id: 'c2', x: 60, y: -24, width: 48, height: 48, hp: 10 },  // center 84,0
   ]);
   const out = sim.step(0.05, { creatures, players: [], map: WALK_ALL }); // x→100, passes both
-  assert.deepEqual(out.killedCreatureIds.sort(), ['c1', 'c2']);
+  assert.deepEqual(out.kills.map((k) => k.id).sort(), ['c1', 'c2']);
+  assert.ok(out.kills.every((k) => k.killerUserId === 'u1'), 'both kills must be credited to the shooter');
 });
 
 test('a projectile never hits the same target twice', () => {
@@ -169,15 +170,15 @@ test('AoE: a creature behind a wall is not damaged by the blast', () => {
   const blocked = { isWalkable: (x) => x < 30 || x > 55 };
   const out = sim.step(1, { creatures, players: [], map: blocked });
   assert.equal(c.hp, 100, 'blast damaged a creature through a wall');
-  assert.deepEqual(out.killedCreatureIds, []);
+  assert.deepEqual(out.kills, []);
 });
 
-test('AoE: a creature in radius with clear terrain is damaged by the blast', () => {
+test('AoE: a creature in radius with clear terrain is damaged by the blast, credited to the owner', () => {
   const sim = new ProjectileSim();
   sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, damage: 500 } });
   const c = mkCreature('c1', 60, 0);
   const out = sim.step(1, { creatures: creaturesStub([c]), players: [], map: WALK_ALL });
-  assert.deepEqual(out.killedCreatureIds, ['c1']);
+  assert.deepEqual(out.kills, [{ id: 'c1', killerUserId: 'u1' }]);
 });
 
 test('AoE: blast damage falls off with distance', () => {

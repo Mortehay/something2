@@ -60,12 +60,17 @@ const BURN_ELEMENT = 'fire';
 // implementations would drift the way melee and ranged line-of-sight drifted
 // before MAX_SUB was unified.
 //
-// `dealBurn(target, magnitude)` is the only thing that differs between the two
-// entity kinds, and it returns true when the target died: a player's burn
-// damage is applied in place and their death is left to resolveDeaths(), while
-// a creature's must go through the creature sim so the creature is removed
-// exactly once and its id can be reported to the caller for the death commit
-// (loot). Burn must not become a fourth way to die that skips that path.
+// `dealBurn(target, magnitude, sourceId)` is the only thing that differs
+// between the two entity kinds, and it returns true when the target died: a
+// player's burn damage is applied in place and their death is left to
+// resolveDeaths(), while a creature's must go through the creature sim so the
+// creature is removed exactly once and its id (plus the effect's sourceId,
+// i.e. whoever applied the burn) can be reported to the caller for the death
+// commit (loot, and — Task 6 — XP). Burn must not become a fourth way to die
+// that skips that path. `sourceId` is threaded straight from the effect
+// entry's own `sourceId` (see effects.js's applyEffect/tickEffects) — it is
+// NOT the currently-attacking player, which may have walked away or changed
+// entirely since the burn was applied.
 function stepEffects(target, dtMs, now, dealBurn) {
   let died = false;
   for (const ev of tickEffects(target, dtMs, now)) {
@@ -81,7 +86,7 @@ function stepEffects(target, dtMs, now, dealBurn) {
       continue;
     }
     if (ev.key !== BURN) continue;
-    if (dealBurn(target, ev.magnitude)) died = true;
+    if (dealBurn(target, ev.magnitude, ev.sourceId)) died = true;
   }
   // Chill RECOMPUTES the effective speed from a stored base every tick. It
   // must never multiply on apply and divide on expire: that accumulates float
@@ -210,19 +215,20 @@ class World {
   }
 
   // Advances the world clock, ticks status effects for every entity, then
-  // resolves movement. Returns the creature ids killed by a burn tick, in the
-  // same shape attack() and tickProjectiles() already use, so the caller can
-  // route them through the one creature death commit (loot + delete).
+  // resolves movement. Returns the creatures killed by a burn tick, in the
+  // same { kills } shape attack() and tickProjectiles() already use, so the
+  // caller can route them through the one creature death commit (loot + XP).
   tick(dt) {
     const dtMs = dt * 1000;
     this.now += dtMs;
-    const killedCreatureIds = [];
+    const kills = [];
 
     // Effects resolve BEFORE movement so a chill applied during this tick
     // slows THIS tick's movement rather than lagging a frame behind.
     for (const p of this.players.values()) {
       // A player killed by burn is deliberately left at hp<=0 for
-      // resolveDeaths(), the single player-death path.
+      // resolveDeaths(), the single player-death path. Player deaths never
+      // feed `kills` — that array is creature deaths only.
       stepEffects(p, dtMs, this.now, (t, m) => {
         applyDamageWithEffects(t, m, BURN_ELEMENT, t.mit || NO_MITIGATION, this.now);
         return false;
@@ -230,9 +236,12 @@ class World {
     }
     // Snapshot: damageCreatureById deletes from the live map on a kill.
     for (const c of this.creatures.all()) {
-      stepEffects(c, dtMs, this.now, (t, m) => {
+      stepEffects(c, dtMs, this.now, (t, m, sourceId) => {
         if (!this.creatures.damageCreatureById(t.id, m, BURN_ELEMENT, this.now)) return false;
-        killedCreatureIds.push(t.id);
+        // Normalized at construction: an effect applied with no sourceId
+        // (there is none today, but a future riderless path could) must
+        // report `null`, never `undefined`, so no consumer needs `?? null`.
+        kills.push({ id: t.id, killerUserId: sourceId ?? null });
         return true;
       });
     }
@@ -248,7 +257,7 @@ class World {
       if (f) p.facing = f;
       p.ackSeq = p.pendingSeq;
     }
-    return { killedCreatureIds };
+    return { kills };
   }
 
   // Tick creatures with the live players (aggro/chase/contact damage). Death
@@ -258,8 +267,9 @@ class World {
     // `this.now` is threaded through so contact damage reads the same clock
     // every other damage site does — a shocked player must take +25% from a
     // creature's bite too, not only from weapons.
-    const killedCreatureIds = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now);
-    return { killedCreatureIds: killedCreatureIds || [] };
+    const killedIds = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now) || [];
+    // A guard's kill has no player behind it — always null, never omitted.
+    return { kills: killedIds.map((id) => ({ id, killerUserId: null })) };
   }
 
   activeWeapon(userId) {
@@ -305,24 +315,25 @@ class World {
 
   // Attack in the aim direction with the equipped weapon. Melee resolves an arc
   // hit against creatures + other players; projectile spawns a mana-gated
-  // projectile. Returns killed creature ids for the caller to DELETE.
+  // projectile. Returns the killed creatures (id + killer) for the caller to
+  // DELETE and credit.
   attack(userId, ax, ay) {
     const p = this.players.get(userId);
-    if (!p || p._attackCd > 0) return { killedCreatureIds: [], attacks: [] };
+    if (!p || p._attackCd > 0) return { kills: [], attacks: [] };
     // Shock's interrupt. Checked alongside the cooldown and BEFORE any resource
     // is deducted or any cooldown is stamped, matching the existing rule that a
     // refused attack costs nothing: an interrupt that silently ate the mana or
     // started the cooldown would punish the player twice for one hit.
-    if (!canAct(p, this.now)) return { killedCreatureIds: [], attacks: [] };
+    if (!canAct(p, this.now)) return { kills: [], attacks: [] };
     const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
-    if (!w) return { killedCreatureIds: [], attacks: [] };
+    if (!w) return { kills: [], attacks: [] };
 
     const manaCost = w.mana_cost || 0;
     const staminaCost = w.stamina_cost || 0;
     // Both resources are checked BEFORE either is deducted, and a denied
     // attack does NOT consume the cooldown — matching mana's existing rule,
     // now covering the melee branch too (melee weapons can carry a cost).
-    if (p.mana < manaCost || p.stamina < staminaCost) return { killedCreatureIds: [], attacks: [] };
+    if (p.mana < manaCost || p.stamina < staminaCost) return { kills: [], attacks: [] };
 
     const { nx, ny } = normalizeAim(ax, ay, p.facing);
     const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
@@ -335,7 +346,9 @@ class World {
       // Queried BEFORE applyMeleeArc, which deletes whatever it kills: after
       // the fact a one-shot kill would look like a miss.
       const creatureTargets = this.creatures.meleeArcTargets(cx, cy, nx, ny, w.reach, w.arc_width);
-      const killed = this.creatures.applyMeleeArc(cx, cy, nx, ny, w.reach, w.arc_width, weaponDamage(p, w), w.element, this.now);
+      const killed = this.creatures.applyMeleeArc(
+        cx, cy, nx, ny, w.reach, w.arc_width, weaponDamage(p, w), w.element, this.now, userId,
+      );
       let playerHits = 0;
       for (const other of this.players.values()) {
         if (other.userId === userId) continue;
@@ -353,7 +366,10 @@ class World {
       // is derived, and the effect NAME is resolved on this side so the
       // client never needs the weapon catalog to draw the swing.
       return {
-        killedCreatureIds: killed,
+        // The attacker credited for every kill this swing made — attack()
+        // is the one channel where the killer is simply the method's own
+        // argument, no effect-sourceId or projectile-ownerId lookup needed.
+        kills: killed.map((id) => ({ id, killerUserId: userId })),
         attacks: [{
           a: `p:${userId}`,
           v: resolveEffectName(w, 'attack'),
@@ -375,13 +391,20 @@ class World {
     });
     applyAttackCooldown(p, w);
     // Projectiles already render as a moving dot; their trail effects are
-    // slice D, so slice A emits no descriptor for them.
-    return { killedCreatureIds: [], attacks: [] };
+    // slice D, so slice A emits no descriptor for them. A projectile never
+    // kills on the SAME tick it is fired — any kill it eventually scores is
+    // reported later, by tickProjectiles, credited to `p.ownerId` (this
+    // userId) rather than whoever is attacking when it lands.
+    return { kills: [], attacks: [] };
   }
 
-  // Returns the whole step result — { killedCreatureIds, detonations } — so
-  // AoE blasts reach the broadcast. Returning only the killed ids (as this
-  // used to) silently drops every detonation.
+  // Returns the whole step result — { kills, detonations } — so AoE blasts
+  // reach the broadcast. Returning only the kills (as this used to for ids)
+  // would silently drop every detonation. ProjectileSim.step() already
+  // builds `kills` as { id, killerUserId } objects, crediting each one to
+  // the projectile's OWN `ownerId` (captured at spawn, in `world.js`'s
+  // `attack()`) — never to whichever player happens to be attacking when the
+  // shot lands.
   tickProjectiles(dt) {
     return this.projectiles.step(dt, {
       creatures: this.creatures,

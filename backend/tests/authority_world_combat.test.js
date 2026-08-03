@@ -26,24 +26,26 @@ test('a player at <=0 hp respawns at spawn with full hp', () => {
   assert.equal(p.y, 500);
 });
 
-// attack() gained a weapon-catalog-driven arc + (userId, ax, ay) -> {killedCreatureIds}
-// shape in Task 5; these two pre-existing tests are updated to that API (armWorld()
-// is defined further down in this file — hoisted, safe to call here).
+// attack() gained a weapon-catalog-driven arc + (userId, ax, ay) -> { kills }
+// shape in Task 5 (kills was killedCreatureIds pre-Task-5, then Task 5 renamed
+// it to an array of { id, killerUserId } objects); these two pre-existing
+// tests are updated to that API (armWorld() is defined further down in this
+// file — hoisted, safe to call here).
 test('attack is cooldown-gated and kills an adjacent creature', () => {
   const w = armWorld();
   w.addPlayer('u1', { x: 100, y: 100 }); // center 132,132; default weapon = dagger (reach 80, arc 0.6)
   // Load a low-hp creature within the dagger's reach, aligned with due-east aim.
   w.creatures.addCreatures([{ id: 'x', type: 'Wolf', x: 150, y: 108, hp: 5, facing: 'S', color: '#c00' }]);
-  const killed = w.attack('u1', 1, 0).killedCreatureIds;
-  assert.deepEqual(killed, ['x']);
+  const killed = w.attack('u1', 1, 0).kills;
+  assert.deepEqual(killed, [{ id: 'x', killerUserId: 'u1' }]);
   // Immediate re-attack is on cooldown → no-op.
   w.creatures.addCreatures([{ id: 'y', type: 'Wolf', x: 150, y: 108, hp: 5, facing: 'S', color: '#c00' }]);
-  assert.deepEqual(w.attack('u1', 1, 0).killedCreatureIds, []);
+  assert.deepEqual(w.attack('u1', 1, 0).kills, []);
 });
 
 test('attack from an unknown player returns no kills', () => {
   const w = armWorld();
-  assert.deepEqual(w.attack('nobody', 1, 0).killedCreatureIds, []);
+  assert.deepEqual(w.attack('nobody', 1, 0).kills, []);
 });
 
 // Weapon catalog shared by this file's World combat tests.
@@ -80,8 +82,8 @@ test('melee attack hits creatures AND other players in the arc', () => {
   w.addPlayer('u1', { x: 100, y: 100 }, { items: [{ id: 'i2', typeId: 2 }], equipment: { main_hand: 'i2' } }); // center 132,132; halberd (reach 190, wide), damage 18
   w.addPlayer('u2', { x: 150, y: 100 });          // center 182,132 — east, within halberd reach
   w.creatures.addCreatures([{ id: 'c1', type: 'wolf', x: 150, y: 108, hp: 10, facing: 'S', color: '#f00' }]);
-  const { killedCreatureIds } = w.attack('u1', 1, 0); // aim east
-  assert.deepEqual(killedCreatureIds, ['c1']);     // c1 (hp 10) in-arc, killed by 18 dmg
+  const { kills } = w.attack('u1', 1, 0); // aim east
+  assert.deepEqual(kills, [{ id: 'c1', killerUserId: 'u1' }]);     // c1 (hp 10) in-arc, killed by 18 dmg
   assert.equal(w.getPlayer('u2').hp, w.getPlayer('u2').maxHp - 18); // u2 in-arc, took melee damage
 });
 
@@ -103,7 +105,7 @@ test('projectile attack with insufficient mana is denied, no cooldown consumed',
   assert.equal(w.snapshot().projectiles.length, 0);
   assert.equal(p.mana, 5);
   assert.equal(p._attackCd, 0);                    // not on cooldown → retryable
-  assert.deepEqual(out.killedCreatureIds, []);
+  assert.deepEqual(out.kills, []);
 });
 
 test('mana regenerates in tick up to max', () => {
@@ -129,7 +131,7 @@ test('resolveDeaths respawns a player at spawn with full hp+mana', () => {
   assert.equal(p.x, 500); assert.equal(p.y, 500);
 });
 
-test('tickProjectiles returns killed creature ids', () => {
+test('tickProjectiles returns killed creatures credited to the shooter', () => {
   const w = armWorld();
   w.addPlayer('u1', { x: 0, y: 0 }, { items: [{ id: 'i3', typeId: 3 }], equipment: { main_hand: 'i3' } }); // bow
   // Player at (0,0) → center (32,32); a bow projectile spawns there and flies
@@ -137,9 +139,9 @@ test('tickProjectiles returns killed creature ids', () => {
   w.creatures.addCreatures([{ id: 'c1', type: 'wolf', x: 40, y: 8, hp: 1, facing: 'S', color: '#f00' }]); // center 64,32
   w.attack('u1', 1, 0);                            // aim east from center (32,32)
   // Advance until the fast projectile reaches the creature.
-  let out = { killedCreatureIds: [], detonations: [] };
-  for (let i = 0; i < 20 && out.killedCreatureIds.length === 0; i++) out = w.tickProjectiles(0.02);
-  assert.deepEqual(out.killedCreatureIds, ['c1']);
+  let out = { kills: [], detonations: [] };
+  for (let i = 0; i < 20 && out.kills.length === 0; i++) out = w.tickProjectiles(0.02);
+  assert.deepEqual(out.kills, [{ id: 'c1', killerUserId: 'u1' }]);
   assert.deepEqual(out.detonations, [], 'a bow is not an AoE weapon');
 });
 
@@ -429,8 +431,8 @@ test('hit is true for a connected swing that kills nothing', () => {
   // against a player centred 132,132 aiming east), so an arc-geometry change
   // cannot be what makes this test go red.
   w.creatures.addCreatures([{ id: 'tough', type: 'Wolf', x: 150, y: 108, hp: 9999, facing: 'S', color: '#c00' }]);
-  const { killedCreatureIds, attacks } = w.attack('u1', 1, 0);
-  assert.deepEqual(killedCreatureIds, [], 'nothing died');
+  const { kills, attacks } = w.attack('u1', 1, 0);
+  assert.deepEqual(kills, [], 'nothing died');
   assert.equal(attacks[0].hit, true, 'a non-lethal connection is still a hit, not a whiff');
 });
 

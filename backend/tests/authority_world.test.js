@@ -229,7 +229,9 @@ test('a creature killed by a burn tick is REPORTED so it routes through the deat
     durationMs: 4000, magnitude: BURN_MAGNITUDE, now: 0,
   });
   const r = w.tick(BURN_TICK_MS / 1000);
-  assert.deepEqual(r.killedCreatureIds, ['c1'],
+  // No sourceId was passed to applyEffect above, so the killer is normalized
+  // to null — never undefined — same as a guard kill.
+  assert.deepEqual(r.kills, [{ id: 'c1', killerUserId: null }],
     'burn kills must be reported to the caller the way attack/tickProjectiles report theirs');
   assert.equal(w.creatures.has('c1'), false, 'the burn-killed creature was not removed');
 });
@@ -239,7 +241,7 @@ test('a burn tick that does not kill reports nothing', () => {
   const c = addCreature(w, { hp: 50 });
   applyEffect(c, BURN, { durationMs: 4000, magnitude: BURN_MAGNITUDE, now: 0 });
   const r = w.tick(BURN_TICK_MS / 1000);
-  assert.deepEqual(r.killedCreatureIds, []);
+  assert.deepEqual(r.kills, []);
   assert.equal(c.hp, 50 - BURN_MAGNITUDE);
 });
 

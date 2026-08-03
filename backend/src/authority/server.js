@@ -300,14 +300,30 @@ function attachAuthority(httpServer, pool, opts = {}) {
     return spawn;
   }
 
-  // Single fire-and-forget entry point for a killed creature id: named once
-  // here so both kill sites (melee attack handler, projectile tick) share the
-  // same options instead of repeating them. The tick loop must not await this
-  // (it's on the hot path), so the .catch is mandatory — an unhandled
-  // rejection here would kill the process.
-  const onCreatureDeath = (entry, id) =>
-    commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs })
+  // Single fire-and-forget entry point for a killed creature: named once here
+  // so every kill site (melee attack handler, burn tick, guard tick,
+  // projectile tick) shares the same options instead of repeating them. The
+  // tick loop must not await this (it's on the hot path), so the .catch is
+  // mandatory — an unhandled rejection here would kill the process.
+  // `killerUserId` is threaded straight through to commitCreatureDeath's own
+  // (currently unused — Task 6) parameter of the same name.
+  const onCreatureDeath = (entry, id, killerUserId) =>
+    commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
       .catch((err) => console.error('death commit failed:', err));
+
+  // Every kill channel now reports { id, killerUserId } objects rather than
+  // bare ids (Task 5), so the `new Set(...)` de-dup this file used everywhere
+  // is WRONG as of this refactor: Set dedupes by object IDENTITY, and no two
+  // kill objects are ever the same reference, so it would stop de-duping
+  // anything and let the same creature id reach commitCreatureDeath twice in
+  // one tick (e.g. a pierce-through projectile hit and an AoE detonation both
+  // finishing the same creature). De-dup by `id` explicitly instead, keeping
+  // the first killer credited for that id.
+  function dedupeKillsById(kills) {
+    const seen = new Map();
+    for (const k of kills) if (!seen.has(k.id)) seen.set(k.id, k);
+    return [...seen.values()];
+  }
 
   function send(ws, obj) {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
@@ -659,9 +675,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Ammo-free weapons (all melee, all staves, darts) keep the fully
       // synchronous path: no DB round trip on the hot path.
       if (gate.weapon.ammo_type_id == null) {
-        const { killedCreatureIds, attacks } = entry.world.attack(ws.userId, ax, ay);
+        const { kills, attacks } = entry.world.attack(ws.userId, ax, ay);
         pushAttacks(entry, attacks);
-        for (const id of new Set(killedCreatureIds)) onCreatureDeath(entry, id);
+        for (const k of dedupeKillsById(kills)) onCreatureDeath(entry, k.id, k.killerUserId);
         return;
       }
 
@@ -701,9 +717,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
           send(ws, { type: 'noammo', item_type_id: ammoTypeId }); // no cooldown consumed
           return;
         }
-        const { killedCreatureIds, attacks } = cur.world.attack(ws.userId, ax, ay);
+        const { kills, attacks } = cur.world.attack(ws.userId, ax, ay);
         pushAttacks(cur, attacks);
-        for (const id of new Set(killedCreatureIds)) onCreatureDeath(cur, id);
+        for (const k of dedupeKillsById(kills)) onCreatureDeath(cur, k.id, k.killerUserId);
         // The shot is already committed above (ammo spent, kills
         // resolved) — pushing the client its new count is best-effort on
         // top of that, not a condition of it. Isolated in its own
@@ -890,8 +906,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // tick is reported here and goes through the SAME death commit as a
       // melee or projectile kill — burn must not become a fourth way to die
       // that skips loot or deletes twice.
-      const { killedCreatureIds: killedByEffects } = entry.world.tick(dt);
-      for (const id of new Set(killedByEffects)) onCreatureDeath(entry, id);
+      const { kills: killedByEffects } = entry.world.tick(dt);
+      for (const k of dedupeKillsById(killedByEffects)) onCreatureDeath(entry, k.id, k.killerUserId);
       if (entry.links && entry.links.size > 0) {
         const now = Date.now();
         for (const p of entry.world.players.values()) {
@@ -924,10 +940,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // aggro/chase/contact damage + respawns (before state). Guard kills route
       // through onCreatureDeath like every other kill site, so the DELETE +
       // drop roll stay authoritative.
-      const { killedCreatureIds: killedByGuards } = entry.world.tickCreatures(dt, entry.activeChunks);
-      for (const id of new Set(killedByGuards)) onCreatureDeath(entry, id);
-      const { killedCreatureIds: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
-      for (const id of new Set(killedByProjectiles)) onCreatureDeath(entry, id);
+      const { kills: killedByGuards } = entry.world.tickCreatures(dt, entry.activeChunks);
+      for (const k of dedupeKillsById(killedByGuards)) onCreatureDeath(entry, k.id, k.killerUserId);
+      const { kills: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
+      for (const k of dedupeKillsById(killedByProjectiles)) onCreatureDeath(entry, k.id, k.killerUserId);
       // Stashed for this tick's broadcast (below). REPLACED, not appended, so
       // an unconsumed stash can never grow without bound.
       entry.pendingDetonations = detonations;

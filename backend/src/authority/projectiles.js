@@ -59,7 +59,12 @@ class ProjectileSim {
   //
   // The caster is exempt, matching the existing rule that a projectile never
   // collides with its owner — one rule, not two.
-  _detonate(p, bx, by, { creatureList, creatures, players, map, now }, killedCreatureIds) {
+  //
+  // `kills` accumulates { id, killerUserId } objects, not bare ids — every
+  // creature this blast finishes off is credited to `p.ownerId`, the
+  // projectile's OWN owner (captured once, at spawn), regardless of who is
+  // currently attacking when the shot actually lands.
+  _detonate(p, bx, by, { creatureList, creatures, players, map, now }, kills) {
     const r = p.aoeRadius;
     for (const c of creatureList) {
       const half = c.width / 2;
@@ -70,7 +75,7 @@ class ProjectileSim {
       // Falloff scales the RAW damage; the creature's own defense and
       // resistances are applied on top, inside damageCreatureById.
       if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r), p.element, now)) {
-        killedCreatureIds.push(c.id);
+        kills.push({ id: c.id, killerUserId: p.ownerId ?? null });
       }
       // The rider is applied at FULL duration: falloff scales damage only. A
       // target clipped by the blast edge still burns for the full time —
@@ -93,8 +98,10 @@ class ProjectileSim {
   }
 
   // Advance every projectile one tick; resolve terrain, creature, and player
-  // collisions. Returns the creature ids killed this step (for the caller to
-  // DELETE) and the AoE blasts that went off (for the caller to broadcast).
+  // collisions. Returns the creatures killed this step — as { id,
+  // killerUserId } objects, credited to each projectile's OWN `ownerId` (for
+  // the caller to DELETE and credit) — and the AoE blasts that went off (for
+  // the caller to broadcast).
   //
   // An AoE projectile detonates on its FIRST contact of ANY kind — terrain, a
   // creature, a player, or running out of range — instead of applying the
@@ -107,7 +114,7 @@ class ProjectileSim {
   // single end-of-tick position check would miss. `pierceLeft` starts at the
   // weapon's `pierce` (targets it can hit); it despawns once that reaches 0.
   step(dt, { creatures, players, map, now = 0 }) {
-    const killedCreatureIds = [];
+    const kills = [];
     const detonations = [];
     const survivors = [];
     const creatureList = creatures.all(); // hoisted: creatures don't move during this step
@@ -126,7 +133,7 @@ class ProjectileSim {
 
         // Terrain: walls stop projectiles.
         if (!map.isWalkable(p.x, p.y)) {
-          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, killedCreatureIds));
+          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, kills));
           dead = true; break;
         }
 
@@ -139,11 +146,13 @@ class ProjectileSim {
           const rr = p.radius + half;
           if (dist2(p.x, p.y, cx, cy) <= rr * rr) {
             if (p.aoeRadius) {
-              detonations.push(this._detonate(p, p.x, p.y, ctx, killedCreatureIds));
+              detonations.push(this._detonate(p, p.x, p.y, ctx, kills));
               dead = true; break;
             }
             p.hitIds.add(key);
-            if (creatures.damageCreatureById(c.id, p.damage, p.element, now)) killedCreatureIds.push(c.id);
+            if (creatures.damageCreatureById(c.id, p.damage, p.element, now)) {
+              kills.push({ id: c.id, killerUserId: p.ownerId ?? null });
+            }
             applyElementEffect(c, p.element, now, p.ownerId);
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
@@ -161,7 +170,7 @@ class ProjectileSim {
           const rr = p.radius + half;
           if (dist2(p.x, p.y, px, py) <= rr * rr) {
             if (p.aoeRadius) {
-              detonations.push(this._detonate(p, p.x, p.y, ctx, killedCreatureIds));
+              detonations.push(this._detonate(p, p.x, p.y, ctx, kills));
               dead = true; break;
             }
             p.hitIds.add(key);
@@ -176,7 +185,7 @@ class ProjectileSim {
         // Out of range counts as an impact: a fireball that reaches the end of
         // its flight without touching anything still explodes.
         if (p.remaining <= 0) {
-          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, killedCreatureIds));
+          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, kills));
           dead = true; break;
         }
       }
@@ -184,7 +193,7 @@ class ProjectileSim {
       if (!dead) survivors.push(p);
     }
     this.projectiles = survivors;
-    return { killedCreatureIds, detonations };
+    return { kills, detonations };
   }
 
   snapshot() {

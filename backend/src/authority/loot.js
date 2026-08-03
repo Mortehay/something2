@@ -44,7 +44,15 @@ function rollGold(range, rng = Math.random) {
 // sources reporting the same creature id in one tick cannot double-drop, and a
 // death that fails to persist drops nothing (so the DB never disagrees with
 // what players received). Any future kill site must route through here.
-async function commitCreatureDeath(pool, entry, creatureId, { rng = Math.random, ttlMs = 600000 } = {}) {
+//
+// `killerUserId` is accepted (every caller now has one to give, per-kill,
+// since Task 5 threaded it through every kill channel) but deliberately UNUSED
+// here — this task is pure plumbing, no XP. It exists so Task 6 can award XP
+// at this single commit point without a second signature change; it is `null`
+// for a kill with no responsible player (a guard, or a riderless effect).
+async function commitCreatureDeath(pool, entry, creatureId, {
+  rng = Math.random, ttlMs = 600000, killerUserId = null,
+} = {}) {
   const r = await pool.query(
     'DELETE FROM world_creatures WHERE id = $1 RETURNING type, x, y', [creatureId],
   );

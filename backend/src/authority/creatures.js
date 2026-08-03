@@ -338,7 +338,14 @@ class CreatureSim {
 
   // Melee arc: damage every creature whose center is within reach AND inside the
   // aim cone; remove + return the dead ids. (nx,ny) must be normalized.
-  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0) {
+  //
+  // `sourceId` (the attacking player's userId) is threaded into the element
+  // rider so a burn this swing applies later ticks with the RIGHT killer —
+  // see effects.js's `sourceId` field and world.js's `stepEffects`. Before
+  // Task 5 this call site passed no sourceId at all, so a creature that died
+  // to a melee-applied burn (rather than the swing itself) could never be
+  // attributed to anyone; this is that gap closed, not a new feature.
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null) {
     const killed = [];
     for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth)) {
       const c = this.creatures.get(id);
@@ -347,7 +354,7 @@ class CreatureSim {
       // The element's status rider is applied wherever the element already
       // deals damage — one call adjacent to each applyDamage, never a second
       // rider table.
-      applyElementEffect(c, element, now);
+      applyElementEffect(c, element, now, sourceId);
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
     }
