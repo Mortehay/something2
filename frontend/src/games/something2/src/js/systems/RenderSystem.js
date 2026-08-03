@@ -622,6 +622,24 @@ export class RenderSystem {
     if (e.maxHp && e.hp != null && e.hp < e.maxHp) {
       this._drawHpBar(drawX, drawY, w, e.hp, e.maxHp);
     }
+    // Level tag, above the sprite. Drawn for creatures only (decorations have
+    // no level) and only above 1, so a starter world stays visually quiet.
+    // Stroke-then-fill because the label sits over arbitrary terrain colours
+    // and plain white text vanishes on snow.
+    if (e.level > 1) {
+      this.ctx.save();
+      this.ctx.font = "bold 10px monospace";
+      this.ctx.textAlign = "center";
+      this.ctx.lineWidth = 3;
+      this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      this.ctx.fillStyle = "#ffd166";
+      const label = `L${e.level}`;
+      const lx = drawX + w / 2;
+      const ly = drawY - 4;
+      this.ctx.strokeText(label, lx, ly);
+      this.ctx.fillText(label, lx, ly);
+      this.ctx.restore();
+    }
     this._drawEffectPips(drawX, drawY, e.effects);
   }
 
