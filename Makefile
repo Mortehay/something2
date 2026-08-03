@@ -1,6 +1,7 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
-        redis-shell admin-password admin-password-rotate seed-catalogs seed-map
+        redis-shell admin-password admin-password-rotate seed-catalogs seed-map \
+        clear-maps list-maps reseed-map
 
 COMPOSE_FILE = compose/docker-compose.yml
 
@@ -97,3 +98,25 @@ seed-catalogs:
 seed-map:
 	@[ -n "$(SPEC)" ] || (echo "usage: make seed-map SPEC=<name>  (see: make list-maps)"; exit 1)
 	SPEC=$(SPEC) node backend/scripts/seed-map.js
+
+# Destructive. Deletes every world and everything cascading from it -- including
+# player_binds, every player's respawn point. Catalogs and inventory survive.
+clear-maps:
+	node backend/scripts/clear-maps.js
+
+# What specs exist, and what is currently in the database.
+list-maps:
+	node backend/scripts/list-maps.js
+
+# Full reset to one spec: clear, re-seed the catalogs, apply the map.
+#
+# NOT written as `reseed-map: clear-maps seed-catalogs seed-map` -- make runs
+# prerequisites to completion in order, so clear-maps would finish (destroying
+# every world) before seed-map's own "SPEC is required" guard ever ran,
+# leaving a bare database on a plain `make reseed-map`. The guard below runs
+# first, as this target's own recipe line, before anything destructive.
+reseed-map:
+	@[ -n "$(SPEC)" ] || (echo "usage: make reseed-map SPEC=<name>  (see: make list-maps)"; exit 1)
+	$(MAKE) clear-maps
+	$(MAKE) seed-catalogs
+	$(MAKE) seed-map SPEC=$(SPEC)
