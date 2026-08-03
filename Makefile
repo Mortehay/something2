@@ -113,10 +113,23 @@ list-maps:
 # NOT written as `reseed-map: clear-maps seed-catalogs seed-map` -- make runs
 # prerequisites to completion in order, so clear-maps would finish (destroying
 # every world) before seed-map's own "SPEC is required" guard ever ran,
-# leaving a bare database on a plain `make reseed-map`. The guard below runs
-# first, as this target's own recipe line, before anything destructive.
+# leaving a bare database on a plain `make reseed-map`. The guards below run
+# first, as this target's own recipe lines, before anything destructive.
+#
+# Two guards, not one: non-empty SPEC alone is not enough -- `make reseed-map
+# SPEC=hub-val` (typo) has a non-empty SPEC, would sail past that check, run
+# clear-maps to completion, and only THEN have seed-map discover the spec
+# file does not exist. That leaves an empty `worlds` table and no map applied.
+# Checking the file exists here, before clear-maps runs, is what actually
+# prevents the data loss -- seed-map's own existsSync check is too late to
+# help once this target is the one calling it.
+#
+# RESEED_SPEC (not SPEC) is passed through to clear-maps so it can name what
+# is about to be applied in its confirmation prompt, without the standalone
+# `make clear-maps` path (where RESEED_SPEC is unset) changing at all.
 reseed-map:
 	@[ -n "$(SPEC)" ] || (echo "usage: make reseed-map SPEC=<name>  (see: make list-maps)"; exit 1)
-	$(MAKE) clear-maps
+	@[ -f backend/seeds/maps/$(SPEC).map.json ] || (echo "no such spec: backend/seeds/maps/$(SPEC).map.json  (see: make list-maps)"; exit 1)
+	RESEED_SPEC=$(SPEC) $(MAKE) clear-maps
 	$(MAKE) seed-catalogs
 	$(MAKE) seed-map SPEC=$(SPEC)

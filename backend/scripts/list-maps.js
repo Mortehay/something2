@@ -12,15 +12,29 @@ const fs = require('fs');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
 
-function listSpecs() {
-  const dir = path.resolve(__dirname, '../seeds/maps');
-  return fs.readdirSync(dir)
-    .filter((f) => f.endsWith('.map.json'))
-    .map((f) => {
+// dir defaults to the real spec directory; overridable so tests can point
+// this at a fixture without touching backend/seeds/maps.
+//
+// One malformed file must not take down the whole command: a hand-edited
+// *.map.json with a JSON syntax error is the likeliest real trigger, and the
+// developer who broke it still needs to see every OTHER spec plus the
+// database listing below, not an unhandled rejection. Each entry is either
+// a parsed spec ({file, name, topology, worlds}) or an error record
+// ({file, error}) -- callers must check for `.error` before reading `.name`.
+function listSpecs(dir = path.resolve(__dirname, '../seeds/maps')) {
+  const specs = [];
+  const errors = [];
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.map.json'))) {
+    try {
       const spec = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-      return { file: f, name: spec.name, topology: spec.topology, worlds: spec.worlds.length };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+      specs.push({ file: f, name: spec.name, topology: spec.topology, worlds: spec.worlds.length });
+    } catch (err) {
+      errors.push({ file: f, error: err.message });
+    }
+  }
+  specs.sort((a, b) => a.name.localeCompare(b.name));
+  errors.sort((a, b) => a.file.localeCompare(b.file));
+  return [...specs, ...errors];
 }
 
 module.exports = { listSpecs };
@@ -30,7 +44,11 @@ if (require.main === module) {
     const specs = listSpecs();
     console.log('Available specs (backend/seeds/maps/*.map.json):');
     for (const s of specs) {
-      console.log(`  ${s.name}  (topology: ${s.topology}, ${s.worlds} worlds)  -- make seed-map SPEC=${s.name}`);
+      if (s.error) {
+        console.log(`  ${s.file}  -- MALFORMED, skipped (${s.error})`);
+      } else {
+        console.log(`  ${s.name}  (topology: ${s.topology}, ${s.worlds} worlds)  -- make seed-map SPEC=${s.name}`);
+      }
     }
 
     const env = dotenv.config({ path: path.resolve(__dirname, '../../.env') }).parsed || {};
@@ -54,5 +72,10 @@ if (require.main === module) {
     } finally {
       await pool.end().catch(() => {});
     }
-  })();
+  })()
+    // Backstop, matching clear-maps.js: listSpecs() is now defensive against
+    // a malformed spec (see above), but anything else unexpected -- readdir
+    // failing outright, a missing seeds/maps dir -- must still surface as a
+    // clean error+exit instead of an unhandled rejection.
+    .catch((e) => { console.error(e.message); process.exitCode = 1; });
 }
