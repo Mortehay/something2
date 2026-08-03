@@ -127,10 +127,19 @@ test('a joined player receives its neighborhood creatures and they roam', async 
 
 // The second half of the loader trap: loadCreatureTypes has its own guard
 // test, but the per-chunk world_creatures join is what actually feeds
-// CreatureSim.addCreatures. Dropping et.defense/et.resistances from it loads
-// them as undefined, every creature spawns with an inert `mit`, and every
-// maths test still passes. The fake pool ignores the SQL text, so assert on it.
-test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`', async () => {
+// CreatureSim.addCreatures. Dropping defense/resistances from it loads them
+// as undefined, every creature spawns with an inert `mit`; dropping
+// level/damage loads THOSE as undefined, and addCreatures' own fallbacks
+// silently reset every persisted creature to level 1 / CREATURE_DAMAGE. In
+// both cases every maths test still passes -- addCreatures is only ever fed
+// what the SELECT actually returns, never told what it should have asked
+// for. The fake pool ignores the SQL text, so assert on it directly.
+//
+// The four column names below must never appear inside the SELECT's own SQL
+// comments (server.js keeps that query's rationale as JS comments above the
+// template literal for exactly this reason) -- a name that shows up only in
+// a comment would satisfy this regex while the real column is gone.
+test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/level/damage', async () => {
   const sqls = [];
   const base = fakePool();
   const pool = withConnect({ query: async (sql, params) => { sqls.push(sql); return base.query(sql, params); } });
@@ -143,9 +152,9 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`', 
 
   const sel = sqls.find((s) => /SELECT/i.test(s) && /FROM world_creatures/i.test(s));
   assert.ok(sel, 'chunk activation must SELECT from world_creatures');
-  for (const col of ['defense', 'resistances']) {
+  for (const col of ['defense', 'resistances', 'level', 'damage']) {
     assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
-      `the world_creatures load must SELECT ${col} — without it every creature's mit is inert`);
+      `the world_creatures load must SELECT ${col} — without it every creature's mit/level/damage is wrong`);
   }
   ws.close(); handle.close(); server.close();
 });

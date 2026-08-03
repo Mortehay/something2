@@ -385,24 +385,32 @@ function attachAuthority(httpServer, pool, opts = {}) {
       }
 
       const span = N * 100;
+      // et.resistances feeds CreatureSim's `mit`; dropping it from this
+      // SELECT loads it as undefined and silently makes every creature
+      // resistance inert. et.faction/wc.home_x/wc.home_y are the same kind
+      // of column: drop them and guards silently revert to ordinary
+      // roaming hostiles with no anchor. wc.level/wc.damage are that kind
+      // of column too now: drop either and a spawned creature's level and
+      // per-instance damage silently fall back to 1 / CREATURE_DAMAGE.
+      //
+      // defense is COALESCEd, and ALIASED, for two separate reasons.
+      // Aliased because selecting wc.defense beside et.defense returns ONE
+      // "defense" key to node-postgres and the later column silently wins —
+      // the exact class of silent bug this comment warns about for the
+      // other columns above. COALESCEd because wc.defense is NULL for every
+      // creature that predates level scaling, and those must keep falling
+      // back to the entity type's base value.
+      //
+      // These rationale comments are deliberately kept OUTSIDE the query
+      // template literal (as JS `//` comments, not SQL `--` comments): this
+      // exact SELECT is guarded by a substring test
+      // (authority_creatures_integration.test.js) that scans the live SQL
+      // text for each column name. Writing the words "defense"/"level"/
+      // "damage" inside the string itself — even in a SQL comment — would
+      // make that guard pass whether or not the real column is still there.
       const rows = await pool.query(
-        // et.resistances feeds CreatureSim's `mit`; dropping it from this
-        // SELECT loads it as undefined and silently makes every creature
-        // resistance inert. et.faction/wc.home_x/wc.home_y are the same kind
-        // of column: drop them and guards silently revert to ordinary
-        // roaming hostiles with no anchor. wc.level/wc.damage are that kind
-        // of column too now: drop either and a spawned creature's level and
-        // per-instance damage silently fall back to 1 / CREATURE_DAMAGE.
         `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
                 wc.level, wc.damage,
-                -- COALESCE, and ALIASED, for two separate reasons. Aliased
-                -- because selecting wc.defense beside et.defense returns ONE
-                -- 'defense' key to node-postgres and the later column silently
-                -- wins -- the exact class of silent bug this comment used to
-                -- warn about for et.defense itself. COALESCE because
-                -- wc.defense is NULL for every creature that predates level
-                -- scaling, and those must keep falling back to the entity
-                -- type's base value.
                 COALESCE(wc.defense, et.defense) AS defense,
                 et.color, et.resistances, et.faction
          FROM world_creatures wc LEFT JOIN entity_types et ON et.name = wc.type

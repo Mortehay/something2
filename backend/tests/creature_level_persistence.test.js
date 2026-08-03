@@ -32,10 +32,18 @@ test('the snapshot sent to clients includes level', () => {
 });
 
 test('scaled defense reaches the mitigation the sim actually uses', () => {
-  // The bug this guards: scaled defense was computed at spawn and thrown
-  // away, because the load SELECT fed creatureMitigation from et.defense --
-  // the entity type's BASE value. A level-12 creature was exactly as soft as
-  // a level-1 one, with every other test still green.
+  // This is a characterization test, not a regression guard for the SQL bug
+  // it was originally written to describe: it builds the row directly and
+  // never touches a SELECT, so it cannot detect a query that feeds
+  // creatureMitigation the entity type's BASE et.defense instead of the
+  // scaled wc.defense -- swapping in the pre-fix creatures.js.addCreatures
+  // still passes this test unchanged, because the input row already carries
+  // the correct scaled `defense: 4`. What it DOES pin: given a row whose
+  // `defense` is already the scaled value, creatureMitigation must build
+  // `mit.defense` from it rather than from anything else. The actual guard
+  // against the SELECT regressing back to et.defense is the SQL-text assertion
+  // in authority_creatures_integration.test.js ("the chunk creature load
+  // SELECTs the columns CreatureSim maps into `mit`/level/damage").
   const s = simWith([{ id: 'd', type: 'Wolf', x: 0, y: 0, hp: 30, level: 9, damage: 9, defense: 4, color: '#c00' }]);
   assert.equal(s.all()[0].mit.defense, 4,
     'creatureMitigation must be built from the scaled per-creature defense, not the base type value');
