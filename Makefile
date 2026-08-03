@@ -1,12 +1,56 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map \
-        clear-maps list-maps reseed-map
+        clear-maps list-maps reseed-map dev dev-stop dev-status
 
 COMPOSE_FILE = compose/docker-compose.yml
+COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
 
 up:
 	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) up -d
+	@echo
+	@echo "Containers are up, but the app is NOT serving yet -- run 'make dev'."
+
+# The frontend/backend/engine images all end in `CMD ["tail","-f","/dev/null"]`
+# (compose/*.Dockerfile), so `make up` gives you idle containers with the
+# source bind-mounted and nothing listening on :15173 or :13101. That is
+# deliberate -- it lets you restart a dev server without bouncing the
+# container -- but the "now start the servers" half was never written down or
+# scripted, so it was done by hand and silently lost on every `make up`,
+# `make restart` and `make rebuild`. These three targets are that half.
+dev:
+	@echo "==> syncing dependencies (self-heals a stale node_modules volume)"
+	$(COMPOSE) exec -T backend npm install --no-audit --no-fund
+	$(COMPOSE) exec -T frontend npm install --no-audit --no-fund
+	@echo "==> starting dev servers"
+	@$(MAKE) --no-print-directory dev-stop
+	$(COMPOSE) exec -d backend npm run dev
+	$(COMPOSE) exec -d frontend npm run dev -- --host 0.0.0.0 --port 5173
+	@echo
+	@echo "frontend: http://localhost:15173    backend: http://localhost:13101"
+	@echo "check with 'make dev-status', follow output with 'make logs'."
+
+# `npm install` above is not busywork. Both services mount an ANONYMOUS volume
+# over /app/node_modules (compose/docker-compose.yml) purely to stop the host
+# checkout's node_modules from shadowing the image's. An anonymous volume is
+# populated once, when it is first created, and then survives `docker compose
+# build` and `up` untouched -- so adding a dependency to package.json and
+# rebuilding leaves the container running against the OLD tree. That is not
+# hypothetical: react-cytoscapejs, cytoscape and cytoscape-edgehandles were
+# all declared in frontend/package.json and all missing from the volume,
+# which fails at import time as a blank World Map tab rather than anything
+# that names a missing package.
+
+dev-stop:
+	@$(COMPOSE) exec -T backend sh -c 'pkill -f "nodemon src/index.js" || true' 2>/dev/null || true
+	@$(COMPOSE) exec -T frontend sh -c 'pkill -f "[v]ite" || true' 2>/dev/null || true
+
+# Reports what is actually LISTENING, not what make thinks it started: an
+# `exec -d` that dies a second later still exits 0, so a started-successfully
+# message from `make dev` proves nothing on its own.
+dev-status:
+	@printf 'backend  :13101  '; c=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:13101/api/health 2>/dev/null); [ "$$c" = "000" ] && echo "DOWN (nothing listening)" || echo "HTTP $$c"
+	@printf 'frontend :15173  '; c=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:15173/ 2>/dev/null); [ "$$c" = "000" ] && echo "DOWN (nothing listening)" || echo "HTTP $$c"
 
 down:
 	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) down --remove-orphans
