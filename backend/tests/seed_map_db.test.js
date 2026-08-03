@@ -233,7 +233,19 @@ test('a spec that fails validation writes nothing', async (t) => {
   } finally { await cleanup(pool); await pool.end(); }
 });
 
+// This test intentionally never tears down the data it seeds (see the note above
+// the test suite: the idempotency checks for hub-vale's village depend on state
+// persisting across runs). That is safe and desirable against a dedicated test
+// database, but unacceptable against a developer's working database (it stacks
+// worlds and flips is_entry to a different world than the developer had).
+// Other tests in this file clean up with cleanup() in a finally, so they are
+// safe against any database. This one must be gated: it only runs if
+// TEST_DATABASE_URL is explicitly set.
 test('every shipped spec applies cleanly', async (t) => {
+  if (!process.env.TEST_DATABASE_URL) {
+    t.skip('TEST_DATABASE_URL not set -- skipping to avoid mutating a real database (this test never tears down)');
+    return;
+  }
   const pool = await openPool();
   if (pool.unreachable) {
     const msg = `NO DATABASE at ${DB_URL} — shipped specs are UNVERIFIED`;
