@@ -1,20 +1,14 @@
 exports.shorthands = undefined;
 
-// Real on-screen sizes for the pre-existing decorations (they were seeded 0×0).
-const SIZE_FIXES = {
-  Tree: { w: 64, h: 96 },
-  Stone: { w: 48, h: 48 },
-  IceRock: { w: 48, h: 48 },
-};
-
-// New decoration types. image/sprite are left null — the user generates sprites
-// locally; each renders once its image exists, and is skipped (no hole) until then.
-const NEW_DECORATIONS = [
-  { name: 'bush',      is_creature: false, walkable: true,  render_mode: 'static', spawn_tiles: ['grass', 'highgrass'],        chance: 0.30, display_width: 40, display_height: 40, color: '#3a7d34' },
-  { name: 'rose_bush', is_creature: false, walkable: true,  render_mode: 'static', spawn_tiles: ['grass', 'highgrass'],        chance: 0.10, display_width: 40, display_height: 44, color: '#a83254' },
-  { name: 'pine_tree', is_creature: false, walkable: false, render_mode: 'static', spawn_tiles: ['leafs', 'grass', 'snow'],    chance: 0.30, display_width: 64, display_height: 104, color: '#1f5c2e' },
-  { name: 'dead_tree', is_creature: false, walkable: false, render_mode: 'static', spawn_tiles: ['earth', 'dirt', 'sand'],     chance: 0.15, display_width: 56, display_height: 92, color: '#6b5a45' },
-];
+// NEW_DECORATIONS moved to backend/seeds/data/decorationTypes.js so
+// `make seed-catalogs` and this migration cannot drift apart; both read it.
+// SIZE_FIXES lives there too but is exported from here for this migration's
+// own use ONLY — it is a one-time correction (see `down` below, which
+// reverts it back to 0x0), not an ongoing invariant, so the seeder must NOT
+// replay it: doing so would silently stomp an admin's hand-resized
+// decoration on every seed run. Migration behaviour is unchanged: the
+// arrays are byte-identical and migrations only ever run once.
+const { NEW_DECORATIONS, SIZE_FIXES } = require('../seeds/data/decorationTypes.js');
 
 exports.up = (pgm) => {
   for (const [name, { w, h }] of Object.entries(SIZE_FIXES)) {

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { STARTER_BIOMES } = require('../migrations/1714440043000_biomes.js');
+const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 
 // Terrain tile names that exist in the catalog (migrations 1714440002000,
 // 1714440027000, 1714440029000). A biome naming a tile outside this set would

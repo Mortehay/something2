@@ -1,0 +1,93 @@
+{
+  "name": "loop-catacombs",
+  "topology": "loop",
+  "worlds": [
+    {
+      "key": "entry",
+      "name": "Catacomb Threshold",
+      "grid": [0, 0],
+      "seed": 3001,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Meadow"], "biome_cell": 16,
+      "creature_count": 2,
+      "allowed_creature_types": ["Slime"],
+      "is_entry": true,
+      "entry_spawn": { "x": 3250, "y": 3250 }
+    },
+    {
+      "key": "crypt",
+      "name": "Sealed Mausoleum",
+      "grid": [-1, 0],
+      "seed": 3002,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Meadow"], "biome_cell": 16,
+      "creature_count": 3,
+      "allowed_creature_types": ["Slime"],
+      "is_entry": false
+    },
+    {
+      "key": "eastwing",
+      "name": "Sunken Eastwing",
+      "grid": [1, 0],
+      "seed": 3003,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Meadow", "Mire"], "biome_cell": 16,
+      "creature_count": 4,
+      "allowed_creature_types": ["Slime", "Bat"],
+      "is_entry": false
+    },
+    {
+      "key": "southwing",
+      "name": "Drowned Southwing",
+      "grid": [0, 1],
+      "seed": 3004,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Meadow", "Mire"], "biome_cell": 16,
+      "creature_count": 5,
+      "allowed_creature_types": ["Slime", "Bat"],
+      "is_entry": false
+    },
+    {
+      "key": "farhall",
+      "name": "Farrow Hall",
+      "grid": [2, 0],
+      "seed": 3005,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Mire"], "biome_cell": 16,
+      "creature_count": 6,
+      "allowed_creature_types": ["Slime", "Bat"],
+      "is_entry": false
+    },
+    {
+      "key": "deepvault",
+      "name": "Deepvault Row",
+      "grid": [1, 1],
+      "seed": 3006,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Mire"], "biome_cell": 16,
+      "creature_count": 6,
+      "allowed_creature_types": ["Slime", "Bat"],
+      "is_entry": false
+    },
+    {
+      "key": "heart",
+      "name": "Frozen Ossuary Heart",
+      "grid": [2, 1],
+      "seed": 3007,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Mire", "Frozen Waste"], "biome_cell": 16,
+      "creature_count": 9,
+      "allowed_creature_types": ["Bat", "Skeleton"],
+      "is_entry": false
+    }
+  ],
+  "links": [
+    { "from": "entry", "edge": "E", "to": "eastwing" },
+    { "from": "entry", "edge": "W", "to": "crypt" },
+    { "from": "eastwing", "edge": "E", "to": "farhall" },
+    { "from": "farhall", "edge": "S", "to": "heart" },
+    { "from": "heart", "edge": "W", "to": "deepvault" },
+    { "from": "deepvault", "edge": "W", "to": "southwing" },
+    { "from": "southwing", "edge": "N", "to": "entry" }
+  ]
+}

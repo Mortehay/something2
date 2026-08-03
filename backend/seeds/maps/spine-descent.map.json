@@ -1,0 +1,104 @@
+{
+  "name": "spine-descent",
+  "topology": "spine",
+  "worlds": [
+    {
+      "key": "entry",
+      "name": "Old Trailhead",
+      "grid": [0, 0],
+      "seed": 1001,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Meadow"], "biome_cell": 16,
+      "creature_count": 2,
+      "allowed_creature_types": ["Slime"],
+      "is_entry": true,
+      "entry_spawn": { "x": 3250, "y": 3250 }
+    },
+    {
+      "key": "pass",
+      "name": "Windwatch Pass",
+      "grid": [1, 0],
+      "seed": 1002,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Meadow", "Deep Forest"], "biome_cell": 16,
+      "creature_count": 3,
+      "allowed_creature_types": ["Slime", "Bat"],
+      "is_entry": false
+    },
+    {
+      "key": "cache",
+      "name": "Hollow Cache",
+      "grid": [1, -1],
+      "seed": 1003,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Deep Forest"], "biome_cell": 16,
+      "creature_count": 4,
+      "allowed_creature_types": ["Bat"],
+      "is_entry": false
+    },
+    {
+      "key": "elite",
+      "name": "Ashfang Den",
+      "grid": [1, 1],
+      "seed": 1004,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Deep Forest"], "biome_cell": 16,
+      "creature_count": 5,
+      "allowed_creature_types": ["Skeleton"],
+      "is_entry": false
+    },
+    {
+      "key": "gorge",
+      "name": "Shrikewind Gorge",
+      "grid": [2, 0],
+      "seed": 1005,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Deep Forest", "Frozen Waste"], "biome_cell": 16,
+      "creature_count": 5,
+      "allowed_creature_types": ["Bat", "Skeleton"],
+      "is_entry": false
+    },
+    {
+      "key": "shrine",
+      "name": "Frostbound Shrine",
+      "grid": [2, 1],
+      "seed": 1006,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Frozen Waste"], "biome_cell": 16,
+      "creature_count": 6,
+      "allowed_creature_types": ["Skeleton"],
+      "is_entry": false
+    },
+    {
+      "key": "deep",
+      "name": "The Deep Cut",
+      "grid": [3, 0],
+      "seed": 1007,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Frozen Waste"], "biome_cell": 16,
+      "creature_count": 7,
+      "allowed_creature_types": ["Bat", "Skeleton"],
+      "is_entry": false
+    },
+    {
+      "key": "end",
+      "name": "Glacier's End",
+      "grid": [4, 0],
+      "seed": 1008,
+      "width": 64, "height": 64, "chunk_size": 32,
+      "biomes": ["Frozen Waste"], "biome_cell": 16,
+      "creature_count": 9,
+      "allowed_creature_types": ["Skeleton"],
+      "is_entry": false
+    }
+  ],
+  "links": [
+    { "from": "entry", "edge": "E", "to": "pass" },
+    { "from": "pass", "edge": "N", "to": "cache" },
+    { "from": "pass", "edge": "S", "to": "elite" },
+    { "from": "pass", "edge": "E", "to": "gorge" },
+    { "from": "gorge", "edge": "S", "to": "shrine" },
+    { "from": "gorge", "edge": "E", "to": "deep" },
+    { "from": "deep", "edge": "E", "to": "end" }
+  ]
+}
