@@ -76,9 +76,19 @@ function hasCycle(spec) {
   return false;
 }
 
+// Present, not exhaustive: a new spec dropped in by an author is supposed to
+// be "covered automatically -- nothing to register" per
+// .claude/skills/map-planner/SKILL.md, which tells authors to validate with
+// `node --test tests/map_spec_fixtures.test.js`. An exact-set assertion here
+// would fail a fourth, unrelated, perfectly valid spec and name nothing to
+// do with the author's own work.
+const SHIPPED_EXAMPLES = ['hub-vale.map.json', 'loop-catacombs.map.json', 'spine-descent.map.json'];
+
 test('all three example topologies ship', () => {
-  assert.deepEqual(specFiles().sort(),
-    ['hub-vale.map.json', 'loop-catacombs.map.json', 'spine-descent.map.json']);
+  const files = specFiles();
+  for (const f of SHIPPED_EXAMPLES) {
+    assert.ok(files.includes(f), `expected shipped example ${f} to still be present`);
+  }
 });
 
 test('every shipped spec validates against the live catalogs', () => {
@@ -105,6 +115,13 @@ test('difficulty escalates with distance from the entry', () => {
       `${f}: the entry world should be the safest`);
 
     const dist = bfsDistances(spec);
+    // bfsDistances buckets a world unreachable from the entry under the key
+    // `undefined` (dist.get(w.key) returns undefined, never throws), and
+    // sorting a mixed undefined/number array yields NaN from the comparator,
+    // so ordering silently becomes unspecified instead of failing loudly.
+    // Pin the sibling-reachability guard here: if it's ever weakened, this
+    // turns a silent mis-bucket into a loud test failure.
+    assert.equal(dist.size, spec.worlds.length, `${f}: not every world is reachable from the entry`);
     const minByDistance = new Map();
     for (const w of spec.worlds) {
       const d = dist.get(w.key);

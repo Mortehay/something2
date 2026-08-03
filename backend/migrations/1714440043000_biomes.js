@@ -1,9 +1,8 @@
 exports.shorthands = undefined;
 
 // Data moved to backend/seeds/data/biomes.js so `make seed-catalogs` and this
-// migration cannot drift apart. Re-exported because biomes_seed.test.js and
-// the seeder both read it. Migration behaviour is unchanged: the array is
-// byte-identical and migrations only ever run once.
+// migration cannot drift apart. Migration behaviour is unchanged: the array
+// is byte-identical and migrations only ever run once.
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 
 exports.up = (pgm) => {
@@ -46,5 +45,3 @@ exports.down = (pgm) => {
   pgm.dropColumns('worlds', ['biomes', 'biome_cell']);
   pgm.dropTable('biomes');
 };
-
-exports.STARTER_BIOMES = STARTER_BIOMES;

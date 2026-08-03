@@ -64,7 +64,17 @@ if (require.main === module) {
       process.exitCode = 1;
       return;
     }
-    if (answer.trim() !== 'yes') { console.log('Aborted.'); return; }
+    if (answer.trim() !== 'yes') {
+      // A declined confirmation must exit non-zero: `make reseed-map` chains
+      // `clear-maps`, `seed-catalogs`, `seed-map` as sequential recipe lines
+      // and only stops on a non-zero exit. Exiting 0 here (as this used to)
+      // let a developer who read the destruction warning and typed anything
+      // but 'yes' fall straight through into seed-catalogs re-seeding and the
+      // spec being applied ON TOP of the worlds they meant to keep.
+      console.log('Aborted.');
+      process.exitCode = 1;
+      return;
+    }
 
     const n = await clearMaps(pool);
     console.log(`deleted ${n.worlds} worlds`);

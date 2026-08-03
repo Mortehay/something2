@@ -6,10 +6,21 @@ const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS, SIZE_FIXES } = require('../seeds/data/decorationTypes.js');
 
-// Skips without a database, FAILS under CI — same posture as
-// creature_drops_db.test.js. A skip reads like a pass; treat it as unknown.
+// Every test in this file calls seedCatalogs(pool), which does
+// `ON CONFLICT DO UPDATE` over all 15 tile_types and all 5 biomes -- this is
+// "the intended way to author catalog entries" per seed-catalogs.js's own
+// header, so a bare `npm test` that reached a developer's real dev database
+// would silently revert any catalog row an admin had hand-edited in the UI.
+// The 'hand-resized decoration' test below is worse: it writes 777x888 and
+// then restores from SIZE_FIXES (64x96) rather than from the value it read,
+// so a hand-resized Tree is lost outright, and an interrupted run leaves
+// Tree stuck at 777x888.
+//
+// This is the identical hazard already gated in seed_map_db.test.js -- same
+// ruling applies here: skip when TEST_DATABASE_URL is absent, and do NOT
+// fall back to DATABASE_URL. A bare `npm test` on a machine with a working
+// dev DATABASE_URL must never reach it.
 const DB_URL = process.env.TEST_DATABASE_URL
-  || process.env.DATABASE_URL
   || 'postgres://user:password@localhost:15432/game_db';
 
 async function openPool() {
@@ -18,7 +29,21 @@ async function openPool() {
   catch (err) { await pool.end().catch(() => {}); return { unreachable: err.message }; }
 }
 
+// Gate ABOVE the CI check, not below it -- see seed_map_db.test.js's "every
+// shipped spec applies cleanly" test for why: a CI environment that sets
+// DATABASE_URL but not TEST_DATABASE_URL must fail loudly here, not skip.
+function requireTestDb(t, why) {
+  if (!process.env.TEST_DATABASE_URL) {
+    const msg = `TEST_DATABASE_URL not set -- skipping to avoid mutating a real database (${why})`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return false;
+  }
+  return true;
+}
+
 test('seeding catalogs twice is a no-op the second time', async (t) => {
+  if (!requireTestDb(t, 'seedCatalogs upserts every tile_type row')) return;
   const pool = await openPool();
   if (pool.unreachable) {
     const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — catalog seeding is UNVERIFIED`;
@@ -39,6 +64,7 @@ test('seeding catalogs twice is a no-op the second time', async (t) => {
 });
 
 test('seeding does not delete a hand-added tile type', async (t) => {
+  if (!requireTestDb(t, 'seedCatalogs upserts every tile_type row')) return;
   const pool = await openPool();
   if (pool.unreachable) {
     const msg = `NO DATABASE at ${DB_URL} — hand-added-tile survival is UNVERIFIED`;
@@ -69,6 +95,7 @@ test('seeding does not delete a hand-added tile type', async (t) => {
 // value nothing in any seed file would ever produce, then asserts a seed run
 // leaves it alone.
 test('seeding does not revert a hand-resized decoration', async (t) => {
+  if (!requireTestDb(t, 'this test itself writes 777x888 into a real entity_types row before restoring it')) return;
   const pool = await openPool();
   if (pool.unreachable) {
     const msg = `NO DATABASE at ${DB_URL} — hand-resized-decoration survival is UNVERIFIED`;
@@ -103,6 +130,7 @@ test('seeding does not revert a hand-resized decoration', async (t) => {
 });
 
 test('seeding biomes twice is a no-op the second time', async (t) => {
+  if (!requireTestDb(t, 'seedCatalogs upserts every biome row')) return;
   const pool = await openPool();
   if (pool.unreachable) {
     const msg = `NO DATABASE at ${DB_URL} — biome seeding is UNVERIFIED`;
@@ -124,6 +152,7 @@ test('seeding biomes twice is a no-op the second time', async (t) => {
 });
 
 test('seeding does not delete a hand-added biome', async (t) => {
+  if (!requireTestDb(t, 'seedCatalogs upserts every biome row')) return;
   const pool = await openPool();
   if (pool.unreachable) {
     const msg = `NO DATABASE at ${DB_URL} — hand-added-biome survival is UNVERIFIED`;
@@ -146,6 +175,7 @@ test('seeding does not delete a hand-added biome', async (t) => {
 });
 
 test('seeding decorations twice is a no-op the second time', async (t) => {
+  if (!requireTestDb(t, 'seedCatalogs upserts every decoration entity_types row')) return;
   const pool = await openPool();
   if (pool.unreachable) {
     const msg = `NO DATABASE at ${DB_URL} — decoration seeding is UNVERIFIED`;
@@ -172,6 +202,7 @@ test('seeding decorations twice is a no-op the second time', async (t) => {
 });
 
 test('seeding does not delete a hand-added decoration', async (t) => {
+  if (!requireTestDb(t, 'seedCatalogs upserts every decoration entity_types row')) return;
   const pool = await openPool();
   if (pool.unreachable) {
     const msg = `NO DATABASE at ${DB_URL} — hand-added-decoration survival is UNVERIFIED`;

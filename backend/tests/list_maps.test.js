@@ -14,8 +14,12 @@ const { listSpecs } = require('../scripts/list-maps.js');
 
 test('listSpecs() returns all three shipped specs with name/topology/world-count', () => {
   const specs = listSpecs();
-  assert.equal(specs.length, 3);
-  assert.deepEqual(specs.map((s) => s.error), [undefined, undefined, undefined]);
+  // >= 3, not === 3: map-planner/SKILL.md tells authors a new spec is
+  // "covered automatically -- nothing to register", so a fourth valid spec
+  // an author drops in must not fail this test -- only a missing/broken
+  // shipped example should.
+  assert.ok(specs.length >= 3, `expected at least the 3 shipped specs, got ${specs.length}`);
+  assert.deepEqual(specs.filter((s) => s.error), [], 'no shipped spec should report an error');
 
   const byName = Object.fromEntries(specs.map((s) => [s.name, s]));
   assert.equal(byName['hub-vale'].topology, 'hub');

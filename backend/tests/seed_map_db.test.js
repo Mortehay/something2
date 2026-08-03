@@ -73,12 +73,15 @@ async function withEntryPreserved(pool, fn) {
   try {
     return await fn();
   } finally {
-    if (beforeId != null) {
-      await pool.query('UPDATE worlds SET is_entry = false WHERE is_entry = true AND id <> $1', [beforeId]);
-      await pool.query('UPDATE worlds SET is_entry = true WHERE id = $1', [beforeId]);
-    } else {
-      await pool.query('UPDATE worlds SET is_entry = false WHERE is_entry = true');
-    }
+    // Single atomic UPDATE, not two separate ones: a crash between "clear
+    // every is_entry" and "set it back on beforeId" used to be able to leave
+    // the database with ZERO entry worlds. COALESCE(id = $1, false) keeps
+    // the SET expression a plain boolean (never SQL NULL) when beforeId is
+    // null -- is_entry is NOT NULL, so assigning NULL would throw.
+    await pool.query(
+      'UPDATE worlds SET is_entry = COALESCE(id = $1, false) WHERE is_entry = true OR id = $1',
+      [beforeId],
+    );
   }
 }
 
@@ -242,8 +245,16 @@ test('a spec that fails validation writes nothing', async (t) => {
 // safe against any database. This one must be gated: it only runs if
 // TEST_DATABASE_URL is explicitly set.
 test('every shipped spec applies cleanly', async (t) => {
+  // Gate ABOVE the CI check, not below it: a CI environment that sets
+  // DATABASE_URL (so pool.unreachable would be false) but not
+  // TEST_DATABASE_URL must still fail loudly here, not skip. The old order
+  // returned via t.skip() before process.env.CI was ever consulted, so under
+  // that CI configuration the only end-to-end proof that shipped specs apply
+  // silently skipped instead of failing.
   if (!process.env.TEST_DATABASE_URL) {
-    t.skip('TEST_DATABASE_URL not set -- skipping to avoid mutating a real database (this test never tears down)');
+    const msg = 'TEST_DATABASE_URL not set -- skipping to avoid mutating a real database (this test never tears down)';
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
     return;
   }
   const pool = await openPool();
