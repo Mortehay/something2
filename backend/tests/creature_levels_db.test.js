@@ -68,7 +68,7 @@ test('existing creatures default to level 1 and damage 5', async (t) => {
         ORDER BY column_name`,
     );
     assert.equal(r.rowCount, 2, 'both columns must exist');
-    assert.match(r.rows[0].column_default, /5/);  // damage
-    assert.match(r.rows[1].column_default, /1/);  // level
+    assert.equal(r.rows[0].column_default, '5');  // damage
+    assert.equal(r.rows[1].column_default, '1');  // level
   } finally { await pool.end(); }
 });
