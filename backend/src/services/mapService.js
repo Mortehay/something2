@@ -1,3 +1,5 @@
+const { rollCreatureLevel, scaleCreature } = require('./creatureLevel');
+
 // generateWFC() (a wave-function-collapse generator driven by
 // tile_types.valid_neighbors) was removed here as dead code (F-010 /
 // SOMET-190): it had zero callers anywhere in the codebase outside its own
@@ -494,6 +496,14 @@ function collectPathCells(cfg, rMin, cMin, rows, cols) {
 const CREATURE_TILE_PX = 100;      // world px per tile (matches frontend MAP_TILE_SIZE)
 const CREATURE_SALT = 0x5eed1e;    // separate the creature roll from terrain fields
 const CREATURE_SPAWN_CHANCE = 0.01; // ~1% of tiles seed a creature (sparse)
+// A THIRD salt, distinct from both the spawn roll and the type pick. Reusing
+// either would tie a creature's level to its type or its existence, so every
+// Wolf in a chunk would share one level and the band would collapse.
+const LEVEL_SALT = 0x1e7e1;
+// The baseline a creature's damage scales from. Creature attack damage is
+// otherwise the flat CREATURE_DAMAGE constant in authority/creatures.js; this
+// mirrors it so an unscaled level-1 creature is byte-identical to today.
+const CREATURE_BASE_DAMAGE = 5;
 
 // Deterministic per-chunk creature spawn. Pure function of (seed, cx, cy,
 // creatureTypes). Each tile gets a seeded roll; a hit spawns a creature of a
@@ -513,15 +523,23 @@ function spawnChunkCreatures(world, cx, cy, creatureTypes) {
       // pick a type deterministically from a second hash
       const pick = hash2((cfg.seed ^ CREATURE_SALT) >>> 1, gCol, gRow);
       const t = creatureTypes[Math.min(creatureTypes.length - 1, Math.floor(pick * creatureTypes.length))];
+      const levelDraw = hash2(cfg.seed ^ LEVEL_SALT, gCol, gRow);
+      const level = rollCreatureLevel(levelDraw, world.levelMin, world.levelMax);
+      const scaled = scaleCreature(
+        { hp: t.hp || 10, damage: CREATURE_BASE_DAMAGE, defense: Number(t.defense ?? 0) || 0 },
+        level,
+      );
       out.push({
         type: t.name,
         x: gCol * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
         y: gRow * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
-        hp: t.hp || 10,
+        hp: scaled.hp,
+        damage: scaled.damage,
+        level,
         facing: 'S',
-        // Carried from the entity type so a spawned creature arrives with the
-        // data CreatureSim builds its `mit` from.
-        defense: Number(t.defense ?? 0) || 0,
+        // Scaled from the entity type's base defense so a spawned creature
+        // arrives with the data CreatureSim builds its `mit` from.
+        defense: scaled.defense,
         resistances: t.resistances || {},
       });
     }
@@ -565,13 +583,27 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
         : allowedTypes;
       if (candidates.length === 0) continue;
       const t = candidates[Math.floor(rng() * candidates.length)];
+      // Drawn from the same stream, immediately after the type pick, so the
+      // roll stays deterministic given rngSeed. NOTE: this consumes one extra
+      // draw per placed creature, which shifts the stream for everything after
+      // it. Creatures are persisted to world_creatures once at world creation,
+      // so already-seeded worlds are unaffected; a NEWLY seeded or re-rolled
+      // world will lay its creatures out differently than it would have before
+      // this change. That is expected and acceptable -- it is not a bug report.
+      const level = rollCreatureLevel(rng(), world.levelMin, world.levelMax);
+      const scaled = scaleCreature(
+        { hp: t.hp || 10, damage: CREATURE_BASE_DAMAGE, defense: Number(t.defense ?? 0) || 0 },
+        level,
+      );
       out.push({
         type: t.name,
         x: col * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
         y: row * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
-        hp: t.hp || 10,
+        hp: scaled.hp,
+        damage: scaled.damage,
+        level,
         facing: 'S',
-        defense: Number(t.defense ?? 0) || 0,
+        defense: scaled.defense,
         resistances: t.resistances || {},
       });
       break;

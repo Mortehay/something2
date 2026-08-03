@@ -430,9 +430,44 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ### Task 3: Roll levels in both spawn paths
 
+> **Plan correction, made after Task 2's review.** The original plan computed a
+> scaled `defense` in this task and then silently discarded it: Task 4's insert
+> did not persist it, and Task 4's SELECT fed `creatureMitigation` from
+> `et.defense` — the entity type's **base** value. A level-12 creature would
+> have been exactly as soft as a level-1 one while acceptance criterion 2
+> claimed defense scaled. Task 3 now carries a second migration, and Task 4
+> persists and reads the scaled value.
+
 **Files:**
+- Create: `backend/migrations/1714440051000_creature_defense.js`
 - Modify: `backend/src/services/mapService.js:502-530` (`spawnChunkCreatures`), `:537-581` (`placeMapCreatures`)
 - Test: `backend/tests/creature_spawn_levels.test.js`
+
+- [ ] **Step 0: Add the scaled-defense column**
+
+`backend/migrations/1714440051000_creature_defense.js`:
+
+```js
+exports.shorthands = undefined;
+
+exports.up = (pgm) => {
+  // NULLABLE with no default, deliberately. NULL means "this row predates
+  // level scaling -- fall back to the entity type's base defense", which is
+  // exactly today's behaviour, so existing creatures are untouched. A default
+  // of 0 would instead strip defense from every creature already in the world.
+  pgm.addColumns('world_creatures', {
+    defense: { type: 'real' },
+  });
+};
+
+exports.down = (pgm) => {
+  pgm.dropColumns('world_creatures', ['defense']);
+};
+```
+
+Apply it with `cd backend && npm run migrate:up` and confirm with
+`docker exec -i something2-db-1 psql -U user -d game_db -c "\d world_creatures" | grep defense`
+that the column is nullable (no `not null`, no default).
 
 **Interfaces:**
 - Consumes: `rollCreatureLevel`, `scaleCreature` from Task 2.
@@ -669,14 +704,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 4: Persist and load the level
 
 **Files:**
-- Modify: `backend/src/authority/server.js:363-374` (chunk spawn insert), `:390-395` (creature SELECT)
+- Modify: `backend/src/authority/server.js:363-374` (chunk spawn insert), `:390-395` (creature SELECT — now aliases a COALESCEd `defense`)
 - Modify: `backend/src/index.js:1726-1735` (admin re-roll insert)
 - Modify: `backend/src/authority/creatures.js:120-137` (`addCreatures`), `:276` (attack damage)
 - Test: `backend/tests/creature_level_persistence.test.js`
 
 **Interfaces:**
-- Consumes: spawn rows carrying `level` and `damage` from Task 3.
-- Produces: sim creatures carry `level` and `damage`; `CreatureSim` attacks for `c.damage`.
+- Consumes: spawn rows carrying `level`, `damage` and scaled `defense` from Task 3, and the `world_creatures.defense` column from Task 3 Step 0.
+- Produces: sim creatures carry `level`, `damage` and a scaled `defense`; `CreatureSim` attacks for `c.damage`, and `creatureMitigation` is built from the scaled defense.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -714,6 +749,25 @@ test('the snapshot sent to clients includes level', () => {
   const snap = s.snapshotForNeighborhood(['0,0']);
   assert.equal(snap.length, 1);
   assert.equal(snap[0].level, 6, 'the client cannot draw a level it was never sent');
+});
+
+test('scaled defense reaches the mitigation the sim actually uses', () => {
+  // The bug this guards: scaled defense was computed at spawn and thrown
+  // away, because the load SELECT fed creatureMitigation from et.defense --
+  // the entity type's BASE value. A level-12 creature was exactly as soft as
+  // a level-1 one, with every other test still green.
+  const s = simWith([{ id: 'd', type: 'Wolf', x: 0, y: 0, hp: 30, level: 9, damage: 9, defense: 4, color: '#c00' }]);
+  assert.equal(s.all()[0].mit.defense, 4,
+    'creatureMitigation must be built from the scaled per-creature defense, not the base type value');
+});
+
+test('a creature row with no defense still mitigates rather than crashing', () => {
+  // wc.defense is NULL for every creature predating level scaling; the SELECT
+  // COALESCEs it to the base, but a fixture or a missing entity type can still
+  // deliver undefined, and mit must never come back undefined -- applyDamage
+  // treats a missing mit as NO_MITIGATION, silently making resistances inert.
+  const s = simWith([{ id: 'e', type: 'Wolf', x: 0, y: 0, hp: 10, color: '#c00' }]);
+  assert.equal(s.all()[0].mit.defense, 0);
 });
 ```
 
@@ -757,9 +811,9 @@ In `backend/src/authority/server.js`, replace the insert at line 369-372:
 
 ```js
             await client.query(
-              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-              [entry.worldId, c.type, c.x, c.y, c.hp, c.facing, c.level, c.damage],
+              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+              [entry.worldId, c.type, c.x, c.y, c.hp, c.facing, c.level, c.damage, c.defense],
             );
 ```
 
@@ -768,19 +822,29 @@ Replace the SELECT at line 390-393 — the existing comment there already warns 
 ```js
         `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
                 wc.level, wc.damage,
-                et.color, et.defense, et.resistances, et.faction
+                -- COALESCE, and ALIASED, for two separate reasons. Aliased
+                -- because selecting wc.defense beside et.defense returns ONE
+                -- `defense` key to node-postgres and the later column silently
+                -- wins -- the exact class of silent bug this file's existing
+                -- comment warns about. COALESCE because wc.defense is NULL for
+                -- every creature that predates level scaling, and those must
+                -- keep falling back to the entity type's base value.
+                COALESCE(wc.defense, et.defense) AS defense,
+                et.color, et.resistances, et.faction
          FROM world_creatures wc LEFT JOIN entity_types et ON et.name = wc.type
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
 ```
 
+Note `et.defense` is gone from the select list — the aliased COALESCE replaces it, and `creatureMitigation` (`creatures.js:34`) reads `row.defense`, so it now receives the scaled value.
+
 In `backend/src/index.js`, replace the admin re-roll insert at line 1732:
 
 ```js
-              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 ```
 
-and extend its parameter array with `r.level, r.damage` (match the existing variable name at that call site — it is the loop variable over `placeMapCreatures`'s rows).
+and extend its parameter array with `r.level, r.damage, r.defense` (match the existing variable name at that call site — it is the loop variable over `placeMapCreatures`'s rows).
 
 - [ ] **Step 5: Verify the world row supplies the band**
 

@@ -65,7 +65,7 @@ test('snapshotForNeighborhood filters by current chunk and shape', () => {
   const snap = s.snapshotForNeighborhood(new Set(['0,0']));
   assert.equal(snap.length, 1);
   assert.equal(snap[0].id, 'near');
-  assert.deepEqual(Object.keys(snap[0]).sort(), ['color', 'facing', 'hp', 'id', 'maxHp', 'mode', 'type', 'x', 'y']);
+  assert.deepEqual(Object.keys(snap[0]).sort(), ['color', 'facing', 'hp', 'id', 'level', 'maxHp', 'mode', 'type', 'x', 'y']);
 });
 
 // --- Task 9: creature status effects reach the client ---

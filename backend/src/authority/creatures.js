@@ -126,6 +126,11 @@ class CreatureSim {
         width: CREATURE_SIZE, height: CREATURE_SIZE, speed: CREATURE_SPEED,
         facing: c.facing || 'S', hp: c.hp, maxHp: c.hp, color: c.color,
         mit: creatureMitigation(c),
+        // Persisted per instance (world_creatures.level/.damage), already
+        // scaled at spawn -- the sim never rescales. The fallbacks cover
+        // rows written before the level migration and unit-test fixtures.
+        level: Number.isInteger(c.level) ? c.level : 1,
+        damage: Number.isFinite(c.damage) ? Number(c.damage) : CREATURE_DAMAGE,
         _dir: dirIdx, dirty: false,
         faction: c.faction || 'hostile',
         home: (Number.isFinite(c.home_x) && Number.isFinite(c.home_y))
@@ -273,7 +278,7 @@ class CreatureSim {
         // to creatures for free, because it lives on the target.
         if (c._attackCd <= 0 && canAct(c, now)
             && dist2(cc.x, cc.y, tc.x, tc.y) <= CONTACT_RANGE * CONTACT_RANGE) {
-          applyDamageWithEffects(tp, CREATURE_DAMAGE, 'physical', tp.mit || NO_MITIGATION, now);
+          applyDamageWithEffects(tp, c.damage ?? CREATURE_DAMAGE, 'physical', tp.mit || NO_MITIGATION, now);
           c._attackCd = CREATURE_ATTACK_COOLDOWN;
         }
         continue;
@@ -410,7 +415,7 @@ class CreatureSim {
     for (const c of this.creatures.values()) {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (set.has(CHUNK_KEY(cx, cy))) {
-        const row = { id: c.id, type: c.type, x: c.x, y: c.y, facing: c.facing, hp: c.hp, maxHp: c.maxHp, mode: c.mode, color: c.color };
+        const row = { id: c.id, type: c.type, x: c.x, y: c.y, facing: c.facing, hp: c.hp, maxHp: c.maxHp, mode: c.mode, color: c.color, level: c.level };
         // Effect KEYS only, omitted when empty — same contract as the player
         // snapshot in world.js. Read on the client as `c.effects || []`.
         const fx = activeEffectKeys(c, now);

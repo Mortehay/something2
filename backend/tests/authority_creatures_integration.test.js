@@ -127,10 +127,19 @@ test('a joined player receives its neighborhood creatures and they roam', async 
 
 // The second half of the loader trap: loadCreatureTypes has its own guard
 // test, but the per-chunk world_creatures join is what actually feeds
-// CreatureSim.addCreatures. Dropping et.defense/et.resistances from it loads
-// them as undefined, every creature spawns with an inert `mit`, and every
-// maths test still passes. The fake pool ignores the SQL text, so assert on it.
-test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`', async () => {
+// CreatureSim.addCreatures. Dropping defense/resistances from it loads them
+// as undefined, every creature spawns with an inert `mit`; dropping
+// level/damage loads THOSE as undefined, and addCreatures' own fallbacks
+// silently reset every persisted creature to level 1 / CREATURE_DAMAGE. In
+// both cases every maths test still passes -- addCreatures is only ever fed
+// what the SELECT actually returns, never told what it should have asked
+// for. The fake pool ignores the SQL text, so assert on it directly.
+//
+// The four column names below must never appear inside the SELECT's own SQL
+// comments (server.js keeps that query's rationale as JS comments above the
+// template literal for exactly this reason) -- a name that shows up only in
+// a comment would satisfy this regex while the real column is gone.
+test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/level/damage', async () => {
   const sqls = [];
   const base = fakePool();
   const pool = withConnect({ query: async (sql, params) => { sqls.push(sql); return base.query(sql, params); } });
@@ -143,9 +152,30 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`', 
 
   const sel = sqls.find((s) => /SELECT/i.test(s) && /FROM world_creatures/i.test(s));
   assert.ok(sel, 'chunk activation must SELECT from world_creatures');
-  for (const col of ['defense', 'resistances']) {
+  // 'defense' is deliberately NOT in the generic word-list loop below: a bare
+  // \bdefense\b matches `et.defense` (the entity type's BASE defense) just as
+  // readily as it matches the real fix, so that check alone is satisfied by
+  // the exact regression this branch exists to prevent — a level-12 creature
+  // mitigating with the type's base defense (2) instead of its own scaled
+  // value (7.5). It is also satisfied by a weaker regression: keeping
+  // `wc.defense` but dropping the COALESCE wrapper, which sends every
+  // pre-migration creature (wc.defense IS NULL) into combat with defense 0
+  // instead of falling back to the entity type's base. Assert the exact
+  // shape instead: the per-creature value COALESCEd against the entity
+  // type's base and aliased back to `defense` (aliasing matters too — a bare
+  // `wc.defense, et.defense` pair returns one "defense" key to node-postgres
+  // and the later column silently wins).
+  assert.match(
+    sel,
+    /COALESCE\(\s*wc\.defense\s*,\s*et\.defense\s*\)\s+AS\s+defense/i,
+    'the world_creatures load must SELECT COALESCE(wc.defense, et.defense) AS defense — '
+    + 'selecting wc.defense or et.defense alone (with or without the alias) either loses '
+    + 'the per-creature scaled value or leaves pre-migration creatures (wc.defense IS NULL) '
+    + 'mitigating with 0 instead of the entity type\'s base',
+  );
+  for (const col of ['resistances', 'level', 'damage']) {
     assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
-      `the world_creatures load must SELECT ${col} — without it every creature's mit is inert`);
+      `the world_creatures load must SELECT ${col} — without it every creature's mit/level/damage is wrong`);
   }
   ws.close(); handle.close(); server.close();
 });

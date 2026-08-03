@@ -504,8 +504,10 @@ export class RenderSystem {
     const active = normalizeEffects(effects);
     if (active.length === 0) return;
     const size = 5, gap = 2;
-    // Sits above the HP bar's row (drawY - 8, height 4), so the two never
-    // overlap on an actor that is both damaged and affected.
+    // Sits above the HP bar's row (drawY - 8, height 4) and below the level
+    // tag's baseline (drawY - 18, ~drawY-26.5..drawY-18 for 12px bold
+    // monospace), so all three rows -- level tag, pips, HP bar -- stack
+    // without overlapping on an actor that is damaged, affected, AND leveled.
     const py = drawY - 16;
     this.ctx.save();
     active.forEach((key, i) => {
@@ -621,6 +623,24 @@ export class RenderSystem {
     // in renderChunked — see buildDrawables' "entity" kind).
     if (e.maxHp && e.hp != null && e.hp < e.maxHp) {
       this._drawHpBar(drawX, drawY, w, e.hp, e.maxHp);
+    }
+    // Level tag, above the sprite. Drawn for creatures only (decorations have
+    // no level) and only above 1, so a starter world stays visually quiet.
+    // Stroke-then-fill because the label sits over arbitrary terrain colours
+    // and plain white text vanishes on snow.
+    if (e.level > 1) {
+      this.ctx.save();
+      this.ctx.font = "bold 12px monospace";
+      this.ctx.textAlign = "center";
+      this.ctx.lineWidth = 2;
+      this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      this.ctx.fillStyle = "#ffd166";
+      const label = `L${e.level}`;
+      const lx = drawX + w / 2;
+      const ly = drawY - 18;
+      this.ctx.strokeText(label, lx, ly);
+      this.ctx.fillText(label, lx, ly);
+      this.ctx.restore();
     }
     this._drawEffectPips(drawX, drawY, e.effects);
   }

@@ -154,3 +154,46 @@ test('loop-catacombs actually contains a cycle', () => {
   const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, 'loop-catacombs.map.json'), 'utf8'));
   assert.ok(hasCycle(spec), 'no cycle: the loop topology does not close on the grid');
 });
+
+test('spine-descent escalates its level bands with depth', () => {
+  // The point of a spine is a difficulty ramp. Without this, a spec could
+  // declare bands that wander or flatten and every other test would still be
+  // green -- the same shape of hole that let a dangling creature reference
+  // survive in biomes_seed.test.js.
+  const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, 'spine-descent.map.json'), 'utf8'));
+  const banded = spec.worlds.filter((w) => w.level_band);
+  assert.ok(banded.length >= 4, 'spine-descent should band most of its worlds');
+
+  const dist = bfsDistances(spec);
+  // Compare per BFS tier, not adjacent pairs in a flat sorted-by-distance
+  // list: cache/elite/gorge all sit at distance 2, so a flat sort's relative
+  // order among them is just file order. Reordering those entries in the
+  // JSON is semantically meaningless and must not be able to trip this
+  // check. Group by tier instead and require each tier's minimum band floor
+  // to be >= the previous tier's -- mirroring the creature_count escalation
+  // test above, which has the same three-way tie at distance 2.
+  const minFloorByDistance = new Map();
+  for (const w of banded) {
+    const d = dist.get(w.key);
+    const prev = minFloorByDistance.get(d);
+    minFloorByDistance.set(d, prev === undefined ? w.level_band[0] : Math.min(prev, w.level_band[0]));
+  }
+  const orderedDistances = [...minFloorByDistance.keys()].sort((a, b) => a - b);
+  let prevFloor = -Infinity;
+  for (const d of orderedDistances) {
+    const floorAtD = minFloorByDistance.get(d);
+    assert.ok(floorAtD >= prevFloor,
+      `distance ${d}'s lowest band floor (${floorAtD}) is lower than a tier closer to the entry (${prevFloor})`);
+    prevFloor = floorAtD;
+  }
+
+  // "Meaningfully harder", kept from the original check: the deepest tier's
+  // toughest band ceiling must clear double the entry's ceiling.
+  const entryBand = banded.find((w) => dist.get(w.key) === 0).level_band;
+  const deepestDistance = Math.max(...orderedDistances);
+  const deepestMax = Math.max(
+    ...banded.filter((w) => dist.get(w.key) === deepestDistance).map((w) => w.level_band[1]),
+  );
+  assert.ok(deepestMax > entryBand[1] * 2,
+    'the deepest world should be meaningfully harder than the entry, not marginally');
+});
