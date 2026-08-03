@@ -51,6 +51,11 @@ test('the sell fraction is capped strictly below 1.0 at any charisma', () => {
 test('a malformed progression falls back to base rather than NaN', () => {
   const s = derivePlayerStats({});
   assert.equal(s.maxHp, 100);
+  assert.equal(s.maxMana, 100);
+  assert.equal(s.meleeMult, 1);
+  assert.equal(s.spellMult, 1);
+  assert.equal(s.cooldownMult, 1);
+  assert.equal(s.manaRegen, 10);
   assert.equal(s.priceMult, 0.5);
   assert.equal(derivePlayerStats(null).maxHp, 100);
   assert.equal(derivePlayerStats({ constitution: 'seven' }).maxHp, 100);
@@ -84,17 +89,29 @@ test('kill XP rewards a harder creature and decays to zero on a trivial one', ()
 });
 
 test('death costs progress into the level and never de-levels', () => {
-  assert.deepEqual(applyDeathPenalty(500, 3), { experience: 450, lost: 50 });
+  assert.deepStrictEqual(applyDeathPenalty(500, 3), { experience: 450, lost: 50 });
   // Exactly at the floor there is nothing to lose.
-  assert.deepEqual(applyDeathPenalty(300, 3), { experience: 300, lost: 0 });
+  assert.deepStrictEqual(applyDeathPenalty(300, 3), { experience: 300, lost: 0 });
   // The invariant, stated directly: for every level and every XP inside it,
-  // the result never falls below the level's floor.
+  // the result never falls below the level's floor. The floor used here is
+  // the closed form written out inline -- NOT a call into xpFloor -- so a bug
+  // confined to xpFloor cannot corrupt both the input and the expectation
+  // identically and cancel itself out. xpFloor is also checked directly
+  // against that same closed form for every level, because the >= invariant
+  // below is structurally unable to catch a floor that is too HIGH: the
+  // clamp in applyDeathPenalty guarantees out.experience >= whatever floor
+  // it was given, so an over-reporting xpFloor still trivially satisfies the
+  // inequality. Only a direct equality check on xpFloor's own output can
+  // catch that.
   for (let level = 1; level <= 50; level++) {
+    const expectedFloor = 50 * (level - 1) * level;
+    assert.equal(xpFloor(level), expectedFloor,
+      `xpFloor(${level}) diverged from the closed form: ${xpFloor(level)} !== ${expectedFloor}`);
     for (const offset of [0, 1, 7, 50, 999]) {
-      const xp = xpFloor(level) + offset;
+      const xp = expectedFloor + offset;
       const out = applyDeathPenalty(xp, level);
-      assert.ok(out.experience >= xpFloor(level),
-        `level ${level} +${offset} de-levelled: ${out.experience} < ${xpFloor(level)}`);
+      assert.ok(out.experience >= expectedFloor,
+        `level ${level} +${offset} de-levelled: ${out.experience} < ${expectedFloor}`);
     }
   }
 });
