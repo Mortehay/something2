@@ -51,6 +51,19 @@ test('a chasing creature deals contact damage on cooldown', () => {
   assert.equal(p.hp, 100 - 2 * CREATURE_DAMAGE, 'hit again after cooldown');
 });
 
+test('a chasing creature with a scaled per-instance damage deals THAT amount, not the flat constant', () => {
+  // Regression guard for the tick() attack path reverting to the flat
+  // CREATURE_DAMAGE constant instead of reading c.damage. A creature with no
+  // explicit damage (creatureAt above) falls back to CREATURE_DAMAGE either
+  // way, so every other contact-damage test in this file passes whether or
+  // not the per-creature read is wired up -- this is the one that would not.
+  const s = new CreatureSim(stubMap(), rng);
+  s.addCreatures([{ ...creatureAt('a', 100, 100), damage: 17.5 }]);
+  const p = player('u1', 110, 100);
+  s.tick(0.05, new Set(['0,0']), [p]); // acquire + first hit
+  assert.equal(p.hp, 100 - 17.5, 'took the creature\'s own scaled damage, not CREATURE_DAMAGE');
+});
+
 test('no player in aggro → creature roams (unchanged), no damage', () => {
   const s = new CreatureSim(stubMap(), rng);
   s.addCreatures([creatureAt('a', 100, 100)]);

@@ -220,7 +220,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     let pending = loading.get(worldId);
     if (!pending) {
       pending = (async () => {
-        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell FROM worlds WHERE id = $1', [worldId]);
+        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         // Postgres uuid input is case-insensitive and also accepts braced /
@@ -362,13 +362,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // wall ring.
         if (rowCount > 0 && entry.hostileCreatureTypes.length && !isBoundedWorld(entry.row)) {
           const spawned = spawnChunkCreatures(
-            { seed: Number(entry.row.seed), chunkSize: N, tileTypes: entry.tileTypes },
+            {
+              seed: Number(entry.row.seed), chunkSize: N, tileTypes: entry.tileTypes,
+              levelMin: entry.row.level_min, levelMax: entry.row.level_max,
+            },
             cx, cy, entry.hostileCreatureTypes,
           );
           for (const c of spawned) {
             await client.query(
-              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
-              [entry.worldId, c.type, c.x, c.y, c.hp, c.facing],
+              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+              [entry.worldId, c.type, c.x, c.y, c.hp, c.facing, c.level, c.damage, c.defense],
             );
           }
         }
@@ -382,13 +386,25 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
       const span = N * 100;
       const rows = await pool.query(
-        // et.defense/et.resistances feed CreatureSim's `mit`; dropping either
-        // from this SELECT loads it as undefined and silently makes every
-        // creature resistance inert. et.faction/wc.home_x/wc.home_y are the
-        // same kind of column: drop them and guards silently revert to
-        // ordinary roaming hostiles with no anchor.
+        // et.resistances feeds CreatureSim's `mit`; dropping it from this
+        // SELECT loads it as undefined and silently makes every creature
+        // resistance inert. et.faction/wc.home_x/wc.home_y are the same kind
+        // of column: drop them and guards silently revert to ordinary
+        // roaming hostiles with no anchor. wc.level/wc.damage are that kind
+        // of column too now: drop either and a spawned creature's level and
+        // per-instance damage silently fall back to 1 / CREATURE_DAMAGE.
         `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
-                et.color, et.defense, et.resistances, et.faction
+                wc.level, wc.damage,
+                -- COALESCE, and ALIASED, for two separate reasons. Aliased
+                -- because selecting wc.defense beside et.defense returns ONE
+                -- 'defense' key to node-postgres and the later column silently
+                -- wins -- the exact class of silent bug this comment used to
+                -- warn about for et.defense itself. COALESCE because
+                -- wc.defense is NULL for every creature that predates level
+                -- scaling, and those must keep falling back to the entity
+                -- type's base value.
+                COALESCE(wc.defense, et.defense) AS defense,
+                et.color, et.resistances, et.faction
          FROM world_creatures wc LEFT JOIN entity_types et ON et.name = wc.type
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],

@@ -6,6 +6,7 @@ const { worldConfig, generateRegion } = require('../src/services/mapService');
 const ROW = {
   id: 'w1', seed: '777', chunk_size: 16, width: 30, height: 30,
   entry_spawn: { x: 1500, y: 1500 }, biome_cell: null,
+  level_min: 3, level_max: 8,
 };
 const TILE_TYPES = {
   grass: { walkable: true, speed: 1 },
@@ -36,13 +37,29 @@ test('carries every field the generator reads', () => {
   const c = buildWorldGenConfig(cfgArgs());
   assert.deepEqual(Object.keys(c).sort(), [
     'biomeCell', 'biomes', 'chunkSize', 'doorways', 'entry_spawn',
-    'height', 'seed', 'tileTypes', 'villages', 'width',
+    'height', 'levelMax', 'levelMin', 'seed', 'tileTypes', 'villages', 'width',
   ]);
   assert.equal(c.chunkSize, 16);
   assert.equal(c.width, 30);
   assert.equal(c.height, 30);
   assert.deepEqual(c.entry_spawn, { x: 1500, y: 1500 });
   assert.deepEqual(c.biomes, BIOMES);
+});
+
+test('maps level_min/level_max to the levelMin/levelMax the spawn paths read', () => {
+  const c = buildWorldGenConfig(cfgArgs());
+  assert.equal(c.levelMin, 3);
+  assert.equal(c.levelMax, 8);
+});
+
+test('a row with no level band passes through as undefined, not defaulted', () => {
+  // rollCreatureLevel (creatureLevel.js) treats a non-integer band as "roll
+  // level 1" -- this module must not silently invent a band, just relay
+  // whatever the row has.
+  const { level_min, level_max, ...rowWithoutBand } = ROW;
+  const c = buildWorldGenConfig(cfgArgs({ row: rowWithoutBand }));
+  assert.strictEqual(c.levelMin, undefined);
+  assert.strictEqual(c.levelMax, undefined);
 });
 
 test('a null biome_cell reaches worldConfig as null so it derives from bounds', () => {

@@ -1729,8 +1729,9 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
           );
           for (const c of rows) {
             await client.query(
-              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing) VALUES ($1,$2,$3,$4,$5,$6)`,
-              [id, c.type, c.x, c.y, c.hp, c.facing],
+              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+              [id, c.type, c.x, c.y, c.hp, c.facing, c.level, c.damage, c.defense],
             );
           }
           placed = rows.length;
