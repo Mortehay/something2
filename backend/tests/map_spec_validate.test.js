@@ -132,6 +132,28 @@ test('rejects a world whose grid is not two integers', () => {
   assert.ok(errs.some((e) => /grid must be two integers/i.test(e)), errs.join('; '));
 });
 
+// validateMapSpec never checked world-level width/height at all: they are
+// nullable columns and seed-map.js passes w.width/w.height straight into the
+// INSERT with no `?? ` fallback (unlike chunk_size/creature_count right next
+// to it), so an omitted width/height used to pass this validator cleanly and
+// write NULL at seed time -- producing a world the World Map tab reports as
+// "not linkable" with no validator error to explain why. These three cover
+// the gap: missing width, missing height, non-integer width.
+test('rejects a world missing width', () => {
+  const errs = errorsFor((s) => { delete s.worlds[0].width; });
+  assert.ok(errs.some((e) => /world "a" width must be an integer/i.test(e)), errs.join('; '));
+});
+
+test('rejects a world missing height', () => {
+  const errs = errorsFor((s) => { delete s.worlds[0].height; });
+  assert.ok(errs.some((e) => /world "a" height must be an integer/i.test(e)), errs.join('; '));
+});
+
+test('rejects a non-integer width', () => {
+  const errs = errorsFor((s) => { s.worlds[0].width = 64.5; });
+  assert.ok(errs.some((e) => /world "a" width must be an integer/i.test(e)), errs.join('; '));
+});
+
 test('rejects a link with an edge letter outside N/E/S/W', () => {
   const errs = errorsFor((s) => { s.links[0].edge = 'NE'; });
   assert.ok(errs.some((e) => /invalid edge/i.test(e)), errs.join('; '));

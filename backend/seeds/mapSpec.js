@@ -66,6 +66,22 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     }
     cells.set(cell, w.key);
 
+    // Presence + integrality only -- NOT the admin API's 8-4096 range. That
+    // range belongs to POST /api/worlds (src/index.js) and is enforced there;
+    // duplicating it here would let this validator's numbers drift from the
+    // API's. Without even this much, `width`/`height` are nullable columns
+    // and seed-map.js passes w.width/w.height straight into the INSERT with
+    // no `?? ` fallback (unlike chunk_size/creature_count just below it in
+    // that file) -- an omitted width/height silently writes NULL, producing
+    // a world the World Map tab reports as "not linkable" with no validator
+    // error to explain why.
+    if (!Number.isInteger(w.width)) {
+      errors.push(`world "${w.key}" width must be an integer`);
+    }
+    if (!Number.isInteger(w.height)) {
+      errors.push(`world "${w.key}" height must be an integer`);
+    }
+
     if (w.village) {
       const v = w.village;
       if (!(v.width >= VILLAGE_LIMITS.minW && v.width <= VILLAGE_LIMITS.maxW)) {
