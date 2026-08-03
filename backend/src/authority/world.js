@@ -10,6 +10,7 @@ const {
 } = require('./effects');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
 const { GroundItemSim } = require('./groundItems');
+const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerStats.js');
 
 const PLAYER_W = 64;
 const PLAYER_H = 64;
@@ -20,8 +21,35 @@ const PLAYER_MANA_REGEN = 10; // per second
 const PLAYER_MAX_STAMINA = 100;
 const PLAYER_STAMINA_REGEN = 10; // per second
 
+// A level-1 (all-base-stat) character's derived bundle. playerStats.js
+// guarantees this is an identity on the pre-A2 constants above -- maxHp 100,
+// maxMana 100, manaRegen 10, x1.0 damage, x1.0 cooldown -- so a player who
+// joins with no progression behaves exactly as before A2.
+const BASE_STATS = derivePlayerStats(DEFAULT_PROGRESSION);
+
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function sign(v) { return v > 0.3 ? 1 : v < -0.3 ? -1 : 0; }
+
+// STR scales physical weapons, INT scales every other element. The split is
+// the weapon catalog's existing `element` column -- no new field, and it
+// gives the element system weight it currently lacks.
+//
+// Called at all THREE damage sites: melee-vs-creature, melee-vs-player, and
+// projectile spawn. The projectile takes its value once, at launch (see
+// projectiles.js `spawn`), so a respec mid-flight cannot change a shot
+// already in the air.
+function weaponDamage(p, w) {
+  const mult = (w.element && w.element !== 'physical') ? p.stats.spellMult : p.stats.meleeMult;
+  return w.damage * mult;
+}
+
+// The ONLY place the weapon's cooldown field is read. Both attack branches
+// (melee and projectile) call this; a test asserts the source contains
+// exactly one reference to that field so a third site cannot silently
+// reappear.
+function applyAttackCooldown(p, w) {
+  p._attackCd = w.cooldown * p.stats.cooldownMult;
+}
 
 // Burn is fire damage, so a fire resistance mitigates the DOT exactly as it
 // mitigates the hit that applied it. Routing it through applyDamage (rather
@@ -92,7 +120,13 @@ class World {
     this.now = 0;
   }
 
-  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0) {
+  // `stats` defaults to BASE_STATS (the level-1 identity bundle) so every
+  // existing caller -- tests included -- that doesn't pass one keeps
+  // behaving exactly as before A2. p.stats is NEVER optional past this
+  // point: every read site can assume it exists rather than falling back to
+  // a module constant, which is precisely how a missed call site would stay
+  // green.
+  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS) {
     this.players.set(userId, {
       userId,
       x: spawn.x,
@@ -108,10 +142,10 @@ class World {
       input: { dx: 0, dy: 0 },
       pendingSeq: 0,
       ackSeq: 0,
-      hp: PLAYER_MAX_HP,
-      maxHp: PLAYER_MAX_HP,
-      mana: PLAYER_MAX_MANA,
-      maxMana: PLAYER_MAX_MANA,
+      hp: stats.maxHp,
+      maxHp: stats.maxHp,
+      mana: stats.maxMana,
+      maxMana: stats.maxMana,
       stamina: PLAYER_MAX_STAMINA,
       maxStamina: PLAYER_MAX_STAMINA,
       inv,
@@ -128,7 +162,33 @@ class World {
       // it isn't instantly re-vacuumed. Manual pickup ignores this entirely.
       // See loot.js `dropGraceActive`.
       dropGrace: new Map(),
+      // The derived stat bundle this player is currently living with. Read at
+      // every damage, cooldown and regen site -- see weaponDamage,
+      // applyAttackCooldown and tick()'s mana-regen line.
+      stats,
     });
+  }
+
+  // Applies a NEW derived bundle to a live player. Deliberately distinct from
+  // addPlayer, which joins at full: here the current pools move by the DELTA.
+  //
+  // AC6 -- level-up must not heal to full. Raising max hp by D raises current
+  // hp by D. Healing to max would make levelling mid-fight a free full heal,
+  // and the optimal play would become hoarding a nearly-dead creature for
+  // emergencies.
+  applyDerivedStats(userId, stats) {
+    const p = this.players.get(userId);
+    if (!p) return { hpDelta: 0, manaDelta: 0 };
+    const hpDelta = stats.maxHp - p.maxHp;
+    const manaDelta = stats.maxMana - p.maxMana;
+    p.maxHp = stats.maxHp;
+    p.maxMana = stats.maxMana;
+    // Lower bound 1, not 0: a respec that shrinks CON must not kill the
+    // player it is being applied to.
+    p.hp = clamp(p.hp + hpDelta, 1, p.maxHp);
+    p.mana = clamp(p.mana + manaDelta, 0, p.maxMana);
+    p.stats = stats;
+    return { hpDelta, manaDelta };
   }
 
   removePlayer(userId) { this.players.delete(userId); }
@@ -179,7 +239,7 @@ class World {
 
     for (const p of this.players.values()) {
       if (p._attackCd > 0) p._attackCd = Math.max(0, p._attackCd - dt);
-      if (p.mana < p.maxMana) p.mana = Math.min(p.maxMana, p.mana + PLAYER_MANA_REGEN * dt);
+      if (p.mana < p.maxMana) p.mana = Math.min(p.maxMana, p.mana + p.stats.manaRegen * dt);
       if (p.stamina < p.maxStamina) p.stamina = Math.min(p.maxStamina, p.stamina + PLAYER_STAMINA_REGEN * dt);
       const r = resolveMove(this.map, p, p.input.dx, p.input.dy, dt);
       p.x = r.x;
@@ -275,19 +335,19 @@ class World {
       // Queried BEFORE applyMeleeArc, which deletes whatever it kills: after
       // the fact a one-shot kill would look like a miss.
       const creatureTargets = this.creatures.meleeArcTargets(cx, cy, nx, ny, w.reach, w.arc_width);
-      const killed = this.creatures.applyMeleeArc(cx, cy, nx, ny, w.reach, w.arc_width, w.damage, w.element, this.now);
+      const killed = this.creatures.applyMeleeArc(cx, cy, nx, ny, w.reach, w.arc_width, weaponDamage(p, w), w.element, this.now);
       let playerHits = 0;
       for (const other of this.players.values()) {
         if (other.userId === userId) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
         if (inArc(cx, cy, nx, ny, ocx, ocy, w.reach, w.arc_width)
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
-          applyDamageWithEffects(other, w.damage, w.element, other.mit || NO_MITIGATION, this.now);
+          applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION, this.now);
           applyElementEffect(other, w.element, this.now, userId);
           playerHits++;
         }
       }
-      p._attackCd = w.cooldown;
+      applyAttackCooldown(p, w);
       // The descriptor exposes facts this method already computed — the aim
       // vector, the attacker's centre, the catalog's reach/arc. Nothing here
       // is derived, and the effect NAME is resolved on this side so the
@@ -310,8 +370,10 @@ class World {
     if (f) p.facing = f;
     if (manaCost) p.mana -= manaCost;
     if (staminaCost) p.stamina -= staminaCost;
-    this.projectiles.spawn({ ownerId: userId, x: cx, y: cy, nx, ny, weapon: w });
-    p._attackCd = w.cooldown;
+    this.projectiles.spawn({
+      ownerId: userId, x: cx, y: cy, nx, ny, weapon: w, damage: weaponDamage(p, w),
+    });
+    applyAttackCooldown(p, w);
     // Projectiles already render as a moving dot; their trail effects are
     // slice D, so slice A emits no descriptor for them.
     return { killedCreatureIds: [], attacks: [] };
@@ -371,4 +433,5 @@ module.exports = {
   PLAYER_MAX_HP,
   PLAYER_MAX_MANA, PLAYER_MANA_REGEN,
   PLAYER_MAX_STAMINA, PLAYER_STAMINA_REGEN,
+  weaponDamage, applyAttackCooldown, BASE_STATS,
 };

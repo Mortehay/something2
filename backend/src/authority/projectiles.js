@@ -21,7 +21,14 @@ class ProjectileSim {
     this._id = 0;
   }
 
-  spawn({ ownerId, x, y, nx, ny, weapon }) {
+  // `damage` is an explicit snapshot taken by the caller (weaponDamage(p, w)
+  // in world.js), not recomputed from `weapon` here. A projectile already in
+  // flight must not change damage because its owner respecced mid-flight --
+  // falls back to weapon.damage so callers that don't pass one (existing
+  // tests, stub weapons) are unaffected.
+  spawn({
+    ownerId, x, y, nx, ny, weapon, damage,
+  }) {
     const id = String(++this._id);
     this.projectiles.push({
       id,
@@ -30,7 +37,7 @@ class ProjectileSim {
       vx: nx * weapon.projectile_speed,
       vy: ny * weapon.projectile_speed,
       remaining: weapon.range,
-      damage: weapon.damage,
+      damage: damage ?? weapon.damage,
       radius: weapon.projectile_radius,
       pierceLeft: weapon.pierce,
       // null = today's point-collision projectile, unchanged. Normalized here

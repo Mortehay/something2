@@ -5,6 +5,8 @@ const { currentUserForToken } = require('../auth/tokens.js');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
+const { loadProgression } = require('../services/progressionStore.js');
+const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
 const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
@@ -592,6 +594,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
         const gr = await pool.query('SELECT gold FROM users WHERE id = $1', [ws.userId]);
         const gold = gr.rows.length ? Number(gr.rows[0].gold) || 0 : 0;
+        const progression = await loadProgression(pool, ws.userId);
+        const stats = derivePlayerStats(progression);
 
         // A newer session for this same account may have won (and kicked
         // us) while we awaited inventory above. If so, our reservation was
@@ -608,7 +612,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
 
         ws.worldId = entry.worldId; // canonical (F-014), not the client's raw spelling
-        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold);
+        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats);
         if (spawn.viaDoorway) {
           const p = entry.world.getPlayer(ws.userId);
           if (p) p._doorwayCdUntil = Date.now() + 1500;
@@ -624,6 +628,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // assumption about what addPlayer currently does.
           autoLoot: entry.world.getPlayer(ws.userId).autoLoot,
           gold,
+          progression,
           merchants: (entry.villages || [])
             .filter((v) => v.merchantX != null && v.merchantY != null)
             .map((v) => ({ villageId: v.id, x: v.merchantX, y: v.merchantY })),
