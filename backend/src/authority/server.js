@@ -305,10 +305,50 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // projectile tick) shares the same options instead of repeating them. The
   // tick loop must not await this (it's on the hot path), so the .catch is
   // mandatory — an unhandled rejection here would kill the process.
-  // `killerUserId` is threaded straight through to commitCreatureDeath's own
-  // (currently unused — Task 6) parameter of the same name.
+  // `killerUserId` is threaded straight through to commitCreatureDeath, which
+  // returns `null` when the rowCount gate refused (already finalized
+  // elsewhere) or `{ awarded, leveledUp, newLevel, progression, killerUserId
+  // }` when it committed the death. This is where the DB-level XP award
+  // becomes a LIVE consequence: without moving the session's pools here, a
+  // level-up would raise max HP in the database and nothing in the running
+  // game (the exact defect A1's review caught).
   const onCreatureDeath = (entry, id, killerUserId) =>
     commitCreatureDeath(pool, entry, id, { rng, ttlMs: groundItemTtlMs, killerUserId })
+      .then((result) => {
+        if (!result || result.killerUserId == null) return; // no commit, or no player to credit
+        const { progression, leveledUp, newLevel, awarded } = result;
+        if (leveledUp) {
+          const p = entry.world.getPlayer(result.killerUserId);
+          // Guard against reviving a player who is CURRENTLY sitting at
+          // hp <= 0 awaiting the tick loop's resolveDeaths(). applyDerivedStats
+          // clamps current hp to a floor of 1 unconditionally, so calling it
+          // on a dying player would cancel their death.
+          //
+          // This is reachable, not hypothetical: world.attack()'s melee
+          // branch deals PvP damage directly (no toggle gates it) from the
+          // synchronous `attack` message handler, which never calls
+          // resolveDeaths() itself — only the tick loop does, once per tick,
+          // after every kill site for that tick has run. A player dropped to
+          // <=0 hp by that PvP hit stays at <=0 hp until the NEXT tick's
+          // resolveDeaths(), and this promise (an async DB round trip) can
+          // resolve inside that window. Because JS never preempts a running
+          // synchronous block, this callback can only ever run BETWEEN ticks
+          // — never mid-tick — so a player killed by this tick's OWN
+          // creature/projectile damage is already respawned (resolveDeaths
+          // always finishes before the tick's synchronous body yields). The
+          // PvP path is the one gap that check does not cover, hence this
+          // guard rather than relying on tick timing alone.
+          if (p && p.hp > 0) {
+            entry.world.applyDerivedStats(result.killerUserId, derivePlayerStats(progression));
+          }
+        }
+        // Best-effort: the killer's socket may be gone (disconnected between
+        // the kill and this commit finishing) — entry.sockets.get returns
+        // undefined and send() itself no-ops on a non-OPEN socket, so this
+        // never throws either way.
+        const sock = entry.sockets.get(result.killerUserId);
+        if (sock) send(sock, { type: 'progression', progression, leveledUp, newLevel, awarded });
+      })
       .catch((err) => console.error('death commit failed:', err));
 
   // Every kill channel now reports { id, killerUserId } objects rather than

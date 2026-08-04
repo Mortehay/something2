@@ -2,6 +2,8 @@
 // test; the caller supplies the rows and performs the INSERTs.
 
 const { CREATURE_SIZE } = require('./creatures');
+const { awardXp, loadProgression } = require('../services/progressionStore.js');
+const { xpForKill } = require('../services/playerStats.js');
 
 // Upper bound on a single row's rolled quantity. The DB only constrains
 // min_qty <= max_qty (CHECK (min_qty >= 1 AND max_qty >= min_qty)) — nothing
@@ -40,24 +42,76 @@ function rollGold(range, rng = Math.random) {
 }
 
 // The single authoritative creature-death commit. rowCount === 1 means THIS
-// call finalized the death, which is what licenses the drop roll: two damage
-// sources reporting the same creature id in one tick cannot double-drop, and a
-// death that fails to persist drops nothing (so the DB never disagrees with
-// what players received). Any future kill site must route through here.
+// call finalized the death, which is what licenses the drop roll AND the XP
+// award: two damage sources reporting the same creature id in one tick cannot
+// double-drop or double-pay, and a death that fails to persist grants nothing
+// (so the DB never disagrees with what players received). Any future kill
+// site must route through here.
 //
-// `killerUserId` is accepted (every caller now has one to give, per-kill,
-// since Task 5 threaded it through every kill channel) but deliberately UNUSED
-// here — this task is pure plumbing, no XP. It exists so Task 6 can award XP
-// at this single commit point without a second signature change; it is `null`
-// for a kill with no responsible player (a guard, or a riderless effect).
+// Runs the DELETE, the XP award and the drop roll in ONE transaction — a
+// checked-out client, not the bare pool — so all three stand or fall
+// together. `awardXp` takes a `SELECT ... FOR UPDATE` row lock that only
+// serializes concurrent awards for the same player when it runs inside a
+// real transaction (see progressionStore.js); calling it on the bare pool
+// would silently lose that guarantee.
+//
+// `killerUserId` is `null` for a kill with no responsible player (a guard, or
+// a riderless effect) — the XP branch is skipped entirely for those, not
+// just zeroed, so a guard kill issues no player_progression queries at all.
+//
+// Returns `null` when the rowCount gate refuses (already finalized elsewhere,
+// or the id never existed) — the caller must not treat that as "awarded
+// nothing to a real kill", it means no kill was committed here at all.
+// Otherwise returns `{ awarded, leveledUp, newLevel, progression,
+// killerUserId }`, which server.js's onCreatureDeath uses to move the live
+// player's pools (on level-up) and push a wire update to their socket.
 async function commitCreatureDeath(pool, entry, creatureId, {
   rng = Math.random, ttlMs = 600000, killerUserId = null,
 } = {}) {
-  const r = await pool.query(
-    'DELETE FROM world_creatures WHERE id = $1 RETURNING type, x, y', [creatureId],
-  );
-  if (r.rowCount !== 1) return;
-  await spawnDrops(pool, entry, r.rows[0], { rng, ttlMs });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await client.query(
+      'DELETE FROM world_creatures WHERE id = $1 RETURNING type, x, y, level', [creatureId],
+    );
+    if (r.rowCount !== 1) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const dead = r.rows[0];
+
+    let progression = null;
+    let leveledUp = false;
+    let newLevel = null;
+    let awarded = 0;
+    if (killerUserId != null) {
+      // Read BEFORE awardXp so the kill's XP is scaled by the killer's level
+      // AT THIS MOMENT, not a value awardXp happens to re-derive. This is an
+      // unlocked read (awardXp takes its own locked read right after, inside
+      // the same transaction) — a small duplication forced by awardXp's
+      // fixed signature (amount in, not creature level + player level), not
+      // a correctness gap: the actual write is still serialized by awardXp's
+      // own row lock.
+      const before = await loadProgression(client, killerUserId);
+      const amount = xpForKill(Number(dead.level) || 1, before.level);
+      const award = await awardXp(client, killerUserId, amount, 'kill');
+      progression = award.progression;
+      leveledUp = award.leveledUp;
+      newLevel = award.newLevel;
+      awarded = award.awarded;
+    }
+
+    await spawnDrops(client, entry, dead, { rng, ttlMs });
+    await client.query('COMMIT');
+    return {
+      awarded, leveledUp, newLevel, progression, killerUserId,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000 } = {}) {

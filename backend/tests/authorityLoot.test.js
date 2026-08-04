@@ -5,18 +5,27 @@ const { commitCreatureDeath, claimItem, dropItem, dropGraceActive, DROP_GRACE_MS
 
 // Routes queries by SQL pattern and records every call, so a test can assert
 // that a query NEVER ran — which is the point of the rowCount guard.
+//
+// `.connect()` proxies straight back to the same routed `query` fn (mirrors
+// authority_combat_integration.test.js's `withConnect`): commitCreatureDeath
+// now runs its DELETE/XP-award/drop-roll inside one client-owned transaction,
+// so every test here needs a checked-out "client", not just a bare pool.
+// None of these tests assert on BEGIN/COMMIT/ROLLBACK, so a proxy is a
+// faithful stand-in.
 function scriptedPool(routes = []) {
   const calls = [];
+  const query = async (sql, params) => {
+    calls.push({ sql, params });
+    for (const [re, result] of routes) {
+      if (re.test(sql)) return typeof result === 'function' ? result(params) : result;
+    }
+    return { rows: [], rowCount: 0 };
+  };
   return {
     calls,
     matching(re) { return calls.filter((c) => re.test(c.sql)); },
-    query: async (sql, params) => {
-      calls.push({ sql, params });
-      for (const [re, result] of routes) {
-        if (re.test(sql)) return typeof result === 'function' ? result(params) : result;
-      }
-      return { rows: [], rowCount: 0 };
-    },
+    query,
+    connect: async () => ({ query, release: () => {} }),
   };
 }
 

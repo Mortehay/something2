@@ -142,9 +142,37 @@ function fakePoolWithBow() {
   const rawDeletes = [];    // any other DELETE FROM world_creatures (e.g. a reverted raw query)
   const dropQueries = [];   // creature_drops lookups (only the funnel issues these)
   const itemInserts = [];   // world_items inserts spawned by the drop roll
+  // commitCreatureDeath now awards XP inside the same transaction (Task 6),
+  // so a real kill against this pool reaches player_progression too. A tiny
+  // in-memory row (lazily created, mirroring loadProgression's lazy INSERT)
+  // is enough to keep awardXp's real read/compute/write logic running
+  // truthfully against this fake instead of crashing on an unmocked table —
+  // this test isn't about progression, so the row starts and stays at
+  // level 1 (the killed wolf has no `level` in its RETURNING row either, so
+  // xpForKill falls back to creature level 1 against player level 1).
+  const progression = new Map();
+  function progressionRow(userId) {
+    if (!progression.has(userId)) {
+      progression.set(userId, {
+        user_id: userId, experience: 0, level: 1, stat_points: 0,
+        strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
+      });
+    }
+    return progression.get(userId);
+  }
   return withConnect({
     deletes, rawDeletes, dropQueries, itemInserts,
     query: async (sql, params) => {
+      if (/^\s*INSERT INTO player_progression/i.test(sql)) { progressionRow(params[0]); return { rows: [], rowCount: 0 }; }
+      if (/^\s*UPDATE player_progression/i.test(sql)) {
+        const row = progressionRow(params[0]);
+        row.experience = Number(params[1]); row.level = Number(params[2]); row.stat_points += Number(params[3]) || 0;
+        return { rows: [{ ...row, experience: String(row.experience) }], rowCount: 1 };
+      }
+      if (/FROM player_progression/i.test(sql)) {
+        const row = progressionRow(params[0]);
+        return { rows: [{ ...row, experience: String(row.experience) }], rowCount: 1 };
+      }
       if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] }; // matches token()'s tv:1 → passes the on-connect version check
       if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
