@@ -6,8 +6,14 @@ const { buyStock, sellItem } = require('../src/authority/trade');
 function mkEntry(player, worldId = 'w1') {
   return { worldId, world: { getPlayer: () => player } };
 }
+// stats.priceMult 0.5 is the pre-A2 SELL_FRACTION default (a base-charisma
+// character's derivePlayerStats output) -- p.stats is never optional past
+// world.js's addPlayer (see its comment there), and sellItem now reads
+// p.stats.priceMult, so this fixture must carry it like a real live player
+// would.
 const PLAYER = () => ({ userId: 1, gold: 100, x: 0, y: 0, width: 64, height: 64,
-  inv: { items: [{ id: 'i1', typeId: 3, quantity: 1 }], equipment: {} } });
+  inv: { items: [{ id: 'i1', typeId: 3, quantity: 1 }], equipment: {} },
+  stats: { priceMult: 0.5 } });
 
 // Builds a mock pool whose `connect()` returns a fake client that records
 // BEGIN/COMMIT/ROLLBACK alongside the statements routed to `handlers`.

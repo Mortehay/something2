@@ -112,7 +112,11 @@ async function sellItem(pool, entry, userId, villageId, itemId) {
 
     const vr = await client.query('SELECT value FROM item_types WHERE id = $1', [itemTypeId]);
     const value = vr.rows.length ? Number(vr.rows[0].value) || 0 : 0;
-    const price = sellPriceFor(value);
+    // The SELLER's own priceMult, never the default and never another
+    // player's -- p was resolved from userId above, so this is the same
+    // player the DELETE just proved owns the item. See progressionConstants
+    // .js SELL_FRACTION_MAX for why this can never reach or exceed 1.0.
+    const price = sellPriceFor(value, p.stats.priceMult);
 
     const gr = await client.query(
       'UPDATE users SET gold = gold + $2 WHERE id = $1 RETURNING gold',

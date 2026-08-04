@@ -5,9 +5,16 @@
 const SELL_FRACTION = 0.5;
 const BUYBACK_DAYS = 3;
 
-function sellPriceFor(value) {
+// priceMult defaults to SELL_FRACTION so every existing caller (and the
+// merchantStock.test.js literals) keeps behaving exactly as before A2.
+// Charisma raises what the seller's OWN sale pays out (see trade.js
+// sellItem); it is never a second, independent fraction -- priceMult IS the
+// fraction, just supplied by playerStats.js instead of the module default.
+function sellPriceFor(value, priceMult = SELL_FRACTION) {
   const v = Number(value) || 0;
-  return Math.max(0, Math.floor(v * SELL_FRACTION));
+  const m = Number(priceMult);
+  const frac = Number.isFinite(m) ? m : SELL_FRACTION;
+  return Math.max(0, Math.floor(v * frac));
 }
 
 function mapRow(r) {
