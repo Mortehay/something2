@@ -435,6 +435,23 @@ export class Game {
         return { progression: this.progression, gold: this.gold };
     }
 
+    // Write-through cache update (SOMET-242 D1 fix). CharacterSheet.jsx calls
+    // this right after a successful allocate/respec HTTP response -- that
+    // response body IS the new authoritative row (and, for respec, the new
+    // gold balance), so this just keeps Game's own copy in sync with it.
+    //
+    // Without this, an allocate/respec never touched this.progression/this.gold
+    // at all (they only otherwise change via the websocket onJoined/
+    // onProgression/onWallet handlers), so the NEXT getProgressionSnapshot()
+    // poll kept echoing the pre-mutation row straight back at the sheet --
+    // which silently reverted the panel to its old values a few hundred ms
+    // after a successful, already-persisted spend (D1: "the sheet does not
+    // refresh after a successful allocation").
+    applyProgressionResult({ progression, gold } = {}) {
+        if (progression) this.progression = progression;
+        if (typeof gold === 'number') this.gold = gold;
+    }
+
     destroy() {
         if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
         if (this._keydownHandler) window.removeEventListener('keydown', this._keydownHandler);

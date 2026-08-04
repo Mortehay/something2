@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { xpProgress, respecDisabled, progressionChanged, STAT_KEYS } from '../../../CharacterSheet.jsx';
+import { xpProgress, respecDisabled, progressionChanged, applyMutationResponse, STAT_KEYS } from '../../../CharacterSheet.jsx';
 import { fetchProgression, allocateStat, respec } from '../net/progressionClient.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -88,6 +88,51 @@ describe('progressionChanged', () => {
 
   it('is false when there is no next snapshot yet', () => {
     expect(progressionChanged(p1, null)).toBe(false);
+  });
+});
+
+// D1 regression guard: "the sheet does not refresh after a successful
+// allocation" -- reproduced by the browser pass as three CON allocate clicks
+// (5 -> 8) against a starting "Unspent points: 6", where the panel kept
+// showing CON 5 / 6 points seconds after the DB and the API response both
+// already reflected CON 8 / 3 points. This pins the literal values from that
+// exact repro: given the prior displayed progression and the allocate
+// response the client actually received, the next value must show the new
+// stat and the new unspent count -- not a recomputation of the same numbers,
+// the literal 8 and 3 from the report.
+describe('applyMutationResponse (D1: apply the allocate/respec response to sheet state)', () => {
+  const prev = {
+    level: 1, experience: 0, stat_points: 6,
+    strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
+  };
+
+  it('an allocate response replaces the stale stat and unspent count', () => {
+    const response = {
+      progression: { ...prev, constitution: 8, stat_points: 3 },
+      stats: { maxHp: 130 },
+    };
+    const next = applyMutationResponse(prev, response);
+    expect(next.constitution).toBe(8);
+    expect(next.stat_points).toBe(3);
+  });
+
+  it('a respec response replaces every stat back to base and refunds points', () => {
+    const allocated = { ...prev, constitution: 8, stat_points: 3 };
+    const response = {
+      progression: {
+        level: 1, experience: 0, stat_points: 9,
+        strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
+      },
+      gold: 50,
+    };
+    const next = applyMutationResponse(allocated, response);
+    expect(next.constitution).toBe(5);
+    expect(next.stat_points).toBe(9);
+  });
+
+  it('falls back to the previous value when the response carries no progression (e.g. a rejected request)', () => {
+    expect(applyMutationResponse(prev, { error: 'not enough points' })).toBe(prev);
+    expect(applyMutationResponse(prev, null)).toBe(prev);
   });
 });
 
@@ -177,5 +222,32 @@ describe('CharacterSheet keyboard toggle (source-text, not behavioural)', () => 
 
   it("source-text: the toggle guard does not also fire on 'm' (the minimap's key)", () => {
     expect(source).not.toMatch(/e\.key\.toLowerCase\(\)\s*!==\s*'m'/);
+  });
+});
+
+// SOURCE-TEXT ONLY, same caveat as above. D2 was "the sheet completely
+// occludes the HUD" -- the canvas-drawn HP/MP/SP/Gold block sits at the
+// canvas's own top-left corner, and the panel used to be pinned to
+// top:20/left:20 too. This only proves the CSS declarations changed to a
+// different corner; it cannot prove the two no longer visually overlap on a
+// real, possibly letterboxed canvas (canvas-pixel space and this panel's
+// CSS-px space are not the same coordinate system -- see the D2 fix commit
+// for why). Placement was ultimately confirmed correct by the coordinator in
+// the browser, not by this or any other automated test.
+describe('CharacterSheet placement (source-text, not behavioural)', () => {
+  const source = readFileSync(
+    fileURLToPath(new URL('../../../CharacterSheet.jsx', import.meta.url)), 'utf8',
+  );
+
+  it('source-text: the panel is anchored to the bottom, not the top, of the play area', () => {
+    const frameBlock = source.slice(source.indexOf('const Frame = styled.div`'), source.indexOf('const Header'));
+    expect(frameBlock).toMatch(/bottom:\s*20px/);
+    expect(frameBlock).not.toMatch(/\btop:\s*20px/);
+  });
+
+  it('source-text: the collapsed show-button is anchored to the same corner as the panel', () => {
+    const showBlock = source.slice(source.indexOf('const ShowButton = styled.button`'), source.indexOf('const BarTrack'));
+    expect(showBlock).toMatch(/bottom:\s*20px/);
+    expect(showBlock).not.toMatch(/\btop:\s*20px/);
   });
 });

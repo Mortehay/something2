@@ -82,9 +82,32 @@ export function progressionChanged(prev, next) {
   return PROGRESSION_FIELDS.some((k) => prev[k] !== next[k]);
 }
 
+// SOMET-242 D1 fix. The allocate/respec POST response body already carries
+// the new authoritative row -- this just picks it out. `response.progression`
+// unconditionally wins over `prevProgression` (an HTTP 200 here IS the new
+// truth; there is nothing to compare it against). Extracted as a pure
+// function so the "does a successful mutation actually change what's
+// displayed" half of D1 is directly testable without mounting the component.
+//
+// On its own this is not the whole fix: see Game.applyProgressionResult
+// below for the other half (keeping Game's own cache in sync so the live
+// poll doesn't echo the pre-mutation row straight back over this).
+export function applyMutationResponse(prevProgression, response) {
+  return (response && response.progression) ? response.progression : prevProgression;
+}
+
+// SOMET-242 D2 fix: this used to sit at top:20/left:20, directly on top of
+// RenderSystem's canvas-drawn HUD block (HP/MP/SP/Gold/Weapon/[i] Inventory
+// hint), which is ALSO pinned to the canvas's top-left corner -- opening the
+// sheet hid the player's own HP bar, including mid-combat. Top-right is
+// already claimed by the fullscreen toggle, Minimap and the How-to-play
+// button (GameView.jsx, all right:16 at various `top`s). Bottom-left is the
+// one corner nothing else -- canvas-drawn or DOM -- occupies: the toast is
+// bottom-CENTER only, and the inventory/shop panels are centered and only
+// visible while open.
 const Frame = styled.div`
   position: absolute;
-  top: 20px;
+  bottom: 20px;
   left: 20px;
   z-index: 20;
   width: 260px;
@@ -126,7 +149,7 @@ const HideButton = styled.button`
 
 const ShowButton = styled.button`
   position: absolute;
-  top: 20px;
+  bottom: 20px;
   left: 20px;
   z-index: 20;
   width: 40px;
@@ -281,12 +304,28 @@ export default function CharacterSheet({ gameRef }) {
     return () => clearInterval(id);
   }, [visible, gameRef]);
 
+  // D1 fix: applying the response to React state alone is not enough. Game
+  // keeps its own cached this.progression/this.gold (read by the poll effect
+  // above via getProgressionSnapshot), and an HTTP-only mutation never told
+  // Game about it -- so the very next poll tick compared this fresh state
+  // against Game's still-stale cache, saw a "difference", and reverted the
+  // panel right back to the pre-allocation numbers. gameRef.current is
+  // written through here so Game's cache and the sheet's state agree from
+  // this point on; the poll then sees no diff and leaves it alone.
+  const applyMutation = (bundle) => {
+    setProgression((prev) => applyMutationResponse(prev, bundle));
+    if (bundle && typeof bundle.gold === 'number') setGold(bundle.gold);
+    if (gameRef.current && gameRef.current.applyProgressionResult) {
+      gameRef.current.applyProgressionResult(bundle);
+    }
+  };
+
   const handleAllocate = (statKey) => {
     if (busy || !progression || (progression.stat_points || 0) < 1) return;
     setBusy(true);
     setError(null);
     allocateStat(statKey, 1)
-      .then((bundle) => { if (bundle && bundle.progression) setProgression(bundle.progression); })
+      .then((bundle) => applyMutation(bundle))
       .catch((err) => setError(err.message || 'allocate failed'))
       .finally(() => setBusy(false));
   };
@@ -298,10 +337,7 @@ export default function CharacterSheet({ gameRef }) {
     setBusy(true);
     setError(null);
     respecRequest()
-      .then((bundle) => {
-        if (bundle && bundle.progression) setProgression(bundle.progression);
-        if (bundle && typeof bundle.gold === 'number') setGold(bundle.gold);
-      })
+      .then((bundle) => applyMutation(bundle))
       .catch((err) => setError(err.message || 'respec failed'))
       .finally(() => setBusy(false));
   };
