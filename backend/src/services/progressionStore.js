@@ -156,16 +156,45 @@ async function respec(pool, userId) {
   }
 }
 
+// Takes `pool`, not `db`, and opens its OWN transaction -- unlike awardXp,
+// nothing upstream already has one open: server.js's onPlayerDeath calls
+// this directly, fire-and-forget, off the tick loop (mirrors respec's shape
+// for the same reason). Locks the row with the SAME SELECT ... FOR UPDATE
+// contract 2ef7de5 gave awardXp, and for the identical hazard: a single tick
+// can fire a kill (onCreatureDeath -> awardXp, its own transaction) and a
+// death (onPlayerDeath -> applyDeath) for the SAME player at once. Read
+// unlocked, this function's SELECT can capture the PRE-kill experience while
+// awardXp's transaction is still open; its UPDATE -- writing a JS-computed
+// ABSOLUTE value -- then blocks on awardXp's row lock and, once released,
+// overwrites the row with that stale value, silently discarding the award
+// that just committed. Worse: the de-level floor here is computed from that
+// same stale `level` column, so if the kill's award levelled the player up
+// inside this window, the write can land the persisted experience BELOW the
+// NEW level's floor -- the exact invariant applyDeathPenalty exists to
+// protect, violated by losing the race rather than by any arithmetic bug.
 async function applyDeath(pool, userId) {
-  const before = await loadProgression(pool, userId);
-  const { experience, lost } = applyDeathPenalty(before.experience, before.level);
-  if (lost <= 0) return { progression: before, lost: 0 };
-  const r = await pool.query(
-    `UPDATE player_progression SET experience = $2, updated_at = now()
-      WHERE user_id = $1 RETURNING ${COLUMNS}`,
-    [userId, experience],
-  );
-  return { progression: mapRow(r.rows[0]), lost };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const before = await loadProgression(client, userId, { forUpdate: true });
+    const { experience, lost } = applyDeathPenalty(before.experience, before.level);
+    if (lost <= 0) {
+      await client.query('COMMIT');
+      return { progression: before, lost: 0 };
+    }
+    const r = await client.query(
+      `UPDATE player_progression SET experience = $2, updated_at = now()
+        WHERE user_id = $1 RETURNING ${COLUMNS}`,
+      [userId, experience],
+    );
+    await client.query('COMMIT');
+    return { progression: mapRow(r.rows[0]), lost };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = {

@@ -123,39 +123,48 @@ function collectMsgs(ws, type, ms) {
 // returns a non-empty inventory so join skips grantStartingLoadout entirely
 // (matching authority_server.test.js's own fakePool, which does the same for
 // the same reason) -- nothing about death depends on the weapon catalog.
+// `route()` is the ONE place SQL is matched to a canned answer. Both
+// `pool.query` and each client's `query` call it directly and log to their
+// OWN call array -- neither delegates to the other's already-instrumented
+// wrapper. (An earlier draft had `client.query` call `pool.query` for its
+// routing, which also re-recorded the call into `pool.calls` -- so a query
+// applyDeath issued once via its client showed up twice under `matching()`.
+// Exactly the "can the mock even tell client.query from pool.query" hazard
+// Task 6's review raised, in a new shape: not indistinguishable, but
+// double-counted.)
 function fakeDeathPool(row) {
+  function route(sql, params) {
+    if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
+    if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
+    if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+    if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
+    if (/FROM player_binds WHERE/i.test(sql)) return { rows: [] };
+    if (/FROM item_types/i.test(sql)) {
+      return { rows: [
+        { id: 1, name: 'dagger', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'melee',
+          damage: 8, cooldown: 0.3, reach: 80, arc_width: 6.3, range: null, projectile_speed: null,
+          projectile_radius: null, pierce: null, mana_cost: 0, element: null, defense: null, resistances: null },
+      ] };
+    }
+    if (/FROM player_items/i.test(sql)) return { rows: [{ id: 'i1', item_type_id: 1 }] };
+    if (/FROM player_equipment/i.test(sql)) return { rows: [] };
+    if (/SELECT gold FROM users/i.test(sql)) return { rows: [{ gold: 0 }] };
+    if (/^\s*INSERT INTO player_progression/i.test(sql)) return { rows: [], rowCount: 0 };
+    if (/^\s*UPDATE player_progression/i.test(sql)) {
+      row.experience = Number(params[1]);
+      return { rows: [{ ...row, experience: String(row.experience) }], rowCount: 1 };
+    }
+    if (/FROM player_progression/i.test(sql)) return { rows: [{ ...row, experience: String(row.experience) }], rowCount: 1 };
+    return { rows: [] };
+  }
   const calls = [];
   const pool = {
     calls,
     matching(re) {
       return [...calls, ...pool.clients.flatMap((c) => c.calls)].filter((c) => re.test(c.sql));
     },
-    query: async (sql, params) => {
-      calls.push({ sql, params });
-      if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
-      if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
-      if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
-      if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
-      if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
-      if (/FROM player_binds WHERE/i.test(sql)) return { rows: [] };
-      if (/FROM item_types/i.test(sql)) {
-        return { rows: [
-          { id: 1, name: 'dagger', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'melee',
-            damage: 8, cooldown: 0.3, reach: 80, arc_width: 6.3, range: null, projectile_speed: null,
-            projectile_radius: null, pierce: null, mana_cost: 0, element: null, defense: null, resistances: null },
-        ] };
-      }
-      if (/FROM player_items/i.test(sql)) return { rows: [{ id: 'i1', item_type_id: 1 }] };
-      if (/FROM player_equipment/i.test(sql)) return { rows: [] };
-      if (/SELECT gold FROM users/i.test(sql)) return { rows: [{ gold: 0 }] };
-      if (/^\s*INSERT INTO player_progression/i.test(sql)) return { rows: [], rowCount: 0 };
-      if (/^\s*UPDATE player_progression/i.test(sql)) {
-        row.experience = Number(params[1]);
-        return { rows: [{ ...row, experience: String(row.experience) }], rowCount: 1 };
-      }
-      if (/FROM player_progression/i.test(sql)) return { rows: [{ ...row, experience: String(row.experience) }], rowCount: 1 };
-      return { rows: [] };
-    },
+    query: async (sql, params) => { calls.push({ sql, params }); return route(sql, params); },
   };
   pool.clients = [];
   pool.connect = async () => {
@@ -163,7 +172,7 @@ function fakeDeathPool(row) {
     const client = {
       calls: clientCalls,
       released: 0,
-      query: async (sql, params) => { clientCalls.push({ sql, params }); return pool.query(sql, params); },
+      query: async (sql, params) => { clientCalls.push({ sql, params }); return route(sql, params); },
       release: () => { client.released += 1; },
     };
     pool.clients.push(client);

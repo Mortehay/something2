@@ -283,6 +283,129 @@ test('awardXp serializes concurrent awards for the same user so none of them clo
   }
 });
 
+// SOMET-242 review fix: applyDeath used to read the progression row
+// UNLOCKED and then write back a JS-computed ABSOLUTE experience value. A
+// single tick can fire a kill (awardXp, inside its own transaction) and a
+// death (applyDeath) for the SAME player at once -- applyDeath's unlocked
+// read could capture the PRE-kill experience, and its UPDATE, once
+// unblocked by awardXp's row lock, would overwrite the row with that stale
+// value and silently discard the just-committed award. Worse: the de-level
+// floor applyDeath computes comes from that same stale `level` column, so
+// if the award ALSO leveled the player up inside that window, the write
+// could persist experience BELOW the new level's floor -- exactly the
+// invariant the whole death-penalty feature exists to protect.
+//
+// The numbers are chosen so the final result is the SAME literal regardless
+// of which of the two operations the row lock happens to serialize FIRST --
+// required for a reliable, non-flaky assertion, since a kill-award and a
+// death-penalty are NOT commutative in general (the penalty is a FRACTION
+// of progress into the level, not a flat amount, so order usually matters):
+//
+//   kill-first:  640 + 2 = 642; lost = floor(0.25*(642-600)) = floor(10.5) = 10; final 632
+//   death-first: lost = floor(0.25*(640-600)) = floor(10) = 10; 640-10 = 630; +2 = 632
+//
+// Both orderings land on 632 because floor(0.25*40) and floor(0.25*42) are
+// the same integer (10) -- +2 is too small to push the quartered progress
+// across its next integer boundary. AMOUNT is 2 (not a realistic kill
+// value) specifically to keep both orderings converging on one literal.
+//
+// GETTING THIS TO REPRODUCE RELIABLY TOOK TWO ROUNDS OF TUNING, and both are
+// worth recording (same spirit as Task 3's N=2 -> N=5 retuning note above):
+//
+// Round 1 -- a bare Promise.all of the two calls, no forced ordering: 632 in
+// 10/10 runs against the UNLOCKED (pre-fix) applyDeath. Not a false negative
+// from bad luck -- investigated with per-query timing logs, and the cause is
+// structural: loadProgression's own lazy row-creation statement,
+// `INSERT INTO player_progression (user_id) VALUES ($1) ON CONFLICT (user_id)
+// DO NOTHING`, is issued FIRST by BOTH awardXp and applyDeath on every call
+// (locked or not), and Postgres makes THAT specific statement block on any
+// concurrent transaction already holding a lock on the conflicting row --
+// the same as a real UPDATE would, even though DO NOTHING never touches a
+// column. Whichever side's INSERT loses that race ends up waiting for the
+// OTHER side's whole transaction to finish before it even reads anything, at
+// which point it reads FRESH (post-commit) data -- an accidental, incidental
+// side effect of loadProgression's shared lazy-insert, not anything the
+// applyDeath/awardXp CONTRACT documents or guarantees. It happened to close
+// off the exact window this test is trying to force open, in 10/10 tries
+// with 3 different delay placements (bare race, delayed award start, delayed
+// award commit) -- 0/30 total reproductions. Adding a delay to award's
+// COMMIT alone (mirroring authority_server.test.js's delayedFakePool "too
+// fast to interleave" fix) was not enough on its own, because the point BOTH
+// sides contend at is that early INSERT, not the final UPDATE.
+//
+// Round 2 -- `raceablePool` below turns applyDeath's copy of that lazy
+// INSERT into a no-op (the row is pre-seeded above, so skipping it changes
+// nothing about correctness) so the ACTUAL read/write pair under test can
+// contend without Postgres's incidental blocking masking it, combined with a
+// delay on award's commit to hold its lock open long enough for applyDeath's
+// (now unobstructed) unlocked UPDATE to arrive and block behind it. This
+// reproduces the clobber (632 -> 630, the award silently discarded) in
+// 10/10 runs against the unlocked applyDeath, and still asserts 632 in
+// 10/10 runs with the fix present -- pool.connect() is untouched by the
+// wrapper, so the FIXED applyDeath (which uses its own client, never bare
+// pool.query()) is not affected by it at all. See task-7-report.md's
+// mutation-check section for the exact commands and all four 10-run tallies.
+//
+// `raceablePool` wraps a REAL pg Pool (same shape as
+// `poolWithForcedAwardFailure` in progression_kill_xp.test.js): everything
+// except the one intercepted statement runs for real against Postgres.
+function raceablePool(pgPool) {
+  return {
+    query: (sql, params) => {
+      if (/^\s*INSERT INTO player_progression/i.test(sql)) return Promise.resolve({ rows: [], rowCount: 0 });
+      return pgPool.query(sql, params);
+    },
+    connect: (...args) => pgPool.connect(...args),
+  };
+}
+
+test('applyDeath and a concurrent awardXp for the same user serialize instead of clobbering each other', async (t) => {
+  if (!requireTestDb(t, 'this test creates a throwaway user and races a kill-award against a death-penalty for it')) return;
+  const pgPool = await openPool();
+  if (pgPool.unreachable) { const m = skipMsg('concurrent award/death row lock'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
+  const pool = raceablePool(pgPool);
+  const AMOUNT = 2;
+  const COMMIT_DELAY_MS = 40;
+  let user;
+  let awardClient;
+  try {
+    user = await createTestUser(pgPool, 'death-race');
+    await loadProgression(pgPool, user);
+    // Level 4 (floor 600), 40 XP into the level.
+    await pgPool.query('UPDATE player_progression SET level = 4, experience = 640 WHERE user_id = $1', [user]);
+
+    awardClient = await pgPool.connect();
+    await awardClient.query('BEGIN');
+
+    // Both fired in the SAME Promise.all, neither awaited first, so both
+    // start before either commits -- otherwise they never actually contend
+    // (same rationale as the awardXp race above). applyDeath is passed the
+    // WRAPPED pool, matching its real call site's contract (server.js's
+    // onPlayerDeath calls applyDeath(pool, userId)): with the fix, it opens
+    // and manages its own transaction internally via pool.connect(), exactly
+    // like respec (untouched by the wrapper); with the fix reverted (the
+    // mutation check), it issues plain unlocked pool.query calls instead,
+    // and the wrapper's one intercepted statement is what lets those calls
+    // actually contend instead of serializing by accident.
+    await Promise.all([
+      awardXp(awardClient, user, AMOUNT, 'kill')
+        .then(() => new Promise((r) => setTimeout(r, COMMIT_DELAY_MS)))
+        .then(() => awardClient.query('COMMIT')),
+      applyDeath(pool, user),
+    ]);
+
+    const after = await loadProgression(pgPool, user);
+    assert.equal(after.experience, 632, 'both the award and the penalty must land, in EITHER serialization order');
+  } finally {
+    if (awardClient) {
+      await awardClient.query('ROLLBACK').catch(() => {}); // no-op if COMMIT already landed
+      awardClient.release();
+    }
+    await dropUser(pgPool, user);
+    await pgPool.end().catch(() => {});
+  }
+});
+
 test('allocateStat spends points atomically', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user and races two concurrent allocations')) return;
   const pool = await openPool();
