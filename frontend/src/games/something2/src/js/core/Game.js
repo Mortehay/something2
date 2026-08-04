@@ -99,6 +99,13 @@ export class Game {
         // never enters the inventory (see onPicked/onWallet below).
         this.gold = 0;
 
+        // Progression (SOMET-242): the raw player_progression row (level,
+        // experience, stat_points, six stats) -- set from `joined.progression`
+        // and refreshed by `progression` push messages (kill XP, level-up,
+        // death). null until the first join lands. Nothing here derives HUD
+        // numbers from it directly; CharacterSheet.jsx is the sole reader.
+        this.progression = null;
+
         // Merchant + shop (Slice D): `merchants` is the join-time list of
         // village merchant markers to render; `shop` is the catalog/buyback
         // snapshot from the last `shop` message (null when no shop is open),
@@ -261,6 +268,7 @@ export class Game {
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
         this.gold = 0;
+        this.progression = null;
         this.merchants = [];
         this.shop = null;
         this.shopOpen = false;
@@ -287,6 +295,7 @@ export class Game {
                     this.autoLoot = msg.autoLoot === true;
                     this.gold = Number(msg.gold) || 0;
                     this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
+                    this.progression = msg.progression || null;
                     resolve(msg.spawn);
                 },
                 onState: (msg) => this._onWorldState(msg),
@@ -301,6 +310,11 @@ export class Game {
                 // current stock; the server is the sole source of truth for
                 // catalog/buyback/prices, so this simply mirrors the frame.
                 onShop: (msg) => { this.shop = { villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [] }; this.shopOpen = true; },
+                // Kill XP / level-up / death pushes. Always the server's raw
+                // row; CharacterSheet.jsx decides what changed and whether
+                // that's worth a re-render (a zero-XP kill still pushes a
+                // frame with unchanged values -- see its progressionChanged).
+                onProgression: (msg) => { if (msg && msg.progression) this.progression = msg.progression; },
                 // A trade lands its inventory/wallet effect via the existing
                 // item/gold plumbing (addItem/removeItem, wallet frame); what
                 // 'bought'/'sold' add on top is re-issuing `interact` so the
@@ -409,6 +423,16 @@ export class Game {
             },
             creatures: (this.creatures ? this.creatures.all() : []).map((c) => ({ x: c.x, y: c.y, color: c.color })),
         };
+    }
+
+    // Read-only live snapshot for the character sheet HUD (SOMET-242), same
+    // convention as getMinimapSnapshot above: Game stays the single source of
+    // truth so the React component never reaches into engine internals. null
+    // unless we're actually in a playing chunked world with a joined
+    // progression row.
+    getProgressionSnapshot() {
+        if (this.state !== 'playing' || !this.chunked || !this.progression) return null;
+        return { progression: this.progression, gold: this.gold };
     }
 
     destroy() {

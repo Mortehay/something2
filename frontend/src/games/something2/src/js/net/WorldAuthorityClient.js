@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWallet, onShop, onBought, onSold, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWallet, onShop, onBought, onSold, onProgression, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -24,6 +24,10 @@ export class WorldAuthorityClient {
     this.onNoAmmo = onNoAmmo || (() => {});
     this.onAmmo = onAmmo || (() => {});
     this.onTransition = onTransition || (() => {});
+    // Pushed on XP gain, level-up and death (SOMET-242); the join payload's
+    // own `progression` field arrives on `onJoined` instead, same split as
+    // `gold` (joined) vs `wallet` (onWallet) above.
+    this.onProgression = onProgression || (() => {});
     this.inputIntervalMs = inputIntervalMs;
     this.now = now;
 
@@ -96,6 +100,7 @@ export class WorldAuthorityClient {
       // locally-derived count or decrement on send, see core/ammo.js.
       case 'ammo': this.onAmmo(msg); break;
       case 'transition': this.onTransition(msg); break;
+      case 'progression': this.onProgression(msg); break;
       case 'error': {
         // Tag so callers can tell a server-issued protocol rejection (e.g.
         // "unequip it first") apart from a raw transport failure below —

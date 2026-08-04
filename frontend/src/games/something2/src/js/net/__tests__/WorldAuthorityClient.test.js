@@ -166,4 +166,17 @@ describe('WorldAuthorityClient', () => {
     expect(seen[0].villageId).toBe('v1');
     expect(seen[0].catalog).toHaveLength(1);
   });
+
+  // SOMET-242 (Task 10): the authority pushes a 'progression' frame on kill
+  // XP, level-up and death -- separate from the join payload's own
+  // `progression` field, same split as gold (joined) vs wallet (onWallet).
+  it('a progression message invokes onProgression, including a zero-XP no-op award', () => {
+    const seen = [];
+    armClient({ onProgression: (m) => seen.push(m) });
+    const progression = { level: 2, experience: 130, stat_points: 3 };
+    FakeWS.last._l.message({ data: JSON.stringify({ type: 'progression', progression, leveledUp: false, newLevel: 2, awarded: 0 }) });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].progression).toEqual(progression);
+    expect(seen[0].awarded).toBe(0);
+  });
 });

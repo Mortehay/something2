@@ -9,6 +9,7 @@ import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";
 import { useAuth } from "../../context/AuthContext";
 import WorldPreview from "./WorldPreview.jsx";
 import Minimap from "./Minimap.jsx";
+import CharacterSheet from "./CharacterSheet.jsx";
 
 const UIOverlay = styled.div`
   position: absolute;
@@ -240,6 +241,7 @@ export default function GameView() {
         </FullscreenToggle>
       )}
       {isPlaying && <Minimap gameRef={gameRef} tileColors={tileColors} />}
+      {isPlaying && <CharacterSheet gameRef={gameRef} />}
       {isPlaying && (
         <HowToButton
           type="button"
