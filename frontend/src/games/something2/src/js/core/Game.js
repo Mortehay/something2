@@ -435,20 +435,39 @@ export class Game {
         return { progression: this.progression, gold: this.gold };
     }
 
-    // Write-through cache update (SOMET-242 D1 fix). CharacterSheet.jsx calls
-    // this right after a successful allocate/respec HTTP response -- that
-    // response body IS the new authoritative row (and, for respec, the new
-    // gold balance), so this just keeps Game's own copy in sync with it.
+    // Write-through cache update for gold ONLY (SOMET-242 D1 fix, narrowed by
+    // the F1 fix below). CharacterSheet.jsx calls this right after a
+    // successful respec HTTP response so the canvas-drawn gold HUD
+    // (RenderSystem reads this.gold directly) reflects the payment
+    // immediately, the same way D1 originally fixed the sheet's own stale
+    // display.
     //
-    // Without this, an allocate/respec never touched this.progression/this.gold
-    // at all (they only otherwise change via the websocket onJoined/
-    // onProgression/onWallet handlers), so the NEXT getProgressionSnapshot()
-    // poll kept echoing the pre-mutation row straight back at the sheet --
-    // which silently reverted the panel to its old values a few hundred ms
-    // after a successful, already-persisted spend (D1: "the sheet does not
-    // refresh after a successful allocation").
-    applyProgressionResult({ progression, gold } = {}) {
-        if (progression) this.progression = progression;
+    // This used to also accept and apply `progression` the same way -- that
+    // was D1's fix. F1 (a later browser pass) found it was racy: the HTTP
+    // response and a concurrent kill/death websocket push travel on two
+    // independent connections with no ordering guarantee between them, so a
+    // late allocate/respec response could overwrite a NEWER kill/death push
+    // with a stale pre-mutation snapshot, silently undoing a level-up in the
+    // display. Fixed by removing progression from this method entirely:
+    // this.progression now has exactly one writer, the onProgression
+    // websocket handler above, which is the only channel with a genuine
+    // ordering guarantee (a single WebSocket connection preserves send
+    // order, and server.js's refreshPlayerStats -- e77d929/bbab966 -- now
+    // pushes a 'progression' frame after every successful allocate/respec
+    // too, through that same ordered channel). See CharacterSheet.jsx's
+    // module header for the full reasoning, including why a naive
+    // "only apply if experience increased" guard was considered and
+    // rejected (death decreases experience, so that check is not a valid
+    // total order either).
+    //
+    // gold has no equivalent websocket echo for a respec (refreshPlayerStats
+    // does not carry gold, and a respec never sends a 'wallet' message), so
+    // it keeps being written through directly here -- a real, narrower
+    // version of the same race remains possible against a concurrent
+    // 'wallet' push (e.g. an item pickup mid-respec), left as a documented,
+    // out-of-scope residual risk in the task report rather than silently
+    // ignored.
+    applyGoldResult(gold) {
         if (typeof gold === 'number') this.gold = gold;
     }
 

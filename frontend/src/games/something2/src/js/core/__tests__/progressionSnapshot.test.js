@@ -26,47 +26,76 @@ describe('getProgressionSnapshot', () => {
   });
 });
 
-// D1 regression guard ("the sheet does not refresh after a successful
-// allocation"): CharacterSheet.jsx's own state update was already correct --
-// the actual bug was that Game's CACHE (this.progression/this.gold, the very
-// thing getProgressionSnapshot reads) never learned about an HTTP-only
-// allocate/respec, so the next live-poll tick echoed the stale pre-mutation
-// row straight back over the sheet's freshly-set state. applyProgressionResult
-// is the write-through fix; this proves it actually closes that loop by
-// calling it and then reading the snapshot back, the same two calls
-// CharacterSheet.jsx and its poll effect make in sequence.
-function callApply(state, result) {
-  return Game.prototype.applyProgressionResult.call(state, result);
+// D1 (Task 10's first browser pass) fixed "the sheet does not refresh after
+// a successful allocation" by write-through-caching BOTH progression and
+// gold from an HTTP allocate/respec response into Game's cache
+// (applyProgressionResult). A LATER browser pass (F1) found that write-
+// through racy: the HTTP response travels on its own connection with no
+// ordering guarantee relative to a concurrent kill/death websocket push, so
+// a late, stale allocate response could overwrite a NEWER push's level-up.
+//
+// Fixed by removing progression from the write-through entirely --
+// Game.applyGoldResult (renamed, narrowed) now touches ONLY gold. Nothing an
+// HTTP response carries can ever clobber this.progression again; the only
+// remaining writer is the websocket 'progression' handler wired into
+// initChunked (onProgression, an unconditional `this.progression =
+// msg.progression`), which is on a single ordered connection and therefore
+// cannot itself be raced by anything on that same connection.
+function callApplyGold(state, gold) {
+  return Game.prototype.applyGoldResult.call(state, gold);
 }
 
-describe('applyProgressionResult (D1 fix: keep Game.progression/gold in sync with an HTTP-only mutation)', () => {
-  it('a call with no progression/gold does nothing (no-arg call)', () => {
+describe('applyGoldResult (F1: narrowed from applyProgressionResult -- gold only, progression untouched)', () => {
+  it('a non-number leaves gold untouched (defensive no-op, mirrors the old no-arg case)', () => {
     const state = { progression: { level: 1, constitution: 5 }, gold: 10 };
-    callApply(state, undefined);
+    callApplyGold(state, undefined);
     expect(state.progression).toEqual({ level: 1, constitution: 5 });
     expect(state.gold).toBe(10);
   });
 
-  it('updates this.progression from an allocate response', () => {
-    const state = { progression: { level: 1, constitution: 5, stat_points: 6 }, gold: 10 };
-    callApply(state, { progression: { level: 1, constitution: 8, stat_points: 3 } });
-    expect(state.progression).toEqual({ level: 1, constitution: 8, stat_points: 3 });
-  });
-
-  it('updates both this.progression and this.gold from a respec response', () => {
+  it('updates this.gold from a respec response\'s gold field', () => {
     const state = { progression: { level: 1, constitution: 8 }, gold: 10 };
-    callApply(state, { progression: { level: 1, constitution: 5 }, gold: 0 });
-    expect(state.progression).toEqual({ level: 1, constitution: 5 });
+    callApplyGold(state, 0);
     expect(state.gold).toBe(0); // 0 is a legitimate balance, not "missing" -- must not be skipped
   });
 
-  // The actual end-to-end regression: after the write-through, the very poll
-  // read (getProgressionSnapshot) that used to hand the sheet a stale row
-  // now reflects the mutation immediately -- no reconnect, no extra HTTP call.
-  it('getProgressionSnapshot reflects the mutation immediately after applyProgressionResult', () => {
-    const state = { state: 'playing', chunked: true, progression: { level: 1, constitution: 5, stat_points: 6 }, gold: 10 };
-    callApply(state, { progression: { level: 1, constitution: 8, stat_points: 3 }, gold: 10 });
-    expect(callSnapshot(state)).toEqual({ progression: { level: 1, constitution: 8, stat_points: 3 }, gold: 10 });
+  it('never touches this.progression, no matter what', () => {
+    const state = { progression: { level: 1, constitution: 8, stat_points: 3 }, gold: 10 };
+    callApplyGold(state, 999);
+    expect(state.progression).toEqual({ level: 1, constitution: 8, stat_points: 3 }); // byte-identical, untouched
+  });
+});
+
+// F1 regression guard, literal values, the reviewer's own reproduction:
+// "the player clicks +CON; the server commits; before the response returns,
+// their in-flight arrow kills a creature, awardXp levels them to 2 and
+// pushes a progression frame that arrives first. The late allocate response
+// then overwrites Game.progression with the pre-kill {level 1} snapshot."
+//
+// This is a PURE ordering test: apply the newer push first (exactly what
+// Game's onProgression handler does -- an unconditional assignment,
+// reproduced inline here since that handler is a closure inside initChunked,
+// not a prototype method, and is already covered end-to-end by
+// WorldAuthorityClient.test.js's "a progression message invokes
+// onProgression" case), then apply what USED TO BE the vulnerable
+// HTTP-response write-through path, and assert the newer state survived.
+describe('F1: a newer websocket push is not clobbered by a later HTTP-response-shaped call', () => {
+  it('the level-2 push survives; the late level-1 allocate response never gets a chance to apply', () => {
+    const state = { progression: { level: 1, experience: 200, stat_points: 0 }, gold: 50 };
+
+    // The kill's XP push arrives first: Game.onProgression's own logic.
+    state.progression = { level: 2, experience: 250, stat_points: 3 };
+
+    // The late, stale allocate HTTP response "arrives" after it. Before F1,
+    // this would have been `applyProgressionResult({ progression: { level: 1,
+    // experience: 200, stat_points: 0 }, gold: 999 })`, silently reverting
+    // state.progression to the pre-kill snapshot. applyGoldResult is the
+    // only remaining thing an HTTP response can still reach, and it no
+    // longer has a `progression` parameter to do that with at all.
+    callApplyGold(state, 999);
+
+    expect(state.progression).toEqual({ level: 2, experience: 250, stat_points: 3 });
+    expect(state.gold).toBe(999); // gold is still applied -- untouched by this fix, see the module header
   });
 });
 

@@ -7,28 +7,37 @@
 // panel -- is asserted against the component's raw source text instead, and
 // is labelled as such in both the test name and the report.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { xpProgress, respecDisabled, progressionChanged, applyMutationResponse, STAT_KEYS } from '../../../CharacterSheet.jsx';
+import { xpProgress, respecDisabled, progressionChanged, STAT_KEYS } from '../../../CharacterSheet.jsx';
 import { fetchProgression, allocateStat, respec } from '../net/progressionClient.js';
 
 afterEach(() => vi.restoreAllMocks());
 
+// F2 rewrote xpProgress's signature: it used to recompute xpFloor/xpToNext
+// itself via a local xpCurve.js (now deleted -- see the source-text section
+// near the bottom of this file). It now takes `levelInfo` -- the API's own
+// xpFloor/xpToNext for the level `progression` is at -- as an explicit
+// second argument, so there is nothing left in this file that can drift from
+// the backend's constants.
 describe('xpProgress', () => {
   it('reports the position inside the current level (level 3, floor 300, xpToNext(3) 300)', () => {
-    // Level 3's floor is XP_BASE*(3-1)*3/2 = 300; xpToNext(3) = XP_BASE*3 = 300.
+    // Literal floor/xpToNext exactly as GET /api/progression would return
+    // them for a level-3 player (XP_BASE*(3-1)*3/2 = 300 floor,
+    // XP_BASE*3 = 300 xpToNext -- backend/src/services/playerStats.js).
     // experience 450 is 150 into that 300-wide band -> 50%. Literal expected
-    // values, not a recomputation of the same formula the code under test uses.
-    const result = xpProgress({ level: 3, experience: 450 });
+    // values, not a recomputation of the same arithmetic the code under test
+    // performs.
+    const result = xpProgress({ level: 3, experience: 450 }, { xpFloor: 300, xpToNext: 300, respecCost: 150 });
     expect(result).toEqual({ into: 150, need: 300, pct: 50 });
   });
 
-  it('does not divide by Infinity at max level (50) -- returns a finite, full bar', () => {
-    // xpFloor(50) = XP_BASE*49*50/2 = 122500 (backend/src/services/playerStats.js
-    // formula, mirrored in xpCurve.js). Picking experience exactly at that floor
-    // as a literal, rather than calling xpFloor() to derive it, keeps this a
-    // literal-value assertion.
-    const result = xpProgress({ level: 50, experience: 122500 });
+  it('does not divide by null at max level -- xpToNext serialises as null over JSON, not Infinity', () => {
+    // JSON.stringify(Infinity) is "null" (JSON has no Infinity literal), so
+    // this is the actual wire shape GET /api/progression sends for a
+    // level-50 player, not a synthetic Infinity. xpFloor(50) =
+    // XP_BASE*49*50/2 = 122500.
+    const result = xpProgress({ level: 50, experience: 122500 }, { xpFloor: 122500, xpToNext: null, respecCost: 2500 });
     expect(result).toEqual({ into: 0, need: 0, pct: 100 });
     expect(Number.isFinite(result.into)).toBe(true);
     expect(Number.isFinite(result.need)).toBe(true);
@@ -36,9 +45,17 @@ describe('xpProgress', () => {
   });
 
   it('past max-level floor still returns finite numbers (grinding at level 50)', () => {
-    const result = xpProgress({ level: 50, experience: 999999 });
+    const result = xpProgress({ level: 50, experience: 999999 }, { xpFloor: 122500, xpToNext: null, respecCost: 2500 });
     expect(result).toEqual({ into: 877499, need: 0, pct: 100 });
     expect(Number.isFinite(result.into)).toBe(true);
+  });
+
+  it('returns an empty (not "MAX LEVEL") bar when no levelInfo has loaded yet', () => {
+    // Distinguishes "still loading" from "genuinely max level" -- both used
+    // to collapse to the same need:0 shape, which would have flashed "MAX
+    // LEVEL" for a level-1 character for one frame on every open.
+    const result = xpProgress({ level: 1, experience: 0 }, null);
+    expect(result).toEqual({ into: 0, need: 0, pct: 0 });
   });
 });
 
@@ -53,6 +70,29 @@ describe('respecDisabled', () => {
   });
   it('is enabled just above the cost', () => {
     expect(respecDisabled(cost + 1, cost)).toBe(false);
+  });
+});
+
+// F2 regression guard, pinning the reviewer's own concrete failure mode:
+// "raise RESPEC_BASE on the backend to 100 and a level-3 player holding 160
+// gold sees an enabled 'Respec (150g)' button that always 402s." 150 is
+// exactly what the OLD deleted local formula (RESPEC_BASE=50 * level 3)
+// would have computed; 300 is what the API actually returns once the
+// backend's RESPEC_BASE is 100. respecDisabled itself was already correct
+// (the reviewer's own framing) -- what was wrong is what fed it. This proves
+// the predicate gives the SAFE answer when fed the bundle's real number, and
+// the UNSAFE one a locally-invented number would have given, side by side.
+describe('respecDisabled fed the API bundle\'s respecCost (F2: no local RESPEC_BASE left to feed it a stale one)', () => {
+  it('160 gold cannot afford the real (bundle) cost of 300 -- correctly disabled', () => {
+    expect(respecDisabled(160, 300)).toBe(true);
+  });
+
+  it('the same 160 gold WOULD have looked affordable against the old formula\'s 150 -- the exact bug', () => {
+    // Not a claim that 150 is ever computed anywhere anymore (RESPEC_BASE is
+    // deleted -- see the source-text section below); this pins what the old,
+    // now-removed local arithmetic used to produce, so the contrast with the
+    // line above is a literal, not an assertion about dead code's behaviour.
+    expect(respecDisabled(160, 150)).toBe(false);
   });
 });
 
@@ -91,50 +131,18 @@ describe('progressionChanged', () => {
   });
 });
 
-// D1 regression guard: "the sheet does not refresh after a successful
-// allocation" -- reproduced by the browser pass as three CON allocate clicks
-// (5 -> 8) against a starting "Unspent points: 6", where the panel kept
-// showing CON 5 / 6 points seconds after the DB and the API response both
-// already reflected CON 8 / 3 points. This pins the literal values from that
-// exact repro: given the prior displayed progression and the allocate
-// response the client actually received, the next value must show the new
-// stat and the new unspent count -- not a recomputation of the same numbers,
-// the literal 8 and 3 from the report.
-describe('applyMutationResponse (D1: apply the allocate/respec response to sheet state)', () => {
-  const prev = {
-    level: 1, experience: 0, stat_points: 6,
-    strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
-  };
-
-  it('an allocate response replaces the stale stat and unspent count', () => {
-    const response = {
-      progression: { ...prev, constitution: 8, stat_points: 3 },
-      stats: { maxHp: 130 },
-    };
-    const next = applyMutationResponse(prev, response);
-    expect(next.constitution).toBe(8);
-    expect(next.stat_points).toBe(3);
-  });
-
-  it('a respec response replaces every stat back to base and refunds points', () => {
-    const allocated = { ...prev, constitution: 8, stat_points: 3 };
-    const response = {
-      progression: {
-        level: 1, experience: 0, stat_points: 9,
-        strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
-      },
-      gold: 50,
-    };
-    const next = applyMutationResponse(allocated, response);
-    expect(next.constitution).toBe(5);
-    expect(next.stat_points).toBe(9);
-  });
-
-  it('falls back to the previous value when the response carries no progression (e.g. a rejected request)', () => {
-    expect(applyMutationResponse(prev, { error: 'not enough points' })).toBe(prev);
-    expect(applyMutationResponse(prev, null)).toBe(prev);
-  });
-});
+// D1's original write-through (`applyMutationResponse`, which used to be
+// exported from CharacterSheet.jsx and applied an allocate/respec HTTP
+// response straight into the sheet's displayed progression) was REMOVED by
+// the F1 fix, not merely changed -- see CharacterSheet.jsx's module header
+// and Game.js's applyGoldResult doc comment for the full reasoning. Its
+// tests are removed along with it rather than left pointing at dead code.
+// The F1 regression test ("a newer push survives a later, older-HTTP-shaped
+// call") now lives in
+// src/js/core/__tests__/progressionSnapshot.test.js, next to
+// Game.applyGoldResult and getProgressionSnapshot, since the actual fix is a
+// Game.js-level guarantee (progression has exactly one writer), not
+// something this file's remaining exports can demonstrate on their own.
 
 describe('STAT_KEYS', () => {
   it('lists all six stats, matching the backend whitelist order', () => {
@@ -249,5 +257,31 @@ describe('CharacterSheet placement (source-text, not behavioural)', () => {
     const showBlock = source.slice(source.indexOf('const ShowButton = styled.button`'), source.indexOf('const BarTrack'));
     expect(showBlock).toMatch(/bottom:\s*20px/);
     expect(showBlock).not.toMatch(/\btop:\s*20px/);
+  });
+});
+
+// SOURCE-TEXT ONLY. F2 was "xpCurve.js re-declares constants the API already
+// sends" -- fixed by deleting the duplicate rather than patching it, so this
+// checks the duplicate is actually gone rather than merely unused.
+describe('F2: no local backend-constant duplication left (source-text, not behavioural)', () => {
+  const source = readFileSync(
+    fileURLToPath(new URL('../../../CharacterSheet.jsx', import.meta.url)), 'utf8',
+  );
+
+  it("source-text: no RESPEC_BASE constant is declared in the sheet -- respecCost comes only from the API bundle", () => {
+    // Checks for a DECLARATION specifically, not the bare word -- the
+    // module header's own prose legitimately mentions RESPEC_BASE while
+    // explaining why it was removed; that history is not the thing under
+    // test here.
+    expect(source).not.toMatch(/const\s+RESPEC_BASE/);
+  });
+
+  it('source-text: xpCurve.js (the deleted local reimplementation) is no longer imported', () => {
+    expect(source).not.toMatch(/xpCurve\.js['"]/);
+  });
+
+  it('xpCurve.js the file itself no longer exists', () => {
+    const xpCurvePath = fileURLToPath(new URL('../core/xpCurve.js', import.meta.url));
+    expect(existsSync(xpCurvePath)).toBe(false);
   });
 });
