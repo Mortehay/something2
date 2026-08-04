@@ -75,11 +75,19 @@ const __setPool = (impl) => { pool = impl; };
 
 // Guards and auth routes must see the CURRENT pool (tests swap it via
 // __setPool), so hand them a proxy that forwards to the live `pool` binding
-// rather than whatever value existed at module-load time.
-const guardPool = { query: (sql, params) => pool.query(sql, params) };
+// rather than whatever value existed at module-load time. `connect` is
+// included (not just `query`) because progressionStore.respec opens its own
+// transaction via pool.connect() -- without it, a router built from this
+// proxy would work for every other route and only fail, at request time, the
+// moment a real respec call was made.
+const guardPool = {
+  query: (sql, params) => pool.query(sql, params),
+  connect: (...args) => pool.connect(...args),
+};
 const { requireAdmin } = require('./auth/middleware.js');
 const { assertJwtSecretOrExit } = require('./auth/assertJwtSecret.js');
 const authRouter = require('./auth/routes.js');
+const progressionRoutes = require('./api/progressionRoutes.js');
 // Single admin guard applied to every mutating admin route below.
 const adminGuard = requireAdmin(guardPool);
 
@@ -313,6 +321,11 @@ app.get('/api/health', (req, res) => {
 
 // Authentication routes: register / login / logout-all / me / admin role.
 app.use('/api/auth', authRouter(guardPool));
+
+// Character-sheet API (SOMET-242): GET the derived progression bundle, POST
+// an allocation or a respec. Every route is behind requireAuth and acts on
+// req.user.id -- see api/progressionRoutes.js's header comment.
+app.use('/api/progression', progressionRoutes(guardPool));
 
 // The /api/dev-token endpoint was removed: it minted a correctly-signed JWT for
 // any user_id with no credentials — a verified account-takeover primitive.

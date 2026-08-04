@@ -1,0 +1,268 @@
+const { test, before, after } = require('node:test');
+const assert = require('node:assert');
+
+// Set the secret before requiring the app / signing any token.
+require('./helpers/auth.js');
+const request = require('supertest');
+const { Pool } = require('pg');
+
+const { app, __setPool } = require('../src/index.js');
+const { signToken } = require('../src/auth/tokens.js');
+const { loadProgression } = require('../src/services/progressionStore.js');
+const C = require('../src/services/progressionConstants.js');
+
+// ---------------------------------------------------------------------------
+// Part 1: route-protection -- no database needed. Walks the REAL Express
+// route stack for the isAuthGuard marker, the same idiom
+// tests/auth_protection.test.js uses for the app's direct routes. Unlike
+// that file, progressionRoutes is a MOUNTED SUB-ROUTER (app.use('/api/
+// progression', progressionRoutes(pool)), same shape as authRouter), so the
+// three routes live one level down: app._router.stack holds a single
+// 'router' layer for the mount, and THAT router's own .stack holds the
+// individual GET '/' / POST '/allocate' / POST '/respec' layers.
+// ---------------------------------------------------------------------------
+
+function progressionRouteLayers() {
+  const appStack = app._router && app._router.stack;
+  assert.ok(appStack, 'could not locate the app router stack');
+  const mountLayer = appStack.find((l) => l.name === 'router'
+    && l.handle && Array.isArray(l.handle.stack)
+    && l.handle.stack.some((rl) => rl.route && ['/', '/allocate', '/respec'].includes(rl.route.path)));
+  assert.ok(mountLayer, 'could not locate the mounted progression router');
+  return mountLayer.handle.stack.filter((rl) => rl.route);
+}
+
+test('every progression route is behind an auth guard', () => {
+  const layers = progressionRouteLayers();
+  // A walk that matches zero routes would pass vacuously -- assert the real
+  // surface first (GET /, POST /allocate, POST /respec).
+  assert.equal(layers.length, 3, `expected exactly 3 progression routes, found ${layers.length}`);
+  const unguarded = layers
+    .filter((l) => !l.route.stack.some((h) => h.handle && h.handle.isAuthGuard))
+    .map((l) => `${Object.keys(l.route.methods).join('/').toUpperCase()} ${l.route.path}`);
+  assert.deepEqual(unguarded, [], `unguarded progression routes: ${unguarded.join(', ')}`);
+});
+
+// ---------------------------------------------------------------------------
+// Part 2: functional/security tests against a REAL database, through the
+// real HTTP app. Same skip-if-unreachable idiom as progression_store.test.js
+// (gated on TEST_DATABASE_URL alone -- no DATABASE_URL fallback -- so a bare
+// `npm test` on a machine with a working dev database can never reach this
+// file) and the same disposable-user fixture: one throwaway user per test,
+// tagged and unique, deleted unconditionally in a `finally`. Nothing outlives
+// a test and no real account is ever touched.
+//
+// The real pg Pool is installed ONCE via __setPool inside `before()`, not
+// per-test: index.js's `guardPool` proxy forwards every call to whatever the
+// module-level `pool` binding currently is, so one swap is visible to every
+// request made through `app` for the rest of this file -- repeating the
+// swap per test would just churn connections for no added isolation, since
+// node:test runs a file's top-level tests sequentially.
+// ---------------------------------------------------------------------------
+
+const DB_URL = process.env.TEST_DATABASE_URL || 'postgres://user:password@localhost:15432/game_db';
+
+function requireTestDb(t, why) {
+  if (!process.env.TEST_DATABASE_URL) {
+    const msg = `TEST_DATABASE_URL not set -- skipping to avoid mutating a real database (${why})`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return false;
+  }
+  return true;
+}
+
+function skipMsg(what) {
+  return `NO DATABASE at ${DB_URL} -- ${what} is UNVERIFIED on this run`;
+}
+
+let dbPool = null;
+
+before(async () => {
+  if (!process.env.TEST_DATABASE_URL) return; // no DB configured -- every test below self-skips
+  const p = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 2000, max: 4 });
+  try {
+    await p.query('SELECT 1');
+    dbPool = p;
+    __setPool(p);
+  } catch (err) {
+    await p.end().catch(() => {});
+  }
+});
+
+after(async () => {
+  if (dbPool) await dbPool.end().catch(() => {});
+});
+
+// True only once both the env var is set AND the connection actually opened.
+function dbReady(t, what) {
+  if (!requireTestDb(t, what)) return false;
+  if (!dbPool) {
+    const m = skipMsg(what);
+    if (process.env.CI) assert.fail(m);
+    t.skip(m);
+    return false;
+  }
+  return true;
+}
+
+async function createTestUser(pool, tag) {
+  const username = `progression-routes-test-${tag}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const r = await pool.query(
+    `INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'player') RETURNING id`,
+    [username],
+  );
+  return r.rows[0].id;
+}
+
+async function dropUser(pool, userId) {
+  if (userId != null) await pool.query('DELETE FROM users WHERE id = $1', [userId]).catch(() => {});
+}
+
+// token_version defaults to 1 (migrations/1714440025000_users.js) and
+// createTestUser never overrides it, so every token here is signed to match.
+function tokenFor(userId) {
+  return signToken({
+    userId, username: `route-test-${userId}`, role: 'player', tokenVersion: 1,
+  });
+}
+
+function authed(userId) {
+  return { Authorization: `Bearer ${tokenFor(userId)}` };
+}
+
+test('GET returns the derived bundle alongside the raw row', async (t) => {
+  if (!dbReady(t, 'this test creates a throwaway user and reads its progression bundle')) return;
+  let user;
+  try {
+    user = await createTestUser(dbPool, 'get');
+
+    const res = await request(app).get('/api/progression').set(authed(user));
+
+    assert.equal(res.status, 200);
+    // The raw row: a fresh character at level 1 / 0 xp / every stat at base.
+    assert.equal(res.body.progression.user_id, user);
+    assert.equal(res.body.progression.level, 1);
+    assert.equal(res.body.progression.experience, 0);
+    assert.equal(res.body.progression.stat_points, 0);
+    for (const k of C.STAT_KEYS) assert.equal(res.body.progression[k], C.BASE_STAT, `${k} must start at base`);
+    // The derived bundle alongside it, all literal expected values for a
+    // fresh (all-base-stat) level-1 character.
+    assert.equal(res.body.xpFloor, 0);
+    assert.equal(res.body.xpToNext, 100); // XP_BASE(100) * level(1)
+    assert.equal(res.body.respecCost, 50); // RESPEC_BASE(50) * level(1)
+    assert.equal(res.body.stats.maxHp, 100);
+    assert.equal(res.body.stats.maxMana, 100);
+    assert.equal(res.body.stats.priceMult, 0.5);
+  } finally {
+    await dropUser(dbPool, user);
+  }
+});
+
+// The security-critical test. Seeds a spendable pool of points on userA and
+// a distinct, independently-verifiable baseline on userB, then asks the API
+// -- AS userA -- to allocate points onto userB by slipping a userId into the
+// body. The only thing that should move is userA's row; userB's must come
+// back byte-for-byte identical to its pre-request snapshot. This is the test
+// mutation check #1 targets: swap the route to read
+// `req.body.userId || req.user.id` and this must fail.
+test('allocate acts on the authenticated user, not a body-supplied id', async (t) => {
+  if (!dbReady(t, 'this test creates two throwaway users and attempts a cross-account allocation')) return;
+  let userA;
+  let userB;
+  try {
+    userA = await createTestUser(dbPool, 'alloc-self');
+    userB = await createTestUser(dbPool, 'alloc-other');
+    await loadProgression(dbPool, userA);
+    await loadProgression(dbPool, userA); // idempotent; keeps the sequence obvious
+    await dbPool.query('UPDATE player_progression SET stat_points = 5 WHERE user_id = $1', [userA]);
+    const before = await loadProgression(dbPool, userB); // userB's untouched baseline
+
+    const res = await request(app).post('/api/progression/allocate').set(authed(userA))
+      .send({ stat: 'strength', count: 1, userId: userB });
+
+    assert.equal(res.status, 200);
+    // The caller's (userA's) own row is the one that must have moved.
+    assert.equal(res.body.progression.user_id, userA);
+    assert.equal(res.body.progression.strength, C.BASE_STAT + 1);
+    assert.equal(res.body.progression.stat_points, 4);
+
+    const after = await loadProgression(dbPool, userB);
+    assert.deepEqual(after, before, "the OTHER user's (body-supplied) progression must be completely untouched");
+  } finally {
+    await dropUser(dbPool, userA);
+    await dropUser(dbPool, userB);
+  }
+});
+
+test('allocate rejects an unknown stat with 400', async (t) => {
+  if (!dbReady(t, 'this test creates a throwaway user and posts a bogus stat key')) return;
+  let user;
+  try {
+    user = await createTestUser(dbPool, 'alloc-badstat');
+    await loadProgression(dbPool, user);
+    await dbPool.query('UPDATE player_progression SET stat_points = 5 WHERE user_id = $1', [user]);
+    const before = await loadProgression(dbPool, user);
+
+    const res = await request(app).post('/api/progression/allocate').set(authed(user))
+      .send({ stat: 'luck', count: 1 });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'unknown stat');
+    const after = await loadProgression(dbPool, user);
+    assert.deepEqual(after, before, 'a rejected allocation must change nothing');
+  } finally {
+    await dropUser(dbPool, user);
+  }
+});
+
+test('allocate with more points than held returns 400 and changes nothing', async (t) => {
+  if (!dbReady(t, 'this test creates a throwaway user and over-spends its stat points')) return;
+  let user;
+  try {
+    user = await createTestUser(dbPool, 'alloc-overspend');
+    await loadProgression(dbPool, user);
+    await dbPool.query('UPDATE player_progression SET stat_points = 2 WHERE user_id = $1', [user]);
+    const before = await loadProgression(dbPool, user);
+
+    const res = await request(app).post('/api/progression/allocate').set(authed(user))
+      .send({ stat: 'strength', count: 5 });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'not enough points');
+    const after = await loadProgression(dbPool, user);
+    assert.deepEqual(after, before, 'an over-budget allocation must change nothing, including the unspent points');
+  } finally {
+    await dropUser(dbPool, user);
+  }
+});
+
+test('respec without the gold returns 402 and changes nothing', async (t) => {
+  if (!dbReady(t, 'this test creates a throwaway user, seeds a level-4 character short on gold and attempts a respec')) return;
+  let user;
+  try {
+    user = await createTestUser(dbPool, 'respec-poor');
+    await loadProgression(dbPool, user);
+    // Level 4 (9 points granted by leveling), 5 of them already spent into
+    // strength, 199 gold against a cost of RESPEC_BASE(50) * 4 = 200.
+    await dbPool.query(
+      'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE user_id = $1',
+      [user],
+    );
+    await dbPool.query('UPDATE users SET gold = 199 WHERE id = $1', [user]);
+    const beforeProgression = await loadProgression(dbPool, user);
+
+    const res = await request(app).post('/api/progression/respec').set(authed(user)).send({});
+
+    assert.equal(res.status, 402);
+    assert.equal(res.body.error, 'not enough gold');
+    assert.equal(res.body.cost, 200);
+
+    const afterProgression = await loadProgression(dbPool, user);
+    assert.deepEqual(afterProgression, beforeProgression, 'stats and unspent points must be unchanged');
+    const g = await dbPool.query('SELECT gold FROM users WHERE id = $1', [user]);
+    assert.equal(Number(g.rows[0].gold), 199, 'gold must not move');
+  } finally {
+    await dropUser(dbPool, user);
+  }
+});
