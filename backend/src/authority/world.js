@@ -415,9 +415,19 @@ class World {
   }
 
   // Respawn any player at <=0 hp (single place, after all damage sources).
+  // Returns the userIds resolved THIS call, so a caller with pool access
+  // (server.js) can apply the death XP penalty without this method itself
+  // becoming async — it runs on the synchronous tick path and must not await
+  // anything. Because every id returned here is healed to full hp in the
+  // SAME pass, a player can never appear in this list on two consecutive
+  // calls for the same death: the next call sees p.hp > 0 and skips them.
+  // That is also the only thing guarding against a double-fire — see
+  // server.js's onPlayerDeath comment for why that guarantee is sufficient.
   resolveDeaths() {
+    const died = [];
     for (const p of this.players.values()) {
       if (p.hp <= 0) {
+        died.push(p.userId);
         p.x = p.spawn.x; p.y = p.spawn.y;
         // Every resource is restored together. Leaving stamina out would
         // respawn a player fully healed but unable to swing a heavy weapon.
@@ -429,6 +439,7 @@ class World {
         p.effects.clear();
       }
     }
+    return died;
   }
 
   snapshot() {

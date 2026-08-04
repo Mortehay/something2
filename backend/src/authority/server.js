@@ -5,7 +5,7 @@ const { currentUserForToken } = require('../auth/tokens.js');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
-const { loadProgression } = require('../services/progressionStore.js');
+const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
@@ -350,6 +350,32 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (sock) send(sock, { type: 'progression', progression, leveledUp, newLevel, awarded });
       })
       .catch((err) => console.error('death commit failed:', err));
+
+  // Fire-and-forget entry point for a PLAYER death: resolveDeaths() (the
+  // single player-death path, world.js) is synchronous and on the tick
+  // path, so it cannot await the DB round trip itself. It returns the ids
+  // it just resolved instead, and the tick loop calls this once per id,
+  // following onCreatureDeath's exact shape (fire-and-forget + mandatory
+  // .catch — an unhandled rejection here would kill the process).
+  //
+  // Once per death, not once per tick spent dead: resolveDeaths() only ever
+  // returns an id on the call where it transitions that player from hp<=0 to
+  // healed, because it heals to full hp in that SAME pass. The very next
+  // tick's resolveDeaths() sees p.hp > 0 for that player and will not report
+  // them again. That is the whole guarantee — it holds only because respawn
+  // heals synchronously before this promise can even be scheduled; it is not
+  // a lock or a de-dup set, so it would NOT survive resolveDeaths ever being
+  // changed to not heal immediately.
+  const onPlayerDeath = (entry, userId) => applyDeath(pool, userId)
+    .then(({ progression, lost }) => {
+      if (lost <= 0) return; // at the level floor: nothing changed, nothing to push
+      // Best-effort: the player's socket may be gone (disconnected between
+      // the death and this commit finishing) — entry.sockets.get returns
+      // undefined and send() itself no-ops on a non-OPEN socket either way.
+      const sock = entry.sockets.get(userId);
+      if (sock) send(sock, { type: 'progression', progression, lost });
+    })
+    .catch((err) => console.error('death penalty commit failed:', err));
 
   // Every kill channel now reports { id, killerUserId } objects rather than
   // bare ids (Task 5), so the `new Set(...)` de-dup this file used everywhere
@@ -987,7 +1013,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Stashed for this tick's broadcast (below). REPLACED, not appended, so
       // an unconsumed stash can never grow without bound.
       entry.pendingDetonations = detonations;
-      entry.world.resolveDeaths();
+      for (const userId of entry.world.resolveDeaths()) onPlayerDeath(entry, userId);
       // Auto-loot: fire claims off-tick. The tick is synchronous and must never
       // await; `claiming` de-dups the repeats this produces across ticks while
       // a claim is still in flight.
