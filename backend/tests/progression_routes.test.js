@@ -463,3 +463,73 @@ test('a refused respec does not touch the live authority session', async (t) => 
     await dropUser(dbPool, user);
   }
 });
+
+// SOMET-242 whole-branch review, finding F3 seam 2: mutation (remove
+// refreshLivePlayerStats from the SUCCESS branch of the respec route)
+// leaves 43 tests green. There is coverage that a REFUSED respec does not
+// call it (above) and that a successful ALLOCATE does (the real-lookup test
+// above) -- a successful respec fell in the gap between the two. This
+// matters more than it used to: eaafb14 renamed the frontend's
+// applyProgressionResult to applyGoldResult(gold), which no longer writes
+// `progression` at all -- the WS 'progression' push this route sends is now
+// the client's ONLY writer for progression state, so a silent miss here is
+// not cosmetic.
+//
+// Same real-lookup harness as the successful-allocation test above (real
+// attachAuthority, real WS join, real HTTP call) rather than the
+// call-recording fakeAuthorityHandle -- a spy cannot catch a broken lookup,
+// only an outcome check on the object the authority actually holds can.
+test('a successful respec reaches the live authority session (real lookup, not a stub)', async (t) => {
+  if (!dbReady(t, 'this test creates a throwaway user, seeds a level-4 character with enough gold and respecs it')) return;
+  let user;
+  let ws;
+  let handle;
+  let server;
+  try {
+    user = await createTestUser(dbPool, 'live-respec-e2e');
+    await loadProgression(dbPool, user);
+    await dbPool.query(
+      'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE user_id = $1',
+      [user],
+    );
+    await dbPool.query('UPDATE users SET gold = 250 WHERE id = $1', [user]); // cost is RESPEC_BASE(50)*4 = 200
+
+    let url;
+    ({ url, handle, server } = await bootAuthority(fakeAuthorityPool()));
+    const joinToken = signToken({
+      userId: user, username: 'x', role: 'player', tokenVersion: 1,
+    });
+    ws = new WebSocket(`${url}?token=${encodeURIComponent(joinToken)}`);
+    await new Promise((r) => ws.on('open', r));
+    ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+    await nextMsg(ws, 'joined');
+
+    const player = handle.worlds.get('w1').world.getPlayer(String(user));
+    assert.ok(player, 'sanity: the real join must have added a real player, string-keyed');
+    // Force the live pools to a value the post-respec (every stat back to
+    // BASE_STAT) bundle clearly differs from, so a real move is what the
+    // assertion below observes -- respec resets to a FIXED bundle
+    // regardless of what was in the database beforehand, so without this
+    // the live object could already happen to sit at the post-respec values
+    // and a broken push would look identical to a working one.
+    player.maxHp = 200;
+    player.hp = 150;
+
+    __setAuthorityHandle(handle);
+    const progressionMsgP = nextMsg(ws, 'progression');
+
+    const res = await request(app).post('/api/progression/respec').set(authed(user)).send({});
+    const msg = await progressionMsgP;
+
+    assert.equal(res.status, 200);
+    assert.equal(player.maxHp, 100, 'respec resets every stat to BASE_STAT -> maxHp back to 100');
+    assert.equal(player.hp, 50, 'hp must move by the (now negative) delta: 150 + (100-200) = 50');
+    assert.equal(msg.stats.maxHp, 100, 'the socket push must carry the same number');
+  } finally {
+    __setAuthorityHandle(null);
+    if (ws) ws.terminate();
+    if (handle) handle.close();
+    if (server && server.listening) server.close();
+    await dropUser(dbPool, user);
+  }
+});

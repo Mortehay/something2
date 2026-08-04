@@ -1373,3 +1373,42 @@ test('refreshPlayerStats accepts a numeric userId (as req.user.id arrives from t
 
   ws.close(); handle.close(); server.close();
 });
+
+// SOMET-242 whole-branch review, finding F3 seam 1: the join path itself was
+// completely unguarded. Mutation (drop `stats` from the addPlayer(...) call
+// in the join handler above, around :697) leaves 56 tests green -- nothing
+// anywhere drives `loadProgression -> derivePlayerStats -> addPlayer`
+// through the REAL server.js join handler. authority_player_stats.test.js
+// only exercises World#addPlayer(..., stats) directly, never through join.
+// This is the single most load-bearing wire in the whole slice: it is what
+// makes a character's stats mean anything at all on connect.
+function highConProgressionPool(userId) {
+  const base = fakePool();
+  return withConnect({
+    query: async (sql, params) => {
+      if (/FROM player_progression WHERE user_id/i.test(sql)) {
+        return { rows: [{
+          user_id: String(userId), experience: '0', level: 1, stat_points: 0,
+          strength: 5, dexterity: 5, constitution: 15, intelligence: 5, wisdom: 5, charisma: 5,
+        }] };
+      }
+      return base.query(sql, params);
+    },
+  });
+}
+
+test('a player who joins with a real CON-15 progression row receives derived stats immediately (join-path wiring)', async () => {
+  const { url, handle, server } = await bootWith(highConProgressionPool(7));
+  const ws = connect(url, 7);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const player = handle.worlds.get('w1').world.getPlayer('7');
+  assert.ok(player, 'sanity: join must have added a player');
+  // Literal expected value, not a recomputation: CON 15 is 10 above
+  // BASE_STAT(5) -> maxHp 100 + HP_PER_CON(10)*10 = 200.
+  assert.equal(player.maxHp, 200, 'the joined player must carry their REAL progression-derived maxHp, not the BASE_STATS default');
+
+  ws.close(); handle.close(); server.close();
+});
