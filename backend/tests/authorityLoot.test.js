@@ -6,26 +6,44 @@ const { commitCreatureDeath, claimItem, dropItem, dropGraceActive, DROP_GRACE_MS
 // Routes queries by SQL pattern and records every call, so a test can assert
 // that a query NEVER ran — which is the point of the rowCount guard.
 //
-// `.connect()` proxies straight back to the same routed `query` fn (mirrors
-// authority_combat_integration.test.js's `withConnect`): commitCreatureDeath
-// now runs its DELETE/XP-award/drop-roll inside one client-owned transaction,
-// so every test here needs a checked-out "client", not just a bare pool.
-// None of these tests assert on BEGIN/COMMIT/ROLLBACK, so a proxy is a
-// faithful stand-in.
+// `.connect()` returns a DISTINCT client object per call (its own call log,
+// its own release counter) rather than `{ query: pool.query, release: () =>
+// {} }` — the original shape made `client.query(x)` and `pool.query(x)` the
+// SAME function reference, so nothing here could tell "issued on the
+// checked-out client" apart from "issued on the bare pool" (review round 1,
+// finding 2, on progression_kill_xp.test.js — fixed the same way here for
+// consistency). `pool.matching(re)` still searches everything (pool calls +
+// every client's calls combined), so every existing assertion below keeps
+// working unchanged; `pool.calls`/`pool.clients[i].calls` are additive, for
+// tests that want to know WHICH connection a statement landed on.
 function scriptedPool(routes = []) {
-  const calls = [];
-  const query = async (sql, params) => {
-    calls.push({ sql, params });
+  const poolCalls = [];
+  const clients = [];
+  function route(sql, params) {
     for (const [re, result] of routes) {
       if (re.test(sql)) return typeof result === 'function' ? result(params) : result;
     }
     return { rows: [], rowCount: 0 };
-  };
+  }
   return {
-    calls,
-    matching(re) { return calls.filter((c) => re.test(c.sql)); },
-    query,
-    connect: async () => ({ query, release: () => {} }),
+    calls: poolCalls,
+    clients,
+    matching(re) {
+      return [...poolCalls, ...clients.flatMap((c) => c.calls)].filter((c) => re.test(c.sql));
+    },
+    query: async (sql, params) => { poolCalls.push({ sql, params }); return route(sql, params); },
+    connect: async () => {
+      const calls = [];
+      const client = {
+        calls,
+        released: 0,
+        matching(re) { return calls.filter((c) => re.test(c.sql)); },
+        query: async (sql, params) => { calls.push({ sql, params }); return route(sql, params); },
+        release: () => { client.released += 1; },
+      };
+      clients.push(client);
+      return client;
+    },
   };
 }
 
@@ -115,6 +133,13 @@ test('removing the rowCount guard would double-drop on two damage sources report
 
   assert.strictEqual(pool.matching(/FROM creature_drops/i).length, 0, 'second finalize must not roll drops');
   assert.strictEqual(entry.world.groundItems.count(), 0);
+
+  // The refused finalize must still ROLLBACK and release its own client,
+  // not silently leak a checked-out connection.
+  assert.strictEqual(pool.calls.length, 0, 'nothing may be issued on the bare pool');
+  assert.strictEqual(pool.clients.length, 1);
+  assert.strictEqual(pool.clients[0].matching(/^\s*ROLLBACK/i).length, 1);
+  assert.strictEqual(pool.clients[0].released, 1);
 });
 
 function armClaimEntry() {

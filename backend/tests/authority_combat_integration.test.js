@@ -7,14 +7,33 @@ const { attachAuthority } = require('../src/authority/server.js');
 
 const SECRET = 'test-secret';
 
-// activateChunk (F-018 / SOMET-198) now opens a client via pool.connect() to
-// wrap the world_chunks INSERT and the creature INSERTs it gates in one
-// transaction, on top of the plain pool.query() every fake pool below
-// already answers. Neither fake asserts on BEGIN/COMMIT/ROLLBACK, so a
-// client that proxies straight back to the same `query` fn is a faithful
-// stand-in.
+// activateChunk (F-018 / SOMET-198) and commitCreatureDeath (SOMET-242) both
+// open a client via pool.connect() to wrap their own work in a transaction,
+// on top of the plain pool.query() every fake pool below already answers.
+// `.connect()` returns a DISTINCT client object per call (its own call log,
+// its own release counter) rather than literally `{ query: pool.query,
+// release: () => {} }` — that original shape made a checked-out client's
+// query indistinguishable from a query issued directly on the bare pool
+// (review round 1, finding 2, on progression_kill_xp.test.js). It still
+// delegates to the SAME `pool.query` closure for routing/state (so every
+// fake pool's own tracking arrays below — `deletes`, `itemInserts`, etc. —
+// are unaffected), only connection identity is now real. Neither fake here
+// asserts on BEGIN/COMMIT/ROLLBACK identity itself (progression_kill_xp.test.js
+// carries that burden for commitCreatureDeath's own transaction), but
+// `pool.clients[i].released` is available if a future test here wants it.
 function withConnect(pool) {
-  pool.connect = async () => ({ query: pool.query, release: () => {} });
+  pool.clients = [];
+  pool.connect = async () => {
+    const calls = [];
+    const client = {
+      calls,
+      released: 0,
+      query: async (sql, params) => { calls.push({ sql, params }); return pool.query(sql, params); },
+      release: () => { client.released += 1; },
+    };
+    pool.clients.push(client);
+    return client;
+  };
   return pool;
 }
 
