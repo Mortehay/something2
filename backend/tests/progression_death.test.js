@@ -228,6 +228,47 @@ test('dying costs a rolled fraction of the level\'s worth (literal, live path)',
   ws.close(); handle.close(); server.close();
 });
 
+// Every OTHER live-path death test pins the draw by passing `rng`, which
+// leaves the production default -- attachAuthority's `opts.rng || Math.random`
+// at server.js:113, threaded into applyDeath -- as the one branch none of them
+// execute. That is this branch's signature failure mode in a fresh place: a
+// stub standing in for the very wiring under test. Booting with no `rng` at
+// all is the only way to prove the unpinned path actually runs end to end and
+// lands inside the documented band.
+//
+// The assertions here are properties, not literals, because the draw is
+// genuinely unpinned -- the literal coverage lives in the pinned test above
+// and in player_stats.test.js. Level 3 is worth 100*3 = 300, so the band is
+// floor(0.005 * 300) = 1 through floor(0.10 * 300) = 30; starting 200 XP into
+// the level keeps the never-de-level clamp out of the result entirely, so a
+// loss of 0 would mean the roll never happened rather than that it was capped.
+test('the unpinned production roll runs and stays inside the band (live path)', async () => {
+  const row = {
+    user_id: '1', experience: 500, level: 3, stat_points: 0,
+    strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
+  };
+  const pool = fakeDeathPool(row);
+  const { url, handle, server } = await bootWith(pool); // no rng: Math.random
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const progressionP = nextMsg(ws, 'progression');
+  kill(handle, '1');
+  const prog = await progressionP;
+
+  assert.ok(prog.lost >= 1 && prog.lost <= 30,
+    `the unpinned roll escaped the 0.5%-10% band for a level worth 300: ${prog.lost}`);
+  assert.strictEqual(prog.progression.experience, 500 - prog.lost,
+    'the pushed experience must match the loss the same message reported');
+  assert.strictEqual(Number(row.experience), 500 - prog.lost,
+    'the persisted row must match too -- not just the wire message');
+  assert.strictEqual(prog.progression.level, 3, 'death never changes level directly');
+
+  ws.close(); handle.close(); server.close();
+});
+
 // Exactly on a level floor: zero progress into the level, so the documented
 // clamp (xp can never fall below xpFloor(level)) means zero loss AND no
 // de-level. Level 3 (not 1) so "never de-levels" is a real claim, not
