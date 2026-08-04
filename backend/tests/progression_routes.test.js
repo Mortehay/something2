@@ -6,9 +6,10 @@ require('./helpers/auth.js');
 const request = require('supertest');
 const { Pool } = require('pg');
 
-const { app, __setPool } = require('../src/index.js');
+const { app, __setPool, __setAuthorityHandle } = require('../src/index.js');
 const { signToken } = require('../src/auth/tokens.js');
 const { loadProgression } = require('../src/services/progressionStore.js');
+const { World } = require('../src/authority/world.js');
 const C = require('../src/services/progressionConstants.js');
 
 // ---------------------------------------------------------------------------
@@ -263,6 +264,127 @@ test('respec without the gold returns 402 and changes nothing', async (t) => {
     const g = await dbPool.query('SELECT gold FROM users WHERE id = $1', [user]);
     assert.equal(Number(g.rows[0].gold), 199, 'gold must not move');
   } finally {
+    await dropUser(dbPool, user);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Part 3: the live-authority follow-up. Allocate/respec must reach the LIVE
+// authority session (SOMET-242 review round 2, Task 10's character-sheet
+// build found this gap): a point spent into CON or DEX mid-session must move
+// the HUD without a reload, not just the database row. index.js wires a
+// `refreshLivePlayerStats` forwarder into progressionRoutes(); these tests
+// use __setAuthorityHandle -- index.js's existing test seam for injecting a
+// fake authority (see evictAuthorityWorld/isWorldLive's own tests) -- with a
+// fake handle whose refreshPlayerStats method does not merely RECORD that it
+// was called: it forwards straight into a REAL World instance's real
+// applyDerivedStats, so "the live player's maxHp actually moved" is a
+// genuine assertion about a real object mutated by real production code, not
+// a spy echoing its own input back (the mock-input-blindness shape Task 6's
+// review found and this repo now explicitly guards against).
+// authority_server.test.js separately proves the REAL attachAuthority
+// -produced refreshPlayerStats end-to-end (session lookup via
+// sessionsByUser, the hp<=0 guard, the pushed 'progression' message).
+// ---------------------------------------------------------------------------
+
+function fakeAuthorityHandle(userId) {
+  const map = { chunkSize: 8, isWalkable: () => true, speedAt: () => 1, getChunk: () => [] };
+  const world = new World(map, new Map(), null, 8);
+  world.addPlayer(userId, { x: 0, y: 0 }); // joins at BASE_STATS -> maxHp 100
+  const calls = [];
+  return {
+    world,
+    calls,
+    refreshPlayerStats(uid, progression, stats) {
+      calls.push({ uid, progression, stats });
+      return world.applyDerivedStats(uid, stats);
+    },
+  };
+}
+
+test('a successful allocation reaches the live authority session', async (t) => {
+  if (!dbReady(t, 'this test creates a throwaway user and allocates a point into constitution')) return;
+  let user;
+  try {
+    user = await createTestUser(dbPool, 'live-allocate');
+    await loadProgression(dbPool, user);
+    await dbPool.query('UPDATE player_progression SET stat_points = 1 WHERE user_id = $1', [user]);
+
+    const handle = fakeAuthorityHandle(user);
+    const player = handle.world.getPlayer(user);
+    // Forced below BASE_STATS' own maxHp so a move is unambiguous -- it
+    // cannot be mistaken for the join-time default still being in place.
+    player.maxHp = 100;
+    player.hp = 60;
+    __setAuthorityHandle(handle);
+
+    const res = await request(app).post('/api/progression/allocate').set(authed(user))
+      .send({ stat: 'constitution', count: 1 });
+
+    assert.equal(res.status, 200);
+    assert.equal(handle.calls.length, 1, 'refreshPlayerStats must be called exactly once');
+    assert.equal(handle.calls[0].uid, user);
+    // CON 5 -> 6 (one above BASE_STAT) -> maxHp 100 + HP_PER_CON(10)*1 = 110.
+    assert.equal(player.maxHp, 110, 'the LIVE player object, not a spy, must show the new max hp');
+    assert.equal(player.hp, 70, 'hp must move by the +10 delta, not snap to the new max');
+  } finally {
+    __setAuthorityHandle(null);
+    await dropUser(dbPool, user);
+  }
+});
+
+test('a failed allocation does not touch the live authority session', async (t) => {
+  if (!dbReady(t, 'this test creates a throwaway user and posts an over-budget allocation')) return;
+  let user;
+  try {
+    user = await createTestUser(dbPool, 'live-allocate-fail');
+    await loadProgression(dbPool, user); // stat_points stays 0
+
+    const handle = fakeAuthorityHandle(user);
+    const player = handle.world.getPlayer(user);
+    player.maxHp = 100;
+    player.hp = 60;
+    __setAuthorityHandle(handle);
+
+    const res = await request(app).post('/api/progression/allocate').set(authed(user))
+      .send({ stat: 'constitution', count: 1 });
+
+    assert.equal(res.status, 400);
+    assert.equal(handle.calls.length, 0, 'refreshPlayerStats must not be called on a rejected allocation');
+    assert.equal(player.maxHp, 100, 'the live player must be completely untouched');
+    assert.equal(player.hp, 60);
+  } finally {
+    __setAuthorityHandle(null);
+    await dropUser(dbPool, user);
+  }
+});
+
+test('a refused respec does not touch the live authority session', async (t) => {
+  if (!dbReady(t, 'this test creates a throwaway user, seeds a level-4 character short on gold and attempts a respec')) return;
+  let user;
+  try {
+    user = await createTestUser(dbPool, 'live-respec-fail');
+    await loadProgression(dbPool, user);
+    await dbPool.query(
+      'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE user_id = $1',
+      [user],
+    );
+    await dbPool.query('UPDATE users SET gold = 199 WHERE id = $1', [user]); // cost is 200
+
+    const handle = fakeAuthorityHandle(user);
+    const player = handle.world.getPlayer(user);
+    player.maxHp = 100;
+    player.hp = 60;
+    __setAuthorityHandle(handle);
+
+    const res = await request(app).post('/api/progression/respec').set(authed(user)).send({});
+
+    assert.equal(res.status, 402);
+    assert.equal(handle.calls.length, 0, 'refreshPlayerStats must not be called on a refused respec');
+    assert.equal(player.maxHp, 100, 'the live player must be completely untouched');
+    assert.equal(player.hp, 60);
+  } finally {
+    __setAuthorityHandle(null);
     await dropUser(dbPool, user);
   }
 });

@@ -1170,6 +1170,44 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const entry = worlds.get(worldId);
       return !!(entry && entry.sockets && entry.sockets.size > 0);
     },
+    // Pushes a freshly-derived stat bundle from the progression HTTP API
+    // (allocate, respec — SOMET-242) into the LIVE authority session, the
+    // same live-consequence step onCreatureDeath's level-up path already
+    // does for kill XP (see the DELETE FROM world_creatures handler above:
+    // "without moving the session's pools here, a level-up would raise max
+    // hp in the database and nothing in the running game"). Without this, a
+    // point spent or a respec applied mid-session would only take effect in
+    // the database, invisible until the player reconnects.
+    //
+    // Looked up via sessionsByUser (one live session per account) rather
+    // than scanning every world's socket map — the natural shortcut when a
+    // userId, not a worldId, is the only thing the caller has.
+    //
+    // Same hp<=0 guard as onCreatureDeath's level-up path, for the identical
+    // reason: World#applyDerivedStats clamps current hp to a floor of 1
+    // UNCONDITIONALLY, so calling it on a player currently sitting at hp<=0
+    // (mid-death, awaiting the tick loop's resolveDeaths()) would incorrectly
+    // revive them. A respec that LOWERS max hp (a lower CON) still moves
+    // current hp by the same (now negative) delta, but that same floor of 1
+    // — not 0 — is what stops a respec from being able to kill anyone.
+    //
+    // Returns false (a no-op, never a throw) when the user has no live
+    // session, isn't in any loaded world, or is currently at hp<=0 — the
+    // caller (progressionRoutes.js, via index.js's `?.` forwarding) treats
+    // "was this reflected live" as best-effort, not a requirement for the
+    // HTTP response, which already reflects the database write either way.
+    refreshPlayerStats(userId, progression, stats) {
+      const ws = sessionsByUser.get(userId);
+      if (!ws || !ws.worldId) return false;
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return false;
+      const p = entry.world.getPlayer(userId);
+      if (!p || p.hp <= 0) return false;
+      entry.world.applyDerivedStats(userId, stats);
+      const sock = entry.sockets.get(userId);
+      if (sock) send(sock, { type: 'progression', progression, stats });
+      return true;
+    },
     close() {
       clearInterval(tickTimer);
       clearInterval(flushTimer);

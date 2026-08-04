@@ -176,6 +176,16 @@ function evictAuthorityWorld(worldId) {
 function isWorldLive(worldId) {
   return authorityHandle?.isWorldLive?.(worldId) ?? false;
 }
+// Pushes a progression HTTP API write (allocate, respec — SOMET-242) into the
+// live authority session, same `?.` fallback idiom as the two helpers above:
+// authorityHandle is null under every test that mounts the app without a
+// real authority attached, and this must never turn that absence into a 500.
+// See authority/server.js's refreshPlayerStats for what "reflected live"
+// actually means (world stat update + a pushed 'progression' message) and
+// its hp<=0 guard.
+function refreshLivePlayerStats(userId, progression, stats) {
+  return authorityHandle?.refreshPlayerStats?.(userId, progression, stats) ?? false;
+}
 // A world-content admin mutation calls this right after its own DB writes.
 // Returns a warning string when the edit could NOT reach a live simulation
 // (a player is connected, so evictWorld refused), or undefined when there is
@@ -325,7 +335,7 @@ app.use('/api/auth', authRouter(guardPool));
 // Character-sheet API (SOMET-242): GET the derived progression bundle, POST
 // an allocation or a respec. Every route is behind requireAuth and acts on
 // req.user.id -- see api/progressionRoutes.js's header comment.
-app.use('/api/progression', progressionRoutes(guardPool));
+app.use('/api/progression', progressionRoutes(guardPool, refreshLivePlayerStats));
 
 // The /api/dev-token endpoint was removed: it minted a correctly-signed JWT for
 // any user_id with no credentials — a verified account-takeover primitive.

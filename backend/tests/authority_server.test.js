@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const WebSocket = require('ws');
 const { attachAuthority } = require('../src/authority/server.js');
+const { derivePlayerStats } = require('../src/services/playerStats.js');
 
 const SECRET = 'test-secret';
 
@@ -1241,4 +1242,97 @@ test('a kicked socket closing mid-join does not tear down the new session', asyn
   const s = await nextMsg(b, 'state');
   assert.ok(Array.isArray(s.players), 'the new session should still receive state after the kicked close');
   b.close(); handle.close(); server.close();
+});
+
+// ---------------------------------------------------------------------------
+// refreshPlayerStats (SOMET-242 follow-up): the progression HTTP API
+// (allocate, respec) writes to the database and, until this method existed,
+// never touched the LIVE authority session — a player who spent a point into
+// CON or DEX mid-session saw nothing move (HUD max hp, attack speed) until
+// they reconnected. This mirrors onCreatureDeath's existing level-up path
+// (both call World#applyDerivedStats and push a 'progression' message), just
+// reached from a userId with no in-flight kill/death context.
+// ---------------------------------------------------------------------------
+
+// Constitution 15 (10 above BASE_STAT 5) -> maxHp 100 + 10*10 = 200, matching
+// the same literal fakeLevelUpPool's row uses in progression_kill_xp.test.js,
+// so a reviewer who knows that number recognizes it here too.
+function highConProgression(userId) {
+  return {
+    user_id: userId, experience: 0, level: 1, stat_points: 0,
+    strength: 5, dexterity: 5, constitution: 15, intelligence: 5, wisdom: 5, charisma: 5,
+  };
+}
+
+test('refreshPlayerStats moves a live player\'s pools and pushes a progression message', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 7);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const world = handle.worlds.get('w1').world;
+  const player = world.getPlayer('7');
+  // Force the live pools BELOW what the new bundle implies, exactly like
+  // progression_kill_xp.test.js's own level-up test -- otherwise "before"
+  // and "after" would already be identical and this could pass even with
+  // applyDerivedStats never called.
+  player.maxHp = 100;
+  player.hp = 60;
+
+  const progression = highConProgression('7');
+  const stats = derivePlayerStats(progression);
+
+  const progressionMsgP = nextMsg(ws, 'progression');
+  const ok = handle.refreshPlayerStats('7', progression, stats);
+  const msg = await progressionMsgP;
+
+  assert.equal(ok, true);
+  assert.equal(player.maxHp, 200, 'maxHp must move to base(100) + 10*10 from constitution 15');
+  assert.equal(player.hp, 160, 'hp must move by the +100 delta (60+100), not snap to the new max (200)');
+  assert.deepEqual(msg.progression, progression);
+  assert.deepEqual(msg.stats, stats);
+
+  ws.close(); handle.close(); server.close();
+});
+
+// Same hazard onCreatureDeath's level-up path already guards against
+// (server.js's own comment: "applyDerivedStats clamps current hp to a floor
+// of 1 unconditionally"). world.attack()'s PvP branch can drop a player to
+// hp<=0 synchronously, outside the tick loop's resolveDeaths() — a stats
+// refresh landing in that window must not cancel the death.
+test('refreshPlayerStats does not revive a player sitting at hp <= 0', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 9);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const world = handle.worlds.get('w1').world;
+  const player = world.getPlayer('9');
+  player.maxHp = 100;
+  player.hp = -5;
+
+  const progression = highConProgression('9');
+  const stats = derivePlayerStats(progression);
+  const ok = handle.refreshPlayerStats('9', progression, stats);
+
+  assert.equal(ok, false, 'the guard must refuse a refresh for a dying player');
+  assert.equal(player.hp, -5, 'must not be revived');
+  assert.equal(player.maxHp, 100, 'maxHp must not move either -- applyDerivedStats must not run at all');
+
+  ws.close(); handle.close(); server.close();
+});
+
+// The player may not be connected at all when the HTTP route fires (they
+// allocated from a browser tab with no open game session, or disconnected a
+// moment earlier). This must be a silent no-op, never a throw -- the HTTP
+// route's own success response does not depend on it.
+test('refreshPlayerStats on a user with no live session is a no-op, not an error', async () => {
+  const { handle, server } = await boot();
+  assert.doesNotThrow(() => {
+    const ok = handle.refreshPlayerStats('no-such-user', highConProgression('no-such-user'), derivePlayerStats({}));
+    assert.equal(ok, false);
+  });
+  server.close();
 });

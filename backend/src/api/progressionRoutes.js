@@ -17,7 +17,16 @@ const { loadProgression, allocateStat, respec } = require('../services/progressi
 const { derivePlayerStats, xpFloor, xpToNext } = require('../services/playerStats.js');
 const C = require('../services/progressionConstants.js');
 
-module.exports = function progressionRoutes(pool) {
+// `refreshLivePlayerStats(userId, progression, stats)` pushes a successful
+// write into the live authority session (SOMET-242 follow-up: allocating a
+// point or respeccing mid-session must move the HUD/character sheet without
+// a reload, not just the database). Defaults to a no-op so every existing
+// caller/test that builds this router with one argument keeps working
+// unchanged, and so a route never 500s when there is no authority attached
+// at all (true of the whole test harness, and of index.js itself before
+// `attachAuthority` runs) — the real forwarder index.js passes in already
+// carries its own `?.` fallback for exactly that case.
+module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () => false) {
   const router = express.Router();
   const guard = requireAuth(pool);
 
@@ -46,10 +55,12 @@ module.exports = function progressionRoutes(pool) {
       const { stat, count } = req.body || {};
       const r = await allocateStat(pool, req.user.id, stat, count);
       if (!r.ok) return res.status(400).json({ error: r.reason });
-      return res.status(200).json({
-        progression: r.progression,
-        stats: derivePlayerStats(r.progression),
-      });
+      const stats = derivePlayerStats(r.progression);
+      // Best-effort: refuses/no-ops silently (no live session, no authority
+      // attached, player at hp<=0) — the write above already succeeded and
+      // the HTTP response below reflects it regardless.
+      refreshLivePlayerStats(req.user.id, r.progression, stats);
+      return res.status(200).json({ progression: r.progression, stats });
     } catch (err) {
       console.error('allocate failed:', err);
       return res.status(500).json({ error: 'allocate failed' });
@@ -60,11 +71,9 @@ module.exports = function progressionRoutes(pool) {
     try {
       const r = await respec(pool, req.user.id);
       if (!r.ok) return res.status(402).json({ error: r.reason, cost: r.cost });
-      return res.status(200).json({
-        progression: r.progression,
-        stats: derivePlayerStats(r.progression),
-        gold: r.gold,
-      });
+      const stats = derivePlayerStats(r.progression);
+      refreshLivePlayerStats(req.user.id, r.progression, stats);
+      return res.status(200).json({ progression: r.progression, stats, gold: r.gold });
     } catch (err) {
       console.error('respec failed:', err);
       return res.status(500).json({ error: 'respec failed' });
