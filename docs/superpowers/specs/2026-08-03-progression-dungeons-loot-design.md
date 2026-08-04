@@ -179,11 +179,18 @@ are not treated as a balance deliverable.
 ### Death
 
 ```
-lost = PENALTY * (experience - xpFloor(level))
+lost = roll(0.5%, 10%) * xpToNext(level)      # rolled fresh per death
 experience = max(xpFloor(level), experience - lost)
 ```
 
 A player can lose a level's worth of grinding, never a level.
+
+The base is what the level **costs**, not the progress already made into it,
+so dying early in a level is not cheaper than dying late — the clamp is what
+stops it crossing the floor, and a player who has just levelled up loses
+nothing. The roll is drawn by the caller and passed into the penalty maths,
+never generated inside it, so the formula stays a pure function testable
+against literal values.
 
 ### Respec
 
