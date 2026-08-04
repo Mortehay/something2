@@ -91,13 +91,34 @@ function xpForKill(creatureLevel, playerLevel) {
   return Math.max(0, Math.round(C.XP_KILL_BASE * cl * factor));
 }
 
-// Lose a fraction of the progress made INTO the current level. Because the
-// loss is computed from the progress above the floor, it can never cross it:
-// a player loses a level's worth of grinding but never a level.
-function applyDeathPenalty(experience, level) {
+// Lose a random slice of what the current level is WORTH -- 0.5% to 10% of
+// xpToNext(level), rolled per death.
+//
+// Takes a [0,1] draw rather than calling Math.random() itself, for the same
+// reason creatureLevel.js's rollCreatureLevel does: a formula that generates
+// its own randomness cannot be tested against literal expected values, and
+// this repo's dominant test failure is assertions derived from the same
+// constants as the code. The caller owns the draw; this stays pure.
+//
+// The level's worth is computed as XP_BASE * level rather than by calling
+// xpToNext(level), because xpToNext deliberately returns Infinity at
+// MAX_LEVEL -- an infinite raw loss would silently become "everything above
+// the floor", i.e. a flat 100% penalty for max-level players only.
+//
+// The clamp is what preserves the never-de-level guarantee, and it now does
+// real work: the loss is derived from the level's total cost, so it can
+// exceed the progress actually made. A player who just levelled up loses
+// nothing. `lost` is reported AFTER clamping, so it never over-reports.
+function applyDeathPenalty(experience, level, unit) {
   const floor = xpFloor(level);
   const xp = Math.max(floor, Number(experience) || 0);
-  const lost = Math.floor(C.DEATH_PENALTY * (xp - floor));
+  const lvl = clamp(Math.floor(Number(level) || 1), 1, C.MAX_LEVEL);
+
+  const u = Number.isFinite(unit) ? clamp(unit, 0, 1) : 0;
+  const fraction = C.DEATH_PENALTY_MIN + u * (C.DEATH_PENALTY_MAX - C.DEATH_PENALTY_MIN);
+  const levelWorth = C.XP_BASE * lvl;
+
+  const lost = Math.min(Math.floor(fraction * levelWorth), xp - floor);
   return { experience: xp - lost, lost };
 }
 

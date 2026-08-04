@@ -63,9 +63,19 @@ const XP_KILL_BASE = 10;
 const XP_LEVEL_DIFF_SLOPE = 0.2;
 const XP_LEVEL_DIFF_MAX = 2;
 
-// Death costs a quarter of the progress made INTO the current level, so a
-// player can lose a level's worth of grinding but never a level.
-const DEATH_PENALTY = 0.25;
+// Death costs a RANDOM slice of what the current level is worth -- between
+// 0.5% and 10% of xpToNext(level), rolled fresh on every death. The base is
+// the level's full cost, NOT the progress already made into it, so the sting
+// of dying does not shrink just because a player died early in a level.
+//
+// The roll is uniform over [MIN, MAX]. The randomness is drawn by the caller
+// and passed in, never called inside the formula -- see applyDeathPenalty.
+//
+// The never-de-level guarantee is unaffected: the loss is still clamped at
+// xpFloor(level), so a player who has just levelled up loses nothing, and one
+// who is 3% into a level loses at most that 3%.
+const DEATH_PENALTY_MIN = 0.005;
+const DEATH_PENALTY_MAX = 0.10;
 
 // Respec cost in gold: RESPEC_BASE * level.
 const RESPEC_BASE = 50;
@@ -77,5 +87,5 @@ module.exports = {
   MANA_REGEN_BASE, MANA_REGEN_PER_WIS,
   PRICE_PER_CHA, SELL_FRACTION_BASE, SELL_FRACTION_MAX,
   XP_BASE, XP_KILL_BASE, XP_LEVEL_DIFF_SLOPE, XP_LEVEL_DIFF_MAX,
-  DEATH_PENALTY, RESPEC_BASE,
+  DEATH_PENALTY_MIN, DEATH_PENALTY_MAX, RESPEC_BASE,
 };

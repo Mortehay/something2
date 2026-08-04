@@ -295,19 +295,25 @@ test('awardXp serializes concurrent awards for the same user so none of them clo
 // could persist experience BELOW the new level's floor -- exactly the
 // invariant the whole death-penalty feature exists to protect.
 //
-// The numbers are chosen so the final result is the SAME literal regardless
-// of which of the two operations the row lock happens to serialize FIRST --
-// required for a reliable, non-flaky assertion, since a kill-award and a
-// death-penalty are NOT commutative in general (the penalty is a FRACTION
-// of progress into the level, not a flat amount, so order usually matters):
+// The final result must be the SAME literal regardless of which of the two
+// operations the row lock happens to serialize FIRST, or the assertion would
+// be flaky by construction.
 //
-//   kill-first:  640 + 2 = 642; lost = floor(0.25*(642-600)) = floor(10.5) = 10; final 632
-//   death-first: lost = floor(0.25*(640-600)) = floor(10) = 10; 640-10 = 630; +2 = 632
+// The death penalty is now a fraction of the LEVEL'S WORTH rather than of the
+// progress made into it, which makes the two operations genuinely commutative
+// whenever the clamp does not bind -- the penalty is a flat amount for a given
+// roll, so adding XP before or after subtracting it lands in the same place.
+// The roll is pinned via the injectable `rng` so "for a given roll" is not
+// left to chance:
 //
-// Both orderings land on 632 because floor(0.25*40) and floor(0.25*42) are
-// the same integer (10) -- +2 is too small to push the quartered progress
-// across its next integer boundary. AMOUNT is 2 (not a realistic kill
-// value) specifically to keep both orderings converging on one literal.
+//   the fixture sits at level 4 (xpFloor(4) = 600), which is worth 100*4 = 400;
+//   draw 0.5 -> 5.25% -> floor(0.0525 * 400) = 21 lost
+//   kill-first:  640 + 2 = 642; 642 - 21 = 621
+//   death-first: 640 - 21 = 619; 619 + 2 = 621
+//
+// This is a strictly better footing than the previous version of this test,
+// which relied on floor(0.25*40) and floor(0.25*42) coincidentally being the
+// same integer.
 //
 // GETTING THIS TO REPRODUCE RELIABLY TOOK TWO ROUNDS OF TUNING, and both are
 // worth recording (same spirit as Task 3's N=2 -> N=5 retuning note above):
@@ -391,11 +397,11 @@ test('applyDeath and a concurrent awardXp for the same user serialize instead of
       awardXp(awardClient, user, AMOUNT, 'kill')
         .then(() => new Promise((r) => setTimeout(r, COMMIT_DELAY_MS)))
         .then(() => awardClient.query('COMMIT')),
-      applyDeath(pool, user),
+      applyDeath(pool, user, { rng: () => 0.5 }),
     ]);
 
     const after = await loadProgression(pgPool, user);
-    assert.equal(after.experience, 632, 'both the award and the penalty must land, in EITHER serialization order');
+    assert.equal(after.experience, 621, 'both the award and the penalty must land, in EITHER serialization order');
   } finally {
     if (awardClient) {
       await awardClient.query('ROLLBACK').catch(() => {}); // no-op if COMMIT already landed
@@ -569,16 +575,18 @@ test('applyDeath never de-levels and persists the loss', async (t) => {
   try {
     user = await createTestUser(pool, 'death-loss');
     await loadProgression(pool, user);
-    // level 3 floor is 300 (XP_BASE * (3-1) * 3 / 2 = 300); 50 xp of progress
-    // into the level. DEATH_PENALTY (0.25) * 50 = 12.5 -> floor 12 lost.
+    // Level 3's floor is 300 and the level is worth 300, so a pinned draw of
+    // 0.5 costs 5.25% of 300 = floor(15.75) = 15. Progress is 50, comfortably
+    // more than 15, so the never-de-level clamp does not bind here -- the
+    // clamped case has its own test in player_stats.test.js.
     await pool.query(
       'UPDATE player_progression SET level = 3, experience = 350 WHERE user_id = $1',
       [user],
     );
 
-    const r = await applyDeath(pool, user);
-    assert.equal(r.lost, 12);
-    assert.equal(r.progression.experience, 338);
+    const r = await applyDeath(pool, user, { rng: () => 0.5 });
+    assert.equal(r.lost, 15);
+    assert.equal(r.progression.experience, 335);
     assert.equal(r.progression.level, 3, 'death must never change level directly');
     assert.ok(r.progression.experience >= 300, 'the loss must never cross back below the level floor');
   } finally {
@@ -596,6 +604,8 @@ test('applyDeath is a no-op at the very start of a level (zero progress to lose)
     user = await createTestUser(pool, 'death-noloss');
     const before = await loadProgression(pool, user); // level 1, xp 0 -- exactly on the floor
 
+    // Deliberately NOT pinning the roll: sitting exactly on the floor must
+    // cost nothing at EVERY draw, and the real Math.random exercises that.
     const r = await applyDeath(pool, user);
     assert.equal(r.lost, 0);
     assert.deepEqual(r.progression, before, 'nothing to lose means nothing changes');

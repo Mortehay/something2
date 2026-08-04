@@ -366,7 +366,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // heals synchronously before this promise can even be scheduled; it is not
   // a lock or a de-dup set, so it would NOT survive resolveDeaths ever being
   // changed to not heal immediately.
-  const onPlayerDeath = (entry, userId) => applyDeath(pool, userId)
+  // `rng` is the same injectable draw the loot roll uses (opts.rng, defaulted
+  // above), threaded through so the death penalty's 0.5%-10% roll can be
+  // pinned in a test instead of leaving these assertions to chance.
+  const onPlayerDeath = (entry, userId) => applyDeath(pool, userId, { rng })
     .then(({ progression, lost }) => {
       if (lost <= 0) return; // at the level floor: nothing changed, nothing to push
       // Best-effort: the player's socket may be gone (disconnected between

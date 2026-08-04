@@ -88,10 +88,44 @@ test('kill XP rewards a harder creature and decays to zero on a trivial one', ()
   assert.equal(xpForKill(1, 10), 0);    // never negative
 });
 
-test('death costs progress into the level and never de-levels', () => {
-  assert.deepStrictEqual(applyDeathPenalty(500, 3), { experience: 450, lost: 50 });
-  // Exactly at the floor there is nothing to lose.
-  assert.deepStrictEqual(applyDeathPenalty(300, 3), { experience: 300, lost: 0 });
+// Level 3 is worth xpToNext(3) = 300 XP and its floor is 300. Every expected
+// number below is hand-computed from those two facts and written as a literal.
+test('death costs a random slice of what the level is worth', () => {
+  // Draw 0 -> the 0.5% floor of the range: floor(0.005 * 300) = 1.
+  assert.deepStrictEqual(applyDeathPenalty(500, 3, 0), { experience: 499, lost: 1 });
+  // Draw 1 -> the 10% ceiling: floor(0.10 * 300) = 30.
+  assert.deepStrictEqual(applyDeathPenalty(500, 3, 1), { experience: 470, lost: 30 });
+  // Draw 0.5 -> 5.25%: floor(0.0525 * 300) = floor(15.75) = 15.
+  assert.deepStrictEqual(applyDeathPenalty(500, 3, 0.5), { experience: 485, lost: 15 });
+});
+
+test('the roll spans the whole 0.5%-10% band and never leaves it', () => {
+  // Sweep the draw and confirm the loss is monotonic in it and bounded by the
+  // two literals above -- a formula that ignored `unit`, or that used the
+  // wrong end of the range, would collapse this to a single value.
+  const losses = [0, 0.25, 0.5, 0.75, 1].map((u) => applyDeathPenalty(100000, 3, u).lost);
+  assert.deepStrictEqual(losses, [1, 8, 15, 22, 30]);
+  for (const u of [-5, 2, NaN, undefined, 'half']) {
+    const { lost } = applyDeathPenalty(100000, 3, u);
+    assert.ok(lost >= 1 && lost <= 30, `draw ${String(u)} escaped the band: ${lost}`);
+  }
+});
+
+test('death never de-levels, and the clamp reports the real loss', () => {
+  // Exactly at the floor there is nothing to lose, at ANY draw.
+  assert.deepStrictEqual(applyDeathPenalty(300, 3, 1), { experience: 300, lost: 0 });
+  // Barely into the level: the 10% roll wants 30 but only 4 exist. `lost` must
+  // report 4, not 30 -- an over-reported loss would lie to the player and to
+  // the wire message the sheet renders.
+  assert.deepStrictEqual(applyDeathPenalty(304, 3, 1), { experience: 300, lost: 4 });
+
+  // MAX_LEVEL is the case a naive implementation gets wrong: xpToNext(50) is
+  // Infinity by design, so deriving the loss from it would wipe out every
+  // point of progress above the floor. Level 50 is worth 100*50 = 5000, so a
+  // full-strength roll costs floor(0.10 * 5000) = 500.
+  assert.deepStrictEqual(applyDeathPenalty(xpFloor(50) + 900, 50, 1),
+    { experience: xpFloor(50) + 400, lost: 500 });
+
   // The invariant, stated directly: for every level and every XP inside it,
   // the result never falls below the level's floor. The floor used here is
   // the closed form written out inline -- NOT a call into xpFloor -- so a bug
@@ -109,9 +143,16 @@ test('death costs progress into the level and never de-levels', () => {
       `xpFloor(${level}) diverged from the closed form: ${xpFloor(level)} !== ${expectedFloor}`);
     for (const offset of [0, 1, 7, 50, 999]) {
       const xp = expectedFloor + offset;
-      const out = applyDeathPenalty(xp, level);
-      assert.ok(out.experience >= expectedFloor,
-        `level ${level} +${offset} de-levelled: ${out.experience} < ${expectedFloor}`);
+      // Both ends of the roll, because the loss now derives from the level's
+      // total worth rather than from progress made, so the strongest draw is
+      // the one most able to punch through the floor.
+      for (const unit of [0, 1]) {
+        const out = applyDeathPenalty(xp, level, unit);
+        assert.ok(out.experience >= expectedFloor,
+          `level ${level} +${offset} at draw ${unit} de-levelled: ${out.experience} < ${expectedFloor}`);
+        assert.equal(out.experience, xp - out.lost,
+          `level ${level} +${offset} at draw ${unit}: reported loss ${out.lost} does not match the XP actually removed`);
+      }
     }
   }
 });

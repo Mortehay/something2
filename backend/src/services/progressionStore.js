@@ -172,12 +172,15 @@ async function respec(pool, userId) {
 // inside this window, the write can land the persisted experience BELOW the
 // NEW level's floor -- the exact invariant applyDeathPenalty exists to
 // protect, violated by losing the race rather than by any arithmetic bug.
-async function applyDeath(pool, userId) {
+// `rng` is injectable so a test can pin the roll, matching the convention
+// commitCreatureDeath already uses. The draw is taken here and handed to the
+// pure penalty maths rather than generated inside it.
+async function applyDeath(pool, userId, { rng = Math.random } = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const before = await loadProgression(client, userId, { forUpdate: true });
-    const { experience, lost } = applyDeathPenalty(before.experience, before.level);
+    const { experience, lost } = applyDeathPenalty(before.experience, before.level, rng());
     if (lost <= 0) {
       await client.query('COMMIT');
       return { progression: before, lost: 0 };

@@ -189,17 +189,20 @@ function kill(handle, userId) {
   world.getPlayer(userId).hp = -5;
 }
 
-// level 4's floor is xpFloor(4) = 100*3*4/2 = 600; 655 is 55 XP INTO level 4.
-// DEATH_PENALTY (0.25) * 55 = 13.75 -> floor 13 lost -> 655-13 = 642. Chosen
-// deliberately non-round so a formula that used the wrong floor, the wrong
-// fraction, or skipped the floor() would land on a different number.
-test('dying costs the documented fraction of progress into the level (literal, live path)', async () => {
+// Level 4's floor is xpFloor(4) = 100*3*4/2 = 600, and level 4 is WORTH
+// 100*4 = 400. The roll is pinned at 0.5, i.e. 5.25% of the band, so the loss
+// is floor(0.0525 * 400) = floor(21) = 21 -> 655-21 = 634. Experience starts
+// 55 XP into the level, comfortably above 21, so the never-de-level clamp is
+// not what produces this number. Deliberately non-round so a formula that
+// used the progress instead of the level's worth, the wrong end of the band,
+// or skipped the floor() would land somewhere else.
+test('dying costs a rolled fraction of the level\'s worth (literal, live path)', async () => {
   const row = {
     user_id: '1', experience: 655, level: 4, stat_points: 0,
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = fakeDeathPool(row);
-  const { url, handle, server } = await bootWith(pool);
+  const { url, handle, server } = await bootWith(pool, { rng: () => 0.5 });
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
@@ -209,8 +212,8 @@ test('dying costs the documented fraction of progress into the level (literal, l
   kill(handle, '1');
   const prog = await progressionP;
 
-  assert.strictEqual(prog.lost, 13, 'floor(0.25 * 55)');
-  assert.strictEqual(prog.progression.experience, 642);
+  assert.strictEqual(prog.lost, 21, 'floor(0.0525 * 400)');
+  assert.strictEqual(prog.progression.experience, 634);
   assert.strictEqual(prog.progression.level, 4, 'death never changes level directly');
 
   // Respawn (the unrelated, pre-existing heal-to-full path) still ran too.
@@ -235,7 +238,7 @@ test('dying at a level floor costs nothing and never de-levels', async () => {
     strength: 6, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = fakeDeathPool(row);
-  const { url, handle, server } = await bootWith(pool);
+  const { url, handle, server } = await bootWith(pool, { rng: () => 0.5 });
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
@@ -264,7 +267,8 @@ test('dying at a level floor costs nothing and never de-levels', async () => {
   ws.close(); handle.close(); server.close();
 });
 
-// level 5 floor is 1000; 30 XP into the level -> lost = floor(0.25*30) = 7.
+// Level 5's floor is 1000 and it is worth 100*5 = 500; a pinned 0.5 draw
+// costs floor(0.0525 * 500) = floor(26.25) = 26, against 30 XP of progress.
 // Non-base stats and a nonzero stat_points prove the UPDATE genuinely only
 // ever touches `experience` -- if it touched anything else, these would move.
 test('dying does not change allocated stats or spent points', async () => {
@@ -273,7 +277,7 @@ test('dying does not change allocated stats or spent points', async () => {
     strength: 8, dexterity: 6, constitution: 7, intelligence: 9, wisdom: 5, charisma: 5,
   };
   const pool = fakeDeathPool(row);
-  const { url, handle, server } = await bootWith(pool);
+  const { url, handle, server } = await bootWith(pool, { rng: () => 0.5 });
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
@@ -283,8 +287,8 @@ test('dying does not change allocated stats or spent points', async () => {
   kill(handle, '1');
   const prog = await progressionP;
 
-  assert.strictEqual(prog.lost, 7);
-  assert.strictEqual(prog.progression.experience, 1023);
+  assert.strictEqual(prog.lost, 26);
+  assert.strictEqual(prog.progression.experience, 1004);
   assert.strictEqual(prog.progression.stat_points, 4, 'spent points must not move');
   assert.strictEqual(prog.progression.strength, 8);
   assert.strictEqual(prog.progression.dexterity, 6);
@@ -306,7 +310,7 @@ test('the death penalty fires exactly once per death, not once per tick spent de
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = fakeDeathPool(row);
-  const { url, handle, server } = await bootWith(pool);
+  const { url, handle, server } = await bootWith(pool, { rng: () => 0.5 });
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
@@ -317,12 +321,12 @@ test('the death penalty fires exactly once per death, not once per tick spent de
   const pushes = await collected;
 
   assert.strictEqual(pushes.length, 1, 'exactly one progression push for one death');
-  assert.strictEqual(pushes[0].lost, 13);
+  assert.strictEqual(pushes[0].lost, 21);
   assert.strictEqual(
     pool.matching(/^\s*UPDATE player_progression/i).length, 1,
     'exactly one UPDATE must land, however many ticks the player briefly sat at hp<=0',
   );
-  assert.strictEqual(row.experience, 642, 'the single write must be the one expected value, not applied twice');
+  assert.strictEqual(row.experience, 634, 'the single write must be the one expected value, not applied twice');
 
   ws.close(); handle.close(); server.close();
 });
@@ -341,7 +345,7 @@ test('a death penalty commit finishing after the socket is gone does not throw',
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = fakeDeathPool(row);
-  const { url, handle, server } = await bootWith(pool);
+  const { url, handle, server } = await bootWith(pool, { rng: () => 0.5 });
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
   ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
@@ -354,7 +358,7 @@ test('a death penalty commit finishing after the socket is gone does not throw',
   // Give the tick loop + applyDeath's (instant, mocked) promise time to run.
   await new Promise((r) => setTimeout(r, 150));
 
-  assert.strictEqual(row.experience, 642, 'the death commit must still complete with no socket to push to');
+  assert.strictEqual(row.experience, 634, 'the death commit must still complete with no socket to push to');
   assert.strictEqual(
     pool.matching(/^\s*UPDATE player_progression/i).length, 1,
     'still exactly one write despite the missing socket',
