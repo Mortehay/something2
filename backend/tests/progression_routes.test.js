@@ -6,10 +6,14 @@ require('./helpers/auth.js');
 const request = require('supertest');
 const { Pool } = require('pg');
 
+const http = require('node:http');
+const WebSocket = require('ws');
+
 const { app, __setPool, __setAuthorityHandle } = require('../src/index.js');
 const { signToken } = require('../src/auth/tokens.js');
 const { loadProgression } = require('../src/services/progressionStore.js');
 const { World } = require('../src/authority/world.js');
+const { attachAuthority } = require('../src/authority/server.js');
 const C = require('../src/services/progressionConstants.js');
 
 // ---------------------------------------------------------------------------
@@ -302,33 +306,104 @@ function fakeAuthorityHandle(userId) {
   };
 }
 
-test('a successful allocation reaches the live authority session', async (t) => {
-  if (!dbReady(t, 'this test creates a throwaway user and allocates a point into constitution')) return;
+// SOMET-242 review round 3: the fake-handle "successful allocation" test that
+// used to live here PASSED while the real path did NOTHING -- browser
+// verification against a genuinely-rebuilt process found the HUD's max hp
+// frozen after a real allocate. Root cause: refreshPlayerStats's Map lookups
+// (sessionsByUser, entry.sockets, World#players) are keyed by the STRING the
+// WS upgrade handler mints (`userId = String(payload.user_id)`), but
+// req.user.id arriving from the HTTP side is the RAW, un-stringified JWT
+// payload value -- a NUMBER. Every lookup silently missed on that type
+// mismatch and returned false, swallowed by index.js's `?? false`. The old
+// test's fake handle bypassed sessionsByUser/entry.sockets entirely (it
+// forwarded straight to a bare World#applyDerivedStats using whatever type
+// was handed to it), so it could not have caught this -- a stub standing in
+// for the exact lookup that was broken. This version performs the REAL
+// lookup: boots a genuine attachAuthority authority (a scripted pool, not
+// the real DB -- the authority's own reads/writes are irrelevant to what's
+// under test here), joins a real WS session for the SAME throwaway user the
+// HTTP call authenticates as, then fires the real HTTP allocate and asserts
+// against the player object the authority itself holds -- fetched by the
+// same string key the WS boundary uses, exactly the fact the bug violated.
+function fakeAuthorityPool() {
+  return {
+    query: async (sql) => {
+      if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
+      if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
+      // token_version lookup on every WS connect/upgrade -- must match the
+      // tokenVersion the join token below is signed with.
+      if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+      return { rows: [] }; // world_players, player_binds, item_types, player_items/equipment, gold, player_progression
+    },
+    connect: async () => ({ query: async () => ({ rows: [] }), release: () => {} }),
+  };
+}
+
+function bootAuthority(pool) {
+  return new Promise((resolve) => {
+    const server = http.createServer();
+    const handle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET, tickMs: 20 });
+    server.listen(0, () => resolve({ url: `ws://127.0.0.1:${server.address().port}/authority`, handle, server }));
+  });
+}
+
+function nextMsg(ws, type) {
+  return new Promise((resolve, reject) => {
+    const to = setTimeout(() => reject(new Error(`timeout waiting for ${type}`)), 3000);
+    ws.on('message', function onMsg(data) {
+      const m = JSON.parse(data);
+      if (!type || m.type === type) { clearTimeout(to); ws.off('message', onMsg); resolve(m); }
+    });
+  });
+}
+
+test('a successful allocation reaches the live authority session (real lookup, not a stub)', async (t) => {
+  if (!dbReady(t, 'this test creates a throwaway user, joins a real authority session for it and allocates a point into constitution')) return;
   let user;
+  let ws;
+  let handle;
+  let server;
   try {
-    user = await createTestUser(dbPool, 'live-allocate');
+    user = await createTestUser(dbPool, 'live-allocate-e2e');
     await loadProgression(dbPool, user);
     await dbPool.query('UPDATE player_progression SET stat_points = 1 WHERE user_id = $1', [user]);
 
-    const handle = fakeAuthorityHandle(user);
-    const player = handle.world.getPlayer(user);
-    // Forced below BASE_STATS' own maxHp so a move is unambiguous -- it
-    // cannot be mistaken for the join-time default still being in place.
-    player.maxHp = 100;
+    let url;
+    ({ url, handle, server } = await bootAuthority(fakeAuthorityPool()));
+    const joinToken = signToken({
+      userId: user, username: 'x', role: 'player', tokenVersion: 1,
+    });
+    ws = new WebSocket(`${url}?token=${encodeURIComponent(joinToken)}`);
+    await new Promise((r) => ws.on('open', r));
+    ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+    await nextMsg(ws, 'joined');
+
+    // The player joined via loadProgression's DEFAULT_PROGRESSION fallback
+    // (the scripted pool answers no player_progression row), i.e. BASE_STAT
+    // constitution -> maxHp 100. Force current hp below that so the delta
+    // (not a snap-to-full) is the thing actually observed.
+    const player = handle.worlds.get('w1').world.getPlayer(String(user));
+    assert.ok(player, 'sanity: the real join must have added a real player, string-keyed');
+    assert.equal(player.maxHp, 100);
     player.hp = 60;
+
     __setAuthorityHandle(handle);
+    const progressionMsgP = nextMsg(ws, 'progression');
 
     const res = await request(app).post('/api/progression/allocate').set(authed(user))
       .send({ stat: 'constitution', count: 1 });
+    const msg = await progressionMsgP;
 
     assert.equal(res.status, 200);
-    assert.equal(handle.calls.length, 1, 'refreshPlayerStats must be called exactly once');
-    assert.equal(handle.calls[0].uid, user);
     // CON 5 -> 6 (one above BASE_STAT) -> maxHp 100 + HP_PER_CON(10)*1 = 110.
-    assert.equal(player.maxHp, 110, 'the LIVE player object, not a spy, must show the new max hp');
+    assert.equal(player.maxHp, 110, 'the player object the authority ACTUALLY holds must show the new max hp');
     assert.equal(player.hp, 70, 'hp must move by the +10 delta, not snap to the new max');
+    assert.equal(msg.stats.maxHp, 110, 'the socket push must carry the same number');
   } finally {
     __setAuthorityHandle(null);
+    if (ws) ws.terminate();
+    if (handle) handle.close();
+    if (server && server.listening) server.close();
     await dropUser(dbPool, user);
   }
 });

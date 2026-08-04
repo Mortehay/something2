@@ -1197,14 +1197,33 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // "was this reflected live" as best-effort, not a requirement for the
     // HTTP response, which already reflects the database write either way.
     refreshPlayerStats(userId, progression, stats) {
-      const ws = sessionsByUser.get(userId);
+      // Root cause of a real, browser-verified miss (SOMET-242 review round
+      // 3): every live registry here (sessionsByUser, entry.sockets,
+      // World#players) is keyed by the STRING the WS upgrade handler mints
+      // at connect time — `userId = String(payload.user_id)`, a few hundred
+      // lines up. `userId` reaching THIS function instead comes from the
+      // HTTP side (progressionRoutes.js's `req.user.id`, threaded through
+      // index.js's `refreshLivePlayerStats`), which is
+      // auth/tokens.js#currentUserForToken's `{ id: payload.user_id, ... }`
+      // — the RAW JWT payload value, a NUMBER, never stringified. Every
+      // Map.get below silently missed on that type mismatch: no error, no
+      // guard fired, just a permanent no-op that returned `false` and got
+      // swallowed by index.js's `?? false`. `applyDerivedStats` DID run at
+      // join time (through the WS path, correctly string-keyed), which is
+      // exactly why the HUD showed a correct number on join and then never
+      // moved again after an allocate. Normalize ONCE, here, at the
+      // boundary this function IS — the same place the WS upgrade handler
+      // normalizes on ITS boundary — so no caller on either side has to
+      // know or agree on a key type.
+      const uid = String(userId);
+      const ws = sessionsByUser.get(uid);
       if (!ws || !ws.worldId) return false;
       const entry = worlds.get(ws.worldId);
       if (!entry) return false;
-      const p = entry.world.getPlayer(userId);
+      const p = entry.world.getPlayer(uid);
       if (!p || p.hp <= 0) return false;
-      entry.world.applyDerivedStats(userId, stats);
-      const sock = entry.sockets.get(userId);
+      entry.world.applyDerivedStats(uid, stats);
+      const sock = entry.sockets.get(uid);
       if (sock) send(sock, { type: 'progression', progression, stats });
       return true;
     },

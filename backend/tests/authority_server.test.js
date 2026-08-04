@@ -1336,3 +1336,40 @@ test('refreshPlayerStats on a user with no live session is a no-op, not an error
   });
   server.close();
 });
+
+// SOMET-242 review round 3: browser verification found a real allocate
+// against a genuinely-rebuilt process never moved the HUD. Root cause --
+// every live registry refreshPlayerStats reads (sessionsByUser,
+// entry.sockets, World#players) is keyed by the STRING the WS upgrade
+// handler mints (`userId = String(payload.user_id)`), but the HTTP side's
+// req.user.id (auth/tokens.js#currentUserForToken's `{ id: payload.user_id,
+// ... }`) is the raw, un-stringified JWT payload -- a NUMBER. Every prior
+// test above called refreshPlayerStats with a hand-typed STRING id and so
+// never exercised this mismatch. This test calls it the way the REAL HTTP
+// caller does: a bare number.
+test('refreshPlayerStats accepts a numeric userId (as req.user.id arrives from the HTTP side) though live sessions are keyed by string', async () => {
+  const { url, handle, server } = await boot();
+  const ws = connect(url, 11); // token signs user_id: 11 (a number); the WS boundary stores ws.userId = '11'
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const world = handle.worlds.get('w1').world;
+  const player = world.getPlayer('11');
+  player.maxHp = 100;
+  player.hp = 60;
+
+  const progression = highConProgression(11); // numeric user_id, mirroring req.user.id's real shape
+  const stats = derivePlayerStats(progression);
+
+  const progressionMsgP = nextMsg(ws, 'progression');
+  const ok = handle.refreshPlayerStats(11, progression, stats); // NUMBER, not '11'
+  const msg = await progressionMsgP;
+
+  assert.equal(ok, true, 'a numeric userId must still find the string-keyed live session');
+  assert.equal(player.maxHp, 200);
+  assert.equal(player.hp, 160);
+  assert.deepEqual(msg.stats, stats);
+
+  ws.close(); handle.close(); server.close();
+});
