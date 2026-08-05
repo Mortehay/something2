@@ -1661,7 +1661,7 @@ app.get('/api/world-graph', async (req, res) => {
         `SELECT id, name, width, height, is_entry, biomes, graph_x, graph_y
            FROM worlds ORDER BY created_at DESC`),
       pool.query(
-        `SELECT from_world_id, edge, to_world_id
+        `SELECT from_world_id, edge, to_world_id, from_x, from_y, to_x, to_y
            FROM map_links ORDER BY from_world_id, edge`),
     ]);
     res.json({ worlds: worldsRes.rows, links: linksRes.rows });
