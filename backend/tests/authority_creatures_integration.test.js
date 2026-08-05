@@ -173,9 +173,9 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/le
     + 'the per-creature scaled value or leaves pre-migration creatures (wc.defense IS NULL) '
     + 'mitigating with 0 instead of the entity type\'s base',
   );
-  for (const col of ['resistances', 'level', 'damage']) {
+  for (const col of ['resistances', 'level', 'damage', 'blocks_portal_id']) {
     assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
-      `the world_creatures load must SELECT ${col} — without it every creature's mit/level/damage is wrong`);
+      `the world_creatures load must SELECT ${col} — without it a guarded dungeon portal silently stops being guarded`);
   }
   ws.close(); handle.close(); server.close();
 });

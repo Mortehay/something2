@@ -497,7 +497,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // make that guard pass whether or not the real column is still there.
       const rows = await pool.query(
         `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
-                wc.level, wc.damage,
+                wc.level, wc.damage, wc.blocks_portal_id,
                 COALESCE(wc.defense, et.defense) AS defense,
                 et.color, et.resistances, et.faction
          FROM world_creatures wc LEFT JOIN entity_types et ON et.name = wc.type

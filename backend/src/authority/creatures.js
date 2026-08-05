@@ -136,6 +136,11 @@ class CreatureSim {
         home: (Number.isFinite(c.home_x) && Number.isFinite(c.home_y))
           ? { x: c.home_x, y: c.home_y }
           : null,
+        // Which portal (map_links.id) this creature gates, or null for every
+        // ordinary creature. Loaded the same way `home` is above -- a raw DB
+        // column carried straight onto the in-memory object at load time,
+        // never recomputed.
+        blocksPortalId: c.blocks_portal_id || null,
         _target: null, _targetKind: null, mode: 'roam', _attackCd: 0,
       });
     }
