@@ -120,3 +120,18 @@ test('a compass-only spec with no portals validates exactly as before (no regres
   const errors = validateMapSpec(spec);
   assert.deepStrictEqual(errors, []);
 });
+
+test('a grid-less non-portal world with missing width reports only the grid error (continue behavior)', () => {
+  const spec = baseSpec();
+  // A grid-less world with no portal link connecting it -- not even "unreachable" since
+  // it has no grid and we continue after the grid error without recording adjacency.
+  spec.worlds.push({ key: 'orphan', name: 'Orphan', height: 20 });
+  const errors = validateMapSpec(spec);
+  // Should report only errors that stem from the grid being invalid; since we continue
+  // after the grid error, the width check is skipped (matching pre-portal behavior).
+  // It will still be flagged as unreachable since it has no links, but that's a
+  // second error from reachability, not from width validation.
+  assert.ok(errors.some((e) => /grid must be two integers/.test(e)));
+  // Verify the width error is NOT present (the continue statement skipped it)
+  assert.ok(!errors.some((e) => /width must be an integer/.test(e)));
+});

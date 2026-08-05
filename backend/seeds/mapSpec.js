@@ -66,9 +66,8 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
 
     const gridRequired = !portalConnectedKeys.has(w.key);
     if (!hasValidGrid(w)) {
-      if (gridRequired) errors.push(`world "${w.key}" grid must be two integers`);
-      // else: portal-only world, grid legitimately absent -- no cell-collision
-      // check for it either, there is no cell to collide in.
+      if (gridRequired) { errors.push(`world "${w.key}" grid must be two integers`); continue; }
+      // else: portal-only world, grid legitimately absent -- fall through to width/height/etc checks
     } else {
       const cell = `${w.grid[0]},${w.grid[1]}`;
       if (cells.has(cell)) {
@@ -77,6 +76,15 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       cells.set(cell, w.key);
     }
 
+    // Presence + integrality only -- NOT the admin API's 8-4096 range. That
+    // range belongs to POST /api/worlds (src/index.js) and is enforced there;
+    // duplicating it here would let this validator's numbers drift from the
+    // API's. Without even this much, `width`/`height` are nullable columns
+    // and seed-map.js passes w.width/w.height straight into the INSERT with
+    // no `?? ` fallback (unlike chunk_size/creature_count just below it in
+    // that file) -- an omitted width/height silently writes NULL, producing
+    // a world the World Map tab reports as "not linkable" with no validator
+    // error to explain why.
     if (!Number.isInteger(w.width)) {
       errors.push(`world "${w.key}" width must be an integer`);
     }
@@ -84,6 +92,10 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       errors.push(`world "${w.key}" height must be an integer`);
     }
 
+    // Optional. Validated here as well as by worlds_level_band_check because
+    // `make reseed-map` clears every world BEFORE seeding: a band rejected
+    // only by the database would fail after the destruction, leaving the
+    // developer with no maps at all.
     if (w.level_band !== undefined) {
       const b = w.level_band;
       if (!Array.isArray(b) || b.length !== 2
@@ -174,6 +186,11 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     }
     usedEdges.add(slot);
 
+    // A world with a malformed grid already produced a "grid must be two
+    // integers" error in the world loop above; here we must not dereference
+    // grid[0]/grid[1] on it (that throws instead of returning errors). Skip
+    // the geometry check but still record adjacency, so an otherwise-valid
+    // link doesn't also spuriously fail reachability.
     if (!hasValidGrid(from) || !hasValidGrid(to)) {
       adjacency.get(l.from).push(l.to);
       adjacency.get(l.to).push(l.from);
