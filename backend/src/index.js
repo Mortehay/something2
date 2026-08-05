@@ -1653,7 +1653,14 @@ app.put('/api/worlds/:id/graph-position', adminGuard, async (req, res) => {
 // setLink writes a row and its mirror, so the client can pair them itself;
 // serving pre-collapsed pairs would destroy the evidence its missing-mirror
 // lint check depends on. Both queries are ORDER BY'd so the payload is stable
-// between requests.
+// between requests — and the links ORDER BY has to reach past (from_world_id,
+// edge) to be a real guarantee: those two columns are unique for compass
+// edges, but a world may hold MANY 'PORTAL' rows, which then tie completely
+// and come back in whatever order Postgres feels like. That would let
+// placePortalClusters (which assigns sibling branch columns in receipt order)
+// swap which dungeon branch renders in which column on every refetch. Adding
+// from_x, from_y fully disambiguates: a partial unique index already makes
+// (from_world_id, from_x, from_y) unique for PORTAL rows.
 app.get('/api/world-graph', async (req, res) => {
   try {
     const [worldsRes, linksRes] = await Promise.all([
@@ -1662,7 +1669,7 @@ app.get('/api/world-graph', async (req, res) => {
            FROM worlds ORDER BY created_at DESC`),
       pool.query(
         `SELECT from_world_id, edge, to_world_id, from_x, from_y, to_x, to_y
-           FROM map_links ORDER BY from_world_id, edge`),
+           FROM map_links ORDER BY from_world_id, edge, from_x, from_y`),
     ]);
     res.json({ worlds: worldsRes.rows, links: linksRes.rows });
   } catch (err) {

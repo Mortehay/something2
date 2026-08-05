@@ -88,6 +88,38 @@ test('both queries are deterministically ordered', async () => {
   for (const c of pool.calls) assert.match(c.sql, /ORDER BY/i);
 });
 
+// `ORDER BY from_world_id, edge` alone is NOT a stable order once portals
+// exist: every 'PORTAL' row out of one world ties on both columns, and
+// Postgres is free to return ties differently per request. The client's
+// placePortalClusters assigns sibling branch columns in receipt order, so an
+// unstable tie makes a two-branch dungeon swap columns on every refetch.
+// (from_world_id, from_x, from_y) is unique for PORTAL rows by partial index
+// -- see migrations/1714440060000_map_link_portals.js's
+// map_links_portal_source_unique -- so these four columns are a total order.
+test('the links query breaks the (from_world_id, edge) tie two PORTAL rows create', async () => {
+  const pool = poolFor();
+  __setPool(pool);
+  await request(app).get('/api/world-graph');
+  const linksCall = pool.calls.find((c) => /FROM map_links/i.test(c.sql));
+  assert.ok(linksCall, 'expected a query against map_links');
+  assert.match(linksCall.sql, /ORDER BY\s+from_world_id\s*,\s*edge\s*,\s*from_x\s*,\s*from_y/i);
+});
+
+// The order the route hands the client is whatever the driver returned, so
+// this asserts the pass-through, not the sort itself: two branches out of one
+// hub must both arrive, distinguishable by their source tile.
+test('two PORTAL rows out of one world both survive to the client, source tiles intact', async () => {
+  const portals = [
+    { from_world_id: 'a', edge: 'PORTAL', to_world_id: 'b', from_x: 100, from_y: 100, to_x: 50, to_y: 50 },
+    { from_world_id: 'a', edge: 'PORTAL', to_world_id: 'u', from_x: 900, from_y: 100, to_x: 50, to_y: 50 },
+  ];
+  __setPool(poolFor(portals));
+  const res = await request(app).get('/api/world-graph');
+  assert.deepEqual(res.body.links, portals);
+  const tiles = res.body.links.map((l) => `${l.from_x},${l.from_y}`);
+  assert.equal(new Set(tiles).size, 2, 'each portal must be identifiable by its own source tile');
+});
+
 // The mock handlers above match on /FROM worlds/i and return the canned
 // WORLDS rows whatever columns are actually requested, so nothing pins the
 // SELECT's column list -- dropping `biomes` or `graph_x` from the route would
