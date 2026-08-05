@@ -37,7 +37,7 @@ function uniqueSpec(suffix) {
     links: [
       { kind: 'portal', from: 'surface', from_x: 1050, from_y: 1050,
         to: 'dungeon-1', to_x: 550, to_y: 550,
-        guard: { creature_type: 'Orc', count: 2 } },
+        guard: { creature_type: 'Wolf', count: 2 } },
     ],
   };
 }
@@ -50,8 +50,8 @@ test('applyMapSpec writes a grid-less dungeon world, its portal link, and its gu
   const spec = uniqueSpec(suffix);
   let worldIds = [];
   try {
-    const orcRow = await pool.query(`SELECT 1 FROM entity_types WHERE name = 'Orc' AND is_creature = true`);
-    if (orcRow.rowCount === 0) { t.skip('no "Orc" creature type in this database — cannot exercise guard insertion'); return; }
+    const wolfRow = await pool.query(`SELECT 1 FROM entity_types WHERE name = 'Wolf' AND is_creature = true`);
+    if (wolfRow.rowCount === 0) { t.skip('no "Wolf" creature type in this database — cannot exercise guard insertion'); return; }
 
     const result = await applyMapSpec(pool, spec);
     assert.equal(result.worlds, 2);
@@ -80,7 +80,7 @@ test('applyMapSpec writes a grid-less dungeon world, its portal link, and its gu
       `SELECT type, blocks_portal_id, home_x, home_y FROM world_creatures WHERE world_id = $1`, [surface.id]);
     assert.equal(guardRows.rowCount, 2);
     for (const g of guardRows.rows) {
-      assert.equal(g.type, 'Orc');
+      assert.equal(g.type, 'Wolf');
       assert.equal(g.blocks_portal_id, linkRows.rows[0].id);
       assert.equal(g.home_x, 1050);
       assert.equal(g.home_y, 1050);
@@ -101,8 +101,8 @@ test('re-applying the same spec does not duplicate the portal guard pack', async
   const spec = uniqueSpec(suffix);
   let worldIds = [];
   try {
-    const orcRow = await pool.query(`SELECT 1 FROM entity_types WHERE name = 'Orc' AND is_creature = true`);
-    if (orcRow.rowCount === 0) { t.skip('no "Orc" creature type — cannot exercise guard insertion'); return; }
+    const wolfRow = await pool.query(`SELECT 1 FROM entity_types WHERE name = 'Wolf' AND is_creature = true`);
+    if (wolfRow.rowCount === 0) { t.skip('no "Wolf" creature type — cannot exercise guard insertion'); return; }
 
     await applyMapSpec(pool, spec);
     await applyMapSpec(pool, spec); // second application, same spec
@@ -113,7 +113,7 @@ test('re-applying the same spec does not duplicate the portal guard pack', async
     const surfaceId = worldRows.rows[0].id; // either order works: both are cleaned up below
 
     const guardCount = await pool.query(
-      `SELECT count(*) FROM world_creatures WHERE world_id = ANY($1) AND type = 'Orc'`, [worldIds]);
+      `SELECT count(*) FROM world_creatures WHERE world_id = ANY($1) AND type = 'Wolf'`, [worldIds]);
     assert.equal(Number(guardCount.rows[0].count), 2, 'guards must not double up on re-apply');
   } finally {
     if (worldIds.length) await pool.query('DELETE FROM worlds WHERE id = ANY($1)', [worldIds]);
