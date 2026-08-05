@@ -86,32 +86,46 @@ function isPortalBlocked(creatures, linkId) {
 //   and the caller re-arms it (clears it) the moment their tile changes --
 //   so it blocks forever if they stand still, and never blocks again once
 //   they've actually walked off, however long that takes.
-// - `loadedChunks`/`chunkSize`: a creature's chunk loads asynchronously
-//   (activateChunk), so `creatures` can be an INCOMPLETE snapshot for a
-//   chunk that hasn't finished loading yet -- a guard that is very much
-//   alive in the DB can be invisible to `isPortalBlocked` for the first
-//   tick(s) after a player joins or reconnects next to a guarded portal.
-//   Fail closed instead: require every chunk in the portal tile's radius-1
-//   neighborhood (not just the single chunk the tile itself falls in) to be
-//   loaded before trusting the creature scan. insertPortalGuards spreads a
-//   pack up to +/-60px around the portal tile (RING_OFFSETS), which is
-//   enough to land a guard in an ADJACENT chunk when the portal sits near a
-//   chunk boundary -- that neighbor chunk activates concurrently via its
-//   own independent DB round-trip from the same recomputeActive pass, and
-//   can still be in flight after the portal's own chunk has already
-//   resolved. Checking only the single chunk would leave that narrower
-//   version of the same race open. Same neighborhoodKeys(cx, cy, 1) helper
-//   recomputeActive already uses to decide "am I near enough that this
-//   could matter". This applies to every portal, guarded or not -- a
-//   portal should never fire before the world state around it has actually
-//   loaded.
-function planPortalTransition({ gRow, gCol, portalLinks, now, cdUntil, creatures, loadedChunks, chunkSize, lastPortalTile }) {
+// - `loadedChunks`/`chunkSize`/`playerX`/`playerY`: a creature's chunk loads
+//   asynchronously (activateChunk), so `creatures` can be an INCOMPLETE
+//   snapshot for a chunk that hasn't finished loading yet -- a guard that
+//   is very much alive in the DB can be invisible to `isPortalBlocked` for
+//   the first tick(s) after a player joins or reconnects next to a guarded
+//   portal. Fail closed instead: require the player's own radius-1 chunk
+//   neighborhood to be loaded before trusting the creature scan.
+//
+//   That neighborhood is anchored on the player's TOP-LEFT position
+//   (`playerX`/`playerY`, i.e. raw `p.x`/`p.y`) via the SAME `chunkOf` call
+//   `recomputeActive` uses to decide what to load -- not on `gRow`/`gCol`
+//   (the player's CENTRE tile, also used to match the portal). Those two
+//   anchors disagree by up to one whole chunk whenever the player happens
+//   to stop near the low edge of a chunk-boundary tile (PLAYER_W/H is 64,
+//   so centre-minus-half-width can floor into the chunk BELOW the one the
+//   centre itself resolves to) -- an earlier version of this gate computed
+//   the required neighborhood from the portal's own (i.e. the player's
+//   CENTRE) tile instead, which could then demand a chunk recomputeActive's
+//   top-left-anchored `want` set would NEVER include, leaving that portal
+//   permanently blocked (confirmed by direct probe: a portal on a chunk's
+//   first column/row, approached so the player's centre lands near the low
+//   edge of its tile, needed chunks recomputeActive never requested -- see
+//   task-8-report.md's third fix pass). Anchoring on the SAME variable
+//   recomputeActive itself reads removes the mismatch by construction: this
+//   player's own neighborhood is always a subset of whatever `want`
+//   recomputeActive computes for them, so the requirement is guaranteed
+//   satisfiable, just possibly not yet loaded (an ordinary, resolving race,
+//   not a permanent one). It is also wide enough to always contain a guard
+//   spread up to +/-60px by insertPortalGuards' RING_OFFSETS -- swept
+//   exhaustively across every stop position in a boundary tile, in both
+//   axes, confirming zero gaps.
+function planPortalTransition({
+  gRow, gCol, portalLinks, now, cdUntil, creatures, loadedChunks, chunkSize, lastPortalTile, playerX, playerY,
+}) {
   if (now < cdUntil) return null;
   const key = `${gRow},${gCol}`;
   const link = portalLinks.get(key);
   if (!link) return null;
   if (lastPortalTile === key) return null; // just arrived here via a warp; inert until they leave the tile
-  const cx = Math.floor(gCol / chunkSize), cy = Math.floor(gRow / chunkSize);
+  const { cx, cy } = chunkOf(playerX, playerY, chunkSize);
   const neighborhoodLoaded = neighborhoodKeys(cx, cy, 1).every((k) => loadedChunks.has(k));
   if (!neighborhoodLoaded) return { blocked: true, linkId: link.id };
   if (isPortalBlocked(creatures, link.id)) return { blocked: true, linkId: link.id };
@@ -1114,6 +1128,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
           const t = planPortalTransition({
             gRow, gCol, portalLinks: entry.portalLinks, now, cdUntil: p._portalCdUntil, creatures: liveCreatures,
             loadedChunks: entry.loadedChunks, chunkSize: entry.row.chunk_size, lastPortalTile: p._lastPortalTile,
+            // Raw top-left position, NOT cx/cy above (the player's centre) --
+            // must match recomputeActive's own chunkOf(p.x, p.y, N) call
+            // exactly, see planPortalTransition's comment.
+            playerX: p.x, playerY: p.y,
           });
           if (!t) continue;
           if (t.blocked) {

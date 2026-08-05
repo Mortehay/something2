@@ -51,11 +51,22 @@ function collectMsgs(ws, type, ms) {
   });
 }
 
-// Mirrors planPortalTransition's own chunk-loaded gate (server.js), which
-// review widened from "the portal's own chunk" to "the portal tile's full
-// radius-1 chunk neighborhood" -- insertPortalGuards (dungeonGuards.js)
+// Mirrors planPortalTransition's own chunk-loaded gate (server.js): the
+// radius-1 chunk neighborhood of a given RAW world position (interpret the
+// (x,y) passed in however the caller intends -- see the two call sites
+// below, which deliberately differ). Review widened the gate from "the
+// portal's own chunk" to "a full radius-1 neighborhood" (insertPortalGuards
 // spreads a pack up to +/-60px via RING_OFFSETS, enough to land a guard in
-// an ADJACENT chunk when the portal sits near a chunk boundary.
+// an ADJACENT chunk when the portal sits near a chunk boundary), then a
+// LATER review pass found the neighborhood's ANCHOR mattered too: it must be
+// the player's own TOP-LEFT position (matching recomputeActive's own
+// chunkOf(p.x, p.y, N) call), not the player's CENTRE / the portal tile's
+// own coordinates -- those two anchors can disagree by a whole chunk right
+// at a chunk-boundary tile (PLAYER_W/H = 64, so centre-minus-half-width can
+// floor into the chunk BEHIND the one centre itself resolves to), which
+// could otherwise demand a chunk recomputeActive would never load. See
+// task-8-report.md's fourth fix pass and the dedicated boundary-tile tests
+// below.
 function chunkNeighborhoodKeys(x, y, chunkSize) {
   const gCol = Math.floor(x / 100), gRow = Math.floor(y / 100);
   const cx = Math.floor(gCol / chunkSize), cy = Math.floor(gRow / chunkSize);
@@ -67,17 +78,22 @@ function chunkNeighborhoodKeys(x, y, chunkSize) {
 }
 
 // Repeatedly places the player exactly on (x,y) and polls entry.loadedChunks
-// until the FULL radius-1 chunk neighborhood around that tile has finished
-// loading. Re-placing on every poll undoes any knockback the (still
-// loading) chunk gate applies in the meantime -- once the whole
-// neighborhood is in, the final placement sticks and the caller's real
-// assertions can proceed without a spurious fail-closed bump getting in the
-// way first. Used by tests that are about guard liveness or the
-// just-arrived latch specifically, NOT about the chunk-load race itself
-// (which has its own dedicated repro tests below).
+// until the FULL radius-1 chunk neighborhood the SERVER actually requires
+// (anchored on the player's own TOP-LEFT position, i.e. x - width/2,
+// y - height/2 -- NOT (x,y) itself, which is the CENTRE the caller wants the
+// player standing at) has finished loading. Re-placing on every poll undoes
+// any knockback the (still loading) chunk gate applies in the meantime --
+// once the whole neighborhood is in, the final placement sticks and the
+// caller's real assertions can proceed without a spurious fail-closed bump
+// getting in the way first. Used by tests that are about guard liveness or
+// the just-arrived latch specifically, NOT about the chunk-load race itself
+// or the anchor mismatch (which have their own dedicated repro tests
+// below) -- callers of this helper should stick to (x,y) comfortably away
+// from a chunk boundary (interior tiles) so centre and top-left anchoring
+// agree and this helper's own polling target is unambiguous.
 async function settleOnPortalTile(entry, playerId, x, y, chunkSize, timeoutMs = 3000) {
-  const keys = chunkNeighborhoodKeys(x, y, chunkSize);
   const p = entry.world.getPlayer(playerId);
+  const keys = chunkNeighborhoodKeys(x - p.width / 2, y - p.height / 2, chunkSize);
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     p.x = x - p.width / 2; p.y = y - p.height / 2;
@@ -224,16 +240,21 @@ function fakeRacyPortalPool() {
 }
 
 // Portal sits near a chunk boundary (own chunk (1,1), span 800px, so tile
-// x=805 is 5px inside the [800,1600) chunk). Its guard, offset -60px west
-// by insertPortalGuards' RING_OFFSETS, lands at x=745 -- INSIDE the
-// ADJACENT chunk (0,1), a different chunk than the one the portal's own
-// tile falls in. The two chunks activate via independent DB round-trips
-// from the same recomputeActive pass: this fixture lets the portal's OWN
-// chunk resolve immediately (empty, no guard there) while holding the
-// guard's NEIGHBORING chunk's query open, so a single-chunk-only gate would
-// wrongly consider the portal's world state "loaded" the moment its own
-// chunk resolves and let a transition through before the guard is ever
-// visible.
+// x=850 is 50px inside the [800,1600) chunk -- close enough for a -60px
+// ring offset to cross into the adjacent chunk, but far enough that the
+// player's own top-left position when standing exactly on the portal
+// (850 - PLAYER_HALF(32) = 818) still resolves to the SAME chunk (1) as the
+// portal-tile-derived one, so this fixture stays clear of the anchor
+// mismatch covered separately below and stays focused on ONE thing: single
+// chunk vs full neighborhood. Its guard, offset -60px west by
+// insertPortalGuards' RING_OFFSETS, lands at x=790 -- INSIDE the ADJACENT
+// chunk (0,1), a different chunk than the one the portal's own tile falls
+// in. The two chunks activate via independent DB round-trips from the same
+// recomputeActive pass: this fixture lets the portal's OWN chunk resolve
+// immediately (empty, no guard there) while holding the guard's
+// NEIGHBORING chunk's query open, so a single-chunk-only gate would wrongly
+// consider the portal's world state "loaded" the moment its own chunk
+// resolves and let a transition through before the guard is ever visible.
 function fakeAdjacentChunkGuardPool() {
   const GUARD_ID = 'guard-1';
   let releaseGuardChunkQuery;
@@ -263,7 +284,7 @@ function fakeAdjacentChunkGuardPool() {
     if (/FROM map_links ml JOIN worlds/i.test(sql)) {
       return { rows: [{
         id: 'link-1', edge: 'PORTAL', to_world_id: 'w2', to_width: 20, to_height: 20,
-        from_x: 805, from_y: 1050, to_x: 550, to_y: 550,
+        from_x: 850, from_y: 1050, to_x: 550, to_y: 550,
       }] };
     }
     if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
@@ -275,8 +296,8 @@ function fakeAdjacentChunkGuardPool() {
       const isGuardChunk = x1 === 0 && x2 === 800 && y1 === 800 && y2 === 1600;
       if (isGuardChunk) {
         return guardChunkGate.then(() => ({ rows: [{
-          id: GUARD_ID, type: 'Orc', x: 745, y: 1050, hp: 50, facing: 'S',
-          home_x: 805, home_y: 1050, level: 3, damage: 10, blocks_portal_id: 'link-1',
+          id: GUARD_ID, type: 'Orc', x: 790, y: 1050, hp: 50, facing: 'S',
+          home_x: 850, home_y: 1050, level: 3, damage: 10, blocks_portal_id: 'link-1',
           defense: 2, color: '#a33', resistances: {}, faction: 'guard',
         }] }));
       }
@@ -380,7 +401,7 @@ test('a guard-blocked portal refuses transfer and knocks the player back', async
   const blocked = await nextMsg(ws, 'portalBlocked');
   assert.equal(blocked.message, 'Guards block the way.');
 
-  await new Promise((r) => setTimeout(r, 150)); // let the same tick's knockback land (generous margin over one tick's worth of real socket/scheduler latency)
+  await new Promise((r) => setTimeout(r, 250)); // let the same tick's knockback land (generous margin over one tick's worth of real socket/scheduler latency, widened again after an observed flake under full-suite load)
   assert.ok(Math.abs((p.x + p.width / 2) - 1050) > 1 || Math.abs((p.y + p.height / 2) - 1050) > 1,
     'the player must have been pushed off the exact portal tile');
 
@@ -488,26 +509,32 @@ test('a portal must not leak a transition while a guard in an ADJACENT chunk has
   // guard's own (deliberately held open) to finish loading, WITHOUT ever
   // triggering the portal itself first. Park the player elsewhere INSIDE
   // the portal's own chunk (1,1) -- tile (1200,1200), far from the actual
-  // trigger tile (805,1050) so portalLinks.get(...) never matches it -- so
+  // trigger tile (850,1050) so portalLinks.get(...) never matches it -- so
   // recomputeActive requests that chunk's full radius-1 neighborhood (the
   // same one the portal's own tile would need) without ever evaluating
   // planPortalTransition as "on the tile" and risking a spurious blocked
   // branch.
   //
-  // This sidesteps two separate masking effects that would otherwise hide
+  // This sidesteps three separate masking effects that would otherwise hide
   // the real behaviour: (a) the portal's own chunk being transiently
   // unloaded too, right after the player first arrives there, which the
   // gate would ALSO correctly (for an unrelated reason) block on before the
-  // guard-adjacency case is ever exercised, and (b) the 800ms cooldown that
+  // guard-adjacency case is ever exercised; (b) the 800ms cooldown that
   // first block would arm (_portalCdUntil), which silences every further
   // evaluation for the rest of this test's short observation window
-  // regardless of which gate is active -- both were confirmed experimentally
-  // to make an EARLIER version of this test pass identically whether the
-  // widened neighborhood gate or the narrower single-chunk gate it replaced
-  // was in effect.
+  // regardless of which gate is active; and (c) the ANCHOR mismatch a later
+  // review pass found (see the boundary-tile tests below) -- from_x:850
+  // (not 805) is deliberately far enough from the chunk edge that the
+  // player's own top-left position when standing exactly on the portal
+  // (850-32=818) still resolves to the SAME chunk (1) the portal's own tile
+  // does, so this fixture stays focused on single-chunk-vs-neighborhood and
+  // doesn't also (accidentally) depend on the anchor fix to ever resolve.
   p.x = 1200 - p.width / 2; p.y = 1200 - p.height / 2;
   const guardKey = '0,1';
-  const restOfNeighborhood = chunkNeighborhoodKeys(805, 1050, 8).filter((k) => k !== guardKey);
+  // Top-left anchored (x - width/2, y - height/2), matching what the real
+  // gate (and recomputeActive) actually keys off -- not the raw portal
+  // coordinates themselves.
+  const restOfNeighborhood = chunkNeighborhoodKeys(850 - p.width / 2, 1050 - p.height / 2, 8).filter((k) => k !== guardKey);
   const preloadDeadline = Date.now() + 2000;
   while (!restOfNeighborhood.every((k) => entry.loadedChunks.has(k))) {
     if (Date.now() > preloadDeadline) throw new Error('neighborhood (minus the guard\'s own chunk) did not pre-load in time');
@@ -529,7 +556,7 @@ test('a portal must not leak a transition while a guard in an ADJACENT chunk has
   // is the guard's own chunk. This is the precise case Gap 2 review called
   // out: the portal's own chunk (and everything else nearby) has already
   // resolved, but a guard placed in an ADJACENT chunk has not.
-  p.x = 805 - p.width / 2; p.y = 1050 - p.height / 2;
+  p.x = 850 - p.width / 2; p.y = 1050 - p.height / 2;
 
   await new Promise((r) => setTimeout(r, 250)); // observe while the guard's chunk is still pending
   pool.releaseGuardChunkQuery();
@@ -542,6 +569,141 @@ test('a portal must not leak a transition while a guard in an ADJACENT chunk has
     'must not leak a transition while a guard in a NEIGHBORING chunk has not finished loading, even though the portal\'s own chunk (and every other chunk in the neighborhood) already resolved');
 
   ws.close(); handle.close(); server.close();
+});
+
+// A single-world, single-portal, NO-guard fixture parameterized by the
+// portal's own from_x/from_y -- used to reproduce the anchor mismatch on
+// either axis without duplicating the whole fixture per direction.
+function fakeBoundaryPortalPool(fromX, fromY) {
+  function route(sql, params) {
+    if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
+    if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
+    if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+    if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
+    if (/FROM player_binds WHERE/i.test(sql)) return { rows: [] };
+    if (/FROM item_types/i.test(sql)) {
+      return { rows: [
+        { id: 1, name: 'dagger', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'melee',
+          damage: 8, cooldown: 0.3, reach: 80, arc_width: 6.3, range: null, projectile_speed: null,
+          projectile_radius: null, pierce: null, mana_cost: 0, element: null, defense: null, resistances: null },
+      ] };
+    }
+    if (/FROM player_items/i.test(sql)) return { rows: [{ id: 'i1', item_type_id: 1 }] };
+    if (/FROM player_equipment/i.test(sql)) return { rows: [] };
+    if (/SELECT gold FROM users/i.test(sql)) return { rows: [{ gold: 0 }] };
+    if (/^\s*INSERT INTO player_progression/i.test(sql)) return { rows: [], rowCount: 0 };
+    if (/FROM player_progression/i.test(sql)) {
+      return { rows: [{ user_id: '1', experience: '0', level: 1, stat_points: 0,
+        strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5 }] };
+    }
+    if (/FROM map_links ml JOIN worlds/i.test(sql)) {
+      return { rows: [{
+        id: 'link-1', edge: 'PORTAL', to_world_id: 'w2', to_width: 20, to_height: 20,
+        from_x: fromX, from_y: fromY, to_x: 550, to_y: 550,
+      }] };
+    }
+    if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
+    if (/FROM world_creatures wc/i.test(sql)) return { rows: [] }; // no guard -- pure chunk-load-gate/anchor repro
+    if (/FROM world_items/i.test(sql)) return { rows: [] };
+    return { rows: [] };
+  }
+  const pool = { query: async (sql, params) => route(sql, params) };
+  pool.connect = async () => ({ query: async (sql, params) => route(sql, params), release() {} });
+  return pool;
+}
+
+// ---------------------------------------------------------------------------
+// Anchor-mismatch repro (fourth review pass): planPortalTransition's
+// chunk-load gate must be anchored on the PLAYER's own top-left position
+// (matching recomputeActive's chunkOf(p.x, p.y, N) call), not on gRow/gCol
+// (the player's CENTRE tile, also used to match the portal). A gate
+// anchored on centre/portal-tile coordinates could demand a chunk
+// recomputeActive would NEVER load for a player who happens to stop near
+// the low edge of a chunk-boundary tile -- leaving the portal permanently
+// blocked. Not fixed by waiting, not fixed by killing a guard (there isn't
+// one here), nothing resolves it under the old anchor.
+//
+// Reproduced exactly the way the reviewer's own read-only probe did:
+// portal on a chunk-boundary tile, player's CENTRE placed exactly at the
+// portal's own from_x/from_y (the tile's low edge, so top-left floors into
+// the chunk BEHIND), no guard at all. Verified with a genuine multi-second
+// polling probe that watches entry.loadedChunks directly over time and
+// confirms the required set eventually appears -- not a single-shot
+// assertion that could get lucky, and not just "no transition leaked"
+// (which a permanently-blocked portal would also satisfy, for the wrong
+// reason) but the POSITIVE property: the transition eventually arrives.
+// ---------------------------------------------------------------------------
+
+async function proveBoundaryPortalResolves(fromX, fromY, label) {
+  const pool = fakeBoundaryPortalPool(fromX, fromY);
+  const { url, handle, server } = await bootWith(pool);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const entry = handle.worlds.get('w1');
+  const p = entry.world.getPlayer('1');
+
+  // Player's CENTRE lands exactly on the portal's own coordinate -- the
+  // tile's low edge on whichever axis is under test -- so their top-left
+  // (centre - half width/height) floors into the chunk BEHIND the tile's
+  // own chunk. Pin them here continuously: an early "chunk not loaded"
+  // bump would otherwise knock them off the tile via the same knockback
+  // path a guard-blocked bump uses, before natural chunk loading ever
+  // catches up to prove (or disprove) the fix.
+  const pin = setInterval(() => { p.x = fromX - p.width / 2; p.y = fromY - p.height / 2; }, 15);
+
+  const seenTransition = [];
+  function onMsg(data) { const m = JSON.parse(data); if (m.type === 'transition') seenTransition.push(m); }
+  ws.on('message', onMsg);
+
+  // The set the FIX actually requires: the radius-1 neighborhood of the
+  // player's own TOP-LEFT chunk -- exactly what recomputeActive itself
+  // will (eventually) load for this exact position.
+  const requiredKeys = chunkNeighborhoodKeys(fromX - p.width / 2, fromY - p.height / 2, 8);
+
+  const loadDeadline = Date.now() + 3000;
+  let resolved = false;
+  let lastSnapshot = [];
+  while (Date.now() < loadDeadline) {
+    lastSnapshot = [...entry.loadedChunks].sort();
+    if (requiredKeys.every((k) => entry.loadedChunks.has(k))) { resolved = true; break; }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.ok(resolved,
+    `[${label}] required chunk neighborhood ${JSON.stringify(requiredKeys)} never fully loaded within 3s -- last observed loadedChunks: ${JSON.stringify(lastSnapshot)}`);
+
+  // The gate itself only settles the ONE-TIME requirement; a stale
+  // _portalCdUntil from an earlier (correctly fail-closed) blocked tick,
+  // armed before the neighborhood finished loading, can still delay the
+  // eventual transition by up to 800ms. Poll for the actual outcome rather
+  // than assuming a fixed delay past "resolved" is enough.
+  const transitionDeadline = Date.now() + 2000;
+  while (Date.now() < transitionDeadline && seenTransition.length === 0) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  clearInterval(pin);
+  ws.off('message', onMsg);
+
+  assert.ok(seenTransition.length > 0,
+    `[${label}] the portal must eventually transition once its required neighborhood has fully loaded -- it must not stay permanently blocked`);
+
+  ws.close(); handle.close(); server.close();
+}
+
+test('a portal on an X-axis chunk boundary, approached so centre and top-left chunk assignment disagree, still resolves', async () => {
+  // Reviewer's exact repro: from_x:805 is column 8 (chunkSize:8), the FIRST
+  // column of chunk cx=1. Centre exactly at 805 -> top-left 773 -> column 7
+  // -> chunk cx=0, one chunk BEHIND the tile's own chunk.
+  await proveBoundaryPortalResolves(805, 1050, 'x-boundary, west approach');
+});
+
+test('a portal on a Y-axis chunk boundary, approached so centre and top-left chunk assignment disagree, still resolves', async () => {
+  // Same mismatch, other axis: from_y:805 is row 8, the first row of chunk
+  // cy=1. Centre exactly at y=805 -> top-left y=773 -> row 7 -> chunk cy=0.
+  await proveBoundaryPortalResolves(1250, 805, 'y-boundary, north approach');
 });
 
 // ---------------------------------------------------------------------------
