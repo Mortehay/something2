@@ -9,7 +9,9 @@ import { useWorldGraph, useSaveGraphPosition } from './useMapGraph.js';
 import { useBiomes } from './useBiomes.js';
 import { useSetLink, useClearLink } from './useMapsAdmin.js';
 import { seedPositions, compassFromDelta, OPPOSITE } from './mapGraphLayout.js';
-import { collapseLinks, lintGraph, linksReplacedBy } from './mapGraphLint.js';
+import {
+  collapseLinks, lintGraph, linksReplacedBy, edgeElementId,
+} from './mapGraphLint.js';
 import { planLinkChange } from './mapGraphActions.js';
 import { biomeRingSvg } from './biomeRingSvg.js';
 
@@ -143,7 +145,7 @@ function MapGraphAdmin() {
   // A drag-to-connect gesture never writes anything by itself -- it only
   // proposes { fromId, edge, toId } here. The confirm panel is what calls
   // commitPending(). `selectedEdge` is the delete-side counterpart: which
-  // drawn edge (identified by its Cytoscape id, `${fromId}|${edge}`) is
+  // drawn edge (identified by its Cytoscape id — see edgeElementId) is
   // currently selected on the canvas -- it stores only that key, not a
   // snapshot of the row, so it can be re-checked against live `links` on
   // every render instead of outliving the row it pointed at.
@@ -220,10 +222,11 @@ function MapGraphAdmin() {
       .filter((l) => ids.has(l.fromId) && ids.has(l.toId))
       .map((l) => ({
         data: {
-          id: `${l.fromId}|${l.edge}`,
+          id: edgeElementId(l.fromId, l.edge, l.toId),
           source: l.fromId,
           target: l.toId,
-          label: `${l.edge}↔${l.toEdge}`,
+          // `PORTAL↔PORTAL` says nothing a single `PORTAL` doesn't.
+          label: l.edge === 'PORTAL' ? 'PORTAL' : `${l.edge}↔${l.toEdge}`,
           mirrored: String(l.mirrored),
         },
       }));
@@ -392,8 +395,11 @@ function MapGraphAdmin() {
   // having to remember to flip the toggle back off themselves.
   //
   // `onSelect` ignores any edge id without a `|`: `elements` above is the
-  // only place this component builds a real edge, and it always ids one
-  // `${fromId}|${edge}`. Edgehandles' own preview/ghost edges get
+  // only place this component builds a real edge, and it always ids one via
+  // edgeElementId — `${fromId}|${edge}`, plus a trailing `|${toId}` for a
+  // PORTAL, which the two-way destructure below simply drops (the delete
+  // route rejects edge=PORTAL outright, so a portal selection is
+  // display-only). Edgehandles' own preview/ghost edges get
   // auto-generated ids with no `|` in them. Before link mode could actually
   // run (see the `eh`/`linkMode` comment), that distinction was moot because
   // those temporary edges are `.remove()`d before `select` could ever fire on

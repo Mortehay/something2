@@ -5,6 +5,15 @@ import { OPPOSITE, compassFromDelta } from './mapGraphLayout.js';
 
 const key = (fromId, edge) => `${fromId}|${edge}`;
 
+// A PORTAL is not a compass edge and has no direction-preserving opposite:
+// setPortalLink's mirror is another PORTAL row with from/to (and their
+// coordinates) swapped outright, NOT (to, OPPOSITE[edge]). OPPOSITE has no
+// 'PORTAL' key, so an OPPOSITE lookup yields undefined and no portal mirror
+// could ever be matched — which left every portal row emitting its own line,
+// and two portals out of one world colliding on the `${fromId}|${edge}`
+// element id the caller builds from these.
+export const mirrorEdgeOf = (edge) => (edge === 'PORTAL' ? 'PORTAL' : OPPOSITE[edge]);
+
 // setLink() writes a row AND its mirror, so the wire carries two rows per
 // logical link. Fold them into one line each, and record whether the mirror
 // was actually there — a row without one means one-way travel, which the API
@@ -17,13 +26,14 @@ export function collapseLinks(links) {
     if (done.has(i)) continue;
     const l = rows[i];
     done.add(i);
-    // The mirror is a DIFFERENT row pointing back: (to, opposite(edge)) -> from.
-    // Matched by row identity rather than by a (from, edge) key, so a duplicate
-    // key in malformed input cannot make an unrelated row disappear.
+    // The mirror is a DIFFERENT row pointing back: (to, mirrorEdgeOf(edge)) ->
+    // from. Matched by row identity rather than by a (from, edge) key, so a
+    // duplicate key in malformed input cannot make an unrelated row disappear.
+    const wantEdge = mirrorEdgeOf(l.edge);
     const mirrorIndex = rows.findIndex((r, j) => (
       !done.has(j)
       && r.from_world_id === l.to_world_id
-      && r.edge === OPPOSITE[l.edge]
+      && r.edge === wantEdge
       && r.to_world_id === l.from_world_id
     ));
     if (mirrorIndex !== -1) done.add(mirrorIndex);
@@ -31,12 +41,22 @@ export function collapseLinks(links) {
       fromId: l.from_world_id,
       edge: l.edge,
       toId: l.to_world_id,
-      toEdge: OPPOSITE[l.edge],
+      toEdge: wantEdge,
       mirrored: mirrorIndex !== -1,
     });
   }
   return out;
 }
+
+// The Cytoscape element id for a collapsed line. Compass edges are unique per
+// (world, edge) by DB constraint, but a world may hold MANY portal rows, so a
+// portal id has to carry its target too — otherwise two dungeon branches out
+// of one hub both id themselves `<hub>|PORTAL`, cytoscape refuses the second
+// ("Can not create second element with ID"), and one whole branch silently
+// vanishes from the diagram.
+export const edgeElementId = (fromId, edge, toId) => (
+  edge === 'PORTAL' ? `${fromId}|PORTAL|${toId}` : `${fromId}|${edge}`
+);
 
 // Warnings, never errors. The live topology is already spatially
 // contradictory (one world linked to another on all four edges at once); that
@@ -77,6 +97,16 @@ export function lintGraph({ worlds, links, positions }) {
         worldIds: [link.fromId, link.toId],
       });
     }
+    // Everything below this point is compass geometry: which way the line is
+    // DRAWN versus which way its edge name says it should point. A portal has
+    // no such direction to validate — it is deliberately off-grid (its two
+    // ends are arbitrary tiles in two worlds, drawn wherever
+    // placePortalClusters seated them), so measuring it against the compass
+    // would invent a direction-mismatch on every portal, and its drawn
+    // direction must not consume a compass slot in `drawnByWorld` either
+    // (that would fabricate duplicate-direction warnings against real
+    // compass links).
+    if (link.edge === 'PORTAL') continue;
     const a = pos[link.fromId];
     const b = pos[link.toId];
     if (!a || !b) continue;
