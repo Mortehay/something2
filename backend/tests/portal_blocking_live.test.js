@@ -51,6 +51,45 @@ function collectMsgs(ws, type, ms) {
   });
 }
 
+// Mirrors planPortalTransition's own chunk-loaded gate (server.js), which
+// review widened from "the portal's own chunk" to "the portal tile's full
+// radius-1 chunk neighborhood" -- insertPortalGuards (dungeonGuards.js)
+// spreads a pack up to +/-60px via RING_OFFSETS, enough to land a guard in
+// an ADJACENT chunk when the portal sits near a chunk boundary.
+function chunkNeighborhoodKeys(x, y, chunkSize) {
+  const gCol = Math.floor(x / 100), gRow = Math.floor(y / 100);
+  const cx = Math.floor(gCol / chunkSize), cy = Math.floor(gRow / chunkSize);
+  const keys = [];
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) keys.push(`${cx + dx},${cy + dy}`);
+  }
+  return keys;
+}
+
+// Repeatedly places the player exactly on (x,y) and polls entry.loadedChunks
+// until the FULL radius-1 chunk neighborhood around that tile has finished
+// loading. Re-placing on every poll undoes any knockback the (still
+// loading) chunk gate applies in the meantime -- once the whole
+// neighborhood is in, the final placement sticks and the caller's real
+// assertions can proceed without a spurious fail-closed bump getting in the
+// way first. Used by tests that are about guard liveness or the
+// just-arrived latch specifically, NOT about the chunk-load race itself
+// (which has its own dedicated repro tests below).
+async function settleOnPortalTile(entry, playerId, x, y, chunkSize, timeoutMs = 3000) {
+  const keys = chunkNeighborhoodKeys(x, y, chunkSize);
+  const p = entry.world.getPlayer(playerId);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    p.x = x - p.width / 2; p.y = y - p.height / 2;
+    if (keys.every((k) => entry.loadedChunks.has(k))) return p;
+    if (Date.now() > deadline) {
+      throw new Error(`chunk neighborhood for (${x},${y}) did not finish loading in time: missing ${
+        keys.filter((k) => !entry.loadedChunks.has(k)).join(', ')}`);
+    }
+    await new Promise((r) => setTimeout(r, 15));
+  }
+}
+
 // One world (w1), a single guard at (1050,1050) blocking a portal that
 // starts right there too -- so a freshly-joined player standing at spawn
 // can walk one tile east to trigger it.
@@ -159,6 +198,10 @@ function fakeRacyPortalPool() {
     if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
     if (/FROM world_creatures wc/i.test(sql)) {
       // Deferred: does not resolve until releaseCreatureQuery() is called.
+      // Gates EVERY chunk's creature query uniformly (the whole radius-1
+      // neighborhood, now that the gate covers it) -- releasing unblocks
+      // them all at once, which is functionally equivalent to the
+      // single-chunk case this was originally written against.
       return creatureGate.then(() => ({ rows: [{
         id: GUARD_ID, type: 'Orc', x: 1050, y: 1050, hp: 50, facing: 'S',
         home_x: 1050, home_y: 1050, level: 3, damage: 10, blocks_portal_id: 'link-1',
@@ -171,6 +214,80 @@ function fakeRacyPortalPool() {
   const pool = {
     guardId: GUARD_ID,
     releaseCreatureQuery: () => releaseCreatureQuery(),
+    query: async (sql, params) => route(sql, params),
+  };
+  pool.connect = async () => ({
+    query: async (sql, params) => route(sql, params),
+    release() {},
+  });
+  return pool;
+}
+
+// Portal sits near a chunk boundary (own chunk (1,1), span 800px, so tile
+// x=805 is 5px inside the [800,1600) chunk). Its guard, offset -60px west
+// by insertPortalGuards' RING_OFFSETS, lands at x=745 -- INSIDE the
+// ADJACENT chunk (0,1), a different chunk than the one the portal's own
+// tile falls in. The two chunks activate via independent DB round-trips
+// from the same recomputeActive pass: this fixture lets the portal's OWN
+// chunk resolve immediately (empty, no guard there) while holding the
+// guard's NEIGHBORING chunk's query open, so a single-chunk-only gate would
+// wrongly consider the portal's world state "loaded" the moment its own
+// chunk resolves and let a transition through before the guard is ever
+// visible.
+function fakeAdjacentChunkGuardPool() {
+  const GUARD_ID = 'guard-1';
+  let releaseGuardChunkQuery;
+  const guardChunkGate = new Promise((resolve) => { releaseGuardChunkQuery = resolve; });
+  function route(sql, params) {
+    if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
+    if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
+    if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+    if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
+    if (/FROM player_binds WHERE/i.test(sql)) return { rows: [] };
+    if (/FROM item_types/i.test(sql)) {
+      return { rows: [
+        { id: 1, name: 'dagger', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'melee',
+          damage: 8, cooldown: 0.3, reach: 80, arc_width: 6.3, range: null, projectile_speed: null,
+          projectile_radius: null, pierce: null, mana_cost: 0, element: null, defense: null, resistances: null },
+      ] };
+    }
+    if (/FROM player_items/i.test(sql)) return { rows: [{ id: 'i1', item_type_id: 1 }] };
+    if (/FROM player_equipment/i.test(sql)) return { rows: [] };
+    if (/SELECT gold FROM users/i.test(sql)) return { rows: [{ gold: 0 }] };
+    if (/^\s*INSERT INTO player_progression/i.test(sql)) return { rows: [], rowCount: 0 };
+    if (/FROM player_progression/i.test(sql)) {
+      return { rows: [{ user_id: '1', experience: '0', level: 1, stat_points: 0,
+        strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5 }] };
+    }
+    if (/FROM map_links ml JOIN worlds/i.test(sql)) {
+      return { rows: [{
+        id: 'link-1', edge: 'PORTAL', to_world_id: 'w2', to_width: 20, to_height: 20,
+        from_x: 805, from_y: 1050, to_x: 550, to_y: 550,
+      }] };
+    }
+    if (/FROM villages WHERE/i.test(sql)) return { rows: [] };
+    if (/FROM world_creatures wc/i.test(sql)) {
+      // params: [worldId, x1, x2, y1, y2]. The guard's chunk bounding box
+      // (chunk (0,1)) is x in [0,800), y in [800,1600) -- the WEST neighbor
+      // of the portal's own chunk (1,1), x in [800,1600), same y range.
+      const [, x1, x2, y1, y2] = params;
+      const isGuardChunk = x1 === 0 && x2 === 800 && y1 === 800 && y2 === 1600;
+      if (isGuardChunk) {
+        return guardChunkGate.then(() => ({ rows: [{
+          id: GUARD_ID, type: 'Orc', x: 745, y: 1050, hp: 50, facing: 'S',
+          home_x: 805, home_y: 1050, level: 3, damage: 10, blocks_portal_id: 'link-1',
+          defense: 2, color: '#a33', resistances: {}, faction: 'guard',
+        }] }));
+      }
+      return { rows: [] }; // every other chunk, including the portal's own, resolves immediately with no guard
+    }
+    if (/FROM world_items/i.test(sql)) return { rows: [] };
+    return { rows: [] };
+  }
+  const pool = {
+    guardId: GUARD_ID,
+    releaseGuardChunkQuery: () => releaseGuardChunkQuery(),
     query: async (sql, params) => route(sql, params),
   };
   pool.connect = async () => ({
@@ -240,23 +357,17 @@ test('a guard-blocked portal refuses transfer and knocks the player back', async
   const joined = await nextMsg(ws, 'joined');
   assert.ok(joined.spawn, 'joined message must include a spawn point to walk from');
 
-  const world = handle.worlds.get('w1').world;
-  // Let the portal's own chunk finish its natural (neighbor-of-spawn)
-  // pre-load before stepping onto the tile. Without this, the FIRST
-  // evaluation would be blocked by the separate chunk-loaded gate (Critical
-  // 1's fix) regardless of guard state, and its knockback would shove the
-  // player off the tile before the guard-liveness path ever got exercised
-  // in isolation -- masking a broken isPortalBlocked check behind the
-  // chunk-load gate instead of catching it. That race is covered on its own
-  // by the dedicated race-repro test below; this test isolates guard
-  // liveness specifically.
-  await new Promise((r) => setTimeout(r, 150));
-
-  // Walk the player directly onto the portal tile (1050,1050) via a raw
-  // world-state mutation -- movement input itself is covered elsewhere;
-  // this test is about what happens once a player IS on the tile.
-  const p = world.getPlayer('1');
-  p.x = 1050 - p.width / 2; p.y = 1050 - p.height / 2;
+  const entry = handle.worlds.get('w1');
+  // Settle the player exactly on the portal tile only once its FULL chunk
+  // neighborhood has finished loading. Without this, the FIRST evaluation
+  // would be blocked by the separate chunk-loaded gate (Critical 1's fix)
+  // regardless of guard state, and its knockback would shove the player off
+  // the tile before the guard-liveness path ever got exercised in isolation
+  // -- masking a broken isPortalBlocked check behind the chunk-load gate
+  // instead of catching it. That race is covered on its own by the
+  // dedicated race-repro tests below; this test isolates guard liveness
+  // specifically.
+  const p = await settleOnPortalTile(entry, '1', 1050, 1050, 8);
 
   // Start listening for a leaked transition from THIS moment, concurrently
   // with everything below -- not after portalBlocked resolves. The original
@@ -269,7 +380,7 @@ test('a guard-blocked portal refuses transfer and knocks the player back', async
   const blocked = await nextMsg(ws, 'portalBlocked');
   assert.equal(blocked.message, 'Guards block the way.');
 
-  await new Promise((r) => setTimeout(r, 60)); // let the same tick's knockback land
+  await new Promise((r) => setTimeout(r, 150)); // let the same tick's knockback land (generous margin over one tick's worth of real socket/scheduler latency)
   assert.ok(Math.abs((p.x + p.width / 2) - 1050) > 1 || Math.abs((p.y + p.height / 2) - 1050) > 1,
     'the player must have been pushed off the exact portal tile');
 
@@ -293,24 +404,14 @@ test('killing the guard unblocks the portal on the very next approach', async ()
   // NEXT world load would see hp 0 -- for this same live session, kill the
   // in-memory creature directly, mirroring how progression_death.test.js's
   // `kill()` helper kills a live player by mutating hp in place.
-  const world = handle.worlds.get('w1').world;
-  const guard = world.creatures.creatures.get(pool.guardId);
+  const entry = handle.worlds.get('w1');
+  const guard = entry.world.creatures.creatures.get(pool.guardId);
   if (guard) guard.hp = 0;
 
-  // Let the portal's own chunk finish its (already in-flight, since it's a
-  // neighbor of the spawn chunk in this fixture) load before stepping onto
-  // the tile. Without this, the chunk-loaded gate (Critical 1's fix) would
-  // itself produce one spurious fail-closed knockback on first contact --
-  // which physically shoves the player OFF the tile before this test's
-  // single manual placement ever gets evaluated against the (by-then-dead)
-  // guard, hanging forever. That race is real gameplay behaviour and is
-  // covered by the dedicated race-repro test below; this test is
-  // specifically about guard liveness, so it sidesteps the race by waiting
-  // for the natural pre-load to land first.
-  await new Promise((r) => setTimeout(r, 150));
-
-  const p = world.getPlayer('1');
-  p.x = 1050 - p.width / 2; p.y = 1050 - p.height / 2;
+  // Same isolation reasoning as the test above: settle onto the tile only
+  // once the full chunk neighborhood is loaded, so this test is purely
+  // about guard liveness, not the chunk-load race.
+  await settleOnPortalTile(entry, '1', 1050, 1050, 8);
 
   const t = await nextMsg(ws, 'transition');
   assert.deepStrictEqual(
@@ -364,6 +465,86 @@ test('a portal must not leak a transition while its own chunk has not finished l
 });
 
 // ---------------------------------------------------------------------------
+// Gap 2 repro (widened chunk-load gate): a guard placed by insertPortalGuards
+// can land in a chunk ADJACENT to the portal's own chunk (RING_OFFSETS spread
+// up to +/-60px). The gate must cover the whole radius-1 neighborhood, not
+// just the single chunk under the portal tile -- otherwise a portal near a
+// chunk boundary can still leak a transition while its guard's neighboring
+// chunk is still loading, even though the portal's OWN chunk already
+// resolved.
+// ---------------------------------------------------------------------------
+test('a portal must not leak a transition while a guard in an ADJACENT chunk has not finished loading', async () => {
+  const pool = fakeAdjacentChunkGuardPool();
+  const { url, handle, server } = await bootWith(pool);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+
+  const entry = handle.worlds.get('w1');
+  const p = entry.world.getPlayer('1');
+
+  // Wait for every chunk in the portal tile's neighborhood EXCEPT the
+  // guard's own (deliberately held open) to finish loading, WITHOUT ever
+  // triggering the portal itself first. Park the player elsewhere INSIDE
+  // the portal's own chunk (1,1) -- tile (1200,1200), far from the actual
+  // trigger tile (805,1050) so portalLinks.get(...) never matches it -- so
+  // recomputeActive requests that chunk's full radius-1 neighborhood (the
+  // same one the portal's own tile would need) without ever evaluating
+  // planPortalTransition as "on the tile" and risking a spurious blocked
+  // branch.
+  //
+  // This sidesteps two separate masking effects that would otherwise hide
+  // the real behaviour: (a) the portal's own chunk being transiently
+  // unloaded too, right after the player first arrives there, which the
+  // gate would ALSO correctly (for an unrelated reason) block on before the
+  // guard-adjacency case is ever exercised, and (b) the 800ms cooldown that
+  // first block would arm (_portalCdUntil), which silences every further
+  // evaluation for the rest of this test's short observation window
+  // regardless of which gate is active -- both were confirmed experimentally
+  // to make an EARLIER version of this test pass identically whether the
+  // widened neighborhood gate or the narrower single-chunk gate it replaced
+  // was in effect.
+  p.x = 1200 - p.width / 2; p.y = 1200 - p.height / 2;
+  const guardKey = '0,1';
+  const restOfNeighborhood = chunkNeighborhoodKeys(805, 1050, 8).filter((k) => k !== guardKey);
+  const preloadDeadline = Date.now() + 2000;
+  while (!restOfNeighborhood.every((k) => entry.loadedChunks.has(k))) {
+    if (Date.now() > preloadDeadline) throw new Error('neighborhood (minus the guard\'s own chunk) did not pre-load in time');
+    await new Promise((r) => setTimeout(r, 15));
+  }
+  assert.ok(!entry.loadedChunks.has(guardKey), 'sanity: the guard\'s own chunk must still be pending at this point');
+
+  const seenBlocked = [];
+  const seenTransition = [];
+  function onMsg(data) {
+    const m = JSON.parse(data);
+    if (m.type === 'portalBlocked') seenBlocked.push(m);
+    if (m.type === 'transition') seenTransition.push(m);
+  }
+  ws.on('message', onMsg);
+
+  // NOW step onto the portal tile for the first time -- every OTHER chunk
+  // in the neighborhood is already loaded, so the only thing left pending
+  // is the guard's own chunk. This is the precise case Gap 2 review called
+  // out: the portal's own chunk (and everything else nearby) has already
+  // resolved, but a guard placed in an ADJACENT chunk has not.
+  p.x = 805 - p.width / 2; p.y = 1050 - p.height / 2;
+
+  await new Promise((r) => setTimeout(r, 250)); // observe while the guard's chunk is still pending
+  pool.releaseGuardChunkQuery();
+  await new Promise((r) => setTimeout(r, 250)); // observe the settle once it resolves
+  ws.off('message', onMsg);
+
+  assert.ok(seenBlocked.length > 0,
+    'sanity: the portal must have been observed as blocked at least once during this window');
+  assert.deepStrictEqual(seenTransition, [],
+    'must not leak a transition while a guard in a NEIGHBORING chunk has not finished loading, even though the portal\'s own chunk (and every other chunk in the neighborhood) already resolved');
+
+  ws.close(); handle.close(); server.close();
+});
+
+// ---------------------------------------------------------------------------
 // Critical 2 repro: a mirrored, unguarded portal pair. Arriving on one side
 // lands exactly on the OTHER side's own trigger tile by construction
 // (setPortalLink). Without the just-arrived latch, the very next tick would
@@ -377,15 +558,12 @@ test('a mirrored portal pair does not bounce the arriving player straight back',
   ws1.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
   await nextMsg(ws1, 'joined');
 
-  const world1 = handle.worlds.get('w1').world;
-  // Let w1's portal chunk finish its natural (neighbor-of-spawn) pre-load
-  // before stepping onto the tile -- same reasoning as the guard-liveness
-  // test above: this test is about the arrival-side latch, not the
-  // chunk-load race (covered separately), so it sidesteps that race rather
-  // than fighting it.
-  await new Promise((r) => setTimeout(r, 150));
-  const p1 = world1.getPlayer('1');
-  p1.x = 1050 - p1.width / 2; p1.y = 1050 - p1.height / 2;
+  const entry1 = handle.worlds.get('w1');
+  // Settle w1's portal chunk neighborhood before stepping onto the tile --
+  // same isolation reasoning as the guard-liveness tests above: this test
+  // is about the arrival-side latch, not the chunk-load race, so it
+  // sidesteps that race rather than fighting it.
+  await settleOnPortalTile(entry1, '1', 1050, 1050, 8);
 
   const t = await nextMsg(ws1, 'transition');
   assert.deepStrictEqual({ toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY },
@@ -407,9 +585,46 @@ test('a mirrored portal pair does not bounce the arriving player straight back',
   assert.deepStrictEqual({ x: joined2.spawn.x, y: joined2.spawn.y }, { x: 550, y: 550 },
     'sanity: the player must land exactly on the mirror portal\'s own tile for this to be a meaningful test');
 
-  const leaked = await collectMsgs(ws2, 'transition', 400);
-  assert.deepStrictEqual(leaked, [],
-    'arriving exactly on a portal\'s own trigger tile must not immediately bounce the player back');
+  const entry2 = handle.worlds.get('w2');
+  const p2 = entry2.world.getPlayer('1');
+  const arriveX = p2.x, arriveY = p2.y;
+
+  // Watch for BOTH message types, and track the player's own position, from
+  // the moment of arrival, across a window long enough for w2's portal-tile
+  // chunk neighborhood to finish loading (confirmed below). This is the
+  // POSITIVE property that actually discriminates the latch fix: a
+  // counterfactual run with the join-handler's `_lastPortalTile` write
+  // (server.js, the block right after `entry.world.addPlayer` under
+  // `spawn.viaDoorway`) deleted still passes an "assert no transition ever
+  // arrived" check, because a freshly-loaded destination world starts with
+  // an EMPTY entry.loadedChunks -- the separate (already-correct)
+  // chunk-load gate independently blocks the very first tick regardless of
+  // the latch, sends one portalBlocked, and knocks the player off the tile,
+  // after which nothing is under them to fire again. "No transition" is
+  // therefore true either way and proves nothing about the latch on its
+  // own. What only holds if the latch is doing its job: the player is
+  // STILL standing exactly at the arrival tile, with ZERO messages of any
+  // kind, even once the chunk has had ample time to finish loading.
+  const seenBlocked = [];
+  const seenTransition = [];
+  function onMsg(data) {
+    const m = JSON.parse(data);
+    if (m.type === 'portalBlocked') seenBlocked.push(m);
+    if (m.type === 'transition') seenTransition.push(m);
+  }
+  ws2.on('message', onMsg);
+  await new Promise((r) => setTimeout(r, 500));
+  ws2.off('message', onMsg);
+
+  const neighborhood = chunkNeighborhoodKeys(arriveX + p2.width / 2, arriveY + p2.height / 2, 8);
+  assert.ok(neighborhood.every((k) => entry2.loadedChunks.has(k)),
+    'sanity: the destination chunk neighborhood must have actually finished loading during the wait for this test to prove anything');
+
+  assert.deepStrictEqual(seenBlocked, [], 'the arriving player must never receive a portalBlocked bounce');
+  assert.deepStrictEqual(seenTransition, [], 'the arriving player must never receive a leaked transition either');
+  assert.strictEqual(p2.x, arriveX,
+    'the player must still be standing exactly at the arrival position -- proves the LATCH suppressed the portal, not a coincidentally-still-loading chunk gate');
+  assert.strictEqual(p2.y, arriveY);
 
   ws2.close(); handle.close(); server.close();
 });
@@ -422,10 +637,8 @@ test('a player who stands still on the arrival tile past the old cooldown window
   ws1.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
   await nextMsg(ws1, 'joined');
 
-  const world1 = handle.worlds.get('w1').world;
-  await new Promise((r) => setTimeout(r, 150)); // let w1's portal chunk pre-load, see note above
-  const p1 = world1.getPlayer('1');
-  p1.x = 1050 - p1.width / 2; p1.y = 1050 - p1.height / 2;
+  const entry1 = handle.worlds.get('w1');
+  await settleOnPortalTile(entry1, '1', 1050, 1050, 8); // let w1's portal chunk neighborhood settle, see note above
   await nextMsg(ws1, 'transition');
   ws1.close();
 
@@ -434,14 +647,35 @@ test('a player who stands still on the arrival tile past the old cooldown window
   ws2.send(JSON.stringify({ type: 'join', world_id: 'w2' }));
   await nextMsg(ws2, 'joined');
 
-  // The old mechanism was a flat timer (_portalCdUntil, 1500ms) that would
-  // have expired by now with the player still standing on the exact same
-  // tile -- proving the fix is a genuine position latch, not just a longer
-  // delay before the same bounce.
-  await new Promise((r) => setTimeout(r, 1700));
-  const leaked = await collectMsgs(ws2, 'transition', 200);
-  assert.deepStrictEqual(leaked, [],
+  const entry2 = handle.worlds.get('w2');
+  const p2 = entry2.world.getPlayer('1');
+  const arriveX = p2.x, arriveY = p2.y;
+
+  // Listen from THE MOMENT of arrival, spanning well past the OLD flat
+  // cooldown window (1500ms) -- not just a tail window started after
+  // sleeping past it. A tail-only listener would miss an EARLY leak
+  // entirely: by 1700ms the destination chunk neighborhood is certainly
+  // long finished loading (no deliberate delay in this fixture), so
+  // without the latch a transition would fire almost immediately once that
+  // (empty, unguarded) neighborhood resolves -- not conveniently at the
+  // 1700ms mark -- and starting to listen only after that sleep would never
+  // observe it.
+  const seenBlocked = [];
+  const seenTransition = [];
+  function onMsg(data) {
+    const m = JSON.parse(data);
+    if (m.type === 'portalBlocked') seenBlocked.push(m);
+    if (m.type === 'transition') seenTransition.push(m);
+  }
+  ws2.on('message', onMsg);
+  await new Promise((r) => setTimeout(r, 1900));
+  ws2.off('message', onMsg);
+
+  assert.deepStrictEqual(seenBlocked, []);
+  assert.deepStrictEqual(seenTransition, []);
+  assert.strictEqual(p2.x, arriveX,
     'standing still past the old cooldown window must not trigger a bounce -- the latch only clears when the player actually moves off the tile');
+  assert.strictEqual(p2.y, arriveY);
 
   ws2.close(); handle.close(); server.close();
 });

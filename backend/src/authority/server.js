@@ -7,7 +7,7 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
-const { chunkOf, CHUNK_KEY, parseKey, neighborhoodKeys } = require('./coords');
+const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
 const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
@@ -91,18 +91,29 @@ function isPortalBlocked(creatures, linkId) {
 //   chunk that hasn't finished loading yet -- a guard that is very much
 //   alive in the DB can be invisible to `isPortalBlocked` for the first
 //   tick(s) after a player joins or reconnects next to a guarded portal.
-//   Fail closed instead: if the portal's own chunk isn't in loadedChunks
-//   yet, treat it as blocked regardless of what the (incomplete) creature
-//   scan shows. This applies to every portal, guarded or not -- a portal
-//   should never fire before the world state around it has actually loaded.
+//   Fail closed instead: require every chunk in the portal tile's radius-1
+//   neighborhood (not just the single chunk the tile itself falls in) to be
+//   loaded before trusting the creature scan. insertPortalGuards spreads a
+//   pack up to +/-60px around the portal tile (RING_OFFSETS), which is
+//   enough to land a guard in an ADJACENT chunk when the portal sits near a
+//   chunk boundary -- that neighbor chunk activates concurrently via its
+//   own independent DB round-trip from the same recomputeActive pass, and
+//   can still be in flight after the portal's own chunk has already
+//   resolved. Checking only the single chunk would leave that narrower
+//   version of the same race open. Same neighborhoodKeys(cx, cy, 1) helper
+//   recomputeActive already uses to decide "am I near enough that this
+//   could matter". This applies to every portal, guarded or not -- a
+//   portal should never fire before the world state around it has actually
+//   loaded.
 function planPortalTransition({ gRow, gCol, portalLinks, now, cdUntil, creatures, loadedChunks, chunkSize, lastPortalTile }) {
   if (now < cdUntil) return null;
   const key = `${gRow},${gCol}`;
   const link = portalLinks.get(key);
   if (!link) return null;
   if (lastPortalTile === key) return null; // just arrived here via a warp; inert until they leave the tile
-  const chunkKey = CHUNK_KEY(Math.floor(gCol / chunkSize), Math.floor(gRow / chunkSize));
-  if (!loadedChunks.has(chunkKey)) return { blocked: true, linkId: link.id };
+  const cx = Math.floor(gCol / chunkSize), cy = Math.floor(gRow / chunkSize);
+  const neighborhoodLoaded = neighborhoodKeys(cx, cy, 1).every((k) => loadedChunks.has(k));
+  if (!neighborhoodLoaded) return { blocked: true, linkId: link.id };
   if (isPortalBlocked(creatures, link.id)) return { blocked: true, linkId: link.id };
   return { toWorldId: link.toWorldId, arriveX: link.toX, arriveY: link.toY };
 }

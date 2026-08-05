@@ -10,11 +10,18 @@ function portalLinksWith(entries) {
 
 // gRow:5, gCol:5 with this chunkSize lands in chunk "0,0" -- matches the
 // real code's chunkOf formula (cx = floor(gCol/chunkSize), cy = floor(gRow/
-// chunkSize)). Used as the default "world state here has already loaded"
-// fixture for every test that isn't specifically exercising the chunk-load
-// gate.
+// chunkSize)). The gate requires the FULL radius-1 neighborhood around that
+// chunk (widened after review: insertPortalGuards can place a guard in an
+// ADJACENT chunk, not just the one the portal's own tile falls in), so this
+// is every key in that 3x3 block -- the default "world state here has
+// already loaded" fixture for every test that isn't specifically exercising
+// the chunk-load gate.
 const CHUNK_SIZE = 8;
-const LOADED_HERE = new Set(['0,0']);
+const LOADED_HERE = new Set([
+  '-1,-1', '0,-1', '1,-1',
+  '-1,0', '0,0', '1,0',
+  '-1,1', '0,1', '1,1',
+]);
 
 test('no portal at this tile returns null', () => {
   const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
@@ -96,6 +103,13 @@ test('a pack blocks until every member is dead', () => {
 // Chunk-load gate: a creature's chunk loads asynchronously, so `creatures`
 // can be an incomplete snapshot. A guard that is alive in the DB but whose
 // chunk hasn't finished loading yet must not be silently treated as absent.
+//
+// The gate covers the portal tile's FULL radius-1 chunk neighborhood, not
+// just the single chunk its own tile falls in -- insertPortalGuards spreads
+// a pack up to +/-60px (RING_OFFSETS), enough to land a guard in an
+// ADJACENT chunk when the portal sits near a chunk boundary. A single-chunk
+// gate would consider the portal's world state "loaded" the moment its own
+// chunk resolves, even while a guard one chunk over is still in flight.
 // ---------------------------------------------------------------------------
 
 test('a portal whose own chunk has not finished loading is blocked, even with zero creatures in scope', () => {
@@ -108,16 +122,30 @@ test('a portal whose own chunk has not finished loading is blocked, even with ze
     'an unloaded chunk must fail closed even for an unguarded portal -- the creature scan cannot be trusted yet');
 });
 
-test('a portal fires normally once its chunk has finished loading', () => {
+test('the portal\'s OWN chunk being loaded is not enough -- a still-loading NEIGHBOR chunk still blocks', () => {
   const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
   const result = planPortalTransition({
     gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures: [],
+    // Only the portal's own chunk ("0,0") is loaded; every OTHER chunk in
+    // its radius-1 neighborhood (where a spread-out guard could be) is
+    // still missing. This is exactly the narrower gate Gap 2 review found:
+    // checking only "0,0" would have returned a clear transition here.
     loadedChunks: new Set(['0,0']), chunkSize: CHUNK_SIZE, lastPortalTile: null,
+  });
+  assert.deepStrictEqual(result, { blocked: true, linkId: 'link-1' },
+    'a guard placed by insertPortalGuards can land in an ADJACENT chunk (RING_OFFSETS spreads up to +/-60px) -- the gate must cover the whole neighborhood, not just the tile\'s own chunk');
+});
+
+test('a portal fires normally once its FULL chunk neighborhood has finished loading', () => {
+  const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
+  const result = planPortalTransition({
+    gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures: [],
+    loadedChunks: LOADED_HERE, chunkSize: CHUNK_SIZE, lastPortalTile: null,
   });
   assert.deepStrictEqual(result, { toWorldId: 'w2', arriveX: 50, arriveY: 50 });
 });
 
-test('an unrelated loaded chunk does not satisfy the gate -- only the portal\'s OWN chunk counts', () => {
+test('an unrelated loaded chunk does not satisfy the gate -- it must be THIS neighborhood specifically', () => {
   const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
   const result = planPortalTransition({
     gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures: [],
