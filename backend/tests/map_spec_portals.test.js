@@ -66,6 +66,70 @@ test('two portals from the same world at the same tile is rejected', () => {
   assert.ok(errors.some((e) => /already has a portal/.test(e)));
 });
 
+test('two portals converging on the same ARRIVAL tile is rejected', () => {
+  // Neither declared `from` slot collides, so the old declared-side-only
+  // check passed this clean -- but setPortalLink writes a mirror row at
+  // (to, to_x, to_y) for each, and both mirrors land on surface(1050,1050).
+  // The second upsert overwrites the first, so dungeon-1's way back up
+  // silently becomes dungeon-1b's, and dungeon-1 ships one-way.
+  const spec = baseSpec();
+  spec.worlds.push(
+    { key: 'dungeon-1', name: 'Dungeon Level 1', width: 20, height: 20 },
+    { key: 'dungeon-1b', name: 'Dungeon Level 1 Alt', width: 20, height: 20 },
+  );
+  spec.links.push(
+    { kind: 'portal', from: 'dungeon-1', from_x: 550, from_y: 550, to: 'surface', to_x: 1050, to_y: 1050 },
+    { kind: 'portal', from: 'dungeon-1b', from_x: 550, from_y: 550, to: 'surface', to_x: 1050, to_y: 1050 },
+  );
+  const errors = validateMapSpec(spec);
+  assert.ok(errors.some((e) => /already has a portal on tile \(1050,1050\)/.test(e)),
+    `expected an arrival-tile collision error, got: ${JSON.stringify(errors)}`);
+});
+
+test("a portal's arrival tile colliding with another portal's DEPARTURE tile is rejected", () => {
+  // Mixed sides: surface(1050,1050) is dungeon-1's declared arrival AND
+  // dungeon-2's declared departure. One row, two claimants, same overwrite.
+  const spec = baseSpec();
+  spec.worlds.push(
+    { key: 'dungeon-1', name: 'Dungeon Level 1', width: 20, height: 20 },
+    { key: 'dungeon-2', name: 'Dungeon Level 2', width: 20, height: 20 },
+  );
+  spec.links.push(
+    { kind: 'portal', from: 'dungeon-1', from_x: 550, from_y: 550, to: 'surface', to_x: 1050, to_y: 1050 },
+    { kind: 'portal', from: 'surface', from_x: 1050, from_y: 1050, to: 'dungeon-2', to_x: 550, to_y: 550 },
+  );
+  const errors = validateMapSpec(spec);
+  assert.ok(errors.some((e) => /already has a portal on tile \(1050,1050\)/.test(e)),
+    `expected a departure/arrival collision error, got: ${JSON.stringify(errors)}`);
+});
+
+test('distinct arrival tiles for two branches back to the same hub validate clean', () => {
+  // The counter-case: same hub world, DIFFERENT staircase tiles. Nothing
+  // overwrites anything, so this must not be flagged.
+  const spec = baseSpec();
+  spec.worlds.push(
+    { key: 'dungeon-1', name: 'Dungeon Level 1', width: 20, height: 20 },
+    { key: 'dungeon-1b', name: 'Dungeon Level 1 Alt', width: 20, height: 20 },
+  );
+  spec.links.push(
+    { kind: 'portal', from: 'dungeon-1', from_x: 550, from_y: 550, to: 'surface', to_x: 1050, to_y: 1050 },
+    { kind: 'portal', from: 'dungeon-1b', from_x: 550, from_y: 550, to: 'surface', to_x: 1950, to_y: 1050 },
+  );
+  assert.deepStrictEqual(validateMapSpec(spec), []);
+});
+
+test('redundantly declaring both directions of one portal is not a conflict', () => {
+  // Both declarations produce byte-identical rows, so the second write
+  // destroys nothing -- flagging it would reject a legal (if verbose) spec.
+  const spec = baseSpec();
+  spec.worlds.push({ key: 'dungeon-1', name: 'Dungeon Level 1', width: 20, height: 20 });
+  spec.links.push(
+    { kind: 'portal', from: 'surface', from_x: 1050, from_y: 1050, to: 'dungeon-1', to_x: 550, to_y: 550 },
+    { kind: 'portal', from: 'dungeon-1', from_x: 550, from_y: 550, to: 'surface', to_x: 1050, to_y: 1050 },
+  );
+  assert.deepStrictEqual(validateMapSpec(spec), []);
+});
+
 test('a dungeon level unreachable from the entry (no portal, no grid link) is still rejected', () => {
   const spec = baseSpec();
   spec.worlds.push({ key: 'dungeon-orphan', name: 'Orphan', width: 20, height: 20 });

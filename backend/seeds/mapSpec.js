@@ -141,7 +141,21 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
   }
 
   const usedEdges = new Set();
-  const usedPortalSources = new Set();
+  // Every portal TILE a spec claims, whichever side of a link declared it.
+  // setPortalLink writes TWO rows per declared link -- the declared
+  // (from, from_x, from_y) and the implicit mirror at (to, to_x, to_y) -- and
+  // both upsert on the same partial unique index (from_world_id, from_x,
+  // from_y) WHERE edge = 'PORTAL'. So tracking only the declared side lets a
+  // spec whose two links converge on ONE arrival tile validate clean, and the
+  // second setPortalLink call then silently overwrites the first's mirror
+  // row: one of the two portals ships one-way, with no error anywhere.
+  //
+  // Maps the tile to the DESTINATION the row landing on it will carry, not
+  // just to "seen". A spec that redundantly declares both directions of the
+  // same portal claims each tile twice with identical destinations -- those
+  // writes are byte-identical and idempotent, so they destroy nothing and
+  // must not be reported as a conflict.
+  const usedPortalTiles = new Map();
   const adjacency = new Map(worlds.map((w) => [w.key, []]));
   for (const l of links) {
     const from = byKey.get(l.from);
@@ -158,11 +172,23 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
         adjacency.get(l.to).push(l.from);
         continue;
       }
-      const slot = `${l.from}:${l.from_x},${l.from_y}`;
-      if (usedPortalSources.has(slot)) {
-        errors.push(`world "${l.from}" already has a portal from tile (${l.from_x},${l.from_y})`);
+      // Departure side first, then the mirror this link implies, so the
+      // error names the tile that actually collides.
+      const departure = `${l.from}:${l.from_x},${l.from_y}`;
+      const arrival = `${l.to}:${l.to_x},${l.to_y}`;
+      const claimed = [
+        { slot: departure, leadsTo: arrival, world: l.from, x: l.from_x, y: l.from_y, side: 'departure' },
+        { slot: arrival, leadsTo: departure, world: l.to, x: l.to_x, y: l.to_y, side: 'arrival' },
+      ];
+      for (const c of claimed) {
+        const prior = usedPortalTiles.get(c.slot);
+        if (prior !== undefined && prior !== c.leadsTo) {
+          errors.push(`world "${c.world}" already has a portal on tile (${c.x},${c.y}) leading to `
+            + `${prior} — portal link ${l.from}->${l.to} claims that tile again as its ${c.side} `
+            + `tile, and the second write would overwrite the first, leaving one of them one-way`);
+        }
+        usedPortalTiles.set(c.slot, c.leadsTo);
       }
-      usedPortalSources.add(slot);
 
       if (l.guard) {
         if (!Number.isInteger(l.guard.count) || l.guard.count < 1) {
