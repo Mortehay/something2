@@ -659,38 +659,46 @@ async function proveBoundaryPortalResolves(fromX, fromY, label) {
   function onMsg(data) { const m = JSON.parse(data); if (m.type === 'transition') seenTransition.push(m); }
   ws.on('message', onMsg);
 
-  // The set the FIX actually requires: the radius-1 neighborhood of the
-  // player's own TOP-LEFT chunk -- exactly what recomputeActive itself
-  // will (eventually) load for this exact position.
-  const requiredKeys = chunkNeighborhoodKeys(fromX - p.width / 2, fromY - p.height / 2, 8);
+  // try/finally, not straight-line teardown: BOTH assertions below fire on
+  // exactly the regression this helper exists to catch, and a throw past a
+  // live setInterval (plus an open socket and a listening server) leaves the
+  // event loop with work to do forever -- `node --test` then hangs instead
+  // of reporting a clean failure, which is the worst possible way for a
+  // regression test to react to the regression.
+  try {
+    // The set the FIX actually requires: the radius-1 neighborhood of the
+    // player's own TOP-LEFT chunk -- exactly what recomputeActive itself
+    // will (eventually) load for this exact position.
+    const requiredKeys = chunkNeighborhoodKeys(fromX - p.width / 2, fromY - p.height / 2, 8);
 
-  const loadDeadline = Date.now() + 3000;
-  let resolved = false;
-  let lastSnapshot = [];
-  while (Date.now() < loadDeadline) {
-    lastSnapshot = [...entry.loadedChunks].sort();
-    if (requiredKeys.every((k) => entry.loadedChunks.has(k))) { resolved = true; break; }
-    await new Promise((r) => setTimeout(r, 50));
+    const loadDeadline = Date.now() + 3000;
+    let resolved = false;
+    let lastSnapshot = [];
+    while (Date.now() < loadDeadline) {
+      lastSnapshot = [...entry.loadedChunks].sort();
+      if (requiredKeys.every((k) => entry.loadedChunks.has(k))) { resolved = true; break; }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(resolved,
+      `[${label}] required chunk neighborhood ${JSON.stringify(requiredKeys)} never fully loaded within 3s -- last observed loadedChunks: ${JSON.stringify(lastSnapshot)}`);
+
+    // The gate itself only settles the ONE-TIME requirement; a stale
+    // _portalCdUntil from an earlier (correctly fail-closed) blocked tick,
+    // armed before the neighborhood finished loading, can still delay the
+    // eventual transition by up to 800ms. Poll for the actual outcome rather
+    // than assuming a fixed delay past "resolved" is enough.
+    const transitionDeadline = Date.now() + 2000;
+    while (Date.now() < transitionDeadline && seenTransition.length === 0) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    assert.ok(seenTransition.length > 0,
+      `[${label}] the portal must eventually transition once its required neighborhood has fully loaded -- it must not stay permanently blocked`);
+  } finally {
+    clearInterval(pin);
+    ws.off('message', onMsg);
+    ws.close(); handle.close(); server.close();
   }
-  assert.ok(resolved,
-    `[${label}] required chunk neighborhood ${JSON.stringify(requiredKeys)} never fully loaded within 3s -- last observed loadedChunks: ${JSON.stringify(lastSnapshot)}`);
-
-  // The gate itself only settles the ONE-TIME requirement; a stale
-  // _portalCdUntil from an earlier (correctly fail-closed) blocked tick,
-  // armed before the neighborhood finished loading, can still delay the
-  // eventual transition by up to 800ms. Poll for the actual outcome rather
-  // than assuming a fixed delay past "resolved" is enough.
-  const transitionDeadline = Date.now() + 2000;
-  while (Date.now() < transitionDeadline && seenTransition.length === 0) {
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  clearInterval(pin);
-  ws.off('message', onMsg);
-
-  assert.ok(seenTransition.length > 0,
-    `[${label}] the portal must eventually transition once its required neighborhood has fully loaded -- it must not stay permanently blocked`);
-
-  ws.close(); handle.close(); server.close();
 }
 
 test('a portal on an X-axis chunk boundary, approached so centre and top-left chunk assignment disagree, still resolves', async () => {

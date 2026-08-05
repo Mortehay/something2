@@ -198,6 +198,20 @@ export function seedPositions(worlds, links, { cell = 220 } = {}) {
       // first one in list order; placePortalClusters then cascades through
       // the rest of the cycle from there (its own `cellOf.has` guard stops
       // it from looping back around forever).
+      //
+      // NOTE this fires on EVERY portal pair, not just an authored loop:
+      // setPortalLink writes both directions, so each endpoint is the
+      // other's portal target and both are blocked from the start. When
+      // neither endpoint is anchored (no stored graph_x/graph_y) and neither
+      // is flagged is_entry, nothing in the graph says which one is the hub,
+      // so which one lands on top is arbitrary -- but it is fixed by list
+      // order, so it is stable across refetches, which is what the diagram
+      // actually needs. In practice the ambiguity does not arise: `roots` is
+      // sorted is_entry-first above, and validateMapSpec (backend/seeds/
+      // mapSpec.js) guarantees a seeded map has exactly one is_entry world
+      // with every other world reachable from it -- so the hub is always
+      // first in line for this tie-break, or has already been seated by the
+      // compass walk. See mapGraphLayoutPortals.test.js.
       seatRoot(remaining[0]);
       remaining = roots.filter((w) => !cellOf.has(w.id));
     }
