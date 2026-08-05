@@ -34,7 +34,7 @@ test('map_links has PORTAL coordinate columns and the widened edge check', async
           AND column_name IN ('from_x','from_y','to_x','to_y')`);
     assert.equal(rows.length, 4, 'expected all four coordinate columns');
     for (const r of rows) {
-      assert.equal(r.data_type, 'integer');
+      assert.equal(r.data_type, 'real');
       assert.equal(r.is_nullable, 'YES', `${r.column_name} must stay nullable for compass rows`);
     }
   } finally {

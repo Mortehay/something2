@@ -2,10 +2,10 @@ exports.shorthands = undefined;
 
 exports.up = (pgm) => {
   pgm.addColumns('map_links', {
-    from_x: { type: 'integer' },
-    from_y: { type: 'integer' },
-    to_x: { type: 'integer' },
-    to_y: { type: 'integer' },
+    from_x: { type: 'real' },
+    from_y: { type: 'real' },
+    to_x: { type: 'real' },
+    to_y: { type: 'real' },
   });
 
   // Widen the edge check to admit PORTAL alongside the four compass values.
