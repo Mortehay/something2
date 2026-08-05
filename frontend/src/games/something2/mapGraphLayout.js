@@ -103,6 +103,25 @@ export function seedPositions(worlds, links, { cell = 220 } = {}) {
     adjacency.get(l.from_world_id).push(l);
   }
 
+  // Reverse of portalAdjacency: every world that is SOMEONE's portal target,
+  // mapped to the set of worlds that portal to it. Lets the disconnected-root
+  // loop below tell "a dungeon with no compass links of its own" apart from
+  // "an unrelated orphan" -- without this, a portal target that sorts before
+  // its own source in `worlds` (GET /api/world-graph orders by created_at
+  // DESC, so a dungeon created after its still-unlinked hub sorts first) gets
+  // seated as its own independent root before the source ever gets a turn,
+  // and is then permanently stranded beside it instead of clustered beneath
+  // it -- placePortalClusters's `if (cellOf.has(childId)) continue` guard
+  // means the source's own later pass can never reclaim it once that
+  // happens.
+  const portalSources = new Map();
+  for (const [fromId, children] of portalAdjacency) {
+    for (const childId of children) {
+      if (!portalSources.has(childId)) portalSources.set(childId, new Set());
+      portalSources.get(childId).add(fromId);
+    }
+  }
+
   const queue = [...cellOf.keys()];
   const walk = () => {
     while (queue.length > 0) {
@@ -134,8 +153,8 @@ export function seedPositions(worlds, links, { cell = 220 } = {}) {
   };
   const roots = [...list].sort((a, b) => (b.is_entry ? 1 : 0) - (a.is_entry ? 1 : 0));
   let nextRow = cellOf.size > 0 ? deepestRow() + 2 : 0;
-  for (const w of roots) {
-    if (cellOf.has(w.id)) continue;
+
+  const seatRoot = (w) => {
     let col = 0;
     while (taken.has(`${col},${nextRow}`)) col += 1;
     cellOf.set(w.id, [col, nextRow]);
@@ -146,6 +165,42 @@ export function seedPositions(worlds, links, { cell = 220 } = {}) {
     // If this root's cluster spilled onto lower rows, keep the next root clear.
     const deepest = deepestRow();
     if (deepest >= nextRow + 1) nextRow = deepest + 2;
+  };
+
+  // Blocked = still a portal TARGET of some world that has no cell yet.
+  // Seating a blocked world as its own root is exactly the bug this guards
+  // against -- give its source a chance to seat (and cascade-place it via
+  // placePortalClusters) first.
+  const isBlockedTarget = (id) => {
+    const srcs = portalSources.get(id);
+    if (!srcs) return false;
+    for (const s of srcs) if (!cellOf.has(s)) return true;
+    return false;
+  };
+
+  let remaining = roots.filter((w) => !cellOf.has(w.id));
+  while (remaining.length > 0) {
+    let progressed = false;
+    for (const w of remaining) {
+      // May already have been placed this pass, by an earlier root's
+      // placePortalClusters cascade.
+      if (cellOf.has(w.id)) continue;
+      if (isBlockedTarget(w.id)) continue;
+      seatRoot(w);
+      progressed = true;
+    }
+    remaining = roots.filter((w) => !cellOf.has(w.id));
+    if (remaining.length === 0) break;
+    if (!progressed) {
+      // Every remaining world is blocked on some other unpositioned world --
+      // a portal CYCLE, where the "wait for your source" rule can never be
+      // satisfied by everyone at once. Break the tie by force-seating the
+      // first one in list order; placePortalClusters then cascades through
+      // the rest of the cycle from there (its own `cellOf.has` guard stops
+      // it from looping back around forever).
+      seatRoot(remaining[0]);
+      remaining = roots.filter((w) => !cellOf.has(w.id));
+    }
   }
 
   for (const [id, [col, row]] of cellOf) {
