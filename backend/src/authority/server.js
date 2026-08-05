@@ -57,6 +57,48 @@ function planBind({ villages, gRow, gCol, boundVillageId }) {
   return v;
 }
 
+// Pure: does any LIVE creature reference this exact portal link? A pack
+// blocks until its last member dies -- there is no separate "pack cleared"
+// flag, it falls straight out of this scan every time it is asked.
+function isPortalBlocked(creatures, linkId) {
+  for (const c of creatures) {
+    if (c.blocksPortalId === linkId && c.hp > 0) return true;
+  }
+  return false;
+}
+
+// Pure: given a player's current tile + this world's portal links, decide
+// whether to teleport, block, or do nothing. Mirrors planTransition's
+// shape and cooldown convention but keys off tile-coordinate equality
+// (portalLinks is keyed "gRow,gCol") rather than edge-doorway membership --
+// a portal has no compass edge, it is a specific interior point.
+function planPortalTransition({ gRow, gCol, portalLinks, now, cdUntil, creatures }) {
+  if (now < cdUntil) return null;
+  const link = portalLinks.get(`${gRow},${gCol}`);
+  if (!link) return null;
+  if (isPortalBlocked(creatures, link.id)) return { blocked: true, linkId: link.id };
+  return { toWorldId: link.toWorldId, arriveX: link.toX, arriveY: link.toY };
+}
+
+// Pure: the server-authoritative "just set the position" move respawn
+// already makes, applied to a blocked-portal bounce instead of a death.
+// Pushes the player further along the same line they approached the portal
+// on (portal -> player, extended), so it reads as "bounced off the door"
+// rather than a random shove. Falls back to leaving the player exactly
+// where they are if the candidate tile is not walkable -- never teleports
+// someone into a wall.
+function knockbackPosition({ px, py, portalX, portalY, distance, map }) {
+  let dx = px - portalX;
+  let dy = py - portalY;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) { dx = 0; dy = -1; } // degenerate: player exactly on the portal, push north arbitrarily
+  else { dx /= len; dy /= len; }
+  const candidateX = px + dx * distance;
+  const candidateY = py + dy * distance;
+  if (!map.isWalkable(candidateX, candidateY)) return { x: px, y: py };
+  return { x: candidateX, y: candidateY };
+}
+
 const INTERACT_RADIUS = 120; // px: how close a player must stand to trade
 
 // The village whose merchant is nearest to (cx,cy) within `radius`, or null.
@@ -250,7 +292,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const goldItemTypeId = resolveGoldItemTypeId(itemTypes);
         const linkRows = await fetchLinks(pool, canonicalId);
-        const links = new Map(linkRows.map((l) => [l.edge, { toWorldId: l.to_world_id, toWidth: l.to_width, toHeight: l.to_height }]));
+        const compassRows = linkRows.filter((l) => l.edge !== 'PORTAL');
+        const portalRows = linkRows.filter((l) => l.edge === 'PORTAL');
+        const links = new Map(compassRows.map((l) => [l.edge, { toWorldId: l.to_world_id, toWidth: l.to_width, toHeight: l.to_height }]));
+        // Keyed by the portal's OWN tile, floored to grid cells -- matches how
+        // planPortalTransition looks players up (gRow/gCol from Math.floor(y|x /
+        // MAP_TILE_SIZE)), the same granularity planTransition already uses for
+        // doorway tiles.
+        const portalLinks = new Map(portalRows.map((l) => [
+          `${Math.floor(l.from_y / MAP_TILE_SIZE)},${Math.floor(l.from_x / MAP_TILE_SIZE)}`,
+          { id: l.id, toWorldId: l.to_world_id, toX: l.to_x, toY: l.to_y, fromX: l.from_x, fromY: l.from_y },
+        ]));
         const villages = await fetchVillages(pool, canonicalId);
         const decorationDefs = await loadDecorationDefs(pool);
         const biomes = await loadBiomes(pool, row.biomes);
@@ -262,7 +314,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         const entry = {
           worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
-          tileTypes, creatureTypes, creatureTypeIds, hostileCreatureTypes, creatureGold, goldItemTypeId, links, villages,
+          tileTypes, creatureTypes, creatureTypeIds, hostileCreatureTypes, creatureGold, goldItemTypeId, links, portalLinks, villages,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -994,6 +1046,34 @@ function attachAuthority(httpServer, pool, opts = {}) {
           }
         }
       }
+      if (entry.portalLinks && entry.portalLinks.size > 0) {
+        const now = Date.now();
+        const liveCreatures = entry.world.creatures.all();
+        for (const p of entry.world.players.values()) {
+          const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+          const gRow = Math.floor(cy / MAP_TILE_SIZE), gCol = Math.floor(cx / MAP_TILE_SIZE);
+          const t = planPortalTransition({
+            gRow, gCol, portalLinks: entry.portalLinks, now, cdUntil: p._portalCdUntil, creatures: liveCreatures,
+          });
+          if (!t) continue;
+          if (t.blocked) {
+            p._portalCdUntil = now + 800; // shorter than the doorway cooldown: a blocked bump should feel snappy, not sticky
+            const link = [...entry.portalLinks.values()].find((l) => l.id === t.linkId);
+            const pushed = knockbackPosition({
+              px: cx, py: cy, portalX: link.fromX, portalY: link.fromY, distance: 60, map: entry.world.map,
+            });
+            p.x = pushed.x - p.width / 2;
+            p.y = pushed.y - p.height / 2;
+            const ws = entry.sockets.get(p.userId);
+            if (ws) send(ws, { type: 'portalBlocked', message: 'Guards block the way.' });
+            continue;
+          }
+          p._portalCdUntil = now + 1500;
+          pendingArrivals.set(p.userId, { worldId: t.toWorldId, x: t.arriveX, y: t.arriveY });
+          const ws = entry.sockets.get(p.userId);
+          if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
+        }
+      }
       if (entry.villages && entry.villages.length) {
         for (const p of entry.world.players.values()) {
           const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
@@ -1248,6 +1328,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
 module.exports = {
   attachAuthority, planTransition, planBind, nearestMerchantVillage, INTERACT_RADIUS,
+  planPortalTransition, isPortalBlocked, knockbackPosition,
   // Stash internals, exported for unit test only. Not part of the module's API.
   __test: { pushAttacks, drainAttacks, MAX_PENDING_ATTACKS },
 };
