@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const { randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
 const { applyMapSpec } = require('../scripts/seed-map.js');
 
@@ -22,10 +23,46 @@ async function openPool() {
   catch (err) { await pool.end().catch(() => {}); return { unreachable: err.message }; }
 }
 
-// Every world/village name in this spec is uuid-suffixed so a failed run
-// never collides with a real seeded map, and every row this test creates is
-// deleted in `finally` regardless of outcome.
-function uniqueSpec(suffix) {
+// Snapshot whichever world is currently is_entry (0 or 1 of them), run fn,
+// then restore exactly that snapshot -- copied from
+// tests/seed_map_db.test.js's helper of the same name (see its comment for
+// the full rationale). Our spec's `surface` world declares is_entry: true,
+// and applyMapSpec's own is_entry step clears every OTHER world when it sets
+// a new one -- so without this, running these tests against a real dev DB
+// steals is_entry off whatever the real entry world is (e.g. "Old
+// Trailhead"), and then `finally` deletes `surface` outright, leaving ZERO
+// worlds with is_entry = true anywhere in the database.
+async function withEntryPreserved(pool, fn) {
+  const before = await pool.query('SELECT id FROM worlds WHERE is_entry = true');
+  const beforeId = before.rows[0]?.id ?? null;
+  try {
+    return await fn();
+  } finally {
+    // Single atomic UPDATE, not two separate ones: a crash between "clear
+    // every is_entry" and "set it back on beforeId" used to be able to leave
+    // the database with ZERO entry worlds. COALESCE(id = $1, false) keeps
+    // the SET expression a plain boolean (never SQL NULL) when beforeId is
+    // null -- is_entry is NOT NULL, so assigning NULL would throw.
+    await pool.query(
+      'UPDATE worlds SET is_entry = COALESCE(id = $1, false) WHERE is_entry = true OR id = $1',
+      [beforeId],
+    );
+  }
+}
+
+// Every world name in this spec carries a random uuid suffix so concurrent
+// or repeated runs never collide with each other or with a real seeded map.
+// Cleanup below deletes strictly by these names, computed here and never
+// re-derived from a query result -- so it runs unconditionally in `finally`
+// regardless of where inside the test an assertion throws. (An earlier
+// version of this file instead captured world ids from a query made AFTER
+// the assertions that could fail, which meant a failed assertion skipped
+// cleanup entirely and left the `Portal Test *` rows to leak permanently --
+// self-perpetuating, since the next run's idempotency guard would then
+// suppress guard re-insertion against the surviving rows and fail the same
+// assertion again.)
+function uniqueSpec() {
+  const suffix = randomUUID().slice(0, 8);
   return {
     name: `portal-seed-test-${suffix}`,
     worlds: [
@@ -46,22 +83,20 @@ test('applyMapSpec writes a grid-less dungeon world, its portal link, and its gu
   if (!requireTestDb(t, 'writes a real spec through applyMapSpec')) return;
   const pool = await openPool();
   if (pool.unreachable) { t.skip(`NO DATABASE at ${DB_URL}`); return; }
-  const suffix = 'a1';
-  const spec = uniqueSpec(suffix);
-  let worldIds = [];
+  const spec = uniqueSpec();
+  const worldNames = spec.worlds.map((w) => w.name);
   try {
     const wolfRow = await pool.query(`SELECT 1 FROM entity_types WHERE name = 'Wolf' AND is_creature = true`);
     if (wolfRow.rowCount === 0) { t.skip('no "Wolf" creature type in this database — cannot exercise guard insertion'); return; }
 
-    const result = await applyMapSpec(pool, spec);
+    const result = await withEntryPreserved(pool, () => applyMapSpec(pool, spec));
     assert.equal(result.worlds, 2);
     assert.equal(result.links, 1);
     assert.equal(result.portalGuards, 2);
 
     const worldRows = await pool.query(
       `SELECT id, name, width, height, level_min, level_max, graph_x, graph_y FROM worlds WHERE name = ANY($1)`,
-      [spec.worlds.map((w) => w.name)]);
-    worldIds = worldRows.rows.map((r) => r.id);
+      [worldNames]);
     assert.equal(worldRows.rowCount, 2);
     const dungeon = worldRows.rows.find((r) => r.name === spec.worlds[1].name);
     assert.equal(dungeon.level_min, 3);
@@ -86,9 +121,7 @@ test('applyMapSpec writes a grid-less dungeon world, its portal link, and its gu
       assert.equal(g.home_y, 1050);
     }
   } finally {
-    if (worldIds.length) {
-      await pool.query('DELETE FROM worlds WHERE id = ANY($1)', [worldIds]); // CASCADEs links/creatures
-    }
+    await pool.query('DELETE FROM worlds WHERE name = ANY($1)', [worldNames]); // CASCADEs links/creatures
     await pool.end();
   }
 });
@@ -97,26 +130,23 @@ test('re-applying the same spec does not duplicate the portal guard pack', async
   if (!requireTestDb(t, 'writes a real spec through applyMapSpec twice')) return;
   const pool = await openPool();
   if (pool.unreachable) { t.skip(`NO DATABASE at ${DB_URL}`); return; }
-  const suffix = 'idempotent1';
-  const spec = uniqueSpec(suffix);
-  let worldIds = [];
+  const spec = uniqueSpec();
+  const worldNames = spec.worlds.map((w) => w.name);
   try {
     const wolfRow = await pool.query(`SELECT 1 FROM entity_types WHERE name = 'Wolf' AND is_creature = true`);
     if (wolfRow.rowCount === 0) { t.skip('no "Wolf" creature type — cannot exercise guard insertion'); return; }
 
-    await applyMapSpec(pool, spec);
-    await applyMapSpec(pool, spec); // second application, same spec
+    await withEntryPreserved(pool, () => applyMapSpec(pool, spec));
+    await withEntryPreserved(pool, () => applyMapSpec(pool, spec)); // second application, same spec
 
-    const worldRows = await pool.query(`SELECT id FROM worlds WHERE name = ANY($1)`,
-      [spec.worlds.map((w) => w.name)]);
-    worldIds = worldRows.rows.map((r) => r.id);
-    const surfaceId = worldRows.rows[0].id; // either order works: both are cleaned up below
+    const worldRows = await pool.query(`SELECT id FROM worlds WHERE name = ANY($1)`, [worldNames]);
+    const worldIds = worldRows.rows.map((r) => r.id);
 
     const guardCount = await pool.query(
       `SELECT count(*) FROM world_creatures WHERE world_id = ANY($1) AND type = 'Wolf'`, [worldIds]);
     assert.equal(Number(guardCount.rows[0].count), 2, 'guards must not double up on re-apply');
   } finally {
-    if (worldIds.length) await pool.query('DELETE FROM worlds WHERE id = ANY($1)', [worldIds]);
+    await pool.query('DELETE FROM worlds WHERE name = ANY($1)', [worldNames]);
     await pool.end();
   }
 });
