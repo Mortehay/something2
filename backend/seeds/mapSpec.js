@@ -50,31 +50,33 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
   const seenNames = new Set();
   const cells = new Map();
 
+  // A world reachable only through a PORTAL link never embeds in the
+  // overworld's 2D grid, so it must not be required to declare one. This
+  // scan runs before the per-world loop so that loop can consult it.
+  const portalConnectedKeys = new Set();
+  for (const l of links) {
+    if (l.kind === 'portal') { portalConnectedKeys.add(l.from); portalConnectedKeys.add(l.to); }
+  }
+
   for (const w of worlds) {
     if (byKey.has(w.key)) errors.push(`duplicate key "${w.key}"`);
     byKey.set(w.key, w);
     if (seenNames.has(w.name)) errors.push(`duplicate name "${w.name}"`);
     seenNames.add(w.name);
 
+    const gridRequired = !portalConnectedKeys.has(w.key);
     if (!hasValidGrid(w)) {
-      errors.push(`world "${w.key}" grid must be two integers`);
-      continue;
+      if (gridRequired) errors.push(`world "${w.key}" grid must be two integers`);
+      // else: portal-only world, grid legitimately absent -- no cell-collision
+      // check for it either, there is no cell to collide in.
+    } else {
+      const cell = `${w.grid[0]},${w.grid[1]}`;
+      if (cells.has(cell)) {
+        errors.push(`worlds "${cells.get(cell)}" and "${w.key}" occupy the same grid cell ${cell}`);
+      }
+      cells.set(cell, w.key);
     }
-    const cell = `${w.grid[0]},${w.grid[1]}`;
-    if (cells.has(cell)) {
-      errors.push(`worlds "${cells.get(cell)}" and "${w.key}" occupy the same grid cell ${cell}`);
-    }
-    cells.set(cell, w.key);
 
-    // Presence + integrality only -- NOT the admin API's 8-4096 range. That
-    // range belongs to POST /api/worlds (src/index.js) and is enforced there;
-    // duplicating it here would let this validator's numbers drift from the
-    // API's. Without even this much, `width`/`height` are nullable columns
-    // and seed-map.js passes w.width/w.height straight into the INSERT with
-    // no `?? ` fallback (unlike chunk_size/creature_count just below it in
-    // that file) -- an omitted width/height silently writes NULL, producing
-    // a world the World Map tab reports as "not linkable" with no validator
-    // error to explain why.
     if (!Number.isInteger(w.width)) {
       errors.push(`world "${w.key}" width must be an integer`);
     }
@@ -82,10 +84,6 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       errors.push(`world "${w.key}" height must be an integer`);
     }
 
-    // Optional. Validated here as well as by worlds_level_band_check because
-    // `make reseed-map` clears every world BEFORE seeding: a band rejected
-    // only by the database would fail after the destruction, leaving the
-    // developer with no maps at all.
     if (w.level_band !== undefined) {
       const b = w.level_band;
       if (!Array.isArray(b) || b.length !== 2
@@ -131,12 +129,43 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
   }
 
   const usedEdges = new Set();
+  const usedPortalSources = new Set();
   const adjacency = new Map(worlds.map((w) => [w.key, []]));
   for (const l of links) {
     const from = byKey.get(l.from);
     const to = byKey.get(l.to);
     if (!from) { errors.push(`link references unknown world "${l.from}"`); continue; }
     if (!to) { errors.push(`link references unknown world "${l.to}"`); continue; }
+
+    if (l.kind === 'portal') {
+      const coordFields = ['from_x', 'from_y', 'to_x', 'to_y'];
+      const badField = coordFields.find((f) => !Number.isInteger(l[f]));
+      if (badField) {
+        errors.push(`portal link ${l.from}->${l.to} ${badField} must be an integer`);
+        adjacency.get(l.from).push(l.to);
+        adjacency.get(l.to).push(l.from);
+        continue;
+      }
+      const slot = `${l.from}:${l.from_x},${l.from_y}`;
+      if (usedPortalSources.has(slot)) {
+        errors.push(`world "${l.from}" already has a portal from tile (${l.from_x},${l.from_y})`);
+      }
+      usedPortalSources.add(slot);
+
+      if (l.guard) {
+        if (!Number.isInteger(l.guard.count) || l.guard.count < 1) {
+          errors.push(`portal link ${l.from}->${l.to} guard count must be a positive integer`);
+        }
+        if (creatureTypeNames && !creatureTypeNames.has(l.guard.creature_type)) {
+          errors.push(`portal link ${l.from}->${l.to} references unknown creature type "${l.guard.creature_type}"`);
+        }
+      }
+
+      adjacency.get(l.from).push(l.to);
+      adjacency.get(l.to).push(l.from);
+      continue;
+    }
+
     if (!EDGE_DELTA[l.edge]) { errors.push(`link ${l.from}->${l.to} has invalid edge "${l.edge}"`); continue; }
 
     const slot = `${l.from}:${l.edge}`;
@@ -145,11 +174,6 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     }
     usedEdges.add(slot);
 
-    // A world with a malformed grid already produced a "grid must be two
-    // integers" error in the world loop above; here we must not dereference
-    // grid[0]/grid[1] on it (that throws instead of returning errors). Skip
-    // the geometry check but still record adjacency, so an otherwise-valid
-    // link doesn't also spuriously fail reachability.
     if (!hasValidGrid(from) || !hasValidGrid(to)) {
       adjacency.get(l.from).push(l.to);
       adjacency.get(l.to).push(l.from);
