@@ -18,7 +18,7 @@ async function fetchLinks(pool, worldId) {
 async function setLink(pool, fromId, edge, toId) {
   const insert = `INSERT INTO map_links (from_world_id, edge, to_world_id)
      VALUES ($1, $2, $3)
-     ON CONFLICT (from_world_id, edge) DO UPDATE SET to_world_id = EXCLUDED.to_world_id`;
+     ON CONFLICT (from_world_id, edge) WHERE edge != 'PORTAL' DO UPDATE SET to_world_id = EXCLUDED.to_world_id`;
   await pool.query(insert, [fromId, edge, toId]);
   await pool.query(insert, [toId, oppositeEdge(edge), fromId]);
 }
