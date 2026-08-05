@@ -8,10 +8,19 @@ function portalLinksWith(entries) {
   return new Map(entries.map((e) => [`${e.gRow},${e.gCol}`, e]));
 }
 
+// gRow:5, gCol:5 with this chunkSize lands in chunk "0,0" -- matches the
+// real code's chunkOf formula (cx = floor(gCol/chunkSize), cy = floor(gRow/
+// chunkSize)). Used as the default "world state here has already loaded"
+// fixture for every test that isn't specifically exercising the chunk-load
+// gate.
+const CHUNK_SIZE = 8;
+const LOADED_HERE = new Set(['0,0']);
+
 test('no portal at this tile returns null', () => {
   const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
   const result = planPortalTransition({
     gRow: 1, gCol: 1, portalLinks: links, now: 1000, cdUntil: 0, creatures: [],
+    loadedChunks: LOADED_HERE, chunkSize: CHUNK_SIZE, lastPortalTile: null,
   });
   assert.strictEqual(result, null);
 });
@@ -20,6 +29,7 @@ test('a portal on cooldown returns null even though the tile matches', () => {
   const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
   const result = planPortalTransition({
     gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 2000, creatures: [],
+    loadedChunks: LOADED_HERE, chunkSize: CHUNK_SIZE, lastPortalTile: null,
   });
   assert.strictEqual(result, null);
 });
@@ -28,6 +38,7 @@ test('an unblocked portal returns the transition', () => {
   const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
   const result = planPortalTransition({
     gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures: [],
+    loadedChunks: LOADED_HERE, chunkSize: CHUNK_SIZE, lastPortalTile: null,
   });
   assert.deepStrictEqual(result, { toWorldId: 'w2', arriveX: 50, arriveY: 50 });
 });
@@ -37,6 +48,7 @@ test('a portal with a living blocking guard returns blocked, not a transition', 
   const creatures = [{ id: 'g1', hp: 50, blocksPortalId: 'link-1' }];
   const result = planPortalTransition({
     gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures,
+    loadedChunks: LOADED_HERE, chunkSize: CHUNK_SIZE, lastPortalTile: null,
   });
   assert.deepStrictEqual(result, { blocked: true, linkId: 'link-1' });
 });
@@ -46,6 +58,7 @@ test('a portal whose guard already died returns the transition (unblocks the ins
   const creatures = [{ id: 'g1', hp: 0, blocksPortalId: 'link-1' }];
   const result = planPortalTransition({
     gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures,
+    loadedChunks: LOADED_HERE, chunkSize: CHUNK_SIZE, lastPortalTile: null,
   });
   assert.deepStrictEqual(result, { toWorldId: 'w2', arriveX: 50, arriveY: 50 });
 });
@@ -55,6 +68,7 @@ test('a living guard blocking a DIFFERENT portal does not block this one', () =>
   const creatures = [{ id: 'g1', hp: 50, blocksPortalId: 'link-999' }];
   const result = planPortalTransition({
     gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures,
+    loadedChunks: LOADED_HERE, chunkSize: CHUNK_SIZE, lastPortalTile: null,
   });
   assert.deepStrictEqual(result, { toWorldId: 'w2', arriveX: 50, arriveY: 50 },
     'this proves the linkage is the FK, not proximity -- an unrelated live guard must not block an unrelated portal');
@@ -76,6 +90,66 @@ test('a pack blocks until every member is dead', () => {
   assert.equal(isPortalBlocked(creatures, 'link-1'), true, 'one survivor still blocks');
   creatures[1].hp = 0;
   assert.equal(isPortalBlocked(creatures, 'link-1'), false, 'the last one dying unblocks it');
+});
+
+// ---------------------------------------------------------------------------
+// Chunk-load gate: a creature's chunk loads asynchronously, so `creatures`
+// can be an incomplete snapshot. A guard that is alive in the DB but whose
+// chunk hasn't finished loading yet must not be silently treated as absent.
+// ---------------------------------------------------------------------------
+
+test('a portal whose own chunk has not finished loading is blocked, even with zero creatures in scope', () => {
+  const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
+  const result = planPortalTransition({
+    gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures: [],
+    loadedChunks: new Set(), chunkSize: CHUNK_SIZE, lastPortalTile: null,
+  });
+  assert.deepStrictEqual(result, { blocked: true, linkId: 'link-1' },
+    'an unloaded chunk must fail closed even for an unguarded portal -- the creature scan cannot be trusted yet');
+});
+
+test('a portal fires normally once its chunk has finished loading', () => {
+  const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
+  const result = planPortalTransition({
+    gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures: [],
+    loadedChunks: new Set(['0,0']), chunkSize: CHUNK_SIZE, lastPortalTile: null,
+  });
+  assert.deepStrictEqual(result, { toWorldId: 'w2', arriveX: 50, arriveY: 50 });
+});
+
+test('an unrelated loaded chunk does not satisfy the gate -- only the portal\'s OWN chunk counts', () => {
+  const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
+  const result = planPortalTransition({
+    gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures: [],
+    loadedChunks: new Set(['9,9']), chunkSize: CHUNK_SIZE, lastPortalTile: null,
+  });
+  assert.deepStrictEqual(result, { blocked: true, linkId: 'link-1' });
+});
+
+// ---------------------------------------------------------------------------
+// Just-arrived latch: a mirrored portal pair's arrival tile IS the return
+// portal's own trigger tile (setPortalLink writes it that way by
+// construction). Without a latch, the very next tick loop pass would bounce
+// a freshly-arrived player straight back before they could do anything.
+// ---------------------------------------------------------------------------
+
+test('a portal does not fire when the player is still standing on the tile they just warped in on', () => {
+  const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
+  const result = planPortalTransition({
+    gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures: [],
+    loadedChunks: LOADED_HERE, chunkSize: CHUNK_SIZE, lastPortalTile: '5,5',
+  });
+  assert.strictEqual(result, null, 'the latch must suppress the portal entirely -- no transition, no blocked bounce');
+});
+
+test('the latch is scoped to the exact tile -- a different lastPortalTile does not suppress', () => {
+  const links = portalLinksWith([{ gRow: 5, gCol: 5, id: 'link-1', toWorldId: 'w2', toX: 50, toY: 50 }]);
+  const result = planPortalTransition({
+    gRow: 5, gCol: 5, portalLinks: links, now: 1000, cdUntil: 0, creatures: [],
+    loadedChunks: LOADED_HERE, chunkSize: CHUNK_SIZE, lastPortalTile: '9,9',
+  });
+  assert.deepStrictEqual(result, { toWorldId: 'w2', arriveX: 50, arriveY: 50 },
+    'the caller is responsible for clearing lastPortalTile once the player leaves the tile; this proves the pure function honours whatever it is handed');
 });
 
 test('knockbackPosition pushes away from the portal along the approach line', () => {

@@ -7,7 +7,7 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
-const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
+const { chunkOf, CHUNK_KEY, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
 const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
@@ -72,10 +72,37 @@ function isPortalBlocked(creatures, linkId) {
 // shape and cooldown convention but keys off tile-coordinate equality
 // (portalLinks is keyed "gRow,gCol") rather than edge-doorway membership --
 // a portal has no compass edge, it is a specific interior point.
-function planPortalTransition({ gRow, gCol, portalLinks, now, cdUntil, creatures }) {
+//
+// Two extra gates beyond "is a live guard blocking this link", both added
+// after review caught live races the original guard-only check missed:
+//
+// - `lastPortalTile`: a mirrored portal pair's arrival tile IS the return
+//   portal's own trigger tile (setPortalLink writes the mirror's from_x/
+//   from_y as the forward row's to_x/to_y, by construction). Without this,
+//   a player arriving on an unguarded mirrored portal bounces straight back
+//   the instant the tick loop next runs -- there is no time window to do
+//   anything. This is a latch, not a timer: it suppresses the portal ONLY
+//   while the player's current tile still equals the tile they arrived on,
+//   and the caller re-arms it (clears it) the moment their tile changes --
+//   so it blocks forever if they stand still, and never blocks again once
+//   they've actually walked off, however long that takes.
+// - `loadedChunks`/`chunkSize`: a creature's chunk loads asynchronously
+//   (activateChunk), so `creatures` can be an INCOMPLETE snapshot for a
+//   chunk that hasn't finished loading yet -- a guard that is very much
+//   alive in the DB can be invisible to `isPortalBlocked` for the first
+//   tick(s) after a player joins or reconnects next to a guarded portal.
+//   Fail closed instead: if the portal's own chunk isn't in loadedChunks
+//   yet, treat it as blocked regardless of what the (incomplete) creature
+//   scan shows. This applies to every portal, guarded or not -- a portal
+//   should never fire before the world state around it has actually loaded.
+function planPortalTransition({ gRow, gCol, portalLinks, now, cdUntil, creatures, loadedChunks, chunkSize, lastPortalTile }) {
   if (now < cdUntil) return null;
-  const link = portalLinks.get(`${gRow},${gCol}`);
+  const key = `${gRow},${gCol}`;
+  const link = portalLinks.get(key);
   if (!link) return null;
+  if (lastPortalTile === key) return null; // just arrived here via a warp; inert until they leave the tile
+  const chunkKey = CHUNK_KEY(Math.floor(gCol / chunkSize), Math.floor(gRow / chunkSize));
+  if (!loadedChunks.has(chunkKey)) return { blocked: true, linkId: link.id };
   if (isPortalBlocked(creatures, link.id)) return { blocked: true, linkId: link.id };
   return { toWorldId: link.toWorldId, arriveX: link.toX, arriveY: link.toY };
 }
@@ -752,7 +779,22 @@ function attachAuthority(httpServer, pool, opts = {}) {
         entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats);
         if (spawn.viaDoorway) {
           const p = entry.world.getPlayer(ws.userId);
-          if (p) p._doorwayCdUntil = Date.now() + 1500;
+          if (p) {
+            p._doorwayCdUntil = Date.now() + 1500;
+            // Latch the tile this warp-in landed the player on (see
+            // planPortalTransition's comment). Set unconditionally for any
+            // doorway-style arrival, not just portals -- harmless for a
+            // compass-doorway arrival (arrivalPoint() lands them off the
+            // doorway tile, so this key won't coincide with a portalLinks
+            // entry anyway), and it's the ONLY place a freshly-created
+            // player object in the DESTINATION world can record "I just
+            // arrived here" -- a same-world timer like _portalCdUntil
+            // cannot cross worlds, since the arriving player is a brand
+            // new object with no memory of the trip.
+            const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+            const gRow = Math.floor(cy / MAP_TILE_SIZE), gCol = Math.floor(cx / MAP_TILE_SIZE);
+            p._lastPortalTile = `${gRow},${gCol}`;
+          }
         }
         send(ws, {
           type: 'joined', user_id: ws.userId, spawn, tickRate: 1000 / tickMs,
@@ -1052,13 +1094,25 @@ function attachAuthority(httpServer, pool, opts = {}) {
         for (const p of entry.world.players.values()) {
           const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
           const gRow = Math.floor(cy / MAP_TILE_SIZE), gCol = Math.floor(cx / MAP_TILE_SIZE);
+          const hereKey = `${gRow},${gCol}`;
+          // Re-arm the just-arrived latch the moment the player's tile no
+          // longer matches where a warp last dropped them -- see
+          // planPortalTransition's comment for why this exists (mirrored
+          // portal pairs share a tile with their own trigger).
+          if (p._lastPortalTile && p._lastPortalTile !== hereKey) p._lastPortalTile = null;
           const t = planPortalTransition({
             gRow, gCol, portalLinks: entry.portalLinks, now, cdUntil: p._portalCdUntil, creatures: liveCreatures,
+            loadedChunks: entry.loadedChunks, chunkSize: entry.row.chunk_size, lastPortalTile: p._lastPortalTile,
           });
           if (!t) continue;
           if (t.blocked) {
             p._portalCdUntil = now + 800; // shorter than the doorway cooldown: a blocked bump should feel snappy, not sticky
-            const link = [...entry.portalLinks.values()].find((l) => l.id === t.linkId);
+            // Same key just looked up inside planPortalTransition -- O(1) and
+            // guaranteed to exist (it's exactly what produced t.linkId), unlike
+            // a [...values()].find() re-scan which allocates every blocked
+            // player every tick and would throw on the next line if it ever
+            // missed, uncaught, inside this bare setInterval callback.
+            const link = entry.portalLinks.get(hereKey);
             const pushed = knockbackPosition({
               px: cx, py: cy, portalX: link.fromX, portalY: link.fromY, distance: 60, map: entry.world.map,
             });
