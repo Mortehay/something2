@@ -98,7 +98,7 @@ test('applying a spec twice produces identical rows', async (t) => {
     const s = spec();
     await withEntryPreserved(pool, async () => {
       const result = await applyMapSpec(pool, s);
-      assert.deepEqual(result, { worlds: 2, links: 1, villages: 1 },
+      assert.deepEqual(result, { worlds: 2, links: 1, villages: 1, portalGuards: 0 },
         'applyMapSpec must report exactly what it wrote, not just resolve');
 
       // Correctness rule 3: is_entry must actually be set on the spec's

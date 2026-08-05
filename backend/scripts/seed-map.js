@@ -10,8 +10,9 @@ const fs = require('fs');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const { validateMapSpec } = require('../seeds/mapSpec.js');
-const { setLink } = require('../src/services/mapLinks.js');
+const { setLink, setPortalLink } = require('../src/services/mapLinks.js');
 const { createVillage } = require('../src/services/villages.js');
+const { insertPortalGuards } = require('../src/services/dungeonGuards.js');
 
 // Pixels per grid cell for the World Map tab's canvas coordinates. Deriving
 // graph_x/graph_y from the same grid the links were validated against is what
@@ -56,9 +57,14 @@ async function applyMapSpec(pool, spec) {
     // was actually written, the same way `villages` below already does.
     let worldsWritten = 0;
     let linksWritten = 0;
+    let portalGuardsWritten = 0;
 
     for (const w of spec.worlds) {
-      const pos = graphPosition(w.grid);
+      // A grid-less (portal-only) world has nothing to derive a World Map
+      // position from -- graph_x/graph_y stay NULL, exactly the same NULL
+      // the frontend already treats as "no stored position, use the layout
+      // fallback" for any world an admin hasn't dragged yet.
+      const pos = w.grid ? graphPosition(w.grid) : { x: null, y: null };
       const r = await client.query(
         `INSERT INTO worlds (name, seed, chunk_size, width, height, creature_count,
                              allowed_creature_types, entry_spawn, biomes, biome_cell,
@@ -86,11 +92,36 @@ async function applyMapSpec(pool, spec) {
       worldsWritten += 1;
     }
 
-    // After every world exists, so a link can never reference a missing target.
-    // setLink writes the mirror edge itself -- never INSERT into map_links here.
+    // After every world exists, so a link can never reference a missing
+    // target. setLink/setPortalLink write the mirror row themselves -- never
+    // INSERT into map_links here. portalLinkIds records the FORWARD row's id
+    // per source tile, for the guard-insertion pass below.
+    const portalLinkIds = new Map(); // `${fromKey}:${from_x},${from_y}` -> link id
     for (const l of spec.links) {
-      await setLink(client, idByKey.get(l.from), l.edge, idByKey.get(l.to));
+      if (l.kind === 'portal') {
+        const { id } = await setPortalLink(
+          client, idByKey.get(l.from), l.from_x, l.from_y, idByKey.get(l.to), l.to_x, l.to_y);
+        portalLinkIds.set(`${l.from}:${l.from_x},${l.from_y}`, id);
+      } else {
+        await setLink(client, idByKey.get(l.from), l.edge, idByKey.get(l.to));
+      }
       linksWritten += 1;
+    }
+
+    // Guard packs are a separate pass (after every portal link exists) and
+    // are call-site-guarded the same way village guards are just below:
+    // insertPortalGuards is a bare INSERT with no ON CONFLICT, so re-applying
+    // an unchanged spec would double the pack on every run without this check.
+    for (const l of spec.links) {
+      if (l.kind !== 'portal' || !l.guard) continue;
+      const linkId = portalLinkIds.get(`${l.from}:${l.from_x},${l.from_y}`);
+      const existingGuards = await client.query(
+        'SELECT 1 FROM world_creatures WHERE blocks_portal_id = $1 LIMIT 1', [linkId]);
+      if (existingGuards.rowCount === 0) {
+        await insertPortalGuards(
+          client, idByKey.get(l.from), linkId, l.from_x, l.from_y, l.guard.creature_type, l.guard.count);
+        portalGuardsWritten += l.guard.count;
+      }
     }
 
     let villages = 0;
@@ -114,7 +145,7 @@ async function applyMapSpec(pool, spec) {
     }
 
     await client.query('COMMIT');
-    return { worlds: worldsWritten, links: linksWritten, villages };
+    return { worlds: worldsWritten, links: linksWritten, villages, portalGuards: portalGuardsWritten };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -135,7 +166,8 @@ if (require.main === module) {
   if (!url) { console.error('DATABASE_URL is not set in .env'); process.exit(1); }
   const pool = new Pool({ connectionString: url });
   applyMapSpec(pool, JSON.parse(fs.readFileSync(file, 'utf8')))
-    .then((n) => console.log(`applied ${name}: ${n.worlds} worlds, ${n.links} links, ${n.villages} villages`))
+    .then((n) => console.log(
+      `applied ${name}: ${n.worlds} worlds, ${n.links} links, ${n.villages} villages, ${n.portalGuards} portal guards`))
     .catch((e) => { console.error(e.message); process.exitCode = 1; })
     .finally(() => pool.end());
 }
