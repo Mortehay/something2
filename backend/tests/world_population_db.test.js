@@ -9,7 +9,7 @@ const describeDb = URL ? test : test.skip;
 // Fixture worlds are named zzPop* and deleted by name, unconditionally, in a
 // finally. Never delete by an id captured mid-test: if the test fails before
 // the capture, the row leaks into the shared dev database forever.
-const FIXTURES = ['zzPopHorde', 'zzPopDead', 'zzPopNoAllowlist'];
+const FIXTURES = ['zzPopHorde', 'zzPopDead', 'zzPopNoAllowlist', 'zzPopGuardFilter'];
 
 async function cleanup(pool) {
   await pool.query('DELETE FROM worlds WHERE name = ANY($1::text[])', [FIXTURES]);
@@ -20,13 +20,24 @@ async function cleanup(pool) {
 // empty and the world would be legitimately unpopulated.
 const ALLOWED = ['Skeleton', 'Bat'];
 
-async function makeWorld(pool, name, density, allowedNames = ALLOWED) {
+// biomeNames defaults to ['Deep Forest'] (every existing call site's
+// behaviour, unchanged) but is overridable: the guard-filter test below needs
+// NO biome at all, because 'Deep Forest'.creature_types is ["Wolf","Bat",
+// "Skeleton"] -- it does not list 'Village Guard', so a biome-scoped world
+// would exclude the guard type via the biome intersection in
+// creatureTileCandidates regardless of whether worldPopulation.js's own
+// guard-faction filter ran. With biomes: [], sampleBiomeRegion short-circuits
+// to null (mapService.js's `if (cfg.biomes.length === 0) return null`) and
+// creatureTileCandidates falls back to allowedTypes unfiltered by biome, so
+// the ONLY thing standing between a guard-faction type and the scatter/pack
+// pool is worldPopulation.js's `hostileTypes` filter.
+async function makeWorld(pool, name, density, allowedNames = ALLOWED, biomeNames = ['Deep Forest']) {
   const r = await pool.query(
     `INSERT INTO worlds (name, seed, chunk_size, width, height, density,
                          allowed_creature_types, biomes, biome_cell, level_min, level_max)
      VALUES ($1, 4242, 32, 64, 64, $2, $3::jsonb, $4::jsonb, 16, 3, 5)
      RETURNING *`,
-    [name, density, JSON.stringify(allowedNames), JSON.stringify(['Deep Forest'])],
+    [name, density, JSON.stringify(allowedNames), JSON.stringify(biomeNames)],
   );
   return r.rows[0];
 }
@@ -126,6 +137,57 @@ describeDb('guards survive a repopulate', async () => {
       `SELECT count(*)::int AS n FROM world_creatures
        WHERE world_id = $1 AND type = 'Village Guard'`, [world.id]);
     assert.equal(g.rows[0].n, 1);
+  } finally {
+    await cleanup(pool);
+    await pool.end();
+  }
+});
+
+// SOMET-246 (Task 8, review round 1): the ONLY test covering this used to be
+// guardSpawnPool.test.js, which asserted directly on loadCreatureTypes'
+// hostileCreatureTypes filter -- but that filter had zero production callers
+// left once server.js's per-chunk spawn gate was deleted, so that test was
+// deleted with it. The invariant it protected did not disappear: it moved to
+// worldPopulation.js's own `hostileTypes = et.rows.filter((t) => (t.faction
+// || 'hostile') !== 'guard')`, the only place that still rolls a wild-spawn
+// candidate pool. 'Village Guard' has no home_x/home_y when it isn't placed
+// via insertVillageGuards, so a guard that slipped into this pool would come
+// out as a world-roaming, undroppable, unleashed 300hp creature-hunter --
+// exactly the failure guardSpawnPool.test.js's own comment described.
+// 'allowed_creature_types' can legally list any is_creature row, guard
+// faction included, so nothing upstream of populateWorld stops an admin from
+// putting 'Village Guard' in it; this filter is the only thing that does.
+describeDb('populateWorld excludes guard-faction types from the wild-spawn pool', async () => {
+  const pool = new Pool({ connectionString: URL });
+  try {
+    await cleanup(pool);
+    // biomes: [] -- see makeWorld's comment: a biome-scoped world would
+    // exclude 'Village Guard' via the biome/creatureTypes intersection alone,
+    // making this test pass whether or not the faction filter runs at all.
+    const world = await makeWorld(pool, 'zzPopGuardFilter', 'horde', ['Village Guard', 'Skeleton'], []);
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      result = await populateWorld(client, world, { rngSeed: 17 });
+      await client.query('COMMIT');
+    } finally { client.release(); }
+
+    // Positive side first: a world that placed nothing would satisfy "no
+    // guards appear" vacuously. horde's scatterCount is nonzero on a 64x64
+    // world (49 elsewhere in this file with an unrestricted biome; still
+    // must be > 0 here since 'Skeleton' is the only non-guard candidate).
+    assert.ok(result.total > 0, 'fixture placed nothing -- the negative assertion below would be vacuous');
+
+    const skeletons = await pool.query(
+      `SELECT count(*)::int AS n FROM world_creatures
+       WHERE world_id = $1 AND type = 'Skeleton'`, [world.id]);
+    assert.ok(skeletons.rows[0].n > 0, 'the allowed hostile type must actually be placed');
+
+    const guards = await pool.query(
+      `SELECT count(*)::int AS n FROM world_creatures
+       WHERE world_id = $1 AND type = 'Village Guard'`, [world.id]);
+    assert.equal(guards.rows[0].n, 0, 'a guard-faction type must never enter the wild-spawn pool');
   } finally {
     await cleanup(pool);
     await pool.end();

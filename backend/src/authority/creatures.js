@@ -56,21 +56,18 @@ async function loadCreatureTypes(pool) {
     ...creatureMitigation(row),
   }));
   const creatureTypeIds = new Map(r.rows.map((row) => [row.name, row.id]));
-  // Wild-spawn pool: guard-faction types are placed exclusively via
-  // insertVillageGuards (anchored to a village gate post), never by the
-  // per-chunk random roll. A guard rolled into that pool has no home_x/home_y
-  // — withinLeash treats a null home as unconstrained — so it would come out
-  // as a world-roaming, undroppable, unleashed creature-hunter. creatureTypes
-  // and creatureTypeIds stay COMPLETE: drops and name→id lookups must still
-  // see guards.
-  const hostileCreatureTypes = creatureTypes.filter((t) => (t.faction || 'hostile') !== 'guard');
   // Per-creature gold drop range, by name. Slice C: a killed creature drops a
   // random amount in [min, max] into the killer's wallet.
   const creatureGold = new Map(r.rows.map((row) => [row.name, {
     min: Number(row.gold_min) || 0,
     max: Number(row.gold_max) || 0,
   }]));
-  return { creatureTypes, creatureTypeIds, hostileCreatureTypes, creatureGold };
+  // creatureTypes/creatureTypeIds stay COMPLETE (guards included): drops and
+  // name→id lookups still need to see guards. The wild-spawn exclusion of
+  // guard-faction types lives at the one place that still rolls a wild-spawn
+  // pool -- worldPopulation.js's own `hostileTypes` filter -- not here; this
+  // function no longer has a wild-spawn caller of its own (SOMET-246).
+  return { creatureTypes, creatureTypeIds, creatureGold };
 }
 
 function center(o) { return { x: o.x + o.width / 2, y: o.y + o.height / 2 }; }

@@ -89,7 +89,13 @@ async function populateWorld(client, worldRow, { rngSeed }) {
     [allowedNames],
   );
   // Guards are structural, never wild spawns -- the same filter the re-roll
-  // route already applied before this module existed.
+  // route already applied before this module existed. Guard-faction types
+  // are placed exclusively via insertVillageGuards (anchored to a village
+  // gate post); a guard rolled into the scatter/pack pool here would have no
+  // home_x/home_y (withinLeash treats a null home as unconstrained), so it
+  // would come out as a world-roaming, undroppable, unleashed 300hp
+  // creature-hunter. Covered by world_population_db.test.js's "populateWorld
+  // excludes guard-faction types from the wild-spawn pool".
   const hostileTypes = et.rows.filter((t) => (t.faction || 'hostile') !== 'guard');
   if (hostileTypes.length === 0) {
     await client.query('UPDATE worlds SET creature_count = 0 WHERE id = $1', [worldRow.id]);
