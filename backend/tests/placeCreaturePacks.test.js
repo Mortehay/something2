@@ -65,6 +65,13 @@ test('every member lands strictly inside the wall ring on a walkable tile', () =
   }
 });
 
+test('pack members occupy distinct tiles, never stacked', () => {
+  const rows = placeCreaturePacks(boundedWorld(), [{ size: 10 }], CREATURES, 5150);
+  assert.equal(rows.length, 10);
+  const distinct = new Set(rows.map((r) => `${r.x},${r.y}`));
+  assert.equal(distinct.size, rows.length);
+});
+
 test('row shape matches placeMapCreatures (pixel centre, carried stats)', () => {
   const rows = placeCreaturePacks(boundedWorld(), [{ size: 1 }], [CREATURES[0]], 3);
   assert.equal(rows.length, 1);

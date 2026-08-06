@@ -695,6 +695,12 @@ function placeCreaturePacks(world, packSpecs, allowedTypes, rngSeed, maxAttempts
 
     emit(packType, anchorRow, anchorCol);
 
+    // Cells this pack has already used, so two members never land on the
+    // same tile (stacked sprites read as one creature, not a group). Scoped
+    // to this pack only -- scatter, and other packs, are free to reuse a
+    // cell; that is pre-existing behaviour and out of scope here.
+    const usedCells = new Set([`${anchorRow},${anchorCol}`]);
+
     const radius = packRadius(size);
     const span = 2 * radius + 1;
     for (let m = 1; m < size; m++) {
@@ -702,11 +708,14 @@ function placeCreaturePacks(world, packSpecs, allowedTypes, rngSeed, maxAttempts
         const row = anchorRow + Math.floor(rng() * span) - radius;
         const col = anchorCol + Math.floor(rng() * span) - radius;
         if (row < rLo || row > rHi || col < cLo || col > cHi) continue;
+        const key = `${row},${col}`;
+        if (usedCells.has(key)) continue;
         const candidates = creatureTileCandidates(world, cfg, row, col, allowedTypes);
         // The member's OWN tile must admit the pack's type. A pack straddling
         // a biome boundary must not push a creature into a biome that forbids
         // it -- exactly the rule scatter enforces per cell.
         if (!candidates || !candidates.some((t) => t.name === packType.name)) continue;
+        usedCells.add(key);
         emit(packType, row, col);
         break;
       }
