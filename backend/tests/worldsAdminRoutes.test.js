@@ -321,7 +321,16 @@ test('POST /api/worlds/:id/creatures places creatures and reports the count', as
     [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
     [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],
     [/UPDATE worlds SET creature_count/i, (p) => { wroteCreatureCount = p[0]; return { rows: [], rowCount: 1 }; }],
-    [/INSERT INTO world_creatures/i, (p) => { inserted.push(p); return { rows: [], rowCount: 1 }; }],
+    // populateWorld batches its inserts (SOMET-246 final review, finding 4):
+    // ONE statement carries up to 200 rows of 9 bind parameters each, rather
+    // than one round-trip per creature. Split the flat parameter list back
+    // into rows so `inserted.length` still means "creatures written" -- a
+    // future regression back to per-creature inserts keeps working here, and
+    // a batch that silently dropped rows still shows up as a mismatch below.
+    [/INSERT INTO world_creatures/i, (p) => {
+      for (let i = 0; i < p.length; i += 9) inserted.push(p.slice(i, i + 9));
+      return { rows: [], rowCount: p.length / 9 };
+    }],
   ]);
   __setPool(pool);
   const res = await request(app).post('/api/worlds/w1/creatures').set(...AUTH).send({});
