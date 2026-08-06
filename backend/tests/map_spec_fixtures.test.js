@@ -195,9 +195,22 @@ test('spine-descent goes underground as it descends', () => {
   assert.deepEqual(byKey.end, ['Frostvault', 'Abyssal Rift']);
 });
 
-// Each hub world keeps its established biome FIRST so its character leads;
-// banding order is terrain_tiles order within a biome, but biome order across
-// a world's list matters too.
+// Each hub world gains exactly one new SURFACE biome and keeps its established
+// biome first so its character leads; banding order is terrain_tiles order
+// within a biome, but biome order across a world's list matters too.
+//
+// `mire` is the one exception, and it is a NAVIGABILITY fix, not a style
+// choice. Mire's terrain_tiles are ['swamp','water','earth'] and the value
+// noise is bell-shaped, so whichever biome leads gets the fat middle of the
+// distribution -- with Mire first that middle is `water` (impassable), which
+// covered ~42% of Blackfen Sinks' interior and put the N doorway's arrival
+// tile (1,32) inside a 3-cell water-locked pocket: 3 of 3844 interior cells
+// reachable, a guaranteed SOMET-184 movement freeze one hop south of the entry
+// world. Reversing the pair drops water to 29% and yields ONE connected
+// walkable component covering 70.7% of the interior. The plan's table is what
+// was wrong here; both biomes are kept, only the lead changes, and the world
+// still reads as a storm-lashed tidal fen (water 29% + swamp 9%). Verified by
+// generating the world and flood-filling it -- see the P3 final fix report.
 test('hub-vale keeps its original biome first and gains one new surface biome', () => {
   const spec = readSpec('hub-vale');
   const expected = {
@@ -205,7 +218,24 @@ test('hub-vale keeps its original biome first and gains one new surface biome', 
     forest: ['Deep Forest', 'Verdant Jungle'],
     dunes: ['Arid Dunes', 'Ashfields'],
     frozen: ['Frozen Waste', 'Sunken Ruins'],
-    mire: ['Mire', 'Storm Coast'],
+    mire: ['Storm Coast', 'Mire'],   // reversed on purpose: see above
   };
   for (const w of spec.worlds) assert.deepEqual(w.biomes, expected[w.key], w.key);
+});
+
+// The rule the exception above must not be allowed to erode: every hub world
+// still carries BOTH its original biome and exactly one new surface biome.
+// Stated separately from the exact lists so re-ordering a world for
+// navigability can never quietly drop a biome at the same time.
+test('every hub-vale world still pairs its original biome with one new surface biome', () => {
+  const spec = readSpec('hub-vale');
+  const ORIGINAL = new Set(['Meadow', 'Deep Forest', 'Arid Dunes', 'Frozen Waste', 'Mire']);
+  const NEW_SURFACE = new Set(['Highlands', 'Verdant Jungle', 'Storm Coast', 'Sunken Ruins', 'Ashfields']);
+  for (const w of spec.worlds) {
+    assert.equal(w.biomes.length, 2, `${w.key} must carry exactly two biomes`);
+    assert.equal(w.biomes.filter((b) => ORIGINAL.has(b)).length, 1,
+      `${w.key} must keep exactly one original biome, got ${JSON.stringify(w.biomes)}`);
+    assert.equal(w.biomes.filter((b) => NEW_SURFACE.has(b)).length, 1,
+      `${w.key} must gain exactly one new surface biome, got ${JSON.stringify(w.biomes)}`);
+  }
 });

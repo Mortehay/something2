@@ -53,7 +53,7 @@
       "grid": [0, 1],
       "seed": 2005,
       "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Mire", "Storm Coast"], "biome_cell": 16,
+      "biomes": ["Storm Coast", "Mire"], "biome_cell": 16,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
     }
