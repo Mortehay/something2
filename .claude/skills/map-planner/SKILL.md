@@ -77,7 +77,7 @@ The tier resolves through one shared table (`backend/src/services/densityTiers.j
 
 A *pack* is a cluster of one creature type around an anchor tile, placed under the same validity rules as the scatter (interior, walkable, not a wall or doorway tile, not inside a village, admitted by the local biome's fauna). A pack that cannot seat every member ships short — that is a correct outcome on a corridor-heavy map, not an error.
 
-The resolved total is capped at **2000 creatures per world** (`MAX_WORLD_CREATURES`, same file), which only bites on very large maps: at `normal`, a world above roughly 816×816 tiles clamps. Both seeding and the admin re-roll go through the same cap.
+The resolved total is capped at **2000 creatures per world** (`MAX_WORLD_CREATURES`, same file), which only bites on very large maps: at `normal`, a world of 816×816 tiles or larger clamps (815×815 does not). Both seeding and the admin re-roll go through the same cap.
 
 Escalate `density` alongside `level_band` for a spine — deeper worlds should be both tougher and busier. The three shipped example specs all sit on the `normal` default; authoring real tiers for them is deliberately left to a later content pass.
 

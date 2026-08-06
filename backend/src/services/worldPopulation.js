@@ -52,7 +52,7 @@ function packSpecsFor({ packCount, packSizeMin, packSizeMax }, rngSeed) {
   return specs;
 }
 
-// Columns per creature row, and how many rows go into one multi-row INSERT.
+// How many creature rows go into one multi-row INSERT.
 //
 // One INSERT per creature was a network round-trip per creature inside an open
 // write transaction -- at the top of the density range that is thousands of

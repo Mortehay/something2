@@ -108,7 +108,11 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
       </Row>
       <Row>
         <label style={{ color: 'var(--s2-text-muted)' }}>Creatures scattered:</label>
-        <Input type="number" value={creatureCount} readOnly disabled style={{ width: 70 }}
+        {/* Dimmed explicitly: the styled Input pins `color`, so the browser's
+            default disabled greying never lands and the field would otherwise
+            still read as editable. */}
+        <Input type="number" value={creatureCount} readOnly disabled
+          style={{ width: 70, color: 'var(--s2-text-dim)' }}
           title="Derived from this map's density tier — not editable here" />
         <span style={{ color: 'var(--s2-text-dim)', fontSize: '0.85em' }}>
           reported, not set — the count comes from this map's density tier. Use Re-roll creatures below,
