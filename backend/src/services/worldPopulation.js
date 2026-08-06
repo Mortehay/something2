@@ -39,6 +39,35 @@ function packSpecsFor({ packCount, packSizeMin, packSizeMax }, rngSeed) {
   return specs;
 }
 
+// Columns per creature row, and how many rows go into one multi-row INSERT.
+//
+// One INSERT per creature was a network round-trip per creature inside an open
+// write transaction -- at the top of the density range that is thousands of
+// sequential awaits holding a pool connection and a row-lock footprint the
+// whole time. Batched instead. 200 rows x 9 columns is 1800 bind parameters,
+// comfortably under Postgres's 65535 per-statement limit, so the chunk size is
+// about keeping one statement's parameter list sane rather than about that
+// ceiling.
+const INSERT_BATCH_ROWS = 200;
+
+async function insertCreatures(client, worldId, rows) {
+  if (rows.length === 0) return;
+  for (let i = 0; i < rows.length; i += INSERT_BATCH_ROWS) {
+    const batch = rows.slice(i, i + INSERT_BATCH_ROWS);
+    const params = [];
+    const tuples = batch.map((c) => {
+      const b = params.length;
+      params.push(worldId, c.type, c.x, c.y, c.hp, c.facing, c.level, c.damage, c.defense);
+      return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9})`;
+    });
+    await client.query(
+      `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
+       VALUES ${tuples.join(',')}`,
+      params,
+    );
+  }
+}
+
 async function populateWorld(client, worldRow, { rngSeed }) {
   if (!isBoundedWorld(worldRow)) {
     throw new Error(`world "${worldRow.name}" has no width/height and cannot be populated`);
@@ -120,13 +149,7 @@ async function populateWorld(client, worldRow, { rngSeed }) {
   await client.query('UPDATE worlds SET creature_count = $1 WHERE id = $2',
     [scatter.length, worldRow.id]);
 
-  for (const c of [...scatter, ...packed]) {
-    await client.query(
-      `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [worldRow.id, c.type, c.x, c.y, c.hp, c.facing, c.level, c.damage, c.defense],
-    );
-  }
+  await insertCreatures(client, worldRow.id, [...scatter, ...packed]);
 
   return { scattered: scatter.length, packed: packed.length, total: scatter.length + packed.length };
 }

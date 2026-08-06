@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { resolveDensity, DENSITY_NAMES, DEFAULT_DENSITY } = require('../src/services/densityTiers');
+const {
+  resolveDensity, DENSITY_NAMES, DEFAULT_DENSITY, MAX_WORLD_CREATURES,
+} = require('../src/services/densityTiers');
 
 // Expected counts are written as LITERALS, never recomputed from the tier
 // table. Importing DENSITY_TIERS and recomputing perThousand * area / 1000
@@ -56,4 +58,41 @@ test('DENSITY_NAMES lists exactly the six tiers, ascending', () => {
 
 test('an unbounded world resolves to no creatures', () => {
   assert.equal(resolveDensity('horde', null, null).scatterCount, 0);
+});
+
+// SOMET-246 final review, finding 4. Area scaling has no natural ceiling, and
+// POST/PUT /api/worlds accept width and height up to 4096. Unclamped, the
+// numbers below are 50,332 / 100,663 / 201,327 scattered creatures -- seconds
+// of event-loop-blocking rejection sampling in the same process as the live
+// authority, plus that many INSERTs inside one open write transaction.
+//
+// The expected values are literals: 2000 minus each tier's worst-case pack
+// budget (packCount * packSizeMax). Recomputing them from MAX_WORLD_CREATURES
+// and DENSITY_TIERS would assert the clamp's own arithmetic back at itself.
+test('a map large enough to blow past the cap is clamped, packs included', () => {
+  // normal: 1 pack of at most 4 -> 2000 - 4.
+  assert.equal(resolveDensity('normal', 4096, 4096).scatterCount, 1996);
+  // dense: 2 packs of at most 6 -> 2000 - 12.
+  assert.equal(resolveDensity('dense', 4096, 4096).scatterCount, 1988);
+  // swarm: 6 packs of at most 12 -> 2000 - 72.
+  assert.equal(resolveDensity('swarm', 4096, 4096).scatterCount, 1928);
+});
+
+test('the clamped total never exceeds 2000 creatures for any tier', () => {
+  assert.equal(MAX_WORLD_CREATURES, 2000);
+  for (const tier of DENSITY_NAMES) {
+    const d = resolveDensity(tier, 4096, 4096);
+    const worstCaseTotal = d.scatterCount + d.packCount * d.packSizeMax;
+    assert.ok(worstCaseTotal <= 2000,
+      `${tier} on a 4096x4096 map resolves to ${worstCaseTotal} creatures`);
+  }
+});
+
+// The clamp must not quietly reshape ordinary maps. Every world in every
+// shipped spec is 64x64 or smaller, so the cap is invisible to all of them --
+// which is exactly why a regression in it would go unnoticed without this.
+test('the cap leaves normal-sized maps untouched', () => {
+  assert.equal(resolveDensity('swarm', 64, 64).scatterCount, 98);
+  assert.equal(resolveDensity('swarm', 283, 283).scatterCount, 1922);   // just under the clamp
+  assert.equal(resolveDensity('swarm', 284, 284).scatterCount, 1928);   // one tile wider: clamped
 });

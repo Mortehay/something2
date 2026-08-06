@@ -10,6 +10,7 @@ const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS } = require('./services/villages');
 const { seedItemAcrossVillages } = require('./services/merchantStock');
 const { populateWorld } = require('./services/worldPopulation');
+const { MAX_WORLD_CREATURES } = require('./services/densityTiers');
 const { loadDecorationDefs } = require('./services/decorationDefs');
 const { loadBiomes } = require('./services/biomes');
 const { composeBiomePrompt } = require('./services/biomePrompt');
@@ -128,7 +129,11 @@ function isUniqueViolation(err) {
 }
 
 // Upper bound for PUT /api/worlds/:id creature_count (SOMET-188 / F-008).
-const MAX_CREATURE_COUNT = 2000;
+// ONE number, defined in densityTiers.js: that is where it now does the real
+// work, clamping the count resolveDensity hands to both population callers.
+// Two literal 2000s would let the API's advertised limit and the limit
+// actually enforced during placement drift apart.
+const MAX_CREATURE_COUNT = MAX_WORLD_CREATURES;
 // Upper bound for POST /api/maps/generate rows/cols. This route eagerly
 // builds an rows*cols in-memory array and JSON.stringifies the whole thing
 // into a single row, unlike chunked worlds -- an unvalidated 100000x100000
@@ -1481,12 +1486,15 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     if (w !== null && (w < 8 || w > 4096 || h < 8 || h > 4096)) {
       return res.status(400).json({ error: 'width and height must be between 8 and 4096 tiles' });
     }
-    // POST /api/worlds/:id/creatures re-rolls this many creatures with one
-    // generateRegion() call and one INSERT round-trip per placement attempt
-    // (SOMET-188 / F-008) -- an unbounded count ties up the request and a
-    // pool connection indefinitely. MapsAdmin's Creatures field is a plain
-    // <input type="number"> with no max, so this server-side cap is the only
-    // real gate.
+    // creature_count is DERIVED since SOMET-246: populateWorld resolves how
+    // many creatures to place from the world's `density` tier and overwrites
+    // this column with what it actually scattered. Nothing reads the value
+    // written here for placement, and MapsAdmin now renders the field
+    // read-only, echoing back whatever it was sent. The bound that does the
+    // real work moved to resolveDensity (MAX_WORLD_CREATURES, same 2000);
+    // this check remains so the column can never be poked past what a
+    // population pass could legitimately write, and so the API keeps
+    // rejecting nonsense with a clear message rather than storing it.
     const countRaw = Number.isFinite(creature_count) ? Math.floor(creature_count) : 0;
     if (countRaw > MAX_CREATURE_COUNT) {
       return res.status(400).json({ error: `creature_count must be between 0 and ${MAX_CREATURE_COUNT}` });
