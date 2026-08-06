@@ -5,6 +5,19 @@
 // re-applying an unchanged spec is a no-op. The whole apply is one transaction
 // -- a spec that fails halfway must not leave a half-built map that the World
 // Map tab then renders as a broken graph.
+//
+// RESTART THE BACKEND AFTER SEEDING AGAINST A RUNNING STACK.
+// A biome change reshapes terrain, and the backend caches terrain in FOUR
+// places. PUT /api/worlds/:id busts all four (src/index.js: DELETE
+// world_chunks, worldPreviewCache.delete, clearOverviewCache, evictOrWarn).
+// This is a separate process, so it can only reach the one that lives in
+// Postgres -- the world_chunks DELETE below. The world-preview cache, the
+// minimap overview cache and the authority's in-memory copy of a live world
+// all sit in the backend's heap and keep serving the OLD terrain until it
+// restarts: the preview and minimap draw a world that no longer exists, and a
+// player already inside one collides against terrain the database no longer
+// has. Nothing a CLI can fix -- restart the backend. The notice printed at the
+// end of a run says so.
 const path = require('path');
 const fs = require('fs');
 const dotenv = require('dotenv');
@@ -65,11 +78,36 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
   const midCol = Math.floor(row.width / 2);
   const midRow = Math.floor(row.height / 2);
   const edges = new Set(doorwayEdges);
+  // TWO tiles per doorway, and the second is the one that can actually fail.
+  //
+  // The gap itself is stamped `map_doorway` by stampBounds, so it is walkable
+  // BY CONSTRUCTION and asserts nothing on its own -- for a world with one
+  // doorway and no entry_spawn it used to be the ONLY required tile, which made
+  // assertNavigable flood-fill from it with nothing to compare against and
+  // return clean unconditionally. That is how Blackfen Sinks shipped sealed.
+  //
+  // The tile that matters is the ARRIVAL point one tile inward: exactly what
+  // mapService.arrivalPoint returns for an inbound player, and generated
+  // terrain, so it can be water / cave_wall / chasm. Keep the gap FIRST anyway
+  // -- assertNavigable fills from the first entry, and only the gap is a safe
+  // anchor. Distinct labels so a failure names the real problem.
   for (const e of edges) {
-    if (e === 'N') out.push({ row: 0, col: midCol, what: 'doorway N' });
-    if (e === 'S') out.push({ row: row.height - 1, col: midCol, what: 'doorway S' });
-    if (e === 'W') out.push({ row: midRow, col: 0, what: 'doorway W' });
-    if (e === 'E') out.push({ row: midRow, col: row.width - 1, what: 'doorway E' });
+    if (e === 'N') {
+      out.push({ row: 0, col: midCol, what: 'doorway N' });
+      out.push({ row: 1, col: midCol, what: 'arrival via doorway N' });
+    }
+    if (e === 'S') {
+      out.push({ row: row.height - 1, col: midCol, what: 'doorway S' });
+      out.push({ row: row.height - 2, col: midCol, what: 'arrival via doorway S' });
+    }
+    if (e === 'W') {
+      out.push({ row: midRow, col: 0, what: 'doorway W' });
+      out.push({ row: midRow, col: 1, what: 'arrival via doorway W' });
+    }
+    if (e === 'E') {
+      out.push({ row: midRow, col: row.width - 1, what: 'doorway E' });
+      out.push({ row: midRow, col: row.width - 2, what: 'arrival via doorway E' });
+    }
   }
   for (const l of (spec.links || [])) {
     if (l.kind !== 'portal') continue;
@@ -80,9 +118,12 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
       out.push({ row: Math.floor(l.to_y / 100), col: Math.floor(l.to_x / 100), what: `portal arrival from ${l.from}` });
     }
   }
-  // A doorway tile is walkable by construction (stampBounds stamps
-  // map_doorway on the ring), so it always anchors the fill safely. Ordering
-  // matters: assertNavigable starts from the FIRST entry.
+  // A doorway GAP is walkable by construction (stampBounds stamps map_doorway
+  // on the ring), so it always anchors the fill safely. Ordering matters:
+  // assertNavigable starts from the FIRST entry. `arrival via doorway N` and
+  // friends deliberately do NOT match this prefix -- an arrival tile is
+  // generated terrain and may be water, which would make it the worst possible
+  // anchor (assertNavigable would early-return and blame every other tile).
   out.sort((a, b) => (a.what.startsWith('doorway') ? -1 : 0) - (b.what.startsWith('doorway') ? -1 : 0));
   return out;
 }
@@ -279,7 +320,7 @@ async function applyMapSpec(pool, spec) {
   }
 }
 
-module.exports = { applyMapSpec, GRID_SPACING, graphPosition };
+module.exports = { applyMapSpec, GRID_SPACING, graphPosition, requiredTilesFor };
 
 if (require.main === module) {
   const name = process.env.SPEC;
@@ -291,9 +332,19 @@ if (require.main === module) {
   if (!url) { console.error('DATABASE_URL is not set in .env'); process.exit(1); }
   const pool = new Pool({ connectionString: url });
   applyMapSpec(pool, JSON.parse(fs.readFileSync(file, 'utf8')))
-    .then((n) => console.log(
-      `applied ${name}: ${n.worlds} worlds, ${n.links} links, ${n.villages} villages, `
-      + `${n.portalGuards} portal guards, ${n.creatures} creatures`))
+    .then((n) => {
+      console.log(
+        `applied ${name}: ${n.worlds} worlds, ${n.links} links, ${n.villages} villages, `
+        + `${n.portalGuards} portal guards, ${n.creatures} creatures`);
+      // See this file's header: only the world_chunks cache is reachable from
+      // here. Printed unconditionally rather than probed -- this process has no
+      // way to tell whether a backend is up, and a note that only appears
+      // sometimes is a note nobody learns to read.
+      console.log(
+        'NOTE: if the backend is running, RESTART IT. This process cannot clear its '
+        + 'world-preview cache, its minimap overview cache, or its in-memory copy of a '
+        + 'live world, so those keep serving the old terrain.');
+    })
     .catch((e) => { console.error(e.message); process.exitCode = 1; })
     .finally(() => pool.end());
 }

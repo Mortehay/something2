@@ -57,3 +57,73 @@ test('graphPosition scales linearly, not just for unit steps', () => {
   const far = graphPosition([3, -2]);
   assert.deepEqual(far, { x: 3 * GRID_SPACING, y: -2 * GRID_SPACING });
 });
+
+// --- requiredTilesFor: what the navigability guard is actually asked ------
+//
+// This is the function that made the guard vacuous. It required only the
+// doorway GAP, which stampBounds stamps `map_doorway` on the ring -- walkable
+// by construction. For a world with one doorway and no entry_spawn that was
+// the ONLY required tile, so assertNavigable flood-filled from it, had nothing
+// to compare against, and returned clean however sealed the world was. Nine of
+// the twenty shipped worlds are in that shape, and Blackfen Sinks shipped
+// sealed through it.
+//
+// The tile that can actually generate as water / cave_wall / chasm is the
+// ARRIVAL point one tile inward -- literally where mapService.arrivalPoint
+// puts an inbound player. arrivalPoint is IMPORTED rather than restated so the
+// two cannot drift: a test that hard-coded `row: 1` would keep passing if
+// arrivalPoint were later changed to land somewhere else, which is exactly the
+// divergence that would re-open this hole.
+const { requiredTilesFor } = require('../scripts/seed-map.js');
+const { arrivalPoint, CREATURE_TILE_PX } = require('../src/services/mapService.js');
+
+const bareSpec = { links: [] };
+const bareRow = (w = 64, h = 64) => ({ width: w, height: h, entry_spawn: null });
+const find = (tiles, what) => tiles.find((t) => t.what === what);
+
+test('every doorway contributes BOTH its gap and the arrival tile one step inward', () => {
+  for (const edge of ['N', 'S', 'W', 'E']) {
+    const tiles = requiredTilesFor({ key: 'w' }, bareSpec, bareRow(), [edge]);
+    assert.equal(tiles.length, 2, `${edge} must require the gap AND the arrival tile`);
+    assert.ok(find(tiles, `doorway ${edge}`), `${edge} gap missing`);
+    assert.ok(find(tiles, `arrival via doorway ${edge}`), `${edge} arrival missing`);
+  }
+});
+
+test('the arrival tile is exactly the tile arrivalPoint drops an inbound player on', () => {
+  const HALF = CREATURE_TILE_PX / 2 - 32; // arrivalPoint's own centre-to-top-left offset
+  for (const edge of ['N', 'S', 'W', 'E']) {
+    const req = find(requiredTilesFor({ key: 'w' }, bareSpec, bareRow(), [edge]),
+      `arrival via doorway ${edge}`);
+    const p = arrivalPoint(64, 64, edge); // player TOP-LEFT pixel
+    assert.equal(req.row, Math.floor((p.y + HALF) / CREATURE_TILE_PX), `${edge} arrival row`);
+    assert.equal(req.col, Math.floor((p.x + HALF) / CREATURE_TILE_PX), `${edge} arrival col`);
+  }
+});
+
+test('a doorway GAP still anchors the fill, never an arrival tile', () => {
+  // assertNavigable starts from the FIRST entry and early-returns blaming
+  // every other tile if that entry is unwalkable. Only a gap is walkable by
+  // construction, so an arrival tile must never sort to the front -- not with
+  // an entry_spawn present, and not with several doorways.
+  const row = { width: 64, height: 64, entry_spawn: { x: 3250, y: 3250 } };
+  const tiles = requiredTilesFor({ key: 'w' }, bareSpec, row, ['S', 'N', 'E']);
+  assert.ok(tiles[0].what.startsWith('doorway '), `first required tile was "${tiles[0].what}"`);
+  const firstArrival = tiles.findIndex((t) => t.what.startsWith('arrival'));
+  const lastGap = tiles.map((t) => t.what.startsWith('doorway ')).lastIndexOf(true);
+  assert.ok(firstArrival > lastGap, 'every doorway gap must sort ahead of every arrival tile');
+});
+
+test('the arrival tile sits inside the interior, never on the wall ring', () => {
+  // The off-by-one this rules out: an "arrival" left on the ring, which
+  // stampBounds writes as map_doorway/map_wall by construction -- making the
+  // new requirement exactly as vacuous as the old one it replaced.
+  for (const [w, h] of [[64, 64], [96, 96], [16, 40]]) {
+    for (const edge of ['N', 'S', 'W', 'E']) {
+      const req = find(requiredTilesFor({ key: 'w' }, bareSpec, bareRow(w, h), [edge]),
+        `arrival via doorway ${edge}`);
+      assert.ok(req.row > 0 && req.row < h - 1, `${edge} ${w}x${h}: row ${req.row} is on the ring`);
+      assert.ok(req.col > 0 && req.col < w - 1, `${edge} ${w}x${h}: col ${req.col} is on the ring`);
+    }
+  }
+});

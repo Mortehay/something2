@@ -14,7 +14,38 @@
 // world, and it is the right question anyway: what matters is not that some
 // absolute point is walkable, but that everything a player can arrive at or
 // leave through is mutually connected.
+//
+// WHY THE FRACTION FLOOR EXISTS. The mutual-connectivity question above is
+// vacuous when there is only ONE required tile: the fill starts there, and the
+// membership scan then finds that tile in its own frontier, always. Nine of
+// the twenty shipped worlds are in exactly that shape (one doorway, no
+// entry_spawn), and one of them -- Blackfen Sinks -- shipped with 3 of 3844
+// interior cells reachable while this module reported it clean. So a second,
+// absolute question is asked as well: does the fill reach a plausible share of
+// the interior at all? That one needs nothing to compare against.
 const { worldConfig, generateRegion } = require('./mapService');
+
+// Fraction of the bounded INTERIOR the anchor's flood fill must reach.
+//
+// Measured against all 20 shipped worlds: the healthy ones reach 70.7%-100% of
+// their interior (and every one of them reaches EVERY walkable cell it has --
+// one connected component, no islands). The sealed Blackfen Sinks reached
+// 0.08%. 0.25 sits ~2.8x below the worst healthy world and ~300x above the
+// failure, which is the widest margin the real data offers. A world where a
+// player walking in the front door can reach under a quarter of the map is
+// broken by any content standard; if a deliberately maze-like biome set ever
+// lands legitimately below this, raise it here rather than deleting the check.
+const MIN_REACHABLE_FRACTION = 0.25;
+
+// Denominator is every INTERIOR CELL, walkable or not -- deliberately not "the
+// walkable cells". A world whose interior banded solid cave_wall has almost no
+// walkable cells, so a walkable-cell denominator would score its 3-cell
+// doorway pocket at 100% and wave through the most completely sealed world
+// there is. Counting cells makes "how much of this map can I walk?" the
+// question, which is the one that matters.
+function interiorArea(width, height) {
+  return Math.max(0, (width - 2) * (height - 2));
+}
 
 function assertNavigable(world, requiredTiles) {
   if (!requiredTiles || requiredTiles.length === 0) return [];
@@ -62,7 +93,19 @@ function assertNavigable(world, requiredTiles) {
       problems.push(`${t.what} at (${t.row},${t.col}) is unreachable`);
     }
   }
+
+  // The absolute question, asked whether or not there was anything to compare
+  // the anchor against. `seen` counts every reached cell including the doorway
+  // gap on the ring, so a fully-open world scores slightly over 1.0 -- fine,
+  // this is a floor.
+  const area = interiorArea(width, height);
+  if (area > 0 && seen.size < area * MIN_REACHABLE_FRACTION) {
+    const pct = (100 * seen.size / area).toFixed(1);
+    problems.push(
+      `only ${seen.size} of ${area} interior cells (${pct}%) are reachable from `
+      + `${start.what} at (${start.row},${start.col}) -- the world is effectively sealed`);
+  }
   return problems;
 }
 
-module.exports = { assertNavigable };
+module.exports = { assertNavigable, MIN_REACHABLE_FRACTION };
