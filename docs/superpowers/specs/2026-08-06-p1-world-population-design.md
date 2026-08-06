@@ -89,6 +89,23 @@ decides how many and writes them down.** Both placement functions stay pure
 and deterministic given their RNG, which is what keeps them unit-testable
 without a database.
 
+Scatter and packs must apply *identical* tile-validity rules — interior,
+walkable, not wall or doorway, not inside a village, and admitted by the local
+biome's fauna. That is guaranteed by extraction rather than by duplication:
+the existing rules come out of `placeMapCreatures` into one shared helper that
+both call. Copying the checks into the pack function would let the two drift
+the first time either is edited.
+
+### One supporting extraction
+
+`getTileTypesMap` currently lives in `backend/src/index.js:253` and closes
+over the module-level `pool`, so `populateWorld` cannot call it without a
+circular import. It moves to `backend/src/services/tileTypes.js` as
+`loadTileTypes(db)`, taking its connection as a parameter like every other
+service here (`loadBiomes`, `fetchVillages`, `fetchLinks`). `index.js` imports
+it back. This keeps one definition of what a `tile_types` row becomes, rather
+than `populateWorld` growing a second, subtly different query.
+
 ---
 
 ## Density tiers
@@ -167,9 +184,16 @@ rather than a failure to report.
 
 ### Determinism
 
-Scatter and packs draw from **one** `makeRng(rngSeed)` stream, scatter first,
-then packs in order. Given the same seed, world and catalog, population is
-reproducible.
+Population is reproducible from `rngSeed`: same seed, world and catalog gives
+the same creatures in the same places.
+
+Scatter and packs draw from **separate streams off that one seed** —
+`makeRng(rngSeed)` for scatter, `makeRng(rngSeed ^ PACK_SALT)` for packs.
+A single shared stream would be the obvious choice, but pack anchors would
+then start from the same draws scatter already consumed and cluster on top of
+scattered creatures. Salting a second stream is how this codebase already
+separates correlated rolls — `CREATURE_SALT`, `LEVEL_SALT` and
+`pathSegmentCells`' direction salts all exist for the same reason.
 
 This mirrors a caution already documented in `placeMapCreatures`: the level
 roll consumes an extra draw per creature and shifts the stream for everything
