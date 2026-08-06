@@ -143,8 +143,11 @@ test('spine-descent escalates its level bands with depth', () => {
   // order among them is just file order. Reordering those entries in the
   // JSON is semantically meaningless and must not be able to trip this
   // check. Group by tier instead and require each tier's minimum band floor
-  // to be >= the previous tier's -- mirroring the creature_count escalation
-  // test above, which has the same three-way tie at distance 2.
+  // to be >= the previous tier's. (This grouping was inherited from the
+  // creature_count escalation test, which had the same three-way tie at
+  // distance 2 and was deleted with the field it read -- see the note above
+  // "hub-vale has a village in its hub". This is now the only escalation
+  // check in the file.)
   const minFloorByDistance = new Map();
   for (const w of banded) {
     const d = dist.get(w.key);

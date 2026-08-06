@@ -494,13 +494,13 @@ function collectPathCells(cfg, rMin, cMin, rows, cols) {
 // creatures", nothing in the codebase ever called it outside its own tests.
 
 const CREATURE_TILE_PX = 100;      // world px per tile (matches frontend MAP_TILE_SIZE)
-// Distinct from the type-pick draw, so a creature's level never ties to its
-// type or its existence -- every Wolf in a chunk would otherwise share one
-// level and the band would collapse. No longer read anywhere: its only
-// caller was the per-chunk random-roll spawn path, retired as unreachable
-// dead code (SOMET-246). Kept because placeMapCreatures/placeCreaturePacks
-// are close enough in shape that a future per-tile path may want it again.
-const LEVEL_SALT = 0x1e7e1;
+// LEVEL_SALT (a per-tile salt separating the level roll from the type-pick
+// draw) was removed here alongside its only caller, the per-chunk random-roll
+// spawn path retired as unreachable dead code (SOMET-246). It briefly survived
+// that retirement as "kept in case a future per-tile path wants it again" --
+// the same speculative justification the F-010 / SOMET-190 cleanup rejected
+// for densityAt() a few lines above. placeMapCreatures and placeCreaturePacks
+// separate their streams with their own salts and never needed it.
 // The baseline a creature's damage scales from. Creature attack damage is
 // otherwise the flat CREATURE_DAMAGE constant in authority/creatures.js; this
 // mirrors it so an unscaled level-1 creature is byte-identical to today.
