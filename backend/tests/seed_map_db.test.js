@@ -60,7 +60,7 @@ const spec = () => ({
 
 async function cleanup(pool) {
   await pool.query(
-    "DELETE FROM worlds WHERE name IN ('zzTestAlpha','zzTestBeta','zzTestPopA','zzTestPopB')",
+    "DELETE FROM worlds WHERE name IN ('zzTestAlpha','zzTestBeta','zzTestPopA','zzTestPopB','zzTestVilA')",
   ).catch(() => {});
 }
 
@@ -390,6 +390,83 @@ test('seeding populates every world with creatures', async (t) => {
       for (const r of rows.rows) {
         assert.ok(r.n > 0, `world ${r.name} is empty`);
       }
+    });
+  } finally {
+    await cleanup(pool);
+    await pool.end();
+  }
+});
+
+// SOMET-246 final review, finding 1. applyMapSpec used to run its population
+// loop BEFORE the village loop, so on a first seed populateWorld's
+// fetchVillages returned [] and creatureTileCandidates' "not inside a village"
+// exclusion never fired -- hostiles landed on the village footprint and
+// createVillage then stamped walls around them. It also made seeding
+// non-idempotent, because the first apply rejection-samples against no village
+// and every later apply samples against one, which shifts the shared RNG
+// stream for every placement after the first rejected draw.
+//
+// The fixture below is pinned, not arbitrary. Verified against the OLD
+// ordering (population loop above the village loop, the code as of 7f25c73):
+// seed 991 with this 8x6 village puts 2 hostiles inside the footprint and
+// makes 10 of 16 creature rows move between the first and second apply, so
+// both assertions below genuinely fail there. A neighbouring seed (1234) does
+// NOT collide and passes either way -- which is exactly why the seed is fixed.
+//
+// The village is deliberately the maximum size VILLAGE_LIMITS allows (8x6) to
+// widen the target, and `density` is deliberately NOT authored: the world
+// lands on the 'normal' default like every shipped spec does.
+const VILLAGE_BOX = { min_row: 20, min_col: 20, width: 8, height: 6 };
+const villagePopulationSpec = () => ({
+  name: 'zz-test-village-population-fixture',
+  topology: 'spine',
+  worlds: [
+    { key: 'a', name: 'zzTestVilA', grid: [12, -3], seed: 991, width: 64, height: 64,
+      chunk_size: 64, biomes: [], biome_cell: 32,
+      allowed_creature_types: ['Slime'], is_entry: true, entry_spawn: { x: 3200, y: 3200 },
+      village: { ...VILLAGE_BOX, gate_edge: 'S', spawn_x: 2350, spawn_y: 2650 } },
+  ],
+  links: [],
+});
+
+test('seeding a spec with a village is idempotent and keeps hostiles out of the village', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — village/population ordering is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  // Non-guard creatures only: the two village gate guards are placed by
+  // createVillage at fixed gate-post tiles and are irrelevant to the scatter
+  // the ordering defect moves.
+  const hostiles = `SELECT wc.x, wc.y, wc.type FROM world_creatures wc
+       JOIN worlds w ON w.id = wc.world_id
+      WHERE w.name = 'zzTestVilA' AND wc.type <> 'Village Guard'
+      ORDER BY wc.x, wc.y, wc.type`;
+  try {
+    await cleanup(pool);
+    const s = villagePopulationSpec();
+    await withEntryPreserved(pool, async () => {
+      await applyMapSpec(pool, s);
+      const first = (await pool.query(hostiles)).rows;
+      // Non-vacuity: an apply that placed nothing would satisfy both
+      // assertions below trivially.
+      assert.ok(first.length > 0, 'the fixture placed no hostiles — both assertions below would be vacuous');
+
+      const inside = first.filter((r) => {
+        const col = Math.floor(Number(r.x) / 100);
+        const row = Math.floor(Number(r.y) / 100);
+        return row >= VILLAGE_BOX.min_row && row < VILLAGE_BOX.min_row + VILLAGE_BOX.height
+          && col >= VILLAGE_BOX.min_col && col < VILLAGE_BOX.min_col + VILLAGE_BOX.width;
+      });
+      assert.deepEqual(inside, [],
+        'a hostile was placed inside the village footprint — population ran before the village existed');
+
+      await applyMapSpec(pool, s);
+      const second = (await pool.query(hostiles)).rows;
+      assert.deepEqual(second, first,
+        're-applying an unchanged spec moved the creatures — seeding is not idempotent');
     });
   } finally {
     await cleanup(pool);

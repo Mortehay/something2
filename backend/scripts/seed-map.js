@@ -127,10 +127,36 @@ async function applyMapSpec(pool, spec) {
       }
     }
 
-    // After links exist (populateWorld reads them for doorway tiles) and after
-    // portal guards (its delete spares guards but the guards must already be
-    // there to be spared). Before villages is fine either way -- village
-    // guards are inserted by createVillage below and are likewise spared.
+    let villages = 0;
+    for (const w of spec.worlds) {
+      if (!w.village) continue;
+      const worldId = idByKey.get(w.key);
+      const existing = await client.query('SELECT id FROM villages WHERE world_id = $1', [worldId]);
+      if (existing.rowCount === 0) {          // idempotent: one village per seeded world
+        await createVillage(client, worldId, w.village);
+        villages += 1;
+      }
+    }
+
+    // MUST be after links (populateWorld reads them for doorway tiles), after
+    // portal guards (its delete spares guards, but a guard must already exist
+    // to be spared) and -- the non-obvious one -- after VILLAGES.
+    //
+    // populateWorld fetches this world's villages and creatureTileCandidates
+    // refuses any tile inside one. On a FIRST seed, running before the village
+    // loop means fetchVillages returns [] and that exclusion silently does
+    // nothing: hostiles get scattered across the village footprint and
+    // createVillage then stamps its walls around them. It also makes seeding
+    // non-idempotent -- the first apply samples against no village, every
+    // later apply samples against one, so the same unchanged spec lays its
+    // creatures out differently (SOMET-246 final review, finding 1; covered by
+    // seed_map_db.test.js's "seeding a spec with a village is idempotent and
+    // keeps hostiles out of the village"). `make reseed-map` runs clear-maps
+    // first, so every seed it performs is a first seed.
+    //
+    // Village guards are unaffected by the move: populateWorld's delete spares
+    // `type = 'Village Guard'`, so the guards createVillage just inserted
+    // survive the pass that runs moments later.
     //
     // Seeded worlds CONVERGE to their spec: populateWorld deletes non-guard
     // creatures and re-places them, so editing a density tier and re-seeding
@@ -142,17 +168,6 @@ async function applyMapSpec(pool, spec) {
       const wr = await client.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
       const n = await populateWorld(client, wr.rows[0], { rngSeed: w.seed });
       creaturesWritten += n.total;
-    }
-
-    let villages = 0;
-    for (const w of spec.worlds) {
-      if (!w.village) continue;
-      const worldId = idByKey.get(w.key);
-      const existing = await client.query('SELECT id FROM villages WHERE world_id = $1', [worldId]);
-      if (existing.rowCount === 0) {          // idempotent: one village per seeded world
-        await createVillage(client, worldId, w.village);
-        villages += 1;
-      }
     }
 
     // LAST: setting is_entry clears it on every other world (index.js:1542),
