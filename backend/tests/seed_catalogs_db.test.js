@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { seedCatalogs } = require('../scripts/seed-catalogs.js');
+const { seedCatalogs, seedOneTile } = require('../scripts/seed-catalogs.js');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS, SIZE_FIXES } = require('../seeds/data/decorationTypes.js');
@@ -83,6 +83,60 @@ test('seeding does not delete a hand-added tile type', async (t) => {
     assert.equal(r.rowCount, 1, 'seeding deleted a tile type it did not create');
   } finally {
     await pool.query('DELETE FROM tile_types WHERE name = $1', [CANARY]).catch(() => {});
+    await pool.end();
+  }
+});
+
+// The seeder's stated rule is that a run must never cost an admin something
+// they authored by hand. Every existing terrain tile carries a prompt in the
+// database that is NOT in DEFAULT_TILE_TYPES (verified live: `grass` reads
+// "lush green meadow grass"). A naive `prompt = EXCLUDED.prompt` would wipe
+// all eleven on the next run.
+test('seeding preserves a prompt the seed file does not specify', async (t) => {
+  if (!requireTestDb(t, 'seedOneTile upserts a real tile_types row')) return;
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} — prompt preservation is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await pool.query(
+      `INSERT INTO tile_types (name, color, walkable, speed, prompt)
+       VALUES ('zzPromptKeep', '#123456', true, 1, 'hand authored prompt')
+       ON CONFLICT (name) DO UPDATE SET prompt = EXCLUDED.prompt`);
+    // Re-run the seeder over a seed entry that omits `prompt` entirely.
+    await seedOneTile(pool, { name: 'zzPromptKeep', color: '#123456', walkable: true, speed: 1, valid_neighbors: [] });
+    const r = await pool.query(`SELECT prompt FROM tile_types WHERE name = 'zzPromptKeep'`);
+    assert.equal(r.rows[0].prompt, 'hand authored prompt');
+  } finally {
+    await pool.query(`DELETE FROM tile_types WHERE name LIKE 'zz%'`);
+    await pool.end();
+  }
+});
+
+test('seeding writes a prompt the seed file does specify', async (t) => {
+  if (!requireTestDb(t, 'seedOneTile upserts a real tile_types row')) return;
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} — prompt write is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await seedOneTile(pool, {
+      name: 'zzPromptWrite', color: '#123456', walkable: true, speed: 1,
+      valid_neighbors: [], prompt: 'seeded prompt', wall_height: 48, place_order: 2,
+    });
+    const r = await pool.query(
+      `SELECT prompt, wall_height, place_order FROM tile_types WHERE name = 'zzPromptWrite'`);
+    assert.equal(r.rows[0].prompt, 'seeded prompt');
+    assert.equal(r.rows[0].wall_height, 48);
+    assert.equal(r.rows[0].place_order, 2);
+  } finally {
+    await pool.query(`DELETE FROM tile_types WHERE name LIKE 'zz%'`);
     await pool.end();
   }
 });

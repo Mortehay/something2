@@ -13,17 +13,41 @@ const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
 const { HOSTILE_CREATURES, CREATURE_DROPS } = require('../seeds/data/entityTypes.js');
 
+// COALESCE, not plain EXCLUDED, for the four columns below.
+//
+// Every existing terrain tile carries a prompt in the database that is NOT in
+// DEFAULT_TILE_TYPES -- `grass` reads "lush green meadow grass", and so on for
+// all eleven. Those were authored in the admin UI. Writing EXCLUDED
+// unconditionally would wipe every one of them on the next `make
+// seed-catalogs`, which is precisely what this file's header rule forbids.
+//
+// So a seed entry that OMITS a field passes NULL and COALESCE keeps whatever
+// the row already holds; a seed entry that SPECIFIES one overwrites. New tiles
+// (no existing row) fall to the column defaults via the same COALESCE.
+async function seedOneTile(db, t) {
+  await db.query(
+    `INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors,
+                             prompt, render_mode, wall_height, place_order)
+     VALUES ($1,$2,$3,$4,$5,$6::jsonb,
+             COALESCE($7, ''), COALESCE($8, 'color'), COALESCE($9, 0), COALESCE($10, 0))
+     ON CONFLICT (name) DO UPDATE
+       SET color = EXCLUDED.color, walkable = EXCLUDED.walkable,
+           speed = EXCLUDED.speed, valid_neighbors = EXCLUDED.valid_neighbors,
+           prompt = COALESCE($7, tile_types.prompt),
+           render_mode = COALESCE($8, tile_types.render_mode),
+           wall_height = COALESCE($9, tile_types.wall_height),
+           place_order = COALESCE($10, tile_types.place_order)`,
+    [t.name, t.color, t.walkable, t.speed, t.image ?? '',
+     JSON.stringify(t.valid_neighbors ?? []),
+     t.prompt ?? null, t.render_mode ?? null,
+     t.wall_height ?? null, t.place_order ?? null],
+  );
+}
+
 async function seedCatalogs(pool) {
   let tiles = 0;
   for (const t of DEFAULT_TILE_TYPES) {
-    await pool.query(
-      `INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb)
-       ON CONFLICT (name) DO UPDATE
-         SET color = EXCLUDED.color, walkable = EXCLUDED.walkable,
-             speed = EXCLUDED.speed, valid_neighbors = EXCLUDED.valid_neighbors`,
-      [t.name, t.color, t.walkable, t.speed, t.image ?? '', JSON.stringify(t.valid_neighbors ?? [])],
-    );
+    await seedOneTile(pool, t);
     tiles += 1;
   }
 
@@ -117,7 +141,7 @@ async function seedCatalogs(pool) {
   return { tiles, biomes, decorations, creatures, drops };
 }
 
-module.exports = { seedCatalogs };
+module.exports = { seedCatalogs, seedOneTile };
 
 if (require.main === module) {
   const env = dotenv.config({ path: path.resolve(__dirname, '../../.env') }).parsed || {};
