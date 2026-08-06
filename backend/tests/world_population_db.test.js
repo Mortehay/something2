@@ -9,7 +9,9 @@ const describeDb = URL ? test : test.skip;
 // Fixture worlds are named zzPop* and deleted by name, unconditionally, in a
 // finally. Never delete by an id captured mid-test: if the test fails before
 // the capture, the row leaks into the shared dev database forever.
-const FIXTURES = ['zzPopHorde', 'zzPopDead', 'zzPopNoAllowlist', 'zzPopGuardFilter'];
+const FIXTURES = [
+  'zzPopHorde', 'zzPopDead', 'zzPopNoAllowlist', 'zzPopGuardFilter', 'zzPopRollback',
+];
 
 async function cleanup(pool) {
   await pool.query('DELETE FROM worlds WHERE name = ANY($1::text[])', [FIXTURES]);
@@ -222,6 +224,79 @@ describeDb('a portal guard survives a repopulate even though its type is an ordi
       `SELECT count(*)::int AS n FROM world_creatures
        WHERE world_id = $1 AND blocks_portal_id = $2`, [world.id, link.rows[0].id]);
     assert.equal(g.rows[0].n, 1, 'the portal guard was deleted by the population pass');
+  } finally {
+    await cleanup(pool);
+    await pool.end();
+  }
+});
+
+// Required by the design spec's testing section ("the whole thing rolls back
+// as one unit on a mid-flight failure") and missing until SOMET-246's final
+// review, finding 7. seed_map_db.test.js has a rollback test, but its fixtures
+// declare allowed_creature_types: [] and it fails on an oversized chunk_size
+// during the world INSERT -- long before the population pass -- so it can
+// never reach the delete/insert pair this covers.
+//
+// The failure is injected as a REAL database error (`SELECT 1/0`, division by
+// zero) issued on the same connection in place of the first creature INSERT,
+// not as a JS throw: that aborts the Postgres transaction the way a genuine
+// constraint violation mid-populate would, so the ROLLBACK below is exercising
+// the database's atomicity and not just the test's own control flow.
+describeDb('populateWorld rolls its delete and inserts back as one unit', async () => {
+  const pool = new Pool({ connectionString: URL });
+  try {
+    await cleanup(pool);
+    const world = await makeWorld(pool, 'zzPopRollback', 'normal');
+
+    // A committed population to destroy. Its rows are what must survive.
+    const seedClient = await pool.connect();
+    try {
+      await seedClient.query('BEGIN');
+      await populateWorld(seedClient, world, { rngSeed: 101 });
+      await seedClient.query('COMMIT');
+    } finally { seedClient.release(); }
+
+    const snapshot = async () => (await pool.query(
+      `SELECT type, x, y, level FROM world_creatures WHERE world_id = $1
+        ORDER BY x, y, type, level`, [world.id])).rows;
+    const before = await snapshot();
+    assert.ok(before.length > 0,
+      'the committed populate placed nothing — the rollback assertions below would be vacuous');
+
+    // A sentinel the failing pass will overwrite. populateWorld writes
+    // creature_count BEFORE its inserts, so this also proves that write is
+    // inside the same unit rather than leaking out on its own.
+    await pool.query('UPDATE worlds SET creature_count = 999 WHERE id = $1', [world.id]);
+
+    const client = await pool.connect();
+    let insertsAttempted = 0;
+    try {
+      // Forwards everything to the real connection, except the creature
+      // INSERT, which becomes a division by zero on that same connection.
+      const failing = {
+        query: (text, params) => {
+          if (typeof text === 'string' && /INSERT INTO world_creatures/.test(text)) {
+            insertsAttempted += 1;
+            return client.query('SELECT 1/0');
+          }
+          return client.query(text, params);
+        },
+      };
+      await client.query('BEGIN');
+      // A DIFFERENT seed: had the delete escaped, a partially-completed
+      // repopulate would leave visibly different rows, not the same ones back.
+      await assert.rejects(
+        () => populateWorld(failing, world, { rngSeed: 202 }), /division by zero/i);
+      await client.query('ROLLBACK');
+    } finally { client.release(); }
+
+    assert.equal(insertsAttempted, 1,
+      'the injected failure never reached an INSERT — the delete/insert pair was not exercised');
+    assert.deepEqual(await snapshot(), before,
+      'the delete committed even though the inserts failed: population is not atomic');
+    const cc = await pool.query('SELECT creature_count FROM worlds WHERE id = $1', [world.id]);
+    assert.equal(cc.rows[0].creature_count, 999,
+      'the creature_count write survived a rolled-back population pass');
   } finally {
     await cleanup(pool);
     await pool.end();
