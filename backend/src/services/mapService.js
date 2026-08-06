@@ -547,6 +547,31 @@ function spawnChunkCreatures(world, cx, cy, creatureTypes) {
   return out;
 }
 
+// The tile-validity rules every creature placement obeys, in ONE place.
+//
+// placeMapCreatures (scatter) and placeCreaturePacks must apply identical
+// rules -- a pack must never stand somewhere scatter would refuse. Extracted
+// rather than copied: two copies drift the first time either is edited, and
+// this repo already carries one byte-for-byte duplicated movement routine as
+// a standing hazard.
+//
+// Returns the creature types the local biome admits here, or null if no
+// creature may stand on this tile at all. The world's allowlist stays
+// authoritative -- a biome can only REMOVE candidates from it, never add one.
+function creatureTileCandidates(world, cfg, gRow, gCol, allowedTypes) {
+  const { wallTile, doorwayTile } = cfg.bounds;
+  const name = generateRegion(world, gRow, gCol, 1, 1)[0][0];
+  if (name === wallTile || name === doorwayTile) return null;
+  const def = world.tileTypes && world.tileTypes[name];
+  if (def && def.walkable === false) return null;
+  if (villageContaining(gRow, gCol, cfg.villages)) return null;
+  const region = sampleBiomeRegion(cfg, gRow, gCol);
+  const candidates = region
+    ? allowedTypes.filter((t) => region.creatureTypes.includes(t.name))
+    : allowedTypes;
+  return candidates.length ? candidates : null;
+}
+
 // Count-based creature placement for a BOUNDED map. Rejection-samples `count`
 // interior tiles (strictly inside the wall ring), keeping only walkable,
 // non-wall, non-doorway tiles, and assigns a random allowed type. Pure and
@@ -557,8 +582,7 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
   if (!cfg.bounds) return [];
   if (!count || count < 1) return [];
   if (!allowedTypes || allowedTypes.length === 0) return [];
-  const { width, height, wallTile, doorwayTile } = cfg.bounds;
-  const villages = cfg.villages;
+  const { width, height } = cfg.bounds;
   const rLo = 1, rHi = height - 2, cLo = 1, cHi = width - 2;
   if (rHi < rLo || cHi < cLo) return [];
   const rng = makeRng(rngSeed >>> 0);
@@ -567,21 +591,8 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
     for (let a = 0; a < maxAttempts; a++) {
       const row = rLo + Math.floor(rng() * (rHi - rLo + 1));
       const col = cLo + Math.floor(rng() * (cHi - cLo + 1));
-      const name = generateRegion(world, row, col, 1, 1)[0][0];
-      if (name === wallTile || name === doorwayTile) continue;
-      const def = world.tileTypes && world.tileTypes[name];
-      if (def && def.walkable === false) continue;
-      if (villageContaining(row, col, villages)) continue;
-      // Narrow to the fauna native to the biome that owns this cell. The
-      // world's allowlist stays authoritative -- a biome can only remove
-      // candidates from it, never add one. An empty intersection means this
-      // biome has no fauna the world permits, so roll another cell rather
-      // than forcing a foreign creature into it.
-      const region = sampleBiomeRegion(cfg, row, col);
-      const candidates = region
-        ? allowedTypes.filter((t) => region.creatureTypes.includes(t.name))
-        : allowedTypes;
-      if (candidates.length === 0) continue;
+      const candidates = creatureTileCandidates(world, cfg, row, col, allowedTypes);
+      if (!candidates) continue;
       const t = candidates[Math.floor(rng() * candidates.length)];
       // Drawn from the same stream, immediately after the type pick, so the
       // roll stays deterministic given rngSeed. NOTE: this consumes one extra
@@ -607,6 +618,98 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
         resistances: t.resistances || {},
       });
       break;
+    }
+  }
+  return out;
+}
+
+// A second stream off the same seed, for the reason CREATURE_SALT and
+// LEVEL_SALT exist: sharing one stream with scatter would make pack anchors
+// start from draws scatter already consumed, clustering packs on top of the
+// scattered creatures instead of somewhere else on the map.
+const PACK_SALT = 0x9ac4;
+
+// Tiles from the anchor a member may sit. Grows with pack size so a pack of
+// 12 does not have to fit in the same footprint as a pack of 3, and is capped
+// so a large pack still reads as a group rather than a thin smear.
+function packRadius(size) {
+  return Math.min(4, Math.max(2, Math.ceil(Math.sqrt(size)) + 1));
+}
+
+// Clustered creature placement for a BOUNDED map. Each entry in `packSpecs`
+// ({ size }) becomes one group of a SINGLE type, anchored on a valid tile and
+// spread within packRadius(size) of it. Same validity rules as scatter, via
+// creatureTileCandidates. Pure and deterministic given `rngSeed`. Returns rows
+// shaped exactly like placeMapCreatures'. Unbounded worlds return [].
+//
+// A pack that cannot seat every member ships SHORT rather than failing: a
+// crypt whose walkable area is mostly narrow corridor holds tighter, smaller
+// packs, and that is a correct outcome, not an error to report.
+function placeCreaturePacks(world, packSpecs, allowedTypes, rngSeed, maxAttempts = 40) {
+  const cfg = worldConfig(world);
+  if (!cfg.bounds) return [];
+  if (!packSpecs || packSpecs.length === 0) return [];
+  if (!allowedTypes || allowedTypes.length === 0) return [];
+  const { width, height } = cfg.bounds;
+  const rLo = 1, rHi = height - 2, cLo = 1, cHi = width - 2;
+  if (rHi < rLo || cHi < cLo) return [];
+  const rng = makeRng((rngSeed ^ PACK_SALT) >>> 0);
+  const out = [];
+
+  const emit = (t, gRow, gCol) => {
+    const level = rollCreatureLevel(rng(), world.levelMin, world.levelMax);
+    const scaled = scaleCreature(
+      { hp: t.hp || 10, damage: CREATURE_BASE_DAMAGE, defense: Number(t.defense ?? 0) || 0 },
+      level,
+    );
+    out.push({
+      type: t.name,
+      x: gCol * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
+      y: gRow * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
+      hp: scaled.hp,
+      damage: scaled.damage,
+      level,
+      facing: 'S',
+      defense: scaled.defense,
+      resistances: t.resistances || {},
+    });
+  };
+
+  for (const p of packSpecs) {
+    const size = Math.max(1, Math.floor(p.size) || 0);
+
+    // Anchor: rejection-sample a valid tile, then fix the pack's ONE type
+    // from what the local biome admits there.
+    let anchorRow = -1, anchorCol = -1, packType = null;
+    for (let a = 0; a < maxAttempts; a++) {
+      const row = rLo + Math.floor(rng() * (rHi - rLo + 1));
+      const col = cLo + Math.floor(rng() * (cHi - cLo + 1));
+      const candidates = creatureTileCandidates(world, cfg, row, col, allowedTypes);
+      if (!candidates) continue;
+      anchorRow = row;
+      anchorCol = col;
+      packType = candidates[Math.floor(rng() * candidates.length)];
+      break;
+    }
+    if (!packType) continue;  // nowhere legal to seat this pack at all
+
+    emit(packType, anchorRow, anchorCol);
+
+    const radius = packRadius(size);
+    const span = 2 * radius + 1;
+    for (let m = 1; m < size; m++) {
+      for (let a = 0; a < maxAttempts; a++) {
+        const row = anchorRow + Math.floor(rng() * span) - radius;
+        const col = anchorCol + Math.floor(rng() * span) - radius;
+        if (row < rLo || row > rHi || col < cLo || col > cHi) continue;
+        const candidates = creatureTileCandidates(world, cfg, row, col, allowedTypes);
+        // The member's OWN tile must admit the pack's type. A pack straddling
+        // a biome boundary must not push a creature into a biome that forbids
+        // it -- exactly the rule scatter enforces per cell.
+        if (!candidates || !candidates.some((t) => t.name === packType.name)) continue;
+        emit(packType, row, col);
+        break;
+      }
     }
   }
   return out;
@@ -973,6 +1076,8 @@ module.exports = {
     collectPathCells,
     spawnChunkCreatures,
     placeMapCreatures,
+    placeCreaturePacks,
+    creatureTileCandidates,
     stampBounds,
     isBoundedWorld,
     stampVillage,
