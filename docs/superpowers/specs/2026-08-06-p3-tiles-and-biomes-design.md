@@ -48,9 +48,25 @@ seal a region.
 **The sand trap is live and stays undisturbed.** `PATH_NAME_RE` matches
 `path|dirt|road|trail|earth|sand` and `detectPathTile` returns the first match
 in catalog id order, so `sand` (id 4) is the path tile for every world. New
-tiles receive higher ids, and none of the names below match the pattern
-anyway, so this holds by construction rather than by luck. `PATH_NAME_RE` and
+tiles receive higher ids, and none of the names below match the pattern, so
+this holds by construction rather than by luck. `PATH_NAME_RE` and
 `detectPathTile` are not touched.
+
+The coastal tile is named `storm_shingle` for exactly this reason — the
+obvious `storm_sand` matches the pattern. It would in fact have been harmless
+(a higher id never wins the `find`), but a catalog where the rule holds only
+because of insertion order is one reordering away from moving every world's
+paths. A test asserts no new tile name matches the pattern.
+
+**Existing tiles carry admin-authored prompts that the seed file does not.**
+Verified live: `grass` reads "lush green meadow grass", `ice` reads "pale blue
+cracked ice", and so on for all eleven terrain tiles — none of which appears
+in `DEFAULT_TILE_TYPES`. Adding `prompt = EXCLUDED.prompt` to the seeder's
+`ON CONFLICT DO UPDATE` would therefore **wipe every one of them on the next
+`make seed-catalogs`**, violating that file's stated rule that a run must
+never cost an admin something they authored by hand. The seeder passes NULL
+for fields a seed entry omits and `COALESCE`s against the existing row, so
+seed values apply only where authored.
 
 ---
 
@@ -62,7 +78,7 @@ reused as secondary band members wherever they fit.
 
 | group | tiles |
 |---|---|
-| Surface (5) | `highland_rock`, `jungle_floor`, `storm_sand`, `ruin_stone`, `ash_waste` |
+| Surface (5) | `highland_rock`, `jungle_floor`, `storm_shingle`, `ruin_stone`, `ash_waste` |
 | Underground (14) | `cobblestone`, `crypt_floor`, `bone_floor`, `cave_floor`, `fungal_floor`, `ember_rock`, `rime_floor`, `vault_floor`, `hive_floor`, `cistern_shallows`, `umbral_floor`, `crystal_floor`, `blight_floor`, `foundry_floor` |
 | Abyssal (8) | `void_floor`, `brimstone`, `chaos_floor`, `sanctum_floor`, `dream_floor`, `titan_floor`, `plague_floor`, `maw_floor` |
 | Impassable (3) | `cave_wall`, `rubble`, `chasm` |
