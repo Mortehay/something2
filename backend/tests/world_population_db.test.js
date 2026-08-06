@@ -132,6 +132,40 @@ describeDb('guards survive a repopulate', async () => {
   }
 });
 
+// Covers the gap found wiring populateWorld into applyMapSpec (SOMET-246
+// Task 6): a portal guard is an ordinary hostile entity_types row (e.g.
+// 'Wolf', see seed_map_portals.test.js) marked structural only by
+// blocks_portal_id, NOT by type = 'Village Guard' or faction = 'guard'. A
+// delete that only spared `type <> 'Village Guard'` deleted it on every
+// repopulate. blocks_portal_id references map_links, so this fixture inserts
+// a throwaway link row to get a real id rather than faking one.
+describeDb('a portal guard survives a repopulate even though its type is an ordinary hostile', async () => {
+  const pool = new Pool({ connectionString: URL });
+  try {
+    await cleanup(pool);
+    const world = await makeWorld(pool, 'zzPopHorde', 'horde');
+    const link = await pool.query(
+      `INSERT INTO map_links (from_world_id, edge, to_world_id, from_x, from_y, to_x, to_y)
+       VALUES ($1, 'PORTAL', $1, 100, 100, 200, 200) RETURNING id`, [world.id]);
+    await pool.query(
+      `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, home_x, home_y, blocks_portal_id)
+       VALUES ($1, 'Wolf', 100, 100, 12, 'S', 100, 100, $2)`, [world.id, link.rows[0].id]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await populateWorld(client, world, { rngSeed: 3 });
+      await client.query('COMMIT');
+    } finally { client.release(); }
+    const g = await pool.query(
+      `SELECT count(*)::int AS n FROM world_creatures
+       WHERE world_id = $1 AND blocks_portal_id = $2`, [world.id, link.rows[0].id]);
+    assert.equal(g.rows[0].n, 1, 'the portal guard was deleted by the population pass');
+  } finally {
+    await cleanup(pool);
+    await pool.end();
+  }
+});
+
 describeDb('the dead tier leaves a world genuinely empty', async () => {
   const pool = new Pool({ connectionString: URL });
   try {

@@ -48,8 +48,21 @@ async function populateWorld(client, worldRow, { rngSeed }) {
   // delete + inserts below must commit or fail with it (F-007 / SOMET-187 --
   // a failure between them otherwise leaves a world with zero creatures and
   // no endpoint that re-derives them).
+  //
+  // Sparing by `type <> GUARD_TYPE` alone only protects village guards.
+  // Portal guards (dungeonGuards.js) reuse an ordinary hostile entity_types
+  // row -- e.g. a spec can declare `guard: { creature_type: 'Wolf', ... }`
+  // (seed_map_portals.test.js) -- so a 'Wolf' portal guard has neither
+  // type = 'Village Guard' nor faction = 'guard', and a type-only filter
+  // deletes it on the very next repopulate. blocks_portal_id IS NOT NULL is
+  // the actual structural marker (migration 1714440061000): only a guard
+  // defending a specific portal ever sets it, exactly like home_x/home_y is
+  // only meaningful for guard-faction creatures. Found wiring this module
+  // into applyMapSpec (SOMET-246 Task 6): seed_map_portals.test.js already
+  // covered this and started failing once population ran in the same
+  // transaction as portal guards for the first time.
   await client.query(
-    'DELETE FROM world_creatures WHERE world_id = $1 AND type <> $2',
+    'DELETE FROM world_creatures WHERE world_id = $1 AND type <> $2 AND blocks_portal_id IS NULL',
     [worldRow.id, GUARD_TYPE],
   );
 
