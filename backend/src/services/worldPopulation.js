@@ -15,7 +15,7 @@
 // BOUNDARY: hostile creatures only. Village guards (insertVillageGuards) and
 // portal guards (insertPortalGuards) keep their own owners; the delete below
 // is scoped to spare them, so a guard survives a repopulate.
-const { placeMapCreatures, placeCreaturePacks, isBoundedWorld } = require('./mapService');
+const { placeMapCreatures, placeCreaturePacks, isBoundedWorld, makeRng } = require('./mapService');
 const { buildWorldGenConfig } = require('./worldGenConfig');
 const { resolveDensity } = require('./densityTiers');
 const { loadTileTypes } = require('./tileTypes');
@@ -25,16 +25,29 @@ const { fetchLinks } = require('./mapLinks');
 
 const GUARD_TYPE = 'Village Guard';
 
-// Pack sizes are drawn from the tier's [min, max] band using the SAME seed the
-// placement uses, so a repopulate at a fixed seed reproduces the same pack
-// shapes as well as the same positions.
+// A third stream off the world's one seed, for the pack SIZES -- salted away
+// from both scatter (makeRng(rngSeed)) and pack placement
+// (makeRng(rngSeed ^ PACK_SALT)) so sizes are not correlated with where the
+// packs land. A repopulate at a fixed seed reproduces the same pack shapes as
+// well as the same positions.
+const PACK_SPEC_SALT = 0x5b17;
+
+// Uses makeRng, the mulberry32 every other seeded draw in this codebase goes
+// through, rather than an inline LCG. The original wrote
+// `s = (s * 1664525 + 1013904223) >>> 0` and took `s % span`: bit k of a
+// mod-2^32 LCG has period at most 2^(k+1), so the low bits it was sampling
+// barely move. Measured over 5000 seeds before the fix, `horde` (4 packs,
+// sizes 5-8, span 4) produced a permutation of exactly {5,6,7,8} -- total 26 --
+// for every seed that will ever exist, because 4 successive values of the low
+// 2 bits cycle through all 4 residues; and `normal` (1 pack, span 2) picked 3
+// or 4 purely by the parity of one draw. mulberry32 mixes before it returns,
+// so Math.floor(rng() * span) is uniform over the whole span.
 function packSpecsFor({ packCount, packSizeMin, packSizeMax }, rngSeed) {
   const specs = [];
-  let s = (rngSeed ^ 0x5b17) >>> 0;
+  const rng = makeRng(((rngSeed >>> 0) ^ PACK_SPEC_SALT) >>> 0);
+  const span = Math.max(1, packSizeMax - packSizeMin + 1);
   for (let i = 0; i < packCount; i++) {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    const span = packSizeMax - packSizeMin + 1;
-    specs.push({ size: packSizeMin + (s % span) });
+    specs.push({ size: packSizeMin + Math.floor(rng() * span) });
   }
   return specs;
 }
