@@ -64,3 +64,60 @@ test('an unbounded world is skipped rather than flood-filled', () => {
   const unbounded = { seed: 1, chunkSize: 32, tileTypes: TILE_TYPES };
   assert.deepEqual(assertNavigable(unbounded, REQUIRED), []);
 });
+
+// Neither prior sealed-world test exercises the post-flood-fill "unreached
+// required tile" scan: the fully-sealed fixture's start tile is itself
+// unwalkable, so it takes the early-return before the BFS ever runs; the
+// open-world fixture runs the BFS but nothing is ever left unseen. This is
+// the scenario the module's own doc comment names -- "a doorway walled off
+// from the rest of the interior" -- and it is the only one that forces the
+// BFS to run AND leave something unreached, exercising the final membership
+// check that a regression could silently break.
+//
+// Needs its own tileTypes: stampBounds stamps the boundary ring with
+// map_wall/map_doorway regardless of the biome, so those names must resolve
+// to real walkable flags or the ring reads as always-walkable (undefined
+// def) rather than the walled ring this fixture depends on.
+const RING_TILE_TYPES = {
+  floor: { walkable: true, speed: 1 },
+  wall: { walkable: false, speed: 1 },
+  map_wall: { walkable: false, speed: 1 },
+  map_doorway: { walkable: true, speed: 1 },
+};
+// A 12x12 bounded world with a single N doorway, whose interior is entirely
+// `wall`-banded. The doorway gap itself is stamped by stampBounds and stays
+// walkable, but everything one tile south of it is sealed -- so the doorway
+// is reachable from itself, and the interior is not reachable from the
+// doorway.
+const doorwaySealedWorld = () => ({
+  seed: 7, chunkSize: 32, tileTypes: RING_TILE_TYPES,
+  width: 12, height: 12, doorways: new Set(['N']),
+  biomes: [{ name: 'Sealed', terrain_tiles: ['wall'], flora_types: [], creature_types: [] }],
+  biomeCell: 8,
+});
+
+test('a doorway cut off from the sealed interior is reported unreachable; the doorway itself is not', () => {
+  const { generateRegion } = require('../src/services/mapService');
+  const world = doorwaySealedWorld();
+  const grid = generateRegion(world, 0, 0, 12, 12);
+  // Prove the fixture is what it claims before trusting assertNavigable's
+  // verdict on it -- a fixture that quietly generated an open interior, or a
+  // doorway that didn't stamp, would make this test vacuous.
+  assert.equal(grid[0][6], 'map_doorway', `expected doorway cell to be map_doorway, got ${grid[0][6]}`);
+  assert.equal(grid[2][2], 'wall', `expected interior cell to be wall-banded, got ${grid[2][2]}`);
+
+  // Doorway first: it anchors the BFS (walkable by construction). The
+  // interior cell second: wall-banded and severed from the doorway gap by a
+  // solid ring of `wall` directly south of it.
+  const required = [
+    { row: 0, col: 6, what: 'north doorway' },
+    { row: 2, col: 2, what: 'interior chamber' },
+  ];
+  const unreachable = assertNavigable(world, required);
+  assert.equal(unreachable.length, 1);
+  assert.ok(unreachable.some((m) => m.includes('interior chamber')));
+  // Not just "interior chamber is present" -- confirm the reachable doorway
+  // is genuinely absent, not just outnumbered. A membership check that
+  // reported everything would still pass a weaker assertion.
+  assert.ok(!unreachable.some((m) => m.includes('north doorway')));
+});
