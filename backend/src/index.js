@@ -13,10 +13,16 @@ const { loadDecorationDefs } = require('./services/decorationDefs');
 const { loadBiomes } = require('./services/biomes');
 const { composeBiomePrompt } = require('./services/biomePrompt');
 const { buildWorldGenConfig } = require('./services/worldGenConfig');
+const { loadTileTypes } = require('./services/tileTypes');
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3101;
+
+// Helper to get tile types in the format expected by the game engine.
+// One-line adapter over services/tileTypes.js's loadTileTypes so the ~dozen
+// existing call sites below keep working unchanged.
+const getTileTypesMap = () => loadTileTypes(pool);
 
 // Middleware
 //
@@ -247,32 +253,6 @@ async function runMigrations() {
 if (require.main === module) {
   assertJwtSecretOrExit();
   runMigrations();
-}
-
-// Helper to get tile types in the format expected by the game engine
-async function getTileTypesMap() {
-  const result = await pool.query('SELECT * FROM tile_types ORDER BY id ASC');
-  const tileTypes = {};
-  result.rows.forEach(row => {
-    tileTypes[row.name] = {
-      id: row.id,
-      color: row.color,
-      walkable: row.walkable,
-      speed: row.speed,
-      image: row.image,
-      sprite: row.sprite || null,
-      render_mode: row.render_mode || 'color',
-      validNeighbors: row.valid_neighbors || [],
-      // Cache-busting key for the client's asset URLs. Generated keys are
-      // stable (approving overwrites static.png in place) and /api/assets sends
-      // max-age=300, so without this an approved regeneration keeps rendering
-      // the previous texture for five minutes.
-      updated_at: row.updated_at,
-      wall_height: row.wall_height ?? 0,
-      place_order: row.place_order ?? 0
-    };
-  });
-  return tileTypes;
 }
 
 // Decoration defs for GET /chunk's generateChunkDecorations call. Shared with
