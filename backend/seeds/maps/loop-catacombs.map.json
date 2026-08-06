@@ -8,7 +8,7 @@
       "grid": [0, 0],
       "seed": 3001,
       "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Meadow"], "biome_cell": 16,
+      "biomes": ["Catacombs"], "biome_cell": 16,
       "allowed_creature_types": ["Slime"],
       "is_entry": true,
       "entry_spawn": { "x": 3250, "y": 3250 }
@@ -19,7 +19,7 @@
       "grid": [-1, 0],
       "seed": 3002,
       "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Meadow"], "biome_cell": 16,
+      "biomes": ["Catacombs", "Ossuary"], "biome_cell": 16,
       "allowed_creature_types": ["Slime"],
       "is_entry": false
     },
@@ -29,7 +29,7 @@
       "grid": [1, 0],
       "seed": 3003,
       "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Meadow", "Mire"], "biome_cell": 16,
+      "biomes": ["Sunken Cistern"], "biome_cell": 16,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
     },
@@ -39,7 +39,7 @@
       "grid": [0, 1],
       "seed": 3004,
       "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Meadow", "Mire"], "biome_cell": 16,
+      "biomes": ["Blightworks", "Sunken Cistern"], "biome_cell": 16,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
     },
@@ -49,7 +49,7 @@
       "grid": [2, 0],
       "seed": 3005,
       "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Mire"], "biome_cell": 16,
+      "biomes": ["Hive Warrens"], "biome_cell": 16,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
     },
@@ -59,7 +59,7 @@
       "grid": [1, 1],
       "seed": 3006,
       "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Mire"], "biome_cell": 16,
+      "biomes": ["Deepvault"], "biome_cell": 16,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
     },
@@ -69,7 +69,7 @@
       "grid": [2, 1],
       "seed": 3007,
       "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Mire", "Frozen Waste"], "biome_cell": 16,
+      "biomes": ["Ossuary", "Frostvault"], "biome_cell": 16,
       "allowed_creature_types": ["Bat", "Skeleton"],
       "is_entry": false
     }

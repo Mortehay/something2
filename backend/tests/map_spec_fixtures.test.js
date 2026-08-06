@@ -20,6 +20,9 @@ const CREATURES = new Set(HOSTILE_CREATURES.map((c) => c.name));
 
 const specFiles = () => fs.readdirSync(MAPS_DIR).filter((f) => f.endsWith('.map.json'));
 
+const readSpec = (name) =>
+  JSON.parse(fs.readFileSync(path.join(MAPS_DIR, `${name}.map.json`), 'utf8'));
+
 // BFS hop distance from the entry over the UNDIRECTED link graph. Shared by
 // the cycle test and the escalation test below so both reason about the same
 // graph shape.
@@ -172,4 +175,37 @@ test('spine-descent escalates its level bands with depth', () => {
   );
   assert.ok(deepestMax > entryBand[1] * 2,
     'the deepest world should be meaningfully harder than the entry, not marginally');
+});
+
+// P3's whole point: the catacombs were meadows. Every dungeon world must now
+// name an underground biome, and no shipped spec may still reference the
+// surface biomes underground.
+test('every loop-catacombs world uses an underground biome', () => {
+  const spec = readSpec('loop-catacombs');
+  const surface = new Set(['Meadow', 'Deep Forest', 'Arid Dunes', 'Frozen Waste', 'Mire']);
+  const offenders = spec.worlds.filter((w) => (w.biomes || []).some((b) => surface.has(b)));
+  assert.deepEqual(offenders.map((w) => w.key), []);
+});
+
+test('spine-descent goes underground as it descends', () => {
+  const spec = readSpec('spine-descent');
+  const byKey = Object.fromEntries(spec.worlds.map((w) => [w.key, w.biomes]));
+  assert.deepEqual(byKey.entry, ['Meadow']);            // entry stays surface
+  assert.deepEqual(byKey.cache, ['Cavern']);            // underground by band 3-5
+  assert.deepEqual(byKey.end, ['Frostvault', 'Abyssal Rift']);
+});
+
+// Each hub world keeps its established biome FIRST so its character leads;
+// banding order is terrain_tiles order within a biome, but biome order across
+// a world's list matters too.
+test('hub-vale keeps its original biome first and gains one new surface biome', () => {
+  const spec = readSpec('hub-vale');
+  const expected = {
+    hub: ['Meadow', 'Highlands'],
+    forest: ['Deep Forest', 'Verdant Jungle'],
+    dunes: ['Arid Dunes', 'Ashfields'],
+    frozen: ['Frozen Waste', 'Sunken Ruins'],
+    mire: ['Mire', 'Storm Coast'],
+  };
+  for (const w of spec.worlds) assert.deepEqual(w.biomes, expected[w.key], w.key);
 });
