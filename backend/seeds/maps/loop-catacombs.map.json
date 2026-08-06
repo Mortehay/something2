@@ -9,7 +9,6 @@
       "seed": 3001,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Meadow"], "biome_cell": 16,
-      "creature_count": 2,
       "allowed_creature_types": ["Slime"],
       "is_entry": true,
       "entry_spawn": { "x": 3250, "y": 3250 }
@@ -21,7 +20,6 @@
       "seed": 3002,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Meadow"], "biome_cell": 16,
-      "creature_count": 3,
       "allowed_creature_types": ["Slime"],
       "is_entry": false
     },
@@ -32,7 +30,6 @@
       "seed": 3003,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Meadow", "Mire"], "biome_cell": 16,
-      "creature_count": 4,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
     },
@@ -43,7 +40,6 @@
       "seed": 3004,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Meadow", "Mire"], "biome_cell": 16,
-      "creature_count": 5,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
     },
@@ -54,7 +50,6 @@
       "seed": 3005,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Mire"], "biome_cell": 16,
-      "creature_count": 6,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
     },
@@ -65,7 +60,6 @@
       "seed": 3006,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Mire"], "biome_cell": 16,
-      "creature_count": 6,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
     },
@@ -76,7 +70,6 @@
       "seed": 3007,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Mire", "Frozen Waste"], "biome_cell": 16,
-      "creature_count": 9,
       "allowed_creature_types": ["Bat", "Skeleton"],
       "is_entry": false
     }

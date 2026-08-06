@@ -9,7 +9,6 @@
       "seed": 1001,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Meadow"], "biome_cell": 16,
-      "creature_count": 2,
       "allowed_creature_types": ["Slime"],
       "is_entry": true,
       "entry_spawn": { "x": 3250, "y": 3250 },
@@ -22,7 +21,6 @@
       "seed": 1002,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Meadow", "Deep Forest"], "biome_cell": 16,
-      "creature_count": 3,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false,
       "level_band": [2, 4]
@@ -34,7 +32,6 @@
       "seed": 1003,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Deep Forest"], "biome_cell": 16,
-      "creature_count": 4,
       "allowed_creature_types": ["Bat"],
       "is_entry": false,
       "level_band": [3, 5]
@@ -46,7 +43,6 @@
       "seed": 1004,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Deep Forest"], "biome_cell": 16,
-      "creature_count": 5,
       "allowed_creature_types": ["Skeleton"],
       "is_entry": false,
       "level_band": [4, 6]
@@ -58,7 +54,6 @@
       "seed": 1005,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Deep Forest", "Frozen Waste"], "biome_cell": 16,
-      "creature_count": 5,
       "allowed_creature_types": ["Bat", "Skeleton"],
       "is_entry": false,
       "level_band": [4, 6]
@@ -70,7 +65,6 @@
       "seed": 1006,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Frozen Waste"], "biome_cell": 16,
-      "creature_count": 6,
       "allowed_creature_types": ["Skeleton"],
       "is_entry": false,
       "level_band": [6, 9]
@@ -82,7 +76,6 @@
       "seed": 1007,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Frozen Waste"], "biome_cell": 16,
-      "creature_count": 7,
       "allowed_creature_types": ["Bat", "Skeleton"],
       "is_entry": false,
       "level_band": [6, 9]
@@ -94,7 +87,6 @@
       "seed": 1008,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Frozen Waste"], "biome_cell": 16,
-      "creature_count": 9,
       "allowed_creature_types": ["Skeleton"],
       "is_entry": false,
       "level_band": [9, 12]

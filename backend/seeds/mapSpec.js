@@ -29,6 +29,8 @@ const EDGE_DELTA = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
 // database-free require.
 const { VILLAGE_LIMITS } = require('../src/services/villages.js');
 
+const { DENSITY_NAMES } = require('../src/services/densityTiers.js');
+
 // True only when w.grid is a well-formed [int, int] pair. Shared by the
 // world loop (which reports the error) and the link loop (which must not
 // dereference grid[0]/grid[1] on a world that failed this check -- a link
@@ -81,8 +83,8 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     // duplicating it here would let this validator's numbers drift from the
     // API's. Without even this much, `width`/`height` are nullable columns
     // and seed-map.js passes w.width/w.height straight into the INSERT with
-    // no `?? ` fallback (unlike chunk_size/creature_count just below it in
-    // that file) -- an omitted width/height silently writes NULL, producing
+    // no `?? ` fallback (unlike chunk_size just below it in that file) -- an
+    // omitted width/height silently writes NULL, producing
     // a world the World Map tab reports as "not linkable" with no validator
     // error to explain why.
     if (!Number.isInteger(w.width)) {
@@ -106,6 +108,23 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       } else if (b[1] < b[0]) {
         errors.push(`world "${w.key}" level_band maximum must be >= its minimum`);
       }
+    }
+
+    // Optional. Validated here as well as by worlds_density_check for the
+    // same reason level_band is: `make reseed-map` clears every world BEFORE
+    // seeding, so a tier rejected only by the database would fail after the
+    // destruction, leaving the developer with no maps at all.
+    if (w.density !== undefined && !DENSITY_NAMES.includes(w.density)) {
+      errors.push(
+        `world "${w.key}" density must be one of ${DENSITY_NAMES.join(', ')} (got "${w.density}")`);
+    }
+
+    // Retired: creature_count is now derived from `density` by populateWorld
+    // and written back to the column. Accepting both would give one number two
+    // authored sources, and the spec's would silently lose on every populate.
+    if (w.creature_count !== undefined) {
+      errors.push(
+        `world "${w.key}" creature_count is no longer authored -- use "density" instead`);
     }
 
     if (w.village) {

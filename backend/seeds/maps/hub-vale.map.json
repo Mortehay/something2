@@ -9,7 +9,6 @@
       "seed": 2001,
       "width": 96, "height": 96, "chunk_size": 32,
       "biomes": ["Meadow"], "biome_cell": 32,
-      "creature_count": 2,
       "allowed_creature_types": ["Slime"],
       "is_entry": true,
       "entry_spawn": { "x": 4850, "y": 4850 },
@@ -25,7 +24,6 @@
       "seed": 2002,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Deep Forest"], "biome_cell": 16,
-      "creature_count": 4,
       "allowed_creature_types": ["Bat", "Skeleton"],
       "is_entry": false
     },
@@ -36,7 +34,6 @@
       "seed": 2003,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Arid Dunes"], "biome_cell": 16,
-      "creature_count": 5,
       "allowed_creature_types": ["Skeleton"],
       "is_entry": false
     },
@@ -47,7 +44,6 @@
       "seed": 2004,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Frozen Waste"], "biome_cell": 16,
-      "creature_count": 6,
       "allowed_creature_types": ["Bat", "Skeleton"],
       "is_entry": false
     },
@@ -58,7 +54,6 @@
       "seed": 2005,
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Mire"], "biome_cell": 16,
-      "creature_count": 7,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
     }

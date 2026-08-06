@@ -11,11 +11,11 @@ const valid = () => ({
   topology: 'spine',
   worlds: [
     { key: 'a', name: 'Alpha', grid: [0, 0], seed: 1, width: 64, height: 64,
-      chunk_size: 64, biomes: ['Meadow'], biome_cell: 32, creature_count: 1,
+      chunk_size: 64, biomes: ['Meadow'], biome_cell: 32,
       allowed_creature_types: ['Slime'], is_entry: true,
       entry_spawn: { x: 32, y: 32 } },
     { key: 'b', name: 'Beta', grid: [1, 0], seed: 2, width: 64, height: 64,
-      chunk_size: 64, biomes: ['Meadow'], biome_cell: 32, creature_count: 3,
+      chunk_size: 64, biomes: ['Meadow'], biome_cell: 32,
       allowed_creature_types: ['Wolf'], is_entry: false },
   ],
   links: [{ from: 'a', edge: 'E', to: 'b' }],
@@ -59,7 +59,7 @@ test('accepts a well-formed spec', () => {
 test('accepts a spec using all four edges, each matching its true grid delta', () => {
   const base = (key, name, grid) => ({
     key, name, grid, seed: 1, width: 64, height: 64, chunk_size: 64,
-    biomes: ['Meadow'], biome_cell: 32, creature_count: 1,
+    biomes: ['Meadow'], biome_cell: 32,
     allowed_creature_types: ['Slime'], is_entry: key === 'hub',
   });
   const spec = {
@@ -101,7 +101,7 @@ test('rejects two worlds in the same grid cell', () => {
 test('rejects two links leaving one world by the same edge', () => {
   const errs = errorsFor((s) => {
     s.worlds.push({ key: 'c', name: 'Gamma', grid: [0, 1], seed: 3, width: 64, height: 64,
-      chunk_size: 64, biomes: ['Meadow'], biome_cell: 32, creature_count: 1,
+      chunk_size: 64, biomes: ['Meadow'], biome_cell: 32,
       allowed_creature_types: ['Slime'], is_entry: false });
     s.links.push({ from: 'a', edge: 'E', to: 'c' });   // E is already taken
   });
@@ -134,8 +134,8 @@ test('rejects a world whose grid is not two integers', () => {
 
 // validateMapSpec never checked world-level width/height at all: they are
 // nullable columns and seed-map.js passes w.width/w.height straight into the
-// INSERT with no `?? ` fallback (unlike chunk_size/creature_count right next
-// to it), so an omitted width/height used to pass this validator cleanly and
+// INSERT with no `?? ` fallback (unlike chunk_size right next to it), so an
+// omitted width/height used to pass this validator cleanly and
 // write NULL at seed time -- producing a world the World Map tab reports as
 // "not linkable" with no validator error to explain why. These three cover
 // the gap: missing width, missing height, non-integer width.
@@ -168,7 +168,7 @@ test('rejects a five-spoke hub, because UNIQUE(from_world_id, edge) allows four'
   cells.forEach(([x, y], i) => {
     spec.worlds.push({ key: `s${i}`, name: `Spoke ${i}`, grid: [x, y], seed: 10 + i,
       width: 64, height: 64, chunk_size: 64, biomes: ['Meadow'], biome_cell: 32,
-      creature_count: 1, allowed_creature_types: ['Slime'], is_entry: false });
+      allowed_creature_types: ['Slime'], is_entry: false });
     spec.links.push({ from: 'a', edge: edges[i], to: `s${i}` });
   });
   assert.ok(validateMapSpec(spec).length > 0, 'a 5th spoke must be rejected');
@@ -312,4 +312,37 @@ test('level_band accepts a valid band and a fixed band', () => {
 
 test('level_band is optional', () => {
   assert.deepEqual(validateMapSpec(valid()), []);
+});
+
+test('density accepts every tier name', () => {
+  for (const d of ['dead', 'sparse', 'normal', 'dense', 'horde', 'swarm']) {
+    const spec = valid();
+    spec.worlds[0].density = d;
+    assert.deepEqual(validateMapSpec(spec), []);
+  }
+});
+
+test('density is optional', () => {
+  const spec = valid();
+  delete spec.worlds[0].density;
+  assert.deepEqual(validateMapSpec(spec), []);
+});
+
+test('an unknown density is rejected by name', () => {
+  const spec = valid();
+  spec.worlds[0].density = 'enormous';
+  const errors = validateMapSpec(spec);
+  assert.ok(errors.some((e) => e.includes('density') && e.includes('enormous')),
+    `expected a density error, got ${JSON.stringify(errors)}`);
+});
+
+// creature_count is now DERIVED from density by populateWorld. Leaving it
+// authorable would give one number two sources of truth, and the spec's copy
+// would silently lose.
+test('the retired creature_count field is rejected, pointing at density', () => {
+  const spec = valid();
+  spec.worlds[0].creature_count = 7;
+  const errors = validateMapSpec(spec);
+  assert.ok(errors.some((e) => e.includes('creature_count') && e.includes('density')),
+    `expected a creature_count error mentioning density, got ${JSON.stringify(errors)}`);
 });

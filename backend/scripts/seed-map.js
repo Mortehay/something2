@@ -66,27 +66,28 @@ async function applyMapSpec(pool, spec) {
       // fallback" for any world an admin hasn't dragged yet.
       const pos = w.grid ? graphPosition(w.grid) : { x: null, y: null };
       const r = await client.query(
-        `INSERT INTO worlds (name, seed, chunk_size, width, height, creature_count,
+        `INSERT INTO worlds (name, seed, chunk_size, width, height,
                              allowed_creature_types, entry_spawn, biomes, biome_cell,
-                             graph_x, graph_y, level_min, level_max)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12,$13,$14)
+                             graph_x, graph_y, level_min, level_max, density)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14)
          ON CONFLICT (name) DO UPDATE
            SET seed = EXCLUDED.seed, chunk_size = EXCLUDED.chunk_size,
                width = EXCLUDED.width, height = EXCLUDED.height,
-               creature_count = EXCLUDED.creature_count,
                allowed_creature_types = EXCLUDED.allowed_creature_types,
                entry_spawn = EXCLUDED.entry_spawn, biomes = EXCLUDED.biomes,
                biome_cell = EXCLUDED.biome_cell,
                graph_x = EXCLUDED.graph_x, graph_y = EXCLUDED.graph_y,
-               level_min = EXCLUDED.level_min, level_max = EXCLUDED.level_max
+               level_min = EXCLUDED.level_min, level_max = EXCLUDED.level_max,
+               density = EXCLUDED.density
          RETURNING id`,
-        [w.name, w.seed, w.chunk_size ?? 64, w.width, w.height, w.creature_count ?? 0,
+        [w.name, w.seed, w.chunk_size ?? 64, w.width, w.height,
          JSON.stringify(w.allowed_creature_types ?? []),
          w.entry_spawn ? JSON.stringify(w.entry_spawn) : null,
          JSON.stringify(w.biomes ?? []), w.biome_cell ?? null,
          pos.x, pos.y,
          w.level_band ? w.level_band[0] : 1,
-         w.level_band ? w.level_band[1] : 1],
+         w.level_band ? w.level_band[1] : 1,
+         w.density ?? 'normal'],
       );
       idByKey.set(w.key, r.rows[0].id);
       worldsWritten += 1;

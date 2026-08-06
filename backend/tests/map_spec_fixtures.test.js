@@ -102,45 +102,18 @@ test('every shipped spec validates against the live catalogs', () => {
   }
 });
 
-test('difficulty escalates with distance from the entry', () => {
-  // An adventure map whose creature counts are flat is not an adventure. This
-  // asserts the shape of the content, not just its syntax -- specifically,
-  // that a world one hop farther from the entry never dips below what a
-  // closer world already offered, not merely that a single farthest world is
-  // the biggest number ("flat everywhere plus one outlier" would pass a
-  // max>min-and-entry-is-min check without ever escalating with distance).
-  for (const f of specFiles()) {
-    const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, f), 'utf8'));
-    const entry = spec.worlds.find((w) => w.is_entry);
-    const counts = spec.worlds.map((w) => w.creature_count);
-    assert.ok(Math.max(...counts) > Math.min(...counts), `${f}: every world has the same creature_count`);
-    assert.equal(entry.creature_count, Math.min(...counts),
-      `${f}: the entry world should be the safest`);
-
-    const dist = bfsDistances(spec);
-    // bfsDistances buckets a world unreachable from the entry under the key
-    // `undefined` (dist.get(w.key) returns undefined, never throws), and
-    // sorting a mixed undefined/number array yields NaN from the comparator,
-    // so ordering silently becomes unspecified instead of failing loudly.
-    // Pin the sibling-reachability guard here: if it's ever weakened, this
-    // turns a silent mis-bucket into a loud test failure.
-    assert.equal(dist.size, spec.worlds.length, `${f}: not every world is reachable from the entry`);
-    const minByDistance = new Map();
-    for (const w of spec.worlds) {
-      const d = dist.get(w.key);
-      const prev = minByDistance.get(d);
-      minByDistance.set(d, prev === undefined ? w.creature_count : Math.min(prev, w.creature_count));
-    }
-    const orderedDistances = [...minByDistance.keys()].sort((a, b) => a - b);
-    let prevMin = -Infinity;
-    for (const d of orderedDistances) {
-      const minAtD = minByDistance.get(d);
-      assert.ok(minAtD >= prevMin,
-        `${f}: distance ${d}'s safest world (creature_count ${minAtD}) is easier than a world closer to the entry (creature_count ${prevMin})`);
-      prevMin = minAtD;
-    }
-  }
-});
+// "difficulty escalates with distance from the entry" (creature_count-based)
+// lived here until SOMET-246 retired creature_count as an authored spec
+// field -- it is now DERIVED by populateWorld from `density`, and this task
+// deliberately ships all three example specs on the 'normal' default (no
+// per-world density; authoring real tiers is a later sub-project's job per
+// docs/superpowers/plans/2026-08-06-p1-world-population.md). With every
+// world at the same tier there is no per-spec escalating number left to
+// assert on here. spine-descent's own level_band ramp is still covered by
+// "spine-descent escalates its level bands with depth" below, and
+// reachability of every world from the entry is still enforced by
+// validateMapSpec itself via "every shipped spec validates against the live
+// catalogs" above.
 
 test('hub-vale has a village in its hub and at most four spokes', () => {
   const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, 'hub-vale.map.json'), 'utf8'));
