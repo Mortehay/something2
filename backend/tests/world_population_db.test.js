@@ -9,7 +9,7 @@ const describeDb = URL ? test : test.skip;
 // Fixture worlds are named zzPop* and deleted by name, unconditionally, in a
 // finally. Never delete by an id captured mid-test: if the test fails before
 // the capture, the row leaks into the shared dev database forever.
-const FIXTURES = ['zzPopHorde', 'zzPopDead'];
+const FIXTURES = ['zzPopHorde', 'zzPopDead', 'zzPopNoAllowlist'];
 
 async function cleanup(pool) {
   await pool.query('DELETE FROM worlds WHERE name = ANY($1::text[])', [FIXTURES]);
@@ -20,13 +20,13 @@ async function cleanup(pool) {
 // empty and the world would be legitimately unpopulated.
 const ALLOWED = ['Skeleton', 'Bat'];
 
-async function makeWorld(pool, name, density) {
+async function makeWorld(pool, name, density, allowedNames = ALLOWED) {
   const r = await pool.query(
     `INSERT INTO worlds (name, seed, chunk_size, width, height, density,
                          allowed_creature_types, biomes, biome_cell, level_min, level_max)
      VALUES ($1, 4242, 32, 64, 64, $2, $3::jsonb, $4::jsonb, 16, 3, 5)
      RETURNING *`,
-    [name, density, JSON.stringify(ALLOWED), JSON.stringify(['Deep Forest'])],
+    [name, density, JSON.stringify(allowedNames), JSON.stringify(['Deep Forest'])],
   );
   return r.rows[0];
 }
@@ -145,6 +145,39 @@ describeDb('the dead tier leaves a world genuinely empty', async () => {
       await client.query('COMMIT');
     } finally { client.release(); }
     assert.equal(result.total, 0);
+  } finally {
+    await cleanup(pool);
+    await pool.end();
+  }
+});
+
+// Covers the gap the Task 4 review found: allowed_creature_types = [] (the
+// column's own default -- migration 1714440027000_bounded_worlds.js:16) with
+// a non-dead density used to still write creature_count = density.scatterCount
+// (49 for horde) before the empty-allowlist early return, leaving the admin
+// UI showing a nonzero count over a genuinely empty map. Density is 'horde'
+// specifically so scatterCount is nonzero -- against the old write-before-
+// checking ordering this assertion would see 49, not 0.
+describeDb('an empty allowlist zeroes creature_count rather than leaving a stale value', async () => {
+  const pool = new Pool({ connectionString: URL });
+  try {
+    await cleanup(pool);
+    const world = await makeWorld(pool, 'zzPopNoAllowlist', 'horde', []);
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      result = await populateWorld(client, world, { rngSeed: 21 });
+      await client.query('COMMIT');
+    } finally { client.release(); }
+    assert.equal(result.total, 0);
+
+    const r = await pool.query('SELECT creature_count FROM worlds WHERE id = $1', [world.id]);
+    assert.equal(r.rows[0].creature_count, 0);
+
+    const rows = await pool.query(
+      'SELECT count(*)::int AS n FROM world_creatures WHERE world_id = $1', [world.id]);
+    assert.equal(rows.rows[0].n, 0);
   } finally {
     await cleanup(pool);
     await pool.end();

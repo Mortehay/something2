@@ -57,13 +57,17 @@ async function populateWorld(client, worldRow, { rngSeed }) {
     ? worldRow.allowed_creature_types : [];
   const density = resolveDensity(worldRow.density, worldRow.width, worldRow.height);
 
-  // Persist the resolved scatter count so worlds.creature_count keeps meaning
-  // "how many scattered creatures this world holds" for the admin UI and every
-  // existing reader. The tier is the authored value; this column is derived.
-  await client.query('UPDATE worlds SET creature_count = $1 WHERE id = $2',
-    [density.scatterCount, worldRow.id]);
-
-  if (allowedNames.length === 0) return { scattered: 0, packed: 0, total: 0 };
+  // creature_count is written from what actually lands in world_creatures,
+  // not the tier's target -- placeMapCreatures can under-deliver when
+  // rejection sampling exhausts maxAttempts on a hostile map, and a world
+  // with no allowed types or no matching hostile entity_types rows must show
+  // 0, not a stale count from a previous populate. Every early return below
+  // writes creature_count itself for that reason, rather than sharing one
+  // write at the end.
+  if (allowedNames.length === 0) {
+    await client.query('UPDATE worlds SET creature_count = 0 WHERE id = $1', [worldRow.id]);
+    return { scattered: 0, packed: 0, total: 0 };
+  }
 
   const et = await client.query(
     `SELECT name, hp, defense, resistances, faction FROM entity_types
@@ -73,7 +77,10 @@ async function populateWorld(client, worldRow, { rngSeed }) {
   // Guards are structural, never wild spawns -- the same filter the re-roll
   // route already applied before this module existed.
   const hostileTypes = et.rows.filter((t) => (t.faction || 'hostile') !== 'guard');
-  if (hostileTypes.length === 0) return { scattered: 0, packed: 0, total: 0 };
+  if (hostileTypes.length === 0) {
+    await client.query('UPDATE worlds SET creature_count = 0 WHERE id = $1', [worldRow.id]);
+    return { scattered: 0, packed: 0, total: 0 };
+  }
 
   const tileTypes = await loadTileTypes(client);
   const villages = await fetchVillages(client, worldRow.id);
@@ -85,6 +92,13 @@ async function populateWorld(client, worldRow, { rngSeed }) {
   const scatter = placeMapCreatures(cfg, density.scatterCount, hostileTypes, rngSeed);
   const packed = placeCreaturePacks(
     cfg, packSpecsFor(density, rngSeed), hostileTypes, rngSeed);
+
+  // Persisted from scatter.length (what was actually placed), not
+  // density.scatterCount (what was asked for), so worlds.creature_count keeps
+  // meaning "how many scattered creatures this world holds" for the admin UI
+  // and every existing reader even when placement ships short.
+  await client.query('UPDATE worlds SET creature_count = $1 WHERE id = $2',
+    [scatter.length, worldRow.id]);
 
   for (const c of [...scatter, ...packed]) {
     await client.query(
