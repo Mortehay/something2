@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
+const { NEW_DECORATIONS, SIZE_FIXES } = require('../seeds/data/decorationTypes.js');
 
 const ORIGINAL = new Set(['Meadow', 'Deep Forest', 'Arid Dunes', 'Frozen Waste', 'Mire']);
 const added = () => STARTER_BIOMES.filter((b) => !ORIGINAL.has(b.name));
@@ -19,6 +20,37 @@ test("every biome's terrain_tiles exist in the tile catalog", () => {
   const dangling = [];
   for (const b of STARTER_BIOMES) {
     for (const t of b.terrain_tiles) if (!tiles.has(t)) dangling.push(`${b.name}->${t}`);
+  }
+  assert.deepEqual(dangling, []);
+});
+
+// The flora half of the same rule, and it covers ALL 32 biomes on purpose.
+//
+// biomes_seed.test.js used to carry this check, but its loop was scoped to the
+// original five to accommodate P3's deliberately empty fauna -- and the flora
+// assertion went with it. This file then picked up the terrain check for every
+// biome but not the flora one, leaving a dangling flora reference in any of the
+// 27 new biomes completely unguarded. That is the exact bug class this repo has
+// already paid for (see the LIVE_CREATURES note in biomes_seed.test.js: `Wolf`
+// sat dangling for weeks behind a check that compared the data to itself).
+//
+// DERIVED, never hand-listed, for that same reason. The names come from the two
+// checked-in sources that actually create these rows: SIZE_FIXES keys are the
+// three decorations migration 1714440003000 seeds (Tree/Stone/IceRock -- the
+// only enumeration of them outside the migration's own SQL), and
+// NEW_DECORATIONS is what seed-catalogs.js inserts. A hand-written literal here
+// would go stale the moment a decoration is renamed and would then agree with
+// nothing.
+const LIVE_FLORA = new Set([...Object.keys(SIZE_FIXES), ...NEW_DECORATIONS.map((d) => d.name)]);
+
+test("every biome's flora_types exist in the decoration catalog", () => {
+  // Guard the derivation itself: if both seed sources were emptied or renamed
+  // away, the set would be empty and the loop below would pass by vacuity
+  // while every reference in the file was dangling.
+  assert.ok(LIVE_FLORA.size >= 7, `flora set collapsed to ${LIVE_FLORA.size} names`);
+  const dangling = [];
+  for (const b of STARTER_BIOMES) {
+    for (const f of b.flora_types) if (!LIVE_FLORA.has(f)) dangling.push(`${b.name}->${f}`);
   }
   assert.deepEqual(dangling, []);
 });
