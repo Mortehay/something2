@@ -47,7 +47,15 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
   const others = (allMaps || []).filter(m => m.id !== world.id);
   const linkFor = (edge) => links.find(l => l.edge === edge)?.to_world_id || '';
   const [name, setName] = useState(world.name);
-  const [count, setCount] = useState(world.creature_count ?? 0);
+  // NOT state, and NOT editable. worlds.creature_count is derived: every
+  // population pass (seeding and the Re-roll button both go through
+  // populateWorld) overwrites it with how many creatures were actually
+  // scattered, from the world's `density` tier. It used to be an editable
+  // number input that PUT a value nothing read, so setting it to 5 and
+  // re-rolling produced 15 creatures and then jumped the field to 12
+  // (SOMET-246). Read straight off the prop so it always shows what is
+  // persisted rather than a stale first-render copy.
+  const creatureCount = world.creature_count ?? 0;
   const [allowed, setAllowed] = useState(new Set(world.allowed_creature_types || []));
   const [isEntry, setIsEntry] = useState(!!world.is_entry);
   const cx = world.width ? Math.floor((world.width * 100) / 2) : 0;
@@ -74,7 +82,10 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
     if (biomesLoading) return;
     update.mutate({
       id: world.id, name, width: world.width, height: world.height,
-      creature_count: Number(count), allowed_creature_types: [...allowed],
+      // Echoed back unchanged, never edited here: PUT /api/worlds/:id treats a
+      // missing creature_count as 0, so omitting it would zero the derived
+      // column on every unrelated save (renaming the map, toggling entry).
+      creature_count: creatureCount, allowed_creature_types: [...allowed],
       is_entry: isEntry, entry_spawn: isEntry ? { x: Number(spawnX), y: Number(spawnY) } : null,
       // Ordered by the biome CATALOG's own order (id ASC), not by checkbox
       // click order -- worlds.biomes is order-sensitive on the backend (biome
@@ -96,11 +107,13 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
           onClick={() => window.confirm('Delete this map?') && del.mutate(world.id)} />
       </Row>
       <Row>
-        <label style={{ color: 'var(--s2-text-muted)' }}>Creatures:</label>
-        <Button $bg="var(--s2-btn-neutral)" onClick={() => setCount(c => Math.max(0, Number(c) - 1))}>−</Button>
-        <Input type="number" min="0" value={count} style={{ width: 70 }}
-          onChange={e => setCount(e.target.value)} />
-        <Button $bg="var(--s2-btn-neutral)" onClick={() => setCount(c => Number(c) + 1)}>＋</Button>
+        <label style={{ color: 'var(--s2-text-muted)' }}>Creatures scattered:</label>
+        <Input type="number" value={creatureCount} readOnly disabled style={{ width: 70 }}
+          title="Derived from this map's density tier — not editable here" />
+        <span style={{ color: 'var(--s2-text-dim)', fontSize: '0.85em' }}>
+          reported, not set — the count comes from this map's density tier. Use Re-roll creatures below,
+          or change the tier in the map spec and re-seed.
+        </span>
       </Row>
       <CheckGrid>
         {creatureTypes.map(t => (
