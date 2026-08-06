@@ -109,6 +109,75 @@ test('packs do not reuse the scatter stream draws', () => {
   assert.notEqual(`${scatter[0].x},${scatter[0].y}`, `${packed[0].x},${packed[0].y}`);
 });
 
+// --- levels and stat scaling ----------------------------------------------
+//
+// SOMET-246 final review, finding 5. placeCreaturePacks carries its own copy
+// of the rollCreatureLevel/scaleCreature block, but every fixture above uses
+// boundedWorld(), which sets no levelMin/levelMax -- so rollCreatureLevel
+// returns 1 for all of them and scaleCreature is a no-op. Hardcoding
+// `level: 1` inside emit() would have kept this entire file green while every
+// pack member in every world shipped unscaled. These four tests are the ones
+// that go red for that. Fixture shape follows creature_spawn_levels.test.js,
+// which covers the same block on the scatter side.
+
+test('pack members roll levels inside the world band, not a hardcoded 1', () => {
+  const world = boundedWorld({ levelMin: 3, levelMax: 5 });
+  const rows = placeCreaturePacks(world, [{ size: 8 }], CREATURES, 4242);
+  assert.equal(rows.length, 8, 'fixture placed a short pack — the level assertions would be weak');
+  for (const c of rows) {
+    assert.ok(c.level >= 3 && c.level <= 5, `level ${c.level} escaped the band [3,5]`);
+  }
+  // A pinned `level: 1` fails the band check above; a pinned `level: 3` (the
+  // band floor) would not, so require the roll to actually move within a pack.
+  assert.ok(new Set(rows.map((c) => c.level)).size > 1,
+    'every member rolled the same level — the level draw is not varying per member');
+});
+
+test('pack members scale hp/damage/defense from their level', () => {
+  // Band pinned to a single value so every member's stats have one exact
+  // hand-computed answer. A pack is single-type, so only one of the two
+  // expected stat rows below is exercised per run -- assert against whichever
+  // type the pack actually rolled.
+  const world = boundedWorld({ levelMin: 4, levelMax: 4 });
+  const rows = placeCreaturePacks(world, [{ size: 6 }], CREATURES, 4242);
+  assert.equal(rows.length, 6, 'fixture placed a short pack — the scaling assertions would be weak');
+  for (const c of rows) {
+    assert.equal(c.level, 4);
+    // Level 4 = 3 steps. goblin: round(12 * (1 + 0.15*3)) = round(17.4) = 17.
+    //                    wolf:   round(8 * 1.45)          = round(11.6) = 12.
+    assert.equal(c.hp, c.type === 'goblin' ? 17 : 12);
+    // Damage from the CREATURE_BASE_DAMAGE baseline of 5: round2(5 * 1.3) = 6.5.
+    assert.equal(c.damage, 6.5);
+    // goblin base defense 1: round2(1 + 0.5*3) = 2.5. wolf base 0: 1.5.
+    assert.equal(c.defense, c.type === 'goblin' ? 2.5 : 1.5);
+  }
+});
+
+test('an unscaled pack member is distinguishable from a scaled one', () => {
+  // The direct counterfactual for "scaleCreature was never called": at level 1
+  // the same fixture must produce the entity type's raw hp, and at a high
+  // level it must not. Without this, a pack function that dropped scaleCreature
+  // entirely would still satisfy the band check above.
+  const flat = placeCreaturePacks(boundedWorld(), [{ size: 4 }], [CREATURES[0]], 4242);
+  const high = placeCreaturePacks(
+    boundedWorld({ levelMin: 10, levelMax: 10 }), [{ size: 4 }], [CREATURES[0]], 4242);
+  assert.equal(flat.length, 4);
+  assert.equal(high.length, 4);
+  assert.equal(flat[0].hp, 12, 'an unbanded world must carry the goblin\'s base hp through');
+  // Level 10 = 9 steps: round(12 * (1 + 0.15*9)) = round(28.2) = 28.
+  assert.equal(high[0].hp, 28);
+  assert.equal(high[0].defense, 5.5);   // round2(1 + 0.5*9)
+});
+
+test('the pack level roll is deterministic for a fixed seed', () => {
+  const world = boundedWorld({ levelMin: 2, levelMax: 9 });
+  const a = placeCreaturePacks(world, [{ size: 6 }], CREATURES, 8080);
+  const b = placeCreaturePacks(world, [{ size: 6 }], CREATURES, 8080);
+  assert.equal(a.length, 6);
+  assert.deepEqual(a.map((c) => [c.type, c.x, c.y, c.level, c.hp]),
+                   b.map((c) => [c.type, c.x, c.y, c.level, c.hp]));
+});
+
 test('returns [] for an unbounded world', () => {
   const rows = placeCreaturePacks(
     { seed: 1, chunkSize: 64, tileTypes: TILE_TYPES }, [{ size: 5 }], CREATURES, 1);
