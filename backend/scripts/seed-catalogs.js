@@ -44,6 +44,46 @@ async function seedOneTile(db, t) {
   );
 }
 
+// CASE, not plain EXCLUDED, for creature_types -- for the same reason the four
+// tile columns above are COALESCE'd, and it is the one biome column that needs
+// it.
+//
+// P3's 27 new biomes ship `creature_types: []` on purpose: the catalog holds
+// only four creatures, so authoring the intended fauna now would seed 27
+// dangling references. P4 fills them. Meanwhile the Biomes admin UI is a
+// first-class authoring surface for that field, so an unconditional
+// `creature_types = EXCLUDED.creature_types` would revert an admin's
+// hand-authored fauna to [] on the very next `make seed-catalogs` -- exactly
+// what this file's header rule forbids, and it would silently re-create the
+// empty-worlds state the user has accepted only as a temporary condition.
+//
+// So: a seed entry supplying a NON-EMPTY list still wins (the original five
+// stay authoritative, and P4's edits will land normally); a seed entry
+// supplying an EMPTY one keeps whatever the row already holds. The other seven
+// columns are populated on every entry, and `biomes` has exactly these eight
+// columns, so there is no column-omission hazard here of the kind the tile
+// path had.
+//
+// Split out of seedCatalogs, mirroring seedOneTile, so the preservation rule
+// can be tested against the REAL statement rather than a restatement of it.
+async function seedOneBiome(db, b) {
+  await db.query(
+    `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color)
+     VALUES ($1,$2::jsonb,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7,$8)
+     ON CONFLICT (name) DO UPDATE
+       SET terrain_tiles = EXCLUDED.terrain_tiles, flora_types = EXCLUDED.flora_types,
+           creature_types = CASE
+             WHEN jsonb_array_length(EXCLUDED.creature_types) = 0 THEN biomes.creature_types
+             ELSE EXCLUDED.creature_types END,
+           palette = EXCLUDED.palette,
+           art_style = EXCLUDED.art_style, exclusions = EXCLUDED.exclusions,
+           color = EXCLUDED.color`,
+    [b.name, JSON.stringify(b.terrain_tiles ?? []), JSON.stringify(b.flora_types ?? []),
+     JSON.stringify(b.creature_types ?? []), JSON.stringify(b.palette ?? []),
+     b.art_style, b.exclusions, b.color],
+  );
+}
+
 async function seedCatalogs(pool) {
   let tiles = 0;
   for (const t of DEFAULT_TILE_TYPES) {
@@ -53,18 +93,7 @@ async function seedCatalogs(pool) {
 
   let biomes = 0;
   for (const b of STARTER_BIOMES) {
-    await pool.query(
-      `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color)
-       VALUES ($1,$2::jsonb,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7,$8)
-       ON CONFLICT (name) DO UPDATE
-         SET terrain_tiles = EXCLUDED.terrain_tiles, flora_types = EXCLUDED.flora_types,
-             creature_types = EXCLUDED.creature_types, palette = EXCLUDED.palette,
-             art_style = EXCLUDED.art_style, exclusions = EXCLUDED.exclusions,
-             color = EXCLUDED.color`,
-      [b.name, JSON.stringify(b.terrain_tiles), JSON.stringify(b.flora_types),
-       JSON.stringify(b.creature_types), JSON.stringify(b.palette),
-       b.art_style, b.exclusions, b.color],
-    );
+    await seedOneBiome(pool, b);
     biomes += 1;
   }
 
@@ -141,7 +170,7 @@ async function seedCatalogs(pool) {
   return { tiles, biomes, decorations, creatures, drops };
 }
 
-module.exports = { seedCatalogs, seedOneTile };
+module.exports = { seedCatalogs, seedOneTile, seedOneBiome };
 
 if (require.main === module) {
   const env = dotenv.config({ path: path.resolve(__dirname, '../../.env') }).parsed || {};

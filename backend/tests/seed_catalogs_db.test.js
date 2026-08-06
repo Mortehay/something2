@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { seedCatalogs, seedOneTile } = require('../scripts/seed-catalogs.js');
+const { seedCatalogs, seedOneTile, seedOneBiome } = require('../scripts/seed-catalogs.js');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS, SIZE_FIXES } = require('../seeds/data/decorationTypes.js');
@@ -225,6 +225,128 @@ test('seeding does not delete a hand-added biome', async (t) => {
     assert.equal(r.rowCount, 1, 'seeding deleted a biome it did not create');
   } finally {
     await pool.query('DELETE FROM biomes WHERE name = $1', [CANARY]).catch(() => {});
+    await pool.end();
+  }
+});
+
+// The biome mirror of 'seeding preserves a prompt the seed file does not
+// specify'. P3's 27 new biomes ship `creature_types: []` as a deliberate
+// placeholder for P4, and the Biomes admin UI is a first-class authoring
+// surface for that field -- so an unconditional
+// `creature_types = EXCLUDED.creature_types` reverted an admin's hand-authored
+// fauna to [] on the very next `make seed-catalogs`, silently.
+test('seeding preserves fauna an admin authored, when the seed entry ships an empty list', async (t) => {
+  if (!requireTestDb(t, 'seedOneBiome upserts a real biomes row')) return;
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} — biome fauna preservation is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  const NAME = 'zzFaunaKeep';
+  const seedEntry = {
+    name: NAME, terrain_tiles: ['grass'], flora_types: ['Stone'],
+    creature_types: [],                       // the P3 placeholder
+    palette: ['a', 'b'], art_style: 'x', exclusions: 'y', color: '#123456',
+  };
+  try {
+    // First seed: the row is created with the placeholder, as `make
+    // seed-catalogs` does for all 27 today.
+    await seedOneBiome(pool, seedEntry);
+    const created = await pool.query('SELECT creature_types FROM biomes WHERE name = $1', [NAME]);
+    assert.deepEqual(created.rows[0].creature_types, [],
+      'setup: a brand-new biome must start from the seed file, placeholder and all');
+
+    // An admin then populates the fauna in the Biomes admin UI.
+    await pool.query(
+      `UPDATE biomes SET creature_types = '["Slime","Bat"]'::jsonb WHERE name = $1`, [NAME]);
+
+    // ...and someone runs the seeder again.
+    await seedOneBiome(pool, seedEntry);
+
+    const r = await pool.query(
+      'SELECT creature_types, terrain_tiles, art_style FROM biomes WHERE name = $1', [NAME]);
+    assert.deepEqual(r.rows[0].creature_types, ['Slime', 'Bat'],
+      'the seeder reverted hand-authored fauna to the placeholder');
+    // The preservation must be scoped to creature_types alone -- the other
+    // columns are still the seed file's to own, or this "fix" would have
+    // turned the whole biome upsert into a no-op.
+    assert.deepEqual(r.rows[0].terrain_tiles, ['grass']);
+    assert.equal(r.rows[0].art_style, 'x');
+  } finally {
+    await pool.query('DELETE FROM biomes WHERE name = $1', [NAME]).catch(() => {});
+    await pool.end();
+  }
+});
+
+// The mirror-image bug the CASE could introduce: never writing fauna at all.
+// P4 fills these lists from the seed file, so a NON-EMPTY seed entry must
+// still win over whatever the row holds.
+test('seeding still overwrites fauna when the seed entry does specify a list', async (t) => {
+  if (!requireTestDb(t, 'seedOneBiome upserts a real biomes row')) return;
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} — biome fauna write is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  const NAME = 'zzFaunaWrite';
+  const base = {
+    name: NAME, terrain_tiles: ['grass'], flora_types: ['Stone'],
+    palette: ['a', 'b'], art_style: 'x', exclusions: 'y', color: '#123456',
+  };
+  try {
+    await seedOneBiome(pool, { ...base, creature_types: ['Slime'] });
+    await pool.query(
+      `UPDATE biomes SET creature_types = '["Wolf"]'::jsonb WHERE name = $1`, [NAME]);
+    await seedOneBiome(pool, { ...base, creature_types: ['Skeleton', 'Bat'] });
+    const r = await pool.query('SELECT creature_types FROM biomes WHERE name = $1', [NAME]);
+    assert.deepEqual(r.rows[0].creature_types, ['Skeleton', 'Bat'],
+      'a seed entry that specifies fauna must still be authoritative');
+  } finally {
+    await pool.query('DELETE FROM biomes WHERE name = $1', [NAME]).catch(() => {});
+    await pool.end();
+  }
+});
+
+// End-to-end through the command a developer actually runs. The two tests
+// above pin seedOneBiome; this one pins that `make seed-catalogs` reaches it,
+// on a real biome that ships the placeholder. Restores the value it READ, not
+// a hard-coded one, so an interrupted run cannot invent a state.
+test('a full seedCatalogs run does not cost an admin the fauna they authored', async (t) => {
+  if (!requireTestDb(t, 'this test writes fauna into a real biomes row before restoring it')) return;
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} — end-to-end fauna preservation is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  const NAME = 'Ossuary'; // one of the 27 shipping creature_types: []
+  let original = null;
+  try {
+    await seedCatalogs(pool);
+    const before = await pool.query('SELECT creature_types FROM biomes WHERE name = $1', [NAME]);
+    assert.equal(before.rowCount, 1, `${NAME} is not seeded — cannot exercise this test`);
+    original = before.rows[0].creature_types;
+    assert.deepEqual(original, [], `${NAME} must still ship the P4 placeholder for this test to mean anything`);
+
+    // Real creature names, so an interrupted run leaves a valid catalog rather
+    // than a dangling reference.
+    await pool.query(
+      `UPDATE biomes SET creature_types = '["Skeleton"]'::jsonb WHERE name = $1`, [NAME]);
+    await seedCatalogs(pool);
+
+    const r = await pool.query('SELECT creature_types FROM biomes WHERE name = $1', [NAME]);
+    assert.deepEqual(r.rows[0].creature_types, ['Skeleton'],
+      'make seed-catalogs reverted hand-authored fauna');
+  } finally {
+    if (original !== null) {
+      await pool.query('UPDATE biomes SET creature_types = $2::jsonb WHERE name = $1',
+        [NAME, JSON.stringify(original)]).catch(() => {});
+    }
     await pool.end();
   }
 });
