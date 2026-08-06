@@ -10,10 +10,14 @@ const fs = require('fs');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const { validateMapSpec } = require('../seeds/mapSpec.js');
-const { setLink, setPortalLink } = require('../src/services/mapLinks.js');
-const { createVillage } = require('../src/services/villages.js');
+const { fetchLinks, setLink, setPortalLink } = require('../src/services/mapLinks.js');
+const { createVillage, fetchVillages } = require('../src/services/villages.js');
 const { insertPortalGuards } = require('../src/services/dungeonGuards.js');
 const { populateWorld } = require('../src/services/worldPopulation.js');
+const { assertNavigable } = require('../src/services/navigability.js');
+const { buildWorldGenConfig } = require('../src/services/worldGenConfig.js');
+const { loadTileTypes } = require('../src/services/tileTypes.js');
+const { loadBiomes } = require('../src/services/biomes.js');
 
 // Pixels per grid cell for the World Map tab's canvas coordinates. Deriving
 // graph_x/graph_y from the same grid the links were validated against is what
@@ -31,6 +35,56 @@ const GRID_SPACING = 220;
 // Pure so it's unit-testable without a database: see tests/seed_map.test.js.
 function graphPosition(grid) {
   return { x: grid[0] * GRID_SPACING, y: grid[1] * GRID_SPACING };
+}
+
+// The tiles a world must keep connected: where a player starts, and every way
+// in or out. Tile coordinates, not pixels -- CREATURE_TILE_PX is 100.
+//
+// `doorwayEdges` is the edge list already fetched from map_links for THIS
+// world (fetchLinks(client, worldId), non-portal rows) -- not spec.links
+// filtered on `l.from === w.key`. Compass links are bidirectional: setLink
+// writes a mirror row, and stampBounds stamps a doorway gap for every edge
+// fetchLinks returns, in both directions. A world that is only a link
+// TARGET in the spec (e.g. `{ from: 'a', edge: 'E', to: 'b' }` for world
+// "b") has no row in spec.links with `from === 'b'`, so filtering on that
+// would silently produce zero doorway requirements for it -- exactly the
+// case where a doorway is stamped into the wall ring but never checked for
+// reachability. Portals stay sourced from spec.links: a portal is declared
+// once with both endpoints, so it doesn't have this problem.
+function requiredTilesFor(w, spec, row, doorwayEdges) {
+  const out = [];
+  if (row.entry_spawn && Number.isFinite(row.entry_spawn.x)) {
+    out.push({
+      row: Math.floor(row.entry_spawn.y / 100),
+      col: Math.floor(row.entry_spawn.x / 100),
+      what: 'entry spawn',
+    });
+  }
+  // DOORWAY_TILES is 3 and the gap is centred, spanning midCol-1..midCol+1,
+  // so the centre column is always inside it.
+  const midCol = Math.floor(row.width / 2);
+  const midRow = Math.floor(row.height / 2);
+  const edges = new Set(doorwayEdges);
+  for (const e of edges) {
+    if (e === 'N') out.push({ row: 0, col: midCol, what: 'doorway N' });
+    if (e === 'S') out.push({ row: row.height - 1, col: midCol, what: 'doorway S' });
+    if (e === 'W') out.push({ row: midRow, col: 0, what: 'doorway W' });
+    if (e === 'E') out.push({ row: midRow, col: row.width - 1, what: 'doorway E' });
+  }
+  for (const l of (spec.links || [])) {
+    if (l.kind !== 'portal') continue;
+    if (l.from === w.key) {
+      out.push({ row: Math.floor(l.from_y / 100), col: Math.floor(l.from_x / 100), what: `portal source to ${l.to}` });
+    }
+    if (l.to === w.key) {
+      out.push({ row: Math.floor(l.to_y / 100), col: Math.floor(l.to_x / 100), what: `portal arrival from ${l.from}` });
+    }
+  }
+  // A doorway tile is walkable by construction (stampBounds stamps
+  // map_doorway on the ring), so it always anchors the fill safely. Ordering
+  // matters: assertNavigable starts from the FIRST entry.
+  out.sort((a, b) => (a.what.startsWith('doorway') ? -1 : 0) - (b.what.startsWith('doorway') ? -1 : 0));
+  return out;
 }
 
 async function applyMapSpec(pool, spec) {
@@ -93,6 +147,16 @@ async function applyMapSpec(pool, spec) {
       );
       idByKey.set(w.key, r.rows[0].id);
       worldsWritten += 1;
+
+      // Terrain is derived from `biomes`/`seed`/`biome_cell`, and world_chunks
+      // caches generated terrain. Re-pointing a world at a new biome without
+      // clearing this makes it serve stale chunks forever.
+      //
+      // Safe to delete unconditionally only since P1 (SOMET-246): that INSERT
+      // used to double as activateChunk's once-only creature-spawn flag, and
+      // P1 deleted the block it gated. The table is now purely a deterministic
+      // cache -- a deleted row costs a regeneration, nothing more.
+      await client.query('DELETE FROM world_chunks WHERE world_id = $1', [r.rows[0].id]);
     }
 
     // After every world exists, so a link can never reference a missing
@@ -168,6 +232,29 @@ async function applyMapSpec(pool, spec) {
       const wr = await client.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
       const n = await populateWorld(client, wr.rows[0], { rngSeed: w.seed });
       creaturesWritten += n.total;
+    }
+
+    // Ten biomes band impassable terrain (cave_wall / rubble / chasm). A blob
+    // over a spawn, or a doorway walled off from the interior, produces a
+    // dungeon nobody can enter -- and walking into it is the only other way to
+    // find out. Generation is deterministic, so checking here is exact.
+    const tileTypes = await loadTileTypes(client);
+    for (const w of spec.worlds) {
+      const worldId = idByKey.get(w.key);
+      const wr = await client.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
+      const row = wr.rows[0];
+      const worldLinks = await fetchLinks(client, worldId);
+      const doorways = worldLinks.filter((l) => l.edge !== 'PORTAL').map((l) => l.edge);
+      const biomes = await loadBiomes(client, row.biomes);
+      const villages = await fetchVillages(client, worldId);
+      const cfg = buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes });
+
+      const required = requiredTilesFor(w, spec, row, doorways);
+      const problems = assertNavigable(cfg, required);
+      if (problems.length) {
+        throw new Error(
+          `world "${w.key}" is not navigable:\n  - ${problems.join('\n  - ')}`);
+      }
     }
 
     // LAST: setting is_entry clears it on every other world (index.js:1542),

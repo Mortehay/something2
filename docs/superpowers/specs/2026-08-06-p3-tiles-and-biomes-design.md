@@ -103,7 +103,7 @@ Emberdepths · Frostvault · Deepvault · Hive Warrens · Sunken Cistern ·
 Umbral Warren · Crystal Hollows · Blightworks · Gloomfen · Sunken Foundry
 
 **Abyssal (8):** Abyssal Rift · Infernal Gate · Shattered Vault ·
-Fallen Sanctum · Dreaming Dark · Titan's Grave · Pestilent Deep · The Maw
+Fallen Sanctum · Dreaming Dark · Grave of Titans · Pestilent Deep · The Maw
 
 ### Fauna ships empty
 

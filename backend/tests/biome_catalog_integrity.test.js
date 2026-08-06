@@ -61,6 +61,6 @@ test('exactly ten biomes band one of the three new impassable tiles', () => {
   assert.deepEqual(withBlocked, [
     'Abyssal Rift', 'Deepvault', 'Dreaming Dark', 'Fallen Sanctum',
     'Infernal Gate', 'Pestilent Deep', 'Shattered Vault', 'The Maw',
-    "Titan's Grave", 'Umbral Warren',
+    'Grave of Titans', 'Umbral Warren',
   ].sort());
 });

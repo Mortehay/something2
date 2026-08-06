@@ -47,8 +47,27 @@ const spec = () => ({
   topology: 'spine',
   worlds: [
     { key: 'a', name: 'zzTestAlpha', grid: [5, -3], seed: 991, width: 64, height: 64,
-      chunk_size: 64, biomes: [], biome_cell: 32,
-      allowed_creature_types: [], is_entry: true, entry_spawn: { x: 32, y: 32 } },
+      // Tile-center of a 64x64 world (col/row 32), not the wall-ring corner
+      // {x:32,y:32} this used to be: stampBounds always walls the outer ring
+      // of a bounded world regardless of biome, so a spawn at pixel (32,32)
+      // -- tile (0,0) -- sits ON that wall and is unreachable by
+      // construction. Harmless before this task's navigability check
+      // existed; SOMET-247 Task 5 makes it a hard failure, same as it would
+      // be for a real shipped spec.
+      //
+      // biomes: ['Deep Forest'], not []: with no biome declared, sampleTerrain
+      // falls back to the FULL non-structural tile catalog (mapService.js's
+      // worldConfig, "pre-biome behaviour, preserved bit-for-bit"), which now
+      // includes cave_wall/rubble/chasm alongside the pre-existing water --
+      // four impassable tile names banded in by noise. That makes an empty
+      // biomes list a per-seed coin flip for whether the doorway and the
+      // entry spawn land in the same connected region (seed 993 in
+      // populationSpec below happened to land on the wrong side of it; this
+      // fixture's seed 991 happened not to). Deep Forest's terrain_tiles
+      // (leafs/highgrass/earth) are all walkable, so declaring it removes the
+      // coin flip instead of relying on a seed that happens to get lucky.
+      chunk_size: 64, biomes: ['Deep Forest'], biome_cell: 32,
+      allowed_creature_types: [], is_entry: true, entry_spawn: { x: 3200, y: 3200 } },
     { key: 'b', name: 'zzTestBeta', grid: [6, -3], seed: 992, width: 64, height: 64,
       chunk_size: 64, biomes: [], biome_cell: 32,
       allowed_creature_types: [], is_entry: false,
@@ -351,8 +370,20 @@ const populationSpec = () => ({
   topology: 'spine',
   worlds: [
     { key: 'a', name: 'zzTestPopA', grid: [9, -3], seed: 993, width: 64, height: 64,
-      chunk_size: 64, biomes: [], biome_cell: 32,
-      allowed_creature_types: ['Slime'], is_entry: true, entry_spawn: { x: 32, y: 32 } },
+      // Tile-center (32,32), not the wall-ring corner -- see the matching
+      // comment on spec() above.
+      //
+      // biomes: ['Meadow'], not []: 'Deep Forest' (used on spec()'s zzTestAlpha,
+      // where allowed_creature_types is [] so it can't matter) would work for
+      // walkability but its creature_types is ['Wolf','Bat','Skeleton'] --
+      // creatureTileCandidates (mapService.js) intersects a world's allowlist
+      // with the local biome's creature_types once ANY biome is declared, so
+      // pairing it with allowed_creature_types: ['Slime'] below would zero out
+      // every placement and make "seeding populates every world with
+      // creatures" vacuous. Meadow's terrain_tiles (grass/highgrass/earth) are
+      // all walkable AND its creature_types includes 'Slime'.
+      chunk_size: 64, biomes: ['Meadow'], biome_cell: 32,
+      allowed_creature_types: ['Slime'], is_entry: true, entry_spawn: { x: 3200, y: 3200 } },
     { key: 'b', name: 'zzTestPopB', grid: [10, -3], seed: 994, width: 64, height: 64,
       chunk_size: 64, biomes: [], biome_cell: 32,
       allowed_creature_types: ['Slime'], is_entry: false },
@@ -470,6 +501,69 @@ test('seeding a spec with a village is idempotent and keeps hostiles out of the 
     });
   } finally {
     await cleanup(pool);
+    await pool.end();
+  }
+});
+
+// Retrofitting a world's biomes changes its terrain, and world_chunks caches
+// generated terrain. Without this, a re-pointed world serves stale chunks.
+test('seeding clears cached chunks for worlds it writes', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — chunk-cache clearing is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await cleanup(pool);
+    await withEntryPreserved(pool, () => applyMapSpec(pool, populationSpec()));
+    const ids = await pool.query(
+      'SELECT id FROM worlds WHERE name = ANY($1::text[])',
+      [populationSpec().worlds.map((w) => w.name)]);
+    // Plant a chunk, then re-seed and confirm it is gone.
+    await pool.query(
+      `INSERT INTO world_chunks (world_id, cx, cy, data) VALUES ($1, 0, 0, '[]'::jsonb)
+       ON CONFLICT (world_id, cx, cy) DO NOTHING`, [ids.rows[0].id]);
+    const before = await pool.query(
+      'SELECT count(*)::int AS n FROM world_chunks WHERE world_id = $1', [ids.rows[0].id]);
+    assert.equal(before.rows[0].n, 1, 'fixture must have planted a chunk');
+
+    await withEntryPreserved(pool, () => applyMapSpec(pool, populationSpec()));
+    const after = await pool.query(
+      'SELECT count(*)::int AS n FROM world_chunks WHERE world_id = $1', [ids.rows[0].id]);
+    assert.equal(after.rows[0].n, 0);
+  } finally {
+    await cleanup(pool);
+    await pool.end();
+  }
+});
+
+// A world whose biome bands nothing but impassable terrain must fail the seed
+// rather than ship a dungeon nobody can enter.
+test('seeding refuses a world sealed by its own terrain', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — sealed-world guard is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await cleanup(pool);
+    await pool.query(
+      `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color)
+       VALUES ('zzSealed', '["cave_wall"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '', '', '#000000')
+       ON CONFLICT (name) DO UPDATE SET terrain_tiles = EXCLUDED.terrain_tiles`);
+    const spec = populationSpec();
+    spec.worlds.forEach((w) => { w.biomes = ['zzSealed']; });
+    await assert.rejects(
+      () => withEntryPreserved(pool, () => applyMapSpec(pool, spec)),
+      /unreachable|outside the map/,
+    );
+  } finally {
+    await cleanup(pool);
+    await pool.query(`DELETE FROM biomes WHERE name = 'zzSealed'`);
     await pool.end();
   }
 });

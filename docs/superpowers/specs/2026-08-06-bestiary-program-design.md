@@ -152,7 +152,7 @@ so tier IV sits inside the ceiling with headroom.
 | Chaos | Shattered Vault | lightning | IV |
 | Fallen | Fallen Sanctum | ice | IV |
 | Nightmare | Dreaming Dark | physical | IV |
-| Titan | Titan's Grave | physical | IV |
+| Titan | Grave of Titans | physical | IV |
 | Plague | Pestilent Deep | fire | III–IV |
 | Eldritch | The Maw | all four, partial | IV |
 

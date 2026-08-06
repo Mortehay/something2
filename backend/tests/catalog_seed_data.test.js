@@ -40,7 +40,7 @@ test('every tile seed row is fully formed', () => {
 });
 
 test('the moved catalog arrays are still intact', () => {
-  assert.equal(STARTER_BIOMES.length, 5);
+  assert.ok(STARTER_BIOMES.length >= 5, 'seed file must stay a superset of the migration biomes');
   assert.ok(NEW_DECORATIONS.length > 0);
 });
 
