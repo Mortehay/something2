@@ -494,58 +494,17 @@ function collectPathCells(cfg, rMin, cMin, rows, cols) {
 // creatures", nothing in the codebase ever called it outside its own tests.
 
 const CREATURE_TILE_PX = 100;      // world px per tile (matches frontend MAP_TILE_SIZE)
-const CREATURE_SALT = 0x5eed1e;    // separate the creature roll from terrain fields
-const CREATURE_SPAWN_CHANCE = 0.01; // ~1% of tiles seed a creature (sparse)
-// A THIRD salt, distinct from both the spawn roll and the type pick. Reusing
-// either would tie a creature's level to its type or its existence, so every
-// Wolf in a chunk would share one level and the band would collapse.
+// Distinct from the type-pick draw, so a creature's level never ties to its
+// type or its existence -- every Wolf in a chunk would otherwise share one
+// level and the band would collapse. No longer read anywhere: its only
+// caller was the per-chunk random-roll spawn path, retired as unreachable
+// dead code (SOMET-246). Kept because placeMapCreatures/placeCreaturePacks
+// are close enough in shape that a future per-tile path may want it again.
 const LEVEL_SALT = 0x1e7e1;
 // The baseline a creature's damage scales from. Creature attack damage is
 // otherwise the flat CREATURE_DAMAGE constant in authority/creatures.js; this
 // mirrors it so an unscaled level-1 creature is byte-identical to today.
 const CREATURE_BASE_DAMAGE = 5;
-
-// Deterministic per-chunk creature spawn. Pure function of (seed, cx, cy,
-// creatureTypes). Each tile gets a seeded roll; a hit spawns a creature of a
-// deterministically-picked type at the tile center (world pixels). Empty
-// creatureTypes -> no creatures.
-function spawnChunkCreatures(world, cx, cy, creatureTypes) {
-  if (!creatureTypes || creatureTypes.length === 0) return [];
-  const cfg = worldConfig(world);
-  const N = cfg.chunkSize;
-  const out = [];
-  for (let lr = 0; lr < N; lr++) {
-    for (let lc = 0; lc < N; lc++) {
-      const gRow = cy * N + lr;
-      const gCol = cx * N + lc;
-      const roll = hash2(cfg.seed ^ CREATURE_SALT, gCol, gRow);
-      if (roll >= CREATURE_SPAWN_CHANCE) continue;
-      // pick a type deterministically from a second hash
-      const pick = hash2((cfg.seed ^ CREATURE_SALT) >>> 1, gCol, gRow);
-      const t = creatureTypes[Math.min(creatureTypes.length - 1, Math.floor(pick * creatureTypes.length))];
-      const levelDraw = hash2(cfg.seed ^ LEVEL_SALT, gCol, gRow);
-      const level = rollCreatureLevel(levelDraw, world.levelMin, world.levelMax);
-      const scaled = scaleCreature(
-        { hp: t.hp || 10, damage: CREATURE_BASE_DAMAGE, defense: Number(t.defense ?? 0) || 0 },
-        level,
-      );
-      out.push({
-        type: t.name,
-        x: gCol * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
-        y: gRow * CREATURE_TILE_PX + CREATURE_TILE_PX / 2,
-        hp: scaled.hp,
-        damage: scaled.damage,
-        level,
-        facing: 'S',
-        // Scaled from the entity type's base defense so a spawned creature
-        // arrives with the data CreatureSim builds its `mit` from.
-        defense: scaled.defense,
-        resistances: t.resistances || {},
-      });
-    }
-  }
-  return out;
-}
 
 // The tile-validity rules every creature placement obeys, in ONE place.
 //
@@ -575,8 +534,9 @@ function creatureTileCandidates(world, cfg, gRow, gCol, allowedTypes) {
 // Count-based creature placement for a BOUNDED map. Rejection-samples `count`
 // interior tiles (strictly inside the wall ring), keeping only walkable,
 // non-wall, non-doorway tiles, and assigns a random allowed type. Pure and
-// deterministic given `rngSeed`. Returns rows shaped like spawnChunkCreatures.
-// Unbounded worlds return [] (they keep the per-chunk roll).
+// deterministic given `rngSeed`. Returns rows shaped like placeCreaturePacks'.
+// Unbounded worlds return [] (world creation now requires width and height
+// together, SOMET-246, so this is a defensive no-op rather than a live path).
 function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40) {
   const cfg = worldConfig(world);
   if (!cfg.bounds) return [];
@@ -623,10 +583,11 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
   return out;
 }
 
-// A second stream off the same seed, for the reason CREATURE_SALT and
-// LEVEL_SALT exist: sharing one stream with scatter would make pack anchors
-// start from draws scatter already consumed, clustering packs on top of the
-// scattered creatures instead of somewhere else on the map.
+// A second stream off the same seed, for the same reason a per-tile salt
+// separated draws in the old per-chunk spawn roll: sharing one stream with
+// scatter would make pack anchors start from draws scatter already
+// consumed, clustering packs on top of the scattered creatures instead of
+// somewhere else on the map.
 const PACK_SALT = 0x9ac4;
 
 // Tiles from the anchor a member may sit. Grows with pack size so a pack of
@@ -1083,7 +1044,6 @@ module.exports = {
     pathAnchor,
     pathSegmentCells,
     collectPathCells,
-    spawnChunkCreatures,
     placeMapCreatures,
     placeCreaturePacks,
     creatureTileCandidates,

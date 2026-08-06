@@ -7,13 +7,12 @@ const { attachAuthority } = require('../src/authority/server.js');
 
 const SECRET = 'test-secret';
 
-// activateChunk (F-018 / SOMET-198) now takes a client from pool.connect()
-// to wrap the world_chunks INSERT and the creature INSERTs it gates in one
-// transaction, in addition to the plain pool.query() every fake pool here
-// already answers. The fake pools in this file have no real transactional
-// semantics to preserve (they don't assert on BEGIN/COMMIT/ROLLBACK), so a
-// client that proxies straight back to the same `query` fn is a faithful
-// stand-in.
+// activateChunk takes a client from pool.connect() to wrap the world_chunks
+// INSERT in a transaction (BEGIN/COMMIT/ROLLBACK), in addition to the plain
+// pool.query() every fake pool here already answers. The fake pools in this
+// file have no real transactional semantics to preserve (they don't assert
+// on BEGIN/COMMIT/ROLLBACK), so a client that proxies straight back to the
+// same `query` fn is a faithful stand-in.
 function withConnect(pool) {
   pool.connect = async () => ({ query: pool.query, release: () => {} });
   return pool;
@@ -223,121 +222,6 @@ test('a transiently failed chunk activation is retried, not stuck unloaded', asy
     sawWolf = m.creatures.some((c) => c.id === 'wolf1');
   }
   assert.ok(sawWolf, 'wolf must appear via retry within 1.5s of the transient failure');
-
-  ws.close(); handle.close(); server.close();
-});
-
-// F-018 (SOMET-198): the world_chunks INSERT is activateChunk's once-only
-// spawn flag (`ins.rowCount > 0` gates the creature-spawn loop). Before the
-// fix that INSERT committed on its own via a plain pool.query, independent
-// of the creature INSERTs it gates — so a failure partway through spawning
-// still left the flag permanently set, and every retry then saw the chunk
-// "already materialized" and silently skipped spawning forever. Reproduces
-// with a REAL transactional fake pool (BEGIN/COMMIT/ROLLBACK tracked, not
-// just answered) so it actually distinguishes "rolled back together" from
-// "committed regardless": seed 16 / chunk_size 8 deterministically spawns
-// two wolves in chunk (0,0) (confirmed via spawnChunkCreatures directly).
-// The player's default (no persisted position) spawn also activates the 8
-// chunks neighboring (0,0), which can have their own incidental spawns at
-// this seed — so `throwOnFirstInsertInBbox` only fires for an INSERT whose
-// (x,y) falls inside chunk (0,0)'s own bbox, and the bbox SELECT is filtered
-// by params like the real query, keeping the assertion scoped to chunk
-// (0,0) regardless of what its neighbors do or when they activate.
-function fakePoolTxn({ seed, chunkSize, bbox }) {
-  const committedChunks = new Set();     // "cx,cy" keys actually materialized
-  const committedCreatures = [];         // rows visible to the bbox SELECT
-  let inBboxInsertCalls = 0;
-  let thrown = false;
-  let nextRowId = 1;
-
-  // `pendingRef` is `null` for a plain (autocommit) pool.query call — mirrors
-  // the OLD, unfixed activateChunk, which issued the world_chunks and
-  // world_creatures INSERTs via plain pool.query with no transaction at all,
-  // so each committed the instant it ran. Each pool.connect() call below
-  // hands out a { current: null } box of its OWN, so two chunk activations
-  // running concurrently (recomputeActive fires one per neighborhood chunk)
-  // never see or clobber each other's in-flight transaction — the same
-  // isolation a real pg client gets from the pool.
-  function makeQuery(pendingRef) {
-    return async function query(sql, params) {
-      if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: String(seed), chunk_size: chunkSize }] };
-      if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
-      if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
-      if (/FROM entity_types WHERE is_creature/i.test(sql)) return { rows: [{ name: 'Wolf', color: '#c0392b', hp: 10 }] };
-      if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
-      if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
-      if (/FROM item_types/i.test(sql)) return { rows: [] };
-      if (/FROM player_items/i.test(sql)) return { rows: [] };
-      if (/FROM player_equipment/i.test(sql)) return { rows: [] };
-
-      if (pendingRef) {
-        if (/^\s*BEGIN\s*$/i.test(sql)) { pendingRef.current = { chunks: new Set(), creatures: [] }; return {}; }
-        if (/^\s*COMMIT\s*$/i.test(sql)) {
-          for (const k of pendingRef.current.chunks) committedChunks.add(k);
-          committedCreatures.push(...pendingRef.current.creatures);
-          pendingRef.current = null;
-          return {};
-        }
-        if (/^\s*ROLLBACK\s*$/i.test(sql)) { pendingRef.current = null; return {}; }
-      }
-
-      const store = (pendingRef && pendingRef.current) || { chunks: committedChunks, creatures: committedCreatures };
-
-      if (/INSERT INTO world_chunks/i.test(sql)) {
-        const key = `${params[1]},${params[2]}`;
-        if (committedChunks.has(key)) return { rows: [], rowCount: 0 };
-        store.chunks.add(key);
-        return { rows: [{ id: 'chunk1' }], rowCount: 1 };
-      }
-      if (/INSERT INTO world_creatures/i.test(sql)) {
-        const [, , x, y] = params;
-        const inBbox = x >= bbox.x0 && x < bbox.x1 && y >= bbox.y0 && y < bbox.y1;
-        if (inBbox) {
-          inBboxInsertCalls++;
-          if (!thrown && inBboxInsertCalls === 1) { thrown = true; throw new Error('simulated creature insert failure'); }
-        }
-        const row = {
-          id: `c${nextRowId++}`, type: params[1], x, y, hp: params[4], facing: params[5],
-          home_x: null, home_y: null, color: '#c0392b', defense: 0, resistances: {}, faction: null,
-        };
-        store.creatures.push(row);
-        return { rows: [] };
-      }
-      if (/FROM world_creatures/i.test(sql)) {
-        const [, xMin, xMax, yMin, yMax] = params;
-        return { rows: committedCreatures.filter((c) => c.x >= xMin && c.x < xMax && c.y >= yMin && c.y < yMax) };
-      }
-      if (/FROM world_items/i.test(sql)) return { rows: [] };
-      if (/UPDATE world_creatures/i.test(sql)) return { rows: [] };
-      return { rows: [] };
-    };
-  }
-
-  return {
-    query: makeQuery(null),
-    connect: async () => ({ query: makeQuery({ current: null }), release: () => {} }),
-  };
-}
-
-test('F-018: a chunk whose spawn fails mid-way is retried as a whole (world_chunks row and creature INSERTs commit or roll back together)', async () => {
-  // chunk_size 8, tile 100px -> chunk (0,0) spans [0,800) x [0,800).
-  const pool = fakePoolTxn({ seed: 16, chunkSize: 8, bbox: { x0: 0, x1: 800, y0: 0, y1: 800 } });
-  const { url, handle, server } = await bootWith(pool);
-  const ws = connect(url, 1);
-  await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
-  await nextMsg(ws, 'joined');
-
-  // Poll for up to ~1.5s of 5Hz-ish recompute cycles, same budget as the
-  // transient-failure test above. Scoped strictly to chunk (0,0)'s own bbox
-  // so neighboring chunks' incidental spawns can't pad or hide the count.
-  let wolfCount = 0;
-  const start = Date.now();
-  while (wolfCount < 2 && Date.now() - start < 1500) {
-    const m = await nextMsg(ws, 'creatures');
-    wolfCount = m.creatures.filter((c) => c.type === 'Wolf' && c.x >= 0 && c.x < 800 && c.y >= 0 && c.y < 800).length;
-  }
-  assert.equal(wolfCount, 2, 'both of chunk (0,0)\'s wolves must eventually appear — a mid-spawn failure must not permanently mark the chunk materialized with fewer creatures than it should have');
 
   ws.close(); handle.close(); server.close();
 });

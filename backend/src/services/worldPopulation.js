@@ -4,8 +4,9 @@
 // reachable. seed-map.js never populated at all -- it wrote creature_count
 // onto the row and stopped -- so a seeded world stayed empty until someone
 // clicked re-roll in the admin UI, one world at a time. The per-chunk path
-// that looked like a fallback (spawnChunkCreatures) was gated on
-// !isBoundedWorld, false for every world that has ever existed.
+// that looked like a fallback was gated on !isBoundedWorld, false for every
+// world that has ever existed -- and has since been deleted as unreachable
+// dead code (SOMET-246).
 //
 // Both callers -- applyMapSpec and POST /api/worlds/:id/creatures -- go
 // through here and nowhere else, so seeding and re-rolling can never again

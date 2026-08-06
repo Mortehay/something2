@@ -79,7 +79,7 @@ test('returns [] when count < 1 or allowedTypes empty', () => {
   assert.deepEqual(placeMapCreatures(boundedWorld(), 5, [], 1), []);
 });
 
-test('row shape matches spawnChunkCreatures (pixel center, carried stats)', () => {
+test('row shape: pixel-centered coordinates, stats carried from the entity type', () => {
   const rows = placeMapCreatures(boundedWorld(), 1, [CREATURES[0]], 3);
   const c = rows[0];
   assert.equal((c.x - 50) % 100, 0);

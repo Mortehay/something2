@@ -1,10 +1,11 @@
 // Creature level: the roll, and what a level does to a creature's stats.
 //
 // This module is PURE and takes a plain number in [0,1) rather than an RNG,
-// because the two spawn paths have different deterministic sources and
-// neither may be replaced:
-//   - spawnChunkCreatures (mapService.js:502) hashes per tile via hash2
-//   - placeMapCreatures  (mapService.js:537) draws from makeRng(rngSeed)
+// so its two callers can each supply their own deterministic source without
+// this module caring what it is:
+//   - placeMapCreatures  (mapService.js:540) draws from makeRng(rngSeed)
+//   - placeCreaturePacks (mapService.js:609) draws from its own makeRng
+//     stream, salted (PACK_SALT) so it never reuses placeMapCreatures' draws
 // Handing this module the draw instead of the generator keeps both callers
 // deterministic on their own terms and keeps this file trivially testable.
 //

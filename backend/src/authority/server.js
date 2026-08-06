@@ -9,7 +9,7 @@ const { loadProgression, applyDeath } = require('../services/progressionStore.js
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes } = require('./creatures');
-const { spawnChunkCreatures, isBoundedWorld, chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
+const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
 const { fetchShop } = require('../services/merchantStock');
@@ -339,7 +339,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
-        const { creatureTypes, creatureTypeIds, hostileCreatureTypes, creatureGold } = await loadCreatureTypes(pool);
+        const { creatureTypes, creatureTypeIds, creatureGold } = await loadCreatureTypes(pool);
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const goldItemTypeId = resolveGoldItemTypeId(itemTypes);
@@ -366,7 +366,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         const entry = {
           worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
-          tileTypes, creatureTypes, creatureTypeIds, hostileCreatureTypes, creatureGold, goldItemTypeId, links, portalLinks, villages,
+          tileTypes, creatureTypes, creatureTypeIds, creatureGold, goldItemTypeId, links, portalLinks, villages,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -520,7 +520,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
     );
   }
 
-  // Materialize + spawn (once) + load a chunk's creatures into the sim.
+  // Materialize + load a chunk's creatures into the sim. Creature placement
+  // itself no longer happens here (SOMET-246): bounded worlds have their
+  // creatures written to world_creatures once, at world-creation/re-roll
+  // time, by populateWorld -- this function only persists the chunk's
+  // generated terrain and then loads whatever world_creatures rows already
+  // fall inside it.
   async function activateChunk(entry, chunkKey) {
     if (entry.chunkLoads.has(chunkKey)) return;
     entry.chunkLoads.add(chunkKey);
@@ -529,44 +534,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const N = entry.row.chunk_size;
       const grid = entry.world.map.getChunk(cx, cy); // deterministic terrain
 
-      // The world_chunks INSERT is this function's once-only spawn flag
-      // (ins.rowCount > 0 below), so it and the creature INSERTs it gates
-      // must commit or fail TOGETHER — otherwise a failure partway through
-      // spawning still leaves the flag committed, and every retry then sees
-      // the chunk "already materialized" and silently skips spawning
-      // forever, with no recovery short of deleting the world_chunks row by
-      // hand (F-018 / SOMET-198). Same pool.connect() + BEGIN/COMMIT/
-      // ROLLBACK + client.release() shape as trade.js.
+      // BEGIN/COMMIT/ROLLBACK + client.release() kept deliberately (SOMET-246)
+      // even though this now wraps a single INSERT: same pool.connect() shape
+      // as trade.js, and collapsing it is out of scope for retiring the dead
+      // per-chunk spawn path this transaction used to also gate.
       const client = await pool.connect();
-      let rowCount = 0;
       try {
         await client.query('BEGIN');
-        const ins = await client.query(
+        await client.query(
           `INSERT INTO world_chunks (world_id, cx, cy, data) VALUES ($1, $2, $3, $4)
            ON CONFLICT (world_id, cx, cy) DO NOTHING RETURNING id`,
           [entry.worldId, cx, cy, JSON.stringify(grid)],
         );
-        rowCount = ins.rowCount;
-        // Bounded maps use count-based placement (placeMapCreatures, written
-        // to world_creatures by the admin re-roll route); they must NOT run
-        // the per-tile roll here, which would scatter creatures onto the
-        // wall ring.
-        if (rowCount > 0 && entry.hostileCreatureTypes.length && !isBoundedWorld(entry.row)) {
-          const spawned = spawnChunkCreatures(
-            {
-              seed: Number(entry.row.seed), chunkSize: N, tileTypes: entry.tileTypes,
-              levelMin: entry.row.level_min, levelMax: entry.row.level_max,
-            },
-            cx, cy, entry.hostileCreatureTypes,
-          );
-          for (const c of spawned) {
-            await client.query(
-              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-              [entry.worldId, c.type, c.x, c.y, c.hp, c.facing, c.level, c.damage, c.defense],
-            );
-          }
-        }
         await client.query('COMMIT');
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});

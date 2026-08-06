@@ -4,7 +4,6 @@ const {
   CreatureSim, AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE,
   CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN, loadCreatureTypes,
 } = require('../src/authority/creatures.js');
-const { spawnChunkCreatures } = require('../src/services/mapService.js');
 const {
   applyElementEffect, SHOCK_INTERRUPT_MS, SHOCK_IMMUNITY_MS,
 } = require('../src/authority/effects.js');
@@ -229,17 +228,6 @@ test('a creature row with no defense/resistances still gets an inert mit (never 
   const sim = new CreatureSim(map, () => 0.5);
   sim.addCreatures([{ id: 'w1', type: 'Wolf', x: 0, y: 0, hp: 10, facing: 'S', color: '#c00' }]);
   assert.deepEqual(sim.creatures.get('w1').mit, { defense: 0, resistances: {} });
-});
-
-test('spawnChunkCreatures carries defense and resistances from the entity type', () => {
-  const world = { seed: 1, chunkSize: 8, tileTypes: { grass: { walkable: true, speed: 1 } } };
-  const types = [{ name: 'Slime', hp: 12, color: '#0f0', defense: 1, resistances: { fire: 0.6 } }];
-  const spawned = spawnChunkCreatures(world, 0, 0, types);
-  assert.ok(spawned.length > 0, 'chunk (0,0) must spawn at least one creature for this to prove anything');
-  for (const c of spawned) {
-    assert.equal(c.defense, 1);
-    assert.deepEqual(c.resistances, { fire: 0.6 });
-  }
 });
 
 // The mock pools elsewhere ignore the SQL string, so every maths test above

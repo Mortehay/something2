@@ -30,12 +30,11 @@ async function openPool() {
   }
 }
 
-// activateChunk (F-018 / SOMET-198) now opens a client via pool.connect() to
-// wrap the world_chunks INSERT and the creature INSERTs it gates in one
-// transaction, on top of the plain pool.query() every fake pool below
-// already answers. None of these fakes assert on BEGIN/COMMIT/ROLLBACK, so a
-// client that proxies straight back to the same `query` fn is a faithful
-// stand-in.
+// activateChunk opens a client via pool.connect() to wrap the world_chunks
+// INSERT in a transaction (BEGIN/COMMIT/ROLLBACK), on top of the plain
+// pool.query() every fake pool below already answers. None of these fakes
+// assert on BEGIN/COMMIT/ROLLBACK, so a client that proxies straight back to
+// the same `query` fn is a faithful stand-in.
 function withConnect(pool) {
   pool.connect = async () => ({ query: pool.query, release: () => {} });
   return pool;

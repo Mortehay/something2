@@ -23,7 +23,7 @@ function buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes }) {
     biomes: biomes || [],
     // null (not undefined) so worldConfig's derive-from-bounds branch runs.
     biomeCell: Number.isFinite(row.biome_cell) ? row.biome_cell : null,
-    // Read by both spawnChunkCreatures and placeMapCreatures (mapService.js)
+    // Read by both placeMapCreatures and placeCreaturePacks (mapService.js)
     // to roll a creature's level via rollCreatureLevel. A row missing either
     // column (or this mapping) reaches that call as `undefined`, which
     // rollCreatureLevel treats as "no band" and silently rolls level 1 for

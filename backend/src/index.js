@@ -1402,13 +1402,17 @@ app.post('/api/worlds', adminGuard, async (req, res) => {
     if (chunkSize < 1 || chunkSize > 256) {
       return res.status(400).json({ error: 'chunk_size must be an integer between 1 and 256' });
     }
-    // Optional rectangular bound (tiles). Both or neither. NULL => infinite.
     const w = Number.isFinite(width) ? Math.floor(width) : null;
     const h = Number.isFinite(height) ? Math.floor(height) : null;
-    if ((w === null) !== (h === null)) {
-      return res.status(400).json({ error: 'width and height must be provided together' });
+    // Both required, not merely paired. Creature population only ever runs
+    // for bounded worlds, and the per-chunk fallback that used to cover
+    // unbounded ones is gone (SOMET-246) -- so an unbounded world would sit
+    // empty forever with nothing to notice. seeds/mapSpec.js already requires
+    // both, so map specs are unaffected by this narrowing.
+    if (w === null || h === null) {
+      return res.status(400).json({ error: 'width and height are required' });
     }
-    if (w !== null && (w < 8 || w > 4096 || h < 8 || h > 4096)) {
+    if (w < 8 || w > 4096 || h < 8 || h > 4096) {
       return res.status(400).json({ error: 'width and height must be between 8 and 4096 tiles' });
     }
     const result = await pool.query(

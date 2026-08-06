@@ -4,11 +4,11 @@ const { Pool } = require('pg');
 
 // THE COVERAGE GAP THIS FILE CLOSES: adding a creature is a one-line INSERT in
 // a migration, and nothing anywhere else in the codebase has to change for it
-// to start spawning — spawnChunkCreatures (mapService.js) picks uniformly from
-// whatever `entity_types WHERE is_creature = true` returns. That is exactly
-// why the drop table silently fell behind: slice 3b3c added Slime, Skeleton
-// and Bat, every test stayed green, and ~75% of the creatures in every newly
-// generated chunk began dropping nothing.
+// to start spawning — populateWorld (worldPopulation.js) picks from whatever
+// allowed, non-guard rows `entity_types WHERE is_creature = true` returns.
+// That is exactly why the drop table silently fell behind: slice 3b3c added
+// Slime, Skeleton and Bat, every test stayed green, and ~75% of the creatures
+// in every newly generated chunk began dropping nothing.
 //
 // No unit test could have caught it. The defect is not in any function's
 // behaviour — rollDrops handles an empty row set correctly, which is precisely

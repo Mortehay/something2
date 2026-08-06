@@ -40,11 +40,24 @@ test('POST /api/worlds creates and returns the row', async () => {
   ]));
   const res = await request(app)
     .post('/api/worlds').set(...AUTH)
-    .send({ name: 'Test World', seed: 42, chunk_size: 32 });
+    .send({ name: 'Test World', seed: 42, chunk_size: 32, width: 40, height: 40 });
   assert.equal(res.status, 201);
   assert.equal(res.body.id, 'w1');
   assert.equal(res.body.name, 'Test World');
   assert.equal(res.body.chunk_size, 32);
+});
+
+// SOMET-246: width/height are now required (not merely paired), since
+// creature population only ever runs for bounded worlds and the per-chunk
+// fallback that used to cover unbounded ones was retired as dead code -- an
+// unbounded world would otherwise sit empty forever with nothing to notice.
+test('POST /api/worlds rejects a request with neither width nor height', async () => {
+  __setPool(mockPool([]));
+  const res = await request(app)
+    .post('/api/worlds').set(...AUTH)
+    .send({ name: 'Unbounded', seed: 1 });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /width and height are required/i);
 });
 
 // F-044 (SOMET-224): worlds.name gained a unique constraint (migration
@@ -64,7 +77,7 @@ test('POST /api/worlds returns 409 on a duplicate name instead of a raw 500', as
   ]));
   const res = await request(app)
     .post('/api/worlds').set(...AUTH)
-    .send({ name: 'AuditFlowBWorld', seed: 1 });
+    .send({ name: 'AuditFlowBWorld', seed: 1, width: 40, height: 40 });
   assert.equal(res.status, 409);
   assert.match(res.body.error, /already exists/i);
 });
