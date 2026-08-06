@@ -54,6 +54,7 @@ test('creature re-roll deletes only hostiles and re-adds guards', async () => {
       gate_edge: 'S', spawn_x: 850, spawn_y: 750,
     }] })],
     [/DELETE FROM world_creatures/i, (p) => ({ rows: [], rowCount: 0 })],
+    [/UPDATE worlds SET creature_count/i, () => ({ rows: [], rowCount: 1 })],
     [/INSERT INTO world_creatures/i, () => ({ rows: [] })],
   ]);
   __setPool(pool);

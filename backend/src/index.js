@@ -5,10 +5,11 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateChunkDecorations, generateWorldPreview, placeMapCreatures, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
+const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS } = require('./services/villages');
 const { seedItemAcrossVillages } = require('./services/merchantStock');
+const { populateWorld } = require('./services/worldPopulation');
 const { loadDecorationDefs } = require('./services/decorationDefs');
 const { loadBiomes } = require('./services/biomes');
 const { composeBiomePrompt } = require('./services/biomePrompt');
@@ -1699,8 +1700,6 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
     if (!isBoundedWorld(world)) {
       return res.status(400).json({ error: 'creature control is only available for bounded maps' });
     }
-    const allowed = Array.isArray(world.allowed_creature_types) ? world.allowed_creature_types : [];
-    const count = Number(world.creature_count) || 0;
 
     // F-007 / SOMET-187: wipe-then-re-derive is two dependent writes around
     // the guard set (like village create/delete below). Without a
@@ -1711,45 +1710,18 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
     await client.query('BEGIN');
     let placed = 0;
     try {
-      // Spare guards — they aren't rolled, they're re-derived from villages below.
-      await client.query(
-        `DELETE FROM world_creatures WHERE world_id = $1 AND type <> $2`,
-        [id, GUARD_TYPE],
-      );
+      // Delegates to the SAME function seeding uses, so re-rolling can never
+      // produce a world the spec would not. It owns the non-guard delete, the
+      // density resolution, both placement passes and the creature_count
+      // write-back; this route owns only the guard re-derivation below.
+      const n = await populateWorld(client, world, {
+        rngSeed: Math.floor(Math.random() * 2 ** 31),
+      });
+      placed = n.total;
 
-      const villages = await fetchVillages(client, world.id);
-
-      if (count > 0 && allowed.length > 0) {
-        const et = await client.query(
-          `SELECT name, hp, defense, resistances, faction FROM entity_types WHERE is_creature = true AND name = ANY($1::text[])`,
-          [allowed],
-        );
-        const hostileTypes = et.rows.filter((t) => (t.faction || 'hostile') !== 'guard');
-        if (hostileTypes.length > 0) {
-          const tileTypes = await getTileTypesMap();
-          const doorways = (await fetchLinks(client, world.id)).map((l) => l.edge);
-          // Same client as the surrounding transaction -- loadBiomes is a
-          // plain read (SELECT ... FROM biomes) and belongs on this
-          // transaction's connection, not a separate pool.query(), so it
-          // sees a consistent snapshot with everything else read here.
-          const biomes = await loadBiomes(client, world.biomes);
-          const rows = placeMapCreatures(
-            buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes }),
-            count, hostileTypes, Math.floor(Math.random() * 2 ** 31),
-          );
-          for (const c of rows) {
-            await client.query(
-              `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-              [id, c.type, c.x, c.y, c.hp, c.facing, c.level, c.damage, c.defense],
-            );
-          }
-          placed = rows.length;
-        }
-      }
-
-      await client.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`, [id, GUARD_TYPE]);
-      await insertVillageGuards(client, id, villages);
+      await client.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`,
+        [id, GUARD_TYPE]);
+      await insertVillageGuards(client, id, await fetchVillages(client, world.id));
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
