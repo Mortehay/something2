@@ -139,6 +139,15 @@ seed-catalogs:
 
 # Apply one map spec from backend/seeds/maps/<SPEC>.map.json. Idempotent:
 # re-running an unchanged spec is a no-op. Validates before writing anything.
+#
+# RESTART THE BACKEND AFTERWARDS IF THE STACK IS RUNNING. Changing a world's
+# biomes changes its terrain, and the backend caches terrain in four places.
+# PUT /api/worlds/:id busts all four; this seeder is a separate process and can
+# only reach the one that lives in Postgres (it DELETEs world_chunks). The
+# preview cache, the minimap overview cache and the authority's in-memory copy
+# of a live world are all in the backend's heap and keep serving the OLD
+# terrain until it restarts -- so a player already in a re-seeded world walks
+# on terrain the server no longer generates. Not fixable from a CLI.
 seed-map:
 	@[ -n "$(SPEC)" ] || (echo "usage: make seed-map SPEC=<name>  (see: make list-maps)"; exit 1)
 	SPEC=$(SPEC) node backend/scripts/seed-map.js

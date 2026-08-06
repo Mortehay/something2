@@ -453,7 +453,19 @@ const villagePopulationSpec = () => ({
   topology: 'spine',
   worlds: [
     { key: 'a', name: 'zzTestVilA', grid: [12, -3], seed: 991, width: 64, height: 64,
-      chunk_size: 64, biomes: [], biome_cell: 32,
+      // biomes: ['Meadow'], not [], for the same reason populationSpec above
+      // names it -- plus one this fixture cares about more. `biomes: []` makes
+      // the generator band the ENTIRE global tile catalog, which P3 just grew
+      // by 30 tiles including three impassable ones (cave_wall / rubble /
+      // chasm) and which will grow again. Whether this world's entry spawn is
+      // walkable, and whether hostiles have anywhere to stand, would then be a
+      // property of the tile catalog rather than of this fixture -- a coin flip
+      // re-tossed by every future tile someone adds, silently turning the
+      // placement assertions below vacuous (or red) for reasons that have
+      // nothing to do with village/population ordering. Meadow's three terrain
+      // tiles are all walkable and its creature_types includes 'Slime', which
+      // matches allowed_creature_types below.
+      chunk_size: 64, biomes: ['Meadow'], biome_cell: 32,
       allowed_creature_types: ['Slime'], is_entry: true, entry_spawn: { x: 3200, y: 3200 },
       village: { ...VILLAGE_BOX, gate_edge: 'S', spawn_x: 2350, spawn_y: 2650 } },
   ],

@@ -76,6 +76,21 @@ const STARTER_BIOMES = [
   // biomes: Deepvault, Umbral Warren and the eight abyssal ones. That is an
   // explicit list, not a tier rule -- a tier rule would sweep in Crystal
   // Hollows and Hive Warrens, which sit at bands 4-6.
+  //
+  // KNOWN, DELIBERATE, NOT A BUG YET: nine of these biomes render BARREN.
+  // Decoration placement only puts a flora object on a tile named in that
+  // decoration's OWN entity_types.spawn_tiles, and every decoration we ship
+  // spawns on surface terrain only (Stone -> earth/rocks/sand, bush ->
+  // grass/highgrass, dead_tree -> earth/dirt/sand, and so on). So a biome whose
+  // terrain is entirely new underground tiles declares flora that nothing can
+  // ever place:
+  //   Ossuary, Fungal Deep, Deepvault, Hive Warrens, Sunken Cistern,
+  //   Umbral Warren, Gloomfen, Sunken Foundry, Grave of Titans
+  // The flora_types lists above are correct as INTENT and are left alone. The
+  // fix is on the decoration side -- extend the relevant decorations'
+  // spawn_tiles to include the underground terrain names (or author underground
+  // decorations of their own) -- and it is content work for a later
+  // sub-project, not something to paper over by editing these lists.
 
   // Surface
   { name: 'Highlands', terrain_tiles: ['highland_rock', 'rocks', 'grass'], flora_types: ['Stone', 'pine_tree'], creature_types: [], palette: ['slate grey', 'moss green', 'pale sky'], art_style: 'windswept highland fantasy, cold clear light', exclusions: 'no sand, no jungle, no lava', color: '#7d8471' },
