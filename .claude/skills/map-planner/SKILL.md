@@ -38,10 +38,12 @@ The three shipped specs in `backend/seeds/maps/` are the worked examples — the
 
 ## Content rules
 
-- **Difficulty escalates with distance from the entry**, and the check is stricter than "counts differ" (`tests/map_spec_fixtures.test.js:92-123`):
-  1. `creature_count` must vary across the spec at all (`max > min`).
-  2. The entry world must have the *minimum* `creature_count` in the spec.
-  3. Bucket every world by its BFS hop-distance from the entry (over the undirected link graph); the *safest* (minimum-`creature_count`) world at hop `d` must be `>= ` the safest world at hop `d-1`. A branch that dips easier than something closer to the entry fails this even if the overall max/min still looks fine.
+- **Difficulty escalates with distance from the entry**, and since SOMET-246 the escalation you author is `level_band`, not a creature count. The check is stricter than "bands differ" (`tests/map_spec_fixtures.test.js:131-170`):
+  1. Most worlds in the spec must declare a `level_band` at all (at least 4 of them).
+  2. Bucket every world by its BFS hop-distance from the entry (over the undirected link graph); the *lowest band floor* at hop `d` must be `>=` the lowest band floor at hop `d-1`. A branch that dips easier than something closer to the entry fails this even if the overall range still looks fine.
+  3. The deepest tier's toughest band ceiling must clear **double** the entry's ceiling.
+
+  How *many* creatures a world holds is no longer authored per world — see `density` below. There is no per-world count to escalate, and the old `creature_count` escalation test was removed with the field.
 - **Biomes form contiguous regions**, not per-world random picks — `mapService.js:212-218` samples a low-frequency value-noise field keyed by `biome_cell` to decide which of a world's listed biomes owns a tile, so a world listing 2 biomes gets two visible regions, not a checkerboard. `biome_cell` is optional — `resolveBiomeCell` (`backend/src/services/mapService.js:144-159`) has three cases, in order: (1) an explicit `biome_cell` that floors to `>= 1` is used as-is; (2) otherwise, if the world has both `width` and `height`, the default is `Math.max(8, Math.floor(Math.min(width,height) / 3))` — note the floor of `8`, so e.g. a 20×20 world gets `8`, not `~6.67`; (3) a world with no bounds (no `width`/`height`) falls back to a flat `DEFAULT_BIOME_CELL = 24` (line 144).
 - **Hub topology needs a village in the hub** — it's the bind point every spoke returns to (`tests/map_spec_fixtures.test.js:125-128` asserts `hub.village` exists). Spine topology wants one near the entry (see `spine-descent` — none is actually placed there in the shipped spec; `hub-vale` is the one with a village).
 
@@ -52,14 +54,38 @@ The three shipped specs in `backend/seeds/maps/` are the worked examples — the
   - `validateMapSpec` (`backend/seeds/mapSpec.js:69-83`) only checks that a world's `width` and `height` are present and integers — reject a spec that omits either, or that spells one as a non-integer. It deliberately does **not** check a range: that's the admin API's job, and duplicating the number here would let the two drift apart.
   - The **8–4096 tile** range (and `chunk_size` **1–256**) is enforced only by `POST /api/worlds` (`backend/src/index.js:1397-1409`) — there's no DB `CHECK` constraint on `worlds.width/height/chunk_size` either (`backend/migrations/1714440012000_create_worlds_and_chunks.js`, `1714440027000_bounded_worlds.js`). A spec with `width: 50000` still passes `node --test tests/map_spec_fixtures.test.js` and `make seed-map` will write it — stay inside 8–4096 anyway, since it's what the rest of the system (admin UI, world creation) assumes.
 - **Exactly one `is_entry: true`** per spec, or validation fails with a count (`backend/seeds/mapSpec.js:112-115`).
-- **Every world needs:** `key` (spec-local id for links), `name` (must be globally unique — `worlds_name_unique`, migration `1714440037000`), `grid: [x, y]` (must be unique per spec — occupying the same cell as another world is an error), `seed`, `width` and `height` (present, integer — validator-enforced, see above). Optional: `chunk_size` (defaults 64), `creature_count` (defaults 0), `allowed_creature_types`, `biomes`, `biome_cell`, `entry_spawn: {x, y}`, `village: {min_row, min_col, width, height, gate_edge, spawn_x, spawn_y}`, `level_band: [min, max]`.
+- **Every world needs:** `key` (spec-local id for links), `name` (must be globally unique — `worlds_name_unique`, migration `1714440037000`), `grid: [x, y]` (must be unique per spec — occupying the same cell as another world is an error), `seed`, `width` and `height` (present, integer — validator-enforced, see above). Optional: `chunk_size` (defaults 64), `density` (defaults `normal` — see below), `allowed_creature_types`, `biomes`, `biome_cell`, `entry_spawn: {x, y}`, `village: {min_row, min_col, width, height, gate_edge, spawn_x, spawn_y}`, `level_band: [min, max]`.
+- **`creature_count` is no longer a spec field, and a spec that still carries one is REJECTED.** `validateMapSpec` (`backend/seeds/mapSpec.js:122-128`) errors with `world "<key>" creature_count is no longer authored -- use "density" instead`. The `worlds.creature_count` *column* survives, but it is now derived: `populateWorld` overwrites it with how many creatures it actually scattered (SOMET-246).
 - **Live catalogs** (verified with a read-only `SELECT` against the running dev DB, 2026-08-03):
   - Biomes (`biomes` table): `Meadow`, `Deep Forest`, `Arid Dunes`, `Frozen Waste`, `Mire`.
   - Creatures huntable in the overworld: `Wolf`, `Slime`, `Skeleton`, `Bat`. Don't re-derive this list by querying the database — read `HOSTILE_CREATURES` in `backend/seeds/data/entityTypes.js`, which is the source `make seed-catalogs` applies and which both `tests/biomes_seed.test.js` and `tests/map_spec_fixtures.test.js` now derive their catalogs from. (A database `SELECT` was the old advice and it misled: `Wolf` was missing from a rebuilt dev volume for a while, so the live table disagreed with the seed data that was about to be reapplied.) `Village Guard` is `is_creature = true` but is **not** on this list — it's a village gate defender spawned by `createVillage` (`backend/src/services/villages.js:51-69`) via `insertVillageGuards` (`villages.js:33-44`), never something you put in a world's `allowed_creature_types`.
 
+## `density`
+
+`density` is the one knob that decides **how many** creatures a world holds. It is a keyword, not a number — one of `dead`, `sparse`, `normal`, `dense`, `horde`, `swarm` — and it writes `worlds.density` (`backend/scripts/seed-map.js`). Omitting it writes `normal`, the column default. `mapSpec.js` validates the keyword (`backend/seeds/mapSpec.js:113-120`) as well as `worlds_density_check` (migration `1714440070000`), for the same reason `level_band` is double-checked: `make reseed-map` clears every world *before* seeding, so a tier caught only by the database fails after the destruction.
+
+The tier resolves through one shared table (`backend/src/services/densityTiers.js`) that scales with **area**, so a 96×96 world is not accidentally sparser than a 64×64 one at the same setting:
+
+| tier | scatter per 1k tiles | packs | pack size | on a 64×64 map |
+|---|---|---|---|---|
+| `dead` | 0 | 0 | — | nothing at all |
+| `sparse` | 1.5 | 0 | — | 6 scattered |
+| `normal` | 3 | 1 | 3–4 | 12 scattered + 1 pack |
+| `dense` | 6 | 2 | 4–6 | 25 scattered + 2 packs |
+| `horde` | 12 | 4 | 5–8 | 49 scattered + 4 packs |
+| `swarm` | 24 | 6 | 8–12 | 98 scattered + 6 packs |
+
+A *pack* is a cluster of one creature type around an anchor tile, placed under the same validity rules as the scatter (interior, walkable, not a wall or doorway tile, not inside a village, admitted by the local biome's fauna). A pack that cannot seat every member ships short — that is a correct outcome on a corridor-heavy map, not an error.
+
+The resolved total is capped at **2000 creatures per world** (`MAX_WORLD_CREATURES`, same file), which only bites on very large maps: at `normal`, a world above roughly 816×816 tiles clamps. Both seeding and the admin re-roll go through the same cap.
+
+Escalate `density` alongside `level_band` for a spine — deeper worlds should be both tougher and busier. The three shipped example specs all sit on the `normal` default; authoring real tiers for them is deliberately left to a later content pass.
+
 ## `level_band`
 
-`level_band: [min, max]` sets the range creature levels are rolled from when the game spawns creatures in that world — it writes `worlds.level_min`/`worlds.level_max` (`backend/scripts/seed-map.js`). Omitting it writes `[1, 1]`, the column defaults, which scales nothing. `mapSpec.js` validates the band (two integers, `min >= 1`, `max >= min`) even though `worlds` also has a database `CHECK` for the same rule — `make reseed-map` clears every world before seeding, so a band caught only by the database fails after the destruction. A spine topology should escalate its band with depth, the same way `creature_count` does — see the worked example below. Changing a band in the spec and re-running `make seed-map` updates the world's stored band but does not re-roll creatures already present in `world_creatures` — for bounded worlds, which every spec-seeded world is, re-rolling those requires `POST /api/worlds/:id/creatures`.
+`level_band: [min, max]` sets the range creature levels are rolled from when the game spawns creatures in that world — it writes `worlds.level_min`/`worlds.level_max` (`backend/scripts/seed-map.js`). Omitting it writes `[1, 1]`, the column defaults, which scales nothing. `mapSpec.js` validates the band (two integers, `min >= 1`, `max >= min`) even though `worlds` also has a database `CHECK` for the same rule — `make reseed-map` clears every world before seeding, so a band caught only by the database fails after the destruction. A spine topology should escalate its band with depth — see the worked example below.
+
+Since SOMET-246, **`make seed-map` re-rolls creatures itself**: `applyMapSpec` calls `populateWorld` for every world in the spec, which deletes that world's non-guard creatures and re-places them from the world's current `density` and `level_band`. So editing either in the spec and re-running `make seed-map` takes effect on the ground, with no admin step. (Village guards and portal guards survive; they are placed by their own passes and the delete is scoped to spare them.) `POST /api/worlds/:id/creatures` still exists and now runs the *same* function, so it is a convenience for re-rolling one world from the admin UI, not the only route to a re-roll. The accepted side effect: killed creatures come back and survivors move on every re-seed.
 
 ## Worked example: `spine-descent`
 
@@ -89,9 +115,9 @@ y=1:                 elite     shrine
 { "from": "deep",  "edge": "E", "to": "end" }
 ```
 
-`creature_count` by distance from `entry`: `2` (entry) → `3` (pass) → `4`/`5`/`5` (cache/elite/gorge, all 2 hops) → `6`/`7` (shrine/deep, 3 hops) → `9` (end, 4 hops) — non-decreasing per hop, which is what the escalation test checks.
+`level_band` by distance from `entry`: `[1,2]` (entry) → `[2,4]` (pass) → `[3,5]`/`[4,6]`/`[4,6]` (cache/elite/gorge, all 2 hops) → `[6,9]`/`[6,9]` (shrine/deep, 3 hops) → `[9,12]` (end, 4 hops) — the floor never drops from one hop to the next, and the deepest world's ceiling (12) is well over double the entry's (2). That is exactly what the escalation test checks.
 
-`level_band` follows the same shape: `[1,2]` (entry) → `[2,4]` (pass) → `[3,5]`/`[4,6]`/`[4,6]` (cache/elite/gorge) → `[6,9]`/`[6,9]` (shrine/deep) → `[9,12]` (end) — the minimum never drops from one hop to the next, and the deepest world's maximum is well over double the entry's.
+`density` would escalate over the same buckets — e.g. `sparse` (entry) → `normal` (pass) → `normal`/`dense`/`dense` → `dense`/`horde` → `horde` (end). The shipped `spine-descent.map.json` does **not** author this yet; every one of its worlds is on the `normal` default, and nothing asserts a density ramp.
 
 ## Two limitations to know before you seed
 
