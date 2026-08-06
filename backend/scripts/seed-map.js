@@ -13,6 +13,7 @@ const { validateMapSpec } = require('../seeds/mapSpec.js');
 const { setLink, setPortalLink } = require('../src/services/mapLinks.js');
 const { createVillage } = require('../src/services/villages.js');
 const { insertPortalGuards } = require('../src/services/dungeonGuards.js');
+const { populateWorld } = require('../src/services/worldPopulation.js');
 
 // Pixels per grid cell for the World Map tab's canvas coordinates. Deriving
 // graph_x/graph_y from the same grid the links were validated against is what
@@ -58,6 +59,7 @@ async function applyMapSpec(pool, spec) {
     let worldsWritten = 0;
     let linksWritten = 0;
     let portalGuardsWritten = 0;
+    let creaturesWritten = 0;
 
     for (const w of spec.worlds) {
       // A grid-less (portal-only) world has nothing to derive a World Map
@@ -125,6 +127,23 @@ async function applyMapSpec(pool, spec) {
       }
     }
 
+    // After links exist (populateWorld reads them for doorway tiles) and after
+    // portal guards (its delete spares guards but the guards must already be
+    // there to be spared). Before villages is fine either way -- village
+    // guards are inserted by createVillage below and are likewise spared.
+    //
+    // Seeded worlds CONVERGE to their spec: populateWorld deletes non-guard
+    // creatures and re-places them, so editing a density tier and re-seeding
+    // takes effect. The alternative -- populate only when empty -- makes a
+    // spec edit silently do nothing, a worse trap than the killed creatures
+    // coming back that this costs.
+    for (const w of spec.worlds) {
+      const worldId = idByKey.get(w.key);
+      const wr = await client.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
+      const n = await populateWorld(client, wr.rows[0], { rngSeed: w.seed });
+      creaturesWritten += n.total;
+    }
+
     let villages = 0;
     for (const w of spec.worlds) {
       if (!w.village) continue;
@@ -146,7 +165,10 @@ async function applyMapSpec(pool, spec) {
     }
 
     await client.query('COMMIT');
-    return { worlds: worldsWritten, links: linksWritten, villages, portalGuards: portalGuardsWritten };
+    return {
+      worlds: worldsWritten, links: linksWritten, villages,
+      portalGuards: portalGuardsWritten, creatures: creaturesWritten,
+    };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -168,7 +190,8 @@ if (require.main === module) {
   const pool = new Pool({ connectionString: url });
   applyMapSpec(pool, JSON.parse(fs.readFileSync(file, 'utf8')))
     .then((n) => console.log(
-      `applied ${name}: ${n.worlds} worlds, ${n.links} links, ${n.villages} villages, ${n.portalGuards} portal guards`))
+      `applied ${name}: ${n.worlds} worlds, ${n.links} links, ${n.villages} villages, `
+      + `${n.portalGuards} portal guards, ${n.creatures} creatures`))
     .catch((e) => { console.error(e.message); process.exitCode = 1; })
     .finally(() => pool.end());
 }

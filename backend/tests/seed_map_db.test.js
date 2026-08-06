@@ -59,7 +59,9 @@ const spec = () => ({
 });
 
 async function cleanup(pool) {
-  await pool.query("DELETE FROM worlds WHERE name IN ('zzTestAlpha','zzTestBeta')").catch(() => {});
+  await pool.query(
+    "DELETE FROM worlds WHERE name IN ('zzTestAlpha','zzTestBeta','zzTestPopA','zzTestPopB')",
+  ).catch(() => {});
 }
 
 // Snapshot whichever world is currently is_entry (0 or 1 of them, per the
@@ -98,7 +100,13 @@ test('applying a spec twice produces identical rows', async (t) => {
     const s = spec();
     await withEntryPreserved(pool, async () => {
       const result = await applyMapSpec(pool, s);
-      assert.deepEqual(result, { worlds: 2, links: 1, villages: 1, portalGuards: 0 },
+      // creatures is 0 here, not merely omitted -- both zzTestAlpha and
+      // zzTestBeta declare allowed_creature_types: [], so populateWorld's own
+      // early-return path (no allowed types -> nothing placed) is what should
+      // fire, not a wiring bug that skipped calling it altogether. The
+      // "seeding populates every world with creatures" test below is what
+      // proves the non-empty path actually places rows.
+      assert.deepEqual(result, { worlds: 2, links: 1, villages: 1, portalGuards: 0, creatures: 0 },
         'applyMapSpec must report exactly what it wrote, not just resolve');
 
       // Correctness rule 3: is_entry must actually be set on the spec's
@@ -330,4 +338,61 @@ test('every shipped spec applies cleanly', async (t) => {
     assert.ok(Number(byName['Blackfen Sinks'].graph_y) > 0,
       'South neighbour must land at +y (screen-down)');
   } finally { await pool.end(); }
+});
+
+// A throwaway spec dedicated to the population pass, separate from `spec()`
+// above -- that fixture's two worlds both declare allowed_creature_types: [],
+// which is exactly the case populateWorld early-returns 0 for (see the
+// "creatures: 0" note on the "applying a spec twice" test), so it can never
+// exercise the non-empty placement path. 'Slime' is a real, non-guard
+// entity_types row already used the same way by hub-vale.map.json.
+const populationSpec = () => ({
+  name: 'zz-test-population-fixture',
+  topology: 'spine',
+  worlds: [
+    { key: 'a', name: 'zzTestPopA', grid: [9, -3], seed: 993, width: 64, height: 64,
+      chunk_size: 64, biomes: [], biome_cell: 32,
+      allowed_creature_types: ['Slime'], is_entry: true, entry_spawn: { x: 32, y: 32 } },
+    { key: 'b', name: 'zzTestPopB', grid: [10, -3], seed: 994, width: 64, height: 64,
+      chunk_size: 64, biomes: [], biome_cell: 32,
+      allowed_creature_types: ['Slime'], is_entry: false },
+  ],
+  links: [{ from: 'a', edge: 'E', to: 'b' }],
+});
+
+// The defect this whole sub-project exists to fix: before P1, applyMapSpec
+// wrote creature_count onto the row and placed nothing, so every seeded world
+// arrived empty. Assert creatures ON THE GROUND, not the returned count --
+// a return value can be right while the INSERT never happened.
+test('seeding populates every world with creatures', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — population is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await cleanup(pool);
+    const s = populationSpec();
+    await withEntryPreserved(pool, async () => {
+      const result = await applyMapSpec(pool, s);
+      assert.ok(result.creatures > 0, `expected creatures, got ${result.creatures}`);
+
+      const rows = await pool.query(
+        `SELECT w.name, count(wc.id)::int AS n
+           FROM worlds w LEFT JOIN world_creatures wc ON wc.world_id = w.id
+          WHERE w.name = ANY($1::text[])
+          GROUP BY w.name`,
+        [s.worlds.map((w) => w.name)],
+      );
+      assert.equal(rows.rows.length, s.worlds.length);
+      for (const r of rows.rows) {
+        assert.ok(r.n > 0, `world ${r.name} is empty`);
+      }
+    });
+  } finally {
+    await cleanup(pool);
+    await pool.end();
+  }
 });
