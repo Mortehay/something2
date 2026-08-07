@@ -2,10 +2,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 102,
-        "y": 950,
+        "id": "raider",
+        "x": 1052,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1202,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -24,14 +32,6 @@
         "facing": "NW",
         "mode": "return",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1052,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 200
@@ -39,10 +39,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 104,
-        "y": 950,
+        "id": "raider",
+        "x": 1054,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1204,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -61,14 +69,6 @@
         "facing": "NW",
         "mode": "return",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1054,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 200
@@ -76,10 +76,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 106,
-        "y": 950,
+        "id": "raider",
+        "x": 1056,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1206,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -98,14 +106,6 @@
         "facing": "NW",
         "mode": "return",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1056,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 200
@@ -113,10 +113,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 108,
-        "y": 950,
+        "id": "raider",
+        "x": 1058,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1208,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -135,14 +143,6 @@
         "facing": "NW",
         "mode": "return",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1058,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 200
@@ -150,10 +150,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 110,
-        "y": 950,
+        "id": "raider",
+        "x": 1060,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1210,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -172,14 +180,6 @@
         "facing": "NW",
         "mode": "return",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1060,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 200
@@ -187,10 +187,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 112,
-        "y": 950,
+        "id": "raider",
+        "x": 1062,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1212,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -209,14 +217,6 @@
         "facing": "NW",
         "mode": "guard",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1062,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 200
@@ -224,10 +224,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 114,
-        "y": 950,
+        "id": "raider",
+        "x": 1064,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1214,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -246,14 +254,6 @@
         "facing": "NW",
         "mode": "guard",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1064,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 200
@@ -261,10 +261,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 116,
-        "y": 950,
+        "id": "raider",
+        "x": 1066,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1216,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -283,14 +291,6 @@
         "facing": "NW",
         "mode": "guard",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1066,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 200
@@ -298,10 +298,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 118,
-        "y": 950,
+        "id": "raider",
+        "x": 1068,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1218,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -320,14 +328,6 @@
         "facing": "NW",
         "mode": "guard",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1068,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 200
@@ -335,10 +335,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 120,
-        "y": 950,
+        "id": "raider",
+        "x": 1070,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1220,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -357,14 +365,6 @@
         "facing": "NW",
         "mode": "guard",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1070,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 200
@@ -372,10 +372,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 122,
-        "y": 950,
+        "id": "raider",
+        "x": 1072,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1222,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -394,14 +402,6 @@
         "facing": "NW",
         "mode": "guard",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1072,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -409,10 +409,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 124,
-        "y": 950,
+        "id": "raider",
+        "x": 1074,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1224,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -431,14 +439,6 @@
         "facing": "NW",
         "mode": "guard",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1074,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -446,10 +446,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 126,
-        "y": 950,
+        "id": "raider",
+        "x": 1076,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1226,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -468,14 +476,6 @@
         "facing": "NW",
         "mode": "guard",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1076,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -483,10 +483,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 128,
-        "y": 950,
+        "id": "raider",
+        "x": 1078,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1228,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -500,19 +508,11 @@
       },
       {
         "id": "sentry",
-        "x": 1392.9289,
-        "y": 1392.9289,
-        "facing": "NW",
-        "mode": "guard",
+        "x": 1390.9294,
+        "y": 1392.9738,
+        "facing": "SW",
+        "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1078,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -520,10 +520,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 130,
-        "y": 950,
+        "id": "raider",
+        "x": 1080,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1230,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -537,19 +545,11 @@
       },
       {
         "id": "sentry",
-        "x": 1390.9294,
-        "y": 1392.9738,
+        "x": 1388.9299,
+        "y": 1393.019,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1080,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -557,10 +557,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 132,
-        "y": 950,
+        "id": "raider",
+        "x": 1082,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1232,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -574,19 +582,11 @@
       },
       {
         "id": "sentry",
-        "x": 1388.9299,
-        "y": 1393.019,
+        "x": 1386.9305,
+        "y": 1393.0645,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1082,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -594,10 +594,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 134,
-        "y": 950,
+        "id": "raider",
+        "x": 1084,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1234,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -611,19 +619,11 @@
       },
       {
         "id": "sentry",
-        "x": 1386.9305,
-        "y": 1393.0645,
+        "x": 1384.931,
+        "y": 1393.1103,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1084,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -631,10 +631,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 136,
-        "y": 950,
+        "id": "raider",
+        "x": 1086,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1236,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -648,19 +656,11 @@
       },
       {
         "id": "sentry",
-        "x": 1384.931,
-        "y": 1393.1103,
+        "x": 1382.9315,
+        "y": 1393.1563,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1086,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -668,10 +668,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 138,
-        "y": 950,
+        "id": "raider",
+        "x": 1088,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1238,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -685,19 +693,11 @@
       },
       {
         "id": "sentry",
-        "x": 1382.9315,
-        "y": 1393.1563,
+        "x": 1380.9321,
+        "y": 1393.2027,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1088,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -705,10 +705,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 140,
-        "y": 950,
+        "id": "raider",
+        "x": 1090,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1240,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -722,19 +730,11 @@
       },
       {
         "id": "sentry",
-        "x": 1380.9321,
-        "y": 1393.2027,
+        "x": 1378.9326,
+        "y": 1393.2495,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1090,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -742,10 +742,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 142,
-        "y": 950,
+        "id": "raider",
+        "x": 1092,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1242,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -759,19 +767,11 @@
       },
       {
         "id": "sentry",
-        "x": 1378.9326,
-        "y": 1393.2495,
+        "x": 1376.9332,
+        "y": 1393.2965,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1092,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -779,10 +779,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 144,
-        "y": 950,
+        "id": "raider",
+        "x": 1094,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1244,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -796,19 +804,11 @@
       },
       {
         "id": "sentry",
-        "x": 1376.9332,
-        "y": 1393.2965,
+        "x": 1374.9337,
+        "y": 1393.3439,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1094,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -816,10 +816,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 146,
-        "y": 950,
+        "id": "raider",
+        "x": 1096,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1246,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -833,19 +841,11 @@
       },
       {
         "id": "sentry",
-        "x": 1374.9337,
-        "y": 1393.3439,
+        "x": 1372.9343,
+        "y": 1393.3916,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1096,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -853,10 +853,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 148,
-        "y": 950,
+        "id": "raider",
+        "x": 1098,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1248,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -870,19 +878,11 @@
       },
       {
         "id": "sentry",
-        "x": 1372.9343,
-        "y": 1393.3916,
+        "x": 1370.9349,
+        "y": 1393.4396,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1098,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -890,10 +890,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 150,
-        "y": 950,
+        "id": "raider",
+        "x": 1100,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1250,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -907,19 +915,11 @@
       },
       {
         "id": "sentry",
-        "x": 1370.9349,
-        "y": 1393.4396,
+        "x": 1368.9354,
+        "y": 1393.4881,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1100,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -927,10 +927,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 152,
-        "y": 950,
+        "id": "raider",
+        "x": 1102,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1252,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -944,19 +952,11 @@
       },
       {
         "id": "sentry",
-        "x": 1368.9354,
-        "y": 1393.4881,
+        "x": 1366.936,
+        "y": 1393.5368,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1102,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -964,10 +964,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 154,
-        "y": 950,
+        "id": "raider",
+        "x": 1104,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1254,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -981,19 +989,11 @@
       },
       {
         "id": "sentry",
-        "x": 1366.936,
-        "y": 1393.5368,
+        "x": 1364.9366,
+        "y": 1393.586,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1104,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -1001,10 +1001,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 156,
-        "y": 950,
+        "id": "raider",
+        "x": 1106,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1256,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1018,19 +1026,11 @@
       },
       {
         "id": "sentry",
-        "x": 1364.9366,
-        "y": 1393.586,
+        "x": 1362.9373,
+        "y": 1393.6355,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1106,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -1038,10 +1038,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 158,
-        "y": 950,
+        "id": "raider",
+        "x": 1108,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1258,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1055,19 +1063,11 @@
       },
       {
         "id": "sentry",
-        "x": 1362.9373,
-        "y": 1393.6355,
+        "x": 1360.9379,
+        "y": 1393.6854,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1108,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -1075,10 +1075,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 160,
-        "y": 950,
+        "id": "raider",
+        "x": 1110,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1260,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1092,19 +1100,11 @@
       },
       {
         "id": "sentry",
-        "x": 1360.9379,
-        "y": 1393.6854,
+        "x": 1358.9385,
+        "y": 1393.7357,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1110,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 195
@@ -1112,10 +1112,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 162,
-        "y": 950,
+        "id": "raider",
+        "x": 1112,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1262,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1129,19 +1137,11 @@
       },
       {
         "id": "sentry",
-        "x": 1358.9385,
-        "y": 1393.7357,
+        "x": 1356.9392,
+        "y": 1393.7864,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1112,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1149,10 +1149,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 164,
-        "y": 950,
+        "id": "raider",
+        "x": 1114,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1264,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1166,19 +1174,11 @@
       },
       {
         "id": "sentry",
-        "x": 1356.9392,
-        "y": 1393.7864,
+        "x": 1354.9398,
+        "y": 1393.8376,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1114,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1186,10 +1186,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 166,
-        "y": 950,
+        "id": "raider",
+        "x": 1116,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1266,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1203,19 +1211,11 @@
       },
       {
         "id": "sentry",
-        "x": 1354.9398,
-        "y": 1393.8376,
+        "x": 1352.9405,
+        "y": 1393.8892,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1116,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1223,10 +1223,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 168,
-        "y": 950,
+        "id": "raider",
+        "x": 1118,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1268,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1240,19 +1248,11 @@
       },
       {
         "id": "sentry",
-        "x": 1352.9405,
-        "y": 1393.8892,
+        "x": 1350.9412,
+        "y": 1393.9412,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1118,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1260,10 +1260,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 170,
-        "y": 950,
+        "id": "raider",
+        "x": 1120,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1270,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1277,19 +1285,11 @@
       },
       {
         "id": "sentry",
-        "x": 1350.9412,
-        "y": 1393.9412,
+        "x": 1348.9418,
+        "y": 1393.9936,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1120,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1297,10 +1297,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 172,
-        "y": 950,
+        "id": "raider",
+        "x": 1122,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1272,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1314,19 +1322,11 @@
       },
       {
         "id": "sentry",
-        "x": 1348.9418,
-        "y": 1393.9936,
+        "x": 1346.9425,
+        "y": 1394.0465,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1122,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1334,10 +1334,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 174,
-        "y": 950,
+        "id": "raider",
+        "x": 1124,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1274,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1351,19 +1359,11 @@
       },
       {
         "id": "sentry",
-        "x": 1346.9425,
-        "y": 1394.0465,
+        "x": 1344.9433,
+        "y": 1394.0999,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1124,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1371,10 +1371,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 176,
-        "y": 950,
+        "id": "raider",
+        "x": 1126,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1276,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1388,19 +1396,11 @@
       },
       {
         "id": "sentry",
-        "x": 1344.9433,
-        "y": 1394.0999,
+        "x": 1342.944,
+        "y": 1394.1538,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1126,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1408,10 +1408,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 178,
-        "y": 950,
+        "id": "raider",
+        "x": 1128,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1278,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1425,49 +1433,17 @@
       },
       {
         "id": "sentry",
-        "x": 1342.944,
-        "y": 1394.1538,
+        "x": 1340.9447,
+        "y": 1394.2082,
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1128,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
   },
   {
     "creatures": [
-      {
-        "id": "roamer",
-        "x": 180,
-        "y": 950,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 30
-      },
-      {
-        "id": "chaser",
-        "x": 380,
-        "y": 300,
-        "facing": "E",
-        "mode": "chase",
-        "hp": 30
-      },
-      {
-        "id": "sentry",
-        "x": 1340.9447,
-        "y": 1394.2082,
-        "facing": "SW",
-        "mode": "chase",
-        "hp": 60
-      },
       {
         "id": "raider",
         "x": 1130,
@@ -1475,17 +1451,12 @@
         "facing": "E",
         "mode": "roam",
         "hp": 40
-      }
-    ],
-    "playerHp": 190
-  },
-  {
-    "creatures": [
+      },
       {
         "id": "roamer",
-        "x": 182,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1280,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1504,14 +1475,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1132,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1519,10 +1482,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 184,
-        "y": 950,
+        "id": "raider",
+        "x": 1132,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1282,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1541,14 +1512,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1134,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1556,10 +1519,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 186,
-        "y": 950,
+        "id": "raider",
+        "x": 1134,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1284,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1578,14 +1549,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1136,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1593,10 +1556,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 188,
-        "y": 950,
+        "id": "raider",
+        "x": 1136,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1286,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1615,14 +1586,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1138,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1630,10 +1593,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 190,
-        "y": 950,
+        "id": "raider",
+        "x": 1138,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1288,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1652,14 +1623,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1140,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1667,10 +1630,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 192,
-        "y": 950,
+        "id": "raider",
+        "x": 1140,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1290,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1689,14 +1660,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1142,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1704,10 +1667,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 194,
-        "y": 950,
+        "id": "raider",
+        "x": 1142,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1292,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1726,14 +1697,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1144,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1741,10 +1704,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 196,
-        "y": 950,
+        "id": "raider",
+        "x": 1144,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1294,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1763,14 +1734,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1146,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1778,10 +1741,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 198,
-        "y": 950,
+        "id": "raider",
+        "x": 1146,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1296,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1800,14 +1771,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1148,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1815,10 +1778,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 200,
-        "y": 950,
+        "id": "raider",
+        "x": 1148,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1298,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1837,14 +1808,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1150,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 190
@@ -1852,10 +1815,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 202,
-        "y": 950,
+        "id": "raider",
+        "x": 1150,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1300,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1874,7 +1845,12 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
+      }
+    ],
+    "playerHp": 190
+  },
+  {
+    "creatures": [
       {
         "id": "raider",
         "x": 1152,
@@ -1882,17 +1858,12 @@
         "facing": "E",
         "mode": "roam",
         "hp": 40
-      }
-    ],
-    "playerHp": 185
-  },
-  {
-    "creatures": [
+      },
       {
         "id": "roamer",
-        "x": 204,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1302,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1911,14 +1882,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1154,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -1926,10 +1889,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 206,
-        "y": 950,
+        "id": "raider",
+        "x": 1154,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1304,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1948,14 +1919,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1156,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -1963,10 +1926,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 208,
-        "y": 950,
+        "id": "raider",
+        "x": 1156,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1306,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -1985,14 +1956,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1158,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2000,10 +1963,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 210,
-        "y": 950,
+        "id": "raider",
+        "x": 1158,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1308,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2022,14 +1993,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1160,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2037,10 +2000,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 212,
-        "y": 950,
+        "id": "raider",
+        "x": 1160,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1310,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2059,14 +2030,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1162,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2074,10 +2037,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 214,
-        "y": 950,
+        "id": "raider",
+        "x": 1162,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1312,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2096,14 +2067,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1164,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2111,10 +2074,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 216,
-        "y": 950,
+        "id": "raider",
+        "x": 1164,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1314,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2133,14 +2104,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1166,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2148,10 +2111,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 218,
-        "y": 950,
+        "id": "raider",
+        "x": 1166,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1316,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2170,14 +2141,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1168,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2185,10 +2148,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 220,
-        "y": 950,
+        "id": "raider",
+        "x": 1168,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1318,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2207,14 +2178,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1170,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2222,10 +2185,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 222,
-        "y": 950,
+        "id": "raider",
+        "x": 1170,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1320,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2244,14 +2215,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1172,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2259,10 +2222,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 224,
-        "y": 950,
+        "id": "raider",
+        "x": 1172,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1322,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2281,14 +2252,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1174,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2296,10 +2259,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 226,
-        "y": 950,
+        "id": "raider",
+        "x": 1174,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1324,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2318,14 +2289,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1176,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2333,10 +2296,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 228,
-        "y": 950,
+        "id": "raider",
+        "x": 1176,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1326,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2355,14 +2326,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1178,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2370,10 +2333,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 230,
-        "y": 950,
+        "id": "raider",
+        "x": 1178,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1328,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2392,14 +2363,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1180,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2407,10 +2370,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 232,
-        "y": 950,
+        "id": "raider",
+        "x": 1180,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1330,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2429,14 +2400,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1182,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2444,10 +2407,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 234,
-        "y": 950,
+        "id": "raider",
+        "x": 1182,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1332,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2466,14 +2437,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1184,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2481,10 +2444,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 236,
-        "y": 950,
+        "id": "raider",
+        "x": 1184,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1334,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2503,14 +2474,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1186,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2518,10 +2481,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 238,
-        "y": 950,
+        "id": "raider",
+        "x": 1186,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1336,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2540,14 +2511,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1188,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2555,10 +2518,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 240,
-        "y": 950,
+        "id": "raider",
+        "x": 1188,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1338,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2577,14 +2548,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1190,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 185
@@ -2592,10 +2555,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 242,
-        "y": 950,
+        "id": "raider",
+        "x": 1190,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1340,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2614,7 +2585,12 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
+      }
+    ],
+    "playerHp": 185
+  },
+  {
+    "creatures": [
       {
         "id": "raider",
         "x": 1192,
@@ -2622,17 +2598,12 @@
         "facing": "E",
         "mode": "roam",
         "hp": 40
-      }
-    ],
-    "playerHp": 180
-  },
-  {
-    "creatures": [
+      },
       {
         "id": "roamer",
-        "x": 244,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1342,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2651,14 +2622,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1194,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 180
@@ -2666,10 +2629,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 246,
-        "y": 950,
+        "id": "raider",
+        "x": 1194,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1344,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2688,14 +2659,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1196,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 180
@@ -2703,10 +2666,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 248,
-        "y": 950,
+        "id": "raider",
+        "x": 1196,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1346,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2725,14 +2696,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1198,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 180
@@ -2740,10 +2703,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 250,
-        "y": 950,
+        "id": "raider",
+        "x": 1198,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1348,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2762,14 +2733,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1200,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 180
@@ -2777,10 +2740,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 252,
-        "y": 950,
+        "id": "raider",
+        "x": 1200,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1350,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2799,14 +2770,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1202,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 180
@@ -2814,10 +2777,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 254,
-        "y": 950,
+        "id": "raider",
+        "x": 1202,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1352,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2836,14 +2807,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1204,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 180
@@ -2851,10 +2814,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 256,
-        "y": 950,
+        "id": "raider",
+        "x": 1204,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 40
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1354,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2873,14 +2844,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1206,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 40
       }
     ],
     "playerHp": 180
@@ -2888,10 +2851,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 258,
-        "y": 950,
+        "id": "raider",
+        "x": 1206,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1356,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2910,14 +2881,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1208,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -2925,10 +2888,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 260,
-        "y": 950,
+        "id": "raider",
+        "x": 1208,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1358,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2947,14 +2918,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1210,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -2962,10 +2925,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 262,
-        "y": 950,
+        "id": "raider",
+        "x": 1210,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1360,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -2984,14 +2955,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1212,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -2999,10 +2962,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 264,
-        "y": 950,
+        "id": "raider",
+        "x": 1212,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1362,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -3021,14 +2992,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1214,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -3036,10 +2999,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 266,
-        "y": 950,
+        "id": "raider",
+        "x": 1214,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1364,
+        "facing": "S",
         "mode": "roam",
         "hp": 30
       },
@@ -3058,14 +3029,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1216,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -3073,10 +3036,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 268,
-        "y": 950,
+        "id": "raider",
+        "x": 1216,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1362,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3095,14 +3066,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1218,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -3110,10 +3073,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 270,
-        "y": 950,
+        "id": "raider",
+        "x": 1218,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1360,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3132,14 +3103,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1220,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -3147,10 +3110,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 272,
-        "y": 950,
+        "id": "raider",
+        "x": 1220,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1358,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3169,14 +3140,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1222,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -3184,10 +3147,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 274,
-        "y": 950,
+        "id": "raider",
+        "x": 1222,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1356,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3206,14 +3177,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1224,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -3221,10 +3184,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 276,
-        "y": 950,
+        "id": "raider",
+        "x": 1224,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1354,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3243,14 +3214,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1226,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -3258,10 +3221,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 278,
-        "y": 950,
+        "id": "raider",
+        "x": 1226,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1352,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3280,14 +3251,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1228,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -3295,10 +3258,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 280,
-        "y": 950,
+        "id": "raider",
+        "x": 1228,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1350,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3317,14 +3288,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1230,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 180
@@ -3332,10 +3295,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 282,
-        "y": 950,
+        "id": "raider",
+        "x": 1230,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1348,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3354,7 +3325,12 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
+      }
+    ],
+    "playerHp": 180
+  },
+  {
+    "creatures": [
       {
         "id": "raider",
         "x": 1232,
@@ -3362,17 +3338,12 @@
         "facing": "E",
         "mode": "roam",
         "hp": 15
-      }
-    ],
-    "playerHp": 175
-  },
-  {
-    "creatures": [
+      },
       {
         "id": "roamer",
-        "x": 284,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1346,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3391,14 +3362,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1234,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 175
@@ -3406,10 +3369,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 286,
-        "y": 950,
+        "id": "raider",
+        "x": 1234,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1344,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3428,14 +3399,6 @@
         "facing": "SW",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1236,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 175
@@ -3443,10 +3406,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 288,
-        "y": 950,
+        "id": "raider",
+        "x": 1236,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1342,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3465,14 +3436,6 @@
         "facing": "SE",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1238,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 175
@@ -3480,10 +3443,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 290,
-        "y": 950,
+        "id": "raider",
+        "x": 1238,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1340,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3502,14 +3473,6 @@
         "facing": "NE",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1240,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 175
@@ -3517,10 +3480,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 292,
-        "y": 950,
+        "id": "raider",
+        "x": 1240,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1338,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3539,14 +3510,6 @@
         "facing": "SE",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1242,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 175
@@ -3554,10 +3517,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 294,
-        "y": 950,
+        "id": "raider",
+        "x": 1242,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1336,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3576,14 +3547,6 @@
         "facing": "NE",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1244,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 175
@@ -3591,10 +3554,18 @@
   {
     "creatures": [
       {
-        "id": "roamer",
-        "x": 296,
-        "y": 950,
+        "id": "raider",
+        "x": 1244,
+        "y": 1400,
         "facing": "E",
+        "mode": "roam",
+        "hp": 15
+      },
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1334,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3613,14 +3584,6 @@
         "facing": "SE",
         "mode": "chase",
         "hp": 60
-      },
-      {
-        "id": "raider",
-        "x": 1246,
-        "y": 1400,
-        "facing": "E",
-        "mode": "roam",
-        "hp": 15
       }
     ],
     "playerHp": 175
@@ -3629,9 +3592,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 298,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1332,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3658,9 +3621,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 300,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1330,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3687,9 +3650,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 302,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1328,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3716,9 +3679,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 304,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1326,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3745,9 +3708,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 306,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1324,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3774,9 +3737,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 308,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1322,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3803,9 +3766,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 310,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1320,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3832,9 +3795,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 312,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1318,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3861,9 +3824,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 314,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1316,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3890,9 +3853,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 316,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1314,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3919,9 +3882,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 318,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1312,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3948,9 +3911,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 320,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1310,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -3977,9 +3940,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 322,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1308,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -4000,15 +3963,15 @@
         "hp": 60
       }
     ],
-    "playerHp": 170
+    "playerHp": 175
   },
   {
     "creatures": [
       {
         "id": "roamer",
-        "x": 324,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1306,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -4035,9 +3998,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 326,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1304,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -4064,9 +4027,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 328,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1302,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -4093,9 +4056,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 330,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1300,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -4122,9 +4085,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 332,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1298,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -4151,9 +4114,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 334,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1296,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -4180,9 +4143,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 336,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1294,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -4209,9 +4172,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 338,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1292,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -4238,9 +4201,9 @@
     "creatures": [
       {
         "id": "roamer",
-        "x": 340,
-        "y": 950,
-        "facing": "E",
+        "x": 900,
+        "y": 1290,
+        "facing": "N",
         "mode": "roam",
         "hp": 30
       },
@@ -4256,6 +4219,35 @@
         "id": "sentry",
         "x": 1288.028,
         "y": 1392.2948,
+        "facing": "NE",
+        "mode": "return",
+        "hp": 60
+      }
+    ],
+    "playerHp": 170
+  },
+  {
+    "creatures": [
+      {
+        "id": "roamer",
+        "x": 900,
+        "y": 1288,
+        "facing": "N",
+        "mode": "roam",
+        "hp": 30
+      },
+      {
+        "id": "chaser",
+        "x": 380,
+        "y": 300,
+        "facing": "E",
+        "mode": "chase",
+        "hp": 30
+      },
+      {
+        "id": "sentry",
+        "x": 1289.9945,
+        "y": 1391.9305,
         "facing": "NE",
         "mode": "return",
         "hp": 60
