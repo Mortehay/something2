@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
+import { deleteBehaviorErrorMessage } from "./behaviorForm.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
 
@@ -29,14 +30,27 @@ function behaviorMutation({ method, url, successMessage, failMessage }) {
           headers: authHeaders(),
           body: method === "DELETE" ? undefined : JSON.stringify(arg.body ?? arg),
         });
-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || failMessage);
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          const err = new Error(body.error || failMessage);
+          // Only DELETE's 409 sets this (a creature type still points at the
+          // profile); the two 400 validation errors never do, so this is
+          // undefined -- and therefore harmless -- for create/update.
+          if (body.referencing_entity_types) err.referencingEntityTypes = body.referencing_entity_types;
+          throw err;
+        }
         return res.status === 204 ? true : res.json();
       },
       onSuccess: () => {
         qc.invalidateQueries({ queryKey: ["creature-behaviors"] });
         toast.success(successMessage);
       },
-      onError: (err) => toast.error(err.message),
+      // `variables` is whatever was passed to .mutate(...). Only the delete
+      // call site supplies `name` (the profile being deleted); when it's
+      // absent, or when the error carries no referencingEntityTypes,
+      // deleteBehaviorErrorMessage falls straight back to err.message.
+      onError: (err, variables) =>
+        toast.error(deleteBehaviorErrorMessage(variables?.name, err.referencingEntityTypes, err.message)),
     });
   };
 }

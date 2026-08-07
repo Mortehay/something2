@@ -39,3 +39,29 @@ export function behaviorFormToPayload(form) {
   for (const k of NUMERIC) payload[k] = Number(form[k]) || 0;
   return payload;
 }
+
+// DELETE /api/creature-behaviors/:id returns 409 with
+// `referencing_entity_types: [{id, name}, ...]` when a creature type still
+// points at the profile -- see backend/src/index.js's delete handler. Names
+// the blockers instead of leaving the admin to hunt through the Entities
+// table row by row. Capped so a profile used by twenty creature types
+// doesn't produce an unreadable toast.
+export function formatReferencingEntityTypes(refs, max = 3) {
+  const names = (refs || []).map((r) => r.name);
+  if (names.length === 0) return "";
+  if (names.length <= max) return names.join(", ");
+  const shown = names.slice(0, max).join(", ");
+  const rest = names.length - max;
+  return `${shown} and ${rest} more`;
+}
+
+// The full delete-failure toast text. `behaviorName` is the profile the
+// admin tried to delete (from the row, not the error body -- the 409 payload
+// only names what's blocking, not what was being deleted). Falls back to a
+// generic message when there is nothing to name (a network error, a 500,
+// etc.), so this is safe to call unconditionally in the delete error path.
+export function deleteBehaviorErrorMessage(behaviorName, refs, fallback) {
+  if (!refs || refs.length === 0) return fallback;
+  const subject = behaviorName ? `"${behaviorName}"` : "this profile";
+  return `Cannot delete ${subject}: still used by ${formatReferencingEntityTypes(refs)}`;
+}

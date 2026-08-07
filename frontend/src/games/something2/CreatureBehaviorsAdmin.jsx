@@ -239,7 +239,10 @@ function CreatureBehaviorsAdmin() {
 
   const handleDelete = (behavior) => {
     if (window.confirm(`Are you sure you want to delete "${behavior.name}"?`)) {
-      deleteMutation.mutate({ id: behavior.id });
+      // `name` rides along so a 409 (still referenced by a creature type) can
+      // name the profile in its error toast -- the response body only names
+      // what's blocking the delete, not what was being deleted.
+      deleteMutation.mutate({ id: behavior.id, name: behavior.name });
     }
   };
 
