@@ -286,6 +286,13 @@ test('loadItemTypes actually SELECTs every column it maps', async () => {
   for (const col of ['stackable', 'ammo_type_id', 'aoe_radius']) {
     assert.ok(sql.includes(col), `loadItemTypes SELECT must name ${col} — a mapped column missing from the SELECT loads as undefined, so ammo silently never depletes and AoE silently never fires`);
   }
+  // SOMET-253 Task 9: knockback is the newest column here and the one items.js's
+  // own comment calls out as the exact shape of the P2a trap this guard exists
+  // to prevent (a column added to the schema but missing from an explicit
+  // SELECT list). creature_mechanics_wiring.test.js proves the VALUE survives
+  // loadItemTypes -> World.attack end to end; this is the companion guard on
+  // the SQL text itself, same as every other column above.
+  assert.ok(sql.includes('knockback'), 'loadItemTypes SELECT must name knockback — without it every weapon\'s knockback silently reads as 0 forever');
 });
 
 test('loadItemTypes exposes ammo and aoe fields', async () => {
