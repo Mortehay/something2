@@ -397,6 +397,10 @@ class CreatureSim {
         // (stamped once, deliberately never refreshed) is what stops this
         // becoming a perma-stun — it applies to creatures for free, because it
         // lives on the target.
+        // `cc` is the PRE-move centre computed above, deliberately not
+        // recomputed here even though `move` may have just changed c.x/c.y
+        // this same tick: recomputing would change the melee range gate
+        // (and, for a shot, the origin) against the frozen golden trace.
         if (c._attackCd <= 0 && canAct(c, now)
             && dist2(cc.x, cc.y, tc.x, tc.y) <= bh.attackRange * bh.attackRange) {
           const dmg = bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE);
@@ -408,6 +412,14 @@ class CreatureSim {
             // Without this a ranged creature burns its cooldowns firing into
             // a wall, which reads as a broken enemy rather than a blocked one.
             const d = Math.hypot(tc.x - cc.x, tc.y - cc.y) || 1;
+            // A hold/kite creature can fire without its movement block ever
+            // running this tick (or any tick, for `hold`), so this is the
+            // only place its facing updates while shooting. Without it a
+            // stationary turret keeps a stale facing and visibly fires out of
+            // its own back — the client renders directional sprites off
+            // c.facing.
+            const f = facingFor(tc.x - cc.x, tc.y - cc.y);
+            if (f) c.facing = f;
             shots.push({
               ownerId: c.id,
               ownerFaction: c.faction || 'hostile',

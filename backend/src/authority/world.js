@@ -279,7 +279,7 @@ class World {
       dt, activeKeys, [...this.players.values()], this.now) || { killed: [], shots: [] };
 
     for (const s of shots) {
-      if (this.projectiles.count() >= MAX_CREATURE_PROJECTILES) break;
+      if (this.projectiles.countByOwnerKind('creature') >= MAX_CREATURE_PROJECTILES) break;
       this.projectiles.spawn({
         ownerId: s.ownerId,
         ownerKind: 'creature',

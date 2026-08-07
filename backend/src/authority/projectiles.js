@@ -239,6 +239,16 @@ class ProjectileSim {
   }
 
   count() { return this.projectiles.length; }
+
+  // Count only creature-owned projectiles -- what MAX_CREATURE_PROJECTILES in
+  // world.js actually needs to bound. Kept here rather than having World
+  // reach into `this.projectiles` directly, matching count()'s existing
+  // encapsulation.
+  countByOwnerKind(ownerKind) {
+    let n = 0;
+    for (const p of this.projectiles) if (p.ownerKind === ownerKind) n++;
+    return n;
+  }
 }
 
 module.exports = { ProjectileSim, MAX_SUB };
