@@ -140,6 +140,34 @@ function movedWith(map, c, vx, vy, dt, mult) {
   return resolveMove(map, { ...c, speed: c.speed * mult }, vx, vy, dt);
 }
 
+// The single place addCreatures decides an instance's behaviour, so every
+// caller -- server.js's real per-chunk spawn loader AND every hand-built test
+// fixture -- goes through the same rule instead of each guessing at a
+// fallback of its own.
+//
+// Priority:
+//  1. `c.behavior` is already a resolved camelCase object (a test fixture
+//     that builds one directly, e.g. the "supplied behaviour overrides the
+//     module constants" test) -- used verbatim.
+//  2. `c.behavior_name` is non-null -- the row came from a real LEFT JOIN
+//     against creature_behaviors that actually found a profile (server.js's
+//     spawn loader, or a test fixture shaped like its query result). Resolved
+//     through resolveBehavior and honored exactly, including a genuinely
+//     Line-shaped or 'charge'-style guard, because that is a deliberate
+//     catalog assignment, not an absence.
+//  3. Nothing usable was supplied -- either the row's behavior_id was NULL
+//     (a LEFT JOIN that found no profile) or the caller never selected the
+//     behaviour columns at all (every pre-P2a call site, every hand-built
+//     test fixture, the golden trace fixture). Falls back BY FACTION rather
+//     than blindly to Line: `behavior_name` is the exact alias resolveBehavior
+//     reads, so this is the one column whose absence proves "no profile",
+//     matching the comment on GUARD_DEFAULT_BEHAVIOR above.
+function resolveInstanceBehavior(c) {
+  if (c.behavior) return c.behavior;
+  if (c.behavior_name != null) return resolveBehavior(c);
+  return (c.faction || 'hostile') === 'guard' ? GUARD_DEFAULT_BEHAVIOR : { ...DEFAULT_BEHAVIOR };
+}
+
 // Nearest DIRS index for a movement vector's signs → facing.
 function facingFor(vx, vy) {
   const sx = Math.sign(vx), sy = Math.sign(vy);
@@ -179,18 +207,14 @@ class CreatureSim {
         // column carried straight onto the in-memory object at load time,
         // never recomputed.
         blocksPortalId: c.blocks_portal_id || null,
-        // Resolved at load time by loadCreatureTypes and carried onto the
-        // instance the same way `mit`, `level` and `damage` are: a raw value
-        // attached once, never recomputed inside the tick.
-        //
-        // A creature spawned with no explicit `.behavior` falls back by
-        // faction: guard-faction gets GUARD_DEFAULT_BEHAVIOR (today's guard
-        // constants, chaseStyle 'guard'), everything else gets Line. See the
-        // comment on GUARD_DEFAULT_BEHAVIOR for why this is faction-aware
-        // rather than a single blind fallback.
-        behavior: c.behavior || ((c.faction || 'hostile') === 'guard'
-          ? GUARD_DEFAULT_BEHAVIOR : { ...DEFAULT_BEHAVIOR }),
-        attackElement: c.attackElement || 'physical',
+        // Resolved once here -- from an already-resolved object, a raw joined
+        // DB row, or a faction-aware fallback -- and carried onto the
+        // instance the same way `mit`, `level` and `damage` are: attached
+        // once, never recomputed inside the tick. See resolveInstanceBehavior.
+        behavior: resolveInstanceBehavior(c),
+        // c.attackElement covers an already-shaped instance; c.attack_element
+        // is the raw column name server.js's SELECT aliases it as (et.attack_element).
+        attackElement: c.attackElement || c.attack_element || 'physical',
         _target: null, _targetKind: null, mode: 'roam', _attackCd: 0,
       });
     }

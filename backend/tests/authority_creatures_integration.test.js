@@ -204,6 +204,31 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/le
     assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
       `the world_creatures load must SELECT ${col} — without it a guarded dungeon portal silently stops being guarded`);
   }
+  // SOMET-249, fix round 1: the twelve-profile behaviour catalog was wired
+  // into loadCreatureTypes (the TYPE catalog, used for gold drops and
+  // name→id lookups) but never into THIS query, which is what actually feeds
+  // live creature INSTANCES. That shipped the whole catalog inert: profiles
+  // existed, the admin UI could edit them, CreatureSim's tick could read
+  // them, and nothing populated `c.behavior` with anything but the fallback.
+  // `behavior_name` is checked separately from the generic word-list loop
+  // below (with its exact alias, not just a bare word-boundary match)
+  // because it is the ONE column resolveInstanceBehavior reads to decide a
+  // real profile was found at all — a join present but aliased wrong (or not
+  // aliased) satisfies a bare `\bname\b` check while silently disabling
+  // every profile with nothing appearing broken.
+  assert.match(sel, /\bb\.name\s+AS\s+behavior_name\b/i,
+    'the world_creatures load must alias the joined profile name AS behavior_name — '
+    + 'resolveInstanceBehavior reads that exact key to know a real profile was found');
+  assert.match(sel, /LEFT JOIN\s+creature_behaviors\s+b\s+ON\s+b\.id\s*=\s*et\.behavior_id/i,
+    'must LEFT JOIN creature_behaviors, not INNER — an INNER JOIN would make a creature whose '
+    + 'type has no assigned profile vanish from the world entirely (it would just never spawn) '
+    + 'instead of falling back through resolveInstanceBehavior');
+  for (const col of ['attack_element', 'attack_kind', 'attack_range', 'attack_cooldown',
+                     'projectile_speed', 'projectile_radius', 'aggro_radius', 'leash_radius',
+                     'chase_style', 'preferred_range', 'move_speed_mult', 'damage_override']) {
+    assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
+      `the world_creatures load must SELECT ${col} — without it a creature's profile is inert in the running game`);
+  }
   ws.close(); handle.close(); server.close();
 });
 

@@ -92,6 +92,64 @@ test('a supplied behaviour overrides the module constants', () => {
   assert.equal(s.all()[0].mode, 'roam');
 });
 
+// --- SOMET-249 fix round 1: prove the catalog reaches a REAL spawn, not just
+// a hand-built `.behavior` object. server.js's per-chunk spawn loader hands
+// addCreatures the raw joined row shape (behavior_name, chase_style,
+// aggro_radius, ... as plain snake_case columns, exactly like a pg row),
+// never a pre-resolved camelCase object. The previous test above passes
+// `.behavior` directly and would keep passing even if resolveInstanceBehavior
+// never looked at a raw row at all -- it does not exercise the loader's
+// actual output shape. This one does, and fails against the pre-fix code:
+// before resolveInstanceBehavior existed, addCreatures only ever checked
+// `c.behavior`, so a raw row like this fell straight through to the Line
+// fallback (aggroRadius 400) regardless of what the row said.
+test('a creature spawned from a raw joined DB row (server.js\'s shape) ticks with its own profile, not the Line fallback', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([{
+    id: 'archer', type: 'Archer', x: 100, y: 100, hp: 20, faction: 'hostile',
+    // Exactly the column names/aliases server.js's SELECT now produces --
+    // snake_case, no `.behavior` object anywhere.
+    behavior_name: 'Ranged', attack_kind: 'ranged', attack_range: 340,
+    attack_cooldown: 1.8, projectile_speed: 520, projectile_radius: 6,
+    aggro_radius: 460, leash_radius: 800, chase_style: 'kite',
+    preferred_range: 240, move_speed_mult: 1, damage_override: null,
+    attack_element: 'physical',
+  }]);
+  const c = s.all()[0];
+  assert.equal(c.behavior.chaseStyle, 'kite', 'the raw row\'s profile must reach c.behavior');
+  assert.equal(c.behavior.aggroRadius, 460);
+  assert.equal(c.attackElement, 'physical');
+
+  // The Ranged profile's 460px aggro radius reaches a player at 430px; the
+  // Line fallback's 400px does not. If resolveInstanceBehavior silently
+  // ignored the raw row and fell back to Line, this creature would stay
+  // 'roam' instead of acquiring the player.
+  const player = { userId: 'u1', x: 530, y: 100, width: 48, height: 48, hp: 100 };
+  s.tick(0.1, new Set(['0,0']), [player], 0);
+  assert.equal(s.all()[0].mode, 'chase',
+    'a 430px player is inside the Ranged profile\'s 460px aggro radius (and outside Line\'s 400px) -- '
+    + 'staying in roam here means the profile never reached the tick');
+});
+
+test('a guard-faction row with NO assigned profile (behavior_id NULL) still guards, not chases', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([{
+    id: 'g', type: 'Village Guard', x: 100, y: 100, hp: 60, faction: 'guard',
+    home_x: 100, home_y: 100,
+    // Shaped like server.js's LEFT JOIN when behavior_id IS NULL: the
+    // columns are present (a real query asked for them) but every value is
+    // null, exactly what pg returns for an unmatched LEFT JOIN row.
+    behavior_name: null, attack_kind: null, attack_range: null,
+    attack_cooldown: null, aggro_radius: null, leash_radius: null,
+    chase_style: null, damage_override: null,
+  }]);
+  const c = s.all()[0];
+  assert.equal(c.behavior.chaseStyle, 'guard',
+    'a NULL-profile guard-faction row must still fall back to guard behaviour, not Line\'s charge');
+  assert.equal(c.behavior.leashRadius, 300);
+  assert.equal(c.behavior.damageOverride, 25);
+});
+
 test('snapshotForNeighborhood filters by current chunk and shape', () => {
   const s = new CreatureSim(stubMap(), noRedirect);
   s.addCreatures([

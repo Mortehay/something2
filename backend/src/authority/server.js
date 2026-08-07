@@ -571,19 +571,39 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // creature that predates level scaling, and those must keep falling
       // back to the entity type's base value.
       //
+      // SOMET-249: LEFT JOIN creature_behaviors b ON b.id = et.behavior_id,
+      // the same shape loadCreatureTypes uses, for the same reason -- an
+      // INNER JOIN would make a creature whose type has no assigned profile
+      // vanish from the world entirely (it would just never spawn) instead of
+      // resolving to the faction-aware fallback in
+      // creatures.js's resolveInstanceBehavior. `b.name` MUST be aliased
+      // `behavior_name`: that is the exact key both resolveBehavior and
+      // resolveInstanceBehavior read to decide whether a real profile was
+      // found at all -- get the alias wrong and every creature silently takes
+      // the fallback, with nothing appearing broken (no error, no red test,
+      // the world just never uses the twelve profiles an admin configured).
+      // et.attack_element is the same kind of column as et.faction above:
+      // drop it and every creature's element silently reverts to 'physical'.
+      //
       // These rationale comments are deliberately kept OUTSIDE the query
       // template literal (as JS `//` comments, not SQL `--` comments): this
       // exact SELECT is guarded by a substring test
       // (authority_creatures_integration.test.js) that scans the live SQL
       // text for each column name. Writing the words "defense"/"level"/
-      // "damage" inside the string itself — even in a SQL comment — would
-      // make that guard pass whether or not the real column is still there.
+      // "damage"/"chase_style"/etc inside the string itself — even in a SQL
+      // comment — would make that guard pass whether or not the real column
+      // is still there.
       const rows = await pool.query(
         `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
                 wc.level, wc.damage, wc.blocks_portal_id,
                 COALESCE(wc.defense, et.defense) AS defense,
-                et.color, et.resistances, et.faction
-         FROM world_creatures wc LEFT JOIN entity_types et ON et.name = wc.type
+                et.color, et.resistances, et.faction, et.attack_element,
+                b.name AS behavior_name, b.attack_kind, b.attack_range, b.attack_cooldown,
+                b.projectile_speed, b.projectile_radius, b.aggro_radius, b.leash_radius,
+                b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override
+         FROM world_creatures wc
+         LEFT JOIN entity_types et ON et.name = wc.type
+         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
