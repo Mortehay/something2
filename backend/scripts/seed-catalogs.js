@@ -12,6 +12,7 @@ const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
 const { HOSTILE_CREATURES, CREATURE_DROPS } = require('../seeds/data/entityTypes.js');
+const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
 
 // COALESCE, not plain EXCLUDED, for the four columns below.
 //
@@ -84,6 +85,51 @@ async function seedOneBiome(db, b) {
   );
 }
 
+// COALESCE for every optional field, same rule as seedOneTile: a seed entry
+// that OMITS a field must not clobber what an admin tuned in the UI. The
+// non-optional five (name, attack_kind, attack_range, attack_cooldown,
+// chase_style) are the profile's identity and are always written.
+//
+// The ::real casts on $5/$6/$7/$8/$10/$11/$12 are load-bearing, not
+// decorative. Postgres infers a bare parameter's type from how it is used
+// INSIDE the COALESCE, and an integer literal default (0, 400, 800, 1) wins
+// that inference over the real column the COALESCE result is later assigned
+// to -- so without the cast, every parameter that ever carries a fractional
+// value (move_speed_mult 1.2, 1.5, 0.7, 0.6, 1.05, 0.95, 0.9) fails with
+// "invalid input syntax for type integer". Found by running the brief's own
+// seed_catalogs_db.test.js: seeding the real CREATURE_BEHAVIORS data (not the
+// seed test's integer-only fixtures) was the first place a fractional value
+// hit these params.
+async function seedOneBehavior(db, b) {
+  await db.query(
+    `INSERT INTO creature_behaviors
+       (name, attack_kind, attack_range, attack_cooldown, projectile_speed,
+        projectile_radius, aggro_radius, leash_radius, chase_style,
+        preferred_range, move_speed_mult, damage_override)
+     VALUES ($1,$2,$3,$4,
+             COALESCE($5::real,0), COALESCE($6::real,0), COALESCE($7::real,400), COALESCE($8::real,800),
+             $9, COALESCE($10::real,0), COALESCE($11::real,1), $12::real)
+     ON CONFLICT (name) DO UPDATE
+       SET attack_kind = EXCLUDED.attack_kind,
+           attack_range = EXCLUDED.attack_range,
+           attack_cooldown = EXCLUDED.attack_cooldown,
+           chase_style = EXCLUDED.chase_style,
+           projectile_speed = COALESCE($5::real, creature_behaviors.projectile_speed),
+           projectile_radius = COALESCE($6::real, creature_behaviors.projectile_radius),
+           aggro_radius = COALESCE($7::real, creature_behaviors.aggro_radius),
+           leash_radius = COALESCE($8::real, creature_behaviors.leash_radius),
+           preferred_range = COALESCE($10::real, creature_behaviors.preferred_range),
+           move_speed_mult = COALESCE($11::real, creature_behaviors.move_speed_mult),
+           damage_override = COALESCE($12::real, creature_behaviors.damage_override),
+           updated_at = now()`,
+    [b.name, b.attack_kind, b.attack_range, b.attack_cooldown,
+     b.projectile_speed ?? null, b.projectile_radius ?? null,
+     b.aggro_radius ?? null, b.leash_radius ?? null, b.chase_style,
+     b.preferred_range ?? null, b.move_speed_mult ?? null,
+     b.damage_override ?? null],
+  );
+}
+
 async function seedCatalogs(pool) {
   let tiles = 0;
   for (const t of DEFAULT_TILE_TYPES) {
@@ -96,6 +142,11 @@ async function seedCatalogs(pool) {
     await seedOneBiome(pool, b);
     biomes += 1;
   }
+
+  for (const b of CREATURE_BEHAVIORS) {
+    await seedOneBehavior(pool, b);
+  }
+  console.log(`Seeded ${CREATURE_BEHAVIORS.length} creature behaviors`);
 
   // NOTE: decorationTypes.js also exports SIZE_FIXES (Tree/Stone/IceRock
   // display size). Deliberately NOT consumed here. SIZE_FIXES is a ONE-TIME
@@ -170,7 +221,7 @@ async function seedCatalogs(pool) {
   return { tiles, biomes, decorations, creatures, drops };
 }
 
-module.exports = { seedCatalogs, seedOneTile, seedOneBiome };
+module.exports = { seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior };
 
 if (require.main === module) {
   const env = dotenv.config({ path: path.resolve(__dirname, '../../.env') }).parsed || {};

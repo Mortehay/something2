@@ -117,3 +117,14 @@ test('every drop rule names a creature in the catalog and a legal chance', () =>
     assert.ok(d.min_qty >= 1 && d.max_qty >= d.min_qty, `${d.creature} drop quantities are inverted`);
   }
 });
+
+test('CREATURE_BEHAVIORS covers every profile the migration inserts', () => {
+  const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
+  const names = CREATURE_BEHAVIORS.map((b) => b.name);
+  // Literal list: this is the contract, not a restatement of the data.
+  for (const n of ['Swarm', 'Skirmisher', 'Line', 'Ranged', 'Caster', 'Brute',
+                   'Heavy', 'Champion', 'Apex', 'Guard', 'Sentry', 'Lurker']) {
+    assert.ok(names.includes(n), `missing behaviour profile ${n}`);
+  }
+  assert.equal(new Set(names).size, names.length, 'duplicate profile name');
+});
