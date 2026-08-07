@@ -188,6 +188,20 @@ exports.up = (pgm) => {
     FROM creature_behaviors b WHERE b.name = 'Apex'
     ON CONFLICT (behavior_id, slot) DO NOTHING
   `);
+
+  // The Brute's shove. Applied here rather than left to the seed file so the
+  // migration and seeds/data/creatureAbilities.js agree row-for-row --
+  // catalog_seed_data.test.js pins the seed file as a superset of what
+  // migrations insert, and a divergence between the two is a defect this
+  // project has shipped before, not a documented exception.
+  //
+  // Behaviour-neutral: no creature type references Brute (see "Which
+  // profiles are live").
+  pgm.sql(`
+    UPDATE creature_abilities a SET knockback = 140
+    FROM creature_behaviors b
+    WHERE b.id = a.behavior_id AND b.name = 'Brute' AND a.slot = 1
+  `);
 };
 
 exports.down = (pgm) => {
@@ -242,7 +256,7 @@ const CREATURE_ABILITIES = [
 module.exports = { CREATURE_ABILITIES };
 ```
 
-**Note the Brute's 140 knockback.** The migration's backfill inserts 0 for every slot-1 row; the seed file carries the Brute's real value. That divergence is intentional and is the seeder's job to reconcile — the migration is behaviour-neutral by construction, and the Brute's shove arrives when an admin runs `make seed-catalogs` or when Task 6 lands. State this in the seeder's guard comment so a later reader does not "fix" the migration to match.
+**This file and the migration must agree row-for-row.** `catalog_seed_data.test.js` pins the seed file as a superset of what migrations insert, and a seeder/migration divergence is a defect this project has already shipped once. The Brute's `knockback: 140` and the Apex's slot 2 appear in both, which is why the migration carries the extra `UPDATE` in Step 1.
 
 - [ ] **Step 4: Extend the seeder**
 
@@ -1154,7 +1168,7 @@ Missing one of the four sites is the likely defect here: the swept path handles 
 
 Expected: green including the trace.
 
-The trace is safe for two independent reasons, and it is worth knowing both: the migration's backfill wrote `knockback = 0` into every slot-1 row, and the only non-zero seeded value (the Apex's Slam, at 120) belongs to a rung **no creature type references** — see "Which profiles are live". The Brute's 140 arrives only when an admin runs `make seed-catalogs`, and the Brute is likewise unreferenced.
+The trace is safe because the only two non-zero seeded knockback values — the Apex's Slam at 120 and the Brute's at 140 — belong to rungs **no creature type references**; see "Which profiles are live". Every other slot-1 row carries 0 from the backfill.
 
 - [ ] **Step 6: Commit**
 
