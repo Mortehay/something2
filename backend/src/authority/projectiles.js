@@ -117,7 +117,13 @@ class ProjectileSim {
       // The rider is applied at FULL duration: falloff scales damage only. A
       // target clipped by the blast edge still burns for the full time —
       // scaling the duration too would give it a burn too short to ever tick.
-      applyElementEffect(c, p.element, now, p.ownerId);
+      //
+      // sourceId is killerUserIdFor(p), NOT p.ownerId: a creature-owned shot's
+      // ownerId is a world_creatures uuid, and a later burn tick that finishes
+      // the target off (world.js's tick()) reports effects[key].sourceId
+      // straight through as killerUserId -- the exact uuid-into-an-integer-
+      // column crash killerUserIdFor exists to prevent on the direct-hit path.
+      applyElementEffect(c, p.element, now, killerUserIdFor(p));
     }
     for (const pl of players) {
       if (!projectileHitsPlayer(p, pl)) continue;
@@ -191,7 +197,10 @@ class ProjectileSim {
             if (creatures.damageCreatureById(c.id, p.damage, p.element, now)) {
               kills.push({ id: c.id, killerUserId: killerUserIdFor(p) });
             }
-            applyElementEffect(c, p.element, now, p.ownerId);
+            // See the _detonate comment above: killerUserIdFor(p), not
+            // p.ownerId -- the same uuid-into-killerUserId bug, reachable
+            // here via a later burn tick rather than this hit itself.
+            applyElementEffect(c, p.element, now, killerUserIdFor(p));
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
           }

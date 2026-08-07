@@ -70,3 +70,9 @@ exports.up = (pgm) => {
 exports.down = (pgm) => {
   pgm.dropTable('creature_behaviors');
 };
+
+// Exposed so creature_behaviors_invariants.test.js can pin the seed file
+// (seeds/data/creatureBehaviors.js) to this array field-for-field, without a
+// database -- the same pattern 1714440042000_decoration_types.js already uses
+// for NEW_DECORATIONS/SIZE_FIXES.
+exports.BEHAVIORS = BEHAVIORS;

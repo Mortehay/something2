@@ -14,7 +14,29 @@ const NUMERIC = [
   "aggro_radius", "leash_radius", "preferred_range", "move_speed_mult",
 ];
 
+// Defaults for a BRAND-NEW profile, mirroring the Line profile (today's
+// baseline hostile creature) rather than 0. A modal that opens with every
+// numeric at 0 lets an admin type a name, pick melee/charge and save a
+// creature that never moves (move_speed_mult 0), never aggroes
+// (aggro_radius/leash_radius 0) and never attacks (attack_range/
+// attack_cooldown 0) -- no error, nothing logged, the exact silent-inertness
+// class this sub-project exists to remove. Applied ONLY when the row has no
+// id (see isNewRow below); an EXISTING row's stored value -- including a
+// genuine 0, which every melee profile has for projectile_speed/
+// projectile_radius -- must still round-trip untouched.
+const NEW_ROW_DEFAULTS = {
+  attack_range: 60,
+  attack_cooldown: 1,
+  projectile_speed: 0,
+  projectile_radius: 0,
+  aggro_radius: 400,
+  leash_radius: 800,
+  preferred_range: 0,
+  move_speed_mult: 1,
+};
+
 export function behaviorToForm(row = {}) {
+  const isNewRow = row.id == null;
   const form = {
     id: row.id ?? null,
     name: row.name ?? "",
@@ -24,7 +46,7 @@ export function behaviorToForm(row = {}) {
     // must survive the round trip, so this is an explicit null check.
     damage_override: row.damage_override == null ? "" : row.damage_override,
   };
-  for (const k of NUMERIC) form[k] = row[k] ?? 0;
+  for (const k of NUMERIC) form[k] = row[k] ?? (isNewRow ? NEW_ROW_DEFAULTS[k] : 0);
   return form;
 }
 

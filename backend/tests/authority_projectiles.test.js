@@ -317,6 +317,45 @@ test('a projectile direct hit applies the weapon element to a creature and to a 
   assert.equal(pl.effects.size, 1);
 });
 
+// SOMET-249 fix-wave I3: applyElementEffect's sourceId feeds killerUserId if
+// the rider's own DOT (e.g. burn) later finishes the target off — see
+// world.js's tick(), which reads effects[key].sourceId straight through as
+// killerUserId. A creature-owned shot's `ownerId` is a world_creatures uuid;
+// if that uuid ever lands in an effect's sourceId, a later burn-tick kill
+// reports it as killerUserId and commitCreatureDeath crashes trying to INSERT
+// a uuid into player_progression.user_id (an integer column) -- rolling back
+// the transaction and resurrecting the creature (the "zombie creature" bug).
+test('a creature-owned direct-hit elemental shot stamps no killer on the rider it applies, not the shooter creature id', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({
+    ownerId: 'shooter', ownerKind: 'creature', ownerFaction: 'hostile',
+    x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 1, pierce: 5, element: 'fire' },
+  });
+  // Different faction than the shooter so projectileHitsCreature lets the hit
+  // through -- same convention as the targeting-matrix tests above.
+  const creatures = realCreatures([{ id: 'c1', type: 'wolf', x: 30, y: -24, hp: 500, color: '#f00', faction: 'guard' }]);
+  sim.step(0.1, { creatures, players: [], map: WALK_ALL, now: 1000 });
+  const c1 = creatures.creatures.get('c1');
+  assert.ok(c1.hp < 500, 'the creature was never hit — test setup is wrong');
+  assert.equal(c1.effects.get(BURN).sourceId, null,
+    'a creature-owned elemental hit must stamp a null killer, not the shooter creature\'s uuid');
+});
+
+test('a creature-owned AoE elemental blast stamps no killer on the rider it applies, not the shooter creature id', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({
+    ownerId: 'shooter', ownerKind: 'creature', ownerFaction: 'hostile',
+    x: 0, y: 0, nx: 1, ny: 0, weapon: FIREBALL,
+  });
+  const creatures = realCreatures([{ ...TRIGGER, faction: 'guard' }]);
+  const out = sim.step(0.1, { creatures, players: [], map: WALK_ALL, now: 1000 });
+  assert.equal(out.detonations.length, 1, 'the blast did not go off — test setup is wrong');
+  const trig = creatures.creatures.get('trig');
+  assert.ok(trig.hp < 500, 'the creature took no blast damage — test setup is wrong');
+  assert.equal(trig.effects.get(BURN).sourceId, null,
+    'a creature-owned AoE hit must stamp a null killer on its rider, not the shooter creature\'s uuid');
+});
+
 test('a projectile direct hit with a non-elemental weapon applies no rider', () => {
   const sim = new ProjectileSim();
   sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 1 } }); // element null

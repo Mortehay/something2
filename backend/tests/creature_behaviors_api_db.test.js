@@ -93,6 +93,12 @@ const FIXTURE_BODY = {
   aggro_radius: 300,
   leash_radius: 500,
   chase_style: 'charge',
+  // Required as of SOMET-249 fix-wave I4: behaviorFieldError now rejects a
+  // missing/non-positive move_speed_mult (0 silently produces a creature
+  // that never moves), so this fixture must carry one explicitly rather than
+  // relying on the route's insert-time `?? 1` default, which now runs too
+  // late to matter.
+  move_speed_mult: 1,
 };
 
 async function deleteBehaviorByName(pool, name) {

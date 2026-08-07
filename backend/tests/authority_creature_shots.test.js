@@ -119,6 +119,24 @@ test('World.tickCreatures spawns a ranged creature\'s shot into its own Projecti
   // pass unnoticed.
   assert.ok(Math.abs(speed - 520) < 1e-9, `expected projectile speed 520, got ${speed}`);
   assert.ok(p.vx > 0, `expected eastward velocity, got vx=${p.vx}`);
+
+  // SOMET-249 fix-wave I2: ownerKind is the single field gating BOTH faction
+  // targeting (projectileHitsCreature/projectileHitsPlayer in projectiles.js)
+  // AND kill credit (killerUserIdFor). Nothing asserted it before this fix --
+  // if world.js's spawn call ever said 'player' instead of 'creature', a
+  // hostile's arrow would start damaging fellow hostiles, and a kill would be
+  // credited to the shooter creature's own uuid (the exact bug Task 8 fixed),
+  // while every OTHER assertion in this test stayed green.
+  assert.equal(p.ownerKind, 'creature', 'ownerKind must be creature, not the player default');
+  assert.equal(p.ownerFaction, 'hostile');
+  // Literal values from the Ranged profile ("ranged()" above), not read back
+  // off the behaviour object -- a mapping typo in tickCreatures' weapon-shaped
+  // object (e.g. projectile_radius swapped for range) would otherwise pass
+  // unnoticed, same rationale as the speed assertion above.
+  assert.equal(p.radius, 6, 'radius must come from the profile\'s projectileRadius');
+  assert.equal(p.remaining, 340, 'remaining must come from the profile\'s attackRange');
+  assert.equal(p.element, 'physical');
+  assert.equal(p.damage, 7);
 });
 
 test('MAX_CREATURE_PROJECTILES caps concurrent creature shots -- the excess is dropped, not queued', () => {

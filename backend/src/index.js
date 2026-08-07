@@ -825,6 +825,35 @@ function behaviorFieldError(body) {
   if (body.chase_style === 'guard' && body.attack_kind !== 'melee') {
     return "chase_style 'guard' requires attack_kind 'melee'";
   }
+  // SOMET-249 fix-wave I4: these five MUST be strictly positive, not merely
+  // finite. A saved 0 here is not a valid edge case the way damage_override's
+  // 0 is ("hits for nothing") -- it is a creature that never moves
+  // (move_speed_mult), never notices a player (aggro_radius), never chases
+  // one past its own feet (leash_radius), and never actually attacks
+  // (attack_range/attack_cooldown of 0 gate CreatureSim's own attack check).
+  // This is exactly the silent-inertness class Task 4's resolveBehavior
+  // fallback exists to prevent for a NULL column; this closes the same hole
+  // for a value the admin route lets through as an explicit zero.
+  const POSITIVE_FIELDS = ['attack_range', 'attack_cooldown', 'aggro_radius', 'leash_radius', 'move_speed_mult'];
+  for (const field of POSITIVE_FIELDS) {
+    if (!(Number(body[field]) > 0)) return `${field} must be greater than 0`;
+  }
+  // projectile_radius and preferred_range are legitimately 0 for a melee
+  // profile (no projectile, no standoff distance) -- only negative/non-finite
+  // is rejected.
+  if (body.projectile_radius != null && !(Number(body.projectile_radius) >= 0)) {
+    return 'projectile_radius must be 0 or greater';
+  }
+  if (body.preferred_range != null && !(Number(body.preferred_range) >= 0)) {
+    return 'preferred_range must be 0 or greater';
+  }
+  // A kiter that prefers to stand farther out than its own attack_range can
+  // reach can never close to a range where its attack gate is satisfied: it
+  // backs away trying to reach preferred_range, which is already outside
+  // attack_range, and oscillates forever without ever landing a hit.
+  if (body.chase_style === 'kite' && Number(body.preferred_range) > Number(body.attack_range)) {
+    return "chase_style 'kite' requires preferred_range <= attack_range";
+  }
   return null;
 }
 
@@ -2226,4 +2255,7 @@ if (require.main === module) {
   console.log('Authority WS attached at /authority');
 }
 
-module.exports = { app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, boundedCacheSet, apiRateLimiter };
+module.exports = {
+  app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, boundedCacheSet,
+  apiRateLimiter, behaviorFieldError,
+};
