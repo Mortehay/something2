@@ -156,6 +156,31 @@ test('World.tickCreatures spawns a ranged creature\'s shot into its own Projecti
   assert.equal(p.damage, 7);
 });
 
+// SOMET-253 Task 6 fix round: the knockback hop was reviewed by hand
+// (services/creatureBehaviors.js -> creatures.js's shot.knockback ->
+// world.js's synthetic weapon -> projectiles.js's spawn) but had no test of
+// its own -- every knockback test either drove CreatureSim.tick directly
+// (stopping short of world.js) or called ProjectileSim.spawn with a
+// hand-built weapon object (bypassing world.js entirely). A typo'd key at
+// EITHER hop (creatures.js's shots.push, or world.js's synthetic weapon
+// object) would leave every other assertion above green -- knockback isn't
+// load-bearing for speed/radius/range/element/damage, so nothing else here
+// would catch it. This drives the real path end to end and pins a
+// deliberately distinctive, non-zero, non-default value.
+test('World.tickCreatures threads the ability\'s own knockback onto the spawned projectile', () => {
+  const w = new World(worldMap());
+  w.addPlayer('u1', { x: 380, y: 92 });
+  w.creatures.addCreatures([{ id: 'c', type: 'R', x: 100, y: 100, hp: 100,
+    behavior: ranged({ knockback: 45 }), attackElement: 'physical', damage: 7 }]);
+  w.tickCreatures(0.1, active);
+  assert.equal(w.projectiles.count(), 1, 'the shot must have been spawned into world.projectiles');
+  const p = w.projectiles.projectiles[0];
+  // Literal 45, the ability's own knockback above -- not read back off the
+  // behaviour object, same rationale as every other field assertion in the
+  // test right above this one.
+  assert.equal(p.knockback, 45, 'knockback must survive creatures.js -> world.js -> projectiles.js unmangled');
+});
+
 test('MAX_CREATURE_PROJECTILES caps concurrent creature shots -- the excess is dropped, not queued', () => {
   const w = new World(worldMap());
   w.addPlayer('u1', { x: 380, y: 92 });
