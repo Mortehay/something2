@@ -7,6 +7,7 @@ import {
 } from './useSprites.js';
 import { assetUrlVersioned } from './useTileSprites.js';
 import { useBiomes } from './useBiomes.js';
+import { useCreatureBehaviors } from './useCreatureBehaviors.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
@@ -721,9 +722,13 @@ function EntityTexturePanel({ entity, prompt }) {
   );
 }
 
+// entity_types.attack_element CHECK constraint, migration 1714440081000.
+const ATTACK_ELEMENTS = ['physical', 'fire', 'ice', 'lightning'];
+
 function EntityTypesAdmin() {
   const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
   const { tileTypes } = useTileTypes();
+  const { behaviors } = useCreatureBehaviors();
   const { data: capability, isError: capabilityDown, isLoading: capabilityLoading } = useSpriteCapability();
   const createMutation = useCreateEntityType();
   const updateMutation = useUpdateEntityType();
@@ -760,7 +765,9 @@ function EntityTypesAdmin() {
     mana_regen_rate: 0,
     display_width: 0,
     display_height: 0,
-    place_order: 0
+    place_order: 0,
+    behavior_id: null,
+    attack_element: 'physical'
   });
 
   useEffect(() => {
@@ -789,7 +796,11 @@ function EntityTypesAdmin() {
         mana_regen_rate: editingEntity.mana_regen_rate || 0,
         display_width: editingEntity.display_width || 0,
         display_height: editingEntity.display_height || 0,
-        place_order: editingEntity.place_order || 0
+        place_order: editingEntity.place_order || 0,
+        // null means "no behavior profile assigned" and must survive as null,
+        // not fall back to a truthy default -- same rule as damage_override.
+        behavior_id: editingEntity.behavior_id ?? null,
+        attack_element: editingEntity.attack_element || 'physical'
       });
     } else {
       setFormData({
@@ -816,7 +827,9 @@ function EntityTypesAdmin() {
         mana_regen_rate: 0.5,
         display_width: 64,
         display_height: 64,
-        place_order: 0
+        place_order: 0,
+        behavior_id: null,
+        attack_element: 'physical'
       });
     }
   }, [editingEntity, isModalOpen]);
@@ -1029,6 +1042,38 @@ function EntityTypesAdmin() {
                   />
                 </FormGroup>
               </div>
+
+              {formData.is_creature && (
+                <div style={{ display: 'flex', gap: '2rem' }}>
+                  <FormGroup style={{ flex: 1 }}>
+                    <label>Behavior</label>
+                    <select
+                      value={formData.behavior_id ?? ''}
+                      onChange={e => setFormData({
+                        ...formData,
+                        behavior_id: e.target.value === '' ? null : Number(e.target.value),
+                      })}
+                    >
+                      <option value="">— none (default Line behavior) —</option>
+                      {behaviors?.map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </FormGroup>
+
+                  <FormGroup style={{ flex: 1 }}>
+                    <label>Attack Element</label>
+                    <select
+                      value={formData.attack_element}
+                      onChange={e => setFormData({ ...formData, attack_element: e.target.value })}
+                    >
+                      {ATTACK_ELEMENTS.map(el => (
+                        <option key={el} value={el}>{el}</option>
+                      ))}
+                    </select>
+                  </FormGroup>
+                </div>
+              )}
 
               <FormGroup>
                 <label>Image Asset Path/URL</label>

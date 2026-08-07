@@ -1,6 +1,6 @@
 import {
   HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker,
-  HiOutlineCube, HiOutlineMap, HiOutlineGlobeAlt, HiOutlineShare,
+  HiOutlineCube, HiOutlineMap, HiOutlineGlobeAlt, HiOutlineShare, HiOutlineBolt,
 } from "react-icons/hi2";
 
 // One source of truth for the sidebar: label, route, icon and the admin colour
@@ -27,6 +27,7 @@ export const NAV_SECTIONS = [
       { id: 'items',    label: 'Items',      path: '/game/items',     Icon: HiOutlineCube,    adminType: 'items' },
       { id: 'maps',     label: 'Maps',       path: '/game/maps',      Icon: HiOutlineMap,     adminType: 'maps' },
       { id: 'biomes',   label: 'Biomes',     path: '/game/biomes',    Icon: HiOutlineGlobeAlt, adminType: 'maps' },
+      { id: 'creature-behaviors', label: 'Creature Behaviors', path: '/game/creature-behaviors', Icon: HiOutlineBolt, adminType: 'entity' },
       { id: 'worldmap', label: 'World Map',  path: '/game/world-map', Icon: HiOutlineShare,   adminType: 'maps' },
     ],
   },
