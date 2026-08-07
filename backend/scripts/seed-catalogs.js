@@ -194,6 +194,27 @@ async function seedCatalogs(pool) {
        c.gold_min, c.gold_max],
     );
     creatures += r.rowCount;
+
+    // Same faction rule 1714440081000_entity_behavior.js's backfill uses
+    // (guard faction -> Guard, everything else -> Line), resolved by name so
+    // this can't desync from that migration if a profile is ever renamed.
+    // COALESCE, not a bare SET, so a behaviour an admin already assigned by
+    // hand is never reset: this only fills a gap. HOSTILE_CREATURES has no
+    // guard-faction entries today (Village Guard is seeded structurally, not
+    // through this list -- see the file header), so c.faction is always
+    // undefined here and every row resolves to Line, but the rule is written
+    // generally rather than hardcoded to match the migration it must stay
+    // consistent with. This is what closes the gap the "seeding restores a
+    // creature that is missing from the catalog" test exposed: the INSERT
+    // above never set behavior_id, so a creature restored after being
+    // deleted (e.g. Wolf, after a dev-volume rebuild) came back with none.
+    await pool.query(
+      `UPDATE entity_types
+         SET behavior_id = COALESCE(behavior_id,
+           (SELECT id FROM creature_behaviors WHERE name = $2))
+       WHERE name = $1`,
+      [c.name, c.faction === 'guard' ? 'Guard' : 'Line'],
+    );
   }
 
   // Guarded by NOT EXISTS, not ON CONFLICT: creature_drops has no unique

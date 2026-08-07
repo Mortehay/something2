@@ -88,18 +88,42 @@ test('creature_behaviors seeding', { skip: !url ? 'no database URL' : false }, a
   });
 
   await t.test('a profile still in use cannot be deleted', async () => {
-    const inUse = await pool.query(
-      'SELECT id FROM creature_behaviors WHERE name = $1', ['Line']);
-    await assert.rejects(
-      () => pool.query('DELETE FROM creature_behaviors WHERE id = $1', [inUse.rows[0].id]),
-      /foreign key|violates/i,
-    );
+    // Self-contained zz-prefixed fixtures, never the real Line/Guard rows:
+    // this subtest previously deleted the real 'Line' row when it ran before
+    // the FK existed (see the fix-round section of the task report).
+    try {
+      await pool.query(
+        `INSERT INTO creature_behaviors
+           (name, attack_kind, attack_range, attack_cooldown, aggro_radius, leash_radius, chase_style)
+         VALUES ('zzInUse','melee',60,1,400,800,'charge')`);
+      // is_creature = false: the FK on behavior_id does not care whether the
+      // row is a creature, and true would make this fixture visible to
+      // creature_drops_db.test.js's "every creature type has a drop rule"
+      // catalog-wide invariant while it briefly exists.
+      await pool.query(
+        `INSERT INTO entity_types (name, color, is_creature, behavior_id)
+         VALUES ('zzInUseCreature','#fff',false,
+           (SELECT id FROM creature_behaviors WHERE name = 'zzInUse'))`);
+      await assert.rejects(
+        () => pool.query('DELETE FROM creature_behaviors WHERE name = $1', ['zzInUse']),
+        /foreign key|violates/i,
+      );
+    } finally {
+      // Entity type first (it holds the FK), then the profile. Both by name,
+      // unconditionally.
+      await pool.query('DELETE FROM entity_types WHERE name = $1', ['zzInUseCreature']);
+      await pool.query('DELETE FROM creature_behaviors WHERE name = $1', ['zzInUse']);
+    }
   });
 
   await t.test('attack_element defaults to physical and rejects an unknown element', async () => {
     try {
+      // is_creature = false: attack_element lives on entity_types regardless
+      // of creature-hood, and a false fixture is invisible to the
+      // creature-only catalog invariants other test files run (e.g.
+      // creature_drops_db.test.js's "every creature type has a drop rule").
       await pool.query(
-        `INSERT INTO entity_types (name, color, is_creature) VALUES ('zzElem','#fff',true)`);
+        `INSERT INTO entity_types (name, color, is_creature) VALUES ('zzElem','#fff',false)`);
       const r = await pool.query('SELECT attack_element FROM entity_types WHERE name = $1', ['zzElem']);
       assert.equal(r.rows[0].attack_element, 'physical');
       await assert.rejects(
