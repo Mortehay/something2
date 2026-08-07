@@ -42,6 +42,13 @@ is no DOM**, so frontend tests cover pure helpers, never rendered components.
   testing a seeder.
 - **Test fixtures are `zz`-prefixed and deleted by name, unconditionally, in a
   `finally`** — never by an id captured mid-test.
+- **A test must never issue a write against a real catalog row**, by id or by
+  name, even one it expects to be rejected. Task 3 learned this the expensive
+  way: a subtest asserting `DELETE FROM creature_behaviors WHERE id = <Line's
+  id>` is refused by the foreign key ran *before* the migration that adds that
+  key, the DELETE succeeded, and it destroyed the real `Line` row in the shared
+  dev database. An assertion about a rejection is only safe on a fixture the
+  test created itself.
 - **Do not touch** `PATH_NAME_RE`, `detectPathTile`,
   `backend/src/authority/collision.js`, `frontend/src/games/something2/movement.js`.
 - **Commits:** `type(scope): summary (SOMET-249)`, ending with
@@ -1951,6 +1958,13 @@ bootstrap on an existing route test — find one with
 ```
 
 Every fixture profile is named `zz…` and removed by name in a `finally`.
+
+**Case 4 must build its own fixture pair — a `zz` profile plus a `zz` entity
+type pointing at it — and must never name or reference a real profile such as
+`Line`.** Tear down the entity type first, then the profile. Task 3 destroyed
+the real `Line` row by asserting a rejection against it in a migration state
+where the rejection did not yet apply; an assertion about a refusal is only
+safe on a row the test created.
 
 - [ ] **Step 2: Run and watch it fail**
 
