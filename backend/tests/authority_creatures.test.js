@@ -150,6 +150,77 @@ test('a guard-faction row with NO assigned profile (behavior_id NULL) still guar
   assert.equal(c.behavior.damageOverride, 25);
 });
 
+// --- SOMET-249 fix round 2 ---
+
+// Every moveSpeedMult in the rest of the suite (and the golden trace) is 1,
+// so movedWith's scaled branch (`resolveMove(map, { ...c, speed: c.speed *
+// mult }, ...)`) was reachable in code but exercised by nothing -- and
+// commit 2 of this task is precisely what lets a non-1 multiplier (8 of the
+// 12 seeded profiles carry one, e.g. Swarm 1.2, Heavy 0.6) reach a live
+// creature. Two things must hold: the scaling must actually apply (not just
+// "the creature moved"), and c.speed itself must never be mutated, since a
+// persisted multiplier would compound every tick -- the exact failure mode
+// movedWith exists to prevent.
+test('moveSpeedMult scales roam distance and never mutates c.speed', () => {
+  const fullBehavior = (mult) => ({
+    name: 'X', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
+    projectileSpeed: 0, projectileRadius: 0, aggroRadius: 400, leashRadius: 800,
+    chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: mult, damageOverride: null,
+  });
+  const s = new CreatureSim(stubMap(), noRedirect); // fixed dir 0 (east) for both
+  s.addCreatures([
+    { id: 'slow', type: 'Wolf', x: 100, y: 100, hp: 10, behavior: fullBehavior(1) },
+    { id: 'fast', type: 'Wolf', x: 100, y: 100, hp: 10, behavior: fullBehavior(2) },
+  ]);
+  s.tick(0.1, new Set(['0,0']));
+  const slow = s.all().find((c) => c.id === 'slow');
+  const fast = s.all().find((c) => c.id === 'fast');
+  const dSlow = Math.hypot(slow.x - 100, slow.y - 100);
+  const dFast = Math.hypot(fast.x - 100, fast.y - 100);
+  assert.ok(dSlow > 0, 'the mult:1 creature must actually move (a zero baseline makes the ratio meaningless)');
+  assert.ok(Math.abs(dFast / dSlow - 2) < 1e-9,
+    `moveSpeedMult:2 must travel ~2x as far as moveSpeedMult:1 in one tick -- got ratio ${dFast / dSlow}`);
+
+  // Run it out further and confirm c.speed itself never changed: a mutation
+  // would compound (each tick's scaled speed becoming the next tick's base),
+  // producing runaway acceleration invisible to a single-tick check.
+  for (let i = 0; i < 50; i++) s.tick(0.1, new Set(['0,0']));
+  assert.equal(slow.speed, 40, 'c.speed must stay at the base CREATURE_SPEED, mult:1');
+  assert.equal(fast.speed, 40, 'c.speed must stay at the base CREATURE_SPEED even under mult:2 -- '
+    + 'movedWith must scale at the resolveMove call site, never by writing c.speed');
+});
+
+// services/creatureBehaviors.js's own header states the resolver's entire
+// purpose: "CreatureSim never sees a partial or malformed behaviour."
+// resolveInstanceBehavior must uphold that same guarantee for a
+// hand-assembled `.behavior` object, not just for a DB-row-shaped one
+// (resolveBehavior already normalizes those). A `.behavior` missing
+// moveSpeedMult gives `c.speed * undefined` = NaN in movedWith -- with a real
+// map (unlike this file's always-true stub), NaN coordinates read as
+// unwalkable and the move is refused every tick, forever, with no error and
+// no log. Missing attackRange makes the contact-range comparison always
+// false, so the creature acquires a target but can never land a hit. Task 7
+// and Task 9 both construct behaviour objects, so this was one task away
+// from being live.
+test('a behaviour missing moveSpeedMult and attackRange still moves and attacks (no silent freeze)', () => {
+  const partial = { chaseStyle: 'charge', aggroRadius: 400, leashRadius: 800, attackCooldown: 1 };
+
+  const roamer = new CreatureSim(stubMap(), noRedirect);
+  roamer.addCreatures([{ id: 'a', type: 'Wolf', x: 100, y: 100, hp: 10, behavior: partial }]);
+  roamer.tick(0.1, new Set(['0,0']));
+  const c = roamer.all()[0];
+  assert.ok(Number.isFinite(c.x) && Number.isFinite(c.y),
+    'a behaviour missing moveSpeedMult must not produce NaN coordinates (c.speed * undefined)');
+  assert.ok(c.x !== 100 || c.y !== 100, 'a behaviour missing moveSpeedMult must not freeze roam movement');
+
+  const attacker = new CreatureSim(stubMap(), noRedirect);
+  attacker.addCreatures([{ id: 'b', type: 'Wolf', x: 100, y: 100, hp: 10, damage: 5, behavior: partial }]);
+  const player = { userId: 'u1', x: 110, y: 100, width: 48, height: 48, hp: 100 };
+  attacker.tick(0.05, new Set(['0,0']), [player], 0);
+  assert.ok(player.hp < 100,
+    'a behaviour missing attackRange must not silently disable the attack (NaN comparison is always false)');
+});
+
 test('snapshotForNeighborhood filters by current chunk and shape', () => {
   const s = new CreatureSim(stubMap(), noRedirect);
   s.addCreatures([

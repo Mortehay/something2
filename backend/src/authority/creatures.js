@@ -28,17 +28,18 @@ const GUARD_LEASH_RADIUS = 300;   // px from HOME: guards hold the gate, they do
 const GUARD_DAMAGE = 25;
 const GUARD_HOME_EPSILON = 24;    // px: close enough to the post to stand still
 
-// Fallback behaviour for a guard-faction creature spawned with no explicit
-// `.behavior` -- every hand-built test fixture, and every real
-// world_creatures row today (server.js's per-chunk spawn loader does not yet
-// select behavior_id; that wiring belongs to a later task). Built from the
-// SAME GUARD_AGGRO_RADIUS/GUARD_LEASH_RADIUS/GUARD_DAMAGE constants the tick
-// used to read directly, so an unprofiled guard's behaviour is byte-identical
-// to today's. This is what lets the guard branch below route on
-// `bh.chaseStyle === 'guard'` instead of `c.faction === 'guard'` without
-// silently turning every guard that predates a real catalog lookup into a
-// hostile (which is what a blind fallback to DEFAULT_BEHAVIOR/Line would do,
-// since Line's chaseStyle is 'charge').
+// Fallback behaviour for a guard-faction creature with no assigned profile --
+// every hand-built test fixture, and any real world_creatures row whose
+// entity_type has behavior_id NULL (server.js's per-chunk spawn loader DOES
+// join creature_behaviors as of SOMET-249 fix round 1, but a NULL FK still
+// resolves here, same as a row that never went through the join at all).
+// Built from the SAME GUARD_AGGRO_RADIUS/GUARD_LEASH_RADIUS/GUARD_DAMAGE
+// constants the tick used to read directly, so an unprofiled guard's
+// behaviour is byte-identical to today's. This is what lets the guard branch
+// below route on `bh.chaseStyle === 'guard'` instead of `c.faction ===
+// 'guard'` without silently turning every guard with no assigned profile
+// into a hostile (which is what a blind fallback to DEFAULT_BEHAVIOR/Line
+// would do, since Line's chaseStyle is 'charge').
 const GUARD_DEFAULT_BEHAVIOR = Object.freeze({
   ...DEFAULT_BEHAVIOR,
   name: 'Guard',
@@ -148,11 +149,21 @@ function movedWith(map, c, vx, vy, dt, mult) {
 // Priority:
 //  1. `c.behavior` is already a resolved camelCase object (a test fixture
 //     that builds one directly, e.g. the "supplied behaviour overrides the
-//     module constants" test) -- used verbatim.
+//     module constants" test; Tasks 7/9 will build these too). Spread onto
+//     DEFAULT_BEHAVIOR rather than used verbatim -- services/creatureBehaviors.js's
+//     whole reason to exist is that CreatureSim never sees a partial
+//     behaviour, and a hand-assembled object is exactly the kind of input
+//     that can omit a field. A `.behavior` missing `moveSpeedMult` would give
+//     `c.speed * undefined` = NaN in movedWith, so `isWalkable(NaN, ...)` is
+//     false and the creature stands still forever with no error; missing
+//     `attackRange` makes the contact-range comparison always false, so it
+//     never attacks. Both are silent-freeze failures, the exact class this
+//     sub-project exists to eliminate.
 //  2. `c.behavior_name` is non-null -- the row came from a real LEFT JOIN
 //     against creature_behaviors that actually found a profile (server.js's
 //     spawn loader, or a test fixture shaped like its query result). Resolved
-//     through resolveBehavior and honored exactly, including a genuinely
+//     through resolveBehavior, which already guarantees a complete object
+//     (never partial), and honored exactly, including a genuinely
 //     Line-shaped or 'charge'-style guard, because that is a deliberate
 //     catalog assignment, not an absence.
 //  3. Nothing usable was supplied -- either the row's behavior_id was NULL
@@ -163,7 +174,7 @@ function movedWith(map, c, vx, vy, dt, mult) {
 //     reads, so this is the one column whose absence proves "no profile",
 //     matching the comment on GUARD_DEFAULT_BEHAVIOR above.
 function resolveInstanceBehavior(c) {
-  if (c.behavior) return c.behavior;
+  if (c.behavior) return { ...DEFAULT_BEHAVIOR, ...c.behavior };
   if (c.behavior_name != null) return resolveBehavior(c);
   return (c.faction || 'hostile') === 'guard' ? GUARD_DEFAULT_BEHAVIOR : { ...DEFAULT_BEHAVIOR };
 }
