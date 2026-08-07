@@ -249,6 +249,23 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/le
     assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
       `the world_creatures load must SELECT ${col} — without it a creature's profile is inert in the running game`);
   }
+  // SOMET-253 Task 4: the pack-leader aura and per-rung gold fallback. Task 5
+  // has no consumer yet, but a column missing here now means Task 5's join
+  // is silently a no-op with nothing appearing broken -- same class of trap
+  // as every column above.
+  for (const col of ['aura_radius', 'aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
+    assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
+      `the world_creatures load must SELECT ${col} — without it Task 5's aura consumer sees no leaders`);
+  }
+  // gold_min/gold_max are checked as the exact aliased form: resolveBehavior
+  // (shared with loadCreatureTypes, where e.gold_min/e.gold_max ALSO exist)
+  // reads behavior_gold_min/behavior_gold_max unconditionally, so this query
+  // must alias identically even though it has no colliding et.gold_min of
+  // its own to protect against.
+  assert.match(sel, /b\.gold_min\s+AS\s+behavior_gold_min/i,
+    'the world_creatures load must SELECT b.gold_min AS behavior_gold_min');
+  assert.match(sel, /b\.gold_max\s+AS\s+behavior_gold_max/i,
+    'the world_creatures load must SELECT b.gold_max AS behavior_gold_max');
   // SOMET-253: exactly the same trap, one table further in. The abilities
   // catalog is what the tick now reads for range, cooldown, kind, element and
   // damage multiplier; loadCreatureTypes carries the lateral join (its own

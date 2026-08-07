@@ -55,6 +55,20 @@ const DEFAULT_BEHAVIOR = Object.freeze({
   preferredRange: 0,
   moveSpeedMult: 1,
   damageOverride: null,
+  // SOMET-253 Task 4: aura_radius 0 means "not a pack leader" -- Task 5's
+  // consumer never applies a buff/debuff within a zero-radius aura, so this
+  // is a true no-op until then. The three multipliers default to 1
+  // (neutral), never 0: a NULL aura_damage_mult resolving to Number(null)=0
+  // would make every buffed creature deal NOTHING, the same trap as the
+  // ability cooldown in Task 2.
+  auraRadius: 0,
+  auraDamageMult: 1,
+  auraDefenseMult: 1,
+  auraSpeedMult: 1,
+  // Per-rung gold fallback (see loot.js, wired up in Task 5). 0 means "no
+  // fallback range", matching the migration's column default.
+  goldMin: 0,
+  goldMax: 0,
 });
 
 // A finite number, or the fallback. `pg` hands back `real` columns as numbers
@@ -128,6 +142,19 @@ function resolveBehavior(row) {
     // falsy test.
     damageOverride: row.damage_override == null
       ? null : num(row.damage_override, null),
+    auraRadius: num(row.aura_radius, DEFAULT_BEHAVIOR.auraRadius),
+    auraDamageMult: num(row.aura_damage_mult, DEFAULT_BEHAVIOR.auraDamageMult),
+    auraDefenseMult: num(row.aura_defense_mult, DEFAULT_BEHAVIOR.auraDefenseMult),
+    auraSpeedMult: num(row.aura_speed_mult, DEFAULT_BEHAVIOR.auraSpeedMult),
+    // Aliased `behavior_gold_min`/`behavior_gold_max`, not the bare
+    // `gold_min`/`gold_max` entity_types already owns: loadCreatureTypes'
+    // SELECT carries both e.gold_min (the entity type's own range, used by
+    // creatureGold) and b.gold_min (this fallback) in one row, and an
+    // unaliased pair would collide into a single pg column with the later
+    // one silently winning -- see ABILITIES_LATERAL's sibling comment on
+    // `behavior_name` for the same rule applied to the name column.
+    goldMin: num(row.behavior_gold_min, DEFAULT_BEHAVIOR.goldMin),
+    goldMax: num(row.behavior_gold_max, DEFAULT_BEHAVIOR.goldMax),
   };
 }
 

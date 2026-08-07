@@ -603,6 +603,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // "damage"/"chase_style"/etc inside the string itself — even in a SQL
       // comment — would make that guard pass whether or not the real column
       // is still there.
+      //
+      // SOMET-253 Task 4: b.gold_min/b.gold_max are aliased AS
+      // behavior_gold_min/behavior_gold_max here too, even though this row
+      // carries no competing et.gold_min/et.gold_max to collide with --
+      // resolveBehavior (shared with loadCreatureTypes, where the collision
+      // IS real) reads that one alias unconditionally, so both SELECTs must
+      // agree on it. b.aura_* columns have no collision anywhere and stay
+      // unaliased, same as aggro_radius/leash_radius/etc.
       const rows = await pool.query(
         `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
                 wc.level, wc.damage, wc.blocks_portal_id,
@@ -610,6 +618,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
                 et.color, et.resistances, et.faction, et.attack_element,
                 b.name AS behavior_name, b.aggro_radius, b.leash_radius,
                 b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
+                b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
+                b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
                 ab.abilities
          FROM world_creatures wc
          LEFT JOIN entity_types et ON et.name = wc.type

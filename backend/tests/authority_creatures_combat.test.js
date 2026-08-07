@@ -272,6 +272,22 @@ test('loadCreatureTypes SELECTs every behaviour column its mapping reads', async
   }
   assert.ok(/LEFT JOIN\s+creature_behaviors/i.test(sql), 'must LEFT JOIN, not INNER JOIN');
 
+  // SOMET-253 Task 4: the four aura multiplier/radius columns. No collision
+  // risk with entity_types (it has no aura_* columns of its own), so a bare
+  // substring check is enough -- unlike gold_min/gold_max just below.
+  for (const col of ['aura_radius', 'aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
+    assert.ok(sql.includes(col), `SELECT is missing ${col} — Task 5's aura consumer would silently see no leaders`);
+  }
+  // Checked as the exact aliased form, not a bare `sql.includes('gold_min')`:
+  // this SELECT already carries e.gold_min/e.gold_max (the entity type's own
+  // range, for creatureGold), so a bare substring check would pass whether or
+  // not the behaviour's fallback range (b.gold_min) was ever added — exactly
+  // the trap `behavior_name` guards against for the name column just above.
+  assert.match(sql, /b\.gold_min\s+AS\s+behavior_gold_min/i,
+    'the behaviour fallback gold_min must be selected and aliased AS behavior_gold_min, distinct from e.gold_min');
+  assert.match(sql, /b\.gold_max\s+AS\s+behavior_gold_max/i,
+    'the behaviour fallback gold_max must be selected and aliased AS behavior_gold_max, distinct from e.gold_max');
+
   // SOMET-253: the attack itself now comes from creature_abilities, not from
   // the parent row's attack_* columns. Drop the lateral join (or the
   // `abilities` alias it produces) and resolveBehavior sees row.abilities ===
@@ -348,6 +364,8 @@ test('loadCreatureTypes maps defense/resistances and defaults them', async () =>
       }],
       aggroRadius: 400, leashRadius: 800,
       chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
+      auraRadius: 0, auraDamageMult: 1, auraDefenseMult: 1, auraSpeedMult: 1,
+      goldMin: 0, goldMax: 0,
     },
     defense: 1, resistances: { fire: 0.6 },
   });
@@ -362,6 +380,8 @@ test('loadCreatureTypes maps defense/resistances and defaults them', async () =>
       }],
       aggroRadius: 400, leashRadius: 800,
       chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
+      auraRadius: 0, auraDamageMult: 1, auraDefenseMult: 1, auraSpeedMult: 1,
+      goldMin: 0, goldMax: 0,
     },
     defense: 0, resistances: {},
   });
