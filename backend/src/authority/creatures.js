@@ -190,6 +190,73 @@ function movedWith(map, c, vx, vy, dt, mult) {
   return resolveMove(map, { ...c, speed: c.speed * mult }, vx, vy, dt);
 }
 
+// Pack-leader auras (SOMET-253 Task 5). Recomputed from scratch every tick and
+// never persisted: a leader's death removes its buff on the next tick with no
+// cleanup path, so the failure mode where a buff outlives its source cannot
+// occur.
+//
+// NON-STACKING: the strongest single value wins per stat. Two overlapping
+// Champions must not compound into a 1.5625x damage pack -- that is the
+// difference between a hard fight and an unwinnable one.
+//
+// A leader does not buff itself.
+//
+// O(leaders x creatures). Leaders are rare and MAX_WORLD_CREATURES bounds the
+// inner term, so this stays cheap without an index.
+function computeAuras(creatures) {
+  const buffs = new Map();
+  const leaders = [];
+  for (const c of creatures) {
+    const bh = c.behavior || DEFAULT_BEHAVIOR;
+    if (bh.auraRadius > 0 && c.hp > 0) leaders.push({ c, bh });
+  }
+  if (leaders.length === 0) return buffs;
+  for (const { c: leader, bh } of leaders) {
+    const lc = center(leader);
+    const r2 = bh.auraRadius * bh.auraRadius;
+    for (const other of creatures) {
+      if (other === leader || other.hp <= 0) continue;
+      if (other.faction !== leader.faction) continue;
+      const oc = center(other);
+      if (dist2(lc.x, lc.y, oc.x, oc.y) > r2) continue;
+      const cur = buffs.get(other.id);
+      if (!cur) {
+        buffs.set(other.id, {
+          damageMult: bh.auraDamageMult,
+          defenseMult: bh.auraDefenseMult,
+          speedMult: bh.auraSpeedMult,
+        });
+      } else {
+        // Math.max, never multiplication -- this line IS the non-stacking rule.
+        cur.damageMult = Math.max(cur.damageMult, bh.auraDamageMult);
+        cur.defenseMult = Math.max(cur.defenseMult, bh.auraDefenseMult);
+        cur.speedMult = Math.max(cur.speedMult, bh.auraSpeedMult);
+      }
+    }
+  }
+  return buffs;
+}
+
+// The neutral buff every creature gets when no leader's aura reaches it.
+// Frozen and shared (never cloned per-creature) since it is only ever read,
+// never written -- `c._buff = buffs.get(c.id) || NO_BUFF` in tick() below.
+const NO_BUFF = Object.freeze({ damageMult: 1, defenseMult: 1, speedMult: 1 });
+
+// Aura-buffed defense at the use site, following movedWith's precedent above:
+// never mutate target.mit itself, compute the buffed value where damage is
+// applied. A small helper keeps the four damage-taken call sites (the guard
+// branch's target, applyAttack, applyMeleeArc, damageCreatureById) from each
+// rebuilding `{ defense, resistances }` by hand and drifting apart.
+// `target._buff` may be unset (a creature attacked before its first tick())
+// -- NO_BUFF covers that the same way `c.mit || NO_MITIGATION` already covers
+// a creature with no mitigation at all.
+function effectiveMit(target) {
+  const mit = target.mit || NO_MITIGATION;
+  const mult = (target._buff || NO_BUFF).defenseMult;
+  if (mult === 1) return mit;
+  return { defense: mit.defense * mult, resistances: mit.resistances };
+}
+
 // The single place addCreatures decides an instance's behaviour, so every
 // caller -- server.js's real per-chunk spawn loader AND every hand-built test
 // fixture -- goes through the same rule instead of each guessing at a
@@ -361,6 +428,18 @@ class CreatureSim {
     // its own ProjectileSim so CreatureSim never depends on that module.
     const shots = [];
     const all = [...this.creatures.values()];
+    // Computed once per tick over the whole set, not per creature: an aura is
+    // a property of the field, and recomputing it inside the loop would let a
+    // creature that moved earlier this tick buff differently than one that
+    // has not moved yet.
+    const buffs = computeAuras(all);
+    // Every creature gets a fresh `_buff` here, including one whose chunk is
+    // outside the active set and will be skipped by the loop below --
+    // otherwise it would keep a stale buff from whenever it was last active.
+    // The buff lives on the instance (rather than a local var) because it is
+    // read from OUTSIDE this loop too: another creature's attack and a
+    // projectile collision both need a target's defence buff.
+    for (const c of all) c._buff = buffs.get(c.id) || NO_BUFF;
     for (const c of this.creatures.values()) {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (!active.has(CHUNK_KEY(cx, cy))) continue; // frozen (out of active set)
@@ -408,7 +487,7 @@ class CreatureSim {
           c.mode = 'chase';
           const tc = center(tgt);
           const vx = tc.x - cc.x, vy = tc.y - cc.y;
-          const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult);
+          const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult * c._buff.speedMult);
           // Leash clamp: a step that would leave the post's radius is refused.
           if ((r.x !== c.x || r.y !== c.y)
               && withinLeash(r.x + c.width / 2, r.y + c.height / 2, c.home, bh.leashRadius)) {
@@ -425,8 +504,8 @@ class CreatureSim {
             // A guard's strike is always physical and always melee-shaped: a
             // guard never emits a shot (the shots array is built in the
             // hostile block only), so attackKind is not read here.
-            const dmg = (bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE)) * ability.damageMult;
-            applyDamageWithEffects(tgt, dmg, 'physical', tgt.mit || NO_MITIGATION, now);
+            const dmg = (bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE)) * ability.damageMult * c._buff.damageMult;
+            applyDamageWithEffects(tgt, dmg, 'physical', effectiveMit(tgt), now);
             tgt.dirty = true;
             c._abilityCd.set(ability.slot, ability.attackCooldown);
             if (tgt.hp <= 0) { this.creatures.delete(tgt.id); killed.push(tgt.id); }
@@ -442,7 +521,7 @@ class CreatureSim {
           const dx = c.home.x - cc.x, dy = c.home.y - cc.y;
           if (Math.hypot(dx, dy) > GUARD_HOME_EPSILON) {
             c.mode = 'return';
-            const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult);
+            const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult * c._buff.speedMult);
             if (r.x !== c.x || r.y !== c.y) {
               c.x = r.x; c.y = r.y;
               const f = facingFor(dx, dy); if (f) c.facing = f;
@@ -505,7 +584,7 @@ class CreatureSim {
         // vector -- an aggroed ambusher IS a charger, it just started asleep.
 
         if (move) {
-          const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult);
+          const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult * c._buff.speedMult);
           if (r.x !== c.x || r.y !== c.y) {
             c.x = r.x; c.y = r.y;
             const f = facingFor(vx, vy); if (f) c.facing = f;
@@ -540,8 +619,11 @@ class CreatureSim {
         // range gate is the same measurement the movement bands used.
         const ability = selectAbility(c, bh, dist);
         if (ability && canAct(c, now)) {
-          const dmg = (bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE)) * ability.damageMult;
+          const dmg = (bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE)) * ability.damageMult * c._buff.damageMult;
           if (ability.attackKind === 'melee') {
+            // tp is a PLAYER, not a creature: no aura ever buffs a player's
+            // defence, so tp.mit is read as-is here, unlike the three
+            // creature-target sites below which read effectiveMit(target).
             applyDamageWithEffects(tp, dmg, 'physical', tp.mit || NO_MITIGATION, now);
             c._abilityCd.set(ability.slot, ability.attackCooldown);
           } else if (hasLineOfSight(this.map, cc.x, cc.y, tc.x, tc.y)) {
@@ -594,7 +676,7 @@ class CreatureSim {
         c._dir = Math.min(DIRS.length - 1, Math.floor(this.rng() * DIRS.length));
       }
       const [dx, dy] = DIRS[c._dir];
-      const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult);
+      const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult * c._buff.speedMult);
       if (r.x !== c.x || r.y !== c.y) {
         c.x = r.x; c.y = r.y;
         c.facing = DIR_FACING[c._dir];
@@ -614,7 +696,7 @@ class CreatureSim {
     for (const [id, c] of this.creatures) {
       const cc = center(c);
       if (dist2(cc.x, cc.y, px, py) > r2) continue;
-      applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
+      applyDamageWithEffects(c, damage, element, effectiveMit(c), now);
       applyElementEffect(c, element, now);
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
@@ -655,7 +737,7 @@ class CreatureSim {
     for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth)) {
       const c = this.creatures.get(id);
       if (!c) continue;
-      applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
+      applyDamageWithEffects(c, damage, element, effectiveMit(c), now);
       // The element's status rider is applied wherever the element already
       // deals damage — one call adjacent to each applyDamage, never a second
       // rider table.
@@ -678,7 +760,7 @@ class CreatureSim {
   damageCreatureById(id, damage, element, now) {
     const c = this.creatures.get(id);
     if (!c) return false;
-    applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
+    applyDamageWithEffects(c, damage, element, effectiveMit(c), now);
     c.dirty = true;
     if (c.hp <= 0) { this.creatures.delete(id); return true; }
     return false;
@@ -749,4 +831,8 @@ module.exports = {
   // join text as loadCreatureTypes above, rather than a second copy that can
   // drift.
   ABILITIES_LATERAL,
+  // SOMET-253 Task 5: exported so authority_creature_auras.test.js can pin
+  // the non-mutation/non-stacking rules directly against the buff map,
+  // without needing a full tick() to observe them.
+  computeAuras,
 };
