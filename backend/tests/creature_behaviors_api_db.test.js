@@ -233,6 +233,14 @@ test('PUT /api/creature-behaviors/:id updates a profile\'s numbers', async (t) =
       chase_style: 'kite',
       preferred_range: 70,
       damage_override: 0, // real value, meaning "hits for nothing" -- must survive
+      // SOMET-253 Task 8: aura_radius/gold_min both 0 here on purpose -- real,
+      // legitimate values ("not a leader" / "no loot floor"), not stand-ins
+      // for "leave unset". This PUT is the regression guard for a bug this
+      // task fixed: the INSERT/UPDATE statements never carried these six
+      // columns at all, so an admin editing them in the form silently had the
+      // write discarded.
+      aura_radius: 0, aura_damage_mult: 1.25, aura_defense_mult: 1.2, aura_speed_mult: 1.1,
+      gold_min: 0, gold_max: 9,
       abilities: [{
         name: 'Attack', attack_kind: 'melee', attack_range: 77, attack_cooldown: 2.5,
         projectile_speed: 0, projectile_radius: 0, element: null, damage_mult: 1, knockback: 0,
@@ -246,10 +254,18 @@ test('PUT /api/creature-behaviors/:id updates a profile\'s numbers', async (t) =
     assert.equal(Number(res.body.damage_override), 0, 'damage_override 0 must survive, not fall back to null');
     assert.equal(Number(res.body.abilities[0].attack_range), 77);
     assert.equal(Number(res.body.abilities[0].attack_cooldown), 2.5);
+    assert.equal(Number(res.body.aura_radius), 0, 'aura_radius 0 must survive, not fall back to a stale/default value');
+    assert.equal(Number(res.body.aura_damage_mult), 1.25);
+    assert.equal(Number(res.body.aura_defense_mult), 1.2);
+    assert.equal(Number(res.body.aura_speed_mult), 1.1);
+    assert.equal(Number(res.body.gold_min), 0);
+    assert.equal(Number(res.body.gold_max), 9);
 
     const row = await dbPool.query('SELECT * FROM creature_behaviors WHERE id = $1', [id]);
     assert.equal(Number(row.rows[0].aggro_radius), 333, 'the row in the database must reflect the update');
     assert.equal(Number(row.rows[0].damage_override), 0);
+    assert.equal(Number(row.rows[0].aura_damage_mult), 1.25, 'the aura columns must actually be written, not silently dropped');
+    assert.equal(Number(row.rows[0].gold_max), 9, 'the gold columns must actually be written, not silently dropped');
     const abilityRow = await dbPool.query('SELECT attack_range FROM creature_abilities WHERE behavior_id = $1', [id]);
     assert.equal(Number(abilityRow.rows[0].attack_range), 77, 'the replaced ability must reflect the update');
   } finally {

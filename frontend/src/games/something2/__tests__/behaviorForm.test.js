@@ -70,6 +70,55 @@ describe("behaviorForm", () => {
     expect(form.leash_radius).toBe(0);
     expect(form.move_speed_mult).toBe(0);
   });
+
+  // SOMET-253 Task 8: the same silent-inertness trap P2a's final review
+  // caught in the Add-Behavior modal (every numeric defaulting to 0), now for
+  // the aura fields. An aura_damage_mult/aura_defense_mult/aura_speed_mult of
+  // 0 makes every creature the aura touches deal, take, or move at NOTHING
+  // the moment a leader stands near them -- no error, nothing logged.
+  it("defaults a new profile's aura multipliers to 1, never 0", () => {
+    const form = behaviorToForm(); // no argument -- the Add-Behavior call site
+    expect(form.aura_damage_mult).toBe(1);
+    expect(form.aura_defense_mult).toBe(1);
+    expect(form.aura_speed_mult).toBe(1);
+    // aura_radius 0 IS the correct default -- 0 means "not a leader", the
+    // right starting point for a brand-new, non-leader profile.
+    expect(form.aura_radius).toBe(0);
+    expect(form.gold_min).toBe(0);
+    expect(form.gold_max).toBe(0);
+  });
+
+  // 0 means "not a leader" and is the correct, genuine value for eleven of
+  // the twelve seeded profiles. behaviorToForm must not mistake an existing
+  // row's real 0 for "unset" and silently promote it to the new-row default.
+  it("round-trips an existing profile's genuine 0 aura_radius", () => {
+    const row = {
+      id: 4, name: "Ranged", chase_style: "kite",
+      aggro_radius: 460, leash_radius: 800, preferred_range: 240, move_speed_mult: 1,
+      aura_radius: 0, aura_damage_mult: 1, aura_defense_mult: 1, aura_speed_mult: 1,
+      gold_min: 2, gold_max: 8, damage_override: null,
+    };
+    const form = behaviorToForm(row);
+    expect(form.aura_radius).toBe(0);
+    const payload = behaviorFormToPayload(form);
+    expect(payload.aura_radius).toBe(0);
+    expect(payload.gold_min).toBe(2);
+    expect(payload.gold_max).toBe(8);
+  });
+
+  // Mirrors the CHECK constraint added by migration 1714440085000
+  // (`gold_max >= gold_min`) -- the pure form/payload helpers don't enforce
+  // this themselves (that's behaviorFieldError's job, server-side), but a
+  // round-tripped value must carry through unmangled so the server can reject
+  // it accurately.
+  it('rejects gold_max below gold_min', () => {
+    const form = { ...behaviorToForm({ name: "Z", chase_style: "charge" }),
+      gold_min: 10, gold_max: 3 };
+    const payload = behaviorFormToPayload(form);
+    expect(payload.gold_min).toBe(10);
+    expect(payload.gold_max).toBe(3);
+    expect(payload.gold_max < payload.gold_min).toBe(true);
+  });
 });
 
 describe("formatReferencingEntityTypes", () => {

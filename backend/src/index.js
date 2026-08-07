@@ -821,6 +821,31 @@ function behaviorFieldError(body) {
   if (body.preferred_range != null && !(Number(body.preferred_range) >= 0)) {
     return 'preferred_range must be 0 or greater';
   }
+  // SOMET-253 Task 8: pack-leader aura + per-rung gold. Mirrors migration
+  // 1714440085000's two CHECK constraints exactly. All six fields are
+  // optional in the body -- most seeded profiles carry no aura fields at all
+  // and fall back to the column defaults (0/1/1/1/0/0), same convention
+  // preferred_range/damage_override already use -- so each rule only fires
+  // when the field is actually present.
+  //
+  // aura_radius 0 means "not a leader" and is the correct value for eleven of
+  // the twelve seeded profiles, so it is >= 0 like preferred_range. The three
+  // multipliers are a different kind of 0: an aura_damage_mult/
+  // aura_defense_mult/aura_speed_mult of 0 would make every creature the aura
+  // touches deal, take, or move at NOTHING the instant a leader stands near
+  // them -- silently. Strictly > 0, same class of rule as move_speed_mult.
+  if (body.aura_radius != null && !(Number(body.aura_radius) >= 0)) {
+    return 'aura_radius must be 0 or greater';
+  }
+  for (const field of ['aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
+    if (body[field] != null && !(Number(body[field]) > 0)) return `${field} must be greater than 0`;
+  }
+  if (body.gold_min != null && !(Number(body.gold_min) >= 0)) {
+    return 'gold_min must be 0 or greater';
+  }
+  if (body.gold_max != null && !(Number(body.gold_max) >= Number(body.gold_min ?? 0))) {
+    return 'gold_max must be greater than or equal to gold_min';
+  }
   return null;
 }
 
@@ -934,13 +959,20 @@ app.post('/api/creature-behaviors', adminGuard, async (req, res) => {
     const result = await client.query(
       `INSERT INTO creature_behaviors
         (name, aggro_radius, leash_radius, chase_style,
-         preferred_range, move_speed_mult, damage_override)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+         preferred_range, move_speed_mult, damage_override,
+         aura_radius, aura_damage_mult, aura_defense_mult, aura_speed_mult,
+         gold_min, gold_max)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
       [b.name, b.aggro_radius, b.leash_radius, b.chase_style,
        b.preferred_range ?? 0, b.move_speed_mult ?? 1,
        // damage_override is nullable and 0 is a real value ("hits for
        // nothing"), so this must be ?? not || -- 0 must survive.
-       b.damage_override ?? null],
+       b.damage_override ?? null,
+       // SOMET-253 Task 8: same ?? convention as above -- aura_radius 0 and
+       // gold_min 0 are real values ("not a leader" / "no loot"), not absent
+       // ones, so a genuine 0 must survive rather than being coerced by ||.
+       b.aura_radius ?? 0, b.aura_damage_mult ?? 1, b.aura_defense_mult ?? 1,
+       b.aura_speed_mult ?? 1, b.gold_min ?? 0, b.gold_max ?? 0],
     );
     const id = result.rows[0].id;
     await replaceAbilities(client, id, b.abilities);
@@ -969,11 +1001,15 @@ app.put('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
       `UPDATE creature_behaviors SET
          name = $1, aggro_radius = $2, leash_radius = $3, chase_style = $4,
          preferred_range = $5, move_speed_mult = $6, damage_override = $7,
+         aura_radius = $8, aura_damage_mult = $9, aura_defense_mult = $10,
+         aura_speed_mult = $11, gold_min = $12, gold_max = $13,
          updated_at = CURRENT_TIMESTAMP
-       WHERE id = $8 RETURNING id`,
+       WHERE id = $14 RETURNING id`,
       [b.name, b.aggro_radius, b.leash_radius, b.chase_style,
        b.preferred_range ?? 0, b.move_speed_mult ?? 1,
-       b.damage_override ?? null, id],
+       b.damage_override ?? null,
+       b.aura_radius ?? 0, b.aura_damage_mult ?? 1, b.aura_defense_mult ?? 1,
+       b.aura_speed_mult ?? 1, b.gold_min ?? 0, b.gold_max ?? 0, id],
     );
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');

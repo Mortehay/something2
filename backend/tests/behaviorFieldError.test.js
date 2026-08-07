@@ -75,6 +75,68 @@ test('damage_override of 0 is accepted, not rejected as a zero numeric', () => {
   assert.equal(behaviorFieldError({ ...VALID, damage_override: 0 }), null);
 });
 
+// SOMET-253 Task 8: pack-leader aura + per-rung gold. VALID carries none of
+// these six fields at all (like most seeded profiles), so a fully-formed
+// profile with them entirely absent must still pass -- they are optional,
+// falling back to the column defaults (0/1/1/1/0/0) exactly like
+// preferred_range/damage_override already do.
+test('a profile with no aura/gold fields at all still passes (falls back to column defaults)', () => {
+  assert.equal(behaviorFieldError(VALID), null);
+});
+
+// aura_radius 0 means "not a leader" -- the correct value for eleven of the
+// twelve seeded profiles, not an unset field. Only negative is rejected.
+test('accepts aura_radius of 0', () => {
+  assert.equal(behaviorFieldError({ ...VALID, aura_radius: 0 }), null);
+});
+
+test('rejects a negative aura_radius', () => {
+  assert.match(behaviorFieldError({ ...VALID, aura_radius: -1 }), /aura_radius/);
+});
+
+// The three aura multipliers are a different kind of 0 than aura_radius: an
+// aura_damage_mult/aura_defense_mult/aura_speed_mult of 0 makes every
+// creature the aura touches deal, take, or move at NOTHING the instant a
+// leader stands near them -- silently, the same class of bug SOMET-249's
+// fix-wave I4 closed for move_speed_mult. Strictly > 0.
+for (const field of ['aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
+  test(`rejects ${field} of exactly 0 when present`, () => {
+    const err = behaviorFieldError({ ...VALID, [field]: 0 });
+    assert.match(err, new RegExp(field), `error should name ${field}, got: ${err}`);
+  });
+
+  test(`rejects a negative ${field}`, () => {
+    const err = behaviorFieldError({ ...VALID, [field]: -1 });
+    assert.match(err, new RegExp(field));
+  });
+
+  test(`accepts a small positive ${field}`, () => {
+    assert.equal(behaviorFieldError({ ...VALID, [field]: 0.5 }), null);
+  });
+}
+
+test('accepts gold_min of 0', () => {
+  assert.equal(behaviorFieldError({ ...VALID, gold_min: 0, gold_max: 5 }), null);
+});
+
+test('rejects a negative gold_min', () => {
+  assert.match(behaviorFieldError({ ...VALID, gold_min: -1 }), /gold_min/);
+});
+
+// Mirrors migration 1714440085000's `CHECK (gold_min >= 0 AND gold_max >=
+// gold_min)`.
+test('rejects gold_max below gold_min', () => {
+  assert.match(behaviorFieldError({ ...VALID, gold_min: 5, gold_max: 2 }), /gold_max/);
+});
+
+test('accepts gold_max equal to gold_min', () => {
+  assert.equal(behaviorFieldError({ ...VALID, gold_min: 5, gold_max: 5 }), null);
+});
+
+test('rejects a gold_max below the default gold_min of 0 when gold_min is omitted', () => {
+  assert.match(behaviorFieldError({ ...VALID, gold_max: -1 }), /gold_max/);
+});
+
 // Every seeded profile is real production data. behaviorFieldError no longer
 // looks at the attack fields these rows still carry (they exist only to keep
 // creature_behaviors_invariants.test.js's field-for-field pin against the
