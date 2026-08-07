@@ -7,7 +7,7 @@ const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc, hasLineOfSight } = require('./weapons');
 const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
 const { applyElementEffect, activeEffectKeys, canAct } = require('./effects');
-const { resolveBehavior } = require('../services/creatureBehaviors');
+const { resolveBehavior, DEFAULT_BEHAVIOR } = require('../services/creatureBehaviors');
 
 const DIRS = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
@@ -27,6 +27,26 @@ const GUARD_AGGRO_RADIUS = 400;   // px: a guard engages a hostile within this
 const GUARD_LEASH_RADIUS = 300;   // px from HOME: guards hold the gate, they do not roam
 const GUARD_DAMAGE = 25;
 const GUARD_HOME_EPSILON = 24;    // px: close enough to the post to stand still
+
+// Fallback behaviour for a guard-faction creature spawned with no explicit
+// `.behavior` -- every hand-built test fixture, and every real
+// world_creatures row today (server.js's per-chunk spawn loader does not yet
+// select behavior_id; that wiring belongs to a later task). Built from the
+// SAME GUARD_AGGRO_RADIUS/GUARD_LEASH_RADIUS/GUARD_DAMAGE constants the tick
+// used to read directly, so an unprofiled guard's behaviour is byte-identical
+// to today's. This is what lets the guard branch below route on
+// `bh.chaseStyle === 'guard'` instead of `c.faction === 'guard'` without
+// silently turning every guard that predates a real catalog lookup into a
+// hostile (which is what a blind fallback to DEFAULT_BEHAVIOR/Line would do,
+// since Line's chaseStyle is 'charge').
+const GUARD_DEFAULT_BEHAVIOR = Object.freeze({
+  ...DEFAULT_BEHAVIOR,
+  name: 'Guard',
+  aggroRadius: GUARD_AGGRO_RADIUS,
+  leashRadius: GUARD_LEASH_RADIUS,
+  chaseStyle: 'guard',
+  damageOverride: GUARD_DAMAGE,
+});
 
 // Creature mitigation, built the same way a player's is built from equipment:
 // from the entity type's defense/resistances. A creature without `mit` falls
@@ -113,6 +133,13 @@ function selectGuardTarget({ guard, creatures, aggroRadius, leashRadius }) {
   }
   return best;
 }
+// Applied at the call site, not by mutating c.speed: a persisted speed would
+// compound every tick.
+function movedWith(map, c, vx, vy, dt, mult) {
+  if (mult === 1) return resolveMove(map, c, vx, vy, dt);
+  return resolveMove(map, { ...c, speed: c.speed * mult }, vx, vy, dt);
+}
+
 // Nearest DIRS index for a movement vector's signs → facing.
 function facingFor(vx, vy) {
   const sx = Math.sign(vx), sy = Math.sign(vy);
@@ -152,6 +179,18 @@ class CreatureSim {
         // column carried straight onto the in-memory object at load time,
         // never recomputed.
         blocksPortalId: c.blocks_portal_id || null,
+        // Resolved at load time by loadCreatureTypes and carried onto the
+        // instance the same way `mit`, `level` and `damage` are: a raw value
+        // attached once, never recomputed inside the tick.
+        //
+        // A creature spawned with no explicit `.behavior` falls back by
+        // faction: guard-faction gets GUARD_DEFAULT_BEHAVIOR (today's guard
+        // constants, chaseStyle 'guard'), everything else gets Line. See the
+        // comment on GUARD_DEFAULT_BEHAVIOR for why this is faction-aware
+        // rather than a single blind fallback.
+        behavior: c.behavior || ((c.faction || 'hostile') === 'guard'
+          ? GUARD_DEFAULT_BEHAVIOR : { ...DEFAULT_BEHAVIOR }),
+        attackElement: c.attackElement || 'physical',
         _target: null, _targetKind: null, mode: 'roam', _attackCd: 0,
       });
     }
@@ -168,17 +207,24 @@ class CreatureSim {
     const active = activeChunkKeys instanceof Set ? activeChunkKeys : new Set(activeChunkKeys);
     const byId = new Map(players.map((p) => [p.userId, p]));
     const killed = [];
+    // Empty until creatures can fire (Task 9). The return shape is { killed,
+    // shots } from this task forward so callers do not have to change again
+    // when shots stops being empty.
+    const shots = [];
     const all = [...this.creatures.values()];
     for (const c of this.creatures.values()) {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (!active.has(CHUNK_KEY(cx, cy))) continue; // frozen (out of active set)
+      const bh = c.behavior || DEFAULT_BEHAVIOR;
       if (c._attackCd > 0) c._attackCd = Math.max(0, c._attackCd - dt);
 
       const cc = center(c);
 
-      // --- Guard faction: defend the post against hostile creatures. Guards
-      // never target players and are never targeted by hostiles.
-      if (c.faction === 'guard') {
+      // --- Guard-style creatures: defend the post against hostile creatures.
+      // Guards never target players and are never targeted by hostiles.
+      // Routed on the resolved behaviour, not faction, so a guard's
+      // engagement rules are catalog data like everything else here.
+      if (bh.chaseStyle === 'guard') {
         // A displaced guard abandons its target and walks home. Without this,
         // a guard holding a target while outside its post radius freezes:
         // every chase step lands outside the leash and is refused by the
@@ -186,10 +232,10 @@ class CreatureSim {
         // is refused forever. A guard outside its own leash must be going
         // home, not chasing — this guarantees recovery from any displacement
         // (knockback, teleport, a bad spawn, terrain shove).
-        const displaced = !withinLeash(cc.x, cc.y, c.home, GUARD_LEASH_RADIUS);
+        const displaced = !withinLeash(cc.x, cc.y, c.home, bh.leashRadius);
         let tgt = (!displaced && c._target) ? this.creatures.get(c._target) : null;
         if (tgt && (tgt.hp <= 0 || tgt.faction !== 'hostile'
-            || !withinLeash(center(tgt).x, center(tgt).y, c.home, GUARD_LEASH_RADIUS))) {
+            || !withinLeash(center(tgt).x, center(tgt).y, c.home, bh.leashRadius))) {
           tgt = null;
         }
         if (!displaced && !tgt) {
@@ -199,7 +245,7 @@ class CreatureSim {
           // same loop is never handed back as a live target.
           tgt = selectGuardTarget({
             guard: c, creatures: all,
-            aggroRadius: GUARD_AGGRO_RADIUS, leashRadius: GUARD_LEASH_RADIUS,
+            aggroRadius: bh.aggroRadius, leashRadius: bh.leashRadius,
           });
         }
         c._target = tgt ? tgt.id : null;
@@ -209,19 +255,19 @@ class CreatureSim {
           c.mode = 'chase';
           const tc = center(tgt);
           const vx = tc.x - cc.x, vy = tc.y - cc.y;
-          const r = resolveMove(this.map, c, vx, vy, dt);
+          const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult);
           // Leash clamp: a step that would leave the post's radius is refused.
           if ((r.x !== c.x || r.y !== c.y)
-              && withinLeash(r.x + c.width / 2, r.y + c.height / 2, c.home, GUARD_LEASH_RADIUS)) {
+              && withinLeash(r.x + c.width / 2, r.y + c.height / 2, c.home, bh.leashRadius)) {
             c.x = r.x; c.y = r.y;
             const f = facingFor(vx, vy); if (f) c.facing = f;
             c.dirty = true;
           }
           if (c._attackCd <= 0 && canAct(c, now)
-              && dist2(cc.x, cc.y, tc.x, tc.y) <= CONTACT_RANGE * CONTACT_RANGE) {
-            applyDamageWithEffects(tgt, GUARD_DAMAGE, 'physical', tgt.mit || NO_MITIGATION, now);
+              && dist2(cc.x, cc.y, tc.x, tc.y) <= bh.attackRange * bh.attackRange) {
+            applyDamageWithEffects(tgt, bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE), 'physical', tgt.mit || NO_MITIGATION, now);
             tgt.dirty = true;
-            c._attackCd = CREATURE_ATTACK_COOLDOWN;
+            c._attackCd = bh.attackCooldown;
             if (tgt.hp <= 0) { this.creatures.delete(tgt.id); killed.push(tgt.id); }
           }
           continue;
@@ -232,7 +278,7 @@ class CreatureSim {
           const dx = c.home.x - cc.x, dy = c.home.y - cc.y;
           if (Math.hypot(dx, dy) > GUARD_HOME_EPSILON) {
             c.mode = 'return';
-            const r = resolveMove(this.map, c, dx, dy, dt);
+            const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult);
             if (r.x !== c.x || r.y !== c.y) {
               c.x = r.x; c.y = r.y;
               const f = facingFor(dx, dy); if (f) c.facing = f;
@@ -251,10 +297,10 @@ class CreatureSim {
       // Target resolution: keep current target unless it left leash; else acquire nearest in aggro.
       if (c._target) {
         const tp = byId.get(c._target);
-        if (!tp || dist2(cc.x, cc.y, center(tp).x, center(tp).y) > LEASH_RADIUS * LEASH_RADIUS) c._target = null;
+        if (!tp || dist2(cc.x, cc.y, center(tp).x, center(tp).y) > bh.leashRadius * bh.leashRadius) c._target = null;
       }
       if (!c._target) {
-        let nearest = null, nd2 = AGGRO_RADIUS * AGGRO_RADIUS;
+        let nearest = null, nd2 = bh.aggroRadius * bh.aggroRadius;
         for (const p of players) {
           const pc = center(p);
           const d2 = dist2(cc.x, cc.y, pc.x, pc.y);
@@ -268,7 +314,7 @@ class CreatureSim {
         const tp = byId.get(c._target);
         const tc = center(tp);
         const vx = tc.x - cc.x, vy = tc.y - cc.y;
-        const r = resolveMove(this.map, c, vx, vy, dt);
+        const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult);
         if (r.x !== c.x || r.y !== c.y) {
           c.x = r.x; c.y = r.y;
           const f = facingFor(vx, vy); if (f) c.facing = f;
@@ -293,9 +339,9 @@ class CreatureSim {
         // never refreshed) is what stops this becoming a perma-stun — it applies
         // to creatures for free, because it lives on the target.
         if (c._attackCd <= 0 && canAct(c, now)
-            && dist2(cc.x, cc.y, tc.x, tc.y) <= CONTACT_RANGE * CONTACT_RANGE) {
-          applyDamageWithEffects(tp, c.damage ?? CREATURE_DAMAGE, 'physical', tp.mit || NO_MITIGATION, now);
-          c._attackCd = CREATURE_ATTACK_COOLDOWN;
+            && dist2(cc.x, cc.y, tc.x, tc.y) <= bh.attackRange * bh.attackRange) {
+          applyDamageWithEffects(tp, bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE), 'physical', tp.mit || NO_MITIGATION, now);
+          c._attackCd = bh.attackCooldown;
         }
         continue;
       }
@@ -305,7 +351,7 @@ class CreatureSim {
         c._dir = Math.min(DIRS.length - 1, Math.floor(this.rng() * DIRS.length));
       }
       const [dx, dy] = DIRS[c._dir];
-      const r = resolveMove(this.map, c, dx, dy, dt);
+      const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult);
       if (r.x !== c.x || r.y !== c.y) {
         c.x = r.x; c.y = r.y;
         c.facing = DIR_FACING[c._dir];
@@ -314,7 +360,7 @@ class CreatureSim {
         c._dir = (c._dir + 1) % DIRS.length; // blocked → turn
       }
     }
-    return killed;
+    return { killed, shots };
   }
 
   // Player melee: damage creatures within `range` of (px,py); remove + return dead ids.

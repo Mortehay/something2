@@ -56,6 +56,42 @@ test('pruneInactive drops non-dirty out-of-active creatures, keeps dirty', () =>
   assert.ok(s.has('dirty'));     // dirty → kept
 });
 
+// --- Task 6: tick() reads the resolved behaviour, not the module constants ---
+
+test('tick returns { killed, shots }', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([{ id: 'a', type: 'Wolf', x: 100, y: 100, hp: 10 }]);
+  const out = s.tick(0.1, new Set(['0,0']));
+  assert.ok(out && typeof out === 'object' && !Array.isArray(out),
+    'tick must return an object, not a bare array');
+  assert.ok(Array.isArray(out.killed));
+  assert.ok(Array.isArray(out.shots));
+});
+
+test('a creature carries a resolved behaviour even with none supplied', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([{ id: 'a', type: 'Wolf', x: 100, y: 100, hp: 10 }]);
+  const c = s.all()[0];
+  assert.equal(c.behavior.chaseStyle, 'charge');
+  assert.equal(c.behavior.aggroRadius, 400);
+  assert.equal(c.attackElement, 'physical');
+});
+
+test('a supplied behaviour overrides the module constants', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([{
+    id: 'a', type: 'Wolf', x: 100, y: 100, hp: 10,
+    behavior: { name: 'Tight', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
+      projectileSpeed: 0, projectileRadius: 0, aggroRadius: 10, leashRadius: 20,
+      chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null },
+  }]);
+  // A player 200px away is far outside the 10px aggro radius, so the creature
+  // must stay in roam. With the old hardcoded 400 it would chase.
+  const player = { userId: 'u1', x: 300, y: 100, width: 48, height: 48, hp: 100 };
+  s.tick(0.1, new Set(['0,0']), [player], 0);
+  assert.equal(s.all()[0].mode, 'roam');
+});
+
 test('snapshotForNeighborhood filters by current chunk and shape', () => {
   const s = new CreatureSim(stubMap(), noRedirect);
   s.addCreatures([

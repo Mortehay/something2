@@ -267,7 +267,8 @@ class World {
     // `this.now` is threaded through so contact damage reads the same clock
     // every other damage site does — a shocked player must take +25% from a
     // creature's bite too, not only from weapons.
-    const killedIds = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now) || [];
+    const { killed: killedIds } = this.creatures.tick(
+      dt, activeKeys, [...this.players.values()], this.now) || { killed: [] };
     // A guard's kill has no player behind it — always null, never omitted.
     return { kills: killedIds.map((id) => ({ id, killerUserId: null })) };
   }

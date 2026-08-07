@@ -43,7 +43,7 @@ test('tick returns ids of creatures killed by a guard', () => {
     mk({ id: 'g', type: 'Village Guard', x: 100, y: 100, hp: 300, faction: 'guard', home_x: 100, home_y: 100 }),
     mk({ id: 'h', type: 'Slime', x: 140, y: 100, hp: 1 }),
   ]);
-  const killed = s.tick(0.5, KEYS, [], 1000);
+  const { killed } = s.tick(0.5, KEYS, [], 1000);
   assert.deepEqual(killed, ['h']);
   assert.equal(s.creatures.has('h'), false, 'dead creature must leave the sim');
 });
