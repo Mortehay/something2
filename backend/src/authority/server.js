@@ -321,7 +321,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
-        const { creatureTypes, creatureTypeIds, creatureGold } = await loadCreatureTypes(pool);
+        const {
+          creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
+        } = await loadCreatureTypes(pool);
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const goldItemTypeId = resolveGoldItemTypeId(itemTypes);
@@ -348,7 +350,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         const entry = {
           worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
-          tileTypes, creatureTypes, creatureTypeIds, creatureGold, goldItemTypeId, links, portalLinks, villages,
+          tileTypes, creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
+          goldItemTypeId, links, portalLinks, villages,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded

@@ -120,7 +120,7 @@ async function loadCreatureTypes(pool) {
   // as aggro_radius/leash_radius/etc above.
   const r = await pool.query(
     `SELECT e.id, e.name, e.color, e.hp, e.defense, e.resistances, e.faction,
-            e.gold_min, e.gold_max, e.attack_element,
+            e.gold_min, e.gold_max, e.attack_element, e.behavior_id,
             b.name AS behavior_name,
             b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
             b.move_speed_mult, b.damage_override,
@@ -147,12 +147,33 @@ async function loadCreatureTypes(pool) {
     min: Number(row.gold_min) || 0,
     max: Number(row.gold_max) || 0,
   }]));
+  // Per-rung gold FALLBACK, by creature type name, from the behaviour's own
+  // gold_min/gold_max (aliased behavior_gold_min/behavior_gold_max above --
+  // see the SELECT's comment for why the alias is load-bearing). loot.js's
+  // spawnDrops picks this only when creatureGold's own range has max <= 0
+  // (SOMET-253 Task 7) -- a creature with no gold range of its own still
+  // pays out at its rung's rate, which is what lets P4 skip per-creature gold
+  // authoring for all 288 rows.
+  const behaviorGold = new Map(r.rows.map((row) => [row.name, {
+    min: Number(row.behavior_gold_min) || 0,
+    max: Number(row.behavior_gold_max) || 0,
+  }]));
+  // Per-rung DROP-TABLE lookup, by creature type name -> behavior_id (NOT the
+  // drop rows themselves -- those live in `behavior_drops` and are queried
+  // live, at kill time, by loot.js's spawnDrops, the same way creatureTypeIds
+  // is used to query creature_drops). A creature with no assigned profile
+  // (behavior_id NULL) maps to null here, and spawnDrops skips the rung query
+  // entirely for it -- same "unknown/absent -> no drops" posture as an
+  // entity_type name missing from creatureTypeIds.
+  const behaviorDrops = new Map(r.rows.map((row) => [row.name, row.behavior_id]));
   // creatureTypes/creatureTypeIds stay COMPLETE (guards included): drops and
   // name→id lookups still need to see guards. The wild-spawn exclusion of
   // guard-faction types lives at the one place that still rolls a wild-spawn
   // pool -- worldPopulation.js's own `hostileTypes` filter -- not here; this
   // function no longer has a wild-spawn caller of its own (SOMET-246).
-  return { creatureTypes, creatureTypeIds, creatureGold };
+  return {
+    creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
+  };
 }
 
 function center(o) { return { x: o.x + o.width / 2, y: o.y + o.height / 2 }; }

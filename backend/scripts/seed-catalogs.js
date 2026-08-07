@@ -14,6 +14,7 @@ const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
 const { HOSTILE_CREATURES, CREATURE_DROPS } = require('../seeds/data/entityTypes.js');
 const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
 const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
+const { BEHAVIOR_DROPS } = require('../seeds/data/behaviorDrops.js');
 
 // COALESCE, not plain EXCLUDED, for the four columns below.
 //
@@ -184,6 +185,29 @@ async function seedOneAbility(client, a) {
   return { skipped: false };
 }
 
+// Guarded by NOT EXISTS, not ON CONFLICT: behavior_drops has no unique
+// constraint on (behavior_id, item_type_id) -- unlike creature_abilities'
+// (behavior_id, slot), there is no natural key to conflict on here, same as
+// creature_drops (see its own NOT EXISTS block in seedCatalogs below, which
+// this mirrors). A bare INSERT would stack a duplicate rule on every single
+// run, doubling a rung's effective drop odds. The name lookups are a
+// cross-join in the same guarded style as 1714440086000_behavior_drops.js: a
+// missing behaviour or item type inserts nothing rather than failing the
+// seed.
+async function seedOneBehaviorDrop(db, d) {
+  const r = await db.query(
+    `INSERT INTO behavior_drops (behavior_id, item_type_id, chance, min_qty, max_qty)
+     SELECT b.id, it.id, $3, $4, $5
+       FROM creature_behaviors b, item_types it
+      WHERE b.name = $1 AND it.name = $2
+        AND NOT EXISTS (
+              SELECT 1 FROM behavior_drops bd
+               WHERE bd.behavior_id = b.id AND bd.item_type_id = it.id)`,
+    [d.behavior, d.item, d.chance, d.min_qty, d.max_qty],
+  );
+  return r.rowCount;
+}
+
 async function seedCatalogs(pool) {
   let tiles = 0;
   for (const t of DEFAULT_TILE_TYPES) {
@@ -300,13 +324,21 @@ async function seedCatalogs(pool) {
     drops += r.rowCount;
   }
 
+  // Per-rung fallback drops (SOMET-253 Task 7). Same restore-a-floor posture
+  // as the creature_drops block above; see seedOneBehaviorDrop's comment for
+  // why NOT EXISTS rather than ON CONFLICT.
+  let behaviorDrops = 0;
+  for (const d of BEHAVIOR_DROPS) {
+    behaviorDrops += await seedOneBehaviorDrop(pool, d);
+  }
+
   return {
-    tiles, biomes, decorations, creatures, drops, abilities,
+    tiles, biomes, decorations, creatures, drops, abilities, behaviorDrops,
   };
 }
 
 module.exports = {
-  seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior, seedOneAbility,
+  seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior, seedOneAbility, seedOneBehaviorDrop,
 };
 
 if (require.main === module) {
@@ -321,7 +353,8 @@ if (require.main === module) {
       // attempted, as the three counts above do) because their DO NOTHING /
       // NOT EXISTS guards make a repeat run legitimately write zero. Zero is
       // the normal steady state here, so say so rather than look like a bug.
-      console.log(`restored ${n.creatures} missing creature types, ${n.drops} missing drop rules`);
+      console.log(`restored ${n.creatures} missing creature types, ${n.drops} missing drop rules, `
+        + `${n.behaviorDrops} missing rung drop rules`);
     })
     .catch((e) => { console.error(e.message); process.exitCode = 1; })
     .finally(() => pool.end());
