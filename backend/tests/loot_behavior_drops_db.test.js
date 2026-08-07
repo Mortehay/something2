@@ -43,9 +43,20 @@ async function makeBehavior(pool, name, { goldMin = 0, goldMax = 0 } = {}) {
 }
 
 async function makeCreatureType(pool, name, behaviorId, { goldMin = 0, goldMax = 0 } = {}) {
+  // faction: 'guard', not the 'hostile' column default -- entity_types
+  // fixtures here are deliberately dropless (several assert the RUNG
+  // fallback with no creature_drops row of their own), which would fail
+  // creature_drops_db.test.js's catalog-wide "EVERY hostile creature has a
+  // drop row" invariant if that test observed one of these rows while it
+  // briefly exists. node:test runs test FILES concurrently by default, so
+  // that observation is a real race, not a hypothetical. Neither
+  // loadCreatureTypes nor spawnDrops branches on faction (verified: no
+  // `faction` reference in loot.js; loadCreatureTypes' SELECT filters only
+  // on `is_creature = true`), so this is invisible to the mechanics this
+  // file actually tests.
   const r = await pool.query(
-    `INSERT INTO entity_types (name, color, is_creature, behavior_id, gold_min, gold_max)
-     VALUES ($1, '#fff', true, $2, $3, $4) RETURNING id`,
+    `INSERT INTO entity_types (name, color, is_creature, behavior_id, gold_min, gold_max, faction)
+     VALUES ($1, '#fff', true, $2, $3, $4, 'guard') RETURNING id`,
     [name, behaviorId, goldMin, goldMax],
   );
   return r.rows[0].id;

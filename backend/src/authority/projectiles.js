@@ -6,7 +6,7 @@
 const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
 const { hasLineOfSight } = require('./weapons');
 const { applyElementEffect } = require('./effects');
-const { knockbackWithFallback } = require('./knockback');
+const { shoveAwayFrom } = require('./knockback');
 
 // Sub-step resolution for terrain sampling, shared with the melee
 // line-of-sight walk in weapons.js. Defined in subStep.js (see the note there
@@ -47,23 +47,13 @@ function killerUserIdFor(p) {
   return p.ownerKind === 'creature' ? null : (p.ownerId ?? null);
 }
 
-// Shove a surviving target (player OR creature -- both carry
-// x/y/width/height) away from (fromX, fromY): the blast centre for an AoE
-// detonation, or the projectile's own current position for a direct hit.
-// Mirrors creatures.js's applyKnockback -- the same server-authoritative
-// "just set the position" pattern server.js:1147 already uses for the
-// blocked-portal bounce, applied here to a projectile impact instead of a
-// door. Callers are responsible for only invoking this on a survivor (a
-// creature this hit did not kill; a player whose hp is still > 0).
-function shoveTarget(map, fromX, fromY, target, distance) {
-  if (!(distance > 0)) return;
-  const half = target.width / 2;
-  const cx = target.x + half, cy = target.y + target.height / 2;
-  const pushed = knockbackWithFallback({ px: cx, py: cy, fromX, fromY, distance, map });
-  target.x = pushed.x - half;
-  target.y = pushed.y - target.height / 2;
-}
-
+// Projectile impacts shove a surviving target (player OR creature) away
+// from the blast centre / impact point via authority/knockback.js's
+// shoveAwayFrom (imported above) -- the same shared wrapper
+// authority/creatures.js's melee branches and authority/world.js's weapon
+// branches use. Callers below are responsible for only invoking it on a
+// survivor (a creature this hit did not kill; a player whose hp is still
+// > 0).
 class ProjectileSim {
   constructor() {
     this.projectiles = [];
@@ -140,7 +130,7 @@ class ProjectileSim {
         // never be shoved. Origin is the blast centre, not the projectile's
         // travel direction: an AoE's shove radiates outward from where it
         // detonated.
-        shoveTarget(map, bx, by, c, p.knockback);
+        shoveAwayFrom(map, bx, by, c, p.knockback);
       }
       // The rider is applied at FULL duration: falloff scales damage only. A
       // target clipped by the blast edge still burns for the full time —
@@ -167,7 +157,7 @@ class ProjectileSim {
       // Survivors only -- a player never gets removed from `players` on
       // death (resolveDeaths respawns them separately), so the check here is
       // the same hp > 0 gate creatures.js uses, not a delete-happened check.
-      if (pl.hp > 0 && p.knockback > 0) shoveTarget(map, bx, by, pl, p.knockback);
+      if (pl.hp > 0 && p.knockback > 0) shoveAwayFrom(map, bx, by, pl, p.knockback);
     }
     return { x: bx, y: by, radius: r, element: p.element };
   }
@@ -232,7 +222,7 @@ class ProjectileSim {
               // Survivors only. Origin is the projectile's own current
               // position -- the point of direct contact, not the blast
               // centre (this is the swept/direct-hit path, not an AoE).
-              shoveTarget(map, p.x, p.y, c, p.knockback);
+              shoveAwayFrom(map, p.x, p.y, c, p.knockback);
             }
             // See the _detonate comment above: killerUserIdFor(p), not
             // p.ownerId -- the same uuid-into-killerUserId bug, reachable
@@ -262,7 +252,7 @@ class ProjectileSim {
             applyElementEffect(pl, p.element, now, p.ownerId);
             // Survivors only. Origin is the projectile's own current
             // position, matching the creature branch just above.
-            if (pl.hp > 0 && p.knockback > 0) shoveTarget(map, p.x, p.y, pl, p.knockback);
+            if (pl.hp > 0 && p.knockback > 0) shoveAwayFrom(map, p.x, p.y, pl, p.knockback);
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
           }

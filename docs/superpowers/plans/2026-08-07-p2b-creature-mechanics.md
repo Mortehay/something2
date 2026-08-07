@@ -27,6 +27,7 @@ Each of these exists because it has been violated in this project.
 3. **Test fixtures are `zz`-prefixed and deleted by name, unconditionally, in a `finally`** — never by an id captured mid-test. An id captured mid-test is not deleted when the test fails before capturing it.
 4. `make seed-catalogs` must never cost an admin something they authored by hand.
 5. The dev database is **shared**. Assume another session may be using it concurrently.
+6. **A `zz`-prefixed `entity_types` fixture must be invisible to catalog-wide invariant tests.** `node:test` runs test FILES concurrently by default, so a fixture that briefly exists mid-test can be observed by another file's whole-catalog scan (e.g. `creature_drops_db.test.js`'s "every hostile creature has a drop row"). Give the fixture row a non-`'hostile'` faction (or `is_creature = false`, if the loader/test under exercise doesn't require `true`) so it falls outside every `faction = 'hostile'` invariant scan by construction. Found in the final whole-branch review of P2b: `loot_behavior_drops_db.test.js`'s fixtures were deliberately dropless and defaulted to `faction = 'hostile'`, racing `creature_drops_db.test.js`.
 
 ### The golden trace
 

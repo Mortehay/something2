@@ -41,4 +41,33 @@ function knockbackWithFallback({ px, py, fromX, fromY, distance, map }) {
   return { x: px, y: py };
 }
 
-module.exports = { knockbackPosition, knockbackWithFallback };
+// Shove a surviving target (player OR creature -- both carry
+// x/y/width/height) away from (fromX, fromY): a creature's attacker, an
+// AoE blast centre, or a projectile's own position at the moment of impact.
+//
+// SOMET-253 whole-branch review, Fix 3: this was two near-identical
+// wrappers -- applyKnockback (authority/creatures.js) and shoveTarget
+// (authority/projectiles.js) -- each doing center(target) ->
+// knockbackWithFallback -> write target.x/y. That duplication was accepted
+// while each had exactly one consumer in its own module; Task 9 added a
+// third, authority/world.js's player-vs-player loop, reaching across a
+// module boundary for pure geometry that has nothing to do with creatures.
+// One implementation now lives where "displace a thing away from a point"
+// belongs, alongside knockbackPosition/knockbackWithFallback.
+//
+// Callers are responsible for only invoking this on a SURVIVOR (hp > 0
+// after damage lands -- shoving a corpse moves something the sim is about
+// to remove) and for marking a creature target dirty afterward (a player
+// target needs no such flag; every player position is broadcast every tick
+// regardless).
+function shoveAwayFrom(map, fromX, fromY, target, distance) {
+  if (!(distance > 0)) return;
+  const half = target.width / 2;
+  const cx = target.x + half;
+  const cy = target.y + target.height / 2;
+  const pushed = knockbackWithFallback({ px: cx, py: cy, fromX, fromY, distance, map });
+  target.x = pushed.x - half;
+  target.y = pushed.y - target.height / 2;
+}
+
+module.exports = { knockbackPosition, knockbackWithFallback, shoveAwayFrom };

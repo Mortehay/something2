@@ -1,5 +1,6 @@
 const { resolveMove } = require('./collision');
-const { CreatureSim, applyKnockback } = require('./creatures');
+const { CreatureSim } = require('./creatures');
+const { shoveAwayFrom } = require('./knockback');
 const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
 const { resolveEffectName } = require('./vfx.js');
 const { ProjectileSim } = require('./projectiles');
@@ -390,7 +391,7 @@ class World {
       // whatever it kills -- iterating creatureTargets directly here would
       // try to shove ids no longer in the sim. Same distinction Task 6's
       // guard/hostile melee branches already draw (creatures.js: tgt.hp<=0
-      // check before applyKnockback), just computed as a set difference
+      // check before shoveAwayFrom), just computed as a set difference
       // instead of a single target's hp check.
       if (w.knockback > 0 && creatureTargets.length > 0) {
         const killedSet = new Set(killed);
@@ -398,7 +399,7 @@ class World {
           if (killedSet.has(id)) continue;
           const c = this.creatures.get(id);
           if (!c) continue;
-          applyKnockback(this.map, cx, cy, c, w.knockback);
+          shoveAwayFrom(this.map, cx, cy, c, w.knockback);
           c.dirty = true;
         }
       }
@@ -414,11 +415,11 @@ class World {
           // Survivors only -- a player at <=0 hp is picked up by
           // resolveDeaths() and respawned elsewhere; shoving first would move
           // a position respawn is about to overwrite anyway. Written straight
-          // onto other.x/other.y via applyKnockback, the same
+          // onto other.x/other.y via shoveAwayFrom, the same
           // server-authoritative assignment the portal bounce and Task 6's
           // creature-side knockback already use -- never resolveMove.
           if (other.hp > 0 && w.knockback > 0) {
-            applyKnockback(this.map, cx, cy, other, w.knockback);
+            shoveAwayFrom(this.map, cx, cy, other, w.knockback);
           }
         }
       }
