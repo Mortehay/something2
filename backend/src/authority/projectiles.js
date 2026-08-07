@@ -15,6 +15,37 @@ const { MAX_SUB } = require('./subStep');
 
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
+// Who a projectile may damage. These mirror the targeting rules CreatureSim
+// already enforces -- guards engage only hostiles, hostiles never target
+// guards, and neither targets its own faction -- rather than inventing a
+// second rule set that could drift from them.
+//
+// The owner exclusion is folded in here as the same rule generalised: a
+// projectile never damages its own shooter, whoever that is.
+function projectileHitsCreature(p, creature) {
+  if (p.ownerKind !== 'creature') return true;        // player shots hit any creature
+  if (p.ownerId === creature.id) return false;        // never its own shooter
+  const targetFaction = creature.faction || 'hostile';
+  return p.ownerFaction !== targetFaction;            // never same faction
+}
+
+function projectileHitsPlayer(p, player) {
+  if (p.ownerKind !== 'creature') return player.userId !== p.ownerId;
+  // A guard's arrow must never hit the player it is defending.
+  return p.ownerFaction === 'hostile';
+}
+
+// The killer credited for a creature kill this projectile scores. A
+// creature-owned shot's `ownerId` is the shooter creature's id, not a
+// player's -- crediting it straight through would hand loot.js a bogus
+// killerUserId (a creature uuid) instead of "no player". commitCreatureDeath
+// already treats null as the no-credit path (the one guard kills take) and
+// skips the XP branch entirely rather than awarding zero, so creature-owned
+// kills must come through as null here, not as p.ownerId.
+function killerUserIdFor(p) {
+  return p.ownerKind === 'creature' ? null : (p.ownerId ?? null);
+}
+
 class ProjectileSim {
   constructor() {
     this.projectiles = [];
@@ -27,12 +58,17 @@ class ProjectileSim {
   // falls back to weapon.damage so callers that don't pass one (existing
   // tests, stub weapons) are unaffected.
   spawn({
-    ownerId, x, y, nx, ny, weapon, damage,
+    ownerId, ownerKind = 'player', ownerFaction = null, x, y, nx, ny, weapon, damage,
   }) {
     const id = String(++this._id);
     this.projectiles.push({
       id,
       ownerId,
+      // 'player' by default so every existing call site is byte-identical.
+      // A creature-owned shot carries its shooter's faction, which is what
+      // the targeting rules below key on.
+      ownerKind,
+      ownerFaction,
       x, y,
       vx: nx * weapon.projectile_speed,
       vy: ny * weapon.projectile_speed,
@@ -67,6 +103,7 @@ class ProjectileSim {
   _detonate(p, bx, by, { creatureList, creatures, players, map, now }, kills) {
     const r = p.aoeRadius;
     for (const c of creatureList) {
+      if (!projectileHitsCreature(p, c)) continue;
       const half = c.width / 2;
       const cx = c.x + half, cy = c.y + c.height / 2;
       const d = Math.hypot(cx - bx, cy - by);
@@ -75,7 +112,7 @@ class ProjectileSim {
       // Falloff scales the RAW damage; the creature's own defense and
       // resistances are applied on top, inside damageCreatureById.
       if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r), p.element, now)) {
-        kills.push({ id: c.id, killerUserId: p.ownerId ?? null });
+        kills.push({ id: c.id, killerUserId: killerUserIdFor(p) });
       }
       // The rider is applied at FULL duration: falloff scales damage only. A
       // target clipped by the blast edge still burns for the full time —
@@ -83,7 +120,7 @@ class ProjectileSim {
       applyElementEffect(c, p.element, now, p.ownerId);
     }
     for (const pl of players) {
-      if (pl.userId === p.ownerId) continue;
+      if (!projectileHitsPlayer(p, pl)) continue;
       const half = pl.width / 2;
       const px = pl.x + half, py = pl.y + pl.height / 2;
       const d = Math.hypot(px - bx, py - by);
@@ -139,6 +176,7 @@ class ProjectileSim {
 
         // Creatures.
         for (const c of creatureList) {
+          if (!projectileHitsCreature(p, c)) continue;
           const key = `c:${c.id}`;
           if (p.hitIds.has(key)) continue;
           const half = c.width / 2;
@@ -151,7 +189,7 @@ class ProjectileSim {
             }
             p.hitIds.add(key);
             if (creatures.damageCreatureById(c.id, p.damage, p.element, now)) {
-              kills.push({ id: c.id, killerUserId: p.ownerId ?? null });
+              kills.push({ id: c.id, killerUserId: killerUserIdFor(p) });
             }
             applyElementEffect(c, p.element, now, p.ownerId);
             p.pierceLeft -= 1;
@@ -160,9 +198,9 @@ class ProjectileSim {
         }
         if (dead) break;
 
-        // Players (never the owner).
+        // Players (never the owner; never a creature owner's own faction ally).
         for (const pl of players) {
-          if (pl.userId === p.ownerId) continue;
+          if (!projectileHitsPlayer(p, pl)) continue;
           const key = `p:${pl.userId}`;
           if (p.hitIds.has(key)) continue;
           const half = pl.width / 2;

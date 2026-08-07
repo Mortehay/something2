@@ -409,3 +409,106 @@ test('an arcane AoE blast damages but applies no rider', () => {
   assert.equal(trig.effects ? trig.effects.size : 0, 0, 'arcane must carry no rider');
   assert.equal(edge.effects.size, 0, 'arcane must carry no rider');
 });
+
+// --- creature-owned projectiles: targeting (Task 8) -------------------------
+
+function mkFactionCreature(id, faction) {
+  return { id, x: 30, y: -24, width: 48, height: 48, hp: 100, faction };
+}
+
+// Builds a projectile in flight and a single target directly in its path,
+// steps the sim once, and reports whether the target took damage. Geometry
+// reuses the file's existing single-hit tests above (creature center 54,0 /
+// player center 94,0) — hit detection itself is proven there; this only
+// exercises the ownerKind/ownerFaction targeting predicates.
+function runOneShot({ ownerKind, ownerFaction, target }) {
+  const sim = new ProjectileSim();
+  const ownerId = ownerKind === 'creature' ? 'shooter' : 'u1';
+  sim.spawn({
+    ownerId, ownerKind, ownerFaction, x: 0, y: 0, nx: 1, ny: 0,
+    weapon: { ...BOW, damage: 10 },
+  });
+  const [kind, sub] = target.split(':');
+  if (kind === 'creature') {
+    const c = mkFactionCreature(`target-${sub}`, sub);
+    const creatures = creaturesStub([c]);
+    sim.step(0.1, { creatures, players: [], map: WALK_ALL }); // x→90, passes center 54
+    const after = creatures._byId.get(c.id);
+    return !after || after.hp < 100;
+  }
+  const targetUserId = sub === 'self' ? ownerId : 'other-user';
+  const pl = { userId: targetUserId, x: 62, y: -32, width: 64, height: 64, hp: 100 };
+  sim.step(0.12, { creatures: creaturesStub([]), players: [pl], map: WALK_ALL }); // x→108, passes center 94
+  return pl.hp < 100;
+}
+
+// The full targeting matrix. Half these cells assert NO damage, and that half
+// is the point: a test checking only the damaging cells passes against an
+// implementation with no faction logic at all.
+test('projectile targeting matrix by owner kind and faction', () => {
+  const cases = [
+    // ownerKind, ownerFaction, target faction/kind, expect damage
+    ['player',   null,      'creature:hostile', true],
+    ['player',   null,      'creature:guard',   true],
+    ['player',   null,      'player:other',     true],
+    ['player',   null,      'player:self',      false],
+    ['creature', 'hostile', 'player:other',     true],
+    ['creature', 'hostile', 'creature:guard',   true],
+    ['creature', 'hostile', 'creature:hostile', false],
+    ['creature', 'guard',   'creature:hostile', true],
+    ['creature', 'guard',   'creature:guard',   false],
+    ['creature', 'guard',   'player:other',     false],
+  ];
+  for (const [ownerKind, ownerFaction, target, expected] of cases) {
+    const hit = runOneShot({ ownerKind, ownerFaction, target });
+    assert.equal(hit, expected,
+      `${ownerKind}/${ownerFaction} vs ${target}: expected ${expected}, got ${hit}`);
+  }
+});
+
+test('spawn defaults to player ownership so existing call sites are unchanged', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0,
+    weapon: { projectile_speed: 100, range: 100, damage: 5, projectile_radius: 4, pierce: 1 } });
+  assert.equal(sim.projectiles[0].ownerKind, 'player');
+});
+
+test('a creature-owned direct-hit kill credits killerUserId: null, not the shooter creature id', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({
+    ownerId: 'shooter', ownerKind: 'creature', ownerFaction: 'hostile',
+    x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 100 },
+  });
+  const creatures = creaturesStub([{ id: 'guardZ', x: 30, y: -24, width: 48, height: 48, hp: 10, faction: 'guard' }]);
+  const out = sim.step(0.1, { creatures, players: [], map: WALK_ALL });
+  assert.deepEqual(out.kills, [{ id: 'guardZ', killerUserId: null }],
+    'a creature-owned kill must never be credited to the shooter creature\'s own id');
+});
+
+test('a creature-owned AoE blast respects faction at the _detonate collision sites', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({
+    ownerId: 'shooter', ownerKind: 'creature', ownerFaction: 'hostile',
+    x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, damage: 40, range: 40 },
+  }); // detonates at x=48 (see the range/AoE comment above), radius 100
+  const guardTarget = mkCreature('guardX', 60, 0); guardTarget.faction = 'guard';
+  const hostileTarget = mkCreature('hostileX', 70, 0); hostileTarget.faction = 'hostile';
+  const creatures = creaturesStub([guardTarget, hostileTarget]);
+  sim.step(1, { creatures, players: [], map: WALK_ALL });
+  assert.ok(creatures._byId.get('guardX').hp < 100,
+    'a hostile shooter\'s AoE must damage a guard-faction creature');
+  assert.equal(creatures._byId.get('hostileX').hp, 100,
+    'a hostile shooter\'s AoE must not damage its own faction');
+});
+
+test('a creature-owned AoE kill credits killerUserId: null, not the shooter creature id', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({
+    ownerId: 'shooter', ownerKind: 'creature', ownerFaction: 'hostile',
+    x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, damage: 500, range: 40 },
+  });
+  const guardTarget = mkCreature('guardY', 60, 0, 10); guardTarget.faction = 'guard';
+  const creatures = creaturesStub([guardTarget]);
+  const out = sim.step(1, { creatures, players: [], map: WALK_ALL });
+  assert.deepEqual(out.kills, [{ id: 'guardY', killerUserId: null }]);
+});
