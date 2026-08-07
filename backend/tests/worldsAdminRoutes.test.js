@@ -316,8 +316,26 @@ test('POST /api/worlds/:id/creatures places creatures and reports the count', as
     [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [world] })],
     [/SELECT .*FROM tile_types/i, () => ({ rows: TILE_ROWS })],
     [/FROM map_links/i, () => ({ rows: [] })],
-    [/FROM entity_types[\s\S]*WHERE is_creature/i, () => ({
-      rows: [{ id: 1, name: 'goblin', hp: 12, defense: 1, resistances: {} }] })],
+    // This single route answers TWO distinct queries against entity_types:
+    // loadCreatureTypes' own SELECT (aliased "e.", SOMET-249: now LEFT JOINs
+    // creature_behaviors) AND worldPopulation.js's separate, still-unaliased
+    // "SELECT name, hp, defense, resistances, faction FROM entity_types WHERE
+    // is_creature = true AND name = ANY(...)". Match on the shared, stable
+    // part ("is_creature = true") rather than pinning either query's exact
+    // shape -- a narrower pattern tied to just one of them silently
+    // stops routing the OTHER, and mockPool throws "unexpected query" on a
+    // miss (loud here, but the equivalent miss in a fake pool that falls
+    // through to a default instead just hangs). Row carries a full
+    // behaviour profile (literal values, not the resolver's own defaults)
+    // so loadCreatureTypes' mapping is exercised realistically; the extra
+    // columns are ignored by worldPopulation.js's narrower SELECT list.
+    [/FROM entity_types\b[\s\S]*is_creature\s*=\s*true/i, () => ({
+      rows: [{
+        id: 1, name: 'goblin', hp: 12, defense: 1, resistances: {}, attack_element: 'physical',
+        behavior_name: 'Line', attack_kind: 'melee', attack_range: 60, attack_cooldown: 1,
+        projectile_speed: 0, projectile_radius: 0, aggro_radius: 400, leash_radius: 800,
+        chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
+      }] })],
     [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
     [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],
     [/UPDATE worlds SET creature_count/i, (p) => { wroteCreatureCount = p[0]; return { rows: [], rowCount: 1 }; }],
@@ -363,8 +381,26 @@ test('POST /api/worlds/:id/creatures threads the world\'s declared biomes into p
     [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [world] })],
     [/SELECT .*FROM tile_types/i, () => ({ rows: TILE_ROWS })],
     [/FROM map_links/i, () => ({ rows: [] })],
-    [/FROM entity_types[\s\S]*WHERE is_creature/i, () => ({
-      rows: [{ id: 1, name: 'goblin', hp: 12, defense: 1, resistances: {} }] })],
+    // This single route answers TWO distinct queries against entity_types:
+    // loadCreatureTypes' own SELECT (aliased "e.", SOMET-249: now LEFT JOINs
+    // creature_behaviors) AND worldPopulation.js's separate, still-unaliased
+    // "SELECT name, hp, defense, resistances, faction FROM entity_types WHERE
+    // is_creature = true AND name = ANY(...)". Match on the shared, stable
+    // part ("is_creature = true") rather than pinning either query's exact
+    // shape -- a narrower pattern tied to just one of them silently
+    // stops routing the OTHER, and mockPool throws "unexpected query" on a
+    // miss (loud here, but the equivalent miss in a fake pool that falls
+    // through to a default instead just hangs). Row carries a full
+    // behaviour profile (literal values, not the resolver's own defaults)
+    // so loadCreatureTypes' mapping is exercised realistically; the extra
+    // columns are ignored by worldPopulation.js's narrower SELECT list.
+    [/FROM entity_types\b[\s\S]*is_creature\s*=\s*true/i, () => ({
+      rows: [{
+        id: 1, name: 'goblin', hp: 12, defense: 1, resistances: {}, attack_element: 'physical',
+        behavior_name: 'Line', attack_kind: 'melee', attack_range: 60, attack_cooldown: 1,
+        projectile_speed: 0, projectile_radius: 0, aggro_radius: 400, leash_radius: 800,
+        chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
+      }] })],
     [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
     [/FROM biomes/i, () => ({ rows: [
       { id: 1, name: 'Meadow', terrain_tiles: ['grass'], flora_types: [], creature_types: ['goblin'],
@@ -404,8 +440,26 @@ test('POST /api/worlds/:id/creatures warns when a player is connected so the re-
     [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [world] })],
     [/SELECT .*FROM tile_types/i, () => ({ rows: TILE_ROWS })],
     [/FROM map_links/i, () => ({ rows: [] })],
-    [/FROM entity_types[\s\S]*WHERE is_creature/i, () => ({
-      rows: [{ id: 1, name: 'goblin', hp: 12, defense: 1, resistances: {} }] })],
+    // This single route answers TWO distinct queries against entity_types:
+    // loadCreatureTypes' own SELECT (aliased "e.", SOMET-249: now LEFT JOINs
+    // creature_behaviors) AND worldPopulation.js's separate, still-unaliased
+    // "SELECT name, hp, defense, resistances, faction FROM entity_types WHERE
+    // is_creature = true AND name = ANY(...)". Match on the shared, stable
+    // part ("is_creature = true") rather than pinning either query's exact
+    // shape -- a narrower pattern tied to just one of them silently
+    // stops routing the OTHER, and mockPool throws "unexpected query" on a
+    // miss (loud here, but the equivalent miss in a fake pool that falls
+    // through to a default instead just hangs). Row carries a full
+    // behaviour profile (literal values, not the resolver's own defaults)
+    // so loadCreatureTypes' mapping is exercised realistically; the extra
+    // columns are ignored by worldPopulation.js's narrower SELECT list.
+    [/FROM entity_types\b[\s\S]*is_creature\s*=\s*true/i, () => ({
+      rows: [{
+        id: 1, name: 'goblin', hp: 12, defense: 1, resistances: {}, attack_element: 'physical',
+        behavior_name: 'Line', attack_kind: 'melee', attack_range: 60, attack_cooldown: 1,
+        projectile_speed: 0, projectile_radius: 0, aggro_radius: 400, leash_radius: 800,
+        chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
+      }] })],
     [/FROM villages WHERE world_id/i, () => ({ rows: [] })],
     [/DELETE FROM world_creatures WHERE world_id/i, () => ({ rows: [], rowCount: 3 })],
     [/UPDATE worlds SET creature_count/i, () => ({ rows: [], rowCount: 1 })],

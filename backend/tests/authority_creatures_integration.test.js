@@ -30,7 +30,21 @@ function fakePool() {
       if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] }; // matches token()'s tv:1 → passes the on-connect version check
       if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
-      if (/FROM entity_types WHERE is_creature/i.test(sql)) return { rows: [{ name: 'Wolf', color: '#c0392b', hp: 10 }] };
+      // SOMET-249: loadCreatureTypes now LEFT JOINs creature_behaviors, so its
+      // SELECT reads "FROM entity_types e ... WHERE e.is_creature" rather than
+      // the bare "FROM entity_types WHERE is_creature". This pattern must be
+      // kept in step with that SELECT -- a routing miss here doesn't fail
+      // loudly, it silently falls through and hangs the test waiting on a
+      // creature that never loads. Row carries a full behaviour profile
+      // (literal values, not the resolver's own defaults) so the mapping is
+      // exercised against a realistic row, not one that takes the fallback
+      // for every field.
+      if (/FROM entity_types e[\s\S]*WHERE e\.is_creature/i.test(sql)) return { rows: [{
+        name: 'Wolf', color: '#c0392b', hp: 10, attack_element: 'physical',
+        behavior_name: 'Line', attack_kind: 'melee', attack_range: 60, attack_cooldown: 1,
+        projectile_speed: 0, projectile_radius: 0, aggro_radius: 400, leash_radius: 800,
+        chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
+      }] };
       if (/INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 }; // already materialized
       if (/FROM world_players WHERE/i.test(sql)) {
         const uid = params[1];
@@ -61,7 +75,21 @@ function fakePoolFlaky() {
       if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] }; // matches token()'s tv:1 → passes the on-connect version check
       if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
-      if (/FROM entity_types WHERE is_creature/i.test(sql)) return { rows: [{ name: 'Wolf', color: '#c0392b', hp: 10 }] };
+      // SOMET-249: loadCreatureTypes now LEFT JOINs creature_behaviors, so its
+      // SELECT reads "FROM entity_types e ... WHERE e.is_creature" rather than
+      // the bare "FROM entity_types WHERE is_creature". This pattern must be
+      // kept in step with that SELECT -- a routing miss here doesn't fail
+      // loudly, it silently falls through and hangs the test waiting on a
+      // creature that never loads. Row carries a full behaviour profile
+      // (literal values, not the resolver's own defaults) so the mapping is
+      // exercised against a realistic row, not one that takes the fallback
+      // for every field.
+      if (/FROM entity_types e[\s\S]*WHERE e\.is_creature/i.test(sql)) return { rows: [{
+        name: 'Wolf', color: '#c0392b', hp: 10, attack_element: 'physical',
+        behavior_name: 'Line', attack_kind: 'melee', attack_range: 60, attack_cooldown: 1,
+        projectile_speed: 0, projectile_radius: 0, aggro_radius: 400, leash_radius: 800,
+        chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
+      }] };
       if (/INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 }; // already materialized
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] }; // user 1 → default center
       if (/FROM world_creatures/i.test(sql)) {

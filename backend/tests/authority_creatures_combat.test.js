@@ -245,14 +245,80 @@ test('loadCreatureTypes actually SELECTs every column it maps', async () => {
   }
 });
 
+// SOMET-249 (Task 5): loadCreatureTypes now joins creature_behaviors so every
+// creature type carries its resolved behaviour. Extends the guard above
+// (rather than replacing it) with the twelve behaviour/attack-element columns
+// the resolveBehavior mapping reads -- omitting any one of them from the
+// SELECT loads it as undefined and silently falls every creature back to the
+// Line default, with no error anywhere.
+test('loadCreatureTypes SELECTs every behaviour column its mapping reads', async () => {
+  let sql = '';
+  const fakePool = { query: async (q) => { sql = q; return { rows: [] }; } };
+  await loadCreatureTypes(fakePool);
+  // A column the mapping consumes but the SELECT omits loads as undefined and
+  // SILENTLY disables the feature it feeds. That is the single most likely way
+  // this sub-project ships inert, which is why it is asserted textually.
+  for (const col of ['attack_kind', 'attack_range', 'attack_cooldown',
+                     'projectile_speed', 'projectile_radius', 'aggro_radius',
+                     'leash_radius', 'chase_style', 'preferred_range',
+                     'move_speed_mult', 'damage_override', 'attack_element']) {
+    assert.ok(sql.includes(col), `SELECT is missing ${col}`);
+  }
+  assert.ok(/LEFT JOIN\s+creature_behaviors/i.test(sql), 'must LEFT JOIN, not INNER JOIN');
+});
+
+test('loadCreatureTypes attaches a resolved behaviour, including for a null profile', async () => {
+  const fakePool = { query: async () => ({ rows: [
+    { id: 1, name: 'zzNoProfile', color: '#fff', hp: 10, defense: 0, resistances: {},
+      faction: 'hostile', gold_min: 0, gold_max: 0, attack_element: 'physical',
+      behavior_name: null, attack_kind: null, chase_style: null },
+    { id: 2, name: 'zzArcher', color: '#fff', hp: 10, defense: 0, resistances: {},
+      faction: 'hostile', gold_min: 0, gold_max: 0, attack_element: 'fire',
+      behavior_name: 'Ranged', attack_kind: 'ranged', attack_range: 340,
+      attack_cooldown: 1.8, projectile_speed: 520, projectile_radius: 6,
+      aggro_radius: 460, leash_radius: 800, chase_style: 'kite',
+      preferred_range: 240, move_speed_mult: 1, damage_override: null },
+  ] }) };
+  const { creatureTypes } = await loadCreatureTypes(fakePool);
+  const byName = new Map(creatureTypes.map((c) => [c.name, c]));
+  assert.equal(byName.get('zzNoProfile').behavior.chaseStyle, 'charge');
+  assert.equal(byName.get('zzNoProfile').behavior.attackRange, 60);
+  assert.equal(byName.get('zzArcher').behavior.chaseStyle, 'kite');
+  assert.equal(byName.get('zzArcher').behavior.projectileSpeed, 520);
+  assert.equal(byName.get('zzArcher').attackElement, 'fire');
+});
+
 test('loadCreatureTypes maps defense/resistances and defaults them', async () => {
   const pool = { query: async () => ({ rows: [
     { id: 1, name: 'Slime', color: '#0f0', hp: 12, defense: '1', resistances: { fire: 0.6 } },
     { id: 2, name: 'Wolf', color: '#c00', hp: 10, defense: null, resistances: null },
   ] }) };
   const { creatureTypes, creatureTypeIds } = await loadCreatureTypes(pool);
-  assert.deepEqual(creatureTypes[0], { name: 'Slime', hp: 12, color: '#0f0', faction: 'hostile', defense: 1, resistances: { fire: 0.6 } });
-  assert.deepEqual(creatureTypes[1], { name: 'Wolf', hp: 10, color: '#c00', faction: 'hostile', defense: 0, resistances: {} });
+  // SOMET-249: loadCreatureTypes now always attaches attackElement (default
+  // 'physical', since these fixture rows carry no attack_element) and a
+  // resolved behaviour (the Line fallback, since these rows carry no
+  // behavior_name). Written as literals, not DEFAULT_BEHAVIOR/resolveBehavior,
+  // so this test cannot pass by construction against a broken mapping.
+  assert.deepEqual(creatureTypes[0], {
+    name: 'Slime', hp: 12, color: '#0f0', faction: 'hostile',
+    attackElement: 'physical',
+    behavior: {
+      name: 'Line', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
+      projectileSpeed: 0, projectileRadius: 0, aggroRadius: 400, leashRadius: 800,
+      chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
+    },
+    defense: 1, resistances: { fire: 0.6 },
+  });
+  assert.deepEqual(creatureTypes[1], {
+    name: 'Wolf', hp: 10, color: '#c00', faction: 'hostile',
+    attackElement: 'physical',
+    behavior: {
+      name: 'Line', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
+      projectileSpeed: 0, projectileRadius: 0, aggroRadius: 400, leashRadius: 800,
+      chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
+    },
+    defense: 0, resistances: {},
+  });
   assert.equal(creatureTypeIds.get('Slime'), 1);
   assert.equal(creatureTypeIds.get('Wolf'), 2);
 });

@@ -7,6 +7,7 @@ const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc, hasLineOfSight } = require('./weapons');
 const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
 const { applyElementEffect, activeEffectKeys, canAct } = require('./effects');
+const { resolveBehavior } = require('../services/creatureBehaviors');
 
 const DIRS = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
@@ -44,15 +45,28 @@ function creatureMitigation(row) {
 // mapping consumes: a mapped column missing from the SELECT loads as
 // undefined and silently disables the feature it feeds.
 async function loadCreatureTypes(pool) {
+  // LEFT JOIN, not INNER: entity_types.behavior_id is nullable and a creature
+  // without a profile must still load, resolving to the Line fallback. An
+  // INNER JOIN would make a creature vanish from the catalog entirely, which
+  // fails silently -- it would simply never spawn.
   const r = await pool.query(
-    `SELECT id, name, color, hp, defense, resistances, faction, gold_min, gold_max
-     FROM entity_types WHERE is_creature = true ORDER BY id ASC`,
+    `SELECT e.id, e.name, e.color, e.hp, e.defense, e.resistances, e.faction,
+            e.gold_min, e.gold_max, e.attack_element,
+            b.name AS behavior_name, b.attack_kind, b.attack_range,
+            b.attack_cooldown, b.projectile_speed, b.projectile_radius,
+            b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
+            b.move_speed_mult, b.damage_override
+     FROM entity_types e
+     LEFT JOIN creature_behaviors b ON b.id = e.behavior_id
+     WHERE e.is_creature = true ORDER BY e.id ASC`,
   );
   const creatureTypes = r.rows.map((row) => ({
     name: row.name,
     hp: row.hp,
     color: row.color,
     faction: row.faction || 'hostile',
+    attackElement: row.attack_element || 'physical',
+    behavior: resolveBehavior(row),
     ...creatureMitigation(row),
   }));
   const creatureTypeIds = new Map(r.rows.map((row) => [row.name, row.id]));
