@@ -348,12 +348,35 @@ class CreatureSim {
       if (c.mode === 'chase') {
         const tp = byId.get(c._target);
         const tc = center(tp);
-        const vx = tc.x - cc.x, vy = tc.y - cc.y;
-        const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult);
-        if (r.x !== c.x || r.y !== c.y) {
-          c.x = r.x; c.y = r.y;
-          const f = facingFor(vx, vy); if (f) c.facing = f;
-          c.dirty = true;
+        const dist = Math.hypot(tc.x - cc.x, tc.y - cc.y);
+        let vx = tc.x - cc.x, vy = tc.y - cc.y;
+        let move = true;
+
+        if (bh.chaseStyle === 'hold') {
+          // Never moves. It still attacks below if the target is in range.
+          move = false;
+        } else if (bh.chaseStyle === 'kite') {
+          // Three bands: too close -> back away; too far -> close; in between
+          // -> stand and shoot. Without the middle band a kiter oscillates
+          // one step per tick and never fires.
+          if (dist < bh.preferredRange) { vx = -vx; vy = -vy; }
+          else if (dist <= bh.attackRange) { move = false; }
+        } else if (bh.chaseStyle === 'skirmish') {
+          // Retreat while the attack is on cooldown, close while it is ready.
+          // Reading _attackCd is what makes this hit-and-run rather than a
+          // timer that ignores whether the strike actually landed.
+          if (c._attackCd > 0 && dist < bh.preferredRange) { vx = -vx; vy = -vy; }
+        }
+        // 'charge' and 'ambush' fall through with the straight-at-target
+        // vector -- an aggroed ambusher IS a charger, it just started asleep.
+
+        if (move) {
+          const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult);
+          if (r.x !== c.x || r.y !== c.y) {
+            c.x = r.x; c.y = r.y;
+            const f = facingFor(vx, vy); if (f) c.facing = f;
+            c.dirty = true;
+          }
         }
         // Contact damage. Gated by canAct for the same reason the player
         // attack paths are (world.js's canAttack/attack): a shocked creature
@@ -381,7 +404,11 @@ class CreatureSim {
         continue;
       }
 
-      // Roam (unchanged behavior).
+      // Roam. `hold` never moves at all, and `ambush` lies dormant until
+      // something enters its aggro radius -- for both, "no target" means
+      // "stand still", not "wander".
+      if (bh.chaseStyle === 'hold' || bh.chaseStyle === 'ambush') continue;
+
       if (this.rng() < REDIRECT_CHANCE) {
         c._dir = Math.min(DIRS.length - 1, Math.floor(this.rng() * DIRS.length));
       }
