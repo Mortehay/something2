@@ -18,7 +18,7 @@ test('creature_abilities migration', { skip: !url ? 'no database URL' : false },
 
   await t.test('every behaviour has a slot-1 ability matching what it used to carry', async () => {
     const r = await pool.query(
-      `SELECT b.name, a.attack_kind, a.attack_range, a.attack_cooldown
+      `SELECT b.name, a.attack_kind, a.attack_range, a.attack_cooldown, a.knockback
        FROM creature_abilities a JOIN creature_behaviors b ON b.id = a.behavior_id
        WHERE a.slot = 1 ORDER BY b.name`);
     const byName = new Map(r.rows.map((x) => [x.name, x]));
@@ -28,15 +28,29 @@ test('creature_abilities migration', { skip: !url ? 'no database URL' : false },
     assert.deepEqual(pick(byName.get('Line')), { attack_kind: 'melee', attack_range: 60, attack_cooldown: 1 });
     assert.deepEqual(pick(byName.get('Ranged')), { attack_kind: 'ranged', attack_range: 340, attack_cooldown: 1.8 });
     assert.deepEqual(pick(byName.get('Guard')), { attack_kind: 'melee', attack_range: 60, attack_cooldown: 1 });
+    // Brute's slot-1 is the one generic-backfill row the migration overrides
+    // after the fact (ABILITY_OVERRIDES) -- pin its knockback too, not just
+    // kind/range/cooldown, so that override cannot silently regress to 0.
+    assert.equal(byName.get('Brute').knockback, 140);
   });
 
   await t.test('Apex has two abilities in slot order', async () => {
     const r = await pool.query(
-      `SELECT a.slot, a.attack_kind
+      `SELECT a.slot, a.attack_kind, a.attack_range, a.attack_cooldown, a.element, a.damage_mult, a.knockback
        FROM creature_abilities a JOIN creature_behaviors b ON b.id = a.behavior_id
        WHERE b.name = 'Apex' ORDER BY a.slot`);
     assert.deepEqual(r.rows.map((x) => x.slot), [1, 2]);
     assert.deepEqual(r.rows.map((x) => x.attack_kind), ['cast', 'melee']);
+    // Slot 2 (Slam) is the migration's hand-authored second ability -- pin
+    // every column it carries, not just kind, so a value drifting in the
+    // migration or the seed file is caught here rather than only by the
+    // static field-for-field test in catalog_seed_data.test.js.
+    const slam = r.rows[1];
+    assert.equal(slam.attack_range, 90);
+    assert.equal(slam.attack_cooldown, 1.2);
+    assert.equal(slam.element, 'physical');
+    assert.equal(slam.damage_mult, 1.4);
+    assert.equal(slam.knockback, 120);
   });
 
   await t.test('the slot uniqueness constraint refuses a duplicate slot', async () => {
