@@ -7,13 +7,30 @@ function openMap() { return { isWalkable: () => true, speedAt: () => 1, chunkSiz
 function walledMap() { return { isWalkable: () => false, speedAt: () => 1, chunkSize: 8 }; }
 const noRedirect = () => 0.05;
 
+// SOMET-253: the attack half of a behaviour lives in `abilities` now, so an
+// override naming an attack field has to land on the ability rather than on
+// the behaviour. Partitioned by key here (instead of rewriting all eleven call
+// sites into two-argument form) so the scenarios below read exactly as they
+// did when the flat fields existed, and a future attack field added to the
+// ability shape only has to be listed once.
+const ABILITY_KEYS = new Set([
+  'slot', 'attackKind', 'attackRange', 'attackCooldown',
+  'projectileSpeed', 'projectileRadius', 'element', 'damageMult', 'knockback',
+]);
+
 function ranged(over = {}) {
-  return {
-    name: 'R', attackKind: 'ranged', attackRange: 340, attackCooldown: 1.8,
-    projectileSpeed: 520, projectileRadius: 6, aggroRadius: 460, leashRadius: 800,
-    chaseStyle: 'kite', preferredRange: 240, moveSpeedMult: 1, damageOverride: null,
-    ...over,
+  const ability = {
+    slot: 1, name: 'Shot', attackKind: 'ranged', attackRange: 340, attackCooldown: 1.8,
+    projectileSpeed: 520, projectileRadius: 6, element: null, damageMult: 1, knockback: 0,
   };
+  const bh = {
+    name: 'R', aggroRadius: 460, leashRadius: 800,
+    chaseStyle: 'kite', preferredRange: 240, moveSpeedMult: 1, damageOverride: null,
+  };
+  for (const [k, v] of Object.entries(over)) {
+    if (ABILITY_KEYS.has(k)) ability[k] = v; else bh[k] = v;
+  }
+  return { ...bh, abilities: [ability] };
 }
 
 function sim(bh, mapFn = openMap, element = 'physical') {

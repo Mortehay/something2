@@ -265,6 +265,23 @@ test('loadCreatureTypes SELECTs every behaviour column its mapping reads', async
     assert.ok(sql.includes(col), `SELECT is missing ${col}`);
   }
   assert.ok(/LEFT JOIN\s+creature_behaviors/i.test(sql), 'must LEFT JOIN, not INNER JOIN');
+
+  // SOMET-253: the attack itself now comes from creature_abilities, not from
+  // the parent row's attack_* columns. Drop the lateral join (or the
+  // `abilities` alias it produces) and resolveBehavior sees row.abilities ===
+  // undefined, hands every creature type the single default melee ability,
+  // and the entire abilities catalog is inert with nothing appearing broken.
+  // damage_mult and knockback are named individually because they exist ONLY
+  // in the aggregate's json_build_object -- a hand-trimmed object list that
+  // still produced an `abilities` key would satisfy a bare check for the
+  // alias while silently zeroing an Apex's 1.4x slam.
+  for (const col of ['creature_abilities', 'abilities', 'damage_mult', 'knockback']) {
+    assert.ok(sql.includes(col),
+      `SELECT is missing ${col} — without it every creature resolves to the default ability`);
+  }
+  assert.match(sql, /ORDER BY\s+a\.slot/i,
+    'the ability aggregate must ORDER BY a.slot — slot order IS priority order, and an '
+    + 'unordered json_agg makes a creature\'s move priority depend on physical row order');
 });
 
 test('loadCreatureTypes attaches a resolved behaviour, including for a null profile', async () => {
@@ -277,14 +294,29 @@ test('loadCreatureTypes attaches a resolved behaviour, including for a null prof
       behavior_name: 'Ranged', attack_kind: 'ranged', attack_range: 340,
       attack_cooldown: 1.8, projectile_speed: 520, projectile_radius: 6,
       aggro_radius: 460, leash_radius: 800, chase_style: 'kite',
-      preferred_range: 240, move_speed_mult: 1, damage_override: null },
+      preferred_range: 240, move_speed_mult: 1, damage_override: null,
+      // SOMET-253: the shape the lateral join delivers — one JSON array of
+      // snake_case ability rows. The attack_* columns above are deliberately
+      // left in place AND deliberately contradicted by nothing: they are what
+      // Task 3 deletes, and the assertions below read the ability, so a
+      // resolver that fell back to the parent columns would still look right
+      // here. The zzStale case in creature_abilities_resolve.test.js is what
+      // pins that they are no longer read.
+      abilities: [{
+        slot: 1, name: 'Ranged', attack_kind: 'ranged', attack_range: 340,
+        attack_cooldown: 1.8, projectile_speed: 520, projectile_radius: 6,
+        element: null, damage_mult: 1, knockback: 0,
+      }] },
   ] }) };
   const { creatureTypes } = await loadCreatureTypes(fakePool);
   const byName = new Map(creatureTypes.map((c) => [c.name, c]));
   assert.equal(byName.get('zzNoProfile').behavior.chaseStyle, 'charge');
-  assert.equal(byName.get('zzNoProfile').behavior.attackRange, 60);
+  // No ability rows at all (behavior_id was NULL): the single default.
+  assert.equal(byName.get('zzNoProfile').behavior.abilities.length, 1);
+  assert.equal(byName.get('zzNoProfile').behavior.abilities[0].attackRange, 60);
   assert.equal(byName.get('zzArcher').behavior.chaseStyle, 'kite');
-  assert.equal(byName.get('zzArcher').behavior.projectileSpeed, 520);
+  assert.equal(byName.get('zzArcher').behavior.abilities[0].projectileSpeed, 520);
+  assert.equal(byName.get('zzArcher').behavior.abilities[0].attackKind, 'ranged');
   assert.equal(byName.get('zzArcher').attackElement, 'fire');
 });
 
@@ -303,8 +335,12 @@ test('loadCreatureTypes maps defense/resistances and defaults them', async () =>
     name: 'Slime', hp: 12, color: '#0f0', faction: 'hostile',
     attackElement: 'physical',
     behavior: {
-      name: 'Line', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
-      projectileSpeed: 0, projectileRadius: 0, aggroRadius: 400, leashRadius: 800,
+      name: 'Line',
+      abilities: [{
+        slot: 1, name: 'Attack', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
+        projectileSpeed: 0, projectileRadius: 0, element: null, damageMult: 1, knockback: 0,
+      }],
+      aggroRadius: 400, leashRadius: 800,
       chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
     },
     defense: 1, resistances: { fire: 0.6 },
@@ -313,8 +349,12 @@ test('loadCreatureTypes maps defense/resistances and defaults them', async () =>
     name: 'Wolf', hp: 10, color: '#c00', faction: 'hostile',
     attackElement: 'physical',
     behavior: {
-      name: 'Line', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
-      projectileSpeed: 0, projectileRadius: 0, aggroRadius: 400, leashRadius: 800,
+      name: 'Line',
+      abilities: [{
+        slot: 1, name: 'Attack', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
+        projectileSpeed: 0, projectileRadius: 0, element: null, damageMult: 1, knockback: 0,
+      }],
+      aggroRadius: 400, leashRadius: 800,
       chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
     },
     defense: 0, resistances: {},

@@ -8,7 +8,7 @@ const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInvent
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
-const { loadCreatureTypes } = require('./creatures');
+const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
@@ -585,6 +585,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // et.attack_element is the same kind of column as et.faction above:
       // drop it and every creature's element silently reverts to 'physical'.
       //
+      // SOMET-253: this query is the SECOND of the two creature-loading paths
+      // and carries ABILITIES_LATERAL for the same reason it carries the
+      // behaviour join -- loadCreatureTypes feeds the TYPE catalog (gold
+      // ranges, name -> id) while THIS query is what feeds live INSTANCES
+      // into CreatureSim.addCreatures. Wiring only the other one is how the
+      // previous sub-project nearly shipped its whole catalog inert with a
+      // fully green suite: every test constructs creatures directly, so
+      // neither query is exercised by anything but its own guard test. The
+      // fragment is imported, never re-typed, so the two cannot drift.
+      //
       // These rationale comments are deliberately kept OUTSIDE the query
       // template literal (as JS `//` comments, not SQL `--` comments): this
       // exact SELECT is guarded by a substring test
@@ -600,10 +610,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
                 et.color, et.resistances, et.faction, et.attack_element,
                 b.name AS behavior_name, b.attack_kind, b.attack_range, b.attack_cooldown,
                 b.projectile_speed, b.projectile_radius, b.aggro_radius, b.leash_radius,
-                b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override
+                b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
+                ab.abilities
          FROM world_creatures wc
          LEFT JOIN entity_types et ON et.name = wc.type
-         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id
+         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
