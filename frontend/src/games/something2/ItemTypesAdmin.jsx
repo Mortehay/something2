@@ -434,6 +434,7 @@ function ItemTypesAdmin() {
                   <StatItem><span>Cooldown</span>{type.cooldown}s</StatItem>
                   <StatItem><span>Mana Cost</span>{type.mana_cost}</StatItem>
                   <StatItem><span>Stamina Cost</span>{type.stamina_cost}</StatItem>
+                  <StatItem><span>Knockback</span>{type.knockback ?? 0}</StatItem>
                 </EntityStats>
                 <EntityStats>
                   {type.kind === 'melee' ? (
@@ -569,6 +570,10 @@ function ItemTypesAdmin() {
                     <FormGroup>
                       <label>Stamina Cost</label>
                       <input type="number" step="1" value={formData.stamina_cost} onChange={e => setFormData({ ...formData, stamina_cost: e.target.value })} />
+                    </FormGroup>
+                    <FormGroup>
+                      <label>Knockback</label>
+                      <input type="number" step="1" min="0" value={formData.knockback} onChange={e => setFormData({ ...formData, knockback: e.target.value })} />
                     </FormGroup>
                   </div>
 

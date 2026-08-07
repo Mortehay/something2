@@ -455,6 +455,11 @@ class CreatureSim {
   has(id) { return this.creatures.has(id); }
   count() { return this.creatures.size; }
   all() { return [...this.creatures.values()]; }
+  // SOMET-253 Task 9: world.js's melee branch needs the creature instance
+  // itself (x/y/width/height) to shove a survivor via applyKnockback below --
+  // `all()` would work but forces a full-map copy per swing, and `has()`
+  // alone can't hand back the object. Named `get` to match the Map it wraps.
+  get(id) { return this.creatures.get(id); }
 
   // `now` is the world clock, threaded in for the same reason the attack
   // resolvers take it: damage reads the target's live status effects (shock's
@@ -883,6 +888,11 @@ module.exports = {
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
   GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE, GUARD_HOME_EPSILON,
   withinLeash, selectGuardTarget,
+  // SOMET-253 Task 9: world.js's melee branch (both the creature side and
+  // the player-vs-player loop) reuses this exact shove, the same way this
+  // module's own guard/hostile melee branches already do -- see the comment
+  // on the function itself for why it accepts a player OR a creature.
+  applyKnockback,
   // Exported so server.js's per-chunk world_creatures SELECT uses the SAME
   // join text as loadCreatureTypes above, rather than a second copy that can
   // drift.
