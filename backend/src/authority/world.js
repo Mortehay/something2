@@ -296,6 +296,10 @@ class World {
           aoe_radius: 0,
           element: s.element,
           damage: s.damage,
+          // SOMET-253 Task 6: the ability's own knockback rides along on the
+          // weapon-shaped object ProjectileSim.spawn reads, same as every
+          // other flight parameter here.
+          knockback: s.knockback,
         },
       });
     }

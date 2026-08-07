@@ -8,6 +8,7 @@ const { inArc, hasLineOfSight } = require('./weapons');
 const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
 const { applyElementEffect, activeEffectKeys, canAct } = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
+const { knockbackWithFallback } = require('./knockback');
 
 const DIRS = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
@@ -255,6 +256,24 @@ function effectiveMit(target) {
   const mult = (target._buff || NO_BUFF).defenseMult;
   if (mult === 1) return mit;
   return { defense: mit.defense * mult, resistances: mit.resistances };
+}
+
+// Shove `target` (a player OR a creature -- both carry x/y/width/height) away
+// from (fromX, fromY) using the three-rung retry, then write the new
+// top-left position straight back onto the instance. Server-authoritative:
+// the same "just set the position" pattern server.js:1147 already uses for
+// the blocked-portal bounce, applied here to combat instead of a closed
+// door. Callers are responsible for only invoking this on a SURVIVOR (hp > 0
+// after damage) -- shoving a corpse moves something the sim is about to
+// remove -- and for marking a creature target dirty afterward (a player
+// target needs no such flag; every player position is broadcast every tick
+// regardless).
+function applyKnockback(map, fromX, fromY, target, distance) {
+  if (!(distance > 0)) return;
+  const tc = center(target);
+  const pushed = knockbackWithFallback({ px: tc.x, py: tc.y, fromX, fromY, distance, map });
+  target.x = pushed.x - target.width / 2;
+  target.y = pushed.y - target.height / 2;
 }
 
 // The single place addCreatures decides an instance's behaviour, so every
@@ -509,6 +528,13 @@ class CreatureSim {
             tgt.dirty = true;
             c._abilityCd.set(ability.slot, ability.attackCooldown);
             if (tgt.hp <= 0) { this.creatures.delete(tgt.id); killed.push(tgt.id); }
+            else if (ability.knockback > 0) {
+              // Survivors only -- a target the line above already deleted
+              // must never be shoved. `cc` (the guard's PRE-move centre, the
+              // same point the range gate above used) is the shove origin.
+              applyKnockback(this.map, cc.x, cc.y, tgt, ability.knockback);
+              tgt.dirty = true;
+            }
           }
           // Refused by canAct: no cooldown stamped, exactly as before -- the
           // guard strikes the moment it recovers rather than also serving a
@@ -626,6 +652,14 @@ class CreatureSim {
             // creature-target sites below which read effectiveMit(target).
             applyDamageWithEffects(tp, dmg, 'physical', tp.mit || NO_MITIGATION, now);
             c._abilityCd.set(ability.slot, ability.attackCooldown);
+            // Survivors only -- a dead player is about to be respawned by
+            // resolveDeaths(), and shoving them first would move a position
+            // that respawn is about to overwrite anyway. `tp.x`/`tp.y` are
+            // written directly, the same server-authoritative assignment
+            // server.js:1147 already makes for the blocked-portal bounce.
+            if (tp.hp > 0 && ability.knockback > 0) {
+              applyKnockback(this.map, cc.x, cc.y, tp, ability.knockback);
+            }
           } else if (hasLineOfSight(this.map, cc.x, cc.y, tc.x, tc.y)) {
             // Terrain blocks a shot exactly as it blocks the melee arc.
             // Without this a ranged creature burns its cooldowns firing into
@@ -657,6 +691,7 @@ class CreatureSim {
               speed: ability.projectileSpeed,
               radius: ability.projectileRadius,
               range: ability.attackRange,
+              knockback: ability.knockback,
             });
             c._abilityCd.set(ability.slot, ability.attackCooldown);
           }

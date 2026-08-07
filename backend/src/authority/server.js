@@ -17,6 +17,7 @@ const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive } = require('./loot');
+const { knockbackPosition } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -130,25 +131,6 @@ function planPortalTransition({
   if (!neighborhoodLoaded) return { blocked: true, linkId: link.id };
   if (isPortalBlocked(creatures, link.id)) return { blocked: true, linkId: link.id };
   return { toWorldId: link.toWorldId, arriveX: link.toX, arriveY: link.toY };
-}
-
-// Pure: the server-authoritative "just set the position" move respawn
-// already makes, applied to a blocked-portal bounce instead of a death.
-// Pushes the player further along the same line they approached the portal
-// on (portal -> player, extended), so it reads as "bounced off the door"
-// rather than a random shove. Falls back to leaving the player exactly
-// where they are if the candidate tile is not walkable -- never teleports
-// someone into a wall.
-function knockbackPosition({ px, py, portalX, portalY, distance, map }) {
-  let dx = px - portalX;
-  let dy = py - portalY;
-  const len = Math.hypot(dx, dy);
-  if (len < 1e-6) { dx = 0; dy = -1; } // degenerate: player exactly on the portal, push north arbitrarily
-  else { dx /= len; dy /= len; }
-  const candidateX = px + dx * distance;
-  const candidateY = py + dy * distance;
-  if (!map.isWalkable(candidateX, candidateY)) return { x: px, y: py };
-  return { x: candidateX, y: candidateY };
 }
 
 const INTERACT_RADIUS = 120; // px: how close a player must stand to trade
@@ -1162,7 +1144,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             // missed, uncaught, inside this bare setInterval callback.
             const link = entry.portalLinks.get(hereKey);
             const pushed = knockbackPosition({
-              px: cx, py: cy, portalX: link.fromX, portalY: link.fromY, distance: 60, map: entry.world.map,
+              px: cx, py: cy, fromX: link.fromX, fromY: link.fromY, distance: 60, map: entry.world.map,
             });
             p.x = pushed.x - p.width / 2;
             p.y = pushed.y - p.height / 2;

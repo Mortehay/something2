@@ -260,7 +260,10 @@ test('the latch is scoped to the exact tile -- a different lastPortalTile does n
 
 test('knockbackPosition pushes away from the portal along the approach line', () => {
   const map = { isWalkable: () => true };
-  const result = knockbackPosition({ px: 1000, py: 1000, portalX: 1050, portalY: 1050, distance: 60, map });
+  // SOMET-253 Task 6 renamed the portal-specific `portalX`/`portalY` params to
+  // the generic `fromX`/`fromY` when this function moved to knockback.js --
+  // same arguments, same result, proving the extraction is byte-identical.
+  const result = knockbackPosition({ px: 1000, py: 1000, fromX: 1050, fromY: 1050, distance: 60, map });
   // The player approached from the -x,-y direction relative to the portal;
   // knockback continues that same direction, away from the portal.
   assert.ok(result.x < 1000, `expected knockback further in -x, got ${result.x}`);
@@ -269,14 +272,14 @@ test('knockbackPosition pushes away from the portal along the approach line', ()
 
 test('knockbackPosition never lands on an unwalkable tile -- falls back to no movement', () => {
   const map = { isWalkable: () => false };
-  const result = knockbackPosition({ px: 1000, py: 1000, portalX: 1050, portalY: 1050, distance: 60, map });
+  const result = knockbackPosition({ px: 1000, py: 1000, fromX: 1050, fromY: 1050, distance: 60, map });
   assert.deepStrictEqual(result, { x: 1000, y: 1000 },
     'if the candidate tile is not walkable, do not move the player rather than shove them into a wall');
 });
 
 test('knockbackPosition with player and portal at the identical point still returns a finite position', () => {
   const map = { isWalkable: () => true };
-  const result = knockbackPosition({ px: 1050, py: 1050, portalX: 1050, portalY: 1050, distance: 60, map });
+  const result = knockbackPosition({ px: 1050, py: 1050, fromX: 1050, fromY: 1050, distance: 60, map });
   assert.ok(Number.isFinite(result.x) && Number.isFinite(result.y),
     'a zero-length approach vector must not produce NaN from a divide-by-zero normalize');
 });
