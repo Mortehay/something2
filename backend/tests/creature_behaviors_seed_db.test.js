@@ -72,4 +72,42 @@ test('creature_behaviors seeding', { skip: !url ? 'no database URL' : false }, a
       await pool.query('DELETE FROM creature_behaviors WHERE name = $1', ['zzbadstyle']);
     }
   });
+
+  await t.test('every existing creature type is backfilled to a behaviour', async () => {
+    const r = await pool.query(`
+      SELECT e.name, e.faction, b.name AS behavior
+      FROM entity_types e LEFT JOIN creature_behaviors b ON b.id = e.behavior_id
+      WHERE e.is_creature = true
+    `);
+    assert.ok(r.rowCount > 0, 'no creature types found');
+    for (const row of r.rows) {
+      assert.ok(row.behavior, `${row.name} has no behaviour profile`);
+      assert.equal(row.behavior, row.faction === 'guard' ? 'Guard' : 'Line',
+        `${row.name} (faction ${row.faction}) got the wrong profile`);
+    }
+  });
+
+  await t.test('a profile still in use cannot be deleted', async () => {
+    const inUse = await pool.query(
+      'SELECT id FROM creature_behaviors WHERE name = $1', ['Line']);
+    await assert.rejects(
+      () => pool.query('DELETE FROM creature_behaviors WHERE id = $1', [inUse.rows[0].id]),
+      /foreign key|violates/i,
+    );
+  });
+
+  await t.test('attack_element defaults to physical and rejects an unknown element', async () => {
+    try {
+      await pool.query(
+        `INSERT INTO entity_types (name, color, is_creature) VALUES ('zzElem','#fff',true)`);
+      const r = await pool.query('SELECT attack_element FROM entity_types WHERE name = $1', ['zzElem']);
+      assert.equal(r.rows[0].attack_element, 'physical');
+      await assert.rejects(
+        () => pool.query(`UPDATE entity_types SET attack_element = 'holy' WHERE name = 'zzElem'`),
+        /entity_types_attack_element_check/,
+      );
+    } finally {
+      await pool.query('DELETE FROM entity_types WHERE name = $1', ['zzElem']);
+    }
+  });
 });
