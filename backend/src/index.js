@@ -16,6 +16,7 @@ const { loadBiomes } = require('./services/biomes');
 const { composeBiomePrompt } = require('./services/biomePrompt');
 const { buildWorldGenConfig } = require('./services/worldGenConfig');
 const { loadTileTypes } = require('./services/tileTypes');
+const { ATTACK_KINDS, CHASE_STYLES } = require('./services/creatureBehaviors');
 require('dotenv').config();
 
 const app = express();
@@ -384,7 +385,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       name, color, walkable, spawn_tiles, chance,
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-      display_width, display_height, render_mode, is_creature, prompt, place_order
+      display_width, display_height, render_mode, is_creature, prompt, place_order,
+      behavior_id, attack_element
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
     if (catalogNameTooLong(name)) {
@@ -396,13 +398,15 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         name, color, walkable, spawn_tiles, chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-        display_width, display_height, render_mode, is_creature, prompt, place_order
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24) RETURNING *`,
+        display_width, display_height, render_mode, is_creature, prompt, place_order,
+        behavior_id, attack_element
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
-        display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0
+        display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0,
+        behavior_id ?? null, attack_element || 'physical'
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -419,7 +423,8 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       name, color, walkable, spawn_tiles, chance,
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-      display_width, display_height, render_mode, is_creature, prompt, place_order
+      display_width, display_height, render_mode, is_creature, prompt, place_order,
+      behavior_id, attack_element
     } = req.body;
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
@@ -466,14 +471,15 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         strength = $6, dexterity = $7, constitution = $8, intelligence = $9, wisdom = $10, charisma = $11,
         hp = $12, max_hp = $13, hp_regen_rate = $14, mana = $15, max_mana = $16, mana_regen_rate = $17,
         image = $18, display_width = $19, display_height = $20, render_mode = $21, is_creature = $22,
-        prompt = COALESCE($23, prompt), place_order = $24, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $25 RETURNING *`,
+        prompt = COALESCE($23, prompt), place_order = $24, behavior_id = $25, attack_element = $26,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $27 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false,
-        prompt ?? null, Number(place_order) || 0, id
+        prompt ?? null, Number(place_order) || 0, behavior_id ?? null, attack_element || 'physical', id
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
@@ -769,6 +775,145 @@ app.delete('/api/tile-types/:id', adminGuard, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete tile type' });
+  }
+});
+
+// --- Creature Behaviors -----------------------------------------------------
+// The behaviour catalog that drives CreatureSim's chase style, attack range/
+// cooldown, and ranged/casting attacks (services/creatureBehaviors.js). Read
+// is unauthenticated for the same reason /api/vfx-effects is: it is catalog
+// data with nothing private in it. Writes are admin-guarded.
+//
+// Mirrors the DB CHECKs so a bad value is a readable 400 rather than a raw
+// 500 from the constraint. Two of these checks were carried in from Task 9's
+// review rather than being simple enumeration membership, and are ALSO
+// enforced as CHECK constraints in migration 1714440082000 so a row written
+// before this validation existed (or by any future writer that bypasses this
+// route) still can't reach the simulation broken:
+//   - attack_kind 'ranged'/'cast' with projectile_speed <= 0: the shot fires
+//     and the cooldown is stamped, but the projectile simulation treats zero
+//     speed as dead-on-arrival and destroys it before it moves a pixel --
+//     the creature silently never damages anyone.
+//   - chase_style 'guard' with attack_kind other than 'melee': the guard
+//     branch of the simulation is not attack-kind aware -- it always applies
+//     CONTACT damage at attack_range with no line-of-sight check, so a
+//     'ranged'/'cast' guard profile would instant-damage through walls.
+function behaviorFieldError(body) {
+  if (!body.name) return 'name is required';
+  if (catalogNameTooLong(body.name)) return `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer`;
+  if (!ATTACK_KINDS.includes(body.attack_kind)) return `attack_kind must be one of ${ATTACK_KINDS.join(', ')}`;
+  if (!CHASE_STYLES.includes(body.chase_style)) return `chase_style must be one of ${CHASE_STYLES.join(', ')}`;
+  if (typeof body.attack_range !== 'number' || !Number.isFinite(body.attack_range)) {
+    return 'attack_range must be a number';
+  }
+  if (typeof body.attack_cooldown !== 'number' || !Number.isFinite(body.attack_cooldown)) {
+    return 'attack_cooldown must be a number';
+  }
+  if (typeof body.aggro_radius !== 'number' || !Number.isFinite(body.aggro_radius)) {
+    return 'aggro_radius must be a number';
+  }
+  if (typeof body.leash_radius !== 'number' || !Number.isFinite(body.leash_radius)) {
+    return 'leash_radius must be a number';
+  }
+  // Carried requirement 1: a ranged/cast attacker needs a positive projectile
+  // speed. Number(undefined) is NaN, so an omitted projectile_speed on a
+  // ranged/cast profile is caught here too, not just an explicit <= 0.
+  if ((body.attack_kind === 'ranged' || body.attack_kind === 'cast') && !(Number(body.projectile_speed) > 0)) {
+    return "attack_kind 'ranged'/'cast' requires projectile_speed greater than 0";
+  }
+  // Carried requirement 2: 'guard' is a melee-only chase style.
+  if (body.chase_style === 'guard' && body.attack_kind !== 'melee') {
+    return "chase_style 'guard' requires attack_kind 'melee'";
+  }
+  return null;
+}
+
+app.get('/api/creature-behaviors', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM creature_behaviors ORDER BY id ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch creature behaviors' });
+  }
+});
+
+app.post('/api/creature-behaviors', adminGuard, async (req, res) => {
+  try {
+    const b = req.body;
+    const bad = behaviorFieldError(b);
+    if (bad) return res.status(400).json({ error: bad });
+    const result = await pool.query(
+      `INSERT INTO creature_behaviors
+        (name, attack_kind, attack_range, attack_cooldown, projectile_speed,
+         projectile_radius, aggro_radius, leash_radius, chase_style,
+         preferred_range, move_speed_mult, damage_override)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [b.name, b.attack_kind, b.attack_range, b.attack_cooldown,
+       b.projectile_speed ?? 0, b.projectile_radius ?? 0,
+       b.aggro_radius, b.leash_radius, b.chase_style,
+       b.preferred_range ?? 0, b.move_speed_mult ?? 1,
+       // damage_override is nullable and 0 is a real value ("hits for
+       // nothing"), so this must be ?? not || -- 0 must survive.
+       b.damage_override ?? null],
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create creature behavior' });
+  }
+});
+
+app.put('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const b = req.body;
+    const bad = behaviorFieldError(b);
+    if (bad) return res.status(400).json({ error: bad });
+    const result = await pool.query(
+      `UPDATE creature_behaviors SET
+         name = $1, attack_kind = $2, attack_range = $3, attack_cooldown = $4,
+         projectile_speed = $5, projectile_radius = $6, aggro_radius = $7,
+         leash_radius = $8, chase_style = $9, preferred_range = $10,
+         move_speed_mult = $11, damage_override = $12, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $13 RETURNING *`,
+      [b.name, b.attack_kind, b.attack_range, b.attack_cooldown,
+       b.projectile_speed ?? 0, b.projectile_radius ?? 0,
+       b.aggro_radius, b.leash_radius, b.chase_style,
+       b.preferred_range ?? 0, b.move_speed_mult ?? 1,
+       b.damage_override ?? null, id],
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Behavior not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update creature behavior' });
+  }
+});
+
+app.delete('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
+  try {
+    const { id } = req.params;
+    // entity_types.behavior_id is a real FK, so the database would refuse
+    // this anyway -- with an unreadable 500. Checking first turns it into a
+    // 409 that names what is in the way. SOMET-238 records that
+    // /api/tile-types and /api/entity-types still lack guards like this one;
+    // that gap is not fixed here, but it is not repeated in new code either.
+    const refs = await pool.query(
+      'SELECT id, name FROM entity_types WHERE behavior_id = $1', [id]);
+    if (refs.rows.length > 0) {
+      return res.status(409).json({
+        error: 'Cannot delete: still referenced by a creature type',
+        referencing_entity_types: refs.rows,
+      });
+    }
+    const result = await pool.query(
+      'DELETE FROM creature_behaviors WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Behavior not found' });
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete creature behavior' });
   }
 });
 
