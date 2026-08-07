@@ -929,7 +929,15 @@ const DEFAULT_BEHAVIOR = Object.freeze({
 
 // A finite number, or the fallback. `pg` hands back `real` columns as numbers
 // and `numeric` as strings, so Number() is applied either way.
+//
+// NULL is absent, NOT zero. Without the first line, `Number(null)` is 0 and
+// `Number.isFinite(0)` is true, so a NULL column would resolve to zero rather
+// than its default -- a NULL attack_cooldown would give a creature an
+// unbounded rate of fire, and a NULL attack_range would leave it unable to
+// attack at all. A legitimate 0 (projectile_speed on every melee profile)
+// arrives as the number 0 and is unaffected.
 function num(v, fallback) {
+  if (v == null) return fallback;
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
