@@ -9,6 +9,18 @@ exports.shorthands = undefined;
 // `down` restores the columns AND repopulates them from slot 1, so the pair
 // round-trips. A behaviour whose slot-1 ability was deleted after the up
 // migration gets the Line defaults rather than a NOT NULL violation.
+//
+// `up`'s dropColumns cascade-drops THREE constraints, not just
+// creature_behaviors_attack_kind_check -- migration 1714440082000 added two
+// more on top of the original one (creature_behaviors_guard_melee_check,
+// creature_behaviors_projectile_speed_check), and both reference attack_kind
+// too, so Postgres drops them the same way. pg-migrate will not re-run
+// 1714440082000 on a `down` of THIS migration (it's still marked applied),
+// so if `down` here only restored the first constraint, the other two would
+// be gone permanently after a down/up round-trip -- a silent, real
+// data-integrity regression on the rollback path. All three are restored
+// below, verbatim from 1714440082000's `up`, so the round-trip is actually
+// lossless.
 exports.up = (pgm) => {
   pgm.dropColumns('creature_behaviors', [
     'attack_kind', 'attack_range', 'attack_cooldown',
@@ -34,4 +46,10 @@ exports.down = (pgm) => {
   `);
   pgm.addConstraint('creature_behaviors', 'creature_behaviors_attack_kind_check',
     "CHECK (attack_kind IN ('melee','ranged','cast'))");
+  // The two 1714440082000 constraints, restored verbatim from that
+  // migration's `up` -- see the header comment above.
+  pgm.addConstraint('creature_behaviors', 'creature_behaviors_projectile_speed_check',
+    "CHECK (NOT (attack_kind IN ('ranged','cast') AND projectile_speed <= 0))");
+  pgm.addConstraint('creature_behaviors', 'creature_behaviors_guard_melee_check',
+    "CHECK (NOT (chase_style = 'guard' AND attack_kind <> 'melee'))");
 };
