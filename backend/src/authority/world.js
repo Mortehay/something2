@@ -12,6 +12,14 @@ const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } =
 const { GroundItemSim } = require('./groundItems');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerStats.js');
 
+// Bounds concurrent creature-owned projectiles per world. A swarm-density
+// world can hold 12-creature packs; twelve Ranged creatures on a 1.8s cooldown
+// sustain roughly seven shots per second, and ProjectileSim.step is
+// O(projectiles x creatures) per sub-step. Excess shots are DROPPED, not
+// queued -- a queued shot arrives after its target has moved and reads worse
+// than no shot at all.
+const MAX_CREATURE_PROJECTILES = 120;
+
 const PLAYER_W = 64;
 const PLAYER_H = 64;
 const PLAYER_SPEED = 200; // client: this.speed(100) * speedMultiplier(2)
@@ -267,8 +275,31 @@ class World {
     // `this.now` is threaded through so contact damage reads the same clock
     // every other damage site does — a shocked player must take +25% from a
     // creature's bite too, not only from weapons.
-    const { killed: killedIds } = this.creatures.tick(
-      dt, activeKeys, [...this.players.values()], this.now) || { killed: [] };
+    const { killed: killedIds, shots } = this.creatures.tick(
+      dt, activeKeys, [...this.players.values()], this.now) || { killed: [], shots: [] };
+
+    for (const s of shots) {
+      if (this.projectiles.count() >= MAX_CREATURE_PROJECTILES) break;
+      this.projectiles.spawn({
+        ownerId: s.ownerId,
+        ownerKind: 'creature',
+        ownerFaction: s.ownerFaction,
+        x: s.x, y: s.y, nx: s.nx, ny: s.ny,
+        damage: s.damage,
+        // ProjectileSim reads its flight parameters off a weapon-shaped
+        // object; a creature's profile supplies the same four fields.
+        weapon: {
+          projectile_speed: s.speed,
+          projectile_radius: s.radius,
+          range: s.range,
+          pierce: 1,
+          aoe_radius: 0,
+          element: s.element,
+          damage: s.damage,
+        },
+      });
+    }
+
     // A guard's kill has no player behind it — always null, never omitted.
     return { kills: killedIds.map((id) => ({ id, killerUserId: null })) };
   }
@@ -469,4 +500,5 @@ module.exports = {
   PLAYER_MAX_MANA, PLAYER_MANA_REGEN,
   PLAYER_MAX_STAMINA, PLAYER_STAMINA_REGEN,
   weaponDamage, applyAttackCooldown, BASE_STATS,
+  MAX_CREATURE_PROJECTILES,
 };

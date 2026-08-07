@@ -242,9 +242,9 @@ class CreatureSim {
     const active = activeChunkKeys instanceof Set ? activeChunkKeys : new Set(activeChunkKeys);
     const byId = new Map(players.map((p) => [p.userId, p]));
     const killed = [];
-    // Empty until creatures can fire (Task 9). The return shape is { killed,
-    // shots } from this task forward so callers do not have to change again
-    // when shots stops being empty.
+    // Populated below by ranged/cast creatures whose target is in range and
+    // in line of sight. Plain data, not a callback -- World spawns these into
+    // its own ProjectileSim so CreatureSim never depends on that module.
     const shots = [];
     const all = [...this.creatures.values()];
     for (const c of this.creatures.values()) {
@@ -378,9 +378,9 @@ class CreatureSim {
             c.dirty = true;
           }
         }
-        // Contact damage. Gated by canAct for the same reason the player
-        // attack paths are (world.js's canAttack/attack): a shocked creature
-        // must miss its bite.
+        // Attack. Gated by canAct for the same reason the player attack paths
+        // are (world.js's canAttack/attack): a shocked creature must miss its
+        // strike, whether that strike is a bite, a shot, or a cast.
         //
         // Without this check the interrupt was inert in PvE. applyElementEffect
         // stamps _interruptedUntil and _shockImmuneUntil onto creatures from
@@ -391,15 +391,41 @@ class CreatureSim {
         // this slice exists to remove.
         //
         // Refused like a cooldown, not eaten: the attack does not happen AND
-        // _attackCd is not stamped, so the creature bites as soon as it recovers
-        // rather than also serving a fresh cooldown for the swing it never took.
-        // The immunity window in applyShockInterrupt (stamped once, deliberately
-        // never refreshed) is what stops this becoming a perma-stun — it applies
-        // to creatures for free, because it lives on the target.
+        // _attackCd is not stamped, so the creature attacks as soon as it
+        // recovers rather than also serving a fresh cooldown for the swing (or
+        // shot) it never took. The immunity window in applyShockInterrupt
+        // (stamped once, deliberately never refreshed) is what stops this
+        // becoming a perma-stun — it applies to creatures for free, because it
+        // lives on the target.
         if (c._attackCd <= 0 && canAct(c, now)
             && dist2(cc.x, cc.y, tc.x, tc.y) <= bh.attackRange * bh.attackRange) {
-          applyDamageWithEffects(tp, bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE), 'physical', tp.mit || NO_MITIGATION, now);
-          c._attackCd = bh.attackCooldown;
+          const dmg = bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE);
+          if (bh.attackKind === 'melee') {
+            applyDamageWithEffects(tp, dmg, 'physical', tp.mit || NO_MITIGATION, now);
+            c._attackCd = bh.attackCooldown;
+          } else if (hasLineOfSight(this.map, cc.x, cc.y, tc.x, tc.y)) {
+            // Terrain blocks a shot exactly as it blocks the melee arc.
+            // Without this a ranged creature burns its cooldowns firing into
+            // a wall, which reads as a broken enemy rather than a blocked one.
+            const d = Math.hypot(tc.x - cc.x, tc.y - cc.y) || 1;
+            shots.push({
+              ownerId: c.id,
+              ownerFaction: c.faction || 'hostile',
+              x: cc.x, y: cc.y,
+              nx: (tc.x - cc.x) / d, ny: (tc.y - cc.y) / d,
+              damage: dmg,
+              // A `ranged` rung fires physical; only `cast` carries the line's
+              // element and therefore its status rider.
+              element: bh.attackKind === 'cast' ? (c.attackElement || 'physical') : 'physical',
+              speed: bh.projectileSpeed,
+              radius: bh.projectileRadius,
+              range: bh.attackRange,
+            });
+            c._attackCd = bh.attackCooldown;
+          }
+          // No line of sight: the cooldown is NOT stamped, so the creature
+          // fires the moment it has a clear shot rather than also serving a
+          // cooldown for the shot it never took. Same treatment canAct gets.
         }
         continue;
       }
