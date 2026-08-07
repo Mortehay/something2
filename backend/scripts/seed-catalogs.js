@@ -13,6 +13,7 @@ const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
 const { HOSTILE_CREATURES, CREATURE_DROPS } = require('../seeds/data/entityTypes.js');
 const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
+const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
 
 // COALESCE, not plain EXCLUDED, for the four columns below.
 //
@@ -130,6 +131,41 @@ async function seedOneBehavior(db, b) {
   );
 }
 
+// Upsert on (behavior_id, slot), resolving behavior_id by NAME. A behaviour
+// the seeder does not know about is skipped rather than failing the run --
+// same posture as grantStartingLoadout skipping a missing catalog name.
+//
+// COALESCE preserves an admin's hand-authored value only for columns the seed
+// file leaves null; every column here is authored, so this is a straight
+// overwrite of catalog-owned data. That is deliberate: an ability's stats ARE
+// the catalog. Admin-authored abilities on admin-authored behaviours are
+// untouched because their behaviour name is not in CREATURE_ABILITIES.
+async function seedOneAbility(client, a) {
+  const b = await client.query(
+    'SELECT id FROM creature_behaviors WHERE name = $1', [a.behavior_name]);
+  if (b.rows.length === 0) return { skipped: true };
+  await client.query(
+    `INSERT INTO creature_abilities
+       (behavior_id, slot, name, attack_kind, attack_range, attack_cooldown,
+        projectile_speed, projectile_radius, element, damage_mult, knockback)
+     VALUES ($1, $2::int, $3, $4, $5::real, $6::real, $7::real, $8::real, $9, $10::real, $11::real)
+     ON CONFLICT (behavior_id, slot) DO UPDATE SET
+       name = EXCLUDED.name,
+       attack_kind = EXCLUDED.attack_kind,
+       attack_range = EXCLUDED.attack_range,
+       attack_cooldown = EXCLUDED.attack_cooldown,
+       projectile_speed = EXCLUDED.projectile_speed,
+       projectile_radius = EXCLUDED.projectile_radius,
+       element = EXCLUDED.element,
+       damage_mult = EXCLUDED.damage_mult,
+       knockback = EXCLUDED.knockback,
+       updated_at = CURRENT_TIMESTAMP`,
+    [b.rows[0].id, a.slot, a.name, a.attack_kind, a.attack_range, a.attack_cooldown,
+     a.projectile_speed, a.projectile_radius, a.element, a.damage_mult, a.knockback],
+  );
+  return { skipped: false };
+}
+
 async function seedCatalogs(pool) {
   let tiles = 0;
   for (const t of DEFAULT_TILE_TYPES) {
@@ -147,6 +183,13 @@ async function seedCatalogs(pool) {
     await seedOneBehavior(pool, b);
   }
   console.log(`Seeded ${CREATURE_BEHAVIORS.length} creature behaviors`);
+
+  let abilities = 0;
+  for (const a of CREATURE_ABILITIES) {
+    const r = await seedOneAbility(pool, a);
+    if (!r.skipped) abilities += 1;
+  }
+  console.log(`Seeded ${abilities} creature abilities`);
 
   // NOTE: decorationTypes.js also exports SIZE_FIXES (Tree/Stone/IceRock
   // display size). Deliberately NOT consumed here. SIZE_FIXES is a ONE-TIME
@@ -239,10 +282,14 @@ async function seedCatalogs(pool) {
     drops += r.rowCount;
   }
 
-  return { tiles, biomes, decorations, creatures, drops };
+  return {
+    tiles, biomes, decorations, creatures, drops, abilities,
+  };
 }
 
-module.exports = { seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior };
+module.exports = {
+  seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior, seedOneAbility,
+};
 
 if (require.main === module) {
   const env = dotenv.config({ path: path.resolve(__dirname, '../../.env') }).parsed || {};
