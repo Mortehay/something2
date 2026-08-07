@@ -85,11 +85,11 @@ function authHeaderFor(user) {
   return { Authorization: `Bearer ${token}` };
 }
 
+// SOMET-253 Task 3: the attack lives on the nested `abilities` array now, not
+// on the behaviour row -- behaviorAbilitiesError rejects a POST/PUT with no
+// abilities at all, so every fixture body below must carry at least one.
 const FIXTURE_BODY = {
   name: 'zzApiBehaviorProfile',
-  attack_kind: 'melee',
-  attack_range: 55,
-  attack_cooldown: 1.2,
   aggro_radius: 300,
   leash_radius: 500,
   chase_style: 'charge',
@@ -99,6 +99,10 @@ const FIXTURE_BODY = {
   // relying on the route's insert-time `?? 1` default, which now runs too
   // late to matter.
   move_speed_mult: 1,
+  abilities: [{
+    name: 'Attack', attack_kind: 'melee', attack_range: 55, attack_cooldown: 1.2,
+    projectile_speed: 0, projectile_radius: 0, element: null, damage_mult: 1, knockback: 0,
+  }],
 };
 
 async function deleteBehaviorByName(pool, name) {
@@ -122,9 +126,12 @@ test('GET /api/creature-behaviors returns the seeded profiles, Line among them',
   assert.ok(res.body.length >= 12, `expected at least 12 profiles, got ${res.body.length}`);
   const line = res.body.find((b) => b.name === 'Line');
   assert.ok(line, 'Line must be among the seeded profiles');
-  assert.equal(line.attack_kind, 'melee');
-  assert.equal(Number(line.attack_range), 60);
   assert.equal(line.chase_style, 'charge');
+  // The attack lives on the nested `abilities` array now (SOMET-253 Task 3);
+  // the behaviour row itself no longer carries attack_kind/attack_range.
+  assert.ok(Array.isArray(line.abilities) && line.abilities.length >= 1);
+  assert.equal(line.abilities[0].attack_kind, 'melee');
+  assert.equal(Number(line.abilities[0].attack_range), 60);
 });
 
 test('POST /api/creature-behaviors rejects an unknown chase_style with 400, not a 500', async (t) => {
@@ -151,7 +158,7 @@ test('POST /api/creature-behaviors rejects an unknown chase_style with 400, not 
 });
 
 test('POST /api/creature-behaviors rejects ranged/cast with a non-positive projectile_speed', async (t) => {
-  if (!dbReady(t, 'posts a ranged profile with projectile_speed 0 and confirms the carried validation catches it')) return;
+  if (!dbReady(t, 'posts a ranged ability with projectile_speed 0 and confirms the carried validation catches it')) return;
   let admin;
   try {
     admin = await createTestAdmin(dbPool, 'post-badprojectile');
@@ -159,9 +166,12 @@ test('POST /api/creature-behaviors rejects ranged/cast with a non-positive proje
     const res = await request(app).post('/api/creature-behaviors').set(authHeaderFor(admin)).send({
       ...FIXTURE_BODY,
       name: 'zzApiBadProjectile',
-      attack_kind: 'ranged',
       chase_style: 'kite',
-      projectile_speed: 0,
+      preferred_range: 0,
+      abilities: [{
+        name: 'Shot', attack_kind: 'ranged', attack_range: 200, attack_cooldown: 1,
+        projectile_speed: 0, projectile_radius: 0, element: null, damage_mult: 1, knockback: 0,
+      }],
     });
 
     assert.equal(res.status, 400);
@@ -184,9 +194,11 @@ test('POST /api/creature-behaviors rejects a non-melee guard', async (t) => {
     const res = await request(app).post('/api/creature-behaviors').set(authHeaderFor(admin)).send({
       ...FIXTURE_BODY,
       name: 'zzApiBadGuard',
-      attack_kind: 'ranged',
       chase_style: 'guard',
-      projectile_speed: 400,
+      abilities: [{
+        name: 'Shot', attack_kind: 'ranged', attack_range: 200, attack_cooldown: 1,
+        projectile_speed: 400, projectile_radius: 0, element: null, damage_mult: 1, knockback: 0,
+      }],
     });
 
     assert.equal(res.status, 400);
@@ -216,25 +228,30 @@ test('PUT /api/creature-behaviors/:id updates a profile\'s numbers', async (t) =
     const res = await request(app).put(`/api/creature-behaviors/${id}`).set(authHeaderFor(admin)).send({
       ...FIXTURE_BODY,
       name: 'zzApiPutTarget',
-      attack_range: 77,
-      attack_cooldown: 2.5,
       aggro_radius: 333,
       leash_radius: 666,
       chase_style: 'kite',
+      preferred_range: 70,
       damage_override: 0, // real value, meaning "hits for nothing" -- must survive
+      abilities: [{
+        name: 'Attack', attack_kind: 'melee', attack_range: 77, attack_cooldown: 2.5,
+        projectile_speed: 0, projectile_radius: 0, element: null, damage_mult: 1, knockback: 0,
+      }],
     });
 
     assert.equal(res.status, 200);
-    assert.equal(Number(res.body.attack_range), 77);
-    assert.equal(Number(res.body.attack_cooldown), 2.5);
     assert.equal(Number(res.body.aggro_radius), 333);
     assert.equal(Number(res.body.leash_radius), 666);
     assert.equal(res.body.chase_style, 'kite');
     assert.equal(Number(res.body.damage_override), 0, 'damage_override 0 must survive, not fall back to null');
+    assert.equal(Number(res.body.abilities[0].attack_range), 77);
+    assert.equal(Number(res.body.abilities[0].attack_cooldown), 2.5);
 
     const row = await dbPool.query('SELECT * FROM creature_behaviors WHERE id = $1', [id]);
-    assert.equal(Number(row.rows[0].attack_range), 77, 'the row in the database must reflect the update');
+    assert.equal(Number(row.rows[0].aggro_radius), 333, 'the row in the database must reflect the update');
     assert.equal(Number(row.rows[0].damage_override), 0);
+    const abilityRow = await dbPool.query('SELECT attack_range FROM creature_abilities WHERE behavior_id = $1', [id]);
+    assert.equal(Number(abilityRow.rows[0].attack_range), 77, 'the replaced ability must reflect the update');
   } finally {
     await deleteBehaviorByName(dbPool, 'zzApiPutTarget');
     await dropUser(dbPool, admin && admin.id);

@@ -258,10 +258,16 @@ test('loadCreatureTypes SELECTs every behaviour column its mapping reads', async
   // A column the mapping consumes but the SELECT omits loads as undefined and
   // SILENTLY disables the feature it feeds. That is the single most likely way
   // this sub-project ships inert, which is why it is asserted textually.
-  for (const col of ['attack_kind', 'attack_range', 'attack_cooldown',
-                     'projectile_speed', 'projectile_radius', 'aggro_radius',
-                     'leash_radius', 'chase_style', 'preferred_range',
-                     'move_speed_mult', 'damage_override', 'attack_element']) {
+  // SOMET-253: attack_kind/attack_range/attack_cooldown/projectile_speed/
+  // projectile_radius are deliberately NOT checked here any more -- Task 3
+  // dropped them from the parent row entirely, and the ability-aggregate
+  // loop below (which checks the SQL text for the SAME names, but produced
+  // by the LATERAL join's json_build_object) is what actually guards them
+  // now. Leaving them in this loop would keep passing on the strength of the
+  // lateral fragment's JSON keys alone, even if the columns being tested
+  // here never existed.
+  for (const col of ['aggro_radius', 'leash_radius', 'chase_style',
+                     'preferred_range', 'move_speed_mult', 'damage_override', 'attack_element']) {
     assert.ok(sql.includes(col), `SELECT is missing ${col}`);
   }
   assert.ok(/LEFT JOIN\s+creature_behaviors/i.test(sql), 'must LEFT JOIN, not INNER JOIN');

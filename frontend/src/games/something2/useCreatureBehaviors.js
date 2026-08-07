@@ -25,6 +25,11 @@ function behaviorMutation({ method, url, successMessage, failMessage }) {
     const qc = useQueryClient();
     return useMutation({
       mutationFn: async (arg) => {
+        // `arg` (create/update) is `{ ...behaviorFormToPayload(...), abilities }`
+        // from CreatureBehaviorsAdmin's handleSubmit -- the nested `abilities`
+        // array (SOMET-253 Task 3) rides along inside it with nothing special
+        // done here, straight into the same JSON body every other field goes
+        // through. The API validates and replaces the whole set transactionally.
         const res = await apiFetch(url(arg), {
           method,
           headers: authHeaders(),

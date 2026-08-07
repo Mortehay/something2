@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import toast from 'react-hot-toast';
-import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
+import {
+  HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark,
+  HiOutlineChevronUp, HiOutlineChevronDown,
+} from "react-icons/hi2";
 import {
   useCreatureBehaviors, useCreateCreatureBehavior, useUpdateCreatureBehavior, useDeleteCreatureBehavior,
 } from './useCreatureBehaviors.js';
 import { behaviorToForm, behaviorFormToPayload, ATTACK_KINDS, CHASE_STYLES } from './behaviorForm.js';
+import { abilityToForm, abilityFormToPayload, ELEMENTS } from './abilityForm.js';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -78,6 +82,12 @@ const IconButton = styled.button`
   &:hover {
     color: ${props => props.$delete ? 'var(--s2-danger)' : 'var(--s2-accent)'};
     background: var(--s2-overlay);
+  }
+
+  &:disabled {
+    color: var(--s2-disabled-bg);
+    cursor: not-allowed;
+    background: none;
   }
 `;
 
@@ -191,6 +201,84 @@ const SecondaryButton = styled.button`
   &:hover { background: var(--s2-overlay); }
 `;
 
+/* Ability list -- abilities are managed nested under the behaviour, not as
+   their own CRUD resource (SOMET-253 Task 3): the API validates them
+   together, atomically, on the same POST/PUT. */
+const AbilitySection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+`;
+
+const AbilitySectionHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  label {
+    font-size: 1.2rem;
+    color: var(--s2-accent);
+    font-weight: bold;
+  }
+`;
+
+const AddAbilityButton = styled.button`
+  background: transparent;
+  color: var(--s2-accent);
+  border: 1px dashed var(--s2-hairline-strong);
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+
+  &:hover { background: var(--s2-overlay); }
+`;
+
+const AbilityCard = styled.div`
+  border: 1px solid var(--s2-hairline-strong);
+  border-radius: 10px;
+  padding: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background: var(--s2-overlay-subtle);
+`;
+
+const AbilityCardHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  span {
+    font-size: 1.1rem;
+    color: var(--s2-text-dim);
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+`;
+
+const AbilityCardActions = styled.div`
+  display: flex;
+  gap: 0.25rem;
+`;
+
+// One creature type's slot-ordered list, `abilities: [{...}, ...]`
+// (row-shaped, snake_case -- what GET /api/creature-behaviors returns) into
+// the array of form-shaped ability objects the modal edits. Falls back to a
+// single brand-new ability (abilityToForm()'s own defaults) for the
+// Add-Behavior modal, where there is no existing profile to seed from --
+// behaviorAbilitiesError rejects an empty array, so the modal must never
+// open with zero abilities.
+function abilitiesToForm(behavior) {
+  const rows = behavior?.abilities;
+  if (!Array.isArray(rows) || rows.length === 0) return [abilityToForm()];
+  return rows.map((row) => abilityToForm(row));
+}
+
 function CreatureBehaviorsAdmin() {
   const { behaviors, isLoadingBehaviors } = useCreatureBehaviors();
   const createMutation = useCreateCreatureBehavior();
@@ -200,9 +288,11 @@ function CreatureBehaviorsAdmin() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBehavior, setEditingBehavior] = useState(null);
   const [formData, setFormData] = useState(behaviorToForm());
+  const [abilities, setAbilities] = useState(abilitiesToForm(null));
 
   useEffect(() => {
     setFormData(behaviorToForm(editingBehavior || {}));
+    setAbilities(abilitiesToForm(editingBehavior));
   }, [editingBehavior, isModalOpen]);
 
   const handleOpenAdd = () => {
@@ -215,17 +305,42 @@ function CreatureBehaviorsAdmin() {
     setIsModalOpen(true);
   };
 
+  const updateAbility = (index, patch) => {
+    setAbilities((prev) => prev.map((a, i) => (i === index ? { ...a, ...patch } : a)));
+  };
+
+  const addAbility = () => {
+    setAbilities((prev) => [...prev, abilityToForm()]);
+  };
+
+  const removeAbility = (index) => {
+    // At least one ability is required (behaviorAbilitiesError) -- refuse to
+    // drop the last one rather than letting the admin save an unattackable
+    // creature with no error until the request round-trips.
+    setAbilities((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
+  };
+
+  const moveAbility = (index, dir) => {
+    setAbilities((prev) => {
+      const target = index + dir;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!formData.name.trim()) {
       toast.error('Name is required');
       return;
     }
-    const payload = behaviorFormToPayload(formData);
+    const payload = {
+      ...behaviorFormToPayload(formData),
+      abilities: abilities.map((a, i) => abilityFormToPayload(a, i)),
+    };
 
-    // The API rejects these two combinations with a 400 -- catch them here so
-    // the error toast reads the same either way, whether the admin never
-    // touched a downstream mutation.onError toast or not.
     if (editingBehavior) {
       updateMutation.mutate({ id: editingBehavior.id, ...payload }, {
         onSuccess: () => setIsModalOpen(false),
@@ -246,7 +361,8 @@ function CreatureBehaviorsAdmin() {
     }
   };
 
-  const isRangedOrCast = formData.attack_kind === 'ranged' || formData.attack_kind === 'cast';
+  const guardNeedsMelee = formData.chase_style === 'guard'
+    && abilities.some((a) => a.attack_kind !== 'melee');
 
   if (isLoadingBehaviors) return <div>Loading creature behaviors...</div>;
 
@@ -265,10 +381,7 @@ function CreatureBehaviorsAdmin() {
           <thead>
             <tr>
               <th>Name</th>
-              <th>Attack Kind</th>
-              <th>Attack Range</th>
-              <th>Cooldown</th>
-              <th>Projectile Speed</th>
+              <th>Abilities</th>
               <th>Aggro Radius</th>
               <th>Leash Radius</th>
               <th>Chase Style</th>
@@ -282,10 +395,11 @@ function CreatureBehaviorsAdmin() {
             {behaviors?.map(behavior => (
               <tr key={behavior.id}>
                 <td>{behavior.name}</td>
-                <td>{behavior.attack_kind}</td>
-                <td>{behavior.attack_range}</td>
-                <td>{behavior.attack_cooldown}</td>
-                <td>{behavior.projectile_speed}</td>
+                <td>
+                  {(behavior.abilities || [])
+                    .map((a) => `${a.name} (${a.attack_kind})`)
+                    .join(', ')}
+                </td>
                 <td>{behavior.aggro_radius}</td>
                 <td>{behavior.leash_radius}</td>
                 <td>{behavior.chase_style}</td>
@@ -329,73 +443,18 @@ function CreatureBehaviorsAdmin() {
                 />
               </FormGroup>
 
-              <FormRow>
-                <FormGroup>
-                  <label>Attack Kind</label>
-                  <select
-                    value={formData.attack_kind}
-                    onChange={e => setFormData({ ...formData, attack_kind: e.target.value })}
-                  >
-                    {ATTACK_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
-                  </select>
-                </FormGroup>
-
-                <FormGroup>
-                  <label>
-                    Chase Style
-                    {formData.chase_style === 'guard' && formData.attack_kind !== 'melee' && (
-                      <Hint> — guard requires melee</Hint>
-                    )}
-                  </label>
-                  <select
-                    value={formData.chase_style}
-                    onChange={e => setFormData({ ...formData, chase_style: e.target.value })}
-                  >
-                    {CHASE_STYLES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </FormGroup>
-              </FormRow>
-
-              <FormRow>
-                <FormGroup>
-                  <label>Attack Range</label>
-                  <input
-                    type="number" step="1" min="0"
-                    value={formData.attack_range}
-                    onChange={e => setFormData({ ...formData, attack_range: e.target.value })}
-                  />
-                </FormGroup>
-                <FormGroup>
-                  <label>Attack Cooldown (s)</label>
-                  <input
-                    type="number" step="0.1" min="0"
-                    value={formData.attack_cooldown}
-                    onChange={e => setFormData({ ...formData, attack_cooldown: e.target.value })}
-                  />
-                </FormGroup>
-              </FormRow>
-
-              <FormRow>
-                <FormGroup>
-                  <label>
-                    Projectile Speed
-                    {isRangedOrCast && <Hint> — required &gt; 0</Hint>}
-                  </label>
-                  <input
-                    type="number" step="1" min="0"
-                    value={formData.projectile_speed}
-                    onChange={e => setFormData({ ...formData, projectile_speed: e.target.value })}
-                  />
-                </FormGroup>
-                <FormGroup>
-                  <label>Projectile Radius</label>
-                  <input
-                    type="number" step="1" min="0"
-                    value={formData.projectile_radius}
-                    onChange={e => setFormData({ ...formData, projectile_radius: e.target.value })}
-                  />
-                </FormGroup>
-              </FormRow>
+              <FormGroup>
+                <label>
+                  Chase Style
+                  {guardNeedsMelee && <Hint> — guard requires every ability to be melee</Hint>}
+                </label>
+                <select
+                  value={formData.chase_style}
+                  onChange={e => setFormData({ ...formData, chase_style: e.target.value })}
+                >
+                  {CHASE_STYLES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </FormGroup>
 
               <FormRow>
                 <FormGroup>
@@ -444,6 +503,140 @@ function CreatureBehaviorsAdmin() {
                   onChange={e => setFormData({ ...formData, damage_override: e.target.value })}
                 />
               </FormGroup>
+
+              <AbilitySection>
+                <AbilitySectionHeader>
+                  <label>Abilities</label>
+                  <AddAbilityButton type="button" onClick={addAbility}>
+                    <HiOutlinePlus /> Add Ability
+                  </AddAbilityButton>
+                </AbilitySectionHeader>
+
+                {abilities.map((ability, index) => {
+                  const isRangedOrCast = ability.attack_kind === 'ranged' || ability.attack_kind === 'cast';
+                  return (
+                    <AbilityCard key={index}>
+                      <AbilityCardHeader>
+                        <span>Slot {index + 1}</span>
+                        <AbilityCardActions>
+                          <IconButton
+                            type="button" title="Move up"
+                            disabled={index === 0}
+                            onClick={() => moveAbility(index, -1)}
+                          >
+                            <HiOutlineChevronUp />
+                          </IconButton>
+                          <IconButton
+                            type="button" title="Move down"
+                            disabled={index === abilities.length - 1}
+                            onClick={() => moveAbility(index, 1)}
+                          >
+                            <HiOutlineChevronDown />
+                          </IconButton>
+                          <IconButton
+                            type="button" $delete title="Remove ability"
+                            disabled={abilities.length <= 1}
+                            onClick={() => removeAbility(index)}
+                          >
+                            <HiOutlineTrash />
+                          </IconButton>
+                        </AbilityCardActions>
+                      </AbilityCardHeader>
+
+                      <FormGroup>
+                        <label>Name</label>
+                        <input
+                          value={ability.name}
+                          onChange={e => updateAbility(index, { name: e.target.value })}
+                          placeholder="e.g. Slam"
+                        />
+                      </FormGroup>
+
+                      <FormRow>
+                        <FormGroup>
+                          <label>Attack Kind</label>
+                          <select
+                            value={ability.attack_kind}
+                            onChange={e => updateAbility(index, { attack_kind: e.target.value })}
+                          >
+                            {ATTACK_KINDS.map(k => <option key={k} value={k}>{k}</option>)}
+                          </select>
+                        </FormGroup>
+                        <FormGroup>
+                          <label>Element</label>
+                          <select
+                            value={ability.element}
+                            onChange={e => updateAbility(index, { element: e.target.value })}
+                          >
+                            <option value="">inherit creature's element</option>
+                            {ELEMENTS.map(el => <option key={el} value={el}>{el}</option>)}
+                          </select>
+                        </FormGroup>
+                      </FormRow>
+
+                      <FormRow>
+                        <FormGroup>
+                          <label>Attack Range</label>
+                          <input
+                            type="number" step="1" min="0"
+                            value={ability.attack_range}
+                            onChange={e => updateAbility(index, { attack_range: e.target.value })}
+                          />
+                        </FormGroup>
+                        <FormGroup>
+                          <label>Attack Cooldown (s)</label>
+                          <input
+                            type="number" step="0.1" min="0"
+                            value={ability.attack_cooldown}
+                            onChange={e => updateAbility(index, { attack_cooldown: e.target.value })}
+                          />
+                        </FormGroup>
+                      </FormRow>
+
+                      <FormRow>
+                        <FormGroup>
+                          <label>
+                            Projectile Speed
+                            {isRangedOrCast && <Hint> — required &gt; 0</Hint>}
+                          </label>
+                          <input
+                            type="number" step="1" min="0"
+                            value={ability.projectile_speed}
+                            onChange={e => updateAbility(index, { projectile_speed: e.target.value })}
+                          />
+                        </FormGroup>
+                        <FormGroup>
+                          <label>Projectile Radius</label>
+                          <input
+                            type="number" step="1" min="0"
+                            value={ability.projectile_radius}
+                            onChange={e => updateAbility(index, { projectile_radius: e.target.value })}
+                          />
+                        </FormGroup>
+                      </FormRow>
+
+                      <FormRow>
+                        <FormGroup>
+                          <label>Damage Mult</label>
+                          <input
+                            type="number" step="0.05" min="0"
+                            value={ability.damage_mult}
+                            onChange={e => updateAbility(index, { damage_mult: e.target.value })}
+                          />
+                        </FormGroup>
+                        <FormGroup>
+                          <label>Knockback</label>
+                          <input
+                            type="number" step="1" min="0"
+                            value={ability.knockback}
+                            onChange={e => updateAbility(index, { knockback: e.target.value })}
+                          />
+                        </FormGroup>
+                      </FormRow>
+                    </AbilityCard>
+                  );
+                })}
+              </AbilitySection>
 
               <FormActions>
                 <SecondaryButton type="button" onClick={() => setIsModalOpen(false)}>Cancel</SecondaryButton>

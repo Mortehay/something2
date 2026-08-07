@@ -88,44 +88,41 @@ async function seedOneBiome(db, b) {
 
 // COALESCE for every optional field, same rule as seedOneTile: a seed entry
 // that OMITS a field must not clobber what an admin tuned in the UI. The
-// non-optional five (name, attack_kind, attack_range, attack_cooldown,
-// chase_style) are the profile's identity and are always written.
+// non-optional two (name, chase_style) are the profile's identity and are
+// always written.
 //
-// The ::real casts on $5/$6/$7/$8/$10/$11/$12 are load-bearing, not
-// decorative. Postgres infers a bare parameter's type from how it is used
-// INSIDE the COALESCE, and an integer literal default (0, 400, 800, 1) wins
-// that inference over the real column the COALESCE result is later assigned
-// to -- so without the cast, every parameter that ever carries a fractional
-// value (move_speed_mult 1.2, 1.5, 0.7, 0.6, 1.05, 0.95, 0.9) fails with
-// "invalid input syntax for type integer". Found by running the brief's own
-// seed_catalogs_db.test.js: seeding the real CREATURE_BEHAVIORS data (not the
-// seed test's integer-only fixtures) was the first place a fractional value
-// hit these params.
+// SOMET-253 Task 3 dropped attack_kind/attack_range/attack_cooldown/
+// projectile_speed/projectile_radius from creature_behaviors -- the attack
+// now lives entirely on creature_abilities (seedOneAbility below). `b` (a
+// row of seeds/data/creatureBehaviors.js) still carries those fields for
+// creature_behaviors_invariants.test.js's field-for-field pin against the
+// historical migration array; they are simply not written here any more.
+//
+// The ::real casts on $3/$4/$6/$7 are load-bearing, not decorative. Postgres
+// infers a bare parameter's type from how it is used INSIDE the COALESCE, and
+// an integer literal default (400, 800, 1) wins that inference over the real
+// column the COALESCE result is later assigned to -- so without the cast,
+// every parameter that ever carries a fractional value (move_speed_mult 1.2,
+// 1.5, 0.7, 0.6, 1.05, 0.95, 0.9) fails with "invalid input syntax for type
+// integer". Found by running the brief's own seed_catalogs_db.test.js:
+// seeding the real CREATURE_BEHAVIORS data (not the seed test's integer-only
+// fixtures) was the first place a fractional value hit these params.
 async function seedOneBehavior(db, b) {
   await db.query(
     `INSERT INTO creature_behaviors
-       (name, attack_kind, attack_range, attack_cooldown, projectile_speed,
-        projectile_radius, aggro_radius, leash_radius, chase_style,
+       (name, aggro_radius, leash_radius, chase_style,
         preferred_range, move_speed_mult, damage_override)
-     VALUES ($1,$2,$3,$4,
-             COALESCE($5::real,0), COALESCE($6::real,0), COALESCE($7::real,400), COALESCE($8::real,800),
-             $9, COALESCE($10::real,0), COALESCE($11::real,1), $12::real)
+     VALUES ($1, COALESCE($2::real,400), COALESCE($3::real,800),
+             $4, COALESCE($5::real,0), COALESCE($6::real,1), $7::real)
      ON CONFLICT (name) DO UPDATE
-       SET attack_kind = EXCLUDED.attack_kind,
-           attack_range = EXCLUDED.attack_range,
-           attack_cooldown = EXCLUDED.attack_cooldown,
-           chase_style = EXCLUDED.chase_style,
-           projectile_speed = COALESCE($5::real, creature_behaviors.projectile_speed),
-           projectile_radius = COALESCE($6::real, creature_behaviors.projectile_radius),
-           aggro_radius = COALESCE($7::real, creature_behaviors.aggro_radius),
-           leash_radius = COALESCE($8::real, creature_behaviors.leash_radius),
-           preferred_range = COALESCE($10::real, creature_behaviors.preferred_range),
-           move_speed_mult = COALESCE($11::real, creature_behaviors.move_speed_mult),
-           damage_override = COALESCE($12::real, creature_behaviors.damage_override),
+       SET chase_style = EXCLUDED.chase_style,
+           aggro_radius = COALESCE($2::real, creature_behaviors.aggro_radius),
+           leash_radius = COALESCE($3::real, creature_behaviors.leash_radius),
+           preferred_range = COALESCE($5::real, creature_behaviors.preferred_range),
+           move_speed_mult = COALESCE($6::real, creature_behaviors.move_speed_mult),
+           damage_override = COALESCE($7::real, creature_behaviors.damage_override),
            updated_at = now()`,
-    [b.name, b.attack_kind, b.attack_range, b.attack_cooldown,
-     b.projectile_speed ?? null, b.projectile_radius ?? null,
-     b.aggro_radius ?? null, b.leash_radius ?? null, b.chase_style,
+    [b.name, b.aggro_radius ?? null, b.leash_radius ?? null, b.chase_style,
      b.preferred_range ?? null, b.move_speed_mult ?? null,
      b.damage_override ?? null],
   );

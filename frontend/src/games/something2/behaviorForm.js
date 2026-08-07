@@ -4,31 +4,32 @@
 
 // Mirrors ATTACK_KINDS / CHASE_STYLES in
 // backend/src/services/creatureBehaviors.js and the CHECK constraints in
-// migration 1714440080000. Three copies is deliberate -- see the note in the
-// backend module.
+// migrations 1714440080000/1714440083000. Three copies is deliberate -- see
+// the note in the backend module. ATTACK_KINDS lives here rather than in
+// abilityForm.js because CHASE_STYLES does too and the two value sets are
+// consumed together by the same admin form; attack_kind itself is an
+// ability-level field as of SOMET-253 Task 3, not a behaviour-level one.
 export const ATTACK_KINDS = ["melee", "ranged", "cast"];
 export const CHASE_STYLES = ["charge", "kite", "skirmish", "hold", "ambush", "guard"];
 
+// SOMET-253 Task 3: attack_range/attack_cooldown/projectile_speed/
+// projectile_radius and attack_kind moved to abilityForm.js -- the attack is
+// nested under the behaviour as an `abilities` array now, not flat fields
+// here. This module covers the movement/aggro half only.
 const NUMERIC = [
-  "attack_range", "attack_cooldown", "projectile_speed", "projectile_radius",
   "aggro_radius", "leash_radius", "preferred_range", "move_speed_mult",
 ];
 
 // Defaults for a BRAND-NEW profile, mirroring the Line profile (today's
 // baseline hostile creature) rather than 0. A modal that opens with every
-// numeric at 0 lets an admin type a name, pick melee/charge and save a
-// creature that never moves (move_speed_mult 0), never aggroes
-// (aggro_radius/leash_radius 0) and never attacks (attack_range/
-// attack_cooldown 0) -- no error, nothing logged, the exact silent-inertness
+// numeric at 0 lets an admin type a name, pick charge and save a creature
+// that never moves (move_speed_mult 0) and never aggroes (aggro_radius/
+// leash_radius 0) -- no error, nothing logged, the exact silent-inertness
 // class this sub-project exists to remove. Applied ONLY when the row has no
 // id (see isNewRow below); an EXISTING row's stored value -- including a
-// genuine 0, which every melee profile has for projectile_speed/
-// projectile_radius -- must still round-trip untouched.
+// genuine 0, which is legitimate for preferred_range -- must still round-trip
+// untouched.
 const NEW_ROW_DEFAULTS = {
-  attack_range: 60,
-  attack_cooldown: 1,
-  projectile_speed: 0,
-  projectile_radius: 0,
   aggro_radius: 400,
   leash_radius: 800,
   preferred_range: 0,
@@ -40,7 +41,6 @@ export function behaviorToForm(row = {}) {
   const form = {
     id: row.id ?? null,
     name: row.name ?? "",
-    attack_kind: row.attack_kind ?? "melee",
     chase_style: row.chase_style ?? "charge",
     // null means "use the creature's own damage". 0 is a real override and
     // must survive the round trip, so this is an explicit null check.
@@ -53,7 +53,6 @@ export function behaviorToForm(row = {}) {
 export function behaviorFormToPayload(form) {
   const payload = {
     name: form.name,
-    attack_kind: form.attack_kind,
     chase_style: form.chase_style,
     damage_override: form.damage_override === "" || form.damage_override == null
       ? null : Number(form.damage_override),

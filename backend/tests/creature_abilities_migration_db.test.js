@@ -62,8 +62,8 @@ test('creature_abilities migration', { skip: !url ? 'no database URL' : false },
     try {
       await pool.query(
         `INSERT INTO creature_behaviors
-           (name, attack_kind, attack_range, attack_cooldown, aggro_radius, leash_radius, chase_style)
-         VALUES ('zzAbilityDupe','melee',60,1,400,800,'charge')`);
+           (name, aggro_radius, leash_radius, chase_style)
+         VALUES ('zzAbilityDupe',400,800,'charge')`);
       const b = await pool.query(
         'SELECT id FROM creature_behaviors WHERE name = $1', ['zzAbilityDupe']);
       const behaviorId = b.rows[0].id;

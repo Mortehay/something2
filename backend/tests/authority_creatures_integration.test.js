@@ -239,8 +239,12 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/le
     'must LEFT JOIN creature_behaviors, not INNER — an INNER JOIN would make a creature whose '
     + 'type has no assigned profile vanish from the world entirely (it would just never spawn) '
     + 'instead of falling back through resolveInstanceBehavior');
-  for (const col of ['attack_element', 'attack_kind', 'attack_range', 'attack_cooldown',
-                     'projectile_speed', 'projectile_radius', 'aggro_radius', 'leash_radius',
+  // SOMET-253: attack_kind/attack_range/attack_cooldown/projectile_speed/
+  // projectile_radius are deliberately NOT checked here any more -- Task 3
+  // dropped them from the parent row entirely, and the ability-aggregate
+  // loop below (checking the SAME names, produced by the LATERAL join's
+  // json_build_object) is what actually guards them now.
+  for (const col of ['attack_element', 'aggro_radius', 'leash_radius',
                      'chase_style', 'preferred_range', 'move_speed_mult', 'damage_override']) {
     assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
       `the world_creatures load must SELECT ${col} — without it a creature's profile is inert in the running game`);

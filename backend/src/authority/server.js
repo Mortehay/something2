@@ -608,8 +608,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
                 wc.level, wc.damage, wc.blocks_portal_id,
                 COALESCE(wc.defense, et.defense) AS defense,
                 et.color, et.resistances, et.faction, et.attack_element,
-                b.name AS behavior_name, b.attack_kind, b.attack_range, b.attack_cooldown,
-                b.projectile_speed, b.projectile_radius, b.aggro_radius, b.leash_radius,
+                b.name AS behavior_name, b.aggro_radius, b.leash_radius,
                 b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
                 ab.abilities
          FROM world_creatures wc

@@ -105,13 +105,13 @@ async function loadCreatureTypes(pool) {
   // `ab.abilities` is the attack half of the profile as of SOMET-253 -- drop
   // it and every creature type resolves to the single default ability, i.e.
   // the whole abilities catalog goes inert with nothing appearing broken.
-  // The b.attack_* columns below are still SELECTed but no longer read by
-  // resolveBehavior; Task 3 removes them along with the columns themselves.
+  // Task 3 dropped the parent row's own attack_kind/attack_range/
+  // attack_cooldown/projectile_speed/projectile_radius columns entirely --
+  // creature_abilities is the only place the attack lives now.
   const r = await pool.query(
     `SELECT e.id, e.name, e.color, e.hp, e.defense, e.resistances, e.faction,
             e.gold_min, e.gold_max, e.attack_element,
-            b.name AS behavior_name, b.attack_kind, b.attack_range,
-            b.attack_cooldown, b.projectile_speed, b.projectile_radius,
+            b.name AS behavior_name,
             b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
             b.move_speed_mult, b.damage_override,
             ab.abilities
