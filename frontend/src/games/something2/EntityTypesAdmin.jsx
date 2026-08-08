@@ -13,6 +13,13 @@ import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
 import { orphanedSpawnTiles } from './catalogReferences.js';
 import { withOptionalBiome } from './generationJobPayload.js';
+import { HiOutlineMagnifyingGlass } from "react-icons/hi2";
+import {
+  buildBiomeIndex, biomesWithEntities, filterByBiomeTab, filterBySearch, paginate,
+  ALL_TAB, UNASSIGNED_TAB,
+} from './entityFilters.js';
+
+const PAGE_SIZE = 6;
 
 // The saved image/atlas for an entity type, served through the backend asset
 // proxy (same route tiles use) rather than hitting MinIO directly.
@@ -53,6 +60,119 @@ const EntityGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 2rem;
+`;
+
+const TabRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--s2-hairline);
+`;
+
+const TabButton = styled.button`
+  background: ${p => p.$active ? 'var(--s2-selected-tint)' : 'transparent'};
+  border: 1px solid ${p => p.$active ? 'var(--s2-tab-entity)' : 'var(--s2-hairline-strong)'};
+  color: ${p => p.$active ? 'var(--s2-tab-entity)' : 'var(--s2-text-muted)'};
+  padding: 0.5rem 1.2rem;
+  border-radius: 20px;
+  font-size: 1.2rem;
+  font-weight: ${p => p.$active ? 'bold' : 'normal'};
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: var(--s2-tab-entity);
+    color: var(--s2-tab-entity);
+  }
+`;
+
+const ControlsRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+`;
+
+const SearchBox = styled.div`
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+  max-width: 360px;
+
+  svg {
+    position: absolute;
+    left: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--s2-text-muted);
+    font-size: 1.4rem;
+  }
+`;
+
+const SearchInput = styled.input`
+  width: 100%;
+  background: var(--s2-bg);
+  border: 1px solid var(--s2-border-strong);
+  color: var(--s2-text-strong);
+  padding: 0.9rem 1rem 0.9rem 3rem;
+  border-radius: 8px;
+  font-size: 1.3rem;
+
+  &:focus {
+    outline: none;
+    border-color: var(--s2-tab-entity);
+  }
+`;
+
+const ResultCount = styled.span`
+  font-size: 1.2rem;
+  color: var(--s2-text-muted);
+  white-space: nowrap;
+`;
+
+const PaginationRow = styled.div`
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 2.5rem;
+`;
+
+const PageButton = styled.button`
+  background: transparent;
+  border: 1px solid var(--s2-hairline-strong);
+  color: var(--s2-text-strong);
+  padding: 0.6rem 1.4rem;
+  border-radius: 8px;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover:not(:disabled) {
+    border-color: var(--s2-tab-entity);
+    color: var(--s2-tab-entity);
+  }
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+`;
+
+const PageInfo = styled.span`
+  font-size: 1.2rem;
+  color: var(--s2-text-muted);
+`;
+
+const EmptyState = styled.div`
+  padding: 3rem;
+  text-align: center;
+  color: var(--s2-text-muted);
+  font-size: 1.3rem;
 `;
 
 const EntityCard = styled.div`
@@ -729,10 +849,44 @@ function EntityTypesAdmin() {
   const { entityTypes, isLoadingEntityTypes } = useEntityTypes();
   const { tileTypes } = useTileTypes();
   const { behaviors } = useCreatureBehaviors();
+  const { biomes } = useBiomes();
   const { data: capability, isError: capabilityDown, isLoading: capabilityLoading } = useSpriteCapability();
   const createMutation = useCreateEntityType();
   const updateMutation = useUpdateEntityType();
   const deleteMutation = useDeleteEntityType();
+
+  const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState(ALL_TAB);
+  const [page, setPage] = useState(1);
+
+  // An entity "lives in" a biome by name membership in that biome's
+  // flora_types/creature_types (no FK -- see entityFilters.js). P4
+  // (SOMET-250) seeded 288 creature types with no biome placement yet, so
+  // most entities land in "Unassigned" today -- that tab is load-bearing,
+  // not an edge case.
+  const biomeIndex = useMemo(() => buildBiomeIndex(biomes), [biomes]);
+  const biomeTabs = useMemo(() => biomesWithEntities(biomes, biomeIndex), [biomes, biomeIndex]);
+  const unassignedCount = useMemo(
+    () => (entityTypes || []).filter(e => !biomeIndex.has(e.name)).length,
+    [entityTypes, biomeIndex],
+  );
+
+  const filteredEntities = useMemo(() => {
+    const byTab = filterByBiomeTab(entityTypes || [], activeTab, biomeIndex);
+    return filterBySearch(byTab, search);
+  }, [entityTypes, activeTab, biomeIndex, search]);
+
+  const { pageItems, page: currentPage, totalPages } = useMemo(
+    () => paginate(filteredEntities, page, PAGE_SIZE),
+    [filteredEntities, page],
+  );
+
+  // Reset to page 1 in the event handlers themselves, not a useEffect keyed
+  // on [search, activeTab] -- this file already has two pre-existing
+  // react-hooks/set-state-in-effect lint findings from a prior review; this
+  // is simple enough to just not add a third.
+  const handleSearchChange = (value) => { setSearch(value); setPage(1); };
+  const handleTabChange = (tab) => { setActiveTab(tab); setPage(1); };
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEntity, setEditingEntity] = useState(null);
@@ -915,8 +1069,42 @@ function EntityTypesAdmin() {
               : 'CPU only — generation works but is slow and reduced quality. A GPU will auto-accelerate it.'}
       </CapabilityBanner>
 
+      <TabRow>
+        <TabButton $active={activeTab === ALL_TAB} onClick={() => handleTabChange(ALL_TAB)}>
+          All
+        </TabButton>
+        {biomeTabs.map(name => (
+          <TabButton key={name} $active={activeTab === name} onClick={() => handleTabChange(name)}>
+            {name}
+          </TabButton>
+        ))}
+        {unassignedCount > 0 && (
+          <TabButton $active={activeTab === UNASSIGNED_TAB} onClick={() => handleTabChange(UNASSIGNED_TAB)}>
+            Unassigned
+          </TabButton>
+        )}
+      </TabRow>
+
+      <ControlsRow>
+        <SearchBox>
+          <HiOutlineMagnifyingGlass />
+          <SearchInput
+            type="text"
+            placeholder="Search entities by name…"
+            value={search}
+            onChange={e => handleSearchChange(e.target.value)}
+          />
+        </SearchBox>
+        <ResultCount>
+          {filteredEntities.length} {filteredEntities.length === 1 ? 'entity' : 'entities'}
+        </ResultCount>
+      </ControlsRow>
+
+      {filteredEntities.length === 0 ? (
+        <EmptyState>No entities match {search ? `"${search}"` : 'this filter'}.</EmptyState>
+      ) : (
       <EntityGrid>
-        {entityTypes?.map(entity => (
+        {pageItems.map(entity => (
           <EntityCard key={entity.id}>
             <EntityHeader>
               <EntityInfo>
@@ -976,6 +1164,19 @@ function EntityTypesAdmin() {
           </EntityCard>
         ))}
       </EntityGrid>
+      )}
+
+      {filteredEntities.length > 0 && totalPages > 1 && (
+        <PaginationRow>
+          <PageButton onClick={() => setPage(p => p - 1)} disabled={currentPage <= 1}>
+            Previous
+          </PageButton>
+          <PageInfo>Page {currentPage} of {totalPages}</PageInfo>
+          <PageButton onClick={() => setPage(p => p + 1)} disabled={currentPage >= totalPages}>
+            Next
+          </PageButton>
+        </PaginationRow>
+      )}
 
       {isModalOpen && (
         <Overlay>
