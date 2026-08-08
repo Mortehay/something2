@@ -28,6 +28,10 @@ export const WEAPON_DEFAULTS = {
   pierce: '',
   ammo_type_id: '',
   aoe_radius: '',
+  // SOMET-253 Task 9: 0 is the correct default for a NEW weapon here --
+  // opposite direction from cooldown, where 0 would mean "fires every tick".
+  // A weapon with no shove is simply harmless, not silently broken.
+  knockback: 0,
 };
 
 export const ARMOR_DEFAULTS = {
@@ -74,6 +78,7 @@ export function formFromType(t) {
     projectile_speed: t.projectile_speed ?? '',
     projectile_radius: t.projectile_radius ?? '',
     pierce: t.pierce ?? '',
+    knockback: t.knockback ?? 0,
     stackable: !!t.stackable,
     ammo_type_id: t.ammo_type_id ?? '',
     aoe_radius: t.aoe_radius ?? '',
@@ -113,6 +118,9 @@ export function validateClient(f) {
     if (num(f.aoe_radius) != null && num(f.pierce, 0) > 1) {
       return 'aoe_radius and pierce > 1 are mutually exclusive';
     }
+    // Mirrors item_types_knockback_check (SOMET-253 Task 9).
+    const kb = num(f.knockback, 0);
+    if (kb == null || kb < 0) return 'knockback must be a non-negative number';
   } else if (f.category === 'ammo') {
     if (!f.stackable) return 'ammo must be stackable';
   } else {
@@ -154,6 +162,11 @@ export function buildPayload(f) {
       // blast radius is meaningless on a melee swing.
       ammo_type_id: f.kind === 'projectile' ? num(f.ammo_type_id) : null,
       aoe_radius: f.kind === 'projectile' ? num(f.aoe_radius) : null,
+      // Not kind-gated like reach/range above: the column itself carries no
+      // such gate (see item_types_knockback_check), and this task only
+      // wires it into the melee branch, but a projectile weapon is free to
+      // carry a value a later task can read.
+      knockback: num(f.knockback, 0),
       stackable: !!f.stackable,
       slot: null,
       defense: null,
@@ -178,6 +191,7 @@ export function buildPayload(f) {
       pierce: null,
       ammo_type_id: null,
       aoe_radius: null,
+      knockback: 0,
       stackable: true,
       slot: null,
       defense: null,
@@ -205,6 +219,7 @@ export function buildPayload(f) {
     pierce: null,
     ammo_type_id: null,
     aoe_radius: null,
+    knockback: 0,
     stackable: !!f.stackable,
     slot: f.slot,
     defense: num(f.defense, 0),

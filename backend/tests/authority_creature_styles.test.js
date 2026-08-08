@@ -5,13 +5,28 @@ const { CreatureSim } = require('../src/authority/creatures.js');
 function stubMap() { return { isWalkable: () => true, speedAt: () => 1, chunkSize: 8 }; }
 const noRedirect = () => 0.05;
 
+// SOMET-253: the attack half of a behaviour lives in `abilities` now, so an
+// override naming an attack field has to land on the ability rather than on
+// the behaviour. Partitioned by key here so every scenario below reads
+// exactly as it did when the flat fields existed.
+const ABILITY_KEYS = new Set([
+  'slot', 'attackKind', 'attackRange', 'attackCooldown',
+  'projectileSpeed', 'projectileRadius', 'element', 'damageMult', 'knockback',
+]);
+
 function behavior(over = {}) {
-  return {
-    name: 'T', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
-    projectileSpeed: 0, projectileRadius: 0, aggroRadius: 400, leashRadius: 800,
-    chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
-    ...over,
+  const ability = {
+    slot: 1, name: 'Attack', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
+    projectileSpeed: 0, projectileRadius: 0, element: null, damageMult: 1, knockback: 0,
   };
+  const bh = {
+    name: 'T', aggroRadius: 400, leashRadius: 800,
+    chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
+  };
+  for (const [k, v] of Object.entries(over)) {
+    if (ABILITY_KEYS.has(k)) ability[k] = v; else bh[k] = v;
+  }
+  return { ...bh, abilities: [ability] };
 }
 
 // Creature at (100,100); player placed relative to it on the x axis.

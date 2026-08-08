@@ -8,7 +8,7 @@ const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInvent
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
-const { loadCreatureTypes } = require('./creatures');
+const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
@@ -17,6 +17,7 @@ const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive } = require('./loot');
+const { knockbackPosition } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
@@ -130,25 +131,6 @@ function planPortalTransition({
   if (!neighborhoodLoaded) return { blocked: true, linkId: link.id };
   if (isPortalBlocked(creatures, link.id)) return { blocked: true, linkId: link.id };
   return { toWorldId: link.toWorldId, arriveX: link.toX, arriveY: link.toY };
-}
-
-// Pure: the server-authoritative "just set the position" move respawn
-// already makes, applied to a blocked-portal bounce instead of a death.
-// Pushes the player further along the same line they approached the portal
-// on (portal -> player, extended), so it reads as "bounced off the door"
-// rather than a random shove. Falls back to leaving the player exactly
-// where they are if the candidate tile is not walkable -- never teleports
-// someone into a wall.
-function knockbackPosition({ px, py, portalX, portalY, distance, map }) {
-  let dx = px - portalX;
-  let dy = py - portalY;
-  const len = Math.hypot(dx, dy);
-  if (len < 1e-6) { dx = 0; dy = -1; } // degenerate: player exactly on the portal, push north arbitrarily
-  else { dx /= len; dy /= len; }
-  const candidateX = px + dx * distance;
-  const candidateY = py + dy * distance;
-  if (!map.isWalkable(candidateX, candidateY)) return { x: px, y: py };
-  return { x: candidateX, y: candidateY };
 }
 
 const INTERACT_RADIUS = 120; // px: how close a player must stand to trade
@@ -339,7 +321,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const tr = await pool.query('SELECT name, walkable, speed FROM tile_types ORDER BY id ASC');
         const tileTypes = {};
         for (const t of tr.rows) tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
-        const { creatureTypes, creatureTypeIds, creatureGold } = await loadCreatureTypes(pool);
+        const {
+          creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
+        } = await loadCreatureTypes(pool);
         const itemTypes = await loadItemTypes(pool);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const goldItemTypeId = resolveGoldItemTypeId(itemTypes);
@@ -366,7 +350,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
         });
         const entry = {
           worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
-          tileTypes, creatureTypes, creatureTypeIds, creatureGold, goldItemTypeId, links, portalLinks, villages,
+          tileTypes, creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
+          goldItemTypeId, links, portalLinks, villages,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -585,6 +570,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // et.attack_element is the same kind of column as et.faction above:
       // drop it and every creature's element silently reverts to 'physical'.
       //
+      // SOMET-253: this query is the SECOND of the two creature-loading paths
+      // and carries ABILITIES_LATERAL for the same reason it carries the
+      // behaviour join -- loadCreatureTypes feeds the TYPE catalog (gold
+      // ranges, name -> id) while THIS query is what feeds live INSTANCES
+      // into CreatureSim.addCreatures. Wiring only the other one is how the
+      // previous sub-project nearly shipped its whole catalog inert with a
+      // fully green suite: every test constructs creatures directly, so
+      // neither query is exercised by anything but its own guard test. The
+      // fragment is imported, never re-typed, so the two cannot drift.
+      //
       // These rationale comments are deliberately kept OUTSIDE the query
       // template literal (as JS `//` comments, not SQL `--` comments): this
       // exact SELECT is guarded by a substring test
@@ -593,17 +588,27 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // "damage"/"chase_style"/etc inside the string itself — even in a SQL
       // comment — would make that guard pass whether or not the real column
       // is still there.
+      //
+      // SOMET-253 Task 4: b.gold_min/b.gold_max are aliased AS
+      // behavior_gold_min/behavior_gold_max here too, even though this row
+      // carries no competing et.gold_min/et.gold_max to collide with --
+      // resolveBehavior (shared with loadCreatureTypes, where the collision
+      // IS real) reads that one alias unconditionally, so both SELECTs must
+      // agree on it. b.aura_* columns have no collision anywhere and stay
+      // unaliased, same as aggro_radius/leash_radius/etc.
       const rows = await pool.query(
         `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
                 wc.level, wc.damage, wc.blocks_portal_id,
                 COALESCE(wc.defense, et.defense) AS defense,
                 et.color, et.resistances, et.faction, et.attack_element,
-                b.name AS behavior_name, b.attack_kind, b.attack_range, b.attack_cooldown,
-                b.projectile_speed, b.projectile_radius, b.aggro_radius, b.leash_radius,
-                b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override
+                b.name AS behavior_name, b.aggro_radius, b.leash_radius,
+                b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
+                b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
+                b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
+                ab.abilities
          FROM world_creatures wc
          LEFT JOIN entity_types et ON et.name = wc.type
-         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id
+         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
@@ -1142,7 +1147,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             // missed, uncaught, inside this bare setInterval callback.
             const link = entry.portalLinks.get(hereKey);
             const pushed = knockbackPosition({
-              px: cx, py: cy, portalX: link.fromX, portalY: link.fromY, distance: 60, map: entry.world.map,
+              px: cx, py: cy, fromX: link.fromX, fromY: link.fromY, distance: 60, map: entry.world.map,
             });
             p.x = pushed.x - p.width / 2;
             p.y = pushed.y - p.height / 2;

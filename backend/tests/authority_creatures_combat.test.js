@@ -258,13 +258,52 @@ test('loadCreatureTypes SELECTs every behaviour column its mapping reads', async
   // A column the mapping consumes but the SELECT omits loads as undefined and
   // SILENTLY disables the feature it feeds. That is the single most likely way
   // this sub-project ships inert, which is why it is asserted textually.
-  for (const col of ['attack_kind', 'attack_range', 'attack_cooldown',
-                     'projectile_speed', 'projectile_radius', 'aggro_radius',
-                     'leash_radius', 'chase_style', 'preferred_range',
-                     'move_speed_mult', 'damage_override', 'attack_element']) {
+  // SOMET-253: attack_kind/attack_range/attack_cooldown/projectile_speed/
+  // projectile_radius are deliberately NOT checked here any more -- Task 3
+  // dropped them from the parent row entirely, and the ability-aggregate
+  // loop below (which checks the SQL text for the SAME names, but produced
+  // by the LATERAL join's json_build_object) is what actually guards them
+  // now. Leaving them in this loop would keep passing on the strength of the
+  // lateral fragment's JSON keys alone, even if the columns being tested
+  // here never existed.
+  for (const col of ['aggro_radius', 'leash_radius', 'chase_style',
+                     'preferred_range', 'move_speed_mult', 'damage_override', 'attack_element']) {
     assert.ok(sql.includes(col), `SELECT is missing ${col}`);
   }
   assert.ok(/LEFT JOIN\s+creature_behaviors/i.test(sql), 'must LEFT JOIN, not INNER JOIN');
+
+  // SOMET-253 Task 4: the four aura multiplier/radius columns. No collision
+  // risk with entity_types (it has no aura_* columns of its own), so a bare
+  // substring check is enough -- unlike gold_min/gold_max just below.
+  for (const col of ['aura_radius', 'aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
+    assert.ok(sql.includes(col), `SELECT is missing ${col} — Task 5's aura consumer would silently see no leaders`);
+  }
+  // Checked as the exact aliased form, not a bare `sql.includes('gold_min')`:
+  // this SELECT already carries e.gold_min/e.gold_max (the entity type's own
+  // range, for creatureGold), so a bare substring check would pass whether or
+  // not the behaviour's fallback range (b.gold_min) was ever added — exactly
+  // the trap `behavior_name` guards against for the name column just above.
+  assert.match(sql, /b\.gold_min\s+AS\s+behavior_gold_min/i,
+    'the behaviour fallback gold_min must be selected and aliased AS behavior_gold_min, distinct from e.gold_min');
+  assert.match(sql, /b\.gold_max\s+AS\s+behavior_gold_max/i,
+    'the behaviour fallback gold_max must be selected and aliased AS behavior_gold_max, distinct from e.gold_max');
+
+  // SOMET-253: the attack itself now comes from creature_abilities, not from
+  // the parent row's attack_* columns. Drop the lateral join (or the
+  // `abilities` alias it produces) and resolveBehavior sees row.abilities ===
+  // undefined, hands every creature type the single default melee ability,
+  // and the entire abilities catalog is inert with nothing appearing broken.
+  // damage_mult and knockback are named individually because they exist ONLY
+  // in the aggregate's json_build_object -- a hand-trimmed object list that
+  // still produced an `abilities` key would satisfy a bare check for the
+  // alias while silently zeroing an Apex's 1.4x slam.
+  for (const col of ['creature_abilities', 'abilities', 'damage_mult', 'knockback']) {
+    assert.ok(sql.includes(col),
+      `SELECT is missing ${col} — without it every creature resolves to the default ability`);
+  }
+  assert.match(sql, /ORDER BY\s+a\.slot/i,
+    'the ability aggregate must ORDER BY a.slot — slot order IS priority order, and an '
+    + 'unordered json_agg makes a creature\'s move priority depend on physical row order');
 });
 
 test('loadCreatureTypes attaches a resolved behaviour, including for a null profile', async () => {
@@ -277,14 +316,29 @@ test('loadCreatureTypes attaches a resolved behaviour, including for a null prof
       behavior_name: 'Ranged', attack_kind: 'ranged', attack_range: 340,
       attack_cooldown: 1.8, projectile_speed: 520, projectile_radius: 6,
       aggro_radius: 460, leash_radius: 800, chase_style: 'kite',
-      preferred_range: 240, move_speed_mult: 1, damage_override: null },
+      preferred_range: 240, move_speed_mult: 1, damage_override: null,
+      // SOMET-253: the shape the lateral join delivers — one JSON array of
+      // snake_case ability rows. The attack_* columns above are deliberately
+      // left in place AND deliberately contradicted by nothing: they are what
+      // Task 3 deletes, and the assertions below read the ability, so a
+      // resolver that fell back to the parent columns would still look right
+      // here. The zzStale case in creature_abilities_resolve.test.js is what
+      // pins that they are no longer read.
+      abilities: [{
+        slot: 1, name: 'Ranged', attack_kind: 'ranged', attack_range: 340,
+        attack_cooldown: 1.8, projectile_speed: 520, projectile_radius: 6,
+        element: null, damage_mult: 1, knockback: 0,
+      }] },
   ] }) };
   const { creatureTypes } = await loadCreatureTypes(fakePool);
   const byName = new Map(creatureTypes.map((c) => [c.name, c]));
   assert.equal(byName.get('zzNoProfile').behavior.chaseStyle, 'charge');
-  assert.equal(byName.get('zzNoProfile').behavior.attackRange, 60);
+  // No ability rows at all (behavior_id was NULL): the single default.
+  assert.equal(byName.get('zzNoProfile').behavior.abilities.length, 1);
+  assert.equal(byName.get('zzNoProfile').behavior.abilities[0].attackRange, 60);
   assert.equal(byName.get('zzArcher').behavior.chaseStyle, 'kite');
-  assert.equal(byName.get('zzArcher').behavior.projectileSpeed, 520);
+  assert.equal(byName.get('zzArcher').behavior.abilities[0].projectileSpeed, 520);
+  assert.equal(byName.get('zzArcher').behavior.abilities[0].attackKind, 'ranged');
   assert.equal(byName.get('zzArcher').attackElement, 'fire');
 });
 
@@ -303,9 +357,15 @@ test('loadCreatureTypes maps defense/resistances and defaults them', async () =>
     name: 'Slime', hp: 12, color: '#0f0', faction: 'hostile',
     attackElement: 'physical',
     behavior: {
-      name: 'Line', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
-      projectileSpeed: 0, projectileRadius: 0, aggroRadius: 400, leashRadius: 800,
+      name: 'Line',
+      abilities: [{
+        slot: 1, name: 'Attack', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
+        projectileSpeed: 0, projectileRadius: 0, element: null, damageMult: 1, knockback: 0,
+      }],
+      aggroRadius: 400, leashRadius: 800,
       chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
+      auraRadius: 0, auraDamageMult: 1, auraDefenseMult: 1, auraSpeedMult: 1,
+      goldMin: 0, goldMax: 0,
     },
     defense: 1, resistances: { fire: 0.6 },
   });
@@ -313,9 +373,15 @@ test('loadCreatureTypes maps defense/resistances and defaults them', async () =>
     name: 'Wolf', hp: 10, color: '#c00', faction: 'hostile',
     attackElement: 'physical',
     behavior: {
-      name: 'Line', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
-      projectileSpeed: 0, projectileRadius: 0, aggroRadius: 400, leashRadius: 800,
+      name: 'Line',
+      abilities: [{
+        slot: 1, name: 'Attack', attackKind: 'melee', attackRange: 60, attackCooldown: 1,
+        projectileSpeed: 0, projectileRadius: 0, element: null, damageMult: 1, knockback: 0,
+      }],
+      aggroRadius: 400, leashRadius: 800,
       chaseStyle: 'charge', preferredRange: 0, moveSpeedMult: 1, damageOverride: null,
+      auraRadius: 0, auraDamageMult: 1, auraDefenseMult: 1, auraSpeedMult: 1,
+      goldMin: 0, goldMax: 0,
     },
     defense: 0, resistances: {},
   });

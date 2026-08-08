@@ -16,7 +16,8 @@ const { loadBiomes } = require('./services/biomes');
 const { composeBiomePrompt } = require('./services/biomePrompt');
 const { buildWorldGenConfig } = require('./services/worldGenConfig');
 const { loadTileTypes } = require('./services/tileTypes');
-const { ATTACK_KINDS, CHASE_STYLES } = require('./services/creatureBehaviors');
+const { ATTACK_KINDS, CHASE_STYLES, ELEMENTS } = require('./services/creatureBehaviors');
+const { ABILITIES_LATERAL } = require('./authority/creatures');
 require('dotenv').config();
 
 const app = express();
@@ -557,6 +558,14 @@ function validateItemType(b) {
       return 'value must be a non-negative integer';
     }
   }
+  // Mirrors item_types_knockback_check (SOMET-253 Task 9). Not gated to
+  // category === 'weapon': the column itself carries no such gate (it stays
+  // at its default 0 on armor/ammo, exactly like damage/cooldown already do).
+  if (b.knockback != null) {
+    if (typeof b.knockback !== 'number' || !Number.isFinite(b.knockback) || b.knockback < 0) {
+      return 'knockback must be a non-negative finite number';
+    }
+  }
   // Mirror the DB CHECKs: a detonating projectile can't also pierce, and only
   // a projectile weapon can consume ammo.
   if (b.aoe_radius != null && b.pierce > 1) {
@@ -587,14 +596,14 @@ app.post('/api/item-types', adminGuard, async (req, res) => {
       `INSERT INTO item_types
         (name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
          range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element, defense, resistances, icon,
-         stackable, ammo_type_id, aoe_radius, value)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING *`,
+         stackable, ammo_type_id, aoe_radius, value, knockback)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
        b.mana_cost ?? 0, b.stamina_cost ?? 0, b.element ?? null, b.defense ?? null,
        JSON.stringify(b.resistances ?? {}), b.icon ?? null,
-       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0],
+       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0, b.knockback ?? 0],
     );
     const row = result.rows[0];
     // SOMET-186 / F-006: without this, a weapon/armor type created after a
@@ -619,15 +628,16 @@ app.put('/api/item-types/:id', adminGuard, async (req, res) => {
         name=$1, category=$2, slot=$3, two_handed=$4, kind=$5, damage=$6, cooldown=$7,
         reach=$8, arc_width=$9, range=$10, projectile_speed=$11, projectile_radius=$12,
         pierce=$13, mana_cost=$14, stamina_cost=$15, element=$16, defense=$17, resistances=$18, icon=$19,
-        stackable=$20, ammo_type_id=$21, aoe_radius=$22, value=$23,
+        stackable=$20, ammo_type_id=$21, aoe_radius=$22, value=$23, knockback=$24,
         updated_at=now()
-       WHERE id=$24 RETURNING *`,
+       WHERE id=$25 RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
        b.mana_cost ?? 0, b.stamina_cost ?? 0, b.element ?? null, b.defense ?? null,
        JSON.stringify(b.resistances ?? {}), b.icon ?? null,
-       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0, req.params.id],
+       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0, b.knockback ?? 0,
+       req.params.id],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
     res.json(result.rows[0]);
@@ -779,87 +789,163 @@ app.delete('/api/tile-types/:id', adminGuard, async (req, res) => {
 });
 
 // --- Creature Behaviors -----------------------------------------------------
-// The behaviour catalog that drives CreatureSim's chase style, attack range/
-// cooldown, and ranged/casting attacks (services/creatureBehaviors.js). Read
-// is unauthenticated for the same reason /api/vfx-effects is: it is catalog
-// data with nothing private in it. Writes are admin-guarded.
+// The behaviour catalog that drives CreatureSim's chase style, aggro/leash,
+// and (via the nested `abilities` array, SOMET-253) its attacks.
+// services/creatureBehaviors.js resolves both tables into one object the sim
+// consumes. Read is unauthenticated for the same reason /api/vfx-effects is:
+// it is catalog data with nothing private in it. Writes are admin-guarded.
+//
+// As of SOMET-253 Task 3, an ability is managed NESTED under its behaviour
+// rather than as its own CRUD resource: two validation rules span both
+// tables (see behaviorAbilitiesError below), and a nested write is what lets
+// them be checked atomically instead of in a race between two requests. The
+// parent row's own attack_kind/attack_range/attack_cooldown/
+// projectile_speed/projectile_radius columns are gone (migration
+// 1714440084000) -- the attack lives entirely in creature_abilities now.
 //
 // Mirrors the DB CHECKs so a bad value is a readable 400 rather than a raw
-// 500 from the constraint. Two of these checks were carried in from Task 9's
-// review rather than being simple enumeration membership, and are ALSO
-// enforced as CHECK constraints in migration 1714440082000 so a row written
-// before this validation existed (or by any future writer that bypasses this
-// route) still can't reach the simulation broken:
-//   - attack_kind 'ranged'/'cast' with projectile_speed <= 0: the shot fires
-//     and the cooldown is stamped, but the projectile simulation treats zero
-//     speed as dead-on-arrival and destroys it before it moves a pixel --
-//     the creature silently never damages anyone.
-//   - chase_style 'guard' with attack_kind other than 'melee': the guard
-//     branch of the simulation is not attack-kind aware -- it always applies
-//     CONTACT damage at attack_range with no line-of-sight check, so a
-//     'ranged'/'cast' guard profile would instant-damage through walls.
+// 500 from the constraint. See migrations 1714440080000 and 1714440083000
+// for the CHECK constraints these mirror.
 function behaviorFieldError(body) {
   if (!body.name) return 'name is required';
   if (catalogNameTooLong(body.name)) return `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer`;
-  if (!ATTACK_KINDS.includes(body.attack_kind)) return `attack_kind must be one of ${ATTACK_KINDS.join(', ')}`;
   if (!CHASE_STYLES.includes(body.chase_style)) return `chase_style must be one of ${CHASE_STYLES.join(', ')}`;
-  if (typeof body.attack_range !== 'number' || !Number.isFinite(body.attack_range)) {
-    return 'attack_range must be a number';
-  }
-  if (typeof body.attack_cooldown !== 'number' || !Number.isFinite(body.attack_cooldown)) {
-    return 'attack_cooldown must be a number';
-  }
   if (typeof body.aggro_radius !== 'number' || !Number.isFinite(body.aggro_radius)) {
     return 'aggro_radius must be a number';
   }
   if (typeof body.leash_radius !== 'number' || !Number.isFinite(body.leash_radius)) {
     return 'leash_radius must be a number';
   }
-  // Carried requirement 1: a ranged/cast attacker needs a positive projectile
-  // speed. Number(undefined) is NaN, so an omitted projectile_speed on a
-  // ranged/cast profile is caught here too, not just an explicit <= 0.
-  if ((body.attack_kind === 'ranged' || body.attack_kind === 'cast') && !(Number(body.projectile_speed) > 0)) {
-    return "attack_kind 'ranged'/'cast' requires projectile_speed greater than 0";
-  }
-  // Carried requirement 2: 'guard' is a melee-only chase style.
-  if (body.chase_style === 'guard' && body.attack_kind !== 'melee') {
-    return "chase_style 'guard' requires attack_kind 'melee'";
-  }
-  // SOMET-249 fix-wave I4: these five MUST be strictly positive, not merely
+  // SOMET-249 fix-wave I4: these MUST be strictly positive, not merely
   // finite. A saved 0 here is not a valid edge case the way damage_override's
   // 0 is ("hits for nothing") -- it is a creature that never moves
-  // (move_speed_mult), never notices a player (aggro_radius), never chases
-  // one past its own feet (leash_radius), and never actually attacks
-  // (attack_range/attack_cooldown of 0 gate CreatureSim's own attack check).
-  // This is exactly the silent-inertness class Task 4's resolveBehavior
-  // fallback exists to prevent for a NULL column; this closes the same hole
-  // for a value the admin route lets through as an explicit zero.
-  const POSITIVE_FIELDS = ['attack_range', 'attack_cooldown', 'aggro_radius', 'leash_radius', 'move_speed_mult'];
+  // (move_speed_mult), never notices a player (aggro_radius), or never
+  // chases one past its own feet (leash_radius).
+  const POSITIVE_FIELDS = ['aggro_radius', 'leash_radius', 'move_speed_mult'];
   for (const field of POSITIVE_FIELDS) {
     if (!(Number(body[field]) > 0)) return `${field} must be greater than 0`;
   }
-  // projectile_radius and preferred_range are legitimately 0 for a melee
-  // profile (no projectile, no standoff distance) -- only negative/non-finite
-  // is rejected.
-  if (body.projectile_radius != null && !(Number(body.projectile_radius) >= 0)) {
-    return 'projectile_radius must be 0 or greater';
-  }
+  // preferred_range is legitimately 0 (no standoff distance for a melee
+  // profile) -- only negative/non-finite is rejected.
   if (body.preferred_range != null && !(Number(body.preferred_range) >= 0)) {
     return 'preferred_range must be 0 or greater';
   }
-  // A kiter that prefers to stand farther out than its own attack_range can
-  // reach can never close to a range where its attack gate is satisfied: it
-  // backs away trying to reach preferred_range, which is already outside
-  // attack_range, and oscillates forever without ever landing a hit.
-  if (body.chase_style === 'kite' && Number(body.preferred_range) > Number(body.attack_range)) {
-    return "chase_style 'kite' requires preferred_range <= attack_range";
+  // SOMET-253 Task 8: pack-leader aura + per-rung gold. Mirrors migration
+  // 1714440085000's two CHECK constraints exactly. All six fields are
+  // optional in the body -- most seeded profiles carry no aura fields at all
+  // and fall back to the column defaults (0/1/1/1/0/0), same convention
+  // preferred_range/damage_override already use -- so each rule only fires
+  // when the field is actually present.
+  //
+  // aura_radius 0 means "not a leader" and is the correct value for eleven of
+  // the twelve seeded profiles, so it is >= 0 like preferred_range. The three
+  // multipliers are a different kind of 0: an aura_damage_mult/
+  // aura_defense_mult/aura_speed_mult of 0 would make every creature the aura
+  // touches deal, take, or move at NOTHING the instant a leader stands near
+  // them -- silently. Strictly > 0, same class of rule as move_speed_mult.
+  if (body.aura_radius != null && !(Number(body.aura_radius) >= 0)) {
+    return 'aura_radius must be 0 or greater';
+  }
+  for (const field of ['aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
+    if (body[field] != null && !(Number(body[field]) > 0)) return `${field} must be greater than 0`;
+  }
+  if (body.gold_min != null && !(Number(body.gold_min) >= 0)) {
+    return 'gold_min must be 0 or greater';
+  }
+  if (body.gold_max != null && !(Number(body.gold_max) >= Number(body.gold_min ?? 0))) {
+    return 'gold_max must be greater than or equal to gold_min';
   }
   return null;
 }
 
+// One ability. Carries P2a's hard-won attack validations, unchanged in
+// meaning, moved here from behaviorFieldError now that the attack lives on
+// creature_abilities instead of the parent row.
+function abilityFieldError(a) {
+  if (!a || typeof a !== 'object') return 'ability must be an object';
+  if (!a.name) return 'ability name is required';
+  if (!ATTACK_KINDS.includes(a.attack_kind)) return `ability attack_kind must be one of ${ATTACK_KINDS.join(', ')}`;
+  if (a.element != null && !ELEMENTS.includes(a.element)) return `ability element must be one of ${ELEMENTS.join(', ')}`;
+  // Strictly positive, not merely finite: a 0 here is a creature that never
+  // attacks (attack_range) or one with unbounded rate of fire
+  // (attack_cooldown). Carried from SOMET-249's fix wave.
+  for (const f of ['attack_range', 'attack_cooldown']) {
+    if (!(Number(a[f]) > 0)) return `ability ${f} must be greater than 0`;
+  }
+  // A ranged/cast ability needs a projectile that actually moves. Number(undefined)
+  // is NaN, so an omitted speed is caught here too.
+  if ((a.attack_kind === 'ranged' || a.attack_kind === 'cast') && !(Number(a.projectile_speed) > 0)) {
+    return "ability attack_kind 'ranged'/'cast' requires projectile_speed greater than 0";
+  }
+  // damage_mult 0 is legitimate (a pure status-rider), so this is >= 0, not > 0.
+  for (const f of ['projectile_radius', 'damage_mult', 'knockback']) {
+    if (a[f] != null && !(Number(a[f]) >= 0)) return `ability ${f} must be 0 or greater`;
+  }
+  return null;
+}
+
+// The two rules that span both tables. Checked on every write of either side,
+// which is why abilities are nested under the behaviour rather than being
+// their own resource -- two separate endpoints would let a valid behaviour and
+// a valid ability combine into an invalid pair.
+function behaviorAbilitiesError(body) {
+  const list = body.abilities;
+  if (!Array.isArray(list) || list.length === 0) {
+    return 'at least one ability is required';   // zero abilities = a creature that cannot attack
+  }
+  for (const a of list) {
+    const bad = abilityFieldError(a);
+    if (bad) return bad;
+  }
+  if (body.chase_style === 'guard' && list.some((a) => a.attack_kind !== 'melee')) {
+    return "chase_style 'guard' requires every ability to be melee";
+  }
+  if (body.chase_style === 'kite') {
+    const longest = Math.max(...list.map((a) => Number(a.attack_range) || 0));
+    if (Number(body.preferred_range) > longest) {
+      return "chase_style 'kite' requires preferred_range <= the longest ability range";
+    }
+  }
+  return null;
+}
+
+// Replaces a behaviour's whole ability set inside an open transaction: DELETE
+// every existing row, then reinsert `abilities` with slot renumbered 1..n BY
+// POSITION. Slot is never read from the client -- the admin editor implies it
+// by array position (drag to reorder), so honouring a client-supplied slot
+// would let the UI and the stored order silently diverge.
+async function replaceAbilities(client, behaviorId, abilities) {
+  await client.query('DELETE FROM creature_abilities WHERE behavior_id = $1', [behaviorId]);
+  for (let i = 0; i < abilities.length; i += 1) {
+    const a = abilities[i];
+    await client.query(
+      `INSERT INTO creature_abilities
+        (behavior_id, slot, name, attack_kind, attack_range, attack_cooldown,
+         projectile_speed, projectile_radius, element, damage_mult, knockback)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [behaviorId, i + 1, a.name, a.attack_kind, a.attack_range, a.attack_cooldown,
+       a.projectile_speed ?? 0, a.projectile_radius ?? 0, a.element ?? null,
+       a.damage_mult ?? 1, a.knockback ?? 0],
+    );
+  }
+}
+
+// One row + its nested abilities, in the shape GET/POST/PUT all return.
+// `client` so POST/PUT can read back their own writes inside the same
+// transaction before COMMIT.
+async function loadBehaviorWithAbilities(db, id) {
+  const r = await db.query(
+    `SELECT b.*, ab.abilities FROM creature_behaviors b${ABILITIES_LATERAL} WHERE b.id = $1`,
+    [id],
+  );
+  return r.rows[0];
+}
+
 app.get('/api/creature-behaviors', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM creature_behaviors ORDER BY id ASC');
+    const result = await pool.query(
+      `SELECT b.*, ab.abilities FROM creature_behaviors b${ABILITIES_LATERAL} ORDER BY b.id ASC`,
+    );
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -868,55 +954,91 @@ app.get('/api/creature-behaviors', async (req, res) => {
 });
 
 app.post('/api/creature-behaviors', adminGuard, async (req, res) => {
+  const b = req.body;
+  const bad = behaviorFieldError(b) || behaviorAbilitiesError(b);
+  if (bad) return res.status(400).json({ error: bad });
+  // Acquired inside the try: pool.connect() can reject (DB restart, pool
+  // exhaustion) and Express 4.x does not catch async handler rejections, so
+  // an unguarded await here would escape as an unhandledRejection and kill
+  // the process. Same hardening as /api/maps/:id/entities.
+  let client = null;
   try {
-    const b = req.body;
-    const bad = behaviorFieldError(b);
-    if (bad) return res.status(400).json({ error: bad });
-    const result = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const result = await client.query(
       `INSERT INTO creature_behaviors
-        (name, attack_kind, attack_range, attack_cooldown, projectile_speed,
-         projectile_radius, aggro_radius, leash_radius, chase_style,
-         preferred_range, move_speed_mult, damage_override)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [b.name, b.attack_kind, b.attack_range, b.attack_cooldown,
-       b.projectile_speed ?? 0, b.projectile_radius ?? 0,
-       b.aggro_radius, b.leash_radius, b.chase_style,
+        (name, aggro_radius, leash_radius, chase_style,
+         preferred_range, move_speed_mult, damage_override,
+         aura_radius, aura_damage_mult, aura_defense_mult, aura_speed_mult,
+         gold_min, gold_max)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+      [b.name, b.aggro_radius, b.leash_radius, b.chase_style,
        b.preferred_range ?? 0, b.move_speed_mult ?? 1,
        // damage_override is nullable and 0 is a real value ("hits for
        // nothing"), so this must be ?? not || -- 0 must survive.
-       b.damage_override ?? null],
+       b.damage_override ?? null,
+       // SOMET-253 Task 8: same ?? convention as above -- aura_radius 0 and
+       // gold_min 0 are real values ("not a leader" / "no loot"), not absent
+       // ones, so a genuine 0 must survive rather than being coerced by ||.
+       b.aura_radius ?? 0, b.aura_damage_mult ?? 1, b.aura_defense_mult ?? 1,
+       b.aura_speed_mult ?? 1, b.gold_min ?? 0, b.gold_max ?? 0],
     );
-    res.status(201).json(result.rows[0]);
+    const id = result.rows[0].id;
+    await replaceAbilities(client, id, b.abilities);
+    const row = await loadBehaviorWithAbilities(client, id);
+    await client.query('COMMIT');
+    res.status(201).json(row);
   } catch (err) {
+    await client?.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Failed to create creature behavior' });
+  } finally {
+    client?.release();
   }
 });
 
 app.put('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  const b = req.body;
+  const bad = behaviorFieldError(b) || behaviorAbilitiesError(b);
+  if (bad) return res.status(400).json({ error: bad });
+  let client = null;
   try {
-    const { id } = req.params;
-    const b = req.body;
-    const bad = behaviorFieldError(b);
-    if (bad) return res.status(400).json({ error: bad });
-    const result = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const result = await client.query(
       `UPDATE creature_behaviors SET
-         name = $1, attack_kind = $2, attack_range = $3, attack_cooldown = $4,
-         projectile_speed = $5, projectile_radius = $6, aggro_radius = $7,
-         leash_radius = $8, chase_style = $9, preferred_range = $10,
-         move_speed_mult = $11, damage_override = $12, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $13 RETURNING *`,
-      [b.name, b.attack_kind, b.attack_range, b.attack_cooldown,
-       b.projectile_speed ?? 0, b.projectile_radius ?? 0,
-       b.aggro_radius, b.leash_radius, b.chase_style,
+         name = $1, aggro_radius = $2, leash_radius = $3, chase_style = $4,
+         preferred_range = $5, move_speed_mult = $6, damage_override = $7,
+         aura_radius = $8, aura_damage_mult = $9, aura_defense_mult = $10,
+         aura_speed_mult = $11, gold_min = $12, gold_max = $13,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE id = $14 RETURNING id`,
+      [b.name, b.aggro_radius, b.leash_radius, b.chase_style,
        b.preferred_range ?? 0, b.move_speed_mult ?? 1,
-       b.damage_override ?? null, id],
+       b.damage_override ?? null,
+       b.aura_radius ?? 0, b.aura_damage_mult ?? 1, b.aura_defense_mult ?? 1,
+       b.aura_speed_mult ?? 1, b.gold_min ?? 0, b.gold_max ?? 0, id],
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Behavior not found' });
-    res.json(result.rows[0]);
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Behavior not found' });
+    }
+    // DELETE FROM creature_abilities WHERE behavior_id = $1 (inside
+    // replaceAbilities) is scoped to this one behaviour's children and is the
+    // intended way to replace its ability set -- it is not the destructive
+    // catalog write the project's DB-safety rules forbid in a test or script,
+    // which is about wiping real catalog rows outright.
+    await replaceAbilities(client, id, b.abilities);
+    const row = await loadBehaviorWithAbilities(client, id);
+    await client.query('COMMIT');
+    res.json(row);
   } catch (err) {
+    await client?.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Failed to update creature behavior' });
+  } finally {
+    client?.release();
   }
 });
 
@@ -2257,5 +2379,5 @@ if (require.main === module) {
 
 module.exports = {
   app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, boundedCacheSet,
-  apiRateLimiter, behaviorFieldError,
+  apiRateLimiter, behaviorFieldError, abilityFieldError, behaviorAbilitiesError,
 };

@@ -124,6 +124,23 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
     'SELECT item_type_id, chance, min_qty, max_qty FROM creature_drops WHERE entity_type_id = $1',
     [entityTypeId],
   );
+
+  // Rung-level fallback pool (SOMET-253 Task 7): a SEPARATE query, not a
+  // UNION with the one above -- rollDrops is applied to each result set
+  // independently, so a creature with rows in only ONE of the two tables
+  // still gets that one, and a creature with rows in BOTH gets BOTH.
+  // entry.behaviorDrops maps creature type NAME -> behavior_id (built by
+  // loadCreatureTypes, mirroring entry.creatureTypeIds' name -> entity_type_id
+  // role) -- a creature with no assigned profile (NULL behavior_id) has no
+  // rung pool to query at all.
+  const behaviorId = entry.behaviorDrops && entry.behaviorDrops.get(dead.type);
+  const br = behaviorId != null
+    ? await pool.query(
+      'SELECT item_type_id, chance, min_qty, max_qty FROM behavior_drops WHERE behavior_id = $1',
+      [behaviorId],
+    )
+    : { rows: [] };
+
   // dead.x/dead.y are world_creatures' stored position, which is the
   // creature's TOP-LEFT corner (creatures.js center() adds half its
   // CREATURE_SIZE box) — but pickup measures from the player's CENTRE. Spawn
@@ -131,7 +148,8 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
   // creature visibly died.
   const dropX = dead.x + CREATURE_SIZE / 2;
   const dropY = dead.y + CREATURE_SIZE / 2;
-  for (const itemTypeId of rollDrops(dr.rows, rng)) {
+  const droppedItemTypeIds = [...rollDrops(dr.rows, rng), ...rollDrops(br.rows, rng)];
+  for (const itemTypeId of droppedItemTypeIds) {
     // quantity named explicitly (not left to the column default): creature
     // drops stay one-per-unit this slice, and being explicit here stops a
     // future edit from silently inheriting whatever the default happens to
@@ -149,7 +167,18 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
 
   // Gold: one coin-pile ground item carrying the whole amount, when this
   // creature type has a gold range and the currency type exists.
-  const goldAmt = rollGold(entry.creatureGold && entry.creatureGold.get(dead.type), rng);
+  //
+  // TYPE range wins when it is set; the RUNG range (entry.behaviorGold, the
+  // behaviour's own gold_min/gold_max -- SOMET-253 Task 7) is the fallback.
+  // Both `.get()` results default to a real {min:0,max:0} object (never
+  // undefined) so the choice below can check `.max > 0` on the NUMBER
+  // unconditionally -- `typeRange ? typeRange : rungRange` would always be
+  // truthy (the object exists even when its range is empty) and never fall
+  // through to the rung, silently disabling the fallback P4 depends on for
+  // creatures with no gold range of their own.
+  const typeRange = (entry.creatureGold && entry.creatureGold.get(dead.type)) || { min: 0, max: 0 };
+  const rungRange = (entry.behaviorGold && entry.behaviorGold.get(dead.type)) || { min: 0, max: 0 };
+  const goldAmt = rollGold(typeRange.max > 0 ? typeRange : rungRange, rng);
   if (goldAmt > 0 && entry.goldItemTypeId != null) {
     const gi = await pool.query(
       `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
