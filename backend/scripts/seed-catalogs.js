@@ -12,6 +12,7 @@ const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
 const { HOSTILE_CREATURES, CREATURE_DROPS } = require('../seeds/data/entityTypes.js');
+const { BESTIARY_P4_CREATURES, BESTIARY_P4_DROPS } = require('../seeds/data/bestiaryP4.js');
 const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
 const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
 const { BEHAVIOR_DROPS } = require('../seeds/data/behaviorDrops.js');
@@ -208,6 +209,89 @@ async function seedOneBehaviorDrop(db, d) {
   return r.rowCount;
 }
 
+// DO NOTHING rather than DO UPDATE for the same reason as decorations above:
+// a designer who has retuned Slime's hp in the admin UI must not have it
+// reset by a seeder run. This makes the block a floor -- it restores a
+// creature a biome references but that the database is missing, and is
+// otherwise a no-op.
+//
+// SOMET-250 Task 6: shared by HOSTILE_CREATURES (4 legacy creatures) AND
+// BESTIARY_P4_CREATURES (288 generated creatures) -- extracted so both lists
+// go through the identical upsert + behaviour-resolution path rather than
+// maintaining two copies of it, mirroring seedOneTile/seedOneBiome above.
+//
+// gold_min/gold_max default to 0 in JS (`?? 0`), not left undefined: the
+// column is NOT NULL with a column default of 0
+// (1714440031000_gold_economy.js), and Postgres only applies a column
+// default when the column is OMITTED from the INSERT list entirely -- an
+// explicit NULL parameter (what `undefined` becomes via node-postgres) still
+// violates the constraint. HOSTILE_CREATURES' four legacy rows always carry
+// an explicit gold_min/gold_max; BESTIARY_P4_CREATURES' 288 rows deliberately
+// do not (see authority/creatures.js's behaviorGold comment) -- they fall
+// back to their rung's own gold_min/gold_max at kill time, so 0 here means
+// "no per-creature override", not "no gold".
+async function seedOneCreatureType(pool, c) {
+  const r = await pool.query(
+    `INSERT INTO entity_types
+      (name, color, walkable, spawn_tiles, chance, is_creature,
+       hp, max_hp, defense, resistances, prompt, gold_min, gold_max)
+     VALUES ($1,$2,$3,$4::jsonb,$5,true,$6,$7,$8,$9::jsonb,$10,$11,$12)
+     ON CONFLICT (name) DO NOTHING`,
+    [c.name, c.color, c.walkable, JSON.stringify(c.spawn_tiles), c.chance,
+     c.hp, c.max_hp, c.defense, JSON.stringify(c.resistances), c.prompt,
+     c.gold_min ?? 0, c.gold_max ?? 0],
+  );
+
+  // Resolve `c.behavior_name` (the rung name every HOSTILE_CREATURES and
+  // BESTIARY_P4_CREATURES row now carries, per the P4 legacy remap and
+  // generator respectively) to `behavior_id` by name against
+  // creature_behaviors, falling back to the same faction rule
+  // 1714440081000_entity_behavior.js's backfill uses (guard faction ->
+  // Guard, everything else -> Line) only for the case a row has neither --
+  // there is none today, but the rule stays general rather than hardcoded so
+  // it cannot desync from that migration if a profile is ever renamed.
+  // COALESCE, not a bare SET, so a behaviour an admin already assigned by
+  // hand is never reset: this only fills a gap. This is what closes the gap
+  // the "seeding restores a creature that is missing from the catalog" test
+  // exposed: the INSERT above never set behavior_id, so a creature restored
+  // after being deleted (e.g. Wolf, after a dev-volume rebuild) came back
+  // with none.
+  await pool.query(
+    `UPDATE entity_types
+       SET behavior_id = COALESCE(behavior_id,
+         (SELECT id FROM creature_behaviors WHERE name = $2))
+     WHERE name = $1`,
+    [c.name, c.behavior_name || (c.faction === 'guard' ? 'Guard' : 'Line')],
+  );
+
+  return r.rowCount;
+}
+
+// Guarded by NOT EXISTS, not ON CONFLICT: creature_drops has no unique
+// constraint on (entity_type_id, item_type_id) -- see
+// 1714440018000_create_loot.js -- so a bare INSERT would stack a duplicate
+// rule on every single run, doubling the creature's effective drop odds. The
+// name lookups are a cross-join in the same guarded style as the migration: a
+// missing creature or item type inserts nothing rather than failing the
+// seed.
+//
+// SOMET-250 Task 6: shared by CREATURE_DROPS (Wolf's one hand-authored rule)
+// AND BESTIARY_P4_DROPS (288 generated rules), same reason as
+// seedOneCreatureType above.
+async function seedOneCreatureDrop(pool, d) {
+  const r = await pool.query(
+    `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
+     SELECT et.id, it.id, $3, $4, $5
+       FROM entity_types et, item_types it
+      WHERE et.name = $1 AND it.name = $2
+        AND NOT EXISTS (
+              SELECT 1 FROM creature_drops cd
+               WHERE cd.entity_type_id = et.id AND cd.item_type_id = it.id)`,
+    [d.creature, d.item, d.chance, d.min_qty, d.max_qty],
+  );
+  return r.rowCount;
+}
+
 async function seedCatalogs(pool) {
   let tiles = 0;
   for (const t of DEFAULT_TILE_TYPES) {
@@ -261,67 +345,22 @@ async function seedCatalogs(pool) {
     decorations += 1;
   }
 
-  // Creatures, then their drop rules. DO NOTHING rather than DO UPDATE for
-  // the same reason as decorations above: a designer who has retuned Slime's
-  // hp in the admin UI must not have it reset by a seeder run. This makes the
-  // block a floor -- it restores a creature a biome references but that the
-  // database is missing, and is otherwise a no-op.
+  // Creatures, then their drop rules. HOSTILE_CREATURES (4 legacy) and
+  // BESTIARY_P4_CREATURES (288 generated, SOMET-250 Task 6) go through the
+  // same seedOneCreatureType path -- see its comment above for the upsert
+  // policy and the gold_min/gold_max and behavior_name resolution rules.
   let creatures = 0;
-  for (const c of HOSTILE_CREATURES) {
-    const r = await pool.query(
-      `INSERT INTO entity_types
-        (name, color, walkable, spawn_tiles, chance, is_creature,
-         hp, max_hp, defense, resistances, prompt, gold_min, gold_max)
-       VALUES ($1,$2,$3,$4::jsonb,$5,true,$6,$7,$8,$9::jsonb,$10,$11,$12)
-       ON CONFLICT (name) DO NOTHING`,
-      [c.name, c.color, c.walkable, JSON.stringify(c.spawn_tiles), c.chance,
-       c.hp, c.max_hp, c.defense, JSON.stringify(c.resistances), c.prompt,
-       c.gold_min, c.gold_max],
-    );
-    creatures += r.rowCount;
-
-    // Same faction rule 1714440081000_entity_behavior.js's backfill uses
-    // (guard faction -> Guard, everything else -> Line), resolved by name so
-    // this can't desync from that migration if a profile is ever renamed.
-    // COALESCE, not a bare SET, so a behaviour an admin already assigned by
-    // hand is never reset: this only fills a gap. HOSTILE_CREATURES has no
-    // guard-faction entries today (Village Guard is seeded structurally, not
-    // through this list -- see the file header), so c.faction is always
-    // undefined here and every row resolves to Line, but the rule is written
-    // generally rather than hardcoded to match the migration it must stay
-    // consistent with. This is what closes the gap the "seeding restores a
-    // creature that is missing from the catalog" test exposed: the INSERT
-    // above never set behavior_id, so a creature restored after being
-    // deleted (e.g. Wolf, after a dev-volume rebuild) came back with none.
-    await pool.query(
-      `UPDATE entity_types
-         SET behavior_id = COALESCE(behavior_id,
-           (SELECT id FROM creature_behaviors WHERE name = $2))
-       WHERE name = $1`,
-      [c.name, c.faction === 'guard' ? 'Guard' : 'Line'],
-    );
+  for (const c of [...HOSTILE_CREATURES, ...BESTIARY_P4_CREATURES]) {
+    creatures += await seedOneCreatureType(pool, c);
   }
 
-  // Guarded by NOT EXISTS, not ON CONFLICT: creature_drops has no unique
-  // constraint on (entity_type_id, item_type_id) -- see
-  // 1714440018000_create_loot.js -- so a bare INSERT would stack a duplicate
-  // rule on every single run, doubling the creature's effective drop odds.
-  // The name lookups are a cross-join in the same guarded style as the
-  // migration: a missing creature or item type inserts nothing rather than
-  // failing the seed.
+  // CREATURE_DROPS (Wolf's one hand-authored rule) and BESTIARY_P4_DROPS (288
+  // generated rules, SOMET-250 Task 6) go through the same
+  // seedOneCreatureDrop path -- see its comment above for why NOT EXISTS
+  // rather than ON CONFLICT.
   let drops = 0;
-  for (const d of CREATURE_DROPS) {
-    const r = await pool.query(
-      `INSERT INTO creature_drops (entity_type_id, item_type_id, chance, min_qty, max_qty)
-       SELECT et.id, it.id, $3, $4, $5
-         FROM entity_types et, item_types it
-        WHERE et.name = $1 AND it.name = $2
-          AND NOT EXISTS (
-                SELECT 1 FROM creature_drops cd
-                 WHERE cd.entity_type_id = et.id AND cd.item_type_id = it.id)`,
-      [d.creature, d.item, d.chance, d.min_qty, d.max_qty],
-    );
-    drops += r.rowCount;
+  for (const d of [...CREATURE_DROPS, ...BESTIARY_P4_DROPS]) {
+    drops += await seedOneCreatureDrop(pool, d);
   }
 
   // Per-rung fallback drops (SOMET-253 Task 7). Same restore-a-floor posture
@@ -339,6 +378,7 @@ async function seedCatalogs(pool) {
 
 module.exports = {
   seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior, seedOneAbility, seedOneBehaviorDrop,
+  seedOneCreatureType, seedOneCreatureDrop,
 };
 
 if (require.main === module) {

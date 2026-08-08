@@ -64,9 +64,13 @@ test('the creature seed file is a superset of every migration-seeded creature', 
 test('Wolf is present — no migration seeds it, so only this file can', () => {
   const wolf = HOSTILE_CREATURES.find((c) => c.name === 'Wolf');
   assert.ok(wolf, 'Wolf is missing from the creature seed file');
-  // hp drives the gold formula and the drop-worthiness of the kill; 12 is the
-  // value recovered from docs/audits/2026-07-24/browser-run.md:244.
-  assert.equal(wolf.hp, 12);
+  // hp drives the gold formula and the drop-worthiness of the kill. It was
+  // 12 (recovered from docs/audits/2026-07-24/browser-run.md:244) until the
+  // 2026-08-08 P4 remap (SOMET-250) retuned Wolf to the Beast line's Line
+  // rung (template.js RUNGS.Line); see the comment above the Wolf entry in
+  // entityTypes.js for the full disclosure. Wolf had zero live placements at
+  // remap time, so this was a free change.
+  assert.equal(wolf.hp, 30);
   assert.equal(wolf.max_hp, wolf.hp, 'max_hp must match hp (elements.js:37 backfilled it)');
   assert.deepEqual(wolf.resistances, {}, 'Wolf is the neutral baseline: no resistances');
 });

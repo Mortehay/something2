@@ -85,10 +85,20 @@ test('creature_behaviors seeding', { skip: !url ? 'no database URL' : false }, a
       WHERE e.is_creature = true
     `);
     assert.ok(r.rowCount > 0, 'no creature types found');
+    // Guard-faction creatures always resolve to the 'Guard' profile -- that
+    // half of the claim stays exact. Non-guard creatures used to be checked
+    // against a hardcoded 'Line' too, back when Skeleton/Bat/Slime/Wolf (all
+    // Line) were the entire hostile catalog. SOMET-250 (P4) seeded 288
+    // creatures spanning all 9 rungs, so "every hostile creature is Line" is
+    // no longer true by design -- Tundra Caster is correctly Caster, not a
+    // bug. What this test still protects, and must keep protecting, is the
+    // ORIGINAL defect it was written for: a creature restored by the seeder
+    // silently getting NO behaviour at all (behavior_id left NULL).
     for (const row of r.rows) {
       assert.ok(row.behavior, `${row.name} has no behaviour profile`);
-      assert.equal(row.behavior, row.faction === 'guard' ? 'Guard' : 'Line',
-        `${row.name} (faction ${row.faction}) got the wrong profile`);
+      if (row.faction === 'guard') {
+        assert.equal(row.behavior, 'Guard', `${row.name} (faction guard) got the wrong profile`);
+      }
     }
   });
 
