@@ -676,7 +676,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 48,
     "defense": 5,
     "resistances": {
-      "physical": 0.2
+      "physical": 0.6
     },
     "prompt": "a hulking physical-touched swamp creature",
     "level_min": 15,
@@ -693,7 +693,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {
-      "physical": 0.25
+      "physical": 0.65
     },
     "prompt": "a armoured physical-touched swamp creature",
     "level_min": 18,
@@ -710,7 +710,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 85,
     "defense": 9,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.7
     },
     "prompt": "a commanding physical-touched swamp creature",
     "level_min": 21,
@@ -727,7 +727,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 130,
     "defense": 13,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.8
     },
     "prompt": "a towering physical-touched swamp creature",
     "level_min": 24,
@@ -827,7 +827,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 48,
     "defense": 5,
     "resistances": {
-      "physical": 0.2
+      "physical": 0.6
     },
     "prompt": "a hulking physical-touched highland creature",
     "level_min": 18,
@@ -844,7 +844,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {
-      "physical": 0.25
+      "physical": 0.65
     },
     "prompt": "a armoured physical-touched highland creature",
     "level_min": 20,
@@ -861,7 +861,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 85,
     "defense": 9,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.7
     },
     "prompt": "a commanding physical-touched highland creature",
     "level_min": 22,
@@ -878,7 +878,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 130,
     "defense": 13,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.8
     },
     "prompt": "a towering physical-touched highland creature",
     "level_min": 24,
@@ -1908,7 +1908,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 48,
     "defense": 5,
     "resistances": {
-      "physical": 0.2
+      "physical": 0.6
     },
     "prompt": "a hulking physical-touched cave creature",
     "level_min": 15,
@@ -1925,7 +1925,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {
-      "physical": 0.25
+      "physical": 0.65
     },
     "prompt": "a armoured physical-touched cave creature",
     "level_min": 18,
@@ -1942,7 +1942,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 85,
     "defense": 9,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.7
     },
     "prompt": "a commanding physical-touched cave creature",
     "level_min": 21,
@@ -1959,7 +1959,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 130,
     "defense": 13,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.8
     },
     "prompt": "a towering physical-touched cave creature",
     "level_min": 24,
@@ -2524,7 +2524,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 48,
     "defense": 5,
     "resistances": {
-      "physical": 0.2
+      "physical": 0.6
     },
     "prompt": "a hulking physical-touched construct creature",
     "level_min": 30,
@@ -2541,7 +2541,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {
-      "physical": 0.25
+      "physical": 0.65
     },
     "prompt": "a armoured physical-touched construct creature",
     "level_min": 32,
@@ -2558,7 +2558,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 85,
     "defense": 9,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.7
     },
     "prompt": "a commanding physical-touched construct creature",
     "level_min": 34,
@@ -2575,7 +2575,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 130,
     "defense": 13,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.8
     },
     "prompt": "a towering physical-touched construct creature",
     "level_min": 36,
@@ -2675,7 +2675,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 48,
     "defense": 5,
     "resistances": {
-      "physical": 0.2
+      "physical": 0.6
     },
     "prompt": "a hulking physical-touched hive creature",
     "level_min": 26,
@@ -2692,7 +2692,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {
-      "physical": 0.25
+      "physical": 0.65
     },
     "prompt": "a armoured physical-touched hive creature",
     "level_min": 29,
@@ -2709,7 +2709,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 85,
     "defense": 9,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.7
     },
     "prompt": "a commanding physical-touched hive creature",
     "level_min": 33,
@@ -2726,7 +2726,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 130,
     "defense": 13,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.8
     },
     "prompt": "a towering physical-touched hive creature",
     "level_min": 36,
@@ -2981,7 +2981,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 48,
     "defense": 5,
     "resistances": {
-      "physical": 0.2
+      "physical": 0.6
     },
     "prompt": "a hulking physical-touched umbral creature",
     "level_min": 39,
@@ -2998,7 +2998,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {
-      "physical": 0.25
+      "physical": 0.65
     },
     "prompt": "a armoured physical-touched umbral creature",
     "level_min": 43,
@@ -3015,7 +3015,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 85,
     "defense": 9,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.7
     },
     "prompt": "a commanding physical-touched umbral creature",
     "level_min": 46,
@@ -3032,7 +3032,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 130,
     "defense": 13,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.8
     },
     "prompt": "a towering physical-touched umbral creature",
     "level_min": 50,
@@ -3287,7 +3287,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 48,
     "defense": 5,
     "resistances": {
-      "physical": 0.2
+      "physical": 0.6
     },
     "prompt": "a hulking physical-touched blight creature",
     "level_min": 26,
@@ -3304,7 +3304,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {
-      "physical": 0.25
+      "physical": 0.65
     },
     "prompt": "a armoured physical-touched blight creature",
     "level_min": 29,
@@ -3321,7 +3321,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 85,
     "defense": 9,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.7
     },
     "prompt": "a commanding physical-touched blight creature",
     "level_min": 33,
@@ -3338,7 +3338,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 130,
     "defense": 13,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.8
     },
     "prompt": "a towering physical-touched blight creature",
     "level_min": 36,
@@ -4388,7 +4388,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 48,
     "defense": 5,
     "resistances": {
-      "physical": 0.2
+      "physical": 0.6
     },
     "prompt": "a hulking physical-touched nightmare creature",
     "level_min": 43,
@@ -4405,7 +4405,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {
-      "physical": 0.25
+      "physical": 0.65
     },
     "prompt": "a armoured physical-touched nightmare creature",
     "level_min": 46,
@@ -4422,7 +4422,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 85,
     "defense": 9,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.7
     },
     "prompt": "a commanding physical-touched nightmare creature",
     "level_min": 48,
@@ -4439,7 +4439,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 130,
     "defense": 13,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.8
     },
     "prompt": "a towering physical-touched nightmare creature",
     "level_min": 50,
@@ -4539,7 +4539,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 48,
     "defense": 5,
     "resistances": {
-      "physical": 0.2
+      "physical": 0.6
     },
     "prompt": "a hulking physical-touched titan creature",
     "level_min": 43,
@@ -4556,7 +4556,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {
-      "physical": 0.25
+      "physical": 0.65
     },
     "prompt": "a armoured physical-touched titan creature",
     "level_min": 46,
@@ -4573,7 +4573,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 85,
     "defense": 9,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.7
     },
     "prompt": "a commanding physical-touched titan creature",
     "level_min": 48,
@@ -4590,7 +4590,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 130,
     "defense": 13,
     "resistances": {
-      "physical": 0.3
+      "physical": 0.8
     },
     "prompt": "a towering physical-touched titan creature",
     "level_min": 50,

@@ -78,7 +78,24 @@ function deriveResistances(rungName, element, opts = {}) {
   if (tier === 'none') return {};
   if (tier === 'weak') return { [element]: WEAK_VALUE };
   if (tier === 'primary') return { [element]: PRIMARY_VALUE[rungName] };
-  // strong
+  // strong: primary element at STRONG_VALUE, plus a *secondary* partial-physical figure
+  // (STRONG_PHYSICAL_PARTIAL) layered on top -- e.g. a fire-primary Brute ends up
+  // { fire: 0.6, physical: 0.2 }, matching the existing two-key pattern already used by
+  // Skeleton/Slime in entityTypes.js (e.g. { ice: 0.6, physical: 0.2 }).
+  //
+  // When the line's own primary element already IS physical (Swamp, Highland, Cave,
+  // Construct, Hive, Umbral, Blight, Nightmare, Titan -- Void/Eldritch never reach this
+  // branch, they take the allFourPartial path above), object-literal key collision used to
+  // silently keep only the second `physical:` key, discarding the intended strong value
+  // (0.6-0.8) in favour of the weaker partial figure (0.2-0.3) -- see SOMET-250 Task 4 review.
+  // There is no meaningful "secondary partial physical resistance" layered on top of a
+  // primary *physical* resistance: physical isn't a second, lesser trait here, it already IS
+  // the primary trait. So a physical-primary line gets exactly one resistance key, at the
+  // full strong value -- not two keys, and not the diluted partial value. This is a
+  // deliberate asymmetry from the non-physical-primary case (which always ends up with
+  // exactly 2 keys): a physical-primary creature ends up with 1 key because there's nothing
+  // left to be "partial" about once physical already occupies the primary slot.
+  if (element === 'physical') return { physical: STRONG_VALUE[rungName] };
   return { [element]: STRONG_VALUE[rungName], physical: STRONG_PHYSICAL_PARTIAL[rungName] };
 }
 

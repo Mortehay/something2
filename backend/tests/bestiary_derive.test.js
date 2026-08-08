@@ -34,6 +34,20 @@ test('Brute/Heavy/Champion/Apex get the primary element strong plus partial phys
   assert.deepEqual(r, { lightning: 0.8, physical: 0.3 });
 });
 
+test('a physical-primary line at a strong rung gets one physical key at the full strong value, not the diluted partial one', () => {
+  // Regression test for SOMET-250 Task 4's review finding: { [element]: STRONG_VALUE,
+  // physical: STRONG_PHYSICAL_PARTIAL } collapses to a single `physical` key (JS keeps only
+  // the second literal) whenever element === 'physical', silently discarding the intended
+  // strong value in favour of the weaker partial figure. Nine of the 32 lines are
+  // physical-primary (Swamp, Highland, Cave, Construct, Hive, Umbral, Blight, Nightmare,
+  // Titan), so this isn't a hypothetical edge case.
+  const brute = deriveResistances('Brute', 'physical');
+  assert.deepEqual(brute, { physical: 0.6 });
+  const apex = deriveResistances('Apex', 'physical');
+  assert.deepEqual(apex, { physical: 0.8 });
+  assert.strictEqual(Object.keys(apex).length, 1, 'physical-primary strong tier should have exactly one resistance key');
+});
+
 test('a null-element line (Beast, Woodland) gets no resistance at any rung', () => {
   assert.deepEqual(deriveResistances('Line', null), {});
   assert.deepEqual(deriveResistances('Apex', null), {});
