@@ -75,6 +75,17 @@ test('damage_override of 0 is accepted, not rejected as a zero numeric', () => {
   assert.equal(behaviorFieldError({ ...VALID, damage_override: 0 }), null);
 });
 
+// SOMET-254: damage_override had no type check at all -- a non-numeric value
+// used to sail through behaviorFieldError and reach Postgres as a real-column
+// cast error (a raw 500) instead of a 400 naming the field.
+test('rejects a non-numeric damage_override', () => {
+  assert.match(behaviorFieldError({ ...VALID, damage_override: 'lots' }), /damage_override/);
+});
+
+test('accepts a negative damage_override (a healing profile)', () => {
+  assert.equal(behaviorFieldError({ ...VALID, damage_override: -5 }), null);
+});
+
 // SOMET-253 Task 8: pack-leader aura + per-rung gold. VALID carries none of
 // these six fields at all (like most seeded profiles), so a fully-formed
 // profile with them entirely absent must still pass -- they are optional,

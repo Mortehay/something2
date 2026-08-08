@@ -130,6 +130,15 @@ function isUniqueViolation(err) {
   return !!err && err.code === '23505';
 }
 
+// A route param destined for an `id` (integer, serial-PK) column. Express
+// hands every :id through as a string with no type coercion, so a
+// non-numeric value (or a float like "1.5") used to reach Postgres as-is and
+// come back as a raw integer-cast 500 instead of a 400 naming the actual
+// problem (SOMET-254, first fixed for /api/creature-behaviors).
+function invalidId(id) {
+  return !/^[0-9]+$/.test(String(id));
+}
+
 // Upper bound for PUT /api/worlds/:id creature_count (SOMET-188 / F-008).
 // ONE number, defined in densityTiers.js: that is where it now does the real
 // work, clamping the count resolveDensity hands to both population callers.
@@ -369,6 +378,28 @@ app.get('/api/map/tiles', async (req, res) => {
   }
 });
 
+// Mirrors the entity_types_attack_element_check CHECK constraint (migration
+// 1714440081000) so a bad value is a readable 400 rather than a raw 500 from
+// the constraint -- render_mode on these same two routes has no such check
+// (SOMET-254 leaves that pre-existing gap as-is; it is a free-form column
+// with no CHECK constraint to mirror). behavior_id is a real integer FK into
+// creature_behaviors from that same migration: a non-numeric value (e.g. a
+// string) reaches Postgres as a cast error before it ever reaches the FK
+// check, so this catches that class of input; whether the id actually names
+// a row is left to the FK constraint itself; the resulting 500 there is a
+// pre-existing, out-of-scope gap noted in the DELETE /api/creature-behaviors
+// handler below.
+function entityTypeFieldError(body) {
+  if (body.attack_element != null && !ELEMENTS.includes(body.attack_element)) {
+    return `attack_element must be one of ${ELEMENTS.join(', ')}`;
+  }
+  if (body.behavior_id != null
+      && (typeof body.behavior_id !== 'number' || !Number.isInteger(body.behavior_id))) {
+    return 'behavior_id must be an integer';
+  }
+  return null;
+}
+
 // Entity Types CRUD
 app.get('/api/entity-types', async (req, res) => {
   try {
@@ -393,6 +424,8 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
+    const fieldErr = entityTypeFieldError(req.body);
+    if (fieldErr) return res.status(400).json({ error: fieldErr });
 
     const result = await pool.query(
       `INSERT INTO entity_types (
@@ -430,6 +463,8 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
+    const fieldErr = entityTypeFieldError(req.body);
+    if (fieldErr) return res.status(400).json({ error: fieldErr });
 
     // SOMET-185: worlds.allowed_creature_types and world_creatures.type
     // reference entity_types by NAME (no FK), so a free rename here silently
@@ -472,7 +507,9 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         strength = $6, dexterity = $7, constitution = $8, intelligence = $9, wisdom = $10, charisma = $11,
         hp = $12, max_hp = $13, hp_regen_rate = $14, mana = $15, max_mana = $16, mana_regen_rate = $17,
         image = $18, display_width = $19, display_height = $20, render_mode = $21, is_creature = $22,
-        prompt = COALESCE($23, prompt), place_order = $24, behavior_id = $25, attack_element = $26,
+        prompt = COALESCE($23, prompt), place_order = $24,
+        behavior_id = COALESCE($25, entity_types.behavior_id),
+        attack_element = COALESCE($26, entity_types.attack_element),
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $27 RETURNING *`,
       [
@@ -480,7 +517,15 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false,
-        prompt ?? null, Number(place_order) || 0, behavior_id ?? null, attack_element || 'physical', id
+        // behavior_id/attack_element: SOMET-254 -- a PUT that omits either
+        // field must leave the existing value alone (COALESCE against the
+        // current row above), same posture prompt already has on this same
+        // line and for the same reason: `?? null`/`?? null` here, not
+        // `?? null`/`|| 'physical'`, so an omitted field passes NULL and
+        // never reaches the fallback-to-default branch that used to silently
+        // demote the creature's profile or reset its element on a partial
+        // write.
+        prompt ?? null, Number(place_order) || 0, behavior_id ?? null, attack_element ?? null, id
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
@@ -830,6 +875,16 @@ function behaviorFieldError(body) {
   if (body.preferred_range != null && !(Number(body.preferred_range) >= 0)) {
     return 'preferred_range must be 0 or greater';
   }
+  // SOMET-254: damage_override has no DB CHECK constraint (it is nullable
+  // with no bound, unlike preferred_range/the aura fields below), so nothing
+  // else in this function was rejecting a non-numeric value here -- it used
+  // to reach Postgres as a real-column cast error (raw 500) instead of a
+  // 400. Any finite number is valid, including negative (a creature that
+  // heals its target is a deliberately supported, if unusual, profile) and
+  // 0 ("hits for nothing", already covered by the test suite below).
+  if (body.damage_override != null && !Number.isFinite(Number(body.damage_override))) {
+    return 'damage_override must be a number';
+  }
   // SOMET-253 Task 8: pack-leader aura + per-rung gold. Mirrors migration
   // 1714440085000's two CHECK constraints exactly. All six fields are
   // optional in the body -- most seeded profiles carry no aura fields at all
@@ -990,6 +1045,13 @@ app.post('/api/creature-behaviors', adminGuard, async (req, res) => {
     res.status(201).json(row);
   } catch (err) {
     await client?.query('ROLLBACK').catch(() => {});
+    // SOMET-254: creature_behaviors.name is unique (migration 1714440080000)
+    // -- a duplicate name used to fall through to the generic 500 below
+    // instead of the 409 biomes/worlds already give the same class of error
+    // via this same isUniqueViolation helper.
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({ error: 'a creature behavior with that name already exists' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to create creature behavior' });
   } finally {
@@ -999,6 +1061,7 @@ app.post('/api/creature-behaviors', adminGuard, async (req, res) => {
 
 app.put('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
   const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
   const b = req.body;
   const bad = behaviorFieldError(b) || behaviorAbilitiesError(b);
   if (bad) return res.status(400).json({ error: bad });
@@ -1035,6 +1098,9 @@ app.put('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
     res.json(row);
   } catch (err) {
     await client?.query('ROLLBACK').catch(() => {});
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({ error: 'a creature behavior with that name already exists' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to update creature behavior' });
   } finally {
@@ -1043,28 +1109,54 @@ app.put('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
 });
 
 app.delete('/api/creature-behaviors/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  // SOMET-254: the reference-count SELECT and the DELETE used to be two
+  // separate pool.query calls with a race window between them -- a
+  // concurrent entity-types write that assigned this behavior_id in that
+  // window turned the intended 409 into an unhandled foreign-key-violation
+  // 500. Both now run against one client inside one transaction.
+  let client = null;
   try {
-    const { id } = req.params;
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // FOR UPDATE locks this row before the reference check: entity_types'
+    // FK constraint takes a FOR KEY SHARE lock on the creature_behaviors row
+    // it references as part of enforcing itself (on both INSERT and an
+    // UPDATE that assigns this id), and FOR KEY SHARE conflicts with FOR
+    // UPDATE -- so any concurrent write that would newly reference this row
+    // blocks until this transaction commits or rolls back. That closes the
+    // window: the SELECT below is guaranteed to still be accurate at DELETE
+    // time.
+    const found = await client.query(
+      'SELECT id FROM creature_behaviors WHERE id = $1 FOR UPDATE', [id]);
+    if (found.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Behavior not found' });
+    }
     // entity_types.behavior_id is a real FK, so the database would refuse
     // this anyway -- with an unreadable 500. Checking first turns it into a
     // 409 that names what is in the way. SOMET-238 records that
     // /api/tile-types and /api/entity-types still lack guards like this one;
     // that gap is not fixed here, but it is not repeated in new code either.
-    const refs = await pool.query(
+    const refs = await client.query(
       'SELECT id, name FROM entity_types WHERE behavior_id = $1', [id]);
     if (refs.rows.length > 0) {
+      await client.query('ROLLBACK');
       return res.status(409).json({
         error: 'Cannot delete: still referenced by a creature type',
         referencing_entity_types: refs.rows,
       });
     }
-    const result = await pool.query(
-      'DELETE FROM creature_behaviors WHERE id = $1 RETURNING id', [id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Behavior not found' });
+    await client.query('DELETE FROM creature_behaviors WHERE id = $1', [id]);
+    await client.query('COMMIT');
     res.status(204).end();
   } catch (err) {
+    await client?.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Failed to delete creature behavior' });
+  } finally {
+    client?.release();
   }
 });
 
