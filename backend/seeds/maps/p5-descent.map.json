@@ -1,0 +1,2268 @@
+{
+  "name": "p5-descent",
+  "topology": "chained-dungeons-plus-surface",
+  "worlds": [
+    {
+      "key": "d1_entry",
+      "name": "The Catacombs: Entry",
+      "grid": [
+        20,
+        0
+      ],
+      "seed": 5000,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Catacombs",
+        "Cavern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Undead Swarm",
+        "Undead Skirmisher",
+        "Undead Line"
+      ],
+      "is_entry": true,
+      "entry_spawn": {
+        "x": 3250,
+        "y": 3250
+      },
+      "level_band": [
+        1,
+        5
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "d1_pass",
+      "name": "The Catacombs: Pass",
+      "grid": [
+        21,
+        0
+      ],
+      "seed": 5001,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Catacombs"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        5
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "d1_cache",
+      "name": "The Catacombs: Cache",
+      "grid": [
+        21,
+        -1
+      ],
+      "seed": 5002,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Catacombs",
+        "Cavern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Undead Swarm",
+        "Undead Skirmisher",
+        "Undead Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        5
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "d1_elite",
+      "name": "The Catacombs: Elite",
+      "grid": [
+        21,
+        1
+      ],
+      "seed": 5003,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Catacombs"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        5
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "d1_gorge",
+      "name": "The Catacombs: Gorge",
+      "grid": [
+        22,
+        0
+      ],
+      "seed": 5004,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Catacombs",
+        "Cavern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Undead Swarm",
+        "Undead Skirmisher",
+        "Undead Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        7
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "d1_shrine",
+      "name": "The Catacombs: Shrine",
+      "grid": [
+        22,
+        1
+      ],
+      "seed": 5005,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Catacombs"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        7
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "d1_deep",
+      "name": "The Catacombs: Deep",
+      "grid": [
+        23,
+        0
+      ],
+      "seed": 5006,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Catacombs",
+        "Cavern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Undead Swarm",
+        "Undead Skirmisher",
+        "Undead Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        8
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "d1_end",
+      "name": "The Catacombs: End",
+      "grid": [
+        24,
+        0
+      ],
+      "seed": 5007,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Catacombs"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        8
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "d2_hub",
+      "name": "The Underdeep: Hub",
+      "grid": [
+        32,
+        0
+      ],
+      "seed": 5100,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Fungal Deep",
+        "Gloomfen"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Fungal Swarm",
+        "Fungal Skirmisher",
+        "Fungal Line"
+      ],
+      "is_entry": false,
+      "village": {
+        "min_row": 28,
+        "min_col": 28,
+        "width": 6,
+        "height": 5,
+        "gate_edge": "S",
+        "spawn_x": 3250,
+        "spawn_y": 3250
+      },
+      "level_band": [
+        8,
+        13
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "d2_spokeN",
+      "name": "The Underdeep: SpokeN",
+      "grid": [
+        32,
+        -1
+      ],
+      "seed": 5101,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Gloomfen",
+        "Fungal Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Gloom Swarm",
+        "Gloom Skirmisher",
+        "Gloom Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        8,
+        13
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "d2_spokeE",
+      "name": "The Underdeep: SpokeE",
+      "grid": [
+        33,
+        0
+      ],
+      "seed": 5102,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Fungal Deep",
+        "Gloomfen"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Fungal Swarm",
+        "Fungal Skirmisher",
+        "Fungal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        8,
+        13
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "d2_spokeS",
+      "name": "The Underdeep: SpokeS",
+      "grid": [
+        32,
+        1
+      ],
+      "seed": 5103,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Gloomfen",
+        "Fungal Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Gloom Swarm",
+        "Gloom Skirmisher",
+        "Gloom Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        8,
+        13
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "d2_spokeW",
+      "name": "The Underdeep: SpokeW",
+      "grid": [
+        31,
+        0
+      ],
+      "seed": 5104,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Fungal Deep",
+        "Gloomfen"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Fungal Swarm",
+        "Fungal Skirmisher",
+        "Fungal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        8,
+        13
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "d2_subBranch",
+      "name": "The Underdeep: SubBranch",
+      "grid": [
+        33,
+        -1
+      ],
+      "seed": 5105,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Gloomfen",
+        "Fungal Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Gloom Swarm",
+        "Gloom Skirmisher",
+        "Gloom Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        8,
+        14
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "d3_entry",
+      "name": "The Ossuary Depths: Entry",
+      "grid": [
+        44,
+        0
+      ],
+      "seed": 5200,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Ossuary",
+        "Sunken Cistern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Bonelord Swarm",
+        "Bonelord Skirmisher",
+        "Bonelord Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        11,
+        21
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "d3_spur",
+      "name": "The Ossuary Depths: Spur",
+      "grid": [
+        43,
+        0
+      ],
+      "seed": 5201,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Sunken Cistern",
+        "Ossuary"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Drowned Swarm",
+        "Drowned Skirmisher",
+        "Drowned Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        11,
+        21
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "d3_eastwing",
+      "name": "The Ossuary Depths: Eastwing",
+      "grid": [
+        45,
+        0
+      ],
+      "seed": 5202,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Ossuary",
+        "Sunken Cistern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Bonelord Swarm",
+        "Bonelord Skirmisher",
+        "Bonelord Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        12,
+        22
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "d3_farhall",
+      "name": "The Ossuary Depths: Farhall",
+      "grid": [
+        46,
+        0
+      ],
+      "seed": 5203,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Sunken Cistern",
+        "Ossuary"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Drowned Swarm",
+        "Drowned Skirmisher",
+        "Drowned Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        12,
+        22
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "d3_heart",
+      "name": "The Ossuary Depths: Heart",
+      "grid": [
+        46,
+        1
+      ],
+      "seed": 5204,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Ossuary",
+        "Sunken Cistern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Bonelord Swarm",
+        "Bonelord Skirmisher",
+        "Bonelord Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        13,
+        23
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "d3_deepvault",
+      "name": "The Ossuary Depths: Deepvault",
+      "grid": [
+        45,
+        1
+      ],
+      "seed": 5205,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Sunken Cistern",
+        "Ossuary"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Drowned Swarm",
+        "Drowned Skirmisher",
+        "Drowned Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        13,
+        23
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "d3_southwing",
+      "name": "The Ossuary Depths: Southwing",
+      "grid": [
+        44,
+        1
+      ],
+      "seed": 5206,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Ossuary",
+        "Sunken Cistern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Bonelord Swarm",
+        "Bonelord Skirmisher",
+        "Bonelord Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        14,
+        24
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "d4_entry",
+      "name": "The Emberhive: Entry",
+      "grid": [
+        56,
+        0
+      ],
+      "seed": 5300,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths",
+        "Hive Warrens"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ember Swarm",
+        "Ember Skirmisher",
+        "Ember Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        14,
+        24
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "d4_pass",
+      "name": "The Emberhive: Pass",
+      "grid": [
+        57,
+        0
+      ],
+      "seed": 5301,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Hive Warrens",
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Hive Swarm",
+        "Hive Skirmisher",
+        "Hive Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        15,
+        25
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "d4_cache",
+      "name": "The Emberhive: Cache",
+      "grid": [
+        57,
+        -1
+      ],
+      "seed": 5302,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths",
+        "Hive Warrens"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ember Swarm",
+        "Ember Skirmisher",
+        "Ember Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        15,
+        25
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "d4_elite",
+      "name": "The Emberhive: Elite",
+      "grid": [
+        57,
+        1
+      ],
+      "seed": 5303,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Hive Warrens",
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Hive Swarm",
+        "Hive Skirmisher",
+        "Hive Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        15,
+        25
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "d4_gorge",
+      "name": "The Emberhive: Gorge",
+      "grid": [
+        58,
+        0
+      ],
+      "seed": 5304,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths",
+        "Hive Warrens"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ember Swarm",
+        "Ember Skirmisher",
+        "Ember Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        16,
+        26
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "d4_shrine",
+      "name": "The Emberhive: Shrine",
+      "grid": [
+        58,
+        1
+      ],
+      "seed": 5305,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Hive Warrens",
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Hive Swarm",
+        "Hive Skirmisher",
+        "Hive Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        16,
+        26
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "d4_deep",
+      "name": "The Emberhive: Deep",
+      "grid": [
+        59,
+        0
+      ],
+      "seed": 5306,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths",
+        "Hive Warrens"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ember Swarm",
+        "Ember Skirmisher",
+        "Ember Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        18,
+        28
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "d4_end",
+      "name": "The Emberhive: End",
+      "grid": [
+        60,
+        0
+      ],
+      "seed": 5307,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Hive Warrens",
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Hive Swarm",
+        "Hive Skirmisher",
+        "Hive Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        18,
+        28
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "d5_hub",
+      "name": "The Frozen Vaults: Hub",
+      "grid": [
+        68,
+        0
+      ],
+      "seed": 5400,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault",
+        "Blightworks"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line"
+      ],
+      "is_entry": false,
+      "village": {
+        "min_row": 28,
+        "min_col": 28,
+        "width": 6,
+        "height": 5,
+        "gate_edge": "S",
+        "spawn_x": 3250,
+        "spawn_y": 3250
+      },
+      "level_band": [
+        19,
+        29
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "d5_spokeN",
+      "name": "The Frozen Vaults: SpokeN",
+      "grid": [
+        68,
+        -1
+      ],
+      "seed": 5401,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Blightworks",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Blight Swarm",
+        "Blight Skirmisher",
+        "Blight Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        19,
+        29
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "d5_spokeE",
+      "name": "The Frozen Vaults: SpokeE",
+      "grid": [
+        69,
+        0
+      ],
+      "seed": 5402,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Deepvault",
+        "Frostvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Construct Swarm",
+        "Construct Skirmisher",
+        "Construct Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        19,
+        29
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "d5_spokeS",
+      "name": "The Frozen Vaults: SpokeS",
+      "grid": [
+        68,
+        1
+      ],
+      "seed": 5403,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault",
+        "Blightworks"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        19,
+        29
+      ],
+      "density": "horde"
+    },
+    {
+      "key": "d5_spokeW",
+      "name": "The Frozen Vaults: SpokeW",
+      "grid": [
+        67,
+        0
+      ],
+      "seed": 5404,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Blightworks",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Blight Swarm",
+        "Blight Skirmisher",
+        "Blight Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        19,
+        29
+      ],
+      "density": "horde"
+    },
+    {
+      "key": "d5_subBranch",
+      "name": "The Frozen Vaults: SubBranch",
+      "grid": [
+        69,
+        -1
+      ],
+      "seed": 5405,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Deepvault",
+        "Frostvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Construct Swarm",
+        "Construct Skirmisher",
+        "Construct Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        20,
+        30
+      ],
+      "density": "horde"
+    },
+    {
+      "key": "d6_entry",
+      "name": "The Crystal Foundry: Entry",
+      "grid": [
+        80,
+        0
+      ],
+      "seed": 5500,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Crystal Hollows",
+        "Sunken Foundry"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Crystal Swarm",
+        "Crystal Skirmisher",
+        "Crystal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        28,
+        34
+      ],
+      "density": "horde"
+    },
+    {
+      "key": "d6_spur",
+      "name": "The Crystal Foundry: Spur",
+      "grid": [
+        79,
+        0
+      ],
+      "seed": 5501,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Sunken Foundry",
+        "Crystal Hollows"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Stoneborn Swarm",
+        "Stoneborn Skirmisher",
+        "Stoneborn Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        28,
+        34
+      ],
+      "density": "horde"
+    },
+    {
+      "key": "d6_eastwing",
+      "name": "The Crystal Foundry: Eastwing",
+      "grid": [
+        81,
+        0
+      ],
+      "seed": 5502,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Crystal Hollows",
+        "Sunken Foundry"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Crystal Swarm",
+        "Crystal Skirmisher",
+        "Crystal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        28,
+        34
+      ],
+      "density": "horde"
+    },
+    {
+      "key": "d6_farhall",
+      "name": "The Crystal Foundry: Farhall",
+      "grid": [
+        82,
+        0
+      ],
+      "seed": 5503,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Sunken Foundry",
+        "Crystal Hollows"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Stoneborn Swarm",
+        "Stoneborn Skirmisher",
+        "Stoneborn Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        29,
+        35
+      ],
+      "density": "horde"
+    },
+    {
+      "key": "d6_heart",
+      "name": "The Crystal Foundry: Heart",
+      "grid": [
+        82,
+        1
+      ],
+      "seed": 5504,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Crystal Hollows",
+        "Sunken Foundry"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Crystal Swarm",
+        "Crystal Skirmisher",
+        "Crystal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        29,
+        35
+      ],
+      "density": "horde"
+    },
+    {
+      "key": "d6_deepvault",
+      "name": "The Crystal Foundry: Deepvault",
+      "grid": [
+        81,
+        1
+      ],
+      "seed": 5505,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Sunken Foundry",
+        "Crystal Hollows"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Stoneborn Swarm",
+        "Stoneborn Skirmisher",
+        "Stoneborn Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        29,
+        35
+      ],
+      "density": "horde"
+    },
+    {
+      "key": "d6_southwing",
+      "name": "The Crystal Foundry: Southwing",
+      "grid": [
+        80,
+        1
+      ],
+      "seed": 5506,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Crystal Hollows",
+        "Sunken Foundry"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Crystal Swarm",
+        "Crystal Skirmisher",
+        "Crystal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        30,
+        36
+      ],
+      "density": "horde"
+    },
+    {
+      "key": "d7_entry",
+      "name": "The Umbral Gate: Entry",
+      "grid": [
+        92,
+        0
+      ],
+      "seed": 5600,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Umbral Warren",
+        "Infernal Gate"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Umbral Swarm",
+        "Umbral Skirmisher",
+        "Umbral Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        39,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d7_pass",
+      "name": "The Umbral Gate: Pass",
+      "grid": [
+        93,
+        0
+      ],
+      "seed": 5601,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Infernal Gate",
+        "Pestilent Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Demonic Swarm",
+        "Demonic Skirmisher",
+        "Demonic Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        39,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d7_cache",
+      "name": "The Umbral Gate: Cache",
+      "grid": [
+        93,
+        -1
+      ],
+      "seed": 5602,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Pestilent Deep",
+        "Umbral Warren"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Plague Swarm",
+        "Plague Skirmisher",
+        "Plague Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        39,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d7_elite",
+      "name": "The Umbral Gate: Elite",
+      "grid": [
+        93,
+        1
+      ],
+      "seed": 5603,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Umbral Warren",
+        "Infernal Gate"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Umbral Swarm",
+        "Umbral Skirmisher",
+        "Umbral Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        39,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d7_gorge",
+      "name": "The Umbral Gate: Gorge",
+      "grid": [
+        94,
+        0
+      ],
+      "seed": 5604,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Infernal Gate",
+        "Pestilent Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Demonic Swarm",
+        "Demonic Skirmisher",
+        "Demonic Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        41,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d7_shrine",
+      "name": "The Umbral Gate: Shrine",
+      "grid": [
+        94,
+        1
+      ],
+      "seed": 5605,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Pestilent Deep",
+        "Umbral Warren"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Plague Swarm",
+        "Plague Skirmisher",
+        "Plague Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        41,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d7_deep",
+      "name": "The Umbral Gate: Deep",
+      "grid": [
+        95,
+        0
+      ],
+      "seed": 5606,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Umbral Warren",
+        "Infernal Gate"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Umbral Swarm",
+        "Umbral Skirmisher",
+        "Umbral Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        42,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d7_end",
+      "name": "The Umbral Gate: End",
+      "grid": [
+        96,
+        0
+      ],
+      "seed": 5607,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Infernal Gate",
+        "Pestilent Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Demonic Swarm",
+        "Demonic Skirmisher",
+        "Demonic Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        43,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d8_hub",
+      "name": "The Abyss: Hub",
+      "grid": [
+        104,
+        0
+      ],
+      "seed": 5700,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Abyssal Rift",
+        "Shattered Vault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Void Swarm",
+        "Void Skirmisher",
+        "Void Line"
+      ],
+      "is_entry": false,
+      "village": {
+        "min_row": 28,
+        "min_col": 28,
+        "width": 6,
+        "height": 5,
+        "gate_edge": "S",
+        "spawn_x": 3250,
+        "spawn_y": 3250
+      },
+      "level_band": [
+        46,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d8_spokeN",
+      "name": "The Abyss: SpokeN",
+      "grid": [
+        104,
+        -1
+      ],
+      "seed": 5701,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Shattered Vault",
+        "Fallen Sanctum"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Chaos Swarm",
+        "Chaos Skirmisher",
+        "Chaos Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        46,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d8_spokeE",
+      "name": "The Abyss: SpokeE",
+      "grid": [
+        105,
+        0
+      ],
+      "seed": 5702,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Fallen Sanctum",
+        "Dreaming Dark"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Fallen Swarm",
+        "Fallen Skirmisher",
+        "Fallen Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        46,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d8_spokeS",
+      "name": "The Abyss: SpokeS",
+      "grid": [
+        104,
+        1
+      ],
+      "seed": 5703,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Dreaming Dark",
+        "Grave of Titans"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Nightmare Swarm",
+        "Nightmare Skirmisher",
+        "Nightmare Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        46,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d8_spokeW",
+      "name": "The Abyss: SpokeW",
+      "grid": [
+        103,
+        0
+      ],
+      "seed": 5704,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Grave of Titans",
+        "The Maw"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Titan Swarm",
+        "Titan Skirmisher",
+        "Titan Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        46,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "d8_subBranch",
+      "name": "The Abyss: SubBranch",
+      "grid": [
+        105,
+        -1
+      ],
+      "seed": 5705,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "The Maw",
+        "Abyssal Rift"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Eldritch Swarm",
+        "Eldritch Skirmisher",
+        "Eldritch Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        47,
+        50
+      ],
+      "density": "swarm"
+    },
+    {
+      "key": "surface_highlands_0",
+      "name": "Highlands Reach",
+      "grid": [
+        20,
+        -1
+      ],
+      "seed": 6000,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Highlands"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Highland Swarm",
+        "Highland Skirmisher",
+        "Highland Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        8
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "surface_highlands_1",
+      "name": "Highlands Frontier",
+      "grid": [
+        20,
+        -2
+      ],
+      "seed": 6011,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Highlands"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Highland Swarm",
+        "Highland Skirmisher",
+        "Highland Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        4,
+        12
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "surface_verdant_jungle_0",
+      "name": "Verdant Jungle Reach",
+      "grid": [
+        20,
+        -3
+      ],
+      "seed": 6020,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Verdant Jungle"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Jungle Swarm",
+        "Jungle Skirmisher",
+        "Jungle Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        8
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "surface_verdant_jungle_1",
+      "name": "Verdant Jungle Frontier",
+      "grid": [
+        20,
+        -4
+      ],
+      "seed": 6031,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Verdant Jungle"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Jungle Swarm",
+        "Jungle Skirmisher",
+        "Jungle Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        4,
+        12
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "surface_storm_coast_0",
+      "name": "Storm Coast Reach",
+      "grid": [
+        20,
+        -5
+      ],
+      "seed": 6040,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Storm Coast"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Storm Swarm",
+        "Storm Skirmisher",
+        "Storm Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        8
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "surface_storm_coast_1",
+      "name": "Storm Coast Frontier",
+      "grid": [
+        20,
+        -6
+      ],
+      "seed": 6051,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Storm Coast"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Storm Swarm",
+        "Storm Skirmisher",
+        "Storm Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        4,
+        12
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "surface_sunken_ruins_0",
+      "name": "Sunken Ruins Reach",
+      "grid": [
+        20,
+        -7
+      ],
+      "seed": 6060,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Sunken Ruins"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ruin Swarm",
+        "Ruin Skirmisher",
+        "Ruin Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        8
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "surface_sunken_ruins_1",
+      "name": "Sunken Ruins Frontier",
+      "grid": [
+        20,
+        -8
+      ],
+      "seed": 6071,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Sunken Ruins"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ruin Swarm",
+        "Ruin Skirmisher",
+        "Ruin Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        4,
+        12
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "surface_ashfields_0",
+      "name": "Ashfields Reach",
+      "grid": [
+        20,
+        -9
+      ],
+      "seed": 6080,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Ashfields"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Volcanic Swarm",
+        "Volcanic Skirmisher",
+        "Volcanic Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        1,
+        8
+      ],
+      "density": "sparse"
+    },
+    {
+      "key": "surface_ashfields_1",
+      "name": "Ashfields Frontier",
+      "grid": [
+        20,
+        -10
+      ],
+      "seed": 6091,
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Ashfields"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Volcanic Swarm",
+        "Volcanic Skirmisher",
+        "Volcanic Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        4,
+        12
+      ],
+      "density": "normal"
+    }
+  ],
+  "links": [
+    {
+      "from": "d1_entry",
+      "edge": "E",
+      "to": "d1_pass"
+    },
+    {
+      "from": "d1_pass",
+      "edge": "N",
+      "to": "d1_cache"
+    },
+    {
+      "from": "d1_pass",
+      "edge": "S",
+      "to": "d1_elite"
+    },
+    {
+      "from": "d1_pass",
+      "edge": "E",
+      "to": "d1_gorge"
+    },
+    {
+      "from": "d1_gorge",
+      "edge": "S",
+      "to": "d1_shrine"
+    },
+    {
+      "from": "d1_gorge",
+      "edge": "E",
+      "to": "d1_deep"
+    },
+    {
+      "from": "d1_deep",
+      "edge": "E",
+      "to": "d1_end"
+    },
+    {
+      "from": "d2_hub",
+      "edge": "N",
+      "to": "d2_spokeN"
+    },
+    {
+      "from": "d2_hub",
+      "edge": "E",
+      "to": "d2_spokeE"
+    },
+    {
+      "from": "d2_hub",
+      "edge": "S",
+      "to": "d2_spokeS"
+    },
+    {
+      "from": "d2_hub",
+      "edge": "W",
+      "to": "d2_spokeW"
+    },
+    {
+      "from": "d2_spokeE",
+      "edge": "N",
+      "to": "d2_subBranch"
+    },
+    {
+      "from": "d3_entry",
+      "edge": "E",
+      "to": "d3_eastwing"
+    },
+    {
+      "from": "d3_entry",
+      "edge": "W",
+      "to": "d3_spur"
+    },
+    {
+      "from": "d3_eastwing",
+      "edge": "E",
+      "to": "d3_farhall"
+    },
+    {
+      "from": "d3_farhall",
+      "edge": "S",
+      "to": "d3_heart"
+    },
+    {
+      "from": "d3_heart",
+      "edge": "W",
+      "to": "d3_deepvault"
+    },
+    {
+      "from": "d3_deepvault",
+      "edge": "W",
+      "to": "d3_southwing"
+    },
+    {
+      "from": "d3_southwing",
+      "edge": "N",
+      "to": "d3_entry"
+    },
+    {
+      "from": "d4_entry",
+      "edge": "E",
+      "to": "d4_pass"
+    },
+    {
+      "from": "d4_pass",
+      "edge": "N",
+      "to": "d4_cache"
+    },
+    {
+      "from": "d4_pass",
+      "edge": "S",
+      "to": "d4_elite"
+    },
+    {
+      "from": "d4_pass",
+      "edge": "E",
+      "to": "d4_gorge"
+    },
+    {
+      "from": "d4_gorge",
+      "edge": "S",
+      "to": "d4_shrine"
+    },
+    {
+      "from": "d4_gorge",
+      "edge": "E",
+      "to": "d4_deep"
+    },
+    {
+      "from": "d4_deep",
+      "edge": "E",
+      "to": "d4_end"
+    },
+    {
+      "from": "d5_hub",
+      "edge": "N",
+      "to": "d5_spokeN"
+    },
+    {
+      "from": "d5_hub",
+      "edge": "E",
+      "to": "d5_spokeE"
+    },
+    {
+      "from": "d5_hub",
+      "edge": "S",
+      "to": "d5_spokeS"
+    },
+    {
+      "from": "d5_hub",
+      "edge": "W",
+      "to": "d5_spokeW"
+    },
+    {
+      "from": "d5_spokeE",
+      "edge": "N",
+      "to": "d5_subBranch"
+    },
+    {
+      "from": "d6_entry",
+      "edge": "E",
+      "to": "d6_eastwing"
+    },
+    {
+      "from": "d6_entry",
+      "edge": "W",
+      "to": "d6_spur"
+    },
+    {
+      "from": "d6_eastwing",
+      "edge": "E",
+      "to": "d6_farhall"
+    },
+    {
+      "from": "d6_farhall",
+      "edge": "S",
+      "to": "d6_heart"
+    },
+    {
+      "from": "d6_heart",
+      "edge": "W",
+      "to": "d6_deepvault"
+    },
+    {
+      "from": "d6_deepvault",
+      "edge": "W",
+      "to": "d6_southwing"
+    },
+    {
+      "from": "d6_southwing",
+      "edge": "N",
+      "to": "d6_entry"
+    },
+    {
+      "from": "d7_entry",
+      "edge": "E",
+      "to": "d7_pass"
+    },
+    {
+      "from": "d7_pass",
+      "edge": "N",
+      "to": "d7_cache"
+    },
+    {
+      "from": "d7_pass",
+      "edge": "S",
+      "to": "d7_elite"
+    },
+    {
+      "from": "d7_pass",
+      "edge": "E",
+      "to": "d7_gorge"
+    },
+    {
+      "from": "d7_gorge",
+      "edge": "S",
+      "to": "d7_shrine"
+    },
+    {
+      "from": "d7_gorge",
+      "edge": "E",
+      "to": "d7_deep"
+    },
+    {
+      "from": "d7_deep",
+      "edge": "E",
+      "to": "d7_end"
+    },
+    {
+      "from": "d8_hub",
+      "edge": "N",
+      "to": "d8_spokeN"
+    },
+    {
+      "from": "d8_hub",
+      "edge": "E",
+      "to": "d8_spokeE"
+    },
+    {
+      "from": "d8_hub",
+      "edge": "S",
+      "to": "d8_spokeS"
+    },
+    {
+      "from": "d8_hub",
+      "edge": "W",
+      "to": "d8_spokeW"
+    },
+    {
+      "from": "d8_spokeE",
+      "edge": "N",
+      "to": "d8_subBranch"
+    },
+    {
+      "from": "d1_entry",
+      "edge": "N",
+      "to": "surface_highlands_0"
+    },
+    {
+      "from": "surface_highlands_0",
+      "edge": "N",
+      "to": "surface_highlands_1"
+    },
+    {
+      "from": "surface_highlands_1",
+      "edge": "N",
+      "to": "surface_verdant_jungle_0"
+    },
+    {
+      "from": "surface_verdant_jungle_0",
+      "edge": "N",
+      "to": "surface_verdant_jungle_1"
+    },
+    {
+      "from": "surface_verdant_jungle_1",
+      "edge": "N",
+      "to": "surface_storm_coast_0"
+    },
+    {
+      "from": "surface_storm_coast_0",
+      "edge": "N",
+      "to": "surface_storm_coast_1"
+    },
+    {
+      "from": "surface_storm_coast_1",
+      "edge": "N",
+      "to": "surface_sunken_ruins_0"
+    },
+    {
+      "from": "surface_sunken_ruins_0",
+      "edge": "N",
+      "to": "surface_sunken_ruins_1"
+    },
+    {
+      "from": "surface_sunken_ruins_1",
+      "edge": "N",
+      "to": "surface_ashfields_0"
+    },
+    {
+      "from": "surface_ashfields_0",
+      "edge": "N",
+      "to": "surface_ashfields_1"
+    },
+    {
+      "kind": "portal",
+      "from": "d1_end",
+      "from_x": 3250,
+      "from_y": 3250,
+      "to": "d2_hub",
+      "to_x": 3250,
+      "to_y": 3250,
+      "guard": {
+        "creature_type": "Fungal Line",
+        "count": 1
+      }
+    },
+    {
+      "kind": "portal",
+      "from": "d2_subBranch",
+      "from_x": 3250,
+      "from_y": 3250,
+      "to": "d3_entry",
+      "to_x": 3250,
+      "to_y": 3250,
+      "guard": {
+        "creature_type": "Bonelord Line",
+        "count": 1
+      }
+    },
+    {
+      "kind": "portal",
+      "from": "d3_heart",
+      "from_x": 3250,
+      "from_y": 3250,
+      "to": "d4_entry",
+      "to_x": 3250,
+      "to_y": 3250,
+      "guard": {
+        "creature_type": "Ember Line",
+        "count": 1
+      }
+    },
+    {
+      "kind": "portal",
+      "from": "d4_end",
+      "from_x": 3250,
+      "from_y": 3250,
+      "to": "d5_hub",
+      "to_x": 3250,
+      "to_y": 3250,
+      "guard": {
+        "creature_type": "Rime Line",
+        "count": 1
+      }
+    },
+    {
+      "kind": "portal",
+      "from": "d5_subBranch",
+      "from_x": 3250,
+      "from_y": 3250,
+      "to": "d6_entry",
+      "to_x": 3250,
+      "to_y": 3250,
+      "guard": {
+        "creature_type": "Crystal Line",
+        "count": 1
+      }
+    },
+    {
+      "kind": "portal",
+      "from": "d6_heart",
+      "from_x": 3250,
+      "from_y": 3250,
+      "to": "d7_entry",
+      "to_x": 3250,
+      "to_y": 3250,
+      "guard": {
+        "creature_type": "Umbral Line",
+        "count": 1
+      }
+    },
+    {
+      "kind": "portal",
+      "from": "d7_end",
+      "from_x": 3250,
+      "from_y": 3250,
+      "to": "d8_hub",
+      "to_x": 3250,
+      "to_y": 3250,
+      "guard": {
+        "creature_type": "Void Line",
+        "count": 1
+      }
+    }
+  ]
+}
