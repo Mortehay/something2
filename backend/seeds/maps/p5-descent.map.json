@@ -58,7 +58,7 @@
       "is_entry": false,
       "level_band": [
         1,
-        5
+        6
       ],
       "density": "sparse"
     },
@@ -86,7 +86,7 @@
       "is_entry": false,
       "level_band": [
         1,
-        5
+        6
       ],
       "density": "sparse"
     },
@@ -114,7 +114,7 @@
       "is_entry": false,
       "level_band": [
         1,
-        5
+        6
       ],
       "density": "sparse"
     },
@@ -198,7 +198,7 @@
       "is_entry": false,
       "level_band": [
         1,
-        8
+        7
       ],
       "density": "sparse"
     },
@@ -263,7 +263,7 @@
       },
       "level_band": [
         8,
-        13
+        14
       ],
       "density": "sparse"
     },
@@ -291,9 +291,9 @@
       "is_entry": false,
       "level_band": [
         8,
-        13
+        14
       ],
-      "density": "sparse"
+      "density": "normal"
     },
     {
       "key": "d2_spokeE",
@@ -319,9 +319,9 @@
       "is_entry": false,
       "level_band": [
         8,
-        13
+        14
       ],
-      "density": "sparse"
+      "density": "normal"
     },
     {
       "key": "d2_spokeS",
@@ -347,7 +347,7 @@
       "is_entry": false,
       "level_band": [
         8,
-        13
+        14
       ],
       "density": "normal"
     },
@@ -375,7 +375,7 @@
       "is_entry": false,
       "level_band": [
         8,
-        13
+        14
       ],
       "density": "normal"
     },
@@ -430,8 +430,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        11,
-        21
+        10,
+        20
       ],
       "density": "normal"
     },
@@ -458,8 +458,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        11,
-        21
+        10,
+        20
       ],
       "density": "normal"
     },
@@ -486,8 +486,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        12,
-        22
+        11,
+        21
       ],
       "density": "normal"
     },
@@ -570,8 +570,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        13,
-        23
+        12,
+        22
       ],
       "density": "normal"
     },
@@ -598,8 +598,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        14,
-        24
+        11,
+        21
       ],
       "density": "normal"
     },
@@ -794,8 +794,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        18,
-        28
+        17,
+        27
       ],
       "density": "dense"
     },
@@ -890,7 +890,7 @@
         19,
         29
       ],
-      "density": "dense"
+      "density": "horde"
     },
     {
       "key": "d5_spokeE",
@@ -918,7 +918,7 @@
         19,
         29
       ],
-      "density": "dense"
+      "density": "horde"
     },
     {
       "key": "d5_spokeS",
@@ -1195,8 +1195,8 @@
       ],
       "is_entry": false,
       "level_band": [
-        30,
-        36
+        28,
+        34
       ],
       "density": "horde"
     },
@@ -1251,7 +1251,7 @@
       ],
       "is_entry": false,
       "level_band": [
-        39,
+        40,
         50
       ],
       "density": "swarm"
@@ -1279,7 +1279,7 @@
       ],
       "is_entry": false,
       "level_band": [
-        39,
+        40,
         50
       ],
       "density": "swarm"
@@ -1307,7 +1307,7 @@
       ],
       "is_entry": false,
       "level_band": [
-        39,
+        40,
         50
       ],
       "density": "swarm"
@@ -1632,7 +1632,7 @@
       "key": "surface_highlands_1",
       "name": "Highlands Frontier",
       "grid": [
-        20,
+        32,
         -2
       ],
       "seed": 6011,
@@ -1659,8 +1659,8 @@
       "key": "surface_verdant_jungle_0",
       "name": "Verdant Jungle Reach",
       "grid": [
-        20,
-        -3
+        44,
+        -1
       ],
       "seed": 6020,
       "width": 64,
@@ -1686,8 +1686,8 @@
       "key": "surface_verdant_jungle_1",
       "name": "Verdant Jungle Frontier",
       "grid": [
-        20,
-        -4
+        56,
+        -1
       ],
       "seed": 6031,
       "width": 64,
@@ -1713,8 +1713,8 @@
       "key": "surface_storm_coast_0",
       "name": "Storm Coast Reach",
       "grid": [
-        20,
-        -5
+        68,
+        -2
       ],
       "seed": 6040,
       "width": 64,
@@ -1740,8 +1740,8 @@
       "key": "surface_storm_coast_1",
       "name": "Storm Coast Frontier",
       "grid": [
-        20,
-        -6
+        80,
+        -1
       ],
       "seed": 6051,
       "width": 64,
@@ -1767,8 +1767,8 @@
       "key": "surface_sunken_ruins_0",
       "name": "Sunken Ruins Reach",
       "grid": [
-        20,
-        -7
+        92,
+        -1
       ],
       "seed": 6060,
       "width": 64,
@@ -1794,8 +1794,8 @@
       "key": "surface_sunken_ruins_1",
       "name": "Sunken Ruins Frontier",
       "grid": [
-        20,
-        -8
+        104,
+        -2
       ],
       "seed": 6071,
       "width": 64,
@@ -1821,8 +1821,8 @@
       "key": "surface_ashfields_0",
       "name": "Ashfields Reach",
       "grid": [
-        20,
-        -9
+        106,
+        0
       ],
       "seed": 6080,
       "width": 64,
@@ -1848,8 +1848,8 @@
       "key": "surface_ashfields_1",
       "name": "Ashfields Frontier",
       "grid": [
-        20,
-        -10
+        93,
+        -2
       ],
       "seed": 6091,
       "width": 64,
@@ -2129,47 +2129,47 @@
       "to": "surface_highlands_0"
     },
     {
-      "from": "surface_highlands_0",
+      "from": "d2_spokeN",
       "edge": "N",
       "to": "surface_highlands_1"
     },
     {
-      "from": "surface_highlands_1",
+      "from": "d3_entry",
       "edge": "N",
       "to": "surface_verdant_jungle_0"
     },
     {
-      "from": "surface_verdant_jungle_0",
+      "from": "d4_entry",
       "edge": "N",
       "to": "surface_verdant_jungle_1"
     },
     {
-      "from": "surface_verdant_jungle_1",
+      "from": "d5_spokeN",
       "edge": "N",
       "to": "surface_storm_coast_0"
     },
     {
-      "from": "surface_storm_coast_0",
+      "from": "d6_entry",
       "edge": "N",
       "to": "surface_storm_coast_1"
     },
     {
-      "from": "surface_storm_coast_1",
+      "from": "d7_entry",
       "edge": "N",
       "to": "surface_sunken_ruins_0"
     },
     {
-      "from": "surface_sunken_ruins_0",
+      "from": "d8_spokeN",
       "edge": "N",
       "to": "surface_sunken_ruins_1"
     },
     {
-      "from": "surface_sunken_ruins_1",
-      "edge": "N",
+      "from": "d8_spokeE",
+      "edge": "E",
       "to": "surface_ashfields_0"
     },
     {
-      "from": "surface_ashfields_0",
+      "from": "d7_cache",
       "edge": "N",
       "to": "surface_ashfields_1"
     },
