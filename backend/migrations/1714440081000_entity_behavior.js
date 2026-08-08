@@ -6,8 +6,11 @@ exports.shorthands = undefined;
 // with no FK, which is exactly why index.js has to guard entity-type renames
 // with a 409. P4 will author 288 creatures against these profiles; a profile
 // rename must not be able to orphan all of them. The default ON DELETE
-// (RESTRICT) is also wanted: a profile still in use cannot be deleted out from
-// under its creatures.
+// (NO ACTION, since this doesn't set one -- node-pg-migrate's default is NO
+// ACTION, not RESTRICT) is also wanted: a profile still in use cannot be
+// deleted out from under its creatures. NO ACTION and RESTRICT differ only
+// when a constraint is declared DEFERRABLE (this one is not), so within a
+// single non-deferred statement the effect here is the same as RESTRICT.
 //
 // behavior_id is NULLABLE and the backfill below is deliberately narrow. A
 // creature type with no profile resolves to the Line fallback in
