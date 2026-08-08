@@ -3,15 +3,24 @@
 // Pure hop-distance -> level_band/density derivation for P5 (SOMET-251).
 // hopFraction is hopDistance / maxHopDistance across the WHOLE assembled
 // graph (computed by the generator's BFS from the single entry, Task 4),
-// clamped to [0,1]. Mirrors map_spec_fixtures.test.js's own escalation
-// check -- floor and ceiling both non-decreasing by hop, deepest ceiling
-// >= 2x the entry's -- so a spec built from this module passes that check
-// by construction rather than by luck.
+// clamped to [0,1]. This module guarantees, for any single tierClamp:
+// floor and ceiling are both non-decreasing as hopFraction rises, and
+// neither ever exceeds the given tierClamp. It does NOT by itself
+// guarantee the deepest ceiling is >= 2x the entry's -- that emerges from
+// how Task 4's generator shares one hopFraction range across the whole
+// 8-dungeon chain (each dungeon only ever sees the narrow slice of [0,1]
+// it actually occupies), not from this curve evaluated at f=0/f=1 for an
+// arbitrary tierClamp in isolation.
 //
 // A branch/spur room (Task 3's skeletons mark these) must use its
 // ATTACHMENT point's hopFraction, not its own slightly-larger one -- the
 // generator is responsible for that substitution before calling this
 // function; this module only implements the curve.
+//
+// Precondition: tierClamp must have span (ceiling - floor) >= ~2 for the
+// positive-band-width guarantee to hold; a zero-span clamp degenerates to
+// [floor, floor] for every hopFraction. No current tierClamp in content.js
+// has zero span (narrowest is 16), so this isn't defended against below.
 function deriveLevelBand(hopFraction, tierClamp) {
   const [floor, ceiling] = tierClamp;
   const span = ceiling - floor;
