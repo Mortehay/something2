@@ -18,6 +18,14 @@ const CREATURE_SIZE = 48;
 const CREATURE_SPEED = 40;    // world px/s
 const REDIRECT_CHANCE = 0.02;
 
+// SOMET-254: AGGRO_RADIUS/LEASH_RADIUS/CONTACT_RANGE/CREATURE_ATTACK_COOLDOWN
+// are no longer read by any tick/behaviour-resolution code in this file --
+// the Line profile in creature_behaviors (services/creatureBehaviors.js's
+// DEFAULT_BEHAVIOR) is the live source of these values now. Kept exported
+// (do not remove) because several tests still import them to derive
+// world-space distances/timings without hardcoding the numbers a second
+// time; CREATURE_DAMAGE stays live below (GUARD_DEFAULT_BEHAVIOR and the
+// no-profile hostile path both still read it directly).
 const AGGRO_RADIUS = 400;            // px: acquire nearest player within this
 const LEASH_RADIUS = 800;            // px: drop a target beyond this
 const CONTACT_RANGE = 60;            // px: creature may hit its target within this
@@ -137,6 +145,14 @@ async function loadCreatureTypes(pool) {
     color: row.color,
     faction: row.faction || 'hostile',
     attackElement: row.attack_element || 'physical',
+    // SOMET-254: this resolved `behavior` is not read by any live production
+    // path -- the TYPE catalog built here (entry.creatureTypes) is stored on
+    // the world entry in server.js but nothing downstream reads it back off
+    // that entry; the actual live INSTANCES CreatureSim ticks come from
+    // server.js's separate per-chunk world_creatures query, which resolves
+    // its own behaviour via resolveInstanceBehavior. Kept (not deleted)
+    // because authority_creatures_combat.test.js pins this resolution as a
+    // correctness check on resolveBehavior/loadCreatureTypes in isolation.
     behavior: resolveBehavior(row),
     ...creatureMitigation(row),
   }));
@@ -333,7 +349,20 @@ function resolveInstanceBehavior(c) {
     };
   }
   if (c.behavior_name != null) return resolveBehavior(c);
-  return (c.faction || 'hostile') === 'guard' ? GUARD_DEFAULT_BEHAVIOR : { ...DEFAULT_BEHAVIOR };
+  // SOMET-254: spread-copy GUARD_DEFAULT_BEHAVIOR here rather than handing
+  // out the shared frozen module singleton directly -- matches the hostile
+  // branch's `{ ...DEFAULT_BEHAVIOR }` right beside it, so every unprofiled
+  // creature (guard or hostile) gets its own per-instance object regardless
+  // of faction. Nothing in this file writes through a resolved `bh` today,
+  // so this was not an active bug, but the two branches disagreeing on
+  // mutability posture was a trap for the next call site that does: a future
+  // write to a resolved guard behaviour would have thrown (the module
+  // singleton is frozen), while the same write on a resolved hostile
+  // behaviour would have silently succeeded and corrupted only that one
+  // creature's copy -- two different failure modes for what should be the
+  // same operation. `GUARD_DEFAULT_BEHAVIOR` itself stays frozen as the
+  // template; only the value handed to each creature is now a fresh copy.
+  return (c.faction || 'hostile') === 'guard' ? { ...GUARD_DEFAULT_BEHAVIOR } : { ...DEFAULT_BEHAVIOR };
 }
 
 // Deterministic: no rng. Among abilities whose cooldown has elapsed AND whose
@@ -470,7 +499,15 @@ class CreatureSim {
     for (const c of this.creatures.values()) {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (!active.has(CHUNK_KEY(cx, cy))) continue; // frozen (out of active set)
-      const bh = c.behavior || DEFAULT_BEHAVIOR;
+      // SOMET-254: `c.behavior` (not `|| DEFAULT_BEHAVIOR`) is enough here --
+      // every entry in `this.creatures` was populated by addCreatures, which
+      // always stamps `behavior: resolveInstanceBehavior(c)`, and every
+      // branch of resolveInstanceBehavior returns a real object, never a
+      // falsy value. Unlike computeAuras above (an exported function some
+      // tests call directly with hand-built fixtures that omit `.behavior`),
+      // this loop only ever sees addCreatures-shaped entries, so the
+      // fallback here could never fire.
+      const bh = c.behavior;
       // Per-slot decrement, arithmetically identical to the old single
       // `_attackCd` decrement -- only the number of timers changed.
       for (const [slot, cd] of c._abilityCd) {
@@ -531,7 +568,14 @@ class CreatureSim {
             // A guard's strike is always physical and always melee-shaped: a
             // guard never emits a shot (the shots array is built in the
             // hostile block only), so attackKind is not read here.
-            const dmg = (bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE)) * ability.damageMult * c._buff.damageMult;
+            //
+            // SOMET-254: `c.damage` (not `?? CREATURE_DAMAGE`) is enough --
+            // addCreatures above always normalizes it to a finite number
+            // (falling back to CREATURE_DAMAGE there) before `c` ever enters
+            // `this.creatures`, so every `c` reached by this tick loop
+            // already has a real number here; the inner `?? CREATURE_DAMAGE`
+            // could never fire.
+            const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
             applyDamageWithEffects(tgt, dmg, 'physical', effectiveMit(tgt), now);
             tgt.dirty = true;
             c._abilityCd.set(ability.slot, ability.attackCooldown);
@@ -653,7 +697,10 @@ class CreatureSim {
         // range gate is the same measurement the movement bands used.
         const ability = selectAbility(c, bh, dist);
         if (ability && canAct(c, now)) {
-          const dmg = (bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE)) * ability.damageMult * c._buff.damageMult;
+          // SOMET-254: see the guard block above -- `c.damage` is always
+          // already a finite number by the time a creature reaches the tick
+          // loop, so the inner `?? CREATURE_DAMAGE` fallback here was dead.
+          const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
           if (ability.attackKind === 'melee') {
             // tp is a PLAYER, not a creature: no aura ever buffs a player's
             // defence, so tp.mit is read as-is here, unlike the three

@@ -342,6 +342,74 @@ test('DELETE of an unreferenced profile returns 204 and removes the row', async 
   }
 });
 
+// SOMET-254: a duplicate name used to reach Postgres's unique constraint
+// (creature_behaviors_name_key) and come back as a raw 23505 500 instead of
+// the 409 biomes/worlds already give for the exact same class of conflict
+// via isUniqueViolation.
+test('POST /api/creature-behaviors rejects a duplicate name with 409, not a 500', async (t) => {
+  if (!dbReady(t, 'posts the same zz name twice and confirms the second is a clean 409')) return;
+  let admin;
+  try {
+    admin = await createTestAdmin(dbPool, 'post-dupename');
+
+    const first = await request(app).post('/api/creature-behaviors').set(authHeaderFor(admin)).send({
+      ...FIXTURE_BODY,
+      name: 'zzApiDupeName',
+    });
+    assert.equal(first.status, 201);
+
+    const second = await request(app).post('/api/creature-behaviors').set(authHeaderFor(admin)).send({
+      ...FIXTURE_BODY,
+      name: 'zzApiDupeName',
+    });
+
+    assert.equal(second.status, 409);
+    assert.match(second.body.error, /already exists/);
+
+    const rows = await dbPool.query('SELECT id FROM creature_behaviors WHERE name = $1', ['zzApiDupeName']);
+    assert.equal(rows.rowCount, 1, 'the duplicate must not have been inserted');
+  } finally {
+    await deleteBehaviorByName(dbPool, 'zzApiDupeName');
+    await dropUser(dbPool, admin && admin.id);
+  }
+});
+
+// SOMET-254: a non-numeric :id used to reach `WHERE id = $1` against an
+// integer column and come back as a raw cast-error 500 on both PUT and
+// DELETE.
+test('PUT /api/creature-behaviors/:id with a non-numeric id returns 400, not a 500', async (t) => {
+  if (!dbReady(t, 'PUTs to a non-numeric id and confirms it is a clean 400')) return;
+  let admin;
+  try {
+    admin = await createTestAdmin(dbPool, 'put-badid');
+
+    const res = await request(app).put('/api/creature-behaviors/not-a-number').set(authHeaderFor(admin)).send({
+      ...FIXTURE_BODY,
+      name: 'zzApiPutBadId',
+    });
+
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /id/);
+  } finally {
+    await dropUser(dbPool, admin && admin.id);
+  }
+});
+
+test('DELETE /api/creature-behaviors/:id with a non-numeric id returns 400, not a 500', async (t) => {
+  if (!dbReady(t, 'DELETEs a non-numeric id and confirms it is a clean 400')) return;
+  let admin;
+  try {
+    admin = await createTestAdmin(dbPool, 'delete-badid');
+
+    const res = await request(app).delete('/api/creature-behaviors/not-a-number').set(authHeaderFor(admin));
+
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /id/);
+  } finally {
+    await dropUser(dbPool, admin && admin.id);
+  }
+});
+
 // --- entity-types behavior_id / attack_element ------------------------------
 
 test('POST /api/entity-types accepts behavior_id and attack_element', async (t) => {
@@ -424,6 +492,205 @@ test('PUT /api/entity-types/:id updates behavior_id and attack_element', async (
   } finally {
     await deleteEntityTypeByName(dbPool, 'zzApiEntityTypeForPut');
     await deleteBehaviorByName(dbPool, 'zzApiEntityTypeBehavior2');
+    await dropUser(dbPool, admin && admin.id);
+  }
+});
+
+// SOMET-254: a PUT that omits behavior_id/attack_element must leave the
+// existing values alone (COALESCE against the row, same as `prompt` on this
+// same route) rather than falling back to `?? null`/`'physical'` -- the
+// pre-fix code silently demoted a creature to no profile and reset its
+// element on any partial write, even though the only real caller (the admin
+// form) always sends the whole object.
+test('PUT /api/entity-types/:id omitting behavior_id/attack_element leaves them unchanged', async (t) => {
+  if (!dbReady(t, 'creates a zz entity type with a profile+element, then PUTs a body missing both fields')) return;
+  let admin;
+  try {
+    admin = await createTestAdmin(dbPool, 'entitytype-put-partial');
+
+    const behavior = await request(app).post('/api/creature-behaviors').set(authHeaderFor(admin)).send({
+      ...FIXTURE_BODY,
+      name: 'zzApiEntityTypePartialBehavior',
+    });
+    assert.equal(behavior.status, 201);
+    const behaviorId = behavior.body.id;
+
+    const created = await request(app).post('/api/entity-types').set(authHeaderFor(admin)).send({
+      name: 'zzApiEntityTypeForPartialPut',
+      color: '#abc',
+      is_creature: false,
+      behavior_id: behaviorId,
+      attack_element: 'ice',
+    });
+    assert.equal(created.status, 201);
+    const entityId = created.body.id;
+
+    // No behavior_id, no attack_element in this body -- the partial write.
+    const res = await request(app).put(`/api/entity-types/${entityId}`).set(authHeaderFor(admin)).send({
+      name: 'zzApiEntityTypeForPartialPut',
+      color: '#def',
+      walkable: false,
+      spawn_tiles: [],
+      chance: 0.1,
+      is_creature: false,
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.behavior_id, behaviorId, 'behavior_id must survive an omitted field, not reset to null');
+    assert.equal(res.body.attack_element, 'ice', "attack_element must survive an omitted field, not reset to 'physical'");
+
+    const row = await dbPool.query('SELECT behavior_id, attack_element FROM entity_types WHERE id = $1', [entityId]);
+    assert.equal(row.rows[0].behavior_id, behaviorId);
+    assert.equal(row.rows[0].attack_element, 'ice');
+  } finally {
+    await deleteEntityTypeByName(dbPool, 'zzApiEntityTypeForPartialPut');
+    await deleteBehaviorByName(dbPool, 'zzApiEntityTypePartialBehavior');
+    await dropUser(dbPool, admin && admin.id);
+  }
+});
+
+// SOMET-254 follow-up (reviewer-found regression): the omission-safety fix
+// above (COALESCE against the existing row when behavior_id is missing)
+// went too far and started COALESCE-ing an *explicit* `behavior_id: null`
+// too, because `behavior_id ?? null` can't tell "omitted" apart from
+// "sent as null" -- both normalize to the same JS value. But
+// EntityTypesAdmin.jsx's "-- none (default Line behavior) --" dropdown
+// option legitimately PUTs behavior_id: null to clear an override back to
+// none. Pre-fix, that clear silently no-opped: 200 back to the admin, old
+// behavior_id still in the DB.
+test('PUT /api/entity-types/:id with an explicit behavior_id: null clears an existing behavior_id', async (t) => {
+  if (!dbReady(t, 'creates a zz entity type with a non-null behavior_id, then PUTs an explicit null over it')) return;
+  let admin;
+  try {
+    admin = await createTestAdmin(dbPool, 'entitytype-put-explicit-null');
+
+    const behavior = await request(app).post('/api/creature-behaviors').set(authHeaderFor(admin)).send({
+      ...FIXTURE_BODY,
+      name: 'zzApiEntityTypeExplicitNullBehavior',
+    });
+    assert.equal(behavior.status, 201);
+    const behaviorId = behavior.body.id;
+
+    const created = await request(app).post('/api/entity-types').set(authHeaderFor(admin)).send({
+      name: 'zzApiEntityTypeForExplicitNullPut',
+      color: '#abc',
+      is_creature: false,
+      behavior_id: behaviorId,
+      attack_element: 'ice',
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.behavior_id, behaviorId);
+    const entityId = created.body.id;
+
+    // behavior_id explicitly present and null -- the "clear to none" action,
+    // same as EntityTypesAdmin.jsx's none-option onChange handler sends.
+    const res = await request(app).put(`/api/entity-types/${entityId}`).set(authHeaderFor(admin)).send({
+      name: 'zzApiEntityTypeForExplicitNullPut',
+      color: '#abc',
+      walkable: false,
+      spawn_tiles: [],
+      chance: 0.1,
+      is_creature: false,
+      behavior_id: null,
+      attack_element: 'ice',
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.behavior_id, null, 'an explicit null in the response means the clear was honored');
+
+    const row = await dbPool.query('SELECT behavior_id FROM entity_types WHERE id = $1', [entityId]);
+    assert.equal(row.rows[0].behavior_id, null, 'the DB value must actually become null, not silently stay at the old behaviorId');
+  } finally {
+    await deleteEntityTypeByName(dbPool, 'zzApiEntityTypeForExplicitNullPut');
+    await deleteBehaviorByName(dbPool, 'zzApiEntityTypeExplicitNullBehavior');
+    await dropUser(dbPool, admin && admin.id);
+  }
+});
+
+// SOMET-254: attack_element and behavior_id were written through with no
+// validation at all on these two routes -- an unknown element used to reach
+// the entity_types_attack_element_check CHECK constraint and come back as a
+// raw 500; a non-numeric behavior_id used to reach the integer FK column the
+// same way.
+test('POST /api/entity-types rejects an unknown attack_element with 400, not a 500', async (t) => {
+  if (!dbReady(t, 'posts an entity type with an out-of-set attack_element')) return;
+  let admin;
+  try {
+    admin = await createTestAdmin(dbPool, 'entitytype-post-badelement');
+
+    const res = await request(app).post('/api/entity-types').set(authHeaderFor(admin)).send({
+      name: 'zzApiEntityTypeBadElement',
+      color: '#abc',
+      is_creature: false,
+      attack_element: 'poison',
+    });
+
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /attack_element/);
+
+    const row = await dbPool.query('SELECT 1 FROM entity_types WHERE name = $1', ['zzApiEntityTypeBadElement']);
+    assert.equal(row.rowCount, 0, 'a rejected POST must not create a row');
+  } finally {
+    await deleteEntityTypeByName(dbPool, 'zzApiEntityTypeBadElement');
+    await dropUser(dbPool, admin && admin.id);
+  }
+});
+
+test('POST /api/entity-types rejects a non-numeric behavior_id with 400, not a 500', async (t) => {
+  if (!dbReady(t, 'posts an entity type with a string behavior_id')) return;
+  let admin;
+  try {
+    admin = await createTestAdmin(dbPool, 'entitytype-post-badbehaviorid');
+
+    const res = await request(app).post('/api/entity-types').set(authHeaderFor(admin)).send({
+      name: 'zzApiEntityTypeBadBehaviorId',
+      color: '#abc',
+      is_creature: false,
+      behavior_id: 'not-a-number',
+    });
+
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /behavior_id/);
+
+    const row = await dbPool.query('SELECT 1 FROM entity_types WHERE name = $1', ['zzApiEntityTypeBadBehaviorId']);
+    assert.equal(row.rowCount, 0, 'a rejected POST must not create a row');
+  } finally {
+    await deleteEntityTypeByName(dbPool, 'zzApiEntityTypeBadBehaviorId');
+    await dropUser(dbPool, admin && admin.id);
+  }
+});
+
+test('PUT /api/entity-types/:id rejects an unknown attack_element with 400, not a 500', async (t) => {
+  if (!dbReady(t, 'creates a zz entity type then PUTs an out-of-set attack_element onto it')) return;
+  let admin;
+  try {
+    admin = await createTestAdmin(dbPool, 'entitytype-put-badelement');
+
+    const created = await request(app).post('/api/entity-types').set(authHeaderFor(admin)).send({
+      name: 'zzApiEntityTypePutBadElement',
+      color: '#abc',
+      is_creature: false,
+    });
+    assert.equal(created.status, 201);
+    const entityId = created.body.id;
+
+    const res = await request(app).put(`/api/entity-types/${entityId}`).set(authHeaderFor(admin)).send({
+      name: 'zzApiEntityTypePutBadElement',
+      color: '#abc',
+      walkable: false,
+      spawn_tiles: [],
+      chance: 0.1,
+      is_creature: false,
+      attack_element: 'poison',
+    });
+
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /attack_element/);
+
+    const row = await dbPool.query('SELECT attack_element FROM entity_types WHERE id = $1', [entityId]);
+    assert.equal(row.rows[0].attack_element, 'physical', 'a rejected PUT must not change the stored value');
+  } finally {
+    await deleteEntityTypeByName(dbPool, 'zzApiEntityTypePutBadElement');
     await dropUser(dbPool, admin && admin.id);
   }
 });

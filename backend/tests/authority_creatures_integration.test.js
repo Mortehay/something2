@@ -35,15 +35,25 @@ function fakePool() {
       // the bare "FROM entity_types WHERE is_creature". This pattern must be
       // kept in step with that SELECT -- a routing miss here doesn't fail
       // loudly, it silently falls through and hangs the test waiting on a
-      // creature that never loads. Row carries a full behaviour profile
-      // (literal values, not the resolver's own defaults) so the mapping is
-      // exercised against a realistic row, not one that takes the fallback
-      // for every field.
+      // creature that never loads.
+      //
+      // SOMET-254: this row's aggro_radius/leash_radius/chase_style/
+      // preferred_range/move_speed_mult/damage_override feed loadCreatureTypes'
+      // TYPE catalog (entry.creatureTypes), which nothing in this file reads --
+      // the live wolf's behaviour comes from the SEPARATE world_creatures row
+      // below via resolveInstanceBehavior instead. Kept genuinely distinct
+      // from DEFAULT_BEHAVIOR (not the old byte-identical 400/800/charge/0/
+      // 1/null) so a broken resolveBehavior mapping would show up here rather
+      // than silently agreeing with its own fallback -- resolveBehavior's
+      // actual field mapping is pinned in creature_behaviors_resolve.test.js
+      // and authority_creatures_combat.test.js's zzArcher case, and the LIVE
+      // wolf's own wiring is proven end-to-end in
+      // creature_mechanics_wiring.test.js.
       if (/FROM entity_types e[\s\S]*WHERE e\.is_creature/i.test(sql)) return { rows: [{
         name: 'Wolf', color: '#c0392b', hp: 10, attack_element: 'physical',
         behavior_name: 'Line', attack_kind: 'melee', attack_range: 60, attack_cooldown: 1,
-        projectile_speed: 0, projectile_radius: 0, aggro_radius: 400, leash_radius: 800,
-        chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
+        projectile_speed: 0, projectile_radius: 0, aggro_radius: 444, leash_radius: 777,
+        chase_style: 'skirmish', preferred_range: 111, move_speed_mult: 1.3, damage_override: 9,
       }] };
       if (/INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 }; // already materialized
       if (/FROM world_players WHERE/i.test(sql)) {
@@ -96,15 +106,16 @@ function fakePoolFlaky() {
       // the bare "FROM entity_types WHERE is_creature". This pattern must be
       // kept in step with that SELECT -- a routing miss here doesn't fail
       // loudly, it silently falls through and hangs the test waiting on a
-      // creature that never loads. Row carries a full behaviour profile
-      // (literal values, not the resolver's own defaults) so the mapping is
-      // exercised against a realistic row, not one that takes the fallback
-      // for every field.
+      // creature that never loads.
+      //
+      // SOMET-254: see fakePool's identical row above for why these values
+      // are deliberately distinct from DEFAULT_BEHAVIOR rather than
+      // byte-identical to it.
       if (/FROM entity_types e[\s\S]*WHERE e\.is_creature/i.test(sql)) return { rows: [{
         name: 'Wolf', color: '#c0392b', hp: 10, attack_element: 'physical',
         behavior_name: 'Line', attack_kind: 'melee', attack_range: 60, attack_cooldown: 1,
-        projectile_speed: 0, projectile_radius: 0, aggro_radius: 400, leash_radius: 800,
-        chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
+        projectile_speed: 0, projectile_radius: 0, aggro_radius: 444, leash_radius: 777,
+        chase_style: 'skirmish', preferred_range: 111, move_speed_mult: 1.3, damage_override: 9,
       }] };
       if (/INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 }; // already materialized
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] }; // user 1 → default center

@@ -93,6 +93,22 @@ async function seedOneBiome(db, b) {
 // non-optional two (name, chase_style) are the profile's identity and are
 // always written.
 //
+// The eleven COALESCE-guarded columns split into two groups against the
+// twelve rows in seeds/data/creatureBehaviors.js as they stand today:
+//   - aggro_radius, leash_radius, preferred_range, move_speed_mult are
+//     supplied by all twelve rows. The COALESCE here is nominal insurance
+//     for a future row that omits one -- against the current data it never
+//     falls back, so it has not yet had occasion to protect a hand-tuned
+//     admin value for these four.
+//   - damage_override, aura_radius, aura_damage_mult, aura_defense_mult,
+//     aura_speed_mult, gold_min, gold_max are genuinely exercised: only
+//     Guard sets damage_override (the other eleven rows fall back to
+//     whatever value is already in the column on reseed), only Champion
+//     sets the four aura_* fields, and only Guard omits gold_min/gold_max.
+//   Read "COALESCE-guarded" as "will protect an admin edit if this seed
+//   row is ever missing the field", not as "is currently protecting one" --
+//   only the second group's fallback is presently reached by a real row.
+//
 // SOMET-253 Task 3 dropped attack_kind/attack_range/attack_cooldown/
 // projectile_speed/projectile_radius from creature_behaviors -- the attack
 // now lives entirely on creature_abilities (seedOneAbility below). `b` (a

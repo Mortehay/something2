@@ -276,8 +276,12 @@ class World {
     // `this.now` is threaded through so contact damage reads the same clock
     // every other damage site does — a shocked player must take +25% from a
     // creature's bite too, not only from weapons.
+    //
+    // SOMET-254: CreatureSim.tick always ends `return { killed, shots };` --
+    // no early return, nothing else in its body returns -- so the `|| {
+    // killed: [], shots: [] }` fallback here could never fire. Removed.
     const { killed: killedIds, shots } = this.creatures.tick(
-      dt, activeKeys, [...this.players.values()], this.now) || { killed: [], shots: [] };
+      dt, activeKeys, [...this.players.values()], this.now);
 
     for (const s of shots) {
       if (this.projectiles.countByOwnerKind('creature') >= MAX_CREATURE_PROJECTILES) break;
