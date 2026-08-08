@@ -5,6 +5,7 @@ const path = require('node:path');
 const { validateMapSpec } = require('../seeds/mapSpec.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { HOSTILE_CREATURES } = require('../seeds/data/entityTypes.js');
+const { BESTIARY_P4_CREATURES } = require('../seeds/data/bestiaryP4.js');
 
 const MAPS_DIR = path.join(__dirname, '..', 'seeds', 'maps');
 const BIOMES = new Set(STARTER_BIOMES.map((b) => b.name));
@@ -16,7 +17,14 @@ const BIOMES = new Set(STARTER_BIOMES.map((b) => b.name));
 // for both. Village Guard is still excluded: it is a village gate defender
 // placed by insertVillageGuards, not a creature a world lists in
 // allowed_creature_types -- and HOSTILE_CREATURES leaves it out by design.
-const CREATURES = new Set(HOSTILE_CREATURES.map((c) => c.name));
+// HOSTILE_CREATURES (4 legacy) is unioned with BESTIARY_P4_CREATURES (288
+// generated, SOMET-250 Task 6), mirroring seed-catalogs.js's own
+// `[...HOSTILE_CREATURES, ...BESTIARY_P4_CREATURES]` union -- both lists are
+// live-seeded into the database, so both are valid ground truth for what a
+// map spec may reference as an allowed_creature_type or guard.creature_type.
+const CREATURES = new Set(
+  [...HOSTILE_CREATURES, ...BESTIARY_P4_CREATURES].map((c) => c.name)
+);
 
 const specFiles = () => fs.readdirSync(MAPS_DIR).filter((f) => f.endsWith('.map.json'));
 
