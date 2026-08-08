@@ -27,9 +27,9 @@ async function fetchVillages(pool, worldId) {
 // Two guards per village, standing on the interior tiles flanking the gate.
 // home_x/home_y is the post: the authority leashes a guard to it.
 // `db` is any queryable (the module-level pool, or a connected client mid-
-// transaction — village create/delete and the creature re-roll route all
-// pass their transaction's client so this participates in it (F-007 /
-// SOMET-187); regenerate isn't transactional and still passes the pool).
+// transaction — village create/delete, the creature re-roll route, and the
+// regenerate-terrain route (SOMET-252) all pass their transaction's client
+// so this participates in it, F-007 / SOMET-187).
 const GUARD_TYPE = 'Village Guard';
 async function insertVillageGuards(db, worldId, villages) {
   for (const v of villages) {
