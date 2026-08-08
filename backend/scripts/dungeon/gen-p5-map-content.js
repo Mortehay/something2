@@ -14,7 +14,19 @@ const WORLD_SIZE = 64;      // matches the 3 shipped examples
 const CHUNK_SIZE = 32;
 const PORTAL_TILE_PX = 3250; // world-pixel center of a 64x64 world, 100px/tile -- same convention the shipped specs use for entry_spawn
 const DUNGEON_GRID_SPACING = 12; // cells between each dungeon's local grid origin -- wider than any skeleton's own bounding box (max 5x3)
-const SURFACE_GRID_Y = 20;
+// The 10 surface worlds must be reachable from the spec's single is_entry
+// world -- validateMapSpec (backend/seeds/mapSpec.js) does a BFS over the
+// WHOLE spec's link graph and rejects any world it can't reach, so
+// "standalone, not chained to the dungeon" (the design doc's phrasing, about
+// narrative framing) still has to resolve to *some* physical link within
+// this one spec file. D1's entry room only uses its E edge (to 'pass'), so
+// its N edge is free; the surface ladder anchors there and runs north
+// (y < 0), well clear of every dungeon's y in {-1,0,1} row band, so it
+// cannot collide with any dungeon room's grid cell. This deliberately
+// contradicts the design doc's "grid layout" note (`y: 20`) in favor of the
+// validator's hard reachability requirement -- see task-5-report.md.
+const SURFACE_ANCHOR_X = 20;
+const SURFACE_ANCHOR_Y = -1;
 
 // A "{Line} {Rung}" name, exactly gen-p4-bestiary.js's convention -- every
 // one of the 288 P4 creatures is named this way.
@@ -79,27 +91,45 @@ function buildDungeon(dungeon, dungeonIndex, hopOffset) {
   return { worlds, links, entryKey: keyMap.get(skeleton.entryRoleKey), exitKey: keyMap.get(skeleton.exitRoleKey), roomCount: skeleton.rooms.length };
 }
 
+// worlds[] plus the CHAIN of ordinary N compass links that connects all 10
+// of them into one component, single-file up column SURFACE_ANCHOR_X. (A
+// two-column ladder was tried first, but D1's 'cache' branch room sits at
+// the dungeon's own grid [21,-1], one column right of the anchor -- a second
+// column there collides. Single-file up one column sidesteps every
+// dungeon's occupied cells, all of which sit at y in {-1,0,1}, entirely by
+// construction: nothing else in the spec ever uses SURFACE_ANCHOR_X at
+// y <= SURFACE_ANCHOR_Y.) This does not by itself reach the dungeon graph --
+// the caller adds the one link that grafts the chain's first world onto D1's
+// entry (see generateSpec).
 function buildSurfaceWorlds() {
   const worlds = [];
+  const links = [];
+  const flat = [];
   SURFACE_BIOMES.forEach((s, i) => {
-    for (let variant = 0; variant < 2; variant++) {
-      const key = `surface_${s.biome.toLowerCase().replace(/\s+/g, '_')}_${variant}`;
-      worlds.push({
-        key,
-        name: `${s.biome} ${variant === 0 ? 'Reach' : 'Frontier'}`,
-        grid: [20 + variant, SURFACE_GRID_Y + i],
-        seed: 6000 + i * 10 + variant,
-        width: WORLD_SIZE, height: WORLD_SIZE, chunk_size: CHUNK_SIZE,
-        biomes: [s.biome],
-        biome_cell: 16,
-        allowed_creature_types: [creatureName(s.line, 'Swarm'), creatureName(s.line, 'Skirmisher'), creatureName(s.line, 'Line')],
-        is_entry: false,
-        level_band: variant === 0 ? [1, 8] : [4, 12],
-        density: variant === 0 ? 'sparse' : 'normal',
-      });
-    }
+    for (let variant = 0; variant < 2; variant++) flat.push({ s, variant });
   });
-  return worlds;
+  flat.forEach(({ s, variant }, row) => {
+    const key = `surface_${s.biome.toLowerCase().replace(/\s+/g, '_')}_${variant}`;
+    worlds.push({
+      key,
+      name: `${s.biome} ${variant === 0 ? 'Reach' : 'Frontier'}`,
+      grid: [SURFACE_ANCHOR_X, SURFACE_ANCHOR_Y - row],
+      seed: 6000 + row * 10 + variant,
+      width: WORLD_SIZE, height: WORLD_SIZE, chunk_size: CHUNK_SIZE,
+      biomes: [s.biome],
+      biome_cell: 16,
+      allowed_creature_types: [creatureName(s.line, 'Swarm'), creatureName(s.line, 'Skirmisher'), creatureName(s.line, 'Line')],
+      is_entry: false,
+      level_band: variant === 0 ? [1, 8] : [4, 12],
+      density: variant === 0 ? 'sparse' : 'normal',
+    });
+    // Each next row is further NORTH (SURFACE_ANCHOR_Y - row decreases), so
+    // the link from the previous row down to this one is edge 'N' (EDGE_DELTA
+    // N = [0,-1] in mapSpec.js), not 'S'.
+    if (row > 0) links.push({ from: flat[row - 1].key, edge: 'N', to: key });
+    flat[row].key = key; // stash for the next iteration's link
+  });
+  return { worlds, links };
 }
 
 function generateSpec() {
@@ -108,6 +138,7 @@ function generateSpec() {
   const portalLinks = [];
   let hopCursor = 0;
   let prevExit = null;
+  let d1EntryKey = null;
 
   DUNGEONS.forEach((dungeon, i) => {
     const built = buildDungeon(dungeon, i, hopCursor);
@@ -127,6 +158,7 @@ function generateSpec() {
       const entryWorld = allWorlds.find((w) => w.key === built.entryKey);
       entryWorld.is_entry = true;
       entryWorld.entry_spawn = { x: PORTAL_TILE_PX, y: PORTAL_TILE_PX };
+      d1EntryKey = built.entryKey;
     }
     prevExit = built.exitKey;
     hopCursor += built.roomCount;
@@ -141,13 +173,21 @@ function generateSpec() {
     delete w.__bandHop; delete w.__globalHop;
   }
 
-  const surfaceWorlds = buildSurfaceWorlds();
+  const { worlds: surfaceWorlds, links: surfaceLinks } = buildSurfaceWorlds();
+  // Graft the surface ladder onto D1's entry room (free N edge -- 'entry'
+  // only uses E, to 'pass') so every surface world is reachable from the
+  // spec's single is_entry, as validateMapSpec's BFS requires. An ordinary
+  // compass link, not an 8th PORTAL: the surface ladder's anchor cell
+  // (SURFACE_ANCHOR_X, SURFACE_ANCHOR_Y) is grid-adjacent (N) to D1 entry by
+  // construction, and p5_gen_map_content.test.js already pins the portal
+  // count at exactly 7 (the 7 inter-dungeon jumps).
+  allLinks.push({ from: d1EntryKey, edge: 'N', to: surfaceWorlds[0].key });
 
   return {
     name: 'p5-descent',
     topology: 'chained-dungeons-plus-surface',
     worlds: [...allWorlds, ...surfaceWorlds],
-    links: [...allLinks, ...portalLinks],
+    links: [...allLinks, ...surfaceLinks, ...portalLinks],
   };
 }
 
