@@ -549,6 +549,64 @@ test('PUT /api/entity-types/:id omitting behavior_id/attack_element leaves them 
   }
 });
 
+// SOMET-254 follow-up (reviewer-found regression): the omission-safety fix
+// above (COALESCE against the existing row when behavior_id is missing)
+// went too far and started COALESCE-ing an *explicit* `behavior_id: null`
+// too, because `behavior_id ?? null` can't tell "omitted" apart from
+// "sent as null" -- both normalize to the same JS value. But
+// EntityTypesAdmin.jsx's "-- none (default Line behavior) --" dropdown
+// option legitimately PUTs behavior_id: null to clear an override back to
+// none. Pre-fix, that clear silently no-opped: 200 back to the admin, old
+// behavior_id still in the DB.
+test('PUT /api/entity-types/:id with an explicit behavior_id: null clears an existing behavior_id', async (t) => {
+  if (!dbReady(t, 'creates a zz entity type with a non-null behavior_id, then PUTs an explicit null over it')) return;
+  let admin;
+  try {
+    admin = await createTestAdmin(dbPool, 'entitytype-put-explicit-null');
+
+    const behavior = await request(app).post('/api/creature-behaviors').set(authHeaderFor(admin)).send({
+      ...FIXTURE_BODY,
+      name: 'zzApiEntityTypeExplicitNullBehavior',
+    });
+    assert.equal(behavior.status, 201);
+    const behaviorId = behavior.body.id;
+
+    const created = await request(app).post('/api/entity-types').set(authHeaderFor(admin)).send({
+      name: 'zzApiEntityTypeForExplicitNullPut',
+      color: '#abc',
+      is_creature: false,
+      behavior_id: behaviorId,
+      attack_element: 'ice',
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.behavior_id, behaviorId);
+    const entityId = created.body.id;
+
+    // behavior_id explicitly present and null -- the "clear to none" action,
+    // same as EntityTypesAdmin.jsx's none-option onChange handler sends.
+    const res = await request(app).put(`/api/entity-types/${entityId}`).set(authHeaderFor(admin)).send({
+      name: 'zzApiEntityTypeForExplicitNullPut',
+      color: '#abc',
+      walkable: false,
+      spawn_tiles: [],
+      chance: 0.1,
+      is_creature: false,
+      behavior_id: null,
+      attack_element: 'ice',
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.behavior_id, null, 'an explicit null in the response means the clear was honored');
+
+    const row = await dbPool.query('SELECT behavior_id FROM entity_types WHERE id = $1', [entityId]);
+    assert.equal(row.rows[0].behavior_id, null, 'the DB value must actually become null, not silently stay at the old behaviorId');
+  } finally {
+    await deleteEntityTypeByName(dbPool, 'zzApiEntityTypeForExplicitNullPut');
+    await deleteBehaviorByName(dbPool, 'zzApiEntityTypeExplicitNullBehavior');
+    await dropUser(dbPool, admin && admin.id);
+  }
+});
+
 // SOMET-254: attack_element and behavior_id were written through with no
 // validation at all on these two routes -- an unknown element used to reach
 // the entity_types_attack_element_check CHECK constraint and come back as a

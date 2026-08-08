@@ -466,6 +466,24 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     const fieldErr = entityTypeFieldError(req.body);
     if (fieldErr) return res.status(400).json({ error: fieldErr });
 
+    // SOMET-254 follow-up: `behavior_id ?? null` alone can't tell "field
+    // omitted from the request" (must COALESCE against the existing row,
+    // per the fix below) apart from "field explicitly sent as null" (must
+    // actually clear it) -- both normalize to the same JS value. But
+    // EntityTypesAdmin.jsx's "-- none (default Line behavior) --" option
+    // (line ~1258) legitimately submits behavior_id: null to clear an
+    // override back to none, and a `?? null` COALESCE silently discards
+    // that clear (200 OK, DB keeps the old value). `'in'` on the parsed
+    // JSON body is the reliable way to see a present-but-null key --
+    // JSON.parse never yields `undefined` for one, so this can't be
+    // spoofed by an absent key. attack_element does NOT get the same
+    // treatment: the column is NOT NULL with a CHECK constraint (migration
+    // 1714440081000) and the admin UI's Attack Element <select> has no
+    // "none" option -- it only ever submits one of ATTACK_ELEMENTS, so
+    // there is no legitimate clear-to-null action to preserve here, and an
+    // explicit null would just fail the NOT NULL constraint anyway.
+    const behaviorIdProvided = 'behavior_id' in req.body;
+
     // SOMET-185: worlds.allowed_creature_types and world_creatures.type
     // reference entity_types by NAME (no FK), so a free rename here silently
     // orphans them — a creature re-roll on an affected world then matches
@@ -508,10 +526,10 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         hp = $12, max_hp = $13, hp_regen_rate = $14, mana = $15, max_mana = $16, mana_regen_rate = $17,
         image = $18, display_width = $19, display_height = $20, render_mode = $21, is_creature = $22,
         prompt = COALESCE($23, prompt), place_order = $24,
-        behavior_id = COALESCE($25, entity_types.behavior_id),
+        behavior_id = CASE WHEN $27::boolean THEN $25 ELSE entity_types.behavior_id END,
         attack_element = COALESCE($26, entity_types.attack_element),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $27 RETURNING *`,
+      WHERE id = $28 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
@@ -524,8 +542,15 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         // `?? null`/`|| 'physical'`, so an omitted field passes NULL and
         // never reaches the fallback-to-default branch that used to silently
         // demote the creature's profile or reset its element on a partial
-        // write.
-        prompt ?? null, Number(place_order) || 0, behavior_id ?? null, attack_element ?? null, id
+        // write. behavior_id additionally needs $27 (behaviorIdProvided) in
+        // the CASE above so an *explicit* null (the "clear to none" action)
+        // isn't swallowed by the same COALESCE that protects an omitted one
+        // -- see the comment above entityTypeFieldError's call site.
+        // behaviorIdProvided sits before id, not after, so `id` stays the
+        // last element of this array -- entityTypes.test.js asserts
+        // `params[params.length - 1]` is the id on this exact route.
+        prompt ?? null, Number(place_order) || 0, behavior_id ?? null, attack_element ?? null,
+        behaviorIdProvided, id
       ]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
