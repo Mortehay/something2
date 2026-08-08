@@ -1968,28 +1968,72 @@ app.get('/api/world-graph', async (req, res) => {
 });
 
 app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
+  // client acquired inside the try, same hardening as POST
+  // /api/worlds/:id/creatures: pool.connect() can reject and Express 4.x
+  // does not catch an async handler's rejection.
+  let client = null;
   try {
     const { id } = req.params;
     const cur = await pool.query('SELECT id FROM worlds WHERE id = $1', [id]);
     if (cur.rows.length === 0) return res.status(404).json({ error: 'world not found' });
     const newSeed = Math.floor(Math.random() * 2 ** 31);
     await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [id]);
-    await pool.query('DELETE FROM world_creatures WHERE world_id = $1', [id]);
-    // Villages live in a separate table and survive a regenerate — without
-    // this, a regenerated world keeps its gated villages but loses their
-    // guards, since the wipe above has no village_id to spare them by.
-    await insertVillageGuards(pool, id, await fetchVillages(pool, id));
+
+    // F-007-style wipe-then-re-derive: the seed update, the repopulate pass
+    // (which owns its own non-guard delete) and the guard re-derivation below
+    // are dependent writes and must commit or fail together, exactly like
+    // POST /api/worlds/:id/creatures.
+    client = await pool.connect();
+    await client.query('BEGIN');
+    let world;
+    try {
+      const updated = await client.query(
+        'UPDATE worlds SET seed = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+        [newSeed, id],
+      );
+      world = updated.rows[0];
+
+      // Used to issue its own unconditional DELETE FROM world_creatures here,
+      // wiping village guards AND portal guards, then only ever re-inserting
+      // village guards -- so a regenerated world lost its portal guards for
+      // good (silently unblocking whatever dungeon entrance they were
+      // guarding, SOMET-243) and came back with zero hostile creatures
+      // (SOMET-252). Delegating to populateWorld makes this the SAME single
+      // population path POST /api/worlds/:id/creatures already uses
+      // (SOMET-246): its own delete excludes type = 'Village Guard' and
+      // blocks_portal_id IS NOT NULL rows, so both guard kinds survive by
+      // construction instead of a second predicate that could drift from it,
+      // and it refills the world per its density tier against the
+      // just-updated seed (creature placement validity depends on the same
+      // seed the terrain will render with).
+      if (isBoundedWorld(world)) {
+        await populateWorld(client, world, { rngSeed: newSeed });
+      }
+
+      // Villages live in a separate table and survive a regenerate — without
+      // this, a regenerated world keeps its gated villages but loses their
+      // guards, since populateWorld's delete has no village_id to spare them
+      // by. Re-derived the same way the re-roll route does: wipe and
+      // re-insert from the current village rows rather than trying to spare
+      // existing guard rows individually.
+      await client.query('DELETE FROM world_creatures WHERE world_id = $1 AND type = $2',
+        [id, GUARD_TYPE]);
+      await insertVillageGuards(client, id, await fetchVillages(client, id));
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    }
+
     worldPreviewCache.delete(id);
     clearOverviewCache(id);
-    const result = await pool.query(
-      'UPDATE worlds SET seed = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
-      [newSeed, id],
-    );
     const liveWarning = evictOrWarn(id);
-    res.json(liveWarning ? { ...result.rows[0], liveWarning } : result.rows[0]);
+    res.json(liveWarning ? { ...world, liveWarning } : world);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to regenerate world' });
+  } finally {
+    client?.release();
   }
 });
 
