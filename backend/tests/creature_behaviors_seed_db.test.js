@@ -15,14 +15,21 @@ test('creature_behaviors seeding', { skip: !url ? 'no database URL' : false }, a
     const b = r.rows[0];
     // Literals, deliberately: importing these from the seed file would make
     // the assertion compare the data to itself.
-    assert.equal(b.attack_kind, 'melee');
-    assert.equal(b.attack_range, 60);
-    assert.equal(b.attack_cooldown, 1);
     assert.equal(b.aggro_radius, 400);
     assert.equal(b.leash_radius, 800);
     assert.equal(b.chase_style, 'charge');
     assert.equal(b.move_speed_mult, 1);
     assert.equal(b.damage_override, null);
+
+    // SOMET-253 Task 3: the attack itself lives on creature_abilities now --
+    // the parent row's own attack_kind/attack_range/attack_cooldown columns
+    // are gone (migration 1714440084000).
+    const a = await pool.query(
+      'SELECT * FROM creature_abilities WHERE behavior_id = $1 AND slot = 1', [b.id]);
+    assert.equal(a.rowCount, 1);
+    assert.equal(a.rows[0].attack_kind, 'melee');
+    assert.equal(a.rows[0].attack_range, 60);
+    assert.equal(a.rows[0].attack_cooldown, 1);
   });
 
   await t.test('Guard carries today\'s guard constants exactly', async () => {
@@ -45,8 +52,8 @@ test('creature_behaviors seeding', { skip: !url ? 'no database URL' : false }, a
     await assert.rejects(
       () => pool.query(
         `INSERT INTO creature_behaviors
-           (name, attack_kind, attack_range, attack_cooldown, aggro_radius, leash_radius, chase_style)
-         VALUES ('zzbadstyle','melee',60,1,400,800,'teleport')`),
+           (name, aggro_radius, leash_radius, chase_style)
+         VALUES ('zzbadstyle',400,800,'teleport')`),
       /creature_behaviors_chase_style_check/,
     );
   });
@@ -55,17 +62,15 @@ test('creature_behaviors seeding', { skip: !url ? 'no database URL' : false }, a
     try {
       await pool.query(
         `INSERT INTO creature_behaviors
-           (name, attack_kind, attack_range, attack_cooldown, aggro_radius, leash_radius,
-            chase_style, damage_override)
-         VALUES ('zzTuned','melee',60,1,400,800,'charge',99)`);
+           (name, aggro_radius, leash_radius, chase_style, damage_override)
+         VALUES ('zzTuned',400,800,'charge',99)`);
       // The seed entry has no damage_override, so the hand-set 99 must survive.
       await seedOneBehavior(pool, {
-        name: 'zzTuned', attack_kind: 'melee', attack_range: 61, attack_cooldown: 1,
-        aggro_radius: 400, leash_radius: 800, chase_style: 'charge',
+        name: 'zzTuned', aggro_radius: 400, leash_radius: 810, chase_style: 'charge',
       });
       const r = await pool.query('SELECT * FROM creature_behaviors WHERE name = $1', ['zzTuned']);
       assert.equal(r.rows[0].damage_override, 99, 'omitted field must be preserved');
-      assert.equal(r.rows[0].attack_range, 61, 'specified field must be overwritten');
+      assert.equal(r.rows[0].leash_radius, 810, 'specified field must be overwritten');
     } finally {
       // By name, unconditionally.
       await pool.query('DELETE FROM creature_behaviors WHERE name = $1', ['zzTuned']);
@@ -94,8 +99,8 @@ test('creature_behaviors seeding', { skip: !url ? 'no database URL' : false }, a
     try {
       await pool.query(
         `INSERT INTO creature_behaviors
-           (name, attack_kind, attack_range, attack_cooldown, aggro_radius, leash_radius, chase_style)
-         VALUES ('zzInUse','melee',60,1,400,800,'charge')`);
+           (name, aggro_radius, leash_radius, chase_style)
+         VALUES ('zzInUse',400,800,'charge')`);
       // is_creature = false: the FK on behavior_id does not care whether the
       // row is a creature, and true would make this fixture visible to
       // creature_drops_db.test.js's "every creature type has a drop rule"

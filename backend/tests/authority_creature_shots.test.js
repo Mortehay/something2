@@ -7,13 +7,30 @@ function openMap() { return { isWalkable: () => true, speedAt: () => 1, chunkSiz
 function walledMap() { return { isWalkable: () => false, speedAt: () => 1, chunkSize: 8 }; }
 const noRedirect = () => 0.05;
 
+// SOMET-253: the attack half of a behaviour lives in `abilities` now, so an
+// override naming an attack field has to land on the ability rather than on
+// the behaviour. Partitioned by key here (instead of rewriting all eleven call
+// sites into two-argument form) so the scenarios below read exactly as they
+// did when the flat fields existed, and a future attack field added to the
+// ability shape only has to be listed once.
+const ABILITY_KEYS = new Set([
+  'slot', 'attackKind', 'attackRange', 'attackCooldown',
+  'projectileSpeed', 'projectileRadius', 'element', 'damageMult', 'knockback',
+]);
+
 function ranged(over = {}) {
-  return {
-    name: 'R', attackKind: 'ranged', attackRange: 340, attackCooldown: 1.8,
-    projectileSpeed: 520, projectileRadius: 6, aggroRadius: 460, leashRadius: 800,
-    chaseStyle: 'kite', preferredRange: 240, moveSpeedMult: 1, damageOverride: null,
-    ...over,
+  const ability = {
+    slot: 1, name: 'Shot', attackKind: 'ranged', attackRange: 340, attackCooldown: 1.8,
+    projectileSpeed: 520, projectileRadius: 6, element: null, damageMult: 1, knockback: 0,
   };
+  const bh = {
+    name: 'R', aggroRadius: 460, leashRadius: 800,
+    chaseStyle: 'kite', preferredRange: 240, moveSpeedMult: 1, damageOverride: null,
+  };
+  for (const [k, v] of Object.entries(over)) {
+    if (ABILITY_KEYS.has(k)) ability[k] = v; else bh[k] = v;
+  }
+  return { ...bh, abilities: [ability] };
 }
 
 function sim(bh, mapFn = openMap, element = 'physical') {
@@ -137,6 +154,31 @@ test('World.tickCreatures spawns a ranged creature\'s shot into its own Projecti
   assert.equal(p.remaining, 340, 'remaining must come from the profile\'s attackRange');
   assert.equal(p.element, 'physical');
   assert.equal(p.damage, 7);
+});
+
+// SOMET-253 Task 6 fix round: the knockback hop was reviewed by hand
+// (services/creatureBehaviors.js -> creatures.js's shot.knockback ->
+// world.js's synthetic weapon -> projectiles.js's spawn) but had no test of
+// its own -- every knockback test either drove CreatureSim.tick directly
+// (stopping short of world.js) or called ProjectileSim.spawn with a
+// hand-built weapon object (bypassing world.js entirely). A typo'd key at
+// EITHER hop (creatures.js's shots.push, or world.js's synthetic weapon
+// object) would leave every other assertion above green -- knockback isn't
+// load-bearing for speed/radius/range/element/damage, so nothing else here
+// would catch it. This drives the real path end to end and pins a
+// deliberately distinctive, non-zero, non-default value.
+test('World.tickCreatures threads the ability\'s own knockback onto the spawned projectile', () => {
+  const w = new World(worldMap());
+  w.addPlayer('u1', { x: 380, y: 92 });
+  w.creatures.addCreatures([{ id: 'c', type: 'R', x: 100, y: 100, hp: 100,
+    behavior: ranged({ knockback: 45 }), attackElement: 'physical', damage: 7 }]);
+  w.tickCreatures(0.1, active);
+  assert.equal(w.projectiles.count(), 1, 'the shot must have been spawned into world.projectiles');
+  const p = w.projectiles.projectiles[0];
+  // Literal 45, the ability's own knockback above -- not read back off the
+  // behaviour object, same rationale as every other field assertion in the
+  // test right above this one.
+  assert.equal(p.knockback, 45, 'knockback must survive creatures.js -> world.js -> projectiles.js unmangled');
 });
 
 test('MAX_CREATURE_PROJECTILES caps concurrent creature shots -- the excess is dropped, not queued', () => {

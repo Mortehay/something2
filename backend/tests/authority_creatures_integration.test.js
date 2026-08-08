@@ -54,7 +54,23 @@ function fakePool() {
       if (/FROM world_creatures/i.test(sql)) {
         // bbox load: return the wolf only for chunk (0,0) span [0,800).
         const xMin = params[1];
-        if (xMin === 0) return { rows: [{ id: 'wolf1', type: 'Wolf', x: 380, y: 380, hp: 10, facing: 'S', color: '#c0392b' }] };
+        // SOMET-253: the row carries behavior_name + the lateral join's
+        // `abilities` array, the shape the real per-chunk SELECT returns.
+        // Slot 1 is byte-identical to the old fallback (melee 60 / 1.0s) so
+        // this creature's movement and contact damage are unchanged; slot 2
+        // exists only so the array has something to sort and the instance has
+        // a second cooldown. They are listed slot 2 FIRST on purpose -- see
+        // the ability-shape test below.
+        if (xMin === 0) return { rows: [{
+          id: 'wolf1', type: 'Wolf', x: 380, y: 380, hp: 10, facing: 'S', color: '#c0392b',
+          behavior_name: 'Line', chase_style: 'charge',
+          abilities: [
+            { slot: 2, name: 'Slam', attack_kind: 'melee', attack_range: 90, attack_cooldown: 1.2,
+              projectile_speed: 0, projectile_radius: 0, element: 'physical', damage_mult: 1.4, knockback: 120 },
+            { slot: 1, name: 'Line', attack_kind: 'melee', attack_range: 60, attack_cooldown: 1,
+              projectile_speed: 0, projectile_radius: 0, element: null, damage_mult: 1, knockback: 0 },
+          ],
+        }] };
         return { rows: [] };
       }
       if (/UPDATE world_creatures/i.test(sql)) { updates.push(params); return { rows: [] }; }
@@ -223,12 +239,79 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/le
     'must LEFT JOIN creature_behaviors, not INNER — an INNER JOIN would make a creature whose '
     + 'type has no assigned profile vanish from the world entirely (it would just never spawn) '
     + 'instead of falling back through resolveInstanceBehavior');
-  for (const col of ['attack_element', 'attack_kind', 'attack_range', 'attack_cooldown',
-                     'projectile_speed', 'projectile_radius', 'aggro_radius', 'leash_radius',
+  // SOMET-253: attack_kind/attack_range/attack_cooldown/projectile_speed/
+  // projectile_radius are deliberately NOT checked here any more -- Task 3
+  // dropped them from the parent row entirely, and the ability-aggregate
+  // loop below (checking the SAME names, produced by the LATERAL join's
+  // json_build_object) is what actually guards them now.
+  for (const col of ['attack_element', 'aggro_radius', 'leash_radius',
                      'chase_style', 'preferred_range', 'move_speed_mult', 'damage_override']) {
     assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
       `the world_creatures load must SELECT ${col} — without it a creature's profile is inert in the running game`);
   }
+  // SOMET-253 Task 4: the pack-leader aura and per-rung gold fallback. Task 5
+  // has no consumer yet, but a column missing here now means Task 5's join
+  // is silently a no-op with nothing appearing broken -- same class of trap
+  // as every column above.
+  for (const col of ['aura_radius', 'aura_damage_mult', 'aura_defense_mult', 'aura_speed_mult']) {
+    assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
+      `the world_creatures load must SELECT ${col} — without it Task 5's aura consumer sees no leaders`);
+  }
+  // gold_min/gold_max are checked as the exact aliased form: resolveBehavior
+  // (shared with loadCreatureTypes, where e.gold_min/e.gold_max ALSO exist)
+  // reads behavior_gold_min/behavior_gold_max unconditionally, so this query
+  // must alias identically even though it has no colliding et.gold_min of
+  // its own to protect against.
+  assert.match(sel, /b\.gold_min\s+AS\s+behavior_gold_min/i,
+    'the world_creatures load must SELECT b.gold_min AS behavior_gold_min');
+  assert.match(sel, /b\.gold_max\s+AS\s+behavior_gold_max/i,
+    'the world_creatures load must SELECT b.gold_max AS behavior_gold_max');
+  // SOMET-253: exactly the same trap, one table further in. The abilities
+  // catalog is what the tick now reads for range, cooldown, kind, element and
+  // damage multiplier; loadCreatureTypes carries the lateral join (its own
+  // guard test pins that), but THIS is the query that feeds live instances.
+  // Join it in only there and every real creature falls back to the single
+  // default melee ability while the entire suite stays green -- the exact
+  // failure SOMET-249 shipped one round of.
+  for (const col of ['creature_abilities', 'abilities', 'damage_mult', 'knockback']) {
+    assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
+      `the world_creatures load must SELECT ${col} — without it every live creature resolves `
+      + 'to the default ability and the abilities catalog is inert in the running game');
+  }
+  assert.match(sel, /ORDER BY\s+a\.slot/i,
+    'the ability aggregate must ORDER BY a.slot — slot order IS priority order, and an '
+    + 'unordered json_agg makes a creature\'s move priority depend on physical row order');
+  ws.close(); handle.close(); server.close();
+});
+
+// The guard above proves the SQL TEXT names the columns; this proves the
+// values actually arrive on the live creature. A join present but returning
+// the wrong shape (e.g. an aggregate the resolver cannot read) satisfies every
+// textual check while leaving the instance on the default ability.
+test('a live creature instance carries the abilities its chunk load returned', async () => {
+  const { url, handle, server } = await bootWith(fakePool());
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+  await nextMsg(ws, 'creatures');
+
+  const wolf = handle.worlds.get('w1').world.creatures.all().find((c) => c.id === 'wolf1');
+  assert.ok(wolf, 'the wolf must have been loaded into the sim');
+  // Literals from fakePool's row, not read back off the behaviour object.
+  assert.equal(wolf.behavior.abilities.length, 2);
+  // fakePool deliberately returns them slot 2 first: the live SQL's
+  // `ORDER BY a.slot` is stubbed away here, so this is what proves
+  // resolveAbilities' own sort is live on the INSTANCE path too. An unsorted
+  // array silently reprioritises every multi-ability creature.
+  assert.deepEqual(wolf.behavior.abilities.map((a) => a.slot), [1, 2]);
+  assert.equal(wolf.behavior.abilities[0].attackRange, 60);
+  assert.equal(wolf.behavior.abilities[0].attackKind, 'melee');
+  assert.equal(wolf.behavior.abilities[1].attackRange, 90);
+  assert.equal(wolf.behavior.abilities[1].damageMult, 1.4);
+  // Per-slot cooldown map, not a single scalar: two abilities recover
+  // independently.
+  assert.ok(wolf._abilityCd instanceof Map);
   ws.close(); handle.close(); server.close();
 });
 

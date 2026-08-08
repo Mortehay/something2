@@ -7,7 +7,8 @@ const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc, hasLineOfSight } = require('./weapons');
 const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
 const { applyElementEffect, activeEffectKeys, canAct } = require('./effects');
-const { resolveBehavior, DEFAULT_BEHAVIOR } = require('../services/creatureBehaviors');
+const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
+const { shoveAwayFrom } = require('./knockback');
 
 const DIRS = [
   [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1],
@@ -61,6 +62,37 @@ function creatureMitigation(row) {
   };
 }
 
+// Abilities as one JSON array per creature, rather than a second round-trip
+// or a row-multiplying join. ORDER BY a.slot inside the aggregate is
+// load-bearing: slot order IS priority order, and json_agg over an unordered
+// subquery would make a creature's move priority depend on physical row
+// order. COALESCE covers a behaviour with no ability rows (json_agg of an
+// empty set is NULL, not '[]').
+//
+// Written ONCE and used by BOTH creature-loading paths -- loadCreatureTypes
+// below (the TYPE catalog) and server.js's per-chunk world_creatures SELECT
+// (live INSTANCES). Two inline copies is how SOMET-249 nearly shipped its
+// whole catalog inert with a fully green suite: every test builds creatures
+// directly, so neither query is exercised by anything but its own guard test.
+// Both aliases the fragment depends on -- the behaviour join being `b` -- are
+// already true of both queries.
+//
+// The rationale stays OUT here as a JS comment rather than inside the
+// template literal: both guard tests scan the live SQL TEXT for column names,
+// and a name appearing only in a SQL comment satisfies the guard by itself.
+const ABILITIES_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(json_agg(
+             json_build_object(
+               'slot', a.slot, 'name', a.name, 'attack_kind', a.attack_kind,
+               'attack_range', a.attack_range, 'attack_cooldown', a.attack_cooldown,
+               'projectile_speed', a.projectile_speed, 'projectile_radius', a.projectile_radius,
+               'element', a.element, 'damage_mult', a.damage_mult, 'knockback', a.knockback
+             ) ORDER BY a.slot
+           ), '[]'::json) AS abilities
+    FROM creature_abilities a WHERE a.behavior_id = b.id
+  ) ab ON true`;
+
 // Load the creature entity types. Named + exported (rather than inlined in
 // server.js) so a guard test can assert the SELECT names every column the
 // mapping consumes: a mapped column missing from the SELECT loads as
@@ -70,15 +102,33 @@ async function loadCreatureTypes(pool) {
   // without a profile must still load, resolving to the Line fallback. An
   // INNER JOIN would make a creature vanish from the catalog entirely, which
   // fails silently -- it would simply never spawn.
+  //
+  // `ab.abilities` is the attack half of the profile as of SOMET-253 -- drop
+  // it and every creature type resolves to the single default ability, i.e.
+  // the whole abilities catalog goes inert with nothing appearing broken.
+  // Task 3 dropped the parent row's own attack_kind/attack_range/
+  // attack_cooldown/projectile_speed/projectile_radius columns entirely --
+  // creature_abilities is the only place the attack lives now.
+  //
+  // SOMET-253 Task 4: b.gold_min/b.gold_max are aliased AS behavior_gold_min/
+  // behavior_gold_max, unlike every other b.* column here, because this row
+  // ALSO carries e.gold_min/e.gold_max (the entity type's own range, used by
+  // creatureGold below) -- an unaliased pair would collide into a single
+  // "gold_min" key with the later column silently winning, corrupting
+  // creatureGold with the per-rung fallback instead of the per-creature
+  // value. b.aura_* columns have no such collision and stay unaliased, same
+  // as aggro_radius/leash_radius/etc above.
   const r = await pool.query(
     `SELECT e.id, e.name, e.color, e.hp, e.defense, e.resistances, e.faction,
-            e.gold_min, e.gold_max, e.attack_element,
-            b.name AS behavior_name, b.attack_kind, b.attack_range,
-            b.attack_cooldown, b.projectile_speed, b.projectile_radius,
+            e.gold_min, e.gold_max, e.attack_element, e.behavior_id,
+            b.name AS behavior_name,
             b.aggro_radius, b.leash_radius, b.chase_style, b.preferred_range,
-            b.move_speed_mult, b.damage_override
+            b.move_speed_mult, b.damage_override,
+            b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
+            b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
+            ab.abilities
      FROM entity_types e
-     LEFT JOIN creature_behaviors b ON b.id = e.behavior_id
+     LEFT JOIN creature_behaviors b ON b.id = e.behavior_id${ABILITIES_LATERAL}
      WHERE e.is_creature = true ORDER BY e.id ASC`,
   );
   const creatureTypes = r.rows.map((row) => ({
@@ -97,12 +147,33 @@ async function loadCreatureTypes(pool) {
     min: Number(row.gold_min) || 0,
     max: Number(row.gold_max) || 0,
   }]));
+  // Per-rung gold FALLBACK, by creature type name, from the behaviour's own
+  // gold_min/gold_max (aliased behavior_gold_min/behavior_gold_max above --
+  // see the SELECT's comment for why the alias is load-bearing). loot.js's
+  // spawnDrops picks this only when creatureGold's own range has max <= 0
+  // (SOMET-253 Task 7) -- a creature with no gold range of its own still
+  // pays out at its rung's rate, which is what lets P4 skip per-creature gold
+  // authoring for all 288 rows.
+  const behaviorGold = new Map(r.rows.map((row) => [row.name, {
+    min: Number(row.behavior_gold_min) || 0,
+    max: Number(row.behavior_gold_max) || 0,
+  }]));
+  // Per-rung DROP-TABLE lookup, by creature type name -> behavior_id (NOT the
+  // drop rows themselves -- those live in `behavior_drops` and are queried
+  // live, at kill time, by loot.js's spawnDrops, the same way creatureTypeIds
+  // is used to query creature_drops). A creature with no assigned profile
+  // (behavior_id NULL) maps to null here, and spawnDrops skips the rung query
+  // entirely for it -- same "unknown/absent -> no drops" posture as an
+  // entity_type name missing from creatureTypeIds.
+  const behaviorDrops = new Map(r.rows.map((row) => [row.name, row.behavior_id]));
   // creatureTypes/creatureTypeIds stay COMPLETE (guards included): drops and
   // name→id lookups still need to see guards. The wild-spawn exclusion of
   // guard-faction types lives at the one place that still rolls a wild-spawn
   // pool -- worldPopulation.js's own `hostileTypes` filter -- not here; this
   // function no longer has a wild-spawn caller of its own (SOMET-246).
-  return { creatureTypes, creatureTypeIds, creatureGold };
+  return {
+    creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
+  };
 }
 
 function center(o) { return { x: o.x + o.width / 2, y: o.y + o.height / 2 }; }
@@ -141,6 +212,73 @@ function movedWith(map, c, vx, vy, dt, mult) {
   return resolveMove(map, { ...c, speed: c.speed * mult }, vx, vy, dt);
 }
 
+// Pack-leader auras (SOMET-253 Task 5). Recomputed from scratch every tick and
+// never persisted: a leader's death removes its buff on the next tick with no
+// cleanup path, so the failure mode where a buff outlives its source cannot
+// occur.
+//
+// NON-STACKING: the strongest single value wins per stat. Two overlapping
+// Champions must not compound into a 1.5625x damage pack -- that is the
+// difference between a hard fight and an unwinnable one.
+//
+// A leader does not buff itself.
+//
+// O(leaders x creatures). Leaders are rare and MAX_WORLD_CREATURES bounds the
+// inner term, so this stays cheap without an index.
+function computeAuras(creatures) {
+  const buffs = new Map();
+  const leaders = [];
+  for (const c of creatures) {
+    const bh = c.behavior || DEFAULT_BEHAVIOR;
+    if (bh.auraRadius > 0 && c.hp > 0) leaders.push({ c, bh });
+  }
+  if (leaders.length === 0) return buffs;
+  for (const { c: leader, bh } of leaders) {
+    const lc = center(leader);
+    const r2 = bh.auraRadius * bh.auraRadius;
+    for (const other of creatures) {
+      if (other === leader || other.hp <= 0) continue;
+      if (other.faction !== leader.faction) continue;
+      const oc = center(other);
+      if (dist2(lc.x, lc.y, oc.x, oc.y) > r2) continue;
+      const cur = buffs.get(other.id);
+      if (!cur) {
+        buffs.set(other.id, {
+          damageMult: bh.auraDamageMult,
+          defenseMult: bh.auraDefenseMult,
+          speedMult: bh.auraSpeedMult,
+        });
+      } else {
+        // Math.max, never multiplication -- this line IS the non-stacking rule.
+        cur.damageMult = Math.max(cur.damageMult, bh.auraDamageMult);
+        cur.defenseMult = Math.max(cur.defenseMult, bh.auraDefenseMult);
+        cur.speedMult = Math.max(cur.speedMult, bh.auraSpeedMult);
+      }
+    }
+  }
+  return buffs;
+}
+
+// The neutral buff every creature gets when no leader's aura reaches it.
+// Frozen and shared (never cloned per-creature) since it is only ever read,
+// never written -- `c._buff = buffs.get(c.id) || NO_BUFF` in tick() below.
+const NO_BUFF = Object.freeze({ damageMult: 1, defenseMult: 1, speedMult: 1 });
+
+// Aura-buffed defense at the use site, following movedWith's precedent above:
+// never mutate target.mit itself, compute the buffed value where damage is
+// applied. A small helper keeps the four damage-taken call sites (the guard
+// branch's target, applyAttack, applyMeleeArc, damageCreatureById) from each
+// rebuilding `{ defense, resistances }` by hand and drifting apart.
+// `target._buff` may be unset (a creature attacked before its first tick())
+// -- NO_BUFF covers that the same way `c.mit || NO_MITIGATION` already covers
+// a creature with no mitigation at all.
+function effectiveMit(target) {
+  const mit = target.mit || NO_MITIGATION;
+  const mult = (target._buff || NO_BUFF).defenseMult;
+  if (mult === 1) return mit;
+  return { defense: mit.defense * mult, resistances: mit.resistances };
+}
+
 // The single place addCreatures decides an instance's behaviour, so every
 // caller -- server.js's real per-chunk spawn loader AND every hand-built test
 // fixture -- goes through the same rule instead of each guessing at a
@@ -173,10 +311,71 @@ function movedWith(map, c, vx, vy, dt, mult) {
 //     than blindly to Line: `behavior_name` is the exact alias resolveBehavior
 //     reads, so this is the one column whose absence proves "no profile",
 //     matching the comment on GUARD_DEFAULT_BEHAVIOR above.
+//
+// The abilities array gets the same treatment as the movement fields in case
+// 1, and for the same reason: a hand-built ability missing `attackCooldown`
+// would stamp `undefined` into _abilityCd, `undefined > 0` is false, and the
+// creature attacks every single tick forever. Each supplied ability is
+// completed from DEFAULT_ABILITY and the array is slot-sorted, mirroring
+// resolveAbilities (which cannot be reused here: it reads snake_case DB keys,
+// while a `.behavior` object is already camelCase).
+function completeAbilities(list) {
+  if (!Array.isArray(list) || list.length === 0) return DEFAULT_BEHAVIOR.abilities;
+  return list.map((a) => ({ ...DEFAULT_ABILITY, ...a })).sort((x, y) => x.slot - y.slot);
+}
+
 function resolveInstanceBehavior(c) {
-  if (c.behavior) return { ...DEFAULT_BEHAVIOR, ...c.behavior };
+  if (c.behavior) {
+    return {
+      ...DEFAULT_BEHAVIOR,
+      ...c.behavior,
+      abilities: completeAbilities(c.behavior.abilities),
+    };
+  }
   if (c.behavior_name != null) return resolveBehavior(c);
   return (c.faction || 'hostile') === 'guard' ? GUARD_DEFAULT_BEHAVIOR : { ...DEFAULT_BEHAVIOR };
+}
+
+// Deterministic: no rng. Among abilities whose cooldown has elapsed AND whose
+// range covers `dist`, the LOWEST slot wins. Returns null when nothing
+// qualifies -- the creature then fires nothing rather than falling back to
+// slot 1, which would let an out-of-range creature hit from anywhere.
+//
+// `bh.abilities` is already slot-sorted (by resolveAbilities for a DB row, by
+// completeAbilities for a hand-built one), so the first match IS the lowest
+// slot.
+//
+// Cooldowns live on the INSTANCE (c._abilityCd), never on the shared
+// behaviour object: one behaviour object is handed to every creature of a
+// type, so a cooldown stored there would make one wolf's bite silence the
+// whole pack.
+function selectAbility(c, bh, dist) {
+  for (const a of bh.abilities) {
+    if ((c._abilityCd.get(a.slot) || 0) > 0) continue;
+    if (dist > a.attackRange) continue;
+    return a;
+  }
+  return null;
+}
+
+// The farthest an ability reaches, ignoring cooldowns. Used by `kite` for the
+// outer edge of its stand-and-shoot band, which is a property of the
+// creature's REPERTOIRE and not of which slot is ready this tick -- gating it
+// on readiness would make a kiter walk forward the instant it fires and back
+// off again the instant it recovers, the exact oscillation the middle band
+// exists to prevent. With one ability this equals that ability's range, which
+// is what the golden trace pins.
+function maxAbilityRange(bh) {
+  let max = 0;
+  for (const a of bh.abilities) if (a.attackRange > max) max = a.attackRange;
+  return max;
+}
+
+// True when ANY ability is off cooldown. `skirmish` retreats while its attack
+// is recovering; with one ability this is identical to the old `_attackCd > 0`
+// test, which is what keeps the golden trace green.
+function anyAbilityReady(c, bh) {
+  return bh.abilities.some((a) => (c._abilityCd.get(a.slot) || 0) <= 0);
 }
 
 // Nearest DIRS index for a movement vector's signs → facing.
@@ -226,7 +425,11 @@ class CreatureSim {
         // c.attackElement covers an already-shaped instance; c.attack_element
         // is the raw column name server.js's SELECT aliases it as (et.attack_element).
         attackElement: c.attackElement || c.attack_element || 'physical',
-        _target: null, _targetKind: null, mode: 'roam', _attackCd: 0,
+        _target: null, _targetKind: null, mode: 'roam',
+        // Per-slot cooldown, per INSTANCE. An absent key means "ready" (the
+        // same thing the old scalar `_attackCd: 0` meant), so a creature that
+        // has never attacked can attack on its first tick.
+        _abilityCd: new Map(),
       });
     }
   }
@@ -234,6 +437,11 @@ class CreatureSim {
   has(id) { return this.creatures.has(id); }
   count() { return this.creatures.size; }
   all() { return [...this.creatures.values()]; }
+  // SOMET-253 Task 9: world.js's melee branch needs the creature instance
+  // itself (x/y/width/height) to shove a survivor via shoveAwayFrom below --
+  // `all()` would work but forces a full-map copy per swing, and `has()`
+  // alone can't hand back the object. Named `get` to match the Map it wraps.
+  get(id) { return this.creatures.get(id); }
 
   // `now` is the world clock, threaded in for the same reason the attack
   // resolvers take it: damage reads the target's live status effects (shock's
@@ -247,11 +455,27 @@ class CreatureSim {
     // its own ProjectileSim so CreatureSim never depends on that module.
     const shots = [];
     const all = [...this.creatures.values()];
+    // Computed once per tick over the whole set, not per creature: an aura is
+    // a property of the field, and recomputing it inside the loop would let a
+    // creature that moved earlier this tick buff differently than one that
+    // has not moved yet.
+    const buffs = computeAuras(all);
+    // Every creature gets a fresh `_buff` here, including one whose chunk is
+    // outside the active set and will be skipped by the loop below --
+    // otherwise it would keep a stale buff from whenever it was last active.
+    // The buff lives on the instance (rather than a local var) because it is
+    // read from OUTSIDE this loop too: another creature's attack and a
+    // projectile collision both need a target's defence buff.
+    for (const c of all) c._buff = buffs.get(c.id) || NO_BUFF;
     for (const c of this.creatures.values()) {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (!active.has(CHUNK_KEY(cx, cy))) continue; // frozen (out of active set)
       const bh = c.behavior || DEFAULT_BEHAVIOR;
-      if (c._attackCd > 0) c._attackCd = Math.max(0, c._attackCd - dt);
+      // Per-slot decrement, arithmetically identical to the old single
+      // `_attackCd` decrement -- only the number of timers changed.
+      for (const [slot, cd] of c._abilityCd) {
+        if (cd > 0) c._abilityCd.set(slot, Math.max(0, cd - dt));
+      }
 
       const cc = center(c);
 
@@ -290,7 +514,7 @@ class CreatureSim {
           c.mode = 'chase';
           const tc = center(tgt);
           const vx = tc.x - cc.x, vy = tc.y - cc.y;
-          const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult);
+          const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult * c._buff.speedMult);
           // Leash clamp: a step that would leave the post's radius is refused.
           if ((r.x !== c.x || r.y !== c.y)
               && withinLeash(r.x + c.width / 2, r.y + c.height / 2, c.home, bh.leashRadius)) {
@@ -298,13 +522,31 @@ class CreatureSim {
             const f = facingFor(vx, vy); if (f) c.facing = f;
             c.dirty = true;
           }
-          if (c._attackCd <= 0 && canAct(c, now)
-              && dist2(cc.x, cc.y, tc.x, tc.y) <= bh.attackRange * bh.attackRange) {
-            applyDamageWithEffects(tgt, bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE), 'physical', tgt.mit || NO_MITIGATION, now);
+          // `cc` is the PRE-move centre, deliberately reused here even though
+          // the leash-clamped step above may have just moved the guard --
+          // recomputing it changes the range gate against the frozen golden
+          // trace. Same rule as the hostile block below.
+          const ability = selectAbility(c, bh, Math.hypot(tc.x - cc.x, tc.y - cc.y));
+          if (ability && canAct(c, now)) {
+            // A guard's strike is always physical and always melee-shaped: a
+            // guard never emits a shot (the shots array is built in the
+            // hostile block only), so attackKind is not read here.
+            const dmg = (bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE)) * ability.damageMult * c._buff.damageMult;
+            applyDamageWithEffects(tgt, dmg, 'physical', effectiveMit(tgt), now);
             tgt.dirty = true;
-            c._attackCd = bh.attackCooldown;
+            c._abilityCd.set(ability.slot, ability.attackCooldown);
             if (tgt.hp <= 0) { this.creatures.delete(tgt.id); killed.push(tgt.id); }
+            else if (ability.knockback > 0) {
+              // Survivors only -- a target the line above already deleted
+              // must never be shoved. `cc` (the guard's PRE-move centre, the
+              // same point the range gate above used) is the shove origin.
+              shoveAwayFrom(this.map, cc.x, cc.y, tgt, ability.knockback);
+              tgt.dirty = true;
+            }
           }
+          // Refused by canAct: no cooldown stamped, exactly as before -- the
+          // guard strikes the moment it recovers rather than also serving a
+          // cooldown for the swing it never took.
           continue;
         }
 
@@ -313,7 +555,7 @@ class CreatureSim {
           const dx = c.home.x - cc.x, dy = c.home.y - cc.y;
           if (Math.hypot(dx, dy) > GUARD_HOME_EPSILON) {
             c.mode = 'return';
-            const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult);
+            const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult * c._buff.speedMult);
             if (r.x !== c.x || r.y !== c.y) {
               c.x = r.x; c.y = r.y;
               const f = facingFor(dx, dy); if (f) c.facing = f;
@@ -360,18 +602,23 @@ class CreatureSim {
           // -> stand and shoot. Without the middle band a kiter oscillates
           // one step per tick and never fires.
           if (dist < bh.preferredRange) { vx = -vx; vy = -vy; }
-          else if (dist <= bh.attackRange) { move = false; }
+          // The band's outer edge is the REACH of the kiter's longest attack,
+          // not one particular slot's: a kiter holding still at 340 because
+          // slot 1 reaches that far is the same creature whether or not slot
+          // 1 happens to be on cooldown this tick.
+          else if (dist <= maxAbilityRange(bh)) { move = false; }
         } else if (bh.chaseStyle === 'skirmish') {
-          // Retreat while the attack is on cooldown, close while it is ready.
-          // Reading _attackCd is what makes this hit-and-run rather than a
-          // timer that ignores whether the strike actually landed.
-          if (c._attackCd > 0 && dist < bh.preferredRange) { vx = -vx; vy = -vy; }
+          // Retreat while EVERY attack is recovering, close while any is
+          // ready. Reading the live cooldowns is what makes this hit-and-run
+          // rather than a timer that ignores whether the strike landed; with
+          // a single ability it is identical to the old `_attackCd > 0`.
+          if (!anyAbilityReady(c, bh) && dist < bh.preferredRange) { vx = -vx; vy = -vy; }
         }
         // 'charge' and 'ambush' fall through with the straight-at-target
         // vector -- an aggroed ambusher IS a charger, it just started asleep.
 
         if (move) {
-          const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult);
+          const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult * c._buff.speedMult);
           if (r.x !== c.x || r.y !== c.y) {
             c.x = r.x; c.y = r.y;
             const f = facingFor(vx, vy); if (f) c.facing = f;
@@ -391,9 +638,9 @@ class CreatureSim {
         // this slice exists to remove.
         //
         // Refused like a cooldown, not eaten: the attack does not happen AND
-        // _attackCd is not stamped, so the creature attacks as soon as it
-        // recovers rather than also serving a fresh cooldown for the swing (or
-        // shot) it never took. The immunity window in applyShockInterrupt
+        // the selected slot's cooldown is not stamped, so the creature attacks
+        // as soon as it recovers rather than also serving a fresh cooldown for
+        // the swing (or shot) it never took. The immunity window in applyShockInterrupt
         // (stamped once, deliberately never refreshed) is what stops this
         // becoming a perma-stun — it applies to creatures for free, because it
         // lives on the target.
@@ -401,12 +648,26 @@ class CreatureSim {
         // recomputed here even though `move` may have just changed c.x/c.y
         // this same tick: recomputing would change the melee range gate
         // (and, for a shot, the origin) against the frozen golden trace.
-        if (c._attackCd <= 0 && canAct(c, now)
-            && dist2(cc.x, cc.y, tc.x, tc.y) <= bh.attackRange * bh.attackRange) {
-          const dmg = bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE);
-          if (bh.attackKind === 'melee') {
+        //
+        // `dist` is the PRE-move distance computed above from `cc`, so the
+        // range gate is the same measurement the movement bands used.
+        const ability = selectAbility(c, bh, dist);
+        if (ability && canAct(c, now)) {
+          const dmg = (bh.damageOverride ?? (c.damage ?? CREATURE_DAMAGE)) * ability.damageMult * c._buff.damageMult;
+          if (ability.attackKind === 'melee') {
+            // tp is a PLAYER, not a creature: no aura ever buffs a player's
+            // defence, so tp.mit is read as-is here, unlike the three
+            // creature-target sites below which read effectiveMit(target).
             applyDamageWithEffects(tp, dmg, 'physical', tp.mit || NO_MITIGATION, now);
-            c._attackCd = bh.attackCooldown;
+            c._abilityCd.set(ability.slot, ability.attackCooldown);
+            // Survivors only -- a dead player is about to be respawned by
+            // resolveDeaths(), and shoving them first would move a position
+            // that respawn is about to overwrite anyway. `tp.x`/`tp.y` are
+            // written directly, the same server-authoritative assignment
+            // server.js:1147 already makes for the blocked-portal bounce.
+            if (tp.hp > 0 && ability.knockback > 0) {
+              shoveAwayFrom(this.map, cc.x, cc.y, tp, ability.knockback);
+            }
           } else if (hasLineOfSight(this.map, cc.x, cc.y, tc.x, tc.y)) {
             // Terrain blocks a shot exactly as it blocks the melee arc.
             // Without this a ranged creature burns its cooldowns firing into
@@ -426,14 +687,21 @@ class CreatureSim {
               x: cc.x, y: cc.y,
               nx: (tc.x - cc.x) / d, ny: (tc.y - cc.y) / d,
               damage: dmg,
-              // A `ranged` rung fires physical; only `cast` carries the line's
-              // element and therefore its status rider.
-              element: bh.attackKind === 'cast' ? (c.attackElement || 'physical') : 'physical',
-              speed: bh.projectileSpeed,
-              radius: bh.projectileRadius,
-              range: bh.attackRange,
+              // A `ranged` ability fires physical; only `cast` carries an
+              // element and therefore its status rider. The ability's own
+              // element wins when it has one (an Apex's physical slam next to
+              // its fire breath); `null` means "inherit the creature type's
+              // attack_element", which is what every backfilled slot-1 row
+              // carries and what reproduces today's behaviour exactly.
+              element: ability.attackKind === 'cast'
+                ? (ability.element ?? c.attackElement ?? 'physical')
+                : 'physical',
+              speed: ability.projectileSpeed,
+              radius: ability.projectileRadius,
+              range: ability.attackRange,
+              knockback: ability.knockback,
             });
-            c._attackCd = bh.attackCooldown;
+            c._abilityCd.set(ability.slot, ability.attackCooldown);
           }
           // No line of sight: the cooldown is NOT stamped, so the creature
           // fires the moment it has a clear shot rather than also serving a
@@ -451,7 +719,7 @@ class CreatureSim {
         c._dir = Math.min(DIRS.length - 1, Math.floor(this.rng() * DIRS.length));
       }
       const [dx, dy] = DIRS[c._dir];
-      const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult);
+      const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult * c._buff.speedMult);
       if (r.x !== c.x || r.y !== c.y) {
         c.x = r.x; c.y = r.y;
         c.facing = DIR_FACING[c._dir];
@@ -471,7 +739,7 @@ class CreatureSim {
     for (const [id, c] of this.creatures) {
       const cc = center(c);
       if (dist2(cc.x, cc.y, px, py) > r2) continue;
-      applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
+      applyDamageWithEffects(c, damage, element, effectiveMit(c), now);
       applyElementEffect(c, element, now);
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
@@ -512,7 +780,7 @@ class CreatureSim {
     for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth)) {
       const c = this.creatures.get(id);
       if (!c) continue;
-      applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
+      applyDamageWithEffects(c, damage, element, effectiveMit(c), now);
       // The element's status rider is applied wherever the element already
       // deals damage — one call adjacent to each applyDamage, never a second
       // rider table.
@@ -535,7 +803,7 @@ class CreatureSim {
   damageCreatureById(id, damage, element, now) {
     const c = this.creatures.get(id);
     if (!c) return false;
-    applyDamageWithEffects(c, damage, element, c.mit || NO_MITIGATION, now);
+    applyDamageWithEffects(c, damage, element, effectiveMit(c), now);
     c.dirty = true;
     if (c.hp <= 0) { this.creatures.delete(id); return true; }
     return false;
@@ -602,4 +870,12 @@ module.exports = {
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
   GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE, GUARD_HOME_EPSILON,
   withinLeash, selectGuardTarget,
+  // Exported so server.js's per-chunk world_creatures SELECT uses the SAME
+  // join text as loadCreatureTypes above, rather than a second copy that can
+  // drift.
+  ABILITIES_LATERAL,
+  // SOMET-253 Task 5: exported so authority_creature_auras.test.js can pin
+  // the non-mutation/non-stacking rules directly against the buff map,
+  // without needing a full tick() to observe them.
+  computeAuras,
 };

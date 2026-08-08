@@ -128,3 +128,32 @@ test('CREATURE_BEHAVIORS covers every profile the migration inserts', () => {
   }
   assert.equal(new Set(names).size, names.length, 'duplicate profile name');
 });
+
+// The migration's two hand-authored overrides -- Brute's knockback and the
+// Apex Slam -- used to live only as inline SQL literals in
+// 1714440083000_creature_abilities.js, with nothing to catch
+// seeds/data/creatureAbilities.js drifting from them. That migration now
+// exports ABILITY_OVERRIDES (the same pattern BEHAVIORS uses above); this
+// pins the seed file to it field for field, covering every column the
+// override carries, not just name and attack_kind.
+const ABILITY_OVERRIDE_FIELDS = [
+  'behavior_name', 'slot', 'name', 'attack_kind', 'attack_range', 'attack_cooldown',
+  'projectile_speed', 'projectile_radius', 'element', 'damage_mult', 'knockback',
+];
+
+test('CREATURE_ABILITIES agrees with the migration\'s hand-authored overrides, field for field', () => {
+  const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
+  const { ABILITY_OVERRIDES } = require('../migrations/1714440083000_creature_abilities.js');
+  assert.ok(ABILITY_OVERRIDES.length > 0, 'no migration overrides — this test would assert nothing');
+
+  for (const row of ABILITY_OVERRIDES) {
+    const [behaviorName, slot] = row;
+    const seedRow = CREATURE_ABILITIES.find(
+      (a) => a.behavior_name === behaviorName && a.slot === slot);
+    assert.ok(seedRow, `migration override ${behaviorName} slot ${slot} has no counterpart in the seed file`);
+    ABILITY_OVERRIDE_FIELDS.forEach((field, i) => {
+      assert.equal(seedRow[field], row[i],
+        `${behaviorName} slot ${slot} .${field}: seed=${seedRow[field]} migration=${row[i]}`);
+    });
+  }
+});

@@ -12,7 +12,7 @@ async function loadItemTypes(pool) {
   const r = await pool.query(
     `SELECT id, name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
             range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element,
-            defense, resistances, stackable, ammo_type_id, aoe_radius, vfx
+            defense, resistances, stackable, ammo_type_id, aoe_radius, vfx, knockback
      FROM item_types ORDER BY id ASC`,
   );
   const m = new Map();
@@ -43,6 +43,13 @@ async function loadItemTypes(pool) {
       // Effect-name bindings per moment, e.g. { attack: 'sweep_arc' }.
       // Normalized to null so `weapon.vfx` is never undefined downstream.
       vfx: row.vfx || null,
+      // SOMET-253 Task 9. This is the SECOND loader (server.js's real
+      // per-request query is the first, at loadItemTypes' own call site
+      // below) -- P2a's creature-behavior inertness trap was exactly this
+      // shape: a column added to the schema but missing from an explicit
+      // SELECT list, so world.attack's `w.knockback > 0` check silently read
+      // undefined forever despite a correct migration and correct world.js.
+      knockback: Number(row.knockback ?? 0),
     });
   }
   return m;

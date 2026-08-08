@@ -1,5 +1,6 @@
 const { resolveMove } = require('./collision');
 const { CreatureSim } = require('./creatures');
+const { shoveAwayFrom } = require('./knockback');
 const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
 const { resolveEffectName } = require('./vfx.js');
 const { ProjectileSim } = require('./projectiles');
@@ -296,6 +297,10 @@ class World {
           aoe_radius: 0,
           element: s.element,
           damage: s.damage,
+          // SOMET-253 Task 6: the ability's own knockback rides along on the
+          // weapon-shaped object ProjectileSim.spawn reads, same as every
+          // other flight parameter here.
+          knockback: s.knockback,
         },
       });
     }
@@ -381,6 +386,23 @@ class World {
       const killed = this.creatures.applyMeleeArc(
         cx, cy, nx, ny, w.reach, w.arc_width, weaponDamage(p, w), w.element, this.now, userId,
       );
+      // SOMET-253 Task 9: survivors = targets minus killed. `creatureTargets`
+      // was captured BEFORE applyMeleeArc ran, and applyMeleeArc deletes
+      // whatever it kills -- iterating creatureTargets directly here would
+      // try to shove ids no longer in the sim. Same distinction Task 6's
+      // guard/hostile melee branches already draw (creatures.js: tgt.hp<=0
+      // check before shoveAwayFrom), just computed as a set difference
+      // instead of a single target's hp check.
+      if (w.knockback > 0 && creatureTargets.length > 0) {
+        const killedSet = new Set(killed);
+        for (const id of creatureTargets) {
+          if (killedSet.has(id)) continue;
+          const c = this.creatures.get(id);
+          if (!c) continue;
+          shoveAwayFrom(this.map, cx, cy, c, w.knockback);
+          c.dirty = true;
+        }
+      }
       let playerHits = 0;
       for (const other of this.players.values()) {
         if (other.userId === userId) continue;
@@ -390,6 +412,15 @@ class World {
           applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION, this.now);
           applyElementEffect(other, w.element, this.now, userId);
           playerHits++;
+          // Survivors only -- a player at <=0 hp is picked up by
+          // resolveDeaths() and respawned elsewhere; shoving first would move
+          // a position respawn is about to overwrite anyway. Written straight
+          // onto other.x/other.y via shoveAwayFrom, the same
+          // server-authoritative assignment the portal bounce and Task 6's
+          // creature-side knockback already use -- never resolveMove.
+          if (other.hp > 0 && w.knockback > 0) {
+            shoveAwayFrom(this.map, cx, cy, other, w.knockback);
+          }
         }
       }
       applyAttackCooldown(p, w);
