@@ -98,7 +98,10 @@ const SEED_ROWS = [
     reach: null, arc_width: null, range: 500, projectile_speed: 650, projectile_radius: 10,
     pierce: 1, mana_cost: 8, stamina_cost: 0, element: 'arcane',
     stackable: false, ammo_type_id: null, aoe_radius: null },
-  { id: 21, name: 'frost staff', category: 'weapon', kind: 'projectile', damage: 13, cooldown: 0.70,
+  // damage 13 -> 15 by 1714440090000_ranged_staff_defense_floor.js: at 13,
+  // (raw - Apex's defense 13) floors to 0 before resistance is even applied,
+  // making ice resistance invisible on every ice-primary Apex creature.
+  { id: 21, name: 'frost staff', category: 'weapon', kind: 'projectile', damage: 15, cooldown: 0.70,
     reach: null, arc_width: null, range: 620, projectile_speed: 650, projectile_radius: 12,
     pierce: 1, mana_cost: 16, stamina_cost: 0, element: 'ice',
     stackable: false, ammo_type_id: null, aoe_radius: null },
@@ -114,7 +117,10 @@ const SEED_ROWS = [
   // mana permitted 0.29 shots/s against a cooldown implying 0.91, so the
   // cooldown was decorative and sustained DPS was a third of the field. Still
   // strictly the worst dmg/mana (0.64 vs archmage's 0.75).
-  { id: 23, name: 'storm staff', category: 'weapon', kind: 'projectile', damage: 14, cooldown: 1.10,
+  // damage 14 -> 15 by 1714440090000_ranged_staff_defense_floor.js: same
+  // Apex-defense-floor fix as frost staff. dpm moves to 0.68, still well
+  // below frost staff's own new 0.94 -- storm remains strictly last.
+  { id: 23, name: 'storm staff', category: 'weapon', kind: 'projectile', damage: 15, cooldown: 1.10,
     reach: null, arc_width: null, range: 700, projectile_speed: 1000, projectile_radius: 10,
     pierce: 1, mana_cost: 22, stamina_cost: 0, element: 'lightning',
     stackable: false, ammo_type_id: null, aoe_radius: 70 },
