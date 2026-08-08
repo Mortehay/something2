@@ -201,3 +201,55 @@ test('MAX_CREATURE_PROJECTILES caps concurrent creature shots -- the excess is d
   assert.equal(w.projectiles.count(), MAX_CREATURE_PROJECTILES,
     'the creature\'s shot must be dropped once the cap is already full, not appended past it');
 });
+
+// SOMET-254: the test above only ever pre-fills creature-owned projectiles,
+// so it would have passed identically under the OLD (pre-fix) logic that
+// capped on world.projectiles.count() (every projectile, any owner) instead
+// of countByOwnerKind('creature') (creature-owned only) -- both reads give
+// the same number when nothing but creature shots exist. This one actually
+// pins the fix: it fills PLAYER-owned projectiles past MAX_CREATURE_PROJECTILES
+// on their own (so the naive all-projectiles count is already well over the
+// cap) while keeping creature-owned projectiles under it, then proves a new
+// creature shot is still allowed through. Under the old bug this shot would
+// have been wrongly dropped; under the real fix player-owned projectiles
+// never count against the creature cap at all.
+test('MAX_CREATURE_PROJECTILES counts only creature-owned projectiles, not player-owned ones sharing the world', () => {
+  const w = new World(worldMap());
+  w.addPlayer('u1', { x: 380, y: 92 });
+  w.creatures.addCreatures([{ id: 'c', type: 'R', x: 100, y: 100, hp: 100,
+    behavior: ranged(), attackElement: 'physical', damage: 7 }]);
+  const fillerWeapon = {
+    projectile_speed: 1, projectile_radius: 1, range: 1,
+    pierce: 1, aoe_radius: 0, element: 'physical', damage: 1,
+  };
+  // Creature-owned: one below the cap, so the creature's own shot below must
+  // still fit under countByOwnerKind('creature').
+  for (let i = 0; i < MAX_CREATURE_PROJECTILES - 1; i++) {
+    w.projectiles.spawn({
+      ownerId: `creatureFiller${i}`, ownerKind: 'creature', ownerFaction: 'hostile',
+      x: -1000, y: -1000, nx: 1, ny: 0, weapon: fillerWeapon, damage: 1,
+    });
+  }
+  // Player-owned: enough on its own to blow well past MAX_CREATURE_PROJECTILES
+  // if the cap were (bugged) counting every projectile regardless of owner.
+  for (let i = 0; i < MAX_CREATURE_PROJECTILES * 2; i++) {
+    w.projectiles.spawn({
+      ownerId: 'u1', ownerKind: 'player',
+      x: -2000, y: -2000, nx: 1, ny: 0, weapon: fillerWeapon, damage: 1,
+    });
+  }
+  const before = w.projectiles.count();
+  assert.equal(before, MAX_CREATURE_PROJECTILES - 1 + MAX_CREATURE_PROJECTILES * 2);
+  assert.ok(before > MAX_CREATURE_PROJECTILES,
+    'precondition: the ALL-projectiles total must already exceed the creature cap');
+  assert.equal(w.projectiles.countByOwnerKind('creature'), MAX_CREATURE_PROJECTILES - 1,
+    'precondition: creature-owned count alone must still be under the cap');
+
+  w.tickCreatures(0.1, active);
+
+  assert.equal(w.projectiles.countByOwnerKind('creature'), MAX_CREATURE_PROJECTILES,
+    'the creature\'s new shot must be allowed through -- creature-owned count was under the cap, '
+    + 'and player-owned projectiles must not count against it');
+  assert.equal(w.projectiles.count(), before + 1,
+    'exactly one new (creature) projectile must have been added to the world');
+});

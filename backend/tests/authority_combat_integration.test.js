@@ -52,13 +52,23 @@ function fakePool() {
       // the bare "FROM entity_types WHERE is_creature". Keep this pattern in
       // step with that SELECT -- a routing miss here doesn't fail loudly, it
       // falls through and hangs the test waiting on a creature that never
-      // loads. Row carries a full behaviour profile (literal values, not the
-      // resolver's own defaults) so the mapping is exercised realistically.
+      // loads.
+      //
+      // SOMET-254: these behaviour columns feed loadCreatureTypes' TYPE
+      // catalog only -- the world_creatures row below carries no behaviour
+      // fields at all, so the live wolf this test actually drives through
+      // combat resolves via the faction fallback, never through this row.
+      // Kept genuinely distinct from DEFAULT_BEHAVIOR (not the old
+      // byte-identical 400/800/charge/0/1/null) so a broken resolveBehavior
+      // mapping would show up here instead of silently agreeing with its own
+      // fallback; resolveBehavior's real field mapping is pinned in
+      // creature_behaviors_resolve.test.js, and the live wiring end-to-end in
+      // creature_mechanics_wiring.test.js.
       if (/FROM entity_types e[\s\S]*WHERE e\.is_creature/i.test(sql)) return { rows: [{
         name: 'Wolf', color: '#c00', hp: 5, attack_element: 'physical',
         behavior_name: 'Line', attack_kind: 'melee', attack_range: 60, attack_cooldown: 1,
-        projectile_speed: 0, projectile_radius: 0, aggro_radius: 400, leash_radius: 800,
-        chase_style: 'charge', preferred_range: 0, move_speed_mult: 1, damage_override: null,
+        projectile_speed: 0, projectile_radius: 0, aggro_radius: 444, leash_radius: 777,
+        chase_style: 'skirmish', preferred_range: 111, move_speed_mult: 1.3, damage_override: 9,
       }] };
       // Dagger tuned as an omnidirectional hit (arc_width = full circle) so this
       // integration test doesn't depend on the player's facing at attack time.
