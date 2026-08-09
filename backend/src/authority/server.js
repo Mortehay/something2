@@ -370,7 +370,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }
 
-  async function loadSpawn(worldId, userId, chunkSize, worldRow) {
+  async function loadSpawn(worldId, userId, chunkSize, worldRow, entry) {
     const pend = pendingArrivals.get(userId);
     const pending = (pend && pend.worldId === worldId) ? { x: pend.x, y: pend.y } : null;
     if (pending) pendingArrivals.delete(userId);
@@ -380,7 +380,26 @@ function attachAuthority(httpServer, pool, opts = {}) {
       [worldId, userId]
     );
     if (r.rows.length) persisted = { x: r.rows[0].x, y: r.rows[0].y };
-    const spawn = chooseSpawn({ pending, persisted, worldRow, chunkSize });
+    // SOMET-261: a persisted position that is now out of bounds or inside
+    // geometry falls back to the nearest portal rather than to the world
+    // centre. Both arguments come from the already-loaded world entry, so this
+    // costs no extra query.
+    //
+    // chooseSpawn defaults both to inert values, so forgetting to pass them
+    // here would disable the fallback silently rather than fail -- that is what
+    // spawn_portal_fallback.test.js's source-text guard exists to catch.
+    const portals = [...entry.portalLinks.values()]
+      .map((l) => ({ x: l.fromX, y: l.fromY }))
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+    const map = entry.world && entry.world.map;
+    const isWalkable = map ? (x, y) => map.isWalkable(x, y) : null;
+    const spawn = chooseSpawn({ pending, persisted, worldRow, chunkSize, portals, isWalkable });
+    if (spawn.viaPortalFallback) {
+      // Worth a line in the log: a spike here means a world was resized or
+      // regenerated in a way that stranded the players saved inside it.
+      console.log(`spawn: relocated user ${userId} in world ${worldId} to nearest portal `
+        + `(saved position ${persisted && persisted.x},${persisted && persisted.y} is no longer valid)`);
+    }
     const b = await pool.query(
       'SELECT x, y FROM player_binds WHERE user_id = $1 AND world_id = $2',
       [userId, worldId],
@@ -758,7 +777,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // off the canonical id) is matched by strict worldId equality in
         // loadSpawn — passing the client's raw spelling back in here would
         // silently reintroduce the same split for doorway arrivals.
-        const spawn = await loadSpawn(entry.worldId, ws.userId, entry.row.chunk_size, entry.row);
+        const spawn = await loadSpawn(entry.worldId, ws.userId, entry.row.chunk_size, entry.row, entry);
         if (ws.readyState !== ws.OPEN) return; // client vanished while we awaited spawn
 
         // One live session per account: the newest join wins. (Refusing instead
