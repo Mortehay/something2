@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { rollChestLoot, xpForChest } = require('../src/authority/chestLoot.js');
+const { rollChestLoot, xpForChest, openChest } = require('../src/authority/chestLoot.js');
 
 function scriptedPool(rows) {
   const calls = [];
@@ -33,4 +33,58 @@ test('xpForChest reuses xpForKill unchanged, applied to the guard level', () => 
   const { xpForKill } = require('../src/services/playerStats.js');
   assert.equal(xpForChest(10, 3), xpForKill(10, 3));
   assert.equal(xpForChest(1, 1), xpForKill(1, 1));
+});
+
+// openChest: guard-gating, CAS on world_chests.state, loot grant, XP award.
+
+function scriptedRoutePool(routes) {
+  const calls = [];
+  function route(sql, params) {
+    for (const [re, result] of routes) {
+      if (re.test(sql)) return typeof result === 'function' ? result(params) : result;
+    }
+    return { rows: [], rowCount: 0 };
+  }
+  return {
+    calls,
+    query: async (sql, params) => { calls.push({ sql, params }); return route(sql, params); },
+    connect: async () => ({
+      query: async (sql, params) => { calls.push({ sql, params }); return route(sql, params); },
+      release: () => {},
+    }),
+  };
+}
+
+test('openChest refuses a chest whose guards are still alive', async () => {
+  const pool = scriptedRoutePool([
+    [/SELECT .* FROM world_chests/i, { rows: [{ id: 'c1', state: 'locked', guard_creature_ids: ['g1'], guard_level: 5 }], rowCount: 1 }],
+    [/SELECT count\(\*\) .* FROM world_creatures/i, { rows: [{ count: '1' }], rowCount: 1 }], // one guard still alive
+  ]);
+  const result = await openChest(pool, 'c1', 'user1');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /guard/i);
+});
+
+test('openChest CAS: only the request that flips locked->opened grants loot and XP', async () => {
+  const pool = scriptedRoutePool([
+    [/SELECT .* FROM world_chests/i, { rows: [{ id: 'c1', state: 'unlocked', guard_creature_ids: [], guard_level: 5 }], rowCount: 1 }],
+    [/UPDATE world_chests SET state = 'opened'/i, { rows: [{ id: 'c1' }], rowCount: 1 }], // CAS wins
+    [/FROM chest_loot/i, { rows: [{ item_type_id: 3, chance: '1', min_qty: 1, max_qty: 1 }], rowCount: 1 }],
+    [/INSERT INTO player_items/i, { rows: [{ id: 'pi1', item_type_id: 3, quantity: 1 }], rowCount: 1 }],
+    [/FROM player_progression/i, { rows: [{ level: 2, experience: 100 }], rowCount: 1 }],
+    [/UPDATE player_progression/i, { rows: [{ level: 2, experience: 150 }], rowCount: 1 }],
+  ]);
+  const result = await openChest(pool, 'c1', 'user1', { rng: () => 0 });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.items, [3]);
+});
+
+test('openChest CAS: a losing request (already opened) grants nothing', async () => {
+  const pool = scriptedRoutePool([
+    [/SELECT .* FROM world_chests/i, { rows: [{ id: 'c1', state: 'unlocked', guard_creature_ids: [], guard_level: 5 }], rowCount: 1 }],
+    [/UPDATE world_chests SET state = 'opened'/i, { rows: [], rowCount: 0 }], // lost the CAS
+  ]);
+  const result = await openChest(pool, 'c1', 'user1');
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /already/i);
 });

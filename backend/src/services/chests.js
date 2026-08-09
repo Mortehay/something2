@@ -148,4 +148,26 @@ async function spawnFieldChest(client, world, allowedGuardTypeNames, rngSeed) {
   return { id: chest.rows[0].id, guardCreatureId, row: mapChestRow(chest.rows[0]) };
 }
 
-module.exports = { insertVaultChest, fetchChests, spawnFieldChest };
+// Mirrors nearestMerchantVillage (server.js:141) exactly: nearest entry
+// within radius, or null. Only chests NOT yet fully opened are candidates
+// for interaction -- an opened vault chest has nothing left to do. A field
+// chest is a one-shot spawn with no further use once opened either, but it
+// is left reachable by proximity here (unlike a permanently-spent vault) --
+// nothing currently re-visits an opened field chest since openChest itself
+// refuses an already-'opened' chest regardless, so excluding vault-only
+// keeps the skip narrowly scoped to what the design actually calls out.
+function nearestChest(chests, cx, cy, radius) {
+  let best = null; let bestDist = Infinity;
+  for (const c of chests) {
+    if (c.state === 'opened' && c.kind === 'vault') continue; // permanently spent
+    const dx = c.x - cx;
+    const dy = c.y - cy;
+    const dist = Math.sqrt((dx * dx) + (dy * dy));
+    if (dist <= radius && dist < bestDist) { best = c; bestDist = dist; }
+  }
+  return best;
+}
+
+module.exports = {
+  insertVaultChest, fetchChests, spawnFieldChest, nearestChest,
+};

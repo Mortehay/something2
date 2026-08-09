@@ -12,7 +12,8 @@ const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
-const { fetchChests, spawnFieldChest } = require('../services/chests.js');
+const { fetchChests, spawnFieldChest, nearestChest } = require('../services/chests.js');
+const { openChest } = require('./chestLoot.js');
 const { fetchShop } = require('../services/merchantStock');
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
@@ -1081,6 +1082,33 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
         const shop = await fetchShop(pool, village.id);
         send(ws, { type: 'shop', villageId: village.id, catalog: shop.catalog, buyback: shop.buyback });
+      });
+    },
+
+    // Opens the nearest in-range chest (proximity-picked, same pattern as
+    // `interact` above -- the client sends no chest id). openChest owns the
+    // guard-check/CAS/loot-roll/XP-award transaction; this handler only
+    // finds the target and keeps entry.chests in sync with the DB write
+    // openChest just committed, the same reason `use`'s handler pushes onto
+    // entry.chests after spawnFieldChest commits.
+    openchest(ws) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      chainOp(ws, 'openchest', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const chest = nearestChest(entry.chests, cx, cy, INTERACT_RADIUS);
+        if (!chest) { send(ws, { type: 'error', message: 'no chest nearby' }); return; }
+
+        const result = await openChest(pool, chest.id, ws.userId);
+        if (!result.ok) { send(ws, { type: 'error', message: result.reason }); return; }
+
+        Object.assign(chest, { state: 'opened' });
+        send(ws, {
+          type: 'chestOpened', chestId: chest.id, items: result.items,
+          awarded: result.awarded, leveledUp: result.leveledUp, newLevel: result.newLevel,
+        });
       });
     },
 
