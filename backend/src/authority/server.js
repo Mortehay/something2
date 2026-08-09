@@ -1030,12 +1030,28 @@ function attachAuthority(httpServer, pool, opts = {}) {
             return;
           }
           const del = await client.query(
-            'DELETE FROM player_items WHERE id = $1 AND user_id = $2',
+            'DELETE FROM player_items WHERE id = $1 AND user_id = $2 RETURNING quantity',
             [msg.itemId, ws.userId],
           );
           if (del.rowCount !== 1) {
             await client.query('ROLLBACK');
             send(ws, { type: 'error', message: 'you do not own that item' });
+            return;
+          }
+          // Mirrors sellItem's own guard in trade.js against the SAME table
+          // and the SAME failure shape: `loot_map` is seeded `stackable:
+          // true` (1714440152000_loot_map_item.js), and nothing here prices
+          // or consumes per-unit -- a stacked row would have this DELETE
+          // (already run above) destroy every unit in the stack while only
+          // spawning ONE chest. Unreachable today (nothing grants loot_map
+          // with quantity > 1 yet), but refuse rather than leave a second
+          // unguarded copy of a failure mode this codebase already paid down
+          // once. The DELETE already ran, so this must roll back, not just
+          // error.
+          const quantity = Number(del.rows[0].quantity) || 1;
+          if (quantity !== 1) {
+            await client.query('ROLLBACK');
+            send(ws, { type: 'error', message: 'cannot use a stacked item' });
             return;
           }
           await client.query('COMMIT');

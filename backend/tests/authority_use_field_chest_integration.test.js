@@ -109,8 +109,11 @@ function makePool({ bounded = true, userItems = [] } = {}) {
       if (/SELECT gold FROM users WHERE id/i.test(sql)) return { rows: [{ gold: 0 }] };
       if (/^\s*DELETE FROM player_items WHERE id = \$1 AND user_id = \$2/i.test(sql)) {
         const [itemId, userId] = params;
-        const owns = userItems.some((it) => it.id === itemId) && userId === '1';
-        return { rows: [], rowCount: owns ? 1 : 0 };
+        const owned = userItems.find((it) => it.id === itemId);
+        const owns = owned && userId === '1';
+        return owns
+          ? { rows: [{ quantity: owned.quantity }], rowCount: 1 }
+          : { rows: [], rowCount: 0 };
       }
       return { rows: [] };
     },
@@ -169,6 +172,32 @@ test('use with a loot_map when no legal tile exists sends an error frame and doe
   assert.match(err.message, /no legal spot/);
   assert.equal(pool.matching(/DELETE FROM player_items/i).length, 0, 'the item must survive a failed spawn');
   assert.equal(handle.worlds.get('w1').chests.length, 0);
+
+  ws.close(); handle.close(); server.close();
+});
+
+// Mirrors sellItem's own guard in trade.js against the SAME table (F-022 /
+// SOMET-202): loot_map is seeded stackable:true, and nothing here prices or
+// consumes per-unit, so a stacked row must be refused rather than silently
+// destroying the whole stack while only spawning one chest. Unreachable
+// today (nothing grants loot_map with quantity > 1 yet) -- this only proves
+// the guard exists and actually rolls the effects back.
+test('use with a stacked loot_map (quantity > 1) refuses and does not spawn a chest or consume the item', async () => {
+  const pool = makePool({ bounded: true, userItems: [{ id: 'map-1', item_type_id: 2, quantity: 5 }] });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = await joinAndGetPlayer(url);
+
+  ws.send(JSON.stringify({ type: 'use', itemId: 'map-1' }));
+  const err = await nextMsg(ws, 'error');
+  assert.match(err.message, /stack/i);
+
+  // The handler must not have reached its post-COMMIT effects: neither the
+  // in-memory chest cache nor the player's in-memory inventory changed, even
+  // though placement (and the DELETE) already ran before the guard caught it.
+  const entry = handle.worlds.get('w1');
+  assert.equal(entry.chests.length, 0, 'no chest pushed onto entry.chests -- the transaction must have rolled back');
+  const p = entry.world.getPlayer('1');
+  assert.ok(p.inv.items.some((it) => it.id === 'map-1'), 'the stacked item must still be in the in-memory inventory');
 
   ws.close(); handle.close(); server.close();
 });
