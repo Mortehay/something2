@@ -12,7 +12,9 @@ const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
-const { fetchChests, spawnFieldChest, nearestChest } = require('../services/chests.js');
+const {
+  fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests,
+} = require('../services/chests.js');
 const { openChest } = require('./chestLoot.js');
 const { fetchShop } = require('../services/merchantStock');
 const { loadDecorationDefs } = require('../services/decorationDefs');
@@ -1104,7 +1106,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const result = await openChest(pool, chest.id, ws.userId);
         if (!result.ok) { send(ws, { type: 'error', message: result.reason }); return; }
 
-        Object.assign(chest, { state: 'opened' });
+        // openedAt/respawnAt (undefined for a vault chest -- openChest
+        // returns respawnAt: null there) must land on entry.chests too, not
+        // just the DB row openChest just committed: the respawn sweep below
+        // (itemSweepTimer) acts on the DB's respawn_at directly, but without
+        // this, entry.chests would never show a respawn_at at all, and a
+        // chest the sweep later relocks would look permanently 'opened' to
+        // an already-connected player until a full world reload.
+        Object.assign(chest, { state: 'opened', openedAt: result.openedAt, respawnAt: result.respawnAt });
         send(ws, {
           type: 'chestOpened', chestId: chest.id, items: result.items,
           awarded: result.awarded, leveledUp: result.leveledUp, newLevel: result.newLevel,
@@ -1433,6 +1442,40 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
       })
       .catch((err) => console.error('ground item sweep failed:', err));
+
+    // Field chest respawn: rides this same interval rather than a second,
+    // independently-scheduled one, mirroring the ground-item sweep just
+    // above (DB write, then keep every live sim's in-memory cache in sync).
+    // getWorld only serves CURRENTLY LOADED worlds (the `worlds` map) --
+    // reconstructing mapGenConfig for an unloaded world here would either
+    // duplicate loadWorld's tileTypes/villages/biomes assembly or, if done by
+    // calling loadWorld() itself, leak a permanently-loaded empty world
+    // (nothing besides a socket's close handler currently evicts an empty
+    // entry, and this sweep never fires that handler). A chest whose world
+    // is offline simply stays due and is retried on a later sweep, resolving
+    // within one itemSweepMs of that world's next load.
+    respawnDueFieldChests(pool, {
+      getWorld: (worldId) => {
+        const entry = worlds.get(worldId);
+        return entry ? { ...entry.mapGenConfig, id: worldId } : null;
+      },
+    })
+      .then((resetCount) => {
+        if (!resetCount) return;
+        // respawnDueFieldChests only reports a count, not which chests/
+        // worlds changed, so refresh every currently-loaded world's chest
+        // cache from the DB -- cheap since a nonzero reset is rare (every
+        // FIELD_CHEST_RESPAWN_MS per chest), and this is what actually keeps
+        // an already-connected player's view of a respawned chest from going
+        // stale (see the `openchest` handler's own comment above on the same
+        // concern at open-time).
+        for (const [worldId, entry] of worlds) {
+          fetchChests(pool, worldId)
+            .then((chests) => { entry.chests = chests; })
+            .catch((err) => console.error('chest cache refresh failed:', err));
+        }
+      })
+      .catch((err) => console.error('field chest respawn sweep failed:', err));
   }, itemSweepMs);
 
   return {

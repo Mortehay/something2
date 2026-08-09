@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { insertVaultChest, spawnFieldChest } = require('../src/services/chests.js');
+const {
+  insertVaultChest, spawnFieldChest, respawnDueFieldChests,
+} = require('../src/services/chests.js');
 
 function scriptedClient(entityTypeRow, creatureId, chestId) {
   const calls = [];
@@ -133,4 +135,105 @@ test('spawnFieldChest places a guard, inserts a locked field chest referencing i
 
   const chestIns = client.calls.find((c) => /INSERT INTO world_chests/i.test(c.sql));
   assert.match(chestIns.sql, /'field'/);
+});
+
+// respawnDueFieldChests: sweeps past-due field chests back to locked with a
+// fresh guard. `getWorld` stands in for server.js's real wiring, which only
+// resolves currently-loaded worlds (see chests.js's header comment on this
+// function) -- boundedWorld()/unboundedWorld() above already give this file
+// the two world shapes needed to exercise "places fine" vs "no legal tile".
+
+function scriptedRespawnClient({
+  dueRows = [{
+    id: 'c1', world_id: 'w1', x: 100, y: 100, guard_entity_type_id: 5,
+  }],
+  entityTypeRows = [{
+    id: 5, name: 'Wolf', hp: 30, defense: 2, resistances: {},
+  }],
+  guardId = 'guard-2',
+} = {}) {
+  const calls = [];
+  return {
+    calls,
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (/SELECT .* FROM world_chests WHERE kind = 'field'/i.test(sql)) {
+        return { rows: dueRows, rowCount: dueRows.length };
+      }
+      if (/SELECT .* FROM entity_types WHERE id = \$1/i.test(sql)) {
+        return { rows: entityTypeRows, rowCount: entityTypeRows.length };
+      }
+      if (/INSERT INTO world_creatures/i.test(sql)) return { rows: [{ id: guardId }], rowCount: 1 };
+      if (/UPDATE world_chests SET state = 'locked'/i.test(sql)) return { rows: [], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+  };
+}
+
+test('respawnDueFieldChests resets a past-due field chest to locked with a fresh guard', async () => {
+  const client = scriptedRespawnClient();
+  const reset = await respawnDueFieldChests(client, { getWorld: async () => boundedWorld() });
+  assert.equal(reset, 1);
+
+  // The query filtering to due chests must scope to field chests only --
+  // vault chests never carry a respawn_at, so this WHERE clause is what
+  // "leaves vault chests alone" actually means (nothing app-level to check).
+  const dueQuery = client.calls.find((c) => /FROM world_chests WHERE kind = 'field'/i.test(c.sql));
+  assert.ok(dueQuery, 'must filter to field chests at the DB level');
+
+  const guardIns = client.calls.find((c) => /INSERT INTO world_creatures/i.test(c.sql));
+  assert.doesNotMatch(guardIns.sql, /resistances/, 'world_creatures has no resistances column');
+  assert.equal(guardIns.params[0], 'w1');
+  assert.equal(guardIns.params[1], 'Wolf');
+
+  const update = client.calls.find((c) => /UPDATE world_chests SET state = 'locked'/i.test(c.sql));
+  assert.match(update.sql, /opened_at = NULL/);
+  assert.match(update.sql, /respawn_at = NULL/);
+  assert.deepEqual(JSON.parse(update.params[0]), ['guard-2']);
+  assert.equal(update.params[2], 'c1');
+});
+
+test('respawnDueFieldChests skips a due chest whose guard entity type was deleted from the catalog, leaving it for manual cleanup', async () => {
+  const client = scriptedRespawnClient({ entityTypeRows: [] });
+  const reset = await respawnDueFieldChests(client, { getWorld: async () => boundedWorld() });
+  assert.equal(reset, 0);
+  assert.ok(!client.calls.some((c) => /INSERT INTO world_creatures/i.test(c.sql)), 'no guard spawned for a deleted entity type');
+});
+
+test('respawnDueFieldChests leaves a chest past-due when no legal tile exists this pass, retried on a later sweep', async () => {
+  const client = scriptedRespawnClient();
+  const reset = await respawnDueFieldChests(client, { getWorld: async () => unboundedWorld() });
+  assert.equal(reset, 0);
+  assert.ok(!client.calls.some((c) => /INSERT INTO world_creatures/i.test(c.sql)));
+});
+
+test('respawnDueFieldChests skips a chest whose owning world is not currently loaded, retried on a later sweep', async () => {
+  const client = scriptedRespawnClient();
+  const reset = await respawnDueFieldChests(client, { getWorld: async () => null });
+  assert.equal(reset, 0);
+  assert.ok(!client.calls.some((c) => /INSERT INTO world_creatures/i.test(c.sql)));
+});
+
+test('respawnDueFieldChests is a no-op when nothing is past-due', async () => {
+  const client = scriptedRespawnClient({ dueRows: [] });
+  const reset = await respawnDueFieldChests(client, { getWorld: async () => boundedWorld() });
+  assert.equal(reset, 0);
+  assert.equal(client.calls.length, 1, 'only the initial due-chests query should run');
+});
+
+test('respawnDueFieldChests keeps resetting later chests after an earlier one in the same sweep throws', async () => {
+  const dueRows = [
+    { id: 'c1', world_id: 'w1', x: 100, y: 100, guard_entity_type_id: 5 },
+    { id: 'c2', world_id: 'w1', x: 200, y: 200, guard_entity_type_id: 5 },
+  ];
+  const client = scriptedRespawnClient({ dueRows });
+  let getWorldCalls = 0;
+  const reset = await respawnDueFieldChests(client, {
+    getWorld: async () => {
+      getWorldCalls += 1;
+      if (getWorldCalls === 1) throw new Error('boom');
+      return boundedWorld();
+    },
+  });
+  assert.equal(reset, 1, 'one failure must not abort the whole sweep');
 });

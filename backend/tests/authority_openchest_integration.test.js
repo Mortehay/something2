@@ -109,7 +109,7 @@ function makePool({ chestSeed, guardAlive = false } = {}) {
         if (params[0] !== chestSeed.id) return { rows: [], rowCount: 0 };
         return {
           rows: [{
-            id: chestSeed.id, state: chestState,
+            id: chestSeed.id, state: chestState, kind: chestSeed.kind,
             guard_creature_ids: chestSeed.guardCreatureIds, guard_level: chestSeed.guardLevel,
           }],
           rowCount: 1,
@@ -122,7 +122,12 @@ function makePool({ chestSeed, guardAlive = false } = {}) {
       if (/UPDATE world_chests SET state = 'opened'/i.test(sql)) {
         if (chestState !== 'unlocked') return { rows: [], rowCount: 0 };
         chestState = 'opened';
-        return { rows: [{ id: chestSeed.id }], rowCount: 1 };
+        return { rows: [{ id: chestSeed.id, opened_at: '2026-08-10T00:00:00.000Z' }], rowCount: 1 };
+      }
+      // Field-chest-only respawn timer (chestLoot.js's openChest, branching
+      // on `kind`).
+      if (/UPDATE world_chests SET respawn_at/i.test(sql)) {
+        return { rows: [{ respawn_at: '2026-08-10T02:00:00.000Z' }], rowCount: 1 };
       }
       if (/FROM chest_loot/i.test(sql)) {
         return { rows: [{ item_type_id: 7, chance: '1', min_qty: 1, max_qty: 1 }], rowCount: 1 };
@@ -213,6 +218,8 @@ test('openchest against an unlocked chest in range sends chestOpened with items+
   const entry = handle.worlds.get('w1');
   assert.equal(entry.chests.length, 1);
   assert.equal(entry.chests[0].state, 'opened', 'the in-memory cache must reflect the DB write openChest committed');
+  assert.ok(entry.chests[0].openedAt, 'openedAt must be carried into the in-memory cache too, not just the DB row');
+  assert.equal(entry.chests[0].respawnAt, null, 'a vault chest never gets a respawn timer');
 
   // A second attempt: nearestChest excludes an opened vault chest, so this
   // never even reaches openChest / the DB again.
@@ -221,6 +228,31 @@ test('openchest against an unlocked chest in range sends chestOpened with items+
   const err = await nextMsg(ws, 'error');
   assert.match(err.message, /no chest nearby/);
   assert.equal(pool.matching(/INSERT INTO player_items/i).length, insertCallsBefore, 'no second loot grant');
+
+  ws.close(); handle.close(); server.close();
+});
+
+test('openchest against a field chest carries respawnAt into the in-memory cache, not just the DB row', async () => {
+  const pool = makePool({
+    chestSeed: {
+      id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'field', state: 'unlocked', guardLevel: 5, guardCreatureIds: [],
+    },
+  });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = await joinAndGetPlayer(url);
+
+  ws.send(JSON.stringify({ type: 'openchest' }));
+  const opened = await nextMsg(ws, 'chestOpened');
+  assert.equal(opened.chestId, 'chest-1');
+
+  const entry = handle.worlds.get('w1');
+  assert.equal(entry.chests[0].state, 'opened');
+  assert.ok(entry.chests[0].openedAt, 'openedAt must be carried into the in-memory cache');
+  assert.ok(
+    entry.chests[0].respawnAt,
+    'a field chest open must carry respawnAt into the in-memory cache, or a chest the respawn sweep later relocks would look permanently opened to an already-connected player',
+  );
+  assert.ok(pool.matching(/UPDATE world_chests SET respawn_at/i).length > 0, 'field chest open must schedule a respawn in the DB');
 
   ws.close(); handle.close(); server.close();
 });

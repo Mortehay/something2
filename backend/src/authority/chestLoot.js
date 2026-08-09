@@ -8,6 +8,13 @@ const { rollDrops } = require('./loot.js');
 const { xpForKill } = require('../services/playerStats.js');
 const { awardXp, loadProgression } = require('../services/progressionStore.js');
 
+// Field chests relock and get a fresh guard this long after being opened;
+// vault chests never carry a respawn_at at all (see openChest below). Also
+// consumed by chests.js's respawnDueFieldChests indirectly, via the
+// respawn_at column this constant sizes -- exported so a test (or a future
+// caller) can reference the exact duration rather than re-deriving it.
+const FIELD_CHEST_RESPAWN_MS = 2 * 60 * 60 * 1000;
+
 async function rollChestLoot(pool, guardLevel, rng = Math.random) {
   const r = await pool.query(
     'SELECT item_type_id, chance, min_qty, max_qty FROM chest_loot WHERE level_min <= $1 AND level_max >= $1',
@@ -32,7 +39,7 @@ async function openChest(pool, chestId, userId, { rng = Math.random } = {}) {
   try {
     await client.query('BEGIN');
     const cr = await client.query(
-      'SELECT id, state, guard_creature_ids, guard_level FROM world_chests WHERE id = $1 FOR UPDATE',
+      'SELECT id, state, kind, guard_creature_ids, guard_level FROM world_chests WHERE id = $1 FOR UPDATE',
       [chestId],
     );
     if (cr.rowCount === 0) {
@@ -63,12 +70,27 @@ async function openChest(pool, chestId, userId, { rng = Math.random } = {}) {
     }
 
     const cas = await client.query(
-      "UPDATE world_chests SET state = 'opened', opened_at = now() WHERE id = $1 AND state = 'unlocked' RETURNING id",
+      "UPDATE world_chests SET state = 'opened', opened_at = now() WHERE id = $1 AND state = 'unlocked' RETURNING id, opened_at",
       [chestId],
     );
     if (cas.rowCount !== 1) {
       await client.query('ROLLBACK');
       return { ok: false, reason: 'already opened' };
+    }
+    const openedAt = cas.rows[0].opened_at;
+
+    // Field chests get a respawn timer; vault chests never do (queried once
+    // more here via `RETURNING respawn_at` -- rather than computed in JS from
+    // FIELD_CHEST_RESPAWN_MS/Date.now() -- so the value handed back to the
+    // caller for the in-memory entry.chests sync is the exact DB-assigned
+    // timestamp, not a value that could drift from it under clock skew).
+    let respawnAt = null;
+    if (chest.kind === 'field') {
+      const rr = await client.query(
+        'UPDATE world_chests SET respawn_at = now() + ($1::int * interval \'1 millisecond\') WHERE id = $2 RETURNING respawn_at',
+        [FIELD_CHEST_RESPAWN_MS, chestId],
+      );
+      respawnAt = rr.rows[0]?.respawn_at ?? null;
     }
 
     const itemTypeIds = await rollChestLoot(client, chest.guard_level, rng);
@@ -92,7 +114,18 @@ async function openChest(pool, chestId, userId, { rng = Math.random } = {}) {
 
     await client.query('COMMIT');
     return {
-      ok: true, items, awarded: award.awarded, leveledUp: award.leveledUp, newLevel: award.newLevel,
+      ok: true,
+      items,
+      awarded: award.awarded,
+      leveledUp: award.leveledUp,
+      newLevel: award.newLevel,
+      // Handed back so the caller (server.js's `openchest` handler) can carry
+      // these onto the in-memory entry.chests element alongside `state`,
+      // not just persist them to the DB row -- otherwise a respawned field
+      // chest's marker/state would look stale to already-connected players
+      // (entry.chests wouldn't show a respawn_at at all until a full reload).
+      openedAt,
+      respawnAt,
     };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -102,4 +135,6 @@ async function openChest(pool, chestId, userId, { rng = Math.random } = {}) {
   }
 }
 
-module.exports = { rollChestLoot, xpForChest, openChest };
+module.exports = {
+  rollChestLoot, xpForChest, openChest, FIELD_CHEST_RESPAWN_MS,
+};

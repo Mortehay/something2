@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { rollChestLoot, xpForChest, openChest } = require('../src/authority/chestLoot.js');
+const {
+  rollChestLoot, xpForChest, openChest, FIELD_CHEST_RESPAWN_MS,
+} = require('../src/authority/chestLoot.js');
 
 function scriptedPool(rows) {
   const calls = [];
@@ -87,4 +89,53 @@ test('openChest CAS: a losing request (already opened) grants nothing', async ()
   const result = await openChest(pool, 'c1', 'user1');
   assert.equal(result.ok, false);
   assert.match(result.reason, /already/i);
+});
+
+test('FIELD_CHEST_RESPAWN_MS is 2 hours', () => {
+  assert.equal(FIELD_CHEST_RESPAWN_MS, 2 * 60 * 60 * 1000);
+});
+
+test('openChest schedules a respawn for a field chest and returns openedAt/respawnAt for the caller to sync in-memory state', async () => {
+  const pool = scriptedRoutePool([
+    [/SELECT .* FROM world_chests WHERE id = \$1 FOR UPDATE/i, {
+      rows: [{
+        id: 'c1', state: 'unlocked', kind: 'field', guard_creature_ids: [], guard_level: 5,
+      }],
+      rowCount: 1,
+    }],
+    [/UPDATE world_chests SET state = 'opened'/i, { rows: [{ id: 'c1', opened_at: '2026-08-10T00:00:00Z' }], rowCount: 1 }],
+    [/UPDATE world_chests SET respawn_at/i, { rows: [{ respawn_at: '2026-08-10T02:00:00Z' }], rowCount: 1 }],
+    [/FROM chest_loot/i, { rows: [], rowCount: 0 }],
+    [/FROM player_progression/i, { rows: [{ level: 2, experience: 100 }], rowCount: 1 }],
+    [/UPDATE player_progression/i, { rows: [{ level: 2, experience: 100 }], rowCount: 1 }],
+  ]);
+  const result = await openChest(pool, 'c1', 'user1', { rng: () => 0 });
+  assert.equal(result.ok, true);
+  assert.equal(result.openedAt, '2026-08-10T00:00:00Z');
+  assert.equal(result.respawnAt, '2026-08-10T02:00:00Z');
+
+  const respawnUpdate = pool.calls.find((c) => /UPDATE world_chests SET respawn_at/i.test(c.sql));
+  assert.ok(respawnUpdate, 'a field chest open must schedule a respawn');
+  assert.equal(respawnUpdate.params[0], FIELD_CHEST_RESPAWN_MS);
+  assert.equal(respawnUpdate.params[1], 'c1');
+});
+
+test('openChest leaves respawn_at untouched for a vault chest', async () => {
+  const pool = scriptedRoutePool([
+    [/SELECT .* FROM world_chests WHERE id = \$1 FOR UPDATE/i, {
+      rows: [{
+        id: 'c1', state: 'unlocked', kind: 'vault', guard_creature_ids: [], guard_level: 5,
+      }],
+      rowCount: 1,
+    }],
+    [/UPDATE world_chests SET state = 'opened'/i, { rows: [{ id: 'c1', opened_at: '2026-08-10T00:00:00Z' }], rowCount: 1 }],
+    [/FROM chest_loot/i, { rows: [], rowCount: 0 }],
+    [/FROM player_progression/i, { rows: [{ level: 2, experience: 100 }], rowCount: 1 }],
+    [/UPDATE player_progression/i, { rows: [{ level: 2, experience: 100 }], rowCount: 1 }],
+  ]);
+  const result = await openChest(pool, 'c1', 'user1', { rng: () => 0 });
+  assert.equal(result.ok, true);
+  assert.equal(result.openedAt, '2026-08-10T00:00:00Z');
+  assert.equal(result.respawnAt, null);
+  assert.ok(!pool.calls.some((c) => /UPDATE world_chests SET respawn_at/i.test(c.sql)), 'vault chest open must not schedule a respawn');
 });

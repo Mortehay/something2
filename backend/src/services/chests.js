@@ -168,6 +168,81 @@ function nearestChest(chests, cx, cy, radius) {
   return best;
 }
 
+// Sweeps field chests past their respawn_at back to a fresh locked state
+// with a NEW guard -- same row, same x/y, so a stale in-flight client
+// reference to the chest id stays valid. Vault chests are excluded by the
+// `kind = 'field'` filter; they never carry a respawn_at in the first place
+// (openChest in chestLoot.js only sets one for kind='field').
+//
+// `getWorld` is injected (not queried inline) so this stays testable against
+// a plain mock instead of a real `worlds` row shape. It also lets the caller
+// decide what "world" means operationally: the real server.js wiring only
+// serves currently-loaded worlds (their cached mapGenConfig), returning null
+// for anything not loaded rather than either reconstructing mapGenConfig
+// from scratch or eagerly loading an otherwise-empty world into memory (the
+// latter would leak -- nothing besides a socket's close handler currently
+// evicts an empty world entry, and a background sweep never fires that
+// handler). A chest whose world isn't loaded this pass simply stays due and
+// is retried on a later sweep.
+//
+// `world` must be the SAME buildWorldGenConfig shape placeMapCreatures
+// already requires elsewhere in this file (see spawnFieldChest's header
+// comment above) -- carrying camelCase `levelMin`/`levelMax` and
+// `tileTypes`/`width`/`height`/etc, NOT a raw `worlds` table row. Passing the
+// raw row would throw ('worldConfig: tileTypes is empty') before ever
+// reaching a placement.
+async function respawnDueFieldChests(client, { getWorld }) {
+  const due = await client.query(
+    "SELECT id, world_id, x, y, guard_entity_type_id FROM world_chests WHERE kind = 'field' AND state = 'opened' AND respawn_at <= now()",
+  );
+  let reset = 0;
+  for (const chest of due.rows) {
+    try {
+      // Full row (id, name, hp, defense, resistances), matching
+      // spawnFieldChest's own entity_types resolve above -- placeMapCreatures
+      // reads `.hp`/`.defense`/`.resistances` off each allowedTypes element
+      // to scale the guard it places. A name-only row would silently place
+      // the respawned guard at hp:10/defense:0/no-resistances fallback stats
+      // regardless of what the real creature type carries.
+      const et = await client.query(
+        'SELECT id, name, hp, defense, resistances FROM entity_types WHERE id = $1',
+        [chest.guard_entity_type_id],
+      );
+      if (et.rowCount === 0) continue; // guard type deleted from the catalog since; leave this chest for manual cleanup
+
+      const world = await getWorld(chest.world_id);
+      if (!world) continue; // owning world isn't loaded this pass; respawn_at stays past-due, retried next sweep
+
+      const placed = placeMapCreatures(world, 1, et.rows, Math.floor(Math.random() * 2 ** 31));
+      if (placed.length === 0) continue; // no legal tile this pass; try again next sweep
+      const p = placed[0];
+
+      // world_creatures has no `resistances` column (see this file's header
+      // comment) -- naming the right `type` is enough for the authority to
+      // resolve resistances at creature-load time, same as spawnFieldChest.
+      const guard = await client.query(
+        `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, home_x, home_y, level, defense)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        [chest.world_id, p.type, chest.x, chest.y, p.hp, p.facing, chest.x, chest.y, p.level, p.defense],
+      );
+
+      await client.query(
+        `UPDATE world_chests SET state = 'locked', opened_at = NULL, respawn_at = NULL,
+                guard_creature_ids = $1, guard_level = $2
+         WHERE id = $3`,
+        [JSON.stringify([guard.rows[0].id]), p.level, chest.id],
+      );
+      reset += 1;
+    } catch (err) {
+      // One bad chest (deleted world, DB hiccup) must not abort the whole
+      // sweep -- every other due chest still gets its turn this pass, and
+      // this one's respawn_at stays past-due for a retry next sweep.
+      console.error(`respawnDueFieldChests: failed to respawn chest ${chest.id}:`, err);
+    }
+  }
+  return reset;
+}
+
 module.exports = {
-  insertVaultChest, fetchChests, spawnFieldChest, nearestChest,
+  insertVaultChest, fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests,
 };
