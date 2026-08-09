@@ -88,46 +88,83 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
   // minutes ago -- no pre-existing catalog row is touched, the class_loadouts
   // rows cascade with them, and the finally block re-seeds unconditionally so
   // even a mid-test failure leaves the catalog whole.
-  await t.test('seed-catalogs rebuilds the classes after a wipe', async () => {
-    const { seedCatalogs } = require('../scripts/seed-catalogs.js');
-    try {
-      await pool.query("DELETE FROM entity_types WHERE name IN ('Warrior','Ranger','Mage')");
+  await t.test('a class a character is playing cannot be deleted out from under it', async () => {
+    // characters.entity_type_id is a plain reference with no ON DELETE, and
+    // that is deliberate: deleting a class must not silently orphan or destroy
+    // the characters playing it. Discovered the hard way -- the first version
+    // of the restore test below tried to DELETE Warrior and was refused by
+    // this constraint, which is the constraint doing its job.
+    const inUse = await pool.query(
+      `SELECT e.name FROM entity_types e
+        WHERE e.is_playable = true
+          AND EXISTS (SELECT 1 FROM characters c WHERE c.entity_type_id = e.id)
+        LIMIT 1`);
+    if (!inUse.rows.length) {
+      // Nothing is playing any class on this database, so there is no
+      // protection to demonstrate. Say so rather than pass vacuously.
+      t.diagnostic('no character is playing any class here; FK protection not exercised');
+      return;
+    }
+    await assert.rejects(
+      () => pool.query('DELETE FROM entity_types WHERE name = $1', [inUse.rows[0].name]),
+      /characters_entity_type_id_fkey/);
+  });
 
-      // Prove the wipe happened. Without this the restore assertions below
-      // could pass simply because nothing was ever removed.
+  await t.test('seed-catalogs rebuilds a class that has gone missing', async () => {
+    // The Wolf lesson: an entity type the repo cannot rebuild disappears when
+    // the volume is rebuilt. Asserting against rows the migration already
+    // created would pass against a seeder that knows nothing about classes at
+    // all (it upserts ON CONFLICT DO NOTHING), so a class really is deleted
+    // here and the seeder really does have to put it back.
+    //
+    // The class is chosen at runtime as one NO character is playing -- the FK
+    // above makes any other choice impossible, and hardcoding a name would
+    // turn this test red the first time someone rolls that class.
+    const { seedCatalogs } = require('../scripts/seed-catalogs.js');
+    const free = await pool.query(
+      `SELECT e.name FROM entity_types e
+        WHERE e.is_playable = true
+          AND NOT EXISTS (SELECT 1 FROM characters c WHERE c.entity_type_id = e.id)
+        ORDER BY e.name LIMIT 1`);
+    if (!free.rows.length) {
+      t.diagnostic('every class is in use; cannot safely delete one to test the restore');
+      return;
+    }
+    const victim = free.rows[0].name;
+    const expectedHp = { Warrior: 100, Ranger: 85, Mage: 75 }[victim];
+    const expectedLoadout = {
+      Warrior: ['leather-vestx1', 'short swordx1'],
+      Ranger: ['arrowx20', 'bowx1', 'leather-vestx1'],
+      Mage: ['apprentice staffx1', 'arcane-wardx1'],
+    }[victim];
+
+    try {
+      await pool.query('DELETE FROM entity_types WHERE name = $1', [victim]);
+
+      // Prove the wipe happened; otherwise the restore assertions could pass
+      // simply because nothing was ever removed.
       const gone = await pool.query(
-        "SELECT count(*)::int AS n FROM entity_types WHERE name IN ('Warrior','Ranger','Mage')");
-      assert.equal(gone.rows[0].n, 0, 'the wipe must actually remove the classes');
-      const goneLoadouts = await pool.query('SELECT count(*)::int AS n FROM class_loadouts');
-      assert.equal(goneLoadouts.rows[0].n, 0, 'class_loadouts must cascade with its classes');
+        'SELECT count(*)::int AS n FROM entity_types WHERE name = $1', [victim]);
+      assert.equal(gone.rows[0].n, 0, 'the wipe must actually remove the class');
 
       await seedCatalogs(pool);
 
       const back = await pool.query(
-        `SELECT name, is_playable, hp, max_hp, dexterity, intelligence, max_mana
-           FROM entity_types WHERE name IN ('Warrior','Ranger','Mage') ORDER BY name`);
-      assert.deepEqual(
-        back.rows.map((x) => [x.name, x.is_playable, Number(x.hp)]),
-        [['Mage', true, 75], ['Ranger', true, 85], ['Warrior', true, 100]]);
+        'SELECT name, is_playable, hp FROM entity_types WHERE name = $1', [victim]);
+      assert.equal(back.rows.length, 1, `${victim} must be restored by the seeder`);
+      assert.equal(back.rows[0].is_playable, true,
+        'a restored class that is not playable is invisible to character creation');
+      assert.equal(Number(back.rows[0].hp), expectedHp);
 
-      const loadouts = await pool.query(
-        `SELECT e.name AS class, i.name AS item, l.quantity
+      const loadout = await pool.query(
+        `SELECT i.name AS item, l.quantity
            FROM class_loadouts l
            JOIN entity_types e ON e.id = l.entity_type_id
            JOIN item_types  i ON i.id = l.item_type_id
-          ORDER BY e.name, i.name`);
+          WHERE e.name = $1 ORDER BY i.name`, [victim]);
       assert.deepEqual(
-        loadouts.rows.map((x) => `${x.class}:${x.item}x${x.quantity}`),
-        [
-          'Mage:apprentice staffx1',
-          'Mage:arcane-wardx1',
-          'Ranger:arrowx20',
-          'Ranger:bowx1',
-          'Ranger:leather-vestx1',
-          'Warrior:leather-vestx1',
-          'Warrior:short swordx1',
-        ],
-        'the loadouts must be rebuildable too, or a wiped volume leaves classes with no gear');
+        loadout.rows.map((x) => `${x.item}x${x.quantity}`), expectedLoadout,
+        'the loadout must come back too, or a rebuilt volume leaves the class with no gear');
 
       // Idempotent: a second run must not stack duplicate loadout rows.
       await seedCatalogs(pool);

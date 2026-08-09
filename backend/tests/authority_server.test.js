@@ -44,7 +44,7 @@ function withConnect(pool) {
 // player rows, and a no-op upsert.
 function fakePool() {
   return withConnect({
-    query: async (sql) => {
+    query: async (sql, params) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
         return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
       }
@@ -808,6 +808,9 @@ function equipRacePool(delayMs = 20) {
   const usedItemIds = new Set();
   return withConnect({
     query: async (sql, params) => {
+      // SOMET-260: join resolves the character first; falling through to
+      // rows:[] refuses the join and HANGS the test waiting for 'joined'.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/INSERT INTO player_equipment/i.test(sql)) {
         await new Promise((r) => setTimeout(r, delayMs));
         const itemId = params[2];
@@ -957,6 +960,9 @@ async function mkAttackHarness(opts = {}) {
   const base = fakePool();
   const pool = withConnect({
     query: async (sql, params) => {
+      // SOMET-260: join resolves the character first; falling through to
+      // rows:[] refuses the join and HANGS the test waiting for 'joined'.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       // Must be matched BEFORE the generic /FROM player_items/ branch: the
       // consume statement mentions player_items in its subquery too.
       //
@@ -1385,13 +1391,20 @@ test('refreshPlayerStats accepts a numeric userId (as req.user.id arrives from t
 // only exercises World#addPlayer(..., stats) directly, never through join.
 // This is the single most load-bearing wire in the whole slice: it is what
 // makes a character's stats mean anything at all on connect.
-function highConProgressionPool(userId) {
+// `characterId`, not userId: SOMET-257 re-keyed player_progression, and this
+// mock matching the OLD column name is not a harmless miss -- it falls through
+// to fakePool's empty default, the join derives BASE_STATS, and the test fails
+// claiming the wire is broken when only the fixture is.
+function highConProgressionPool(characterId) {
   const base = fakePool();
   return withConnect({
     query: async (sql, params) => {
-      if (/FROM player_progression WHERE user_id/i.test(sql)) {
+      // SOMET-260: join resolves the character first; falling through to
+      // rows:[] refuses the join and HANGS the test waiting for 'joined'.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+      if (/FROM player_progression WHERE character_id/i.test(sql)) {
         return { rows: [{
-          user_id: String(userId), experience: '0', level: 1, stat_points: 0,
+          character_id: Number(characterId), experience: '0', level: 1, stat_points: 0,
           strength: 5, dexterity: 5, constitution: 15, intelligence: 5, wisdom: 5, charisma: 5,
         }] };
       }
@@ -1404,7 +1417,9 @@ test('a player who joins with a real CON-15 progression row receives derived sta
   const { url, handle, server } = await bootWith(highConProgressionPool(7));
   const ws = connect(url, 7);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  // character 7 for user 7: the ids happen to match here only so the fixture
+  // reads coherently -- nothing requires it.
+  ws.send(JSON.stringify({ type: 'join', character_id: 7, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const player = handle.worlds.get('w1').world.getPlayer('7');

@@ -145,7 +145,10 @@ test('removing the rowCount guard would double-drop on two damage sources report
 function armClaimEntry() {
   const entry = armEntry();
   entry.claiming = new Set();
-  entry.world.addPlayer('u1', { x: 0, y: 0 }, { items: [], equipment: {} });
+  // SOMET-257: the player carries BOTH ids -- userId keys the in-memory map
+  // and owns gold, characterId keys every database write.
+  entry.world.addPlayer('u1', { x: 0, y: 0 }, { items: [], equipment: {} },
+    { x: 0, y: 0 }, 0, undefined, 31);
   entry.world.groundItems.add([{ id: 'g1', item_type_id: 7, x: 10, y: 10, expires_at: '2999-01-01T00:00:00Z' }]);
   return entry;
 }
@@ -169,8 +172,8 @@ test('two claims of one item: the loser actually issues its claim attempt and lo
       : { rows: [], rowCount: 0 })],
   ]);
 
-  const first = await claimItem(pool, entry, 'u1', 'g1');
-  const second = await claimItem(pool, entry, 'u1', 'g1');
+  const first = await claimItem(pool, entry, 'u1', 31, 'g1');
+  const second = await claimItem(pool, entry, 'u1', 31, 'g1');
 
   assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7, quantity: 1 });
   assert.strictEqual(second, null, 'the loser gets nothing');
@@ -199,7 +202,7 @@ test('a claim loses when the DB row is already gone even though the sim still ho
     [CLAIM_RE, { rows: [], rowCount: 0 }],
   ]);
 
-  const got = await claimItem(pool, entry, 'u1', 'g1');
+  const got = await claimItem(pool, entry, 'u1', 31, 'g1');
 
   assert.strictEqual(got, null, 'the DB rowCount is authoritative, not sim presence');
   assert.strictEqual(entry.world.getPlayer('u1').inv.items.length, 0, 'nothing was granted');
@@ -212,7 +215,7 @@ test('a rejected claim query still drains the claiming set (not stuck unclaimabl
     [CLAIM_RE, () => { throw new Error('db down'); }],
   ]);
 
-  await assert.rejects(claimItem(pool, entry, 'u1', 'g1'), /db down/);
+  await assert.rejects(claimItem(pool, entry, 'u1', 31, 'g1'), /db down/);
 
   assert.strictEqual(entry.claiming.size, 0, 'the id must not be stuck in `claiming` forever');
 });
@@ -228,8 +231,8 @@ test('concurrent claims of the same item: the second is blocked by the claiming 
   // call synchronously reserves the id, so the second is deterministically
   // the one blocked.
   const [first, second] = await Promise.all([
-    claimItem(pool, entry, 'u1', 'g1'),
-    claimItem(pool, entry, 'u1', 'g1'),
+    claimItem(pool, entry, 'u1', 31, 'g1'),
+    claimItem(pool, entry, 'u1', 31, 'g1'),
   ]);
 
   assert.deepStrictEqual(first, { id: 'inst-1', typeId: 7, quantity: 1 });
@@ -264,8 +267,8 @@ test('the claiming guard reserves an id SYNCHRONOUSLY, before any await: two con
   // (e.g. someone inserts `await something()` above it), both calls would
   // pass the (still-empty) `claiming.has` check and both would call
   // pool.query before either's query resolves, making `calls` 2 here.
-  const p1 = claimItem(pool, entry, 'u1', 'g1');
-  const p2 = claimItem(pool, entry, 'u1', 'g1');
+  const p1 = claimItem(pool, entry, 'u1', 31, 'g1');
+  const p2 = claimItem(pool, entry, 'u1', 31, 'g1');
 
   assert.strictEqual(calls, 1,
     'only the first call may issue a query; the second must be blocked by the synchronous claiming-set check');
@@ -281,7 +284,7 @@ test('a successful claim adds the instance to the in-memory inventory', async ()
   const pool = scriptedPool([
     [CLAIM_RE, { rows: [{ id: 'inst-1', item_type_id: 7 }], rowCount: 1 }],
   ]);
-  await claimItem(pool, entry, 'u1', 'g1');
+  await claimItem(pool, entry, 'u1', 31, 'g1');
   assert.deepStrictEqual(entry.world.getPlayer('u1').inv.items, [{ id: 'inst-1', typeId: 7, quantity: 1 }]);
 });
 
@@ -295,7 +298,7 @@ test('dropping an equipped item is rejected and touches no table', async () => {
   const entry = armDropEntry({ main_hand: 'i1' });
   const pool = scriptedPool();
 
-  const r = await dropItem(pool, entry, 'u1', 'i1', { ttlMs: 1000 });
+  const r = await dropItem(pool, entry, 'u1', 31, 'i1', { ttlMs: 1000 });
 
   assert.strictEqual(r.ok, false);
   assert.match(r.reason, /unequip/i);
@@ -306,12 +309,12 @@ test('dropping an equipped item is rejected and touches no table', async () => {
 
 test("dropping another user's item deletes nothing and spawns nothing", async () => {
   const entry = armDropEntry();
-  // The user_id predicate matches no row in the CTE's DELETE, so the INSERT's
+  // The character_id predicate matches no row in the CTE's DELETE, so the INSERT's
   // "SELECT ... FROM d" has nothing to project -> rowCount 0 for the whole
   // statement.
   const pool = scriptedPool([[DROP_RE, { rows: [], rowCount: 0 }]]);
 
-  const r = await dropItem(pool, entry, 'u1', 'not-mine', { ttlMs: 1000 });
+  const r = await dropItem(pool, entry, 'u1', 31, 'not-mine', { ttlMs: 1000 });
 
   assert.strictEqual(r.ok, false);
   assert.strictEqual(entry.world.groundItems.count(), 0, 'nothing spawned in the sim');
@@ -319,17 +322,17 @@ test("dropping another user's item deletes nothing and spawns nothing", async ()
   // actually issued — a test that only asserts a consequence of a result it
   // supplied itself never observes the ownership predicate. Assert on the
   // statement that was actually sent: both that its WHERE clause still
-  // filters by user_id, and that the bound params are (itemId, callerId) —
+  // filters by character_id, and that the bound params are (itemId, callerCharacterId) —
   // not attacker-controlled data standing in for the caller. Without this, a
-  // refactor that deletes "AND user_id = $2" from the SQL (while leaving the
+  // refactor that deletes "AND character_id = $2" from the SQL (while leaving the
   // params array untouched) would leave `r.ok === false` on THIS particular
   // scripted call yet stay green, because nothing here forces the SQL
   // itself to still contain the check.
   const q = pool.matching(DROP_RE)[0];
-  assert.match(q.sql, /user_id\s*=\s*\$2/i,
-    'the DELETE must filter by ownership (user_id), not just the item id');
-  assert.deepStrictEqual(q.params.slice(0, 2), ['not-mine', 'u1'],
-    'ownership predicate must bind the CALLER (u1), not the forged itemId, as user_id');
+  assert.match(q.sql, /character_id\s*=\s*\$2/i,
+    'the DELETE must filter by ownership (character_id), not just the item id');
+  assert.deepStrictEqual(q.params.slice(0, 2), ['not-mine', 31],
+    'ownership predicate must bind the CALLER\'s character (31), not the forged itemId');
 });
 
 // F-016 (SOMET-196): dropItem used to issue the DELETE FROM player_items and
@@ -353,7 +356,7 @@ test('dropItem persists the delete+insert as ONE atomic statement, not two indep
     })],
   ]);
 
-  const r = await dropItem(pool, entry, 'u1', 'i1', { ttlMs: 1000 });
+  const r = await dropItem(pool, entry, 'u1', 31, 'i1', { ttlMs: 1000 });
 
   assert.strictEqual(r.ok, true);
   assert.strictEqual(pool.calls.length, 1,
@@ -369,12 +372,14 @@ test('a successful drop spawns a ground item at the player centre and removes th
     })],
   ]);
 
-  const r = await dropItem(pool, entry, 'u1', 'i1', { ttlMs: 1000 });
+  const r = await dropItem(pool, entry, 'u1', 31, 'i1', { ttlMs: 1000 });
 
   assert.strictEqual(r.ok, true);
   const p = entry.world.getPlayer('u1');
   const q = pool.matching(DROP_RE)[0];
-  assert.deepStrictEqual(q.params.slice(0, 5), ['i1', 'u1', 'w1', p.x + p.width / 2, p.y + p.height / 2]);
+  // (itemId, characterId, worldId, cx, cy): the ownership predicate binds the
+  // CHARACTER, not the account -- inventory is per-character since SOMET-257.
+  assert.deepStrictEqual(q.params.slice(0, 5), ['i1', 31, 'w1', p.x + p.width / 2, p.y + p.height / 2]);
   assert.strictEqual(entry.world.groundItems.count(), 1);
   assert.strictEqual(p.inv.items.length, 0, 'no longer owned');
 });
@@ -399,7 +404,7 @@ test('(a) a freshly-dropped item is inside the dropper\'s grace window: auto-loo
   const pool = scriptedDropPool();
   const now = 1_000_000;
 
-  const r = await dropItem(pool, entry, 'u1', 'i1', { ttlMs: 1000, now });
+  const r = await dropItem(pool, entry, 'u1', 31, 'i1', { ttlMs: 1000, now });
 
   const p = entry.world.getPlayer('u1');
   assert.strictEqual(r.ok, true);
@@ -414,7 +419,7 @@ test('(b) the grace window expires: auto-loot may claim the drop once it has', a
   const pool = scriptedDropPool();
   const now = 1_000_000;
 
-  const r = await dropItem(pool, entry, 'u1', 'i1', { ttlMs: 1000, now });
+  const r = await dropItem(pool, entry, 'u1', 31, 'i1', { ttlMs: 1000, now });
 
   const p = entry.world.getPlayer('u1');
   const after = now + DROP_GRACE_MS + 1;
@@ -437,7 +442,7 @@ test('(c) manual pickup ignores the grace window entirely: claimItem succeeds ev
     [CLAIM_RE, { rows: [{ id: 'inst-1', item_type_id: 7 }], rowCount: 1 }],
   ]);
 
-  const got = await claimItem(pool, entry, 'u1', 'g1');
+  const got = await claimItem(pool, entry, 'u1', 31, 'g1');
 
   assert.deepStrictEqual(got, { id: 'inst-1', typeId: 7, quantity: 1 },
     'manual pickup (claimItem) is unaffected by an active grace window');

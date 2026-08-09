@@ -37,19 +37,24 @@ async function openPool() {
   }
 }
 
-// player_items.user_id is now `integer NOT NULL REFERENCES users(id)` (the
-// auth slice reconciled the column type), so a synthetic string id no longer
-// inserts — the FK and the integer type both reject it. Create a real throwaway
-// user per test and return its integer id; the caller deletes it in `finally`.
-// The ON DELETE CASCADE from player_items means removing the user also clears
-// any rows a test failed to clean up.
-async function createTestUser(pool, tag) {
+// player_items is keyed by `character_id integer NOT NULL REFERENCES
+// characters(id)` (SOMET-257 re-keyed it off user_id), so a synthetic id no
+// longer inserts -- the FK and the integer type both reject it. Create a real
+// throwaway user AND character per test and return the character's id, which
+// is what consumeAmmo/ammoCount now take. The caller deletes the user in
+// `finally`; ON DELETE CASCADE clears the character and any rows a test left.
+async function createTestCharacter(pool, tag) {
   const username = `ammo-db-test-${tag}-${process.pid}-${Date.now()}`;
-  const r = await pool.query(
+  const u = await pool.query(
     `INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'player') RETURNING id`,
     [username],
   );
-  return r.rows[0].id;
+  const c = await pool.query(
+    `INSERT INTO characters (user_id, slot, name, entity_type_id)
+     SELECT $1, 1, $2, e.id FROM entity_types e WHERE e.name = 'Warrior' RETURNING id`,
+    [u.rows[0].id, `ammo-db-char-${tag}-${process.pid}-${Date.now()}`],
+  );
+  return { userId: u.rows[0].id, characterId: c.rows[0].id };
 }
 
 async function anItemTypeId(pool) {
@@ -58,10 +63,10 @@ async function anItemTypeId(pool) {
   return r.rows[0].id;
 }
 
-async function stacks(pool, userId) {
+async function stacks(pool, characterId) {
   const r = await pool.query(
-    'SELECT quantity FROM player_items WHERE user_id = $1 ORDER BY created_at ASC, id ASC',
-    [userId],
+    'SELECT quantity FROM player_items WHERE character_id = $1 ORDER BY created_at ASC, id ASC',
+    [characterId],
   );
   return r.rows.map((row) => Number(row.quantity));
 }
@@ -78,8 +83,9 @@ test('consumeAmmo against a REAL database: a stack drains through its last unit 
     return;
   }
   let user;
+  let character;
   try {
-    user = await createTestUser(pool, 'drain');
+    ({ userId: user, characterId: character } = await createTestCharacter(pool, 'drain'));
     const typeId = await anItemTypeId(pool);
 
     // The CHECK constraint must actually be present, or this test proves
@@ -93,32 +99,32 @@ test('consumeAmmo against a REAL database: a stack drains through its last unit 
       'player_items must still carry CHECK (quantity > 0) — that constraint is what makes this test meaningful');
 
     await pool.query(
-      'INSERT INTO player_items (user_id, item_type_id, quantity) VALUES ($1, $2, 2)',
-      [user, typeId],
+      'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1, $2, 2)',
+      [character, typeId],
     );
-    assert.deepEqual(await stacks(pool, user), [2], 'setup: one stack of two units');
-    assert.equal(await ammoCount(pool, user, typeId), 2);
+    assert.deepEqual(await stacks(pool, character), [2], 'setup: one stack of two units');
+    assert.equal(await ammoCount(pool, character, typeId), 2);
 
     // First unit: an ordinary decrement.
-    assert.equal(await consumeAmmo(pool, user, typeId), true, 'the first unit spends');
-    assert.deepEqual(await stacks(pool, user), [1], 'the stack is down to its last unit');
-    assert.equal(await ammoCount(pool, user, typeId), 1);
+    assert.equal(await consumeAmmo(pool, character, typeId), true, 'the first unit spends');
+    assert.deepEqual(await stacks(pool, character), [1], 'the stack is down to its last unit');
+    assert.equal(await ammoCount(pool, character, typeId), 1);
 
     // THE UNIT THAT COULD NEVER BE FIRED. Before the fix this call threw
     // (check constraint violation) instead of returning, so the assertion
     // below is reached only if the spend is expressed as a statement that
     // never constructs a zero-quantity row.
-    assert.equal(await consumeAmmo(pool, user, typeId), true,
+    assert.equal(await consumeAmmo(pool, character, typeId), true,
       'the LAST unit must spend — this is the exact call that threw a CHECK violation before the fix');
-    assert.deepEqual(await stacks(pool, user), [],
+    assert.deepEqual(await stacks(pool, character), [],
       'the emptied stack must be GONE, not sitting at quantity 0');
-    assert.equal(await ammoCount(pool, user, typeId), 0);
+    assert.equal(await ammoCount(pool, character, typeId), 0);
 
     // And an empty inventory is a clean refusal, not an error: this is what
     // makes the server send `noammo` instead of silently dropping the frame.
-    assert.equal(await consumeAmmo(pool, user, typeId), false,
+    assert.equal(await consumeAmmo(pool, character, typeId), false,
       'with no stacks left the spend refuses cleanly');
-    assert.deepEqual(await stacks(pool, user), []);
+    assert.deepEqual(await stacks(pool, character), []);
   } finally {
     // Deleting the user cascades to player_items (ON DELETE CASCADE), so this
     // cleans the stacks too even if the test bailed mid-setup.
@@ -136,8 +142,9 @@ test('consumeAmmo against a REAL database: one shot touches exactly one stack, o
     return;
   }
   let user;
+  let character;
   try {
-    user = await createTestUser(pool, 'stacks');
+    ({ userId: user, characterId: character } = await createTestCharacter(pool, 'stacks'));
     const typeId = await anItemTypeId(pool);
 
     // Two stacks of the same type — the state the mocked tests can only
@@ -145,21 +152,21 @@ test('consumeAmmo against a REAL database: one shot touches exactly one stack, o
     // values pin which one is "oldest" instead of relying on insert order
     // resolving inside now()'s transaction-level granularity.
     await pool.query(
-      `INSERT INTO player_items (user_id, item_type_id, quantity, created_at) VALUES
+      `INSERT INTO player_items (character_id, item_type_id, quantity, created_at) VALUES
          ($1, $2, 1, now() - interval '2 hours'),
          ($1, $2, 3, now() - interval '1 hour')`,
-      [user, typeId],
+      [character, typeId],
     );
-    assert.deepEqual(await stacks(pool, user), [1, 3], 'setup: oldest stack holds one unit, newer holds three');
+    assert.deepEqual(await stacks(pool, character), [1, 3], 'setup: oldest stack holds one unit, newer holds three');
 
-    assert.equal(await consumeAmmo(pool, user, typeId), true);
+    assert.equal(await consumeAmmo(pool, character, typeId), true);
     // The oldest stack held exactly one unit, so this single shot must have
     // deleted it and left the newer stack completely untouched. A statement
     // that hit every stack would show [2] here; one that drained the wrong
     // stack would show [1, 2].
-    assert.deepEqual(await stacks(pool, user), [3],
+    assert.deepEqual(await stacks(pool, character), [3],
       'exactly one stack is affected per shot, and the oldest drains first');
-    assert.equal(await ammoCount(pool, user, typeId), 3,
+    assert.equal(await ammoCount(pool, character, typeId), 3,
       'total across stacks fell by exactly one unit');
   } finally {
     // Deleting the user cascades to player_items (ON DELETE CASCADE), so this
