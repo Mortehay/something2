@@ -169,13 +169,16 @@ function buildDungeon(dungeon, dungeonIndex) {
   };
 }
 
-// Every free (unused) compass edge across all 8 dungeons' rooms, one
-// candidate per room (its first free edge -- one is all a single graft
-// needs), grouped by dungeon in skeleton room order. "Free" means not used
-// as either side of any of that dungeon's own skeleton links: a link
-// A --edge--> B consumes A's `edge` AND B's opposite edge (setLink writes
-// that mirror in the database), so both directions are marked used here even
-// though the JSON only declares one.
+// Every free (unused) compass edge across the CANDIDATE dungeons' rooms,
+// grouped by dungeon in skeleton room order, one entry per room listing ALL
+// of that room's unconsumed edges (not just the first). "Free" here means
+// edge-wise only: not used as either side of any of that dungeon's own
+// skeleton links -- a link A --edge--> B consumes A's `edge` AND B's
+// opposite edge (setLink writes that mirror in the database), so both
+// directions are marked used here even though the JSON only declares one.
+// Grid-cell collisions (a candidate edge's delta landing on another room's
+// own cell) are checked separately, in pickGraftPoints, against the running
+// `occupied` set -- this function only knows about declared links.
 function findFreeEdgesByDungeon(dungeonBuilds) {
   const usedEdges = new Map(); // world key -> Set(edges)
   const markUsed = (key, edge) => {
@@ -192,19 +195,40 @@ function findFreeEdgesByDungeon(dungeonBuilds) {
   return dungeonBuilds.map(({ built }) =>
     built.worlds
       .map((w) => {
-        const free = ['N', 'E', 'S', 'W'].filter((e) => !(usedEdges.get(w.key) || new Set()).has(e));
-        return free.length ? { worldKey: w.key, grid: w.grid, edge: free[0] } : null;
+        const edges = ['N', 'E', 'S', 'W'].filter((e) => !(usedEdges.get(w.key) || new Set()).has(e));
+        return edges.length ? { worldKey: w.key, grid: w.grid, edges } : null;
       })
       .filter(Boolean));
 }
 
-// Picks 10 (room, free-edge) graft points, at most one per room, spread
+// Picks `count` (room, free-edge) graft points, at most one per room, spread
 // across dungeons rather than piled on a single one: round-robin across the
-// 8 dungeons' candidate queues, alternating scan direction each round so a
-// second pass doesn't always favor the same dungeons. 8 dungeons / 50 rooms
-// give 124 free edges total (verified: 3 spine dungeons x 18 + 3 hub x 14 +
-// 2 loop x 14) -- 10 grafts never come close to exhausting that.
-function pickGraftPoints(dungeonBuilds, count) {
+// candidate queues of the dungeons `dungeonBuilds` was called with,
+// alternating scan direction each round so a second pass doesn't always
+// favor the same dungeons.
+//
+// Callers pass only the shallowest dungeons (see buildSurfaceWorlds below,
+// SOMET-251 final review): surface worlds are shallow content
+// (level_band [1,8]/[4,12], hardcoded, not derived from graph position), so
+// their graft point must sit near the entry too, or a new player has to
+// clear the entire dungeon chain just to reach a starter-tier surface zone --
+// breaking whole-graph escalation monotonicity even though every dungeon
+// room's own escalation stays clean. D1+D2 alone have enough uncollided free
+// edges to comfortably clear the 10 grafts needed (see buildSurfaceWorlds).
+//
+// `occupied` is the set of grid cells (as "x,y" strings) already claimed by
+// ANY room across ALL 8 dungeons, PLUS every graft's own destination cell as
+// it is accepted -- so an accepted graft can never collide with a
+// pre-existing room OR an earlier accepted graft. Restricting grafts to
+// D1+D2 packs far more of the 10 grafts into two dungeons' free edges than
+// the old round-robin-across-8 version did, which surfaced a latent
+// collision the original code never checked for at all: a candidate edge's
+// delta can land exactly on another room's own grid cell (e.g. d1_shrine, a
+// branch room a few cells off the spine) even though that cell was never
+// "used" in the edge sense -- nothing ever declared a link there. Each
+// candidate room tries its free edges in order and is skipped entirely (not
+// retried later) only if every one of them collides.
+function pickGraftPoints(dungeonBuilds, count, occupied) {
   const perDungeonQueues = findFreeEdgesByDungeon(dungeonBuilds);
   const grafts = [];
   let round = 0;
@@ -214,23 +238,41 @@ function pickGraftPoints(dungeonBuilds, count) {
     for (const d of order) {
       if (grafts.length >= count) break;
       const q = perDungeonQueues[d];
-      if (q.length > round) grafts.push(q[round]);
+      if (q.length <= round) continue;
+      const candidate = q[round];
+      const edge = candidate.edges.find((e) => {
+        const [dx, dy] = EDGE_DELTA[e];
+        return !occupied.has(`${candidate.grid[0] + dx},${candidate.grid[1] + dy}`);
+      });
+      if (!edge) continue; // every free edge of this room collides -- skip the room
+      const [dx, dy] = EDGE_DELTA[edge];
+      occupied.add(`${candidate.grid[0] + dx},${candidate.grid[1] + dy}`);
+      grafts.push({ worldKey: candidate.worldKey, grid: candidate.grid, edge });
     }
     round += 1;
-    if (round > 20) throw new Error('ran out of free compass edges while grafting surface worlds onto the dungeon chain');
+    if (round > 20) throw new Error('ran out of free, uncollided compass edges while grafting surface worlds onto the dungeon chain');
   }
   return grafts;
 }
 
 // worlds[] plus one ordinary compass link per world, each grafted onto its
-// own distinct free edge somewhere across the 8 dungeons -- no links between
-// any two surface worlds, so they stay genuinely "standalone, not chained to
-// each other" (the design doc's phrasing) while still resolving to a real
-// physical link, which validateMapSpec's entry-BFS reachability check
+// own distinct free edge somewhere across the shallowest dungeons -- no links
+// between any two surface worlds, so they stay genuinely "standalone, not
+// chained to each other" (the design doc's phrasing) while still resolving to
+// a real physical link, which validateMapSpec's entry-BFS reachability check
 // requires (see backend/seeds/mapSpec.js). A surface world's grid position
 // is therefore its graft room's grid cell plus that edge's delta -- not a
 // fixed column -- which is what keeps every link's declared edge consistent
 // with the grid the validator checks it against.
+//
+// Only D1 and D2's free edges are candidates (SOMET-251 final review,
+// Important #3), not all 8 dungeons: surface worlds carry a hardcoded shallow
+// level_band regardless of where they graft on, so grafting one 31 hops deep
+// into the endgame chain (as the old round-robin-across-all-8 version did for
+// surface_ashfields_0, landing it in The Abyss) makes a level 1-8 zone sit
+// behind the entire dungeon chain -- content-nonsensical, and it breaks the
+// design doc's whole-graph escalation-is-monotonic acceptance criterion. D1+D2
+// keep every graft within a couple of hops of the entry, matching the bands.
 function buildSurfaceWorlds(dungeonBuilds) {
   const worlds = [];
   const links = [];
@@ -239,7 +281,15 @@ function buildSurfaceWorlds(dungeonBuilds) {
     for (let variant = 0; variant < 2; variant++) flat.push({ s, variant });
   });
 
-  const grafts = pickGraftPoints(dungeonBuilds, flat.length);
+  // Occupied by every room across ALL 8 dungeons (not just D1/D2, the
+  // candidate source below) -- a graft's destination cell must never land on
+  // ANY existing room's grid position, wherever in the chain it sits.
+  const occupied = new Set();
+  for (const { built } of dungeonBuilds) {
+    for (const w of built.worlds) occupied.add(w.grid.join(','));
+  }
+  const shallowDungeonBuilds = dungeonBuilds.slice(0, 2); // D1, D2 -- see header comment above
+  const grafts = pickGraftPoints(shallowDungeonBuilds, flat.length, occupied);
 
   flat.forEach(({ s, variant }, row) => {
     const key = `surface_${s.biome.toLowerCase().replace(/\s+/g, '_')}_${variant}`;
@@ -342,18 +392,50 @@ function generateSpec() {
     const attachKey = attachMap.get(w.key);
     return dist.get(attachKey !== undefined ? attachKey : w.key);
   };
+  // maxHop is computed over the ATTACHMENT-SUBSTITUTED hops (bandHopOf), so a
+  // branch room's own raw BFS distance can exceed it (a branch always sits at
+  // least one hop past its attachment point) -- hopFraction is clamped to
+  // [0,1] below rather than trusted to land in range, so that invariant does
+  // not depend on deriveDensity's internal Math.min clamp (a different
+  // module's implementation detail).
   const maxHop = Math.max(...allWorlds.map(bandHopOf));
   for (const w of allWorlds) {
     const dungeon = DUNGEONS.find((d) => w.key.startsWith(`${d.key}_`));
-    const hopFraction = maxHop === 0 ? 0 : bandHopOf(w) / maxHop;
+    // density uses the SAME attachment-substituted hop as level_band
+    // (bandHopOf, not the room's own raw dist.get(w.key)) -- escalation.js's
+    // header comment documents branch rooms banding like their attachment
+    // point, and that contract applies to density exactly as much as it does
+    // to level_band. Using the raw hop here used to make every branch room
+    // (e.g. a hub's spokes) mismatch its hub's density tier.
+    const rawFraction = maxHop === 0 ? 0 : bandHopOf(w) / maxHop;
+    const hopFraction = Math.min(1, Math.max(0, rawFraction));
     w.level_band = deriveLevelBand(hopFraction, dungeon.tierClamp);
-    w.density = deriveDensity(dist.get(w.key) / maxHop);
+    w.density = deriveDensity(hopFraction);
+  }
+
+  // Minor #6 (SOMET-251 final review): SEED_OVERRIDES[globalKey] ?? default
+  // silently no-ops if a key is ever mistyped or a room gets renamed -- no
+  // error, just a quiet fall-through to the (probably-unnavigable) default
+  // seed. Assert every override actually landed on a real world with that
+  // exact seed, so a future typo/rename fails loudly here instead of shipping
+  // a room the navigability check (seed-map.js, or tests/p5_navigability.test.js)
+  // was specifically tuned to route around.
+  const finalWorlds = [...allWorlds, ...surfaceWorlds];
+  const finalByKey = new Map(finalWorlds.map((w) => [w.key, w]));
+  for (const [key, overrideSeed] of Object.entries(SEED_OVERRIDES)) {
+    const w = finalByKey.get(key);
+    if (!w) {
+      throw new Error(`SEED_OVERRIDES has an entry for "${key}" but no world with that key was generated`);
+    }
+    if (w.seed !== overrideSeed) {
+      throw new Error(`SEED_OVERRIDES["${key}"] = ${overrideSeed} was never applied (world's seed is ${w.seed})`);
+    }
   }
 
   return {
     name: 'p5-descent',
     topology: 'chained-dungeons-plus-surface',
-    worlds: [...allWorlds, ...surfaceWorlds],
+    worlds: finalWorlds,
     links: [...allLinks, ...portalLinks],
   };
 }

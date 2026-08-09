@@ -293,7 +293,7 @@
         8,
         14
       ],
-      "density": "normal"
+      "density": "sparse"
     },
     {
       "key": "d2_spokeE",
@@ -321,7 +321,7 @@
         8,
         14
       ],
-      "density": "normal"
+      "density": "sparse"
     },
     {
       "key": "d2_spokeS",
@@ -349,7 +349,7 @@
         8,
         14
       ],
-      "density": "normal"
+      "density": "sparse"
     },
     {
       "key": "d2_spokeW",
@@ -377,7 +377,7 @@
         8,
         14
       ],
-      "density": "normal"
+      "density": "sparse"
     },
     {
       "key": "d2_subBranch",
@@ -890,7 +890,7 @@
         19,
         29
       ],
-      "density": "horde"
+      "density": "dense"
     },
     {
       "key": "d5_spokeE",
@@ -918,7 +918,7 @@
         19,
         29
       ],
-      "density": "horde"
+      "density": "dense"
     },
     {
       "key": "d5_spokeS",
@@ -946,7 +946,7 @@
         19,
         29
       ],
-      "density": "horde"
+      "density": "dense"
     },
     {
       "key": "d5_spokeW",
@@ -974,7 +974,7 @@
         19,
         29
       ],
-      "density": "horde"
+      "density": "dense"
     },
     {
       "key": "d5_subBranch",
@@ -1659,8 +1659,8 @@
       "key": "surface_verdant_jungle_0",
       "name": "Verdant Jungle Reach",
       "grid": [
-        44,
-        -1
+        34,
+        0
       ],
       "seed": 6020,
       "width": 64,
@@ -1686,8 +1686,8 @@
       "key": "surface_verdant_jungle_1",
       "name": "Verdant Jungle Frontier",
       "grid": [
-        56,
-        -1
+        21,
+        -2
       ],
       "seed": 6031,
       "width": 64,
@@ -1713,8 +1713,8 @@
       "key": "surface_storm_coast_0",
       "name": "Storm Coast Reach",
       "grid": [
-        68,
-        -2
+        21,
+        2
       ],
       "seed": 9700,
       "width": 64,
@@ -1740,8 +1740,8 @@
       "key": "surface_storm_coast_1",
       "name": "Storm Coast Frontier",
       "grid": [
-        80,
-        -1
+        33,
+        1
       ],
       "seed": 6051,
       "width": 64,
@@ -1767,7 +1767,7 @@
       "key": "surface_sunken_ruins_0",
       "name": "Sunken Ruins Reach",
       "grid": [
-        92,
+        31,
         -1
       ],
       "seed": 6060,
@@ -1794,8 +1794,8 @@
       "key": "surface_sunken_ruins_1",
       "name": "Sunken Ruins Frontier",
       "grid": [
-        104,
-        -2
+        22,
+        -1
       ],
       "seed": 6071,
       "width": 64,
@@ -1821,8 +1821,8 @@
       "key": "surface_ashfields_0",
       "name": "Ashfields Reach",
       "grid": [
-        106,
-        0
+        23,
+        1
       ],
       "seed": 6080,
       "width": 64,
@@ -1848,7 +1848,7 @@
       "key": "surface_ashfields_1",
       "name": "Ashfields Frontier",
       "grid": [
-        93,
+        33,
         -2
       ],
       "seed": 6091,
@@ -2134,42 +2134,42 @@
       "to": "surface_highlands_1"
     },
     {
-      "from": "d3_entry",
-      "edge": "N",
+      "from": "d2_spokeE",
+      "edge": "E",
       "to": "surface_verdant_jungle_0"
     },
     {
-      "from": "d4_entry",
+      "from": "d1_cache",
       "edge": "N",
       "to": "surface_verdant_jungle_1"
     },
     {
-      "from": "d5_spokeN",
-      "edge": "N",
+      "from": "d1_elite",
+      "edge": "S",
       "to": "surface_storm_coast_0"
     },
     {
-      "from": "d6_entry",
-      "edge": "N",
+      "from": "d2_spokeS",
+      "edge": "E",
       "to": "surface_storm_coast_1"
     },
     {
-      "from": "d7_entry",
+      "from": "d2_spokeW",
       "edge": "N",
       "to": "surface_sunken_ruins_0"
     },
     {
-      "from": "d8_spokeN",
+      "from": "d1_gorge",
       "edge": "N",
       "to": "surface_sunken_ruins_1"
     },
     {
-      "from": "d8_spokeE",
+      "from": "d1_shrine",
       "edge": "E",
       "to": "surface_ashfields_0"
     },
     {
-      "from": "d7_cache",
+      "from": "d2_subBranch",
       "edge": "N",
       "to": "surface_ashfields_1"
     },
