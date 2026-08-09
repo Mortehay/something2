@@ -55,11 +55,38 @@ test("every biome's flora_types exist in the decoration catalog", () => {
   assert.deepEqual(dangling, []);
 });
 
-// P3's boundary with P4, asserted rather than trusted. P4 deletes this test
-// when it fills the lists.
-test('every new biome ships with empty fauna for P4 to fill', () => {
-  const populated = added().filter((b) => (b.creature_types ?? []).length > 0);
-  assert.deepEqual(populated.map((b) => b.name), []);
+// P3 shipped `creature_types: []` on all 27 new biomes with a comment saying
+// "P4 fills them as it authors each creature line" (see biomes.js's header).
+// P4 (SOMET-250) authored the 288 "{Line} {Rung}" creatures into entity_types
+// but never came back to fill this field -- leaving every P5 (SOMET-251)
+// world using one of these biomes with zero possible wild spawns, since
+// placeMapCreatures intersects a world's allowed_creature_types against its
+// biome's creature_types and an empty biome list makes that intersection
+// empty no matter what the world allows. Fixed as a SOMET-251 follow-up
+// (closing the SOMET-247/SOMET-250 gap): each of the 27 now ships exactly
+// its Line's [Swarm, Skirmisher, Line] rung set -- the same three rungs
+// gen-p5-map-content.js already declares in every P5 world's
+// allowed_creature_types, so the intersection is non-empty by construction.
+//
+// This asserts the SHAPE (one consistent Line prefix per biome, no biome
+// left at [], no two biomes sharing a Line) rather than hand-duplicating the
+// biome->Line name table here, which would just be a second copy of the same
+// mapping to go stale in lockstep with the first.
+test('every new biome ships a real, single-Line Swarm/Skirmisher/Line fauna set', () => {
+  const RUNGS = ['Swarm', 'Skirmisher', 'Line'];
+  const linesSeen = new Map(); // line -> biome name, to catch two biomes sharing a Line
+  for (const b of added()) {
+    assert.ok(Array.isArray(b.creature_types) && b.creature_types.length === 3,
+      `${b.name} must ship exactly 3 creature_types, got ${JSON.stringify(b.creature_types)}`);
+    const names = b.creature_types.map((n) => n.split(' '));
+    const lines = new Set(names.map((parts) => parts.slice(0, -1).join(' ')));
+    assert.equal(lines.size, 1, `${b.name}'s creature_types must all share one Line prefix`);
+    const [line] = lines;
+    const rungs = names.map((parts) => parts[parts.length - 1]).sort();
+    assert.deepEqual(rungs, [...RUNGS].sort(), `${b.name} must ship Swarm+Skirmisher+Line, not ${rungs}`);
+    assert.ok(!linesSeen.has(line), `Line "${line}" used by both ${linesSeen.get(line)} and ${b.name}`);
+    linesSeen.set(line, b.name);
+  }
 });
 
 test('every new biome carries palette, art_style, exclusions and a colour', () => {
