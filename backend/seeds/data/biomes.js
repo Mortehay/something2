@@ -80,8 +80,13 @@ const STARTER_BIOMES = [
   // Line'] rung set gen-p5-map-content.js already declares in every P5
   // world's allowed_creature_types -- the minimal set that makes the
   // intersection non-empty (SOMET-251 follow-up, closing the SOMET-247/
-  // SOMET-250 gap; see docs/superpowers/sdd/2026-08-08-p5-map-content/
-  // task-7-biomes-fix-report.md for the investigation).
+  // SOMET-250 gap). The investigation that found this: P4 populated
+  // entity_types with the 288 creatures but its task briefing never named
+  // this file, so nothing came back to wire the new creatures into the
+  // biomes that were supposed to spawn them -- confirmed live before the fix
+  // (all 66 P5 worlds seeded with zero wild/hostile creatures, guards only),
+  // and confirmed fixed after (creature_types populated per biome's Line,
+  // re-seeded, non-zero hostile counts observed in the same 66 worlds).
   //
   // Impassable terrain (cave_wall / rubble / chasm) appears in exactly ten
   // biomes: Deepvault, Umbral Warren and the eight abyssal ones. That is an
