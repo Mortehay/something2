@@ -12,6 +12,7 @@ const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
+const { fetchChests, spawnFieldChest } = require('../services/chests.js');
 const { fetchShop } = require('../services/merchantStock');
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
@@ -148,6 +149,13 @@ function nearestMerchantVillage(villages, cx, cy, radius) {
   }
   return best;
 }
+
+// Guard-type allowlist for a field chest spawned via `use`ing a loot_map.
+// Content decision (which creature types can guard a field chest) is out of
+// scope for this task -- see the design spec; a single, always-present
+// creature type keeps the wire behavior testable without depending on a
+// content decision.
+const ALLOWED_FIELD_CHEST_GUARDS = ['Wolf'];
 
 // Cap on a single world's un-broadcast attack batch. Attacks arrive from the
 // socket handler BETWEEN ticks, so unlike pendingDetonations (produced inside
@@ -342,16 +350,26 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const villages = await fetchVillages(pool, canonicalId);
         const decorationDefs = await loadDecorationDefs(pool);
         const biomes = await loadBiomes(pool, row.biomes);
-        const map = new ServerMap({
-          ...buildWorldGenConfig({
-            row, tileTypes, doorways: [...links.keys()], villages, biomes,
-          }),
-          decorationDefs,
+        const chests = await fetchChests(pool, canonicalId);
+        // Cached once here, rather than rebuilt per spawnFieldChest call, so
+        // the `use` handler can hand placeMapCreatures the exact same
+        // tile-legality config the map itself was generated from. `row`
+        // alone is NOT this shape: it's missing tileTypes/doorways/villages/
+        // biomes entirely, and its level band is `level_min`/`level_max`
+        // (snake_case, straight off the SQL SELECT) where placeMapCreatures
+        // reads camelCase `levelMin`/`levelMax` off its `world` argument
+        // directly (worldConfig() never derives these -- see
+        // worldGenConfig.js's own comment on that exact silent-undefined
+        // trap). Passing `row` as-is would throw ("worldConfig: tileTypes is
+        // empty") before ever reaching a placement.
+        const mapGenConfig = buildWorldGenConfig({
+          row, tileTypes, doorways: [...links.keys()], villages, biomes,
         });
+        const map = new ServerMap({ ...mapGenConfig, decorationDefs });
         const entry = {
           worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
           tileTypes, creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
-          goldItemTypeId, links, portalLinks, villages,
+          goldItemTypeId, links, portalLinks, villages, chests, mapGenConfig,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -965,6 +983,74 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const r = await dropItem(pool, entry, ws.userId, msg.itemId, { ttlMs: groundItemTtlMs });
         if (r.ok) send(ws, { type: 'dropped', itemId: msg.itemId });
         else send(ws, { type: 'error', message: r.reason });
+      });
+    },
+
+    // Consumes a `consumable`-category item (currently only `loot_map`) to
+    // spawn a field chest + its guard on a legal tile. Ownership/category/
+    // name checks happen against the in-memory catalog/inventory first
+    // (entry.world.weapons and p.inv.items -- same source `joined`'s own
+    // `itemTypes`/`items` payload comes from, no extra DB round trip needed
+    // just to look category up), the same way dropItem's equipped-guard
+    // check reads p.inv rather than querying first; the DB DELETE below is
+    // still what's actually authoritative (guarded by user_id, mirrors
+    // dropItem), so a stale in-memory snapshot can only ever cause a
+    // spurious rejection, never a double-spend.
+    use(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.itemId !== 'string') return; // wire hygiene: ids are strings, matches drop's guard
+      chainOp(ws, 'use', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p || !p.inv) return;
+        const item = p.inv.items.find((it) => it.id === msg.itemId);
+        if (!item) { send(ws, { type: 'error', message: 'you do not own that item' }); return; }
+        const itemType = entry.world.weapons.get(item.typeId);
+        if (!itemType || itemType.category !== 'consumable') {
+          send(ws, { type: 'error', message: 'this item has no use action' });
+          return;
+        }
+        if (itemType.name !== 'loot_map') {
+          send(ws, { type: 'error', message: 'unrecognized consumable' });
+          return;
+        }
+
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const spawned = await spawnFieldChest(
+            client,
+            { ...entry.mapGenConfig, id: entry.worldId },
+            ALLOWED_FIELD_CHEST_GUARDS,
+            Math.floor(rng() * 2 ** 31),
+          );
+          if (!spawned) {
+            await client.query('ROLLBACK');
+            send(ws, { type: 'error', message: 'no legal spot for a chest right now' });
+            return;
+          }
+          const del = await client.query(
+            'DELETE FROM player_items WHERE id = $1 AND user_id = $2',
+            [msg.itemId, ws.userId],
+          );
+          if (del.rowCount !== 1) {
+            await client.query('ROLLBACK');
+            send(ws, { type: 'error', message: 'you do not own that item' });
+            return;
+          }
+          await client.query('COMMIT');
+          // Keep the in-memory caches in sync, the same reason claimItem/
+          // dropItem mutate p.inv.items / entry.world.groundItems directly
+          // rather than waiting for a reload.
+          p.inv.items = p.inv.items.filter((it) => it.id !== msg.itemId);
+          entry.chests.push(spawned.row);
+          send(ws, { type: 'used', itemId: msg.itemId, spawnedChestId: spawned.id });
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          client.release();
+        }
       });
     },
 

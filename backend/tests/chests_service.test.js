@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { insertVaultChest } = require('../src/services/chests.js');
+const { insertVaultChest, spawnFieldChest } = require('../src/services/chests.js');
 
 function scriptedClient(entityTypeRow, creatureId, chestId) {
   const calls = [];
@@ -46,4 +46,91 @@ test('insertVaultChest rejects an unknown guard creature type rather than insert
     () => insertVaultChest(client, 'world-1', { x: 0, y: 0, guardCreatureType: 'Nope', level: 1 }),
     /unknown guard creature type/,
   );
+});
+
+// spawnFieldChest's world argument is what placeMapCreatures itself already
+// requires elsewhere (worldPopulation.js, seed-map.js): a buildWorldGenConfig
+// shape, not a raw `worlds` table row. A world with a walkable tile type but
+// no width/height is UNBOUNDED (cfg.bounds is null), which is placeMapCreatures'
+// own documented "nowhere legal" precondition -- not empty tileTypes (that
+// throws a different error, `worldConfig: tileTypes is empty`, before ever
+// reaching the bounds check).
+function unboundedWorld() {
+  return { levelMin: 1, levelMax: 5, tileTypes: { grass: { walkable: true, speed: 1 } } };
+}
+
+// A 10x10 bounded world, entirely walkable interior, no biomes/villages --
+// any rngSeed places the single allowed type somewhere in [1,8]x[1,8].
+function boundedWorld() {
+  return {
+    id: 'world-1', levelMin: 1, levelMax: 5, width: 10, height: 10,
+    tileTypes: { grass: { walkable: true, speed: 1 } },
+  };
+}
+
+function scriptedFieldClient({ entityTypeRows = [{ id: 7, name: 'Wolf', hp: 30, defense: 2, resistances: {} }], creatureId = 'guard-1', chestId = 'chest-1' } = {}) {
+  const calls = [];
+  return {
+    calls,
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (/FROM entity_types/i.test(sql)) return { rows: entityTypeRows, rowCount: entityTypeRows.length };
+      if (/INSERT INTO world_creatures/i.test(sql)) return { rows: [{ id: creatureId }], rowCount: 1 };
+      if (/INSERT INTO world_chests/i.test(sql)) {
+        return {
+          rows: [{
+            id: chestId, world_id: params[0], x: params[1], y: params[2], kind: 'field',
+            guard_entity_type_id: params[3], guard_level: params[4],
+            guard_creature_ids: JSON.parse(params[5]), state: 'locked',
+            opened_at: null, respawn_at: null, created_at: '2026-01-01T00:00:00Z',
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  };
+}
+
+test('spawnFieldChest returns null when placeMapCreatures finds no legal tile', async () => {
+  const client = scriptedFieldClient();
+  const result = await spawnFieldChest(client, unboundedWorld(), ['Wolf'], 42);
+  assert.equal(result, null);
+  // Only the entity_types resolve should have run -- an unbounded world must
+  // short-circuit before any INSERT is attempted.
+  assert.equal(client.calls.length, 1);
+  assert.match(client.calls[0].sql, /FROM entity_types/i);
+});
+
+test('spawnFieldChest rejects when none of the allowed guard types exist', async () => {
+  const client = scriptedFieldClient({ entityTypeRows: [] });
+  await assert.rejects(
+    () => spawnFieldChest(client, boundedWorld(), ['Nope'], 42),
+    /none of the allowed guard types exist/,
+  );
+});
+
+test('spawnFieldChest places a guard, inserts a locked field chest referencing it, and returns a fetchChests-shaped row', async () => {
+  const client = scriptedFieldClient();
+  const result = await spawnFieldChest(client, boundedWorld(), ['Wolf'], 42);
+
+  assert.equal(result.id, 'chest-1');
+  assert.equal(result.guardCreatureId, 'guard-1');
+  // Same camelCase shape fetchChests produces -- entry.chests must never mix
+  // shapes, since a field chest pushed straight from this call sits next to
+  // vault chests loaded through fetchChests.
+  assert.deepEqual(Object.keys(result.row).sort(), [
+    'guardCreatureIds', 'guardEntityTypeId', 'guardLevel', 'id', 'kind', 'openedAt', 'respawnAt', 'state', 'x', 'y',
+  ].sort());
+  assert.equal(result.row.kind, 'field');
+  assert.equal(result.row.state, 'locked');
+  assert.deepEqual(result.row.guardCreatureIds, ['guard-1']);
+
+  const creatureIns = client.calls.find((c) => /INSERT INTO world_creatures/i.test(c.sql));
+  assert.doesNotMatch(creatureIns.sql, /resistances/, 'world_creatures has no resistances column');
+  assert.equal(creatureIns.params[0], 'world-1');
+  assert.equal(creatureIns.params[1], 'Wolf');
+
+  const chestIns = client.calls.find((c) => /INSERT INTO world_chests/i.test(c.sql));
+  assert.match(chestIns.sql, /'field'/);
 });
