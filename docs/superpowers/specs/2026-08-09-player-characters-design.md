@@ -402,16 +402,18 @@ before the epic is called done:
 
 ## 11. Slices
 
-| | slice | depends on |
-|---|---|---|
-| A | `characters` schema + backfill + down-migration test | — |
-| B | playable classes (`is_playable`, three types, `class_loadouts`, seed data) | A |
-| C | characters REST API (list, classes, create, delete; slot cap; ownership) | A, B |
-| D | authority: join-by-character, per-character state, per-class loadout | A, B |
-| E | spawn: nearest-portal fallback | — |
-| F | `CharacterSelect` UI, active-character lifecycle, HUD switch | C, D |
-| G | fog-of-war tracking, player world-map endpoint, `PlayerWorldMap`, nav | D |
-| H | test-player migration, `test-user-readme.md`, browser verification | F, G |
+Tracked in Plane under epic **SOMET-256**.
+
+| | slice | ticket | depends on |
+|---|---|---|---|
+| A | `characters` schema + backfill + down-migration test | SOMET-257 | — |
+| B | playable classes (`is_playable`, three types, `class_loadouts`, seed data) | SOMET-258 | A |
+| C | characters REST API (list, classes, create, delete; slot cap; ownership) | SOMET-259 | A, B |
+| D | authority: join-by-character, per-character state, per-class loadout | SOMET-260 | A, B |
+| E | spawn: nearest-portal fallback | SOMET-261 | — |
+| F | `CharacterSelect` UI, active-character lifecycle, HUD switch | SOMET-262 | C, D |
+| G | fog-of-war tracking, player world-map endpoint, `PlayerWorldMap`, nav | SOMET-263 | D |
+| H | test-player migration, `test-user-readme.md`, browser verification | SOMET-264 | F, G |
 
 A carries the risk; everything after it is additive.
 
