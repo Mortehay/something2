@@ -9,6 +9,7 @@ const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateC
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS } = require('./services/villages');
 const { fetchChests } = require('./services/chests.js');
+const { worldOverviewCache, clearOverviewCache } = require('./services/overviewCache.js');
 const { seedItemAcrossVillages } = require('./services/merchantStock');
 const { populateWorld } = require('./services/worldPopulation');
 const { MAX_WORLD_CREATURES } = require('./services/densityTiers');
@@ -156,7 +157,10 @@ const MAX_MAP_DIM = 500;
 const PREVIEW_DIM = 64;
 const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path grid)
 
-// World overview memo (player-centered minimap window, SOMET minimap HUD)
+// World overview memo (player-centered minimap window, SOMET minimap HUD).
+// worldOverviewCache/clearOverviewCache live in services/overviewCache.js
+// (not here) so authority-side chest mutation paths can invalidate it too --
+// see that module's header comment for why.
 const OVERVIEW_SPAN = 256;   // tiles per side of the player-centered window
 const OVERVIEW_STEP = 4;     // downsample factor -> 64x64 coarse cells
 // Unlike worldPreviewCache (one entry per world), a roaming player can mint one
@@ -164,13 +168,6 @@ const OVERVIEW_STEP = 4;     // downsample factor -> 64x64 coarse cells
 // on a long-running server -- so this cache needs a size cap (SOMET minimap
 // HUD final review).
 const OVERVIEW_CACHE_MAX = 64;
-const worldOverviewCache = new Map(); // "worldId:snappedCol:snappedRow" -> payload
-
-function clearOverviewCache(worldId) {
-  for (const key of worldOverviewCache.keys()) {
-    if (key.startsWith(`${worldId}:`)) worldOverviewCache.delete(key);
-  }
-}
 
 // Insert into a Map with a FIFO size cap: once it exceeds `max`, evict the
 // oldest-inserted entry (Map preserves insertion order). Re-setting an

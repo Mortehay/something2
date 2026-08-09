@@ -16,6 +16,7 @@ const {
   fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests,
 } = require('../services/chests.js');
 const { openChest } = require('./chestLoot.js');
+const { clearOverviewCache } = require('../services/overviewCache.js');
 const { fetchShop } = require('../services/merchantStock');
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
@@ -1140,6 +1141,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // chest the sweep later relocks would look permanently 'opened' to
         // an already-connected player until a full world reload.
         Object.assign(chest, { state: 'opened', openedAt: result.openedAt, respawnAt: result.respawnAt });
+        // openChest's own transaction may have flipped state locked ->
+        // unlocked -> opened in one shot (the guard-dead check folds the
+        // unlock into the same call) -- either way this chest's `state` on
+        // the /overview payload is now stale wherever it was cached. One
+        // call covers both transitions since they already committed
+        // atomically before this handler ever resumes.
+        clearOverviewCache(entry.worldId);
         send(ws, {
           type: 'chestOpened', chestId: chest.id, items: result.items,
           awarded: result.awarded, leveledUp: result.leveledUp, newLevel: result.newLevel,
@@ -1487,6 +1495,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
           return entry ? { ...entry.mapGenConfig, id: worldId } : null;
         },
         onReset: ({ id, worldId, ...patch }) => {
+          // Same reasoning as the openchest handler's own clearOverviewCache
+          // call: the DB write already committed (respawnDueFieldChests'
+          // header comment on `reset` being counted unconditionally applies
+          // here too), so the cache is stale regardless of whether the
+          // owning world is even loaded right now to receive the in-memory
+          // patch below.
+          clearOverviewCache(worldId);
           const entry = worlds.get(worldId);
           if (!entry) return;
           const chest = entry.chests.find((c) => c.id === id);
