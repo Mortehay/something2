@@ -311,11 +311,24 @@ test('seeding still overwrites fauna when the seed entry does specify a list', a
   }
 });
 
-// End-to-end through the command a developer actually runs. The two tests
-// above pin seedOneBiome; this one pins that `make seed-catalogs` reaches it,
-// on a real biome that ships the placeholder. Restores the value it READ, not
-// a hard-coded one, so an interrupted run cannot invent a state.
-test('a full seedCatalogs run does not cost an admin the fauna they authored', async (t) => {
+// Every biome in STARTER_BIOMES now ships a real, non-empty creature_types
+// (SOMET-251 follow-up closing the SOMET-247/SOMET-250 gap -- see biomes.js's
+// header), so a real `seedCatalogs(pool)` run never sources an empty array
+// and can no longer reach the CASE branch this test is about: an EXCLUDED
+// source of [] preserving whatever creature_types the row already has. This
+// test therefore drives seedOneBiome directly with a synthetic empty-array
+// row (everything else copied off the real Ossuary seed entry) to pin that
+// the preservation logic in seed-catalogs.js's real SQL is still correct,
+// not a restatement of it -- not that a full seedCatalogs()/`make
+// seed-catalogs` run exercises this path, which it currently does not.
+//
+// Consequence: there is no live end-to-end test proving a real `make
+// seed-catalogs` run won't clobber admin-authored fauna. That guarantee
+// currently holds only because no biome in real seed data ships an empty
+// creature_types array today; if a future biome ever does, this gap should
+// be revisited. Restores the value it READ, not a hard-coded one, so an
+// interrupted run cannot invent a state.
+test('seedOneBiome preserves hand-authored fauna when its seed source ships an empty creature_types', async (t) => {
   if (!requireTestDb(t, 'this test writes fauna into a real biomes row before restoring it')) return;
   const pool = await openPool();
   if (pool.unreachable) {
