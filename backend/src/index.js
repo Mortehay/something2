@@ -8,6 +8,7 @@ const path = require('path');
 const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS } = require('./services/villages');
+const { fetchChests } = require('./services/chests.js');
 const { seedItemAcrossVillages } = require('./services/merchantStock');
 const { populateWorld } = require('./services/worldPopulation');
 const { MAX_WORLD_CREATURES } = require('./services/densityTiers');
@@ -2505,7 +2506,23 @@ app.get('/api/worlds/:id/overview', async (req, res) => {
       buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes }),
       centerCol, centerRow, OVERVIEW_SPAN, OVERVIEW_STEP,
     );
-    const payload = { world_id: worldId, ...data };
+    // Chests are point entities with a real stored world-pixel x/y (mapChestRow),
+    // not a derived center like a village's bounding box or a doorway's edge --
+    // they never stamp terrain, so (unlike villages/doorways) there is no need to
+    // thread them through buildWorldGenConfig/generateWorldOverview. Fetched fresh
+    // per request (this route has no in-memory chest cache; that's entry.chests,
+    // scoped to a live authority world) and projected into the SAME col/row tile
+    // grid every other overview marker uses, so the client can plot them on one
+    // consistent grid.
+    const chests = await fetchChests(pool, world.id);
+    const chestMarkers = chests.map((c) => ({
+      id: c.id,
+      col: Math.floor(c.x / CREATURE_TILE_PX),
+      row: Math.floor(c.y / CREATURE_TILE_PX),
+      kind: c.kind,
+      state: c.state,
+    }));
+    const payload = { world_id: worldId, ...data, chests: chestMarkers };
     boundedCacheSet(worldOverviewCache, cacheKey, payload, OVERVIEW_CACHE_MAX);
     res.json(payload);
   } catch (err) {

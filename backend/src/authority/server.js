@@ -7,7 +7,7 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
-const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
+const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
 const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
@@ -696,6 +696,32 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const { cx, cy } = chunkOf(p.x, p.y, N);
       const keys = neighborhoodKeys(cx, cy, 1);
       send(ws, { type: 'items', items: entry.world.groundItems.snapshotForNeighborhood(keys) });
+    }
+  }
+
+  // Live minimap/AOI chest markers. Unlike creatures/items, entry.chests is a
+  // plain array (not a chunk-indexed Sim class -- chests are map-spec-authored
+  // or field-spawned, never numerous enough per world to warrant one), so the
+  // neighborhood filter is inlined here rather than via a snapshotForNeighborhood
+  // method. Same field-naming/coordinate convention as creatures/items ({id, x,
+  // y, ...} in world-pixel space): a chest's x/y is a real stored position
+  // (mapChestRow), not a derived center like a village's, so it belongs with the
+  // point-entity family, not the bounding-box-marker family. `state` rides along
+  // (not just kind) so the client can render locked/unlocked/opened distinctly.
+  function broadcastChests(entry) {
+    const N = entry.row.chunk_size;
+    for (const [userId, ws] of entry.sockets) {
+      const p = entry.world.getPlayer(userId);
+      if (!p) continue;
+      const { cx, cy } = chunkOf(p.x, p.y, N);
+      const keys = new Set(neighborhoodKeys(cx, cy, 1));
+      const chests = (entry.chests || [])
+        .filter((c) => {
+          const { cx: ccx, cy: ccy } = chunkOf(c.x, c.y, N);
+          return keys.has(CHUNK_KEY(ccx, ccy));
+        })
+        .map((c) => ({ id: c.id, x: c.x, y: c.y, kind: c.kind, state: c.state }));
+      send(ws, { type: 'chests', chests });
     }
   }
 
@@ -1392,6 +1418,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         recomputeActive(entry);
         broadcastCreatures(entry);
         broadcastItems(entry);
+        broadcastChests(entry);
       }
     }
   }, tickMs);
