@@ -847,23 +847,82 @@ function arrivalPoint(width, height, arriveEdge) {
            y: row * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF };
 }
 
-// Decide a join spawn. Priority: doorway arrival > persisted position >
-// entry_spawn (entry world, first join) > bounded interior center > chunk center.
-function chooseSpawn({ pending, persisted, worldRow, chunkSize }) {
-  if (pending) return { x: pending.x, y: pending.y, viaDoorway: true };
-  if (persisted) return { x: persisted.x, y: persisted.y, viaDoorway: false };
+const PLAYER_SIZE = PLAYER_HALF * 2;
+const FOOT_EPS = 1; // inset so a position flush against a wall edge is not read as inside it
+
+// Is the player's whole 64px box inside the world and standing on walkable
+// ground? isWalkable is ServerMap.isWalkable (authority/collision.js) injected
+// by the caller, so this stays a pure function and the walkability rule is not
+// duplicated a third time -- resolveMove already exists as two byte-for-byte
+// copies across frontend/movement.js and backend/authority/collision.js.
+//
+// All four corners, not the top-left: a box whose origin sits on open ground
+// can still have three quarters of itself inside a wall.
+function spawnIsValid(x, y, worldRow, isWalkable) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  if (isBoundedWorld(worldRow)) {
+    const maxX = worldRow.width * CREATURE_TILE_PX - PLAYER_SIZE;
+    const maxY = worldRow.height * CREATURE_TILE_PX - PLAYER_SIZE;
+    if (x < 0 || y < 0 || x > maxX || y > maxY) return false;
+  }
+  if (typeof isWalkable !== 'function') return true;
+  const corners = [
+    [x + FOOT_EPS, y + FOOT_EPS],
+    [x + PLAYER_SIZE - FOOT_EPS, y + FOOT_EPS],
+    [x + FOOT_EPS, y + PLAYER_SIZE - FOOT_EPS],
+    [x + PLAYER_SIZE - FOOT_EPS, y + PLAYER_SIZE - FOOT_EPS],
+  ];
+  return corners.every(([cx, cy]) => isWalkable(cx, cy));
+}
+
+function nearestPortal(portals, x, y) {
+  let best = null;
+  let bestD2 = Infinity;
+  for (const p of portals || []) {
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+    const d2 = ((p.x - x) ** 2) + ((p.y - y) ** 2);
+    if (d2 < bestD2) { bestD2 = d2; best = p; }
+  }
+  return best;
+}
+
+// Decide a join spawn. Priority: doorway arrival > persisted position (if it is
+// still valid) > nearest portal > entry_spawn (entry world, first join) >
+// bounded interior center > chunk center.
+//
+// The nearest-portal step is SOMET-261. Before it, an invalid persisted
+// position fell all the way through to "world centre", which after a world
+// resize or a regeneration can be inside geometry -- the player loaded stuck,
+// with no way out. A portal is a tile the map author guaranteed is reachable,
+// which makes it the right last resort.
+//
+// `portals` and `isWalkable` are optional with inert defaults so the five
+// pre-existing branches (and edgeHelpers.test.js, which calls this with neither)
+// behave exactly as before. That inertness is also the risk: a caller that
+// forgets to pass them silently never uses the fallback, which is why
+// spawn_portal_fallback.test.js asserts loadSpawn actually supplies both.
+function chooseSpawn({ pending, persisted, worldRow, chunkSize, portals = [], isWalkable = null }) {
+  if (pending) return { x: pending.x, y: pending.y, viaDoorway: true, viaPortalFallback: false };
+  if (persisted) {
+    if (spawnIsValid(persisted.x, persisted.y, worldRow, isWalkable)) {
+      return { x: persisted.x, y: persisted.y, viaDoorway: false, viaPortalFallback: false };
+    }
+    const near = nearestPortal(portals, persisted.x, persisted.y);
+    if (near) return { x: near.x, y: near.y, viaDoorway: false, viaPortalFallback: true };
+  }
   if (worldRow && worldRow.is_entry && worldRow.entry_spawn &&
       Number.isFinite(worldRow.entry_spawn.x) && Number.isFinite(worldRow.entry_spawn.y)) {
-    return { x: worldRow.entry_spawn.x, y: worldRow.entry_spawn.y, viaDoorway: false };
+    return { x: worldRow.entry_spawn.x, y: worldRow.entry_spawn.y, viaDoorway: false, viaPortalFallback: false };
   }
   if (isBoundedWorld(worldRow)) {
     const col = Math.floor(worldRow.width / 2);
     const row = Math.floor(worldRow.height / 2);
     return { x: col * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF,
-             y: row * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF, viaDoorway: false };
+             y: row * CREATURE_TILE_PX + (CREATURE_TILE_PX / 2) - PLAYER_HALF,
+             viaDoorway: false, viaPortalFallback: false };
   }
   const center = (chunkSize * CREATURE_TILE_PX) / 2;
-  return { x: center, y: center, viaDoorway: false };
+  return { x: center, y: center, viaDoorway: false, viaPortalFallback: false };
 }
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
