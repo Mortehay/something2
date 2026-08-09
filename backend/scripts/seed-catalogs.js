@@ -11,7 +11,9 @@ const { Pool } = require('pg');
 const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
-const { HOSTILE_CREATURES, CREATURE_DROPS } = require('../seeds/data/entityTypes.js');
+const {
+  HOSTILE_CREATURES, CREATURE_DROPS, PLAYABLE_CLASSES, CLASS_LOADOUTS,
+} = require('../seeds/data/entityTypes.js');
 const { BESTIARY_P4_CREATURES, BESTIARY_P4_DROPS } = require('../seeds/data/bestiaryP4.js');
 const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
 const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
@@ -308,6 +310,46 @@ async function seedOneCreatureDrop(pool, d) {
   return r.rowCount;
 }
 
+// A playable class (SOMET-258). Same DO NOTHING posture as every other
+// seedOne* here -- this restores a class that is missing, and never overwrites
+// one an admin has retuned by hand.
+//
+// is_playable is set explicitly rather than left to the column default: the
+// default is false, so a restored class that omitted it would come back
+// invisible to the character-creation picker -- present in the catalog,
+// unusable in the game, and silent about it.
+async function seedOnePlayableClass(pool, c) {
+  const r = await pool.query(
+    `INSERT INTO entity_types
+      (name, color, walkable, spawn_tiles, chance, is_playable,
+       strength, dexterity, constitution, intelligence, wisdom, charisma,
+       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate)
+     VALUES ($1,$2,$3,$4::jsonb,$5,true,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+     ON CONFLICT (name) DO NOTHING`,
+    [c.name, c.color, c.walkable, JSON.stringify(c.spawn_tiles), c.chance,
+     c.strength, c.dexterity, c.constitution, c.intelligence, c.wisdom, c.charisma,
+     c.hp, c.max_hp, c.hp_regen_rate, c.mana, c.max_mana, c.mana_regen_rate],
+  );
+  return r.rowCount;
+}
+
+// One class's starting-gear row. Guarded by the cross-join on names, in the
+// same style as the migration and as seedOneCreatureDrop: a catalog missing
+// the class or the item inserts nothing rather than failing the whole seed.
+// ON CONFLICT is safe here (unlike creature_drops) because class_loadouts DOES
+// carry a unique constraint on (entity_type_id, item_type_id).
+async function seedOneClassLoadout(pool, l) {
+  const r = await pool.query(
+    `INSERT INTO class_loadouts (entity_type_id, item_type_id, quantity)
+     SELECT e.id, i.id, $3
+       FROM entity_types e, item_types i
+      WHERE e.name = $1 AND i.name = $2
+     ON CONFLICT (entity_type_id, item_type_id) DO NOTHING`,
+    [l.class, l.item, l.quantity],
+  );
+  return r.rowCount;
+}
+
 async function seedCatalogs(pool) {
   let tiles = 0;
   for (const t of DEFAULT_TILE_TYPES) {
@@ -387,14 +429,27 @@ async function seedCatalogs(pool) {
     behaviorDrops += await seedOneBehaviorDrop(pool, d);
   }
 
+  // Playable classes, then their starting gear. Ordered that way because the
+  // loadout rows resolve their class by name and insert nothing if it is
+  // absent -- seeding gear first would silently no-op on a wiped volume.
+  let classes = 0;
+  for (const c of PLAYABLE_CLASSES) {
+    classes += await seedOnePlayableClass(pool, c);
+  }
+  let classLoadouts = 0;
+  for (const l of CLASS_LOADOUTS) {
+    classLoadouts += await seedOneClassLoadout(pool, l);
+  }
+
   return {
     tiles, biomes, decorations, creatures, drops, abilities, behaviorDrops,
+    classes, classLoadouts,
   };
 }
 
 module.exports = {
   seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior, seedOneAbility, seedOneBehaviorDrop,
-  seedOneCreatureType, seedOneCreatureDrop,
+  seedOneCreatureType, seedOneCreatureDrop, seedOnePlayableClass, seedOneClassLoadout,
 };
 
 if (require.main === module) {
@@ -411,6 +466,7 @@ if (require.main === module) {
       // the normal steady state here, so say so rather than look like a bug.
       console.log(`restored ${n.creatures} missing creature types, ${n.drops} missing drop rules, `
         + `${n.behaviorDrops} missing rung drop rules`);
+      console.log(`restored ${n.classes} missing playable classes, ${n.classLoadouts} missing class loadout rows`);
     })
     .catch((e) => { console.error(e.message); process.exitCode = 1; })
     .finally(() => pool.end());

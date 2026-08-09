@@ -73,4 +73,68 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       'Warrior:short swordx1',
     ]);
   });
+
+  // The Wolf lesson (see seeds/data/entityTypes.js's header): an entity type
+  // the repo cannot rebuild disappears when the Postgres volume is rebuilt,
+  // and characters.entity_type_id will carry a foreign key to these rows.
+  //
+  // This test DELETES the three class rows and proves the seeder puts them
+  // back. That deletion is deliberate and is what makes the test mean
+  // anything: the seeder upserts ON CONFLICT (name) DO NOTHING, so asserting
+  // against rows the migration already created would pass against a seeder
+  // that knows nothing about classes at all.
+  //
+  // It is safe because the blast radius is exactly the rows this epic created
+  // minutes ago -- no pre-existing catalog row is touched, the class_loadouts
+  // rows cascade with them, and the finally block re-seeds unconditionally so
+  // even a mid-test failure leaves the catalog whole.
+  await t.test('seed-catalogs rebuilds the classes after a wipe', async () => {
+    const { seedCatalogs } = require('../scripts/seed-catalogs.js');
+    try {
+      await pool.query("DELETE FROM entity_types WHERE name IN ('Warrior','Ranger','Mage')");
+
+      // Prove the wipe happened. Without this the restore assertions below
+      // could pass simply because nothing was ever removed.
+      const gone = await pool.query(
+        "SELECT count(*)::int AS n FROM entity_types WHERE name IN ('Warrior','Ranger','Mage')");
+      assert.equal(gone.rows[0].n, 0, 'the wipe must actually remove the classes');
+      const goneLoadouts = await pool.query('SELECT count(*)::int AS n FROM class_loadouts');
+      assert.equal(goneLoadouts.rows[0].n, 0, 'class_loadouts must cascade with its classes');
+
+      await seedCatalogs(pool);
+
+      const back = await pool.query(
+        `SELECT name, is_playable, hp, max_hp, dexterity, intelligence, max_mana
+           FROM entity_types WHERE name IN ('Warrior','Ranger','Mage') ORDER BY name`);
+      assert.deepEqual(
+        back.rows.map((x) => [x.name, x.is_playable, Number(x.hp)]),
+        [['Mage', true, 75], ['Ranger', true, 85], ['Warrior', true, 100]]);
+
+      const loadouts = await pool.query(
+        `SELECT e.name AS class, i.name AS item, l.quantity
+           FROM class_loadouts l
+           JOIN entity_types e ON e.id = l.entity_type_id
+           JOIN item_types  i ON i.id = l.item_type_id
+          ORDER BY e.name, i.name`);
+      assert.deepEqual(
+        loadouts.rows.map((x) => `${x.class}:${x.item}x${x.quantity}`),
+        [
+          'Mage:apprentice staffx1',
+          'Mage:arcane-wardx1',
+          'Ranger:arrowx20',
+          'Ranger:bowx1',
+          'Ranger:leather-vestx1',
+          'Warrior:leather-vestx1',
+          'Warrior:short swordx1',
+        ],
+        'the loadouts must be rebuildable too, or a wiped volume leaves classes with no gear');
+
+      // Idempotent: a second run must not stack duplicate loadout rows.
+      await seedCatalogs(pool);
+      const after = await pool.query('SELECT count(*)::int AS n FROM class_loadouts');
+      assert.equal(after.rows[0].n, 7, 'a repeat run must not duplicate loadout rows');
+    } finally {
+      await seedCatalogs(pool);
+    }
+  });
 });
