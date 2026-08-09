@@ -324,24 +324,36 @@ test('a full seedCatalogs run does not cost an admin the fauna they authored', a
     t.skip(msg);
     return;
   }
-  const NAME = 'Ossuary'; // one of the 27 shipping creature_types: []
+  const NAME = 'Ossuary';
   let original = null;
   try {
     await seedCatalogs(pool);
     const before = await pool.query('SELECT creature_types FROM biomes WHERE name = $1', [NAME]);
     assert.equal(before.rowCount, 1, `${NAME} is not seeded — cannot exercise this test`);
     original = before.rows[0].creature_types;
-    assert.deepEqual(original, [], `${NAME} must still ship the P4 placeholder for this test to mean anything`);
 
     // Real creature names, so an interrupted run leaves a valid catalog rather
     // than a dangling reference.
     await pool.query(
       `UPDATE biomes SET creature_types = '["Skeleton"]'::jsonb WHERE name = $1`, [NAME]);
-    await seedCatalogs(pool);
+
+    // Every biome in STARTER_BIOMES now ships a real, non-empty
+    // creature_types (SOMET-251 follow-up closing the SOMET-247/SOMET-250
+    // gap -- see biomes.js's header), so seedCatalogs(pool) alone no longer
+    // exercises the CASE branch this test is about: an EXCLUDED source of []
+    // preserving whatever creature_types the row already has. Drive
+    // seedOneBiome directly with a synthetic empty-array row for NAME
+    // (everything else copied off the real Ossuary seed entry) so the
+    // preservation branch is still exercised against the real SQL in
+    // seed-catalogs.js, not a restatement of it, even though no shipped seed
+    // entry hits that branch by itself any more.
+    const ossuarySeed = STARTER_BIOMES.find((b) => b.name === NAME);
+    assert.ok(ossuarySeed, `${NAME} missing from STARTER_BIOMES — cannot exercise this test`);
+    await seedOneBiome(pool, { ...ossuarySeed, creature_types: [] });
 
     const r = await pool.query('SELECT creature_types FROM biomes WHERE name = $1', [NAME]);
     assert.deepEqual(r.rows[0].creature_types, ['Skeleton'],
-      'make seed-catalogs reverted hand-authored fauna');
+      'an empty-array seed source reverted hand-authored fauna');
   } finally {
     if (original !== null) {
       await pool.query('UPDATE biomes SET creature_types = $2::jsonb WHERE name = $1',
