@@ -42,6 +42,12 @@ exports.up = (pgm) => {
 };
 
 exports.down = (pgm) => {
+  // world_chunks generated while a world had biomes carry biome-banded
+  // terrain baked into their persisted data; regenerating is cheap, so drop
+  // them rather than leave a rolled-back DB serving mismatched terrain.
+  pgm.sql(`DELETE FROM world_chunks USING worlds
+    WHERE world_chunks.world_id = worlds.id
+      AND jsonb_array_length(worlds.biomes) > 0`);
   pgm.dropColumns('worlds', ['biomes', 'biome_cell']);
   pgm.dropTable('biomes');
 };
