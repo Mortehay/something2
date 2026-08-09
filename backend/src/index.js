@@ -98,6 +98,7 @@ const { requireAdmin } = require('./auth/middleware.js');
 const { assertJwtSecretOrExit } = require('./auth/assertJwtSecret.js');
 const authRouter = require('./auth/routes.js');
 const progressionRoutes = require('./api/progressionRoutes.js');
+const characterRoutes = require('./api/characterRoutes.js');
 // Single admin guard applied to every mutating admin route below.
 const adminGuard = requireAdmin(guardPool);
 
@@ -333,6 +334,10 @@ app.use('/api/auth', authRouter(guardPool));
 // an allocation or a respec. Every route is behind requireAuth and acts on
 // req.user.id -- see api/progressionRoutes.js's header comment.
 app.use('/api/progression', progressionRoutes(guardPool, refreshLivePlayerStats));
+
+// Character slots (SOMET-259): list / create / delete, plus the playable-class
+// catalog the creation form reads. Behind requireAuth, scoped to req.user.id.
+app.use('/api/characters', characterRoutes(guardPool));
 
 // The /api/dev-token endpoint was removed: it minted a correctly-signed JWT for
 // any user_id with no credentials — a verified account-takeover primitive.
