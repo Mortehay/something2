@@ -170,9 +170,13 @@ function scriptedRespawnClient({
   };
 }
 
-test('respawnDueFieldChests resets a past-due field chest to locked with a fresh guard', async () => {
+test('respawnDueFieldChests resets a past-due field chest to locked with a fresh guard, and reports the reset via onReset', async () => {
   const client = scriptedRespawnClient();
-  const reset = await respawnDueFieldChests(client, { getWorld: async () => boundedWorld() });
+  const resets = [];
+  const reset = await respawnDueFieldChests(client, {
+    getWorld: async () => boundedWorld(),
+    onReset: (patch) => resets.push(patch),
+  });
   assert.equal(reset, 1);
 
   // The query filtering to due chests must scope to field chests only --
@@ -191,6 +195,39 @@ test('respawnDueFieldChests resets a past-due field chest to locked with a fresh
   assert.match(update.sql, /respawn_at = NULL/);
   assert.deepEqual(JSON.parse(update.params[0]), ['guard-2']);
   assert.equal(update.params[2], 'c1');
+
+  // onReset must hand the caller the EXACT patch just written, keyed by the
+  // chest's id/worldId, so a live in-memory cache can Object.assign only the
+  // matching element instead of requerying and replacing the whole cache
+  // (see this function's own header comment on the full-array-replace race
+  // that motivated onReset in the first place).
+  assert.equal(resets.length, 1);
+  assert.deepEqual(resets[0], {
+    id: 'c1',
+    worldId: 'w1',
+    state: 'locked',
+    openedAt: null,
+    respawnAt: null,
+    guardCreatureIds: ['guard-2'],
+    guardLevel: resets[0].guardLevel,
+  });
+  assert.ok(Number.isInteger(resets[0].guardLevel) && resets[0].guardLevel >= 1);
+});
+
+test('respawnDueFieldChests does not call onReset for a chest it skips', async () => {
+  const client = scriptedRespawnClient({ entityTypeRows: [] });
+  const resets = [];
+  await respawnDueFieldChests(client, {
+    getWorld: async () => boundedWorld(),
+    onReset: (patch) => resets.push(patch),
+  });
+  assert.equal(resets.length, 0);
+});
+
+test('respawnDueFieldChests works with no onReset provided (default no-op)', async () => {
+  const client = scriptedRespawnClient();
+  const reset = await respawnDueFieldChests(client, { getWorld: async () => boundedWorld() });
+  assert.equal(reset, 1);
 });
 
 test('respawnDueFieldChests skips a due chest whose guard entity type was deleted from the catalog, leaving it for manual cleanup', async () => {

@@ -48,7 +48,15 @@ const SPAWN = { x: 500, y: 500 };
 // ... FOR UPDATE), transitioned (UPDATE ... unlocked / CAS ... opened), and
 // re-read across multiple `openchest` frames in one test, exactly like a
 // real world_chests row would be.
-function makePool({ chestSeed, guardAlive = false } = {}) {
+//
+// `extraChests` seeds ADDITIONAL fetchChests rows beyond chestSeed (so a
+// test can have more than one live chest) and, when an entry has `due:
+// true`, also makes it show up in respawnDueFieldChests' own due-chest read
+// -- the plumbing the chest-respawn-sweep regression test below needs (two
+// chests in one world: one opened via the real `openchest` WS flow, one
+// reset by the real `_chestRespawnSweep` test seam, asserting the sweep
+// never disturbs the first).
+function makePool({ chestSeed, guardAlive = false, extraChests = [] } = {}) {
   const calls = [];
   let chestState = chestSeed.state;
   const pool = {
@@ -93,17 +101,45 @@ function makePool({ chestSeed, guardAlive = false } = {}) {
       if (/FROM world_creatures/i.test(sql)) return { rows: [] }; // bbox load at world load
       if (/^\s*DELETE FROM world_items WHERE expires_at/i.test(sql)) return { rows: [], rowCount: 0 };
       if (/SELECT.*FROM world_items/i.test(sql)) return { rows: [], rowCount: 0 }; // ground-item bbox load
-      // fetchChests at world load: the one seeded chest.
+      // fetchChests at world load: the seeded chest plus any extras.
       if (/FROM world_chests WHERE world_id/i.test(sql)) {
         return {
-          rows: [{
-            id: chestSeed.id, x: chestSeed.x, y: chestSeed.y, kind: chestSeed.kind,
-            guard_entity_type_id: 1, guard_level: chestSeed.guardLevel,
-            guard_creature_ids: chestSeed.guardCreatureIds, state: chestSeed.state,
-            opened_at: null, respawn_at: null,
-          }],
+          rows: [
+            {
+              id: chestSeed.id, x: chestSeed.x, y: chestSeed.y, kind: chestSeed.kind,
+              guard_entity_type_id: 1, guard_level: chestSeed.guardLevel,
+              guard_creature_ids: chestSeed.guardCreatureIds, state: chestSeed.state,
+              opened_at: null, respawn_at: null,
+            },
+            ...extraChests.map((c) => ({
+              id: c.id, x: c.x, y: c.y, kind: c.kind,
+              guard_entity_type_id: 1, guard_level: c.guardLevel,
+              guard_creature_ids: c.guardCreatureIds, state: c.state,
+              opened_at: null, respawn_at: null,
+            })),
+          ],
         };
       }
+      // respawnDueFieldChests' own due-chest read (services/chests.js).
+      if (/FROM world_chests WHERE kind = 'field' AND state = 'opened'/i.test(sql)) {
+        return {
+          rows: extraChests
+            .filter((c) => c.due)
+            .map((c) => ({
+              id: c.id, world_id: 'w1', x: c.x, y: c.y, guard_entity_type_id: 1,
+            })),
+        };
+      }
+      // entity_types lookup by id -- used by both spawnFieldChest (a
+      // different shape, `= ANY($1::text[])`) and respawnDueFieldChests
+      // (`= $1`, this one). Checked before the generic catch-all below.
+      if (/FROM entity_types WHERE id = \$1/i.test(sql)) {
+        return { rows: [{ id: 1, name: 'Wolf', hp: 30, defense: 2, resistances: {} }], rowCount: 1 };
+      }
+      // respawnDueFieldChests' fresh-guard insert.
+      if (/INSERT INTO world_creatures/i.test(sql)) return { rows: [{ id: 'respawned-guard-1' }], rowCount: 1 };
+      // respawnDueFieldChests' own reset write.
+      if (/UPDATE world_chests SET state = 'locked'/i.test(sql)) return { rows: [], rowCount: 1 };
       // openChest's own locked read.
       if (/FROM world_chests WHERE id = \$1 FOR UPDATE/i.test(sql)) {
         if (params[0] !== chestSeed.id) return { rows: [], rowCount: 0 };
@@ -253,6 +289,58 @@ test('openchest against a field chest carries respawnAt into the in-memory cache
     'a field chest open must carry respawnAt into the in-memory cache, or a chest the respawn sweep later relocks would look permanently opened to an already-connected player',
   );
   assert.ok(pool.matching(/UPDATE world_chests SET respawn_at/i).length > 0, 'field chest open must schedule a respawn in the DB');
+
+  ws.close(); handle.close(); server.close();
+});
+
+// Regression test for a review finding on this task's own sweep wiring: an
+// earlier version refreshed entry.chests by requerying and replacing the
+// WHOLE array (`entry.chests = await fetchChests(...)`) whenever ANY chest
+// in ANY loaded world reset. That full-array replace raced a concurrent
+// openchest handler for an UNRELATED chest in the same world -- see this
+// file's `chestRespawnSweep`/`respawnDueFieldChests` header comments for the
+// exact race. The fix patches only the reset chest's own element in place
+// (Object.assign, driven by respawnDueFieldChests' onReset), so this test
+// proves BOTH that the due chest gets reset AND that an unrelated,
+// just-opened chest's object is neither reverted nor reallocated.
+test('the chest respawn sweep patches only the reset chest in place, leaving a concurrently-opened UNRELATED chest untouched', async () => {
+  const pool = makePool({
+    chestSeed: {
+      id: 'chest-near', x: SPAWN.x, y: SPAWN.y, kind: 'field', state: 'unlocked', guardLevel: 5, guardCreatureIds: [],
+    },
+    extraChests: [
+      {
+        id: 'chest-far', x: 5000, y: 5000, kind: 'field', state: 'opened', guardLevel: 5, guardCreatureIds: [], due: true,
+      },
+    ],
+  });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = await joinAndGetPlayer(url);
+
+  // Open the near (in-range) field chest first -- nearestChest picks it
+  // over the far, already-opened one regardless.
+  ws.send(JSON.stringify({ type: 'openchest' }));
+  const opened = await nextMsg(ws, 'chestOpened');
+  assert.equal(opened.chestId, 'chest-near');
+
+  const entry = handle.worlds.get('w1');
+  const chestsArrayBefore = entry.chests;
+  const near = entry.chests.find((c) => c.id === 'chest-near');
+  const far = entry.chests.find((c) => c.id === 'chest-far');
+  assert.equal(near.state, 'opened');
+  assert.equal(far.state, 'opened', 'seeded as already-opened and past its respawn_at');
+
+  // Drive one respawn sweep pass deterministically via the real server code
+  // path (not a reimplementation): server.js's own _chestRespawnSweep.
+  await handle._chestRespawnSweep();
+
+  assert.equal(entry.chests, chestsArrayBefore, 'entry.chests must never be replaced wholesale by the sweep');
+  assert.equal(entry.chests.find((c) => c.id === 'chest-near'), near, 'an unrelated chest object must not be reallocated');
+  assert.equal(near.state, 'opened', 'an unrelated, just-opened chest must not be reverted by the sweep');
+  assert.equal(far.state, 'locked', 'the due chest itself must be reset by the sweep, patched in place');
+  assert.equal(far.openedAt, null);
+  assert.equal(far.respawnAt, null);
+  assert.deepEqual(far.guardCreatureIds, ['respawned-guard-1']);
 
   ws.close(); handle.close(); server.close();
 });

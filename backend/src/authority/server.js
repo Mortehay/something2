@@ -1425,6 +1425,52 @@ function attachAuthority(httpServer, pool, opts = {}) {
   }
   const heartbeatTimer = setInterval(heartbeatSweep, heartbeatMs);
 
+  // Field chest respawn: rides the ground-item sweep's interval below rather
+  // than a second, independently-scheduled one. Named (like heartbeatSweep
+  // above) so it can be exposed as `_chestRespawnSweep`: a test seam that
+  // lets tests drive one sweep pass deterministically and await its
+  // completion, instead of racing wall-clock itemSweepMs.
+  //
+  // getWorld only serves CURRENTLY LOADED worlds (the `worlds` map) --
+  // reconstructing mapGenConfig for an unloaded world here would either
+  // duplicate loadWorld's tileTypes/villages/biomes assembly or, if done by
+  // calling loadWorld() itself, leak a permanently-loaded empty world
+  // (nothing besides a socket's close handler currently evicts an empty
+  // entry, and this sweep never fires that handler). A chest whose world is
+  // offline simply stays due and is retried on a later sweep.
+  //
+  // onReset patches ONLY the matching entry.chests element in place
+  // (Object.assign, same convention every other chest write already follows
+  // -- the `use` handler's push, the `openchest` handler's Object.assign)
+  // rather than replacing entry.chests wholesale from a fresh fetchChests
+  // query. A full-array replace raced a concurrent openchest handler's
+  // in-memory write for an UNRELATED chest in the same world: if the
+  // replace's fetchChests SELECT ran before that handler's commit but its
+  // `.then()` resolved after the handler's own Object.assign, the
+  // just-opened chest's in-memory state would silently revert to stale.
+  // Per-chest, per-object patching driven directly off what THIS sweep pass
+  // itself just wrote (see respawnDueFieldChests' onReset contract) makes
+  // that race structurally impossible: there is no separate read to race
+  // against, and an unrelated chest's object is never touched.
+  async function chestRespawnSweep() {
+    try {
+      await respawnDueFieldChests(pool, {
+        getWorld: (worldId) => {
+          const entry = worlds.get(worldId);
+          return entry ? { ...entry.mapGenConfig, id: worldId } : null;
+        },
+        onReset: ({ id, worldId, ...patch }) => {
+          const entry = worlds.get(worldId);
+          if (!entry) return;
+          const chest = entry.chests.find((c) => c.id === id);
+          if (chest) Object.assign(chest, patch);
+        },
+      });
+    } catch (err) {
+      console.error('field chest respawn sweep failed:', err);
+    }
+  }
+
   // Expired ground items: delete from the DB and evict from every live sim.
   // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
   // sweep by up to itemSweepMs; the two are complementary (DB delete is
@@ -1443,39 +1489,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       })
       .catch((err) => console.error('ground item sweep failed:', err));
 
-    // Field chest respawn: rides this same interval rather than a second,
-    // independently-scheduled one, mirroring the ground-item sweep just
-    // above (DB write, then keep every live sim's in-memory cache in sync).
-    // getWorld only serves CURRENTLY LOADED worlds (the `worlds` map) --
-    // reconstructing mapGenConfig for an unloaded world here would either
-    // duplicate loadWorld's tileTypes/villages/biomes assembly or, if done by
-    // calling loadWorld() itself, leak a permanently-loaded empty world
-    // (nothing besides a socket's close handler currently evicts an empty
-    // entry, and this sweep never fires that handler). A chest whose world
-    // is offline simply stays due and is retried on a later sweep, resolving
-    // within one itemSweepMs of that world's next load.
-    respawnDueFieldChests(pool, {
-      getWorld: (worldId) => {
-        const entry = worlds.get(worldId);
-        return entry ? { ...entry.mapGenConfig, id: worldId } : null;
-      },
-    })
-      .then((resetCount) => {
-        if (!resetCount) return;
-        // respawnDueFieldChests only reports a count, not which chests/
-        // worlds changed, so refresh every currently-loaded world's chest
-        // cache from the DB -- cheap since a nonzero reset is rare (every
-        // FIELD_CHEST_RESPAWN_MS per chest), and this is what actually keeps
-        // an already-connected player's view of a respawned chest from going
-        // stale (see the `openchest` handler's own comment above on the same
-        // concern at open-time).
-        for (const [worldId, entry] of worlds) {
-          fetchChests(pool, worldId)
-            .then((chests) => { entry.chests = chests; })
-            .catch((err) => console.error('chest cache refresh failed:', err));
-        }
-      })
-      .catch((err) => console.error('field chest respawn sweep failed:', err));
+    chestRespawnSweep();
   }, itemSweepMs);
 
   return {
@@ -1493,6 +1507,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // 'pong' event (observable via `worlds.get(id).sockets`) between calls
     // rather than sleeping a guessed duration.
     _heartbeatSweep: heartbeatSweep,
+    // Test seam, same reasoning as _heartbeatSweep above: run one field
+    // chest respawn pass synchronously (and await its completion, unlike the
+    // real itemSweepTimer's fire-and-forget call) instead of waiting for or
+    // racing wall-clock itemSweepMs.
+    _chestRespawnSweep: chestRespawnSweep,
     // Evict an IDLE world from the in-memory cache so the next entry reloads it
     // from the DB (fresh seed + creatures). Refuses to evict a world with live
     // sockets to avoid tearing down active sessions.

@@ -191,7 +191,24 @@ function nearestChest(chests, cx, cy, radius) {
 // `tileTypes`/`width`/`height`/etc, NOT a raw `worlds` table row. Passing the
 // raw row would throw ('worldConfig: tileTypes is empty') before ever
 // reaching a placement.
-async function respawnDueFieldChests(client, { getWorld }) {
+//
+// `onReset`, called synchronously right after each chest's DB UPDATE commits,
+// hands the caller the EXACT patch this function just wrote (mapChestRow-
+// shaped: state/openedAt/respawnAt/guardCreatureIds/guardLevel) plus the
+// chest's id and worldId. This is what lets a caller with a live in-memory
+// cache (server.js's entry.chests) apply an in-place Object.assign to just
+// the matching element -- the same convention every other chest write in
+// this codebase already follows (spawnFieldChest's caller pushes one row,
+// openChest's caller Object.assigns one element) -- instead of requerying
+// and replacing the whole cache. A prior version of the server.js wiring did
+// exactly that (a full fetchChests + `entry.chests = chests` replace after
+// ANY reset), which raced a concurrent openchest handler: if the replace's
+// SELECT ran before that handler's commit but resolved after the handler's
+// own Object.assign, the just-opened UNRELATED chest's in-memory state would
+// silently revert to stale. Driving the patch directly off this function's
+// own write, with no intervening read, makes that race structurally
+// impossible.
+async function respawnDueFieldChests(client, { getWorld, onReset = () => {} }) {
   const due = await client.query(
     "SELECT id, world_id, x, y, guard_entity_type_id FROM world_chests WHERE kind = 'field' AND state = 'opened' AND respawn_at <= now()",
   );
@@ -233,6 +250,18 @@ async function respawnDueFieldChests(client, { getWorld }) {
         [JSON.stringify([guard.rows[0].id]), p.level, chest.id],
       );
       reset += 1;
+      // Counted above unconditionally: the DB write already committed, so
+      // this chest WAS reset regardless of whether the caller's onReset
+      // (best-effort cache sync) throws.
+      onReset({
+        id: chest.id,
+        worldId: chest.world_id,
+        state: 'locked',
+        openedAt: null,
+        respawnAt: null,
+        guardCreatureIds: [guard.rows[0].id],
+        guardLevel: p.level,
+      });
     } catch (err) {
       // One bad chest (deleted world, DB hiccup) must not abort the whole
       // sweep -- every other due chest still gets its turn this pass, and
