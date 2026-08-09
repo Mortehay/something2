@@ -147,6 +147,10 @@ function fakeDeathPool(row) {
           projectile_radius: null, pierce: null, mana_cost: 0, element: null, defense: null, resistances: null },
       ] };
     }
+    // SOMET-260: join now resolves the character before anything else, and a
+    // fake pool that falls through to rows:[] refuses the join -- which makes the
+    // test HANG waiting for 'joined' rather than fail. Answer it explicitly.
+    if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
     if (/FROM player_items/i.test(sql)) return { rows: [{ id: 'i1', item_type_id: 1 }] };
     if (/FROM player_equipment/i.test(sql)) return { rows: [] };
     if (/SELECT gold FROM users/i.test(sql)) return { rows: [{ gold: 0 }] };
@@ -205,7 +209,7 @@ test('dying costs a rolled fraction of the level\'s worth (literal, live path)',
   const { url, handle, server } = await bootWith(pool, { rng: () => 0.5 });
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const progressionP = nextMsg(ws, 'progression');
@@ -251,7 +255,7 @@ test('the unpinned production roll runs and stays inside the band (live path)', 
   const { url, handle, server } = await bootWith(pool); // no rng: Math.random
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const progressionP = nextMsg(ws, 'progression');
@@ -282,7 +286,7 @@ test('dying at a level floor costs nothing and never de-levels', async () => {
   const { url, handle, server } = await bootWith(pool, { rng: () => 0.5 });
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   kill(handle, '1');
@@ -321,7 +325,7 @@ test('dying does not change allocated stats or spent points', async () => {
   const { url, handle, server } = await bootWith(pool, { rng: () => 0.5 });
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const progressionP = nextMsg(ws, 'progression');
@@ -354,7 +358,7 @@ test('the death penalty fires exactly once per death, not once per tick spent de
   const { url, handle, server } = await bootWith(pool, { rng: () => 0.5 });
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const collected = collectMsgs(ws, 'progression', 400); // ~20 ticks at tickMs=20
@@ -389,7 +393,7 @@ test('a death penalty commit finishing after the socket is gone does not throw',
   const { url, handle, server } = await bootWith(pool, { rng: () => 0.5 });
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const entry = handle.worlds.get('w1');
@@ -409,7 +413,7 @@ test('a death penalty commit finishing after the socket is gone does not throw',
   // join the same world right after.
   const ws2 = connect(url, 2);
   await new Promise((r) => ws2.on('open', r));
-  ws2.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws2.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   const joined2 = await nextMsg(ws2, 'joined');
   assert.strictEqual(joined2.type, 'joined');
 

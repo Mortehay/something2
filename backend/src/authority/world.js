@@ -140,9 +140,15 @@ class World {
   // point: every read site can assume it exists rather than falling back to
   // a module constant, which is precisely how a missed call site would stay
   // green.
-  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS) {
+  // characterId is what every DATABASE write for this player is keyed by
+  // (SOMET-257 re-keyed inventory, equipment, progression and position off
+  // user_id). The in-memory map stays keyed by userId -- one live session per
+  // account -- so both ids live on the player object and are not
+  // interchangeable: userId owns gold, characterId owns everything else.
+  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null) {
     this.players.set(userId, {
       userId,
+      characterId,
       x: spawn.x,
       y: spawn.y,
       width: PLAYER_W,
@@ -322,7 +328,7 @@ class World {
   async setEquipment(pool, userId, itemId, slot) {
     const p = this.players.get(userId);
     if (!p) return { ok: false, reason: 'no player' };
-    const r = await equipItem(pool, userId, p.inv, this.weapons, itemId, slot);
+    const r = await equipItem(pool, p.characterId, p.inv, this.weapons, itemId, slot);
     if (r.ok) p.mit = mitigation(p.inv, this.weapons);
     return r;
   }
@@ -330,7 +336,7 @@ class World {
   async clearEquipment(pool, userId, slot) {
     const p = this.players.get(userId);
     if (!p) return { ok: false, reason: 'no player' };
-    const r = await unequipItem(pool, userId, p.inv, slot);
+    const r = await unequipItem(pool, p.characterId, p.inv, slot);
     if (r.ok) p.mit = mitigation(p.inv, this.weapons);
     return r;
   }

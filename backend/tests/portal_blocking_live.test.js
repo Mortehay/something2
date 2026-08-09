@@ -113,6 +113,9 @@ function fakePortalPool() {
   const GUARD_ID = 'guard-1';
   let guardHp = 50;
   function route(sql, params) {
+    // SOMET-260: join resolves the character before anything else; falling
+    // through to rows:[] refuses the join and HANGS the test on 'joined'.
+    if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
     if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
     if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
     if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
@@ -184,6 +187,9 @@ function fakeRacyPortalPool() {
   let releaseCreatureQuery;
   const creatureGate = new Promise((resolve) => { releaseCreatureQuery = resolve; });
   function route(sql, params) {
+    // SOMET-260: join resolves the character before anything else; falling
+    // through to rows:[] refuses the join and HANGS the test on 'joined'.
+    if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
     if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
     if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
     if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
@@ -260,6 +266,9 @@ function fakeAdjacentChunkGuardPool() {
   let releaseGuardChunkQuery;
   const guardChunkGate = new Promise((resolve) => { releaseGuardChunkQuery = resolve; });
   function route(sql, params) {
+    // SOMET-260: join resolves the character before anything else; falling
+    // through to rows:[] refuses the join and HANGS the test on 'joined'.
+    if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
     if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
     if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
     if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
@@ -334,6 +343,9 @@ function fakeMirroredPortalPool() {
       from_x: 550, from_y: 550, to_x: 1050, to_y: 1050 }],
   };
   function route(sql, params) {
+    // SOMET-260: join resolves the character before anything else; falling
+    // through to rows:[] refuses the join and HANGS the test on 'joined'.
+    if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
     if (/FROM worlds WHERE id/i.test(sql)) {
       const row = WORLDS[params[0]];
       return { rows: row ? [row] : [] };
@@ -374,7 +386,7 @@ test('a guard-blocked portal refuses transfer and knocks the player back', async
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   const joined = await nextMsg(ws, 'joined');
   assert.ok(joined.spawn, 'joined message must include a spawn point to walk from');
 
@@ -416,7 +428,7 @@ test('killing the guard unblocks the portal on the very next approach', async ()
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   pool.killGuard();
@@ -452,7 +464,7 @@ test('a portal must not leak a transition while its own chunk has not finished l
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const world = handle.worlds.get('w1').world;
@@ -499,7 +511,7 @@ test('a portal must not leak a transition while a guard in an ADJACENT chunk has
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const entry = handle.worlds.get('w1');
@@ -576,6 +588,9 @@ test('a portal must not leak a transition while a guard in an ADJACENT chunk has
 // either axis without duplicating the whole fixture per direction.
 function fakeBoundaryPortalPool(fromX, fromY) {
   function route(sql, params) {
+    // SOMET-260: join resolves the character before anything else; falling
+    // through to rows:[] refuses the join and HANGS the test on 'joined'.
+    if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
     if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
     if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
     if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
@@ -640,7 +655,7 @@ async function proveBoundaryPortalResolves(fromX, fromY, label) {
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const entry = handle.worlds.get('w1');
@@ -725,7 +740,7 @@ test('a mirrored portal pair does not bounce the arriving player straight back',
   const { url, handle, server } = await bootWith(pool);
   const ws1 = connect(url, 1);
   await new Promise((r) => ws1.on('open', r));
-  ws1.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws1.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws1, 'joined');
 
   const entry1 = handle.worlds.get('w1');
@@ -750,7 +765,7 @@ test('a mirrored portal pair does not bounce the arriving player straight back',
   // pendingArrivals is keyed by that same userId.
   const ws2 = connect(url, 1);
   await new Promise((r) => ws2.on('open', r));
-  ws2.send(JSON.stringify({ type: 'join', world_id: 'w2' }));
+  ws2.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w2' }));
   const joined2 = await nextMsg(ws2, 'joined');
   assert.deepStrictEqual({ x: joined2.spawn.x, y: joined2.spawn.y }, { x: 550, y: 550 },
     'sanity: the player must land exactly on the mirror portal\'s own tile for this to be a meaningful test');
@@ -804,7 +819,7 @@ test('a player who stands still on the arrival tile past the old cooldown window
   const { url, handle, server } = await bootWith(pool);
   const ws1 = connect(url, 1);
   await new Promise((r) => ws1.on('open', r));
-  ws1.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws1.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws1, 'joined');
 
   const entry1 = handle.worlds.get('w1');
@@ -814,7 +829,7 @@ test('a player who stands still on the arrival tile past the old cooldown window
 
   const ws2 = connect(url, 1);
   await new Promise((r) => ws2.on('open', r));
-  ws2.send(JSON.stringify({ type: 'join', world_id: 'w2' }));
+  ws2.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w2' }));
   await nextMsg(ws2, 'joined');
 
   const entry2 = handle.worlds.get('w2');

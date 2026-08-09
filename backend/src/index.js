@@ -733,14 +733,21 @@ app.delete('/api/item-types/:id', adminGuard, async (req, res) => {
   }
 });
 
-// Admin grant: give a user an instance of an item type.
-app.post('/api/players/:userId/items', adminGuard, async (req, res) => {
+// Admin grant: give a CHARACTER an instance of an item type.
+//
+// SOMET-257 re-keyed player_items off user_id, so the path parameter is a
+// character id now, not an account id. The path kept its `/api/players/`
+// prefix -- renaming it is an admin-UI change this slice does not carry -- but
+// the parameter name did not, precisely so a call site passing an account id
+// fails loudly on the foreign key rather than silently granting the item to
+// whichever character happens to share that integer.
+app.post('/api/players/:characterId/items', adminGuard, async (req, res) => {
   try {
     const { item_type_id } = req.body;
     if (item_type_id == null) return res.status(400).json({ error: 'item_type_id is required' });
     const result = await pool.query(
-      'INSERT INTO player_items (user_id, item_type_id) VALUES ($1,$2) RETURNING *',
-      [req.params.userId, item_type_id],
+      'INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING *',
+      [req.params.characterId, item_type_id],
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {

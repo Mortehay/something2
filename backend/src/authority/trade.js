@@ -5,7 +5,7 @@
 
 const { sellPriceFor, insertBuyback, BUYBACK_DAYS } = require('../services/merchantStock');
 
-async function buyStock(pool, entry, userId, stockId, villageId) {
+async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
 
@@ -44,8 +44,8 @@ async function buyStock(pool, entry, userId, stockId, villageId) {
     const gold = Number(gr.rows[0].gold) || 0;
 
     const ins = await client.query(
-      'INSERT INTO player_items (user_id, item_type_id, quantity) VALUES ($1, $2, 1) RETURNING id, item_type_id, quantity',
-      [userId, stock.item_type_id],
+      'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1, $2, 1) RETURNING id, item_type_id, quantity',
+      [characterId, stock.item_type_id],
     );
     const row = ins.rows[0];
 
@@ -73,7 +73,7 @@ async function buyStock(pool, entry, userId, stockId, villageId) {
   }
 }
 
-async function sellItem(pool, entry, userId, villageId, itemId) {
+async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
   if (Object.values(p.inv.equipment).includes(itemId)) {
@@ -84,10 +84,10 @@ async function sellItem(pool, entry, userId, villageId, itemId) {
   try {
     await client.query('BEGIN');
 
-    // The user_id predicate IS the ownership check.
+    // The character_id predicate IS the ownership check.
     const del = await client.query(
-      'DELETE FROM player_items WHERE id = $1 AND user_id = $2 RETURNING item_type_id, quantity',
-      [itemId, userId],
+      'DELETE FROM player_items WHERE id = $1 AND character_id = $2 RETURNING item_type_id, quantity',
+      [itemId, characterId],
     );
     if (del.rowCount !== 1) {
       await client.query('ROLLBACK');

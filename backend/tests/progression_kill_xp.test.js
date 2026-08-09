@@ -60,11 +60,25 @@ function scriptedPool(routes = []) {
   };
 }
 
-function armEntry() {
+// SOMET-257 made progression per-character, so commitCreatureDeath resolves
+// the killer's character id off the LIVE player rather than reusing
+// killerUserId (which is the in-memory identity, not a database key). That
+// makes a player object mandatory for a credited kill -- an entry with no
+// player is no longer a realistic stand-in for one, so armEntry adds the
+// killer it is about to credit.
+//
+// The dependency is not new in kind: onCreatureDeath already had to find the
+// same live player to push a level-up down its socket.
+function armEntry({ killerUserId = 'u1', killerCharacterId = 7 } = {}) {
   const map = { chunkSize: 8, isWalkable: () => true, speedAt: () => 1, getChunk: () => [] };
+  const world = new World(map, new Map(), null, 8);
+  if (killerUserId != null) {
+    world.addPlayer(killerUserId, { x: 0, y: 0 }, { items: [], equipment: {} },
+      { x: 0, y: 0 }, 0, undefined, killerCharacterId);
+  }
   return {
     worldId: 'w1',
-    world: new World(map, new Map(), null, 8),
+    world,
     creatureTypeIds: new Map([['Wolf', 42]]),
   };
 }
@@ -164,7 +178,7 @@ test('a kill by nobody (a guard) awards nothing and still drops loot', async () 
 });
 
 test('a second commit of the same creature id awards nothing and returns null', async () => {
-  const entry = armEntry();
+  const entry = armEntry({ killerUserId: 'u2' });
   let deleted = false;
   const row = {
     user_id: 'u2', experience: 0, level: 1, stat_points: 0,
@@ -207,7 +221,7 @@ test('a second commit of the same creature id awards nothing and returns null', 
 });
 
 test('a failed XP award rolls back the creature deletion', async () => {
-  const entry = armEntry();
+  const entry = armEntry({ killerUserId: 'u3' });
   // A tiny stateful "table": DELETE removes the row and stashes it as
   // pending; ROLLBACK restores it; COMMIT drops the stash. This is enough
   // real transactional semantics to make "the row still exists" a genuine
@@ -366,6 +380,10 @@ function fakeLevelUpPool() {
             defense: null, resistances: null },
         ] };
       }
+      // SOMET-260: join now resolves the character before anything else, and a
+      // fake pool that falls through to rows:[] refuses the join -- which makes the
+      // test HANG waiting for 'joined' rather than fail. Answer it explicitly.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/FROM player_items/i.test(sql)) return { rows: [] };
       if (/FROM player_equipment/i.test(sql)) return { rows: [] };
       if (/INSERT INTO player_items/i.test(sql)) return { rows: [], rowCount: 1 };
@@ -405,7 +423,7 @@ test('a level-up moves the LIVE player pools (maxHp up, hp by the delta, never h
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   // Force the LIVE session's pools BELOW what the stored progression
@@ -483,7 +501,7 @@ test('a player mid-death (hp <= 0, awaiting resolveDeaths) is not revived by the
   const { url, handle, server } = await bootWith(pool, { tickMs: 3600000 });
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const world = handle.worlds.get('w1').world;

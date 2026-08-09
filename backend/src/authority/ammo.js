@@ -20,13 +20,13 @@
 // this is already correct for them; if the answer instead becomes "quantity
 // is permanently 1," delete this comment and the del/upd split together.
 
-// Spend one unit of `ammoTypeId` from `userId`. Returns whether a unit was
+// Spend one unit of `ammoTypeId` from `characterId`. Returns whether a unit was
 // actually spent; the caller must treat false as "out of ammo" and refuse the
 // attack WITHOUT consuming the cooldown.
 //
 // The `pick` CTE is load-bearing. A player may hold more than one stack of
 // the same ammo type (stacks are never merged — see the spec), and the
-// obvious form `WHERE user_id = $1 AND item_type_id = $2` would decrement
+// obvious form `WHERE character_id = $1 AND item_type_id = $2` would decrement
 // EVERY one of them on a single shot. Picking one id first makes the
 // statement correct for any number of stacks; ORDER BY created_at drains the
 // oldest first. FOR UPDATE locks that one row so two concurrent spends
@@ -51,11 +51,11 @@
 // claim CTE. Exactly one of del/upd can fire (their predicates partition
 // pick's single row), so `spent` is 1 on a successful spend and 0 when the
 // player holds no stack with anything left.
-async function consumeAmmo(pool, userId, ammoTypeId) {
+async function consumeAmmo(pool, characterId, ammoTypeId) {
   const r = await pool.query(
     `WITH pick AS (
        SELECT id, quantity FROM player_items
-        WHERE user_id = $1 AND item_type_id = $2 AND quantity > 0
+        WHERE character_id = $1 AND item_type_id = $2 AND quantity > 0
         ORDER BY created_at ASC, id ASC LIMIT 1
         FOR UPDATE
      ), del AS (
@@ -68,7 +68,7 @@ async function consumeAmmo(pool, userId, ammoTypeId) {
         RETURNING id
      )
      SELECT (SELECT count(*) FROM del) + (SELECT count(*) FROM upd) AS spent`,
-    [userId, ammoTypeId],
+    [characterId, ammoTypeId],
   );
   return Number(r.rows[0] && r.rows[0].spent) === 1;
 }
@@ -81,12 +81,12 @@ async function consumeAmmo(pool, userId, ammoTypeId) {
 // the HUD. This is a read-only second query — an accepted second round trip
 // per successful shot, not merged into consumeAmmo's UPDATE, so a failure
 // here can never affect whether the shot itself succeeded.
-async function ammoCount(pool, userId, ammoTypeId) {
+async function ammoCount(pool, characterId, ammoTypeId) {
   const r = await pool.query(
     `SELECT COALESCE(SUM(quantity), 0)::int AS n
        FROM player_items
-      WHERE user_id = $1 AND item_type_id = $2`,
-    [userId, ammoTypeId],
+      WHERE character_id = $1 AND item_type_id = $2`,
+    [characterId, ammoTypeId],
   );
   return Number(r.rows[0].n);
 }

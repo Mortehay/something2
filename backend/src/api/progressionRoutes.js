@@ -15,6 +15,7 @@ const express = require('express');
 const { requireAuth } = require('../auth/middleware.js');
 const { loadProgression, allocateStat, respec } = require('../services/progressionStore.js');
 const { derivePlayerStats, xpFloor, xpToNext } = require('../services/playerStats.js');
+const { ownedCharacter } = require('../services/characters.js');
 const C = require('../services/progressionConstants.js');
 
 // `refreshLivePlayerStats(userId, progression, stats)` pushes a successful
@@ -30,10 +31,34 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
   const router = express.Router();
   const guard = requireAuth(pool);
 
+  // SOMET-257 made progression per-character, so every route here needs a
+  // character id as well as the authenticated account. It is read from the
+  // request (query for GET, body for POST) and then CHECKED against
+  // req.user.id -- a client-supplied id is never trusted, and there is no
+  // "default to the account's first character" fallback, which would silently
+  // spend one character's points on another.
+  //
+  // Returns the character, or sends the response and returns null.
+  async function resolveCharacter(req, res) {
+    const raw = req.query.character_id ?? (req.body || {}).character_id;
+    if (raw == null) {
+      res.status(400).json({ error: 'character_id is required' });
+      return null;
+    }
+    const character = await ownedCharacter(pool, req.user.id, raw);
+    if (!character) {
+      res.status(403).json({ error: 'forbidden' });
+      return null;
+    }
+    return character;
+  }
+
   router.get('/', guard, async (req, res) => {
     try {
-      const progression = await loadProgression(pool, req.user.id);
-      res.status(200).json({
+      const character = await resolveCharacter(req, res);
+      if (!character) return undefined;
+      const progression = await loadProgression(pool, character.id);
+      return res.status(200).json({
         progression,
         stats: derivePlayerStats(progression),
         xpFloor: xpFloor(progression.level),
@@ -52,8 +77,10 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
       // whitelists the stat key and validates the count itself (statKey
       // reaches it from an HTTP body, per its own comment). Re-validating
       // here would just be a second, driftable copy of the same guard.
+      const character = await resolveCharacter(req, res);
+      if (!character) return undefined;
       const { stat, count } = req.body || {};
-      const r = await allocateStat(pool, req.user.id, stat, count);
+      const r = await allocateStat(pool, character.id, stat, count);
       if (!r.ok) return res.status(400).json({ error: r.reason });
       const stats = derivePlayerStats(r.progression);
       // Best-effort: refuses/no-ops silently (no live session, no authority
@@ -69,7 +96,11 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
 
   router.post('/respec', guard, async (req, res) => {
     try {
-      const r = await respec(pool, req.user.id);
+      const character = await resolveCharacter(req, res);
+      if (!character) return undefined;
+      // Both ids: the stat reset is per-character, the gold that pays for it
+      // is per-account.
+      const r = await respec(pool, req.user.id, character.id);
       if (!r.ok) return res.status(402).json({ error: r.reason, cost: r.cost });
       const stats = derivePlayerStats(r.progression);
       refreshLivePlayerStats(req.user.id, r.progression, stats);
