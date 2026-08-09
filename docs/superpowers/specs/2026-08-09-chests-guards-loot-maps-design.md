@@ -126,13 +126,24 @@ rather than a new one.
 
 ## API surface
 
-- **`POST /api/worlds/:worldId/chests/:chestId/open`** — validates `state='unlocked'` (CAS to
-  `'opened'`, so two concurrent opens can't double-grant, same shape as `commitCreatureDeath`'s
-  `rowCount === 1` gate), rolls `chest_loot` by `guard_level`, inserts `player_items` rows,
-  awards XP, returns granted items. 409/`{ok:false}` if still guarded or already opened.
-- **`POST /api/inventory/use`** — new generic use-item entry point (`{itemId}` in body, resolved
-  via `player_items` ownership like `dropItem`). Dispatches on `item_types.category`; loot map
-  is its first and only consumer this slice. Rejects items with no defined use behavior.
+Corrected during planning: item/world actions in this codebase are **WebSocket message
+handlers in `authority/server.js`** (`pickup`/`drop`/`interact`/`buy`/`sell`), keyed off the
+live in-memory `entry = worlds.get(ws.worldId)` populated once per world by `loadWorld` — not
+REST routes. This spec's original draft proposed REST endpoints; the plan uses the real
+pattern instead.
+
+- **`openchest` message** — proximity-based like `interact` (no id from the client): finds the
+  nearest chest in `entry.chests` within `INTERACT_RADIUS`, validates `state='unlocked'` (CAS to
+  `'opened'` inside `openChest()`, so two concurrent opens can't double-grant, same shape as
+  `commitCreatureDeath`'s `rowCount === 1` gate), rolls `chest_loot` by `guard_level`, inserts
+  `player_items` rows, awards XP, sends a `chestOpened` frame. An `error` frame if no chest is in
+  range, still guarded, or already opened.
+- **`use` message** — generic use-item entry point (`{itemId}`, resolved via `player_items`
+  ownership like `drop`). Dispatches on `item_types.category`; loot map is its first and only
+  consumer this slice. Sends an `error` frame for items with no defined use behavior.
+- `entry.chests` is loaded alongside `entry.villages` at world-load time and kept in sync
+  in-memory on every write (opening, field-spawn, respawn) — the same pattern
+  `entry.world.groundItems` already follows for ground loot.
 - Chest markers surface on the minimap/world view the same way `world_creatures`/villages
   already do — no new client push mechanism, just a new entity kind in the existing AOI/overview
   payload.
