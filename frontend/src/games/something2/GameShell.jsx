@@ -287,8 +287,18 @@ export default function GameShell() {
   // component via RequireAuth, so a sign-in always produces a fresh mount
   // rather than an in-place canvas swap. bindGameCanvas stays because
   // re-running it against the same node is idempotent and it is the tested path.
+  //
+  // Deliberately NOT gated on isGameRoute (SOMET-271). The canvas element is
+  // rendered unconditionally and only display-toggled, so binding it does not
+  // need the game route to be active -- and requiring it meant that loading
+  // /game/map DIRECTLY (a reload, a bookmark, a deep link) left gameRef null
+  // forever, because this effect's condition was false on mount and nothing
+  // re-ran it until the player navigated to /game. The visible symptom was the
+  // World Map's click-to-travel silently doing nothing: enterWorld bails on
+  // `!gameRef.current` before it can even raise a toast. Found in the browser;
+  // both suites were green, because neither can mount this component.
   useEffect(() => {
-    if (isGameRoute && canvasRef.current) {
+    if (canvasRef.current) {
       gameRef.current = bindGameCanvas(gameRef.current, canvasRef.current, () => new Game());
 
       gameRef.current.setOnStateChange((newState) => {
@@ -331,6 +341,10 @@ export default function GameShell() {
   // refused join (the authority's join policy can say no) must leave the player
   // looking at the map with the toast this function raises, not at a blank
   // canvas that never received `joined`. Every other caller ignores the value.
+  // "This session has already put the player in a world." Set by auto-join AND
+  // by enterWorld; read by the auto-join effect below as `alreadyJoined`.
+  const autoJoinedRef = useRef(false);
+
   const enterWorld = async (worldId = selectedWorldId) => {
     if (!worldId || !gameRef.current) return false;
     // Read through the ref-free closure: enterWorld is re-created every render,
@@ -355,6 +369,15 @@ export default function GameShell() {
       });
       setSelectedWorldId(worldId);
       setIsPlaying(true);
+      // This session has put the player in a world, so auto-join is done --
+      // however it happened (auto-join itself, the admin picker, or a click on
+      // the World Map). Previously only the auto-join path set this, so a map
+      // travel left auto-join still armed: any later re-evaluation where
+      // isPlaying read false sent the character straight back to
+      // activeCharacter.lastWorldId, which is the world it travelled AWAY from
+      // and is stale the moment travel succeeds. Observed live -- the click
+      // entered Old Trailhead and the character ended up in Windwatch Pass.
+      autoJoinedRef.current = true;
       return true;
     } catch (err) {
       toast.error(err.message);
@@ -372,12 +395,17 @@ export default function GameShell() {
   // worldAssetsReady() for why joining early is not self-healing. Admins keep
   // the picker (they manage worlds). If the join throws, enterWorld toasts and
   // isPlaying stays false, so the picker remains as a safe fallback.
-  // autoJoinedRef guards against retries.
-  const autoJoinedRef = useRef(false);
+  // autoJoinedRef guards against retries. Declared above enterWorld, which
+  // also sets it -- a `const` referenced from a closure defined earlier works
+  // only because the closure runs after render, which is a footgun nobody
+  // should have to re-derive.
   useEffect(() => {
     const targetId = autoJoinTarget({
       isAdmin, isPlaying, alreadyJoined: autoJoinedRef.current,
       hasGame: !!gameRef.current, worlds, mapTiles, mapConfig,
+      // Was implicit in `hasGame` until SOMET-271; now passed explicitly,
+      // because the Game instance is no longer route-gated. See autoJoin.js.
+      isGameRoute,
       // SOMET-260 added `hasCharacter` to autoJoinTarget and this call site did
       // not supply it, so it arrived `undefined` and the guard returned null
       // every time -- auto-join was dead for EVERY player, not just for one

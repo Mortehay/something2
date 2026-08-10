@@ -13,9 +13,13 @@ const WORLDS = [
 // no character, so the ready baseline has to include one. The "refuses without
 // a character" case lives in characterGating.test.js alongside the rest of the
 // character wiring.
+// isGameRoute is required as of SOMET-271. It used to be enforced by accident
+// -- the Game instance was only created on the game route, so `hasGame` was
+// false everywhere else -- and the baseline has to state it now that the rule
+// is explicit. The route cases are asserted in their own describe below.
 const base = {
   isAdmin: false, isPlaying: false, alreadyJoined: false, hasGame: true,
-  hasCharacter: true,
+  hasCharacter: true, isGameRoute: true,
   worlds: WORLDS, mapTiles: TILES, mapConfig: CONFIG,
 };
 
@@ -102,5 +106,33 @@ describe('autoJoinTarget resumes the last world', () => {
     expect(autoJoinTarget({ ...base, lastWorldId: 3, hasCharacter: false })).toBeNull();
     expect(autoJoinTarget({ ...base, lastWorldId: 3, mapConfig: undefined })).toBeNull();
     expect(autoJoinTarget({ ...base, lastWorldId: 3, alreadyJoined: true })).toBeNull();
+  });
+});
+
+describe('auto-join only fires on the game route', () => {
+  // SOMET-271. The Game instance is no longer created only on /game (a direct
+  // load of /game/map left it null forever, which silently broke the World
+  // Map's click-to-travel), so `hasGame` no longer doubles as a route check and
+  // this rule has to be its own.
+  it('refuses off the game route even when everything else is ready', () => {
+    expect(autoJoinTarget({ ...base, isGameRoute: false })).toBeNull();
+    // The converse, so this cannot pass by refusing everything.
+    expect(autoJoinTarget({ ...base, isGameRoute: true })).toBe(7);
+  });
+
+  it('refuses when the flag is not supplied at all', () => {
+    // The call site has to pass it. An absent flag reads as "not on the game
+    // route" rather than as "unknown, proceed anyway" -- the failure mode this
+    // project keeps hitting is a guard whose input is never wired, which
+    // arrives undefined and silently permits.
+    const { isGameRoute, ...withoutFlag } = base;
+    expect(autoJoinTarget(withoutFlag)).toBeNull();
+  });
+
+  it('does not resume the last world off the game route either', () => {
+    // The specific live bug: reading the World Map, auto-join fired anyway and
+    // raced a travel click -- the character entered Old Trailhead and was
+    // dragged back to its stale lastWorldId nine seconds later.
+    expect(autoJoinTarget({ ...base, isGameRoute: false, lastWorldId: 3 })).toBeNull();
   });
 });

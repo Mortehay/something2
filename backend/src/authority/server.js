@@ -37,6 +37,30 @@ function finiteOr(v, fallback) { return Number.isFinite(v) ? v : fallback; }
 // services/decorationDefs.js and is shared with index.js's /chunk handler --
 // see that file for why the ORDER BY matters.
 
+// Should this tick's doorway check be suppressed because the player is still
+// standing where it ARRIVED? Extracted (like planTransition below) so the rule
+// is unit-testable rather than buried in the tick loop.
+//
+// The portal path has had an equivalent latch for a while (_lastPortalTile);
+// compass doorways had only a 1500ms cooldown, which merely DELAYS a
+// transition -- stand still and it fires anyway. That gap made map fast travel
+// and plain login-resume bounce: a character's saved position in a world is
+// very often the doorway it walked out through, so arriving there threw it
+// straight back. Verified live (SOMET-271): TestmageQA's saved x in Old
+// Trailhead was 6268 in a 64-tile world, exactly on the east doorway to
+// Windwatch Pass.
+//
+// Releases itself as soon as the player is on a different tile, so it costs
+// nothing after the first step and can never wedge a doorway permanently shut.
+// Mutates `player` deliberately -- the latch IS per-player state; the return
+// value is the decision.
+function suppressArrivalDoorway(player, tileKey) {
+  if (player._arrivalTile == null) return false;
+  if (player._arrivalTile === tileKey) return true;
+  player._arrivalTile = null;
+  return false;
+}
+
 // Pure: given a player's current tile + this world's links, decide whether to
 // teleport. Returns { toWorldId, arriveX, arriveY } or null.
 function planTransition({ tileName, gRow, gCol, worldRow, links, now, cdUntil }) {
@@ -905,6 +929,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
         ws.worldId = entry.worldId; // canonical (F-014), not the client's raw spelling
         ws.characterId = character.id;
         entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id);
+
+        // Latch the tile this join landed on, for EVERY join -- not just a
+        // doorway arrival. A resume or a map fast-travel spawns the character
+        // at its saved position in that world, and that position is very often
+        // the doorway it walked out through, which then fires on the next tick
+        // and throws it straight back where it came from. See the tick loop's
+        // arrival-latch comment for the live case that found this.
+        {
+          const p = entry.world.getPlayer(ws.userId);
+          if (p) {
+            const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+            p._arrivalTile = `${Math.floor(cy / MAP_TILE_SIZE)},${Math.floor(cx / MAP_TILE_SIZE)}`;
+          }
+        }
+
         if (spawn.viaDoorway) {
           const p = entry.world.getPlayer(ws.userId);
           if (p) {
@@ -1209,8 +1248,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
         for (const p of entry.world.players.values()) {
           const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
           const tileName = entry.world.map.getTileAt(cx, cy);
+          const gRow = Math.floor(cy / MAP_TILE_SIZE), gCol = Math.floor(cx / MAP_TILE_SIZE);
+
+          // Do not fire a doorway the player is standing on BECAUSE it just
+          // arrived there -- see suppressArrivalDoorway's own comment.
+          if (suppressArrivalDoorway(p, `${gRow},${gCol}`)) continue;
+
           const t = planTransition({
-            tileName, gRow: Math.floor(cy / MAP_TILE_SIZE), gCol: Math.floor(cx / MAP_TILE_SIZE),
+            tileName, gRow, gCol,
             worldRow: entry.row, links: entry.links, now, cdUntil: p._doorwayCdUntil,
           });
           if (t) {
@@ -1527,7 +1572,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
 }
 
 module.exports = {
-  attachAuthority, planTransition, planBind, nearestMerchantVillage, INTERACT_RADIUS,
+  attachAuthority, planTransition, suppressArrivalDoorway, planBind,
+  nearestMerchantVillage, INTERACT_RADIUS,
   planPortalTransition, isPortalBlocked, knockbackPosition,
   // Stash internals, exported for unit test only. Not part of the module's API.
   __test: { pushAttacks, drainAttacks, MAX_PENDING_ATTACKS },

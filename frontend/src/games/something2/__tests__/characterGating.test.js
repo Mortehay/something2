@@ -100,7 +100,10 @@ describe('auto-join waits for a character', () => {
     // the flag, so it arrived `undefined` and auto-join returned null for
     // EVERY player. The pure-function test passed the flag explicitly and was
     // green the whole time -- a guard is only real if its input is wired.
-    expect(gameShellSource).toMatch(/autoJoinTarget\(\{[\s\S]{0,600}hasCharacter:/);
+    // Window widened alongside the lastWorldId guard below: the call site keeps
+    // growing rationale comments between the opening brace and this argument,
+    // and a window tight enough to feel "precise" just fails on prose.
+    expect(gameShellSource).toMatch(/autoJoinTarget\(\{[\s\S]{0,1500}hasCharacter:/);
   });
 
   it('GameShell SUPPLIES lastWorldId to autoJoinTarget', () => {
@@ -126,6 +129,8 @@ describe('auto-join waits for a character', () => {
     const { autoJoinTarget } = await import('../autoJoin.js');
     const ready = {
       isAdmin: false, isPlaying: false, alreadyJoined: false, hasGame: true,
+      // isGameRoute as of SOMET-271 -- see autoJoin.test.js's own describe.
+      isGameRoute: true,
       worlds: [{ id: 'w1', is_entry: true }], mapTiles: {}, mapConfig: {},
     };
     expect(autoJoinTarget({ ...ready, hasCharacter: true })).toBe('w1');

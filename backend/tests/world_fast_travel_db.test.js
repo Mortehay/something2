@@ -60,17 +60,29 @@ test('worlds.allows_fast_travel', { skip: !url ? 'no TEST_DATABASE_URL' : false 
     }
   });
 
-  await t.test('no existing world was silently flagged by the migration', async () => {
-    // The migration deliberately backfills nothing. Classification is authored
-    // in the map specs (slice 2), so until that lands the correct count is 0 --
-    // and a non-zero count here means something set it outside the specs.
-    // Content worlds only. Other files create flagged `zz`-prefixed fixture
-    // worlds (join_policy_db.test.js needs one to test the flag at all), and
-    // node --test runs files in parallel -- so an unscoped count here reads
-    // another test's in-flight fixtures as live content and fails on them.
+  await t.test('no dungeon room is a travel target in the LIVE data', async () => {
+    // This used to assert a count of ZERO, which was right only while nothing
+    // had been seeded. Once the specs were applied, 25 content worlds carried
+    // the flag legitimately and the test failed for being out of date rather
+    // than for finding a defect -- so it now asserts the property that actually
+    // has to hold forever, at the only place that ultimately matters: the rows
+    // the authority reads.
+    //
+    // map_spec_fixtures.test.js pins the same invariant in the SPECS. This is
+    // the live counterpart, and it is not redundant: a hand-edited world row, a
+    // migration, or an admin endpoint could set the flag without going anywhere
+    // near a spec file.
+    //
+    // Content worlds only -- other files create flagged `zz`-prefixed fixture
+    // worlds (join_policy_db.test.js needs one to test the flag at all) and
+    // node --test runs files in parallel, so an unscoped query reads another
+    // test's in-flight fixtures as live content.
     const r = await pool.query(
-      "SELECT count(*)::int AS n FROM worlds WHERE allows_fast_travel AND name NOT LIKE 'zz%'");
-    assert.equal(r.rows[0].n, 0,
-      'no world should be a travel target until the specs classify them');
+      `SELECT name FROM worlds
+        WHERE allows_fast_travel AND name NOT LIKE 'zz%' AND name ~ '^The .+: .+$'
+        ORDER BY name`);
+    assert.deepEqual(r.rows.map((x) => x.name), [],
+      'a dungeon room must never be reachable by fast travel -- that is the '
+      + 'portal-guard bypass the flag exists to prevent');
   });
 });

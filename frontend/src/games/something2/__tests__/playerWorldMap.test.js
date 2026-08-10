@@ -225,7 +225,13 @@ describe('the player map is read-only by construction', () => {
     const shell = fs.readFileSync(path.join(here, '../GameShell.jsx'), 'utf8');
     const body = shell.slice(
       shell.indexOf('const enterWorld'), shell.indexOf('handleEnterRef.current = enterWorld'));
-    expect(body).toMatch(/setIsPlaying\(true\);\s*\n\s*return true;/);
+    expect(body).toMatch(/setIsPlaying\(true\);/);
+    expect(body).toMatch(/return true;/);
+    // Entering a world -- however it happened -- disarms auto-join. Without
+    // this, a later re-evaluation where isPlaying read false sent the character
+    // back to the stale activeCharacter.lastWorldId, i.e. the world it had just
+    // travelled away from. Observed live before it was fixed.
+    expect(body).toMatch(/autoJoinedRef\.current = true;/);
     expect(body).toMatch(/toast\.error\(err\.message\);\s*\n\s*return false;/);
     // The early bail-outs too: no game instance, or no character chosen.
     expect(body).toMatch(/if \(!worldId \|\| !gameRef\.current\) return false;/);
