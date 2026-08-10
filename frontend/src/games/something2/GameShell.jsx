@@ -439,7 +439,7 @@ export default function GameShell() {
           // is active and it cannot disagree with the one the canvas is using.
           activeCharacterId,
           selectedWorldId, setSelectedWorldId,
-          enterWorld, resume, exitToMenu, toggleFullscreen,
+          enterWorld, resume, exitToMenu, changeCharacter, toggleFullscreen,
           openHelp: () => setHelpOpen(true),
         }} />
 

@@ -62,6 +62,18 @@ describe('GameShell gates the canvas behind a character', () => {
     expect(source).toMatch(/<CharacterSelect[\s\S]{0,240}onPlay=\{playCharacter\}/);
   });
 
+  it('exposes changeCharacter to the HUD, and the HUD calls it', () => {
+    // Same inertness shape as CharacterSelect above: `changeCharacter` was
+    // defined in GameShell and referenced NOWHERE else -- not in the Outlet
+    // context, not by any control -- so a player could not switch characters
+    // without hand-clearing localStorage. SOMET-262 lists "Change character
+    // disconnects cleanly" as an acceptance criterion, and it was unreachable.
+    expect(source).toMatch(/changeCharacter,/);
+    const gameView = read('../GameView.jsx');
+    expect(gameView).toMatch(/changeCharacter/);
+    expect(gameView).toMatch(/onClick=\{changeCharacter\}/);
+  });
+
   it('passes the active character into initChunked', () => {
     expect(source).toMatch(/characterId:/);
   });
