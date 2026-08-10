@@ -6,6 +6,11 @@ import { Game } from "./src/js/main.js";
 import { useMapTiles, useMapConfig, useVfxEffects } from "./useMaps.js";
 import { useWorlds } from "./useWorlds";
 import { autoJoinTarget } from "./autoJoin.js";
+import CharacterSelect from "./CharacterSelect.jsx";
+import { useCharacters } from "./useCharacters.js";
+import {
+  readActiveCharacterId, writeActiveCharacterId, clearActiveCharacterId, resolveActiveCharacter,
+} from "./characterSession.js";
 import { bindGameCanvas } from "./gameCanvasBinding.js";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 import { useAuth } from "../../context/AuthContext";
@@ -182,6 +187,28 @@ export default function GameShell() {
   // dedupes them by query key, so this is one request, not two.
   const { worlds } = useWorlds();
 
+  // SOMET-262: the authority refuses a join with no character, so the canvas is
+  // gated behind a choice. `characters` undefined means "still loading" -- a
+  // THIRD state, distinct from "no character": treating it as the latter
+  // flashes the picker for a frame before the canvas on every reload.
+  const { characters, maxCharacters, isLoadingCharacters } = useCharacters();
+  const [activeCharacterId, setActiveCharacterId] = useState(() => readActiveCharacterId());
+  const activeCharacter = resolveActiveCharacter(activeCharacterId, characters);
+
+  // A stored id whose character no longer exists (deleted from another device)
+  // resolves to null. Drop it rather than letting it reach a join the server
+  // will reject -- that surfaces as an error the player has to dismiss instead
+  // of simply landing on the picker.
+  useEffect(() => {
+    if (!isLoadingCharacters && Array.isArray(characters)
+        && activeCharacterId != null && !activeCharacter) {
+      clearActiveCharacterId();
+      setActiveCharacterId(null);
+    }
+  }, [isLoadingCharacters, characters, activeCharacterId, activeCharacter]);
+
+  const playCharacter = (id) => { writeActiveCharacterId(id); setActiveCharacterId(id); };
+
   const resume = () => {
     if (gameRef.current) gameRef.current.resume();
   };
@@ -221,6 +248,18 @@ export default function GameShell() {
     if (isPlaying) enterGameFullscreen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying]);
+
+  // Leaves the world and returns to the picker. autoJoinedRef is reset so the
+  // next choice can auto-join again; without that a non-admin would land on a
+  // dead canvas after switching.
+  const changeCharacter = () => {
+    exitToMenu();
+    gameRef.current?.destroy?.();
+    gameRef.current = null;
+    clearActiveCharacterId();
+    setActiveCharacterId(null);
+    autoJoinedRef.current = false;
+  };
 
   const exitToMenu = () => {
     exitGameFullscreen();
@@ -289,6 +328,10 @@ export default function GameShell() {
 
   const enterWorld = async (worldId = selectedWorldId) => {
     if (!worldId || !gameRef.current) return;
+    // Read through the ref-free closure: enterWorld is re-created every render,
+    // and handleEnterRef below always points at the latest one, so this sees
+    // the current character rather than the one active at mount.
+    if (!activeCharacter) return;
 
     try {
       const world = worlds?.find(w => w.id === worldId);
@@ -297,6 +340,7 @@ export default function GameShell() {
 
       await gameRef.current.initChunked({
         worldId,
+        characterId: activeCharacter.id,
         chunkSize,
         tileTypes: mapTiles,
         vfxEffects: vfxEffects || null,

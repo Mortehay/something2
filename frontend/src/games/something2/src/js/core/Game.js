@@ -212,7 +212,7 @@ export class Game {
         }
     }
 
-    async initChunked({ worldId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, spawnX = 0, spawnY = 0 }) {
+    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, spawnX = 0, spawnY = 0 }) {
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;
@@ -353,7 +353,7 @@ export class Game {
                 },
                 onTransition: (msg) => { if (this.onTransition) this.onTransition(msg); },
             });
-            this.authorityClient.connect(worldId);
+            this.authorityClient.connect(worldId, characterId);
             setTimeout(() => reject(new Error('authority join timeout')), 5000);
         });
         this.authorityJoined = true;

@@ -4,6 +4,7 @@ import { API_URL } from "../config";
 import {
   getStoredToken, clearToken, authHeaders, AUTH_EXPIRED_EVENT,
 } from "../games/something2/src/js/net/auth.js";
+import { clearActiveCharacterId } from "../games/something2/characterSession.js";
 import { deriveAuth, shouldSignOutOnProbe } from "./authState";
 
 const AuthContext = createContext(null);
@@ -21,6 +22,10 @@ function AuthProvider({ children }) {
 
   const signOut = useCallback(() => {
     clearToken();
+    // The active character is part of the session, not of the browser. Leaving
+    // it behind means the next account to sign in here inherits a stale id and
+    // is bounced by the server's ownership check on its first join.
+    clearActiveCharacterId();
     setToken(null);
   }, []);
 

@@ -30,9 +30,13 @@ export function pickEntryWorld(worlds) {
 }
 
 // The full auto-join decision. Returns the world id to join, or null.
-export function autoJoinTarget({ isAdmin, isPlaying, alreadyJoined, hasGame, worlds, mapTiles, mapConfig }) {
+export function autoJoinTarget({ isAdmin, isPlaying, alreadyJoined, hasGame, hasCharacter, worlds, mapTiles, mapConfig }) {
   if (isAdmin || isPlaying || alreadyJoined) return null;
   if (!hasGame) return null;
+  // SOMET-260: the authority refuses a join with no character, so firing before
+  // one is chosen is a guaranteed error toast rather than a race that sometimes
+  // works. Same reasoning as worldAssetsReady below -- wait, don't retry.
+  if (!hasCharacter) return null;
   if (!worldAssetsReady(mapTiles, mapConfig)) return null;
   const target = pickEntryWorld(worlds);
   return target ? target.id : null;

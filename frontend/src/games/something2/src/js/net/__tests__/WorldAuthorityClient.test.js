@@ -14,7 +14,7 @@ beforeEach(() => { globalThis.WebSocket = FakeWS; FakeWS.last = null; });
 
 function armClient(opts = {}) {
   const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', ...opts });
-  c.connect('w1');
+  c.connect('w1', 5);
   FakeWS.last._l.open(); // marks connected, sends join
   return c;
 }
@@ -22,15 +22,16 @@ function armClient(opts = {}) {
 describe('WorldAuthorityClient', () => {
   it('sends join on open', () => {
     const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't' });
-    c.connect('w1');
+    c.connect('w1', 5);
     FakeWS.last._l.open();
-    expect(FakeWS.last.sent[0]).toEqual({ type: 'join', world_id: 'w1' });
+    // SOMET-260: the authority refuses a join with no character_id.
+    expect(FakeWS.last.sent[0]).toEqual({ type: 'join', world_id: 'w1', character_id: 5 });
   });
 
   it('throttles input to the interval and accumulates dt', () => {
     let clock = 1000;
     const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', inputIntervalMs: 50, now: () => clock });
-    c.connect('w1');
+    c.connect('w1', 5);
     FakeWS.last._l.open();
     FakeWS.last.sent.length = 0; // drop the join frame
 
@@ -73,7 +74,7 @@ describe('WorldAuthorityClient', () => {
   it('ignores messages that arrive after disconnect (e.g. a self-kick during an intentional reconnect)', () => {
     const seen = [];
     const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', onKicked: (m) => seen.push(m) });
-    c.connect('w1');
+    c.connect('w1', 5);
     FakeWS.last._l.open();
     const deadWs = FakeWS.last;
 
@@ -109,7 +110,7 @@ describe('WorldAuthorityClient', () => {
   it('onState receives projectiles from a state frame', () => {
     const states = [];
     const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', onState: (m) => states.push(m) });
-    c.connect('w1');
+    c.connect('w1', 5);
     FakeWS.last._l.open();
     FakeWS.last._l.message({ data: JSON.stringify({ type: 'state', players: [], projectiles: [{ id: '1', x: 1, y: 2, element: 'arcane' }] }) });
     expect(states[0].projectiles).toHaveLength(1);
@@ -131,7 +132,7 @@ describe('WorldAuthorityClient', () => {
   it('a raw websocket error is NOT tagged as a server rejection', () => {
     const seen = [];
     const c = new WorldAuthorityClient({ url: 'ws://x/authority', token: 't', onError: (e) => seen.push(e) });
-    c.connect('w1');
+    c.connect('w1', 5);
     FakeWS.last._l.error();
     expect(seen).toHaveLength(1);
     expect(seen[0].isServerRejection).toBeUndefined();

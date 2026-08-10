@@ -46,16 +46,26 @@ export class WorldAuthorityClient {
     this._lastSentAt = -Infinity;
   }
 
-  connect(worldId) {
+  // SOMET-260: the authority refuses any join without a character_id, and does
+  // NOT fall back to "the account's first character" -- a silent default would
+  // turn a client bug into a successful join as somebody else's character. So
+  // this throws rather than opening a socket it knows will be refused: a
+  // rejected join surfaces as a bare "unknown character" toast with nothing
+  // actionable in it, which is worse than failing here.
+  connect(worldId, characterId) {
+    if (!Number.isInteger(Number(characterId))) {
+      throw new Error('connect() requires a character id');
+    }
     this._closed = false;
     this.worldId = worldId;
+    this.characterId = Number(characterId);
     const sep = this.url.includes('?') ? '&' : '?';
     const wsUrl = `${this.url}${sep}token=${encodeURIComponent(this.token)}`;
     this.ws = new WebSocket(wsUrl);
 
     this.ws.addEventListener('open', () => {
       this.connected = true;
-      this._send({ type: 'join', world_id: worldId });
+      this._send({ type: 'join', world_id: worldId, character_id: this.characterId });
     });
     this.ws.addEventListener('message', (event) => {
       // Drop anything that lands after an intentional disconnect — the socket
