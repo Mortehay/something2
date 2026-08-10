@@ -31,12 +31,22 @@ const Header = styled.div`margin-bottom: 1rem;`;
 const Title = styled.h2`margin: 0 0 0.25rem 0;`;
 const Dim = styled.div`color: var(--s2-text-dim); font-size: 0.9em;`;
 const CanvasCard = styled.div`
-  height: 600px; background: var(--s2-bg-sunken);
+  height: 600px;
+  /* s2-theme-exempt(#12121f): the graph surface stays dark in both modes, like
+     the game canvas. Cytoscape draws to a canvas and cannot read CSS custom
+     properties, so its node label colour has to be a literal; against the light
+     value of --s2-bg-sunken (rgb(236,236,243)) the light labels below were
+     invisible and every visited world rendered as an unlabelled dot. Pinning
+     the surface is the fix the theming spec left open for canvas widgets. */
+  background: #12121f;
   border: 1px solid var(--s2-border); border-radius: 8px; overflow: hidden;
 `;
 const Empty = styled.div`
   display: flex; align-items: center; justify-content: center;
-  height: 100%; color: var(--s2-text-dim); text-align: center; padding: 2rem;
+  /* Sits inside the pinned-dark CanvasCard, so it needs a light literal too --
+     var(--s2-text-dim) is dark-on-dark there. */
+  height: 100%; color: #9ca3af; /* s2-theme-exempt(#9ca3af): on the pinned-dark graph surface */
+  text-align: center; padding: 2rem;
 `;
 
 // Same posture as the admin graph's own query hook: this one surfaces its error rather

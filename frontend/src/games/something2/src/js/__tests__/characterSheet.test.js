@@ -11,8 +11,27 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { xpProgress, respecDisabled, progressionChanged, STAT_KEYS } from '../../../CharacterSheet.jsx';
 import { fetchProgression, allocateStat, respec } from '../net/progressionClient.js';
+import { ACTIVE_CHARACTER_KEY, writeActiveCharacterId, clearActiveCharacterId }
+  from '../../../characterSession.js';
 
 afterEach(() => vi.restoreAllMocks());
+
+// SOMET-257 made progression per character, so every one of these endpoints
+// now needs a character_id and progressionClient reads it from the session
+// store -- the same place GameShell writes it. Without this the sheet asks for
+// nobody's progression and the panel renders "character_id is required" where
+// the stats belong; that is exactly what shipped, and only the browser showed
+// it.
+const TEST_CHARACTER_ID = 77;
+globalThis.localStorage = globalThis.localStorage || (() => {
+  const map = new Map();
+  return {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+  };
+})();
+writeActiveCharacterId(TEST_CHARACTER_ID);
 
 // F2 rewrote xpProgress's signature: it used to recompute xpFloor/xpToNext
 // itself via a local xpCurve.js (now deleted -- see the source-text section
@@ -161,8 +180,23 @@ describe('progressionClient.fetchProgression', () => {
     };
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => body });
     const res = await fetchProgression('http://x');
-    expect(global.fetch).toHaveBeenCalledWith('http://x/api/progression', expect.any(Object));
+    // The character_id is pinned, not merely tolerated: the URL without it is
+    // a 400 from the real server, and this assertion is what makes that a test
+    // failure rather than a browser-only discovery.
+    expect(global.fetch).toHaveBeenCalledWith(
+      `http://x/api/progression?character_id=${TEST_CHARACTER_ID}`, expect.any(Object));
     expect(res).toEqual(body);
+  });
+
+  it('refuses to ask for nobody\'s progression', async () => {
+    clearActiveCharacterId();
+    global.fetch = vi.fn();
+    try {
+      await expect(fetchProgression('http://x')).rejects.toThrow(/No character selected/);
+      expect(global.fetch).not.toHaveBeenCalled();
+    } finally {
+      writeActiveCharacterId(TEST_CHARACTER_ID);
+    }
   });
 
   it('throws the server error message on a non-ok response', async () => {
@@ -184,7 +218,9 @@ describe('progressionClient.allocateStat', () => {
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('http://x/api/progression/allocate');
     expect(opts.method).toBe('POST');
-    expect(JSON.parse(opts.body)).toEqual({ stat: 'constitution', count: 1 });
+    expect(JSON.parse(opts.body)).toEqual({
+      stat: 'constitution', count: 1, character_id: TEST_CHARACTER_ID,
+    });
     expect(res).toEqual(body);
   });
 
@@ -206,6 +242,9 @@ describe('progressionClient.respec', () => {
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('http://x/api/progression/respec');
     expect(opts.method).toBe('POST');
+    // A respec charges the ACCOUNT's gold but refunds the CHARACTER's points,
+    // so the server needs both identities and gets the character one from here.
+    expect(JSON.parse(opts.body)).toEqual({ character_id: TEST_CHARACTER_ID });
     expect(res).toEqual(body);
   });
 

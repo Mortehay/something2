@@ -12,6 +12,12 @@ import { canCreate, slotsUsed } from './characterSession.js';
 const Panel = styled.div`
   position: absolute;
   inset: 0;
+  /* Above every layer GameView paints (its world picker tops out at 100, the
+     minimap modal at 200) and below GameShell's help button (300) and backdrop
+     (400), so Help stays reachable from the gate. Without this the world picker
+     rendered ON TOP of the picker and covered the Play buttons outright -- the
+     gate was visible and unusable. */
+  z-index: 250;
   display: flex;
   align-items: center;
   justify-content: center;

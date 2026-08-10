@@ -34,11 +34,32 @@ describe('the join frame carries a character id', () => {
   });
 });
 
-describe('GameShell gates the canvas behind a character', () => {
-  const source = read('../GameShell.jsx');
+// Read once at module scope: two separate describes assert against GameShell,
+// and a copy scoped inside one of them is not visible to the other.
+const gameShellSource = read('../GameShell.jsx');
 
-  it('renders CharacterSelect', () => {
-    expect(source).toMatch(/CharacterSelect/);
+describe('GameShell gates the canvas behind a character', () => {
+  const source = gameShellSource;
+
+  it('actually RENDERS CharacterSelect, not merely imports it', () => {
+    // This assertion used to be `toMatch(/CharacterSelect/)`, which the import
+    // line satisfied on its own. GameShell imported the component and never
+    // rendered it: the whole character gate was inert, the suite was green, and
+    // a player logging in landed on the raw world list. Caught in the browser,
+    // which is the only place this component executes at all.
+    expect(source).toMatch(/<CharacterSelect\b/);
+  });
+
+  it('gates the picker on the RESOLVED character, not the stored id', () => {
+    // `!activeCharacterId` would send a player whose character was deleted on
+    // another device straight into a join the server refuses -- and a refused
+    // join never sends `joined`, so the client just sits there.
+    expect(source).toMatch(/!isPlaying && !activeCharacter\b(?!Id)/);
+  });
+
+  it('passes the picker the props it needs to honour the cap', () => {
+    expect(source).toMatch(/<CharacterSelect[\s\S]{0,240}maxCharacters=\{maxCharacters\}/);
+    expect(source).toMatch(/<CharacterSelect[\s\S]{0,240}onPlay=\{playCharacter\}/);
   });
 
   it('passes the active character into initChunked', () => {
@@ -62,6 +83,21 @@ describe('GameShell gates the canvas behind a character', () => {
 });
 
 describe('auto-join waits for a character', () => {
+  it('GameShell actually SUPPLIES hasCharacter to autoJoinTarget', () => {
+    // The guard below lived in autoJoinTarget while this call site never passed
+    // the flag, so it arrived `undefined` and auto-join returned null for
+    // EVERY player. The pure-function test passed the flag explicitly and was
+    // green the whole time -- a guard is only real if its input is wired.
+    expect(gameShellSource).toMatch(/autoJoinTarget\(\{[\s\S]{0,600}hasCharacter:/);
+  });
+
+  it('re-runs the auto-join effect when the character changes', () => {
+    // Choosing a character is the LAST input to become ready. Without it in
+    // the dependency array the effect never fires again after the picker
+    // closes, and the player is stranded on the world list.
+    expect(gameShellSource).toMatch(/isAdmin, isPlaying, isGameRoute, activeCharacter\]/);
+  });
+
   it('autoJoinTarget refuses without one', async () => {
     const { autoJoinTarget } = await import('../autoJoin.js');
     const ready = {

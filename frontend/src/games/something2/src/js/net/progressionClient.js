@@ -5,8 +5,25 @@
 // auth.js -- the same helper every other mutating data hook in this app uses,
 // so a 401 (dead/revoked token) is handled the same way everywhere.
 import { authHeaders, apiFetch } from './auth.js';
+import { readActiveCharacterId } from '../../../characterSession.js';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
+
+// SOMET-257 made progression per CHARACTER, so all three of these endpoints
+// now require a character_id -- without one they answer 400 and the character
+// sheet renders "character_id is required" where the stats should be.
+//
+// Read from characterSession, the same store GameShell writes when a character
+// is chosen, rather than threaded down through CharacterSheet's props: this
+// module already reaches into localStorage for the auth token via authHeaders(),
+// so one more identity read follows the pattern instead of inventing a second
+// way to answer "who is this request for". One source, so the sheet can never
+// describe a different character than the canvas is drawing.
+function activeCharacterId() {
+  const id = readActiveCharacterId();
+  if (id == null) throw new Error('No character selected');
+  return id;
+}
 
 async function parseOrThrow(res) {
   let data = {};
@@ -17,7 +34,12 @@ async function parseOrThrow(res) {
 
 // { progression, stats, xpFloor, xpToNext, respecCost }
 export async function fetchProgression(apiUrl = API_URL) {
-  const res = await apiFetch(`${apiUrl}/api/progression`, { headers: authHeaders() });
+  // GET carries it as a query parameter; the POSTs below put it in the body.
+  // progressionRoutes.js reads `req.query.character_id ?? req.body.character_id`
+  // and accepts either, but each verb uses the idiomatic one.
+  const res = await apiFetch(
+    `${apiUrl}/api/progression?character_id=${encodeURIComponent(activeCharacterId())}`,
+    { headers: authHeaders() });
   return parseOrThrow(res);
 }
 
@@ -27,7 +49,7 @@ export async function allocateStat(stat, count, apiUrl = API_URL) {
   const res = await apiFetch(`${apiUrl}/api/progression/allocate`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ stat, count }),
+    body: JSON.stringify({ stat, count, character_id: activeCharacterId() }),
   });
   return parseOrThrow(res);
 }
@@ -39,6 +61,7 @@ export async function respec(apiUrl = API_URL) {
   const res = await apiFetch(`${apiUrl}/api/progression/respec`, {
     method: 'POST',
     headers: authHeaders(),
+    body: JSON.stringify({ character_id: activeCharacterId() }),
   });
   return parseOrThrow(res);
 }
