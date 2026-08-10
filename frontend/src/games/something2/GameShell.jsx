@@ -425,6 +425,10 @@ export default function GameShell() {
 
         <Outlet context={{
           gameRef, isPlaying, isPaused, isFullscreen,
+          // The player map route reads this rather than re-reading
+          // localStorage, so there is one source of truth for which character
+          // is active and it cannot disagree with the one the canvas is using.
+          activeCharacterId,
           selectedWorldId, setSelectedWorldId,
           enterWorld, resume, exitToMenu, toggleFullscreen,
           openHelp: () => setHelpOpen(true),

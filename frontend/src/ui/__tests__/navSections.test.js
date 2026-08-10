@@ -27,18 +27,37 @@ describe('NAV_SECTIONS', () => {
 });
 
 describe('visibleSections', () => {
-  it('shows a non-admin only the game view', () => {
+  // The exact list a player sees, pinned. SOMET-263's whole requirement is
+  // "the player sees only the game view and a read-only world map", so an
+  // extra entry appearing here is a requirement break, not a count to bump.
+  it('shows a non-admin the game view and the player world map, and nothing else', () => {
     const items = allItems(visibleSections(false));
-    expect(items.map((i) => i.path)).toEqual(['/game']);
+    expect(items.map((i) => i.path)).toEqual(['/game', '/game/map']);
   });
 
-  it('shows an admin the game view plus all seven admin screens', () => {
+  it('never shows a non-admin an editor', () => {
+    const items = allItems(visibleSections(false));
+    // The player's map must be the read-only route, never the admin editor
+    // that shares its label.
+    expect(items.map((i) => i.path)).not.toContain('/game/world-map');
+    expect(items.every((i) => !i.adminType)).toBe(true);
+  });
+
+  it('shows an admin the two player screens plus all seven admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(8);
+    expect(items).toHaveLength(9);
     expect(items.map((i) => i.path)).toEqual([
-      '/game', '/game/tiles', '/game/entities', '/game/items',
+      '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
       '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/world-map',
     ]);
+  });
+
+  it('gives the two world-map entries distinct labels', () => {
+    // Both are "World Map" to the person reading the sidebar. An admin sees
+    // both at once, so the editor is the one that gets qualified.
+    const labels = allItems(visibleSections(true))
+      .filter((i) => i.path.includes('map')).map((i) => i.label);
+    expect(new Set(labels).size).toBe(labels.length);
   });
 
   it('hides every admin-only section from a non-admin', () => {

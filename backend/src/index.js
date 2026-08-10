@@ -403,7 +403,12 @@ app.get('/api/player/world-map', playerGuard, async (req, res) => {
           links.set(key, { from: e.from_world_id, to: e.to_world_id, edge: e.edge });
         }
       } else if (!unvisited.has(e.to_world_id)) {
-        unvisited.set(e.to_world_id, { id: e.to_world_id, from: e.from_world_id });
+        // `edge` and nothing else. It says "there is an exit east from here",
+        // which the player can already see in-world, and the map layout needs
+        // it to place the stub next to the world it hangs off -- a stub with no
+        // edge cannot be positioned at all. The name, level band and
+        // coordinates stay withheld.
+        unvisited.set(e.to_world_id, { id: e.to_world_id, from: e.from_world_id, edge: e.edge });
       }
     }
 

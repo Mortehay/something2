@@ -16,6 +16,7 @@ import ItemTypesAdmin from "./games/something2/ItemTypesAdmin";
 import MapsAdmin from "./games/something2/MapsAdmin";
 import BiomesAdmin from "./games/something2/BiomesAdmin";
 import MapGraphAdmin from "./games/something2/MapGraphAdmin";
+import PlayerWorldMap from "./games/something2/PlayerWorldMap";
 import CreatureBehaviorsAdmin from "./games/something2/CreatureBehaviorsAdmin";
 
 import { DarkModeProvider } from "./context/DarkModeContext";
@@ -49,6 +50,9 @@ function App() {
                       running world. See GameShell's canvas comment. */}
                   <Route path="game" element={<GameShell />}>
                     <Route index element={<GameView />} />
+                    {/* A SIBLING of the RequireAdmin block, not inside it:
+                        this is the player-facing fog-of-war map. */}
+                    <Route path="map" element={<PlayerWorldMap />} />
                     <Route element={<RequireAdmin />}>
                       <Route path="tiles" element={<TileTypesAdmin />} />
                       <Route path="entities" element={<EntityTypesAdmin />} />

@@ -276,8 +276,12 @@ test('the map is fogged: visited worlds named, neighbours anonymous, the rest ab
     assert.equal(l.edge, l.from === a ? 'E' : 'W',
       'the edge label must describe the direction the link is reported in');
 
-    assert.deepEqual(body.unvisited, [{ id: c, from: b }],
-      'the directly-linked unvisited neighbour must appear as a bare stub');
+    // id, the world it hangs off, and the compass edge -- the last so the map
+    // can place the stub, and because "there is an exit east" is something the
+    // player can already see standing in B. Asserted with deepEqual so any
+    // FOURTH field added later fails here rather than quietly shipping.
+    assert.deepEqual(body.unvisited, [{ id: c, from: b, edge: 'E' }],
+      'the unvisited neighbour must be a bare stub: id, source and edge, nothing more');
 
     // The assertion this file exists for. Written against the whole serialised
     // body, so a name leaking through ANY field fails -- not just through
