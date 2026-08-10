@@ -7,6 +7,7 @@ const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { ownedCharacter } = require('../services/characters.js');
+const { recordVisit } = require('../services/visitedWorlds.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
@@ -890,6 +891,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
             .filter((v) => v.merchantX != null && v.merchantY != null)
             .map((v) => ({ villageId: v.id, x: v.merchantX, y: v.merchantY })),
         });
+        // Fog of war (SOMET-263). Fire-and-forget: a failed bookkeeping write
+        // must never break a join. Call site 1 of 2 -- the other is the
+        // transition path below, and visited_worlds_db.test.js asserts both.
+        recordVisit(pool, character.id, entry.worldId)
+          .catch((e) => console.error('recordVisit (join)', e));
       } catch (err) {
         console.error('join failed:', err);
         if (entry.sockets.get(ws.userId) === ws) entry.sockets.delete(ws.userId);
@@ -1163,6 +1169,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
             pendingArrivals.set(p.characterId, { worldId: t.toWorldId, x: t.arriveX, y: t.arriveY });
             const ws = entry.sockets.get(p.userId);
             if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
+            // Fog of war: the destination is visited the moment the server
+            // commits the move, not when the client re-joins -- a client that
+            // never completes the rejoin has still been there.
+            recordVisit(pool, p.characterId, t.toWorldId)
+              .catch((e) => console.error('recordVisit (transition)', e));
           }
         }
       }
@@ -1208,6 +1219,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
           pendingArrivals.set(p.characterId, { worldId: t.toWorldId, x: t.arriveX, y: t.arriveY });
           const ws = entry.sockets.get(p.userId);
           if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
+          recordVisit(pool, p.characterId, t.toWorldId)
+            .catch((e) => console.error('recordVisit (transition)', e));
         }
       }
       if (entry.villages && entry.villages.length) {
