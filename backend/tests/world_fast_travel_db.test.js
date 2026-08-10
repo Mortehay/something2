@@ -64,8 +64,12 @@ test('worlds.allows_fast_travel', { skip: !url ? 'no TEST_DATABASE_URL' : false 
     // The migration deliberately backfills nothing. Classification is authored
     // in the map specs (slice 2), so until that lands the correct count is 0 --
     // and a non-zero count here means something set it outside the specs.
+    // Content worlds only. Other files create flagged `zz`-prefixed fixture
+    // worlds (join_policy_db.test.js needs one to test the flag at all), and
+    // node --test runs files in parallel -- so an unscoped count here reads
+    // another test's in-flight fixtures as live content and fails on them.
     const r = await pool.query(
-      'SELECT count(*)::int AS n FROM worlds WHERE allows_fast_travel');
+      "SELECT count(*)::int AS n FROM worlds WHERE allows_fast_travel AND name NOT LIKE 'zz%'");
     assert.equal(r.rows[0].n, 0,
       'no world should be a travel target until the specs classify them');
   });

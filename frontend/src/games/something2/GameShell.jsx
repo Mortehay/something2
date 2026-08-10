@@ -326,12 +326,17 @@ export default function GameShell() {
     };
   }, []);
 
+  // Returns whether the player actually ended up in the world. The World Map's
+  // click-to-travel needs to know: it navigates to the canvas afterwards, and a
+  // refused join (the authority's join policy can say no) must leave the player
+  // looking at the map with the toast this function raises, not at a blank
+  // canvas that never received `joined`. Every other caller ignores the value.
   const enterWorld = async (worldId = selectedWorldId) => {
-    if (!worldId || !gameRef.current) return;
+    if (!worldId || !gameRef.current) return false;
     // Read through the ref-free closure: enterWorld is re-created every render,
     // and handleEnterRef below always points at the latest one, so this sees
     // the current character rather than the one active at mount.
-    if (!activeCharacter) return;
+    if (!activeCharacter) return false;
 
     try {
       const world = worlds?.find(w => w.id === worldId);
@@ -350,8 +355,10 @@ export default function GameShell() {
       });
       setSelectedWorldId(worldId);
       setIsPlaying(true);
+      return true;
     } catch (err) {
       toast.error(err.message);
+      return false;
     }
   };
   // Keep the transition callback pointed at the current closure (fresh

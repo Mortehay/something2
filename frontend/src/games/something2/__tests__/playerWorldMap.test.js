@@ -9,8 +9,10 @@ import { toCytoscapeElements } from '../playerWorldMap.js';
 // mapGraphLayout.js does for the admin graph.
 const PAYLOAD = {
   worlds: [
-    { id: 'a', name: 'Overworld', graph_x: 0, graph_y: 0, is_entry: true, level_min: 1, level_max: 3 },
-    { id: 'b', name: 'Deep Forest', graph_x: 220, graph_y: 0, is_entry: false, level_min: 3, level_max: 6 },
+    // `a` is a travel target the character is not standing in; `b` is flagged
+    // AND current, which is the case the transform has to exclude.
+    { id: 'a', name: 'Overworld', graph_x: 0, graph_y: 0, is_entry: true, level_min: 1, level_max: 3, allows_fast_travel: true },
+    { id: 'b', name: 'Deep Forest', graph_x: 220, graph_y: 0, is_entry: false, level_min: 3, level_max: 6, allows_fast_travel: true },
   ],
   links: [{ from: 'a', to: 'b', edge: 'E' }],
   unvisited: [{ id: 'c', from: 'b', edge: 'E' }],
@@ -42,7 +44,56 @@ describe('toCytoscapeElements', () => {
     // invent a place to put one later. Whatever `data` holds must be drawable
     // from the stub payload alone.
     const stub = nodes.find((n) => n.data.id === 'c');
-    expect(Object.keys(stub.data).sort()).toEqual(['current', 'id', 'label', 'unvisited']);
+    expect(Object.keys(stub.data).sort()).toEqual(['current', 'id', 'label', 'travelable', 'unvisited']);
+  });
+
+  it('never offers travel to an unvisited stub', () => {
+    // A stub is anonymous on purpose. "This unseen place is a travel hub" is
+    // the same kind of leak as its name would be, and it would tell the player
+    // which unexplored doors are worth taking.
+    expect(nodes.find((n) => n.data.id === 'c').data.travelable).toBe('false');
+  });
+
+  it('keeps a stub inert even if the endpoint starts sending the flag', () => {
+    // The transform hardcodes 'false' for stubs rather than reading the field.
+    // Reading it would look identical today (the payload has no such key) and
+    // become a leak the moment the SELECT behind `unvisited` grew a column.
+    const els2 = toCytoscapeElements({
+      ...PAYLOAD, unvisited: [{ id: 'c', from: 'b', edge: 'E', allows_fast_travel: true }],
+    });
+    expect(els2.find((e) => e.data.id === 'c').data.travelable).toBe('false');
+  });
+
+  it('offers travel to a flagged world the character is not standing in', () => {
+    expect(nodes.find((n) => n.data.id === 'a').data.travelable).toBe('true');
+  });
+
+  it('does not offer travel into the world the character is already in', () => {
+    // `b` carries the flag, so this fails if the rule is the flag alone.
+    // Re-joining the current world tears down a live session and re-runs spawn
+    // for no gain.
+    expect(nodes.find((n) => n.data.id === 'b').data.travelable).toBe('false');
+  });
+
+  it('does not offer travel to a visited world without the flag', () => {
+    // The whole point of the column: a visited dungeon room stays walk-only, so
+    // the portal guard in front of it keeps mattering.
+    const els2 = toCytoscapeElements({
+      ...PAYLOAD,
+      worlds: [{ ...PAYLOAD.worlds[0], allows_fast_travel: false }, PAYLOAD.worlds[1]],
+    });
+    expect(els2.find((e) => e.data.id === 'a').data.travelable).toBe('false');
+  });
+
+  it('treats a missing flag as not travelable', () => {
+    // An older server, or a world row predating the column. Absence must mean
+    // no, never "undefined is not false".
+    const els2 = toCytoscapeElements({
+      ...PAYLOAD,
+      worlds: [{ id: 'a', name: 'Overworld', graph_x: 0, graph_y: 0 }],
+      links: [], unvisited: [], currentWorldId: null,
+    });
+    expect(els2.find((e) => e.data.id === 'a').data.travelable).toBe('false');
   });
 
   it('marks the current world', () => {
@@ -133,6 +184,52 @@ describe('the player map is read-only by construction', () => {
     // list), so the object form would have been dead config that read as a
     // guard. Asserted in the form that actually reaches cytoscape.
     expect(source).toMatch(/autoungrabify=\{true\}/);
+  });
+
+  it('adds travel without adding an editing capability', () => {
+    // Click-to-travel is navigation. The absence assertions above must still
+    // hold with it in place -- they are re-stated here as one explicit claim so
+    // a future "while I'm in here" edit has to break a test that names the
+    // reason, not just three that look like leftovers.
+    expect(source).toMatch(/cy\.on\('tap'/);
+    // Cytoscape's own graph-mutation API. Spelled out rather than as a loose
+    // `.json(` -- that also matched `res.json()` in the query function, which
+    // is how a "no mutation" assertion can fail on a fetch.
+    expect(source).not.toMatch(/cy\.add\(|cy\.remove\(|cy\.json\(/);
+  });
+
+  it('only offers travel on nodes the server marked travelable', () => {
+    expect(source).toMatch(/node\[travelable = "true"\]/);
+  });
+
+  it('enters through GameShell rather than opening its own socket', () => {
+    // A second entry path is the two-loader shape that has shipped inert
+    // features in this project before -- and this one would additionally
+    // bypass everything GameShell does around a join.
+    expect(source).toMatch(/enterWorld/);
+    expect(source).not.toMatch(/WorldAuthorityClient|initChunked|new WebSocket/);
+  });
+
+  it('navigates to the canvas only when the join succeeded', () => {
+    // The server can refuse (joinPolicy). Navigating regardless would park the
+    // player on a canvas that never received `joined` and looks frozen, with
+    // the real message already gone past in a toast.
+    expect(source).toMatch(/if \(await enterWorld\(worldId\)\) navigate\('\/game'\)/);
+  });
+
+  it('GameShell.enterWorld reports whether the join actually happened', () => {
+    // The other half of the contract the test above depends on. Without a
+    // truthy return from the success path, `if (await enterWorld(...))` is
+    // always false and click-to-travel enters the world and then refuses to
+    // show it -- a bug that lives in a DIFFERENT file from its symptom.
+    const shell = fs.readFileSync(path.join(here, '../GameShell.jsx'), 'utf8');
+    const body = shell.slice(
+      shell.indexOf('const enterWorld'), shell.indexOf('handleEnterRef.current = enterWorld'));
+    expect(body).toMatch(/setIsPlaying\(true\);\s*\n\s*return true;/);
+    expect(body).toMatch(/toast\.error\(err\.message\);\s*\n\s*return false;/);
+    // The early bail-outs too: no game instance, or no character chosen.
+    expect(body).toMatch(/if \(!worldId \|\| !gameRef\.current\) return false;/);
+    expect(body).toMatch(/if \(!activeCharacter\) return false;/);
   });
 
   it('reads the fog-of-war endpoint, not the admin world graph', () => {

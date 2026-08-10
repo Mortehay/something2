@@ -116,6 +116,11 @@ function fakePortalPool() {
     // SOMET-260: join resolves the character before anything else; falling
     // through to rows:[] refuses the join and HANGS the test on 'joined'.
     if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+    // Plan B slice 3: the join policy's world+visit lookup, which now runs
+    // on every join. Falling through to rows:[] refuses it, and the test
+    // then HANGS waiting for 'joined' rather than failing. is_entry with no
+    // history is the first-join leg -- what these fixtures actually are.
+    if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
     if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
     if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
     if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
@@ -190,6 +195,11 @@ function fakeRacyPortalPool() {
     // SOMET-260: join resolves the character before anything else; falling
     // through to rows:[] refuses the join and HANGS the test on 'joined'.
     if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+    // Plan B slice 3: the join policy's world+visit lookup, which now runs
+    // on every join. Falling through to rows:[] refuses it, and the test
+    // then HANGS waiting for 'joined' rather than failing. is_entry with no
+    // history is the first-join leg -- what these fixtures actually are.
+    if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
     if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
     if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
     if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
@@ -269,6 +279,11 @@ function fakeAdjacentChunkGuardPool() {
     // SOMET-260: join resolves the character before anything else; falling
     // through to rows:[] refuses the join and HANGS the test on 'joined'.
     if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+    // Plan B slice 3: the join policy's world+visit lookup, which now runs
+    // on every join. Falling through to rows:[] refuses it, and the test
+    // then HANGS waiting for 'joined' rather than failing. is_entry with no
+    // history is the first-join leg -- what these fixtures actually are.
+    if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
     if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
     if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
     if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
@@ -346,6 +361,11 @@ function fakeMirroredPortalPool() {
     // SOMET-260: join resolves the character before anything else; falling
     // through to rows:[] refuses the join and HANGS the test on 'joined'.
     if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+    // Plan B slice 3: the join policy's world+visit lookup, which now runs
+    // on every join. Falling through to rows:[] refuses it, and the test
+    // then HANGS waiting for 'joined' rather than failing. is_entry with no
+    // history is the first-join leg -- what these fixtures actually are.
+    if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
     if (/FROM worlds WHERE id/i.test(sql)) {
       const row = WORLDS[params[0]];
       return { rows: row ? [row] : [] };
@@ -591,6 +611,11 @@ function fakeBoundaryPortalPool(fromX, fromY) {
     // SOMET-260: join resolves the character before anything else; falling
     // through to rows:[] refuses the join and HANGS the test on 'joined'.
     if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+    // Plan B slice 3: the join policy's world+visit lookup, which now runs
+    // on every join. Falling through to rows:[] refuses it, and the test
+    // then HANGS waiting for 'joined' rather than failing. is_entry with no
+    // history is the first-join leg -- what these fixtures actually are.
+    if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
     if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
     if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
     if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };

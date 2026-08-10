@@ -62,6 +62,16 @@ export function toCytoscapeElements(payload) {
         label: w.is_entry ? `★ ${w.name}` : w.name,
         unvisited: 'false',
         current: String(w.id === currentWorldId),
+        // Whether clicking this node offers travel. Both halves are required
+        // and both come from the server: `allows_fast_travel` on the row, and
+        // membership of `worlds` (which the endpoint builds from the visit
+        // table) for "you have been here". A world the character has never
+        // entered is never in this array in the first place.
+        //
+        // Not travelable when it is where the character already IS -- a join
+        // into the current world tears down a live session and re-runs spawn
+        // for no gain.
+        travelable: String(w.allows_fast_travel === true && w.id !== currentWorldId),
       },
       position: positionOf(w.id),
     })),
@@ -74,6 +84,11 @@ export function toCytoscapeElements(payload) {
         // where the character is. Set explicitly so every node carries the same
         // keys and the `data(current)` mappers have nothing to warn about.
         current: 'false',
+        // Hardcoded, NOT read from the stub: the payload deliberately carries
+        // no flag for an unvisited world, so `String(s.allows_fast_travel ===
+        // true)` would also produce 'false' here and look correct -- while
+        // quietly becoming a leak the day the endpoint starts sending it.
+        travelable: 'false',
       },
       position: positionOf(s.id),
     })),

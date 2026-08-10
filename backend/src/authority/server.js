@@ -8,6 +8,7 @@ const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInvent
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { ownedCharacter } = require('../services/characters.js');
 const { recordVisit } = require('../services/visitedWorlds.js');
+const { mayJoin, joinPolicyFacts } = require('../services/joinPolicy.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
@@ -277,9 +278,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // runs (F-021 / SOMET-201) — one indexed query per CONNECT (not per
       // tick), shared so the two transports cannot silently drift apart. A DB
       // error or a revoked/missing user must destroy the socket, never throw out.
+      let role = null;
       try {
         const user = await currentUserForToken(pool, payload);
         if (!user) { socket.destroy(); return; }
+        // Read from the DB row this check already fetched, never from the JWT
+        // payload: a token minted before a demotion still carries the old role,
+        // and token_version is not bumped on a role change. The join policy
+        // treats admin as an unrestricted world picker, so a stale claim there
+        // would be a real privilege hold-over.
+        role = user.role;
       } catch {
         socket.destroy();
         return;
@@ -287,6 +295,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.userId = userId;
+        ws.role = role;
         ws.worldId = null;
         wss.emit('connection', ws, req);
       });
@@ -795,6 +804,46 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
       const entry = await loadWorld(msg.world_id).catch(() => null);
       if (!entry) { send(ws, { type: 'error', message: 'unknown world' }); return; }
+
+      // Plan B slice 3: may this character be in this world at all? Until now
+      // the answer was "yes, always" -- any world id in a join frame was a
+      // successful arrival, which makes click-to-travel's visited+flagged offer
+      // a suggestion rather than a rule. See services/joinPolicy.js for why the
+      // check is not keyed on a client-supplied `fast_travel` intent.
+      //
+      // Placed AFTER loadWorld so the policy sees entry.worldId (the canonical
+      // spelling, F-014) -- keying it on msg.world_id would compare the client's
+      // raw string against ids that came out of the database, and a differently
+      // spelled uuid would be refused for the wrong reason.
+      //
+      // pendingArrivals is READ, not consumed: loadSpawn below is what clears
+      // it, and taking it here would leave a refused-then-retried join with no
+      // arrival point.
+      const pending = pendingArrivals.get(character.id);
+      // Fail CLOSED on a lookup error: an authorization check that defaults to
+      // "allow" when the database hiccups is not a check. Logged separately so
+      // a refusal caused by an outage is distinguishable in the logs from one
+      // caused by the rule.
+      let facts = null;
+      try {
+        facts = await joinPolicyFacts(pool, character.id, entry.worldId);
+      } catch (e) {
+        console.error('join policy lookup failed:', e);
+      }
+      const verdict = mayJoin({
+        isAdmin: ws.role === 'admin',
+        pendingWorldId: pending ? pending.worldId : null,
+        worldId: entry.worldId,
+        facts,
+      });
+      if (!verdict.allowed) {
+        // Generic on the wire. `verdict.reason` distinguishes "you have not been
+        // there" from "that world does not exist", and handing that back would
+        // let a client map the world graph by probing ids.
+        console.warn('join refused:', verdict.reason, 'character', character.id, 'world', entry.worldId);
+        send(ws, { type: 'error', message: 'you cannot travel there' });
+        return;
+      }
 
       try {
         // entry.worldId, not msg.world_id: loadWorld canonicalizes the id

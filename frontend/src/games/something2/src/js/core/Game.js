@@ -287,10 +287,17 @@ export class Game {
         this.localUserId = String(claims.user_id);
         const wsUrl = API_URL.replace(/^http/, 'ws') + '/authority';
         const spawn = await new Promise((resolve, reject) => {
+            // Scoped to THIS join attempt, deliberately not this.authorityJoined:
+            // that flag is set once and never cleared, so on a second
+            // initChunked (map travel while already playing) it is still true
+            // from the previous world and an "is this a refused join" test
+            // written against it would answer no.
+            let settled = false;
             this.authorityClient = new WorldAuthorityClient({
                 url: wsUrl,
                 token,
                 onJoined: (msg) => {
+                    settled = true;
                     applyJoined(this.inventory, msg);
                     this.autoLoot = msg.autoLoot === true;
                     this.gold = Number(msg.gold) || 0;
@@ -339,6 +346,19 @@ export class Game {
                 onAmmo: (msg) => applyAmmoCount(this.inventory, msg.item_type_id, msg.count),
                 onError: (e) => {
                     console.error('[authority]', e);
+                    // A server rejection that arrives BEFORE `joined` is a
+                    // refused join, not an in-game rejection: the authority's
+                    // join policy can say no (an unreachable world, a character
+                    // that is not yours). Fail the join promise with the
+                    // server's own words instead of letting it sit until the
+                    // 5s timeout below and then reporting the useless
+                    // "authority join timeout" -- with the real reason already
+                    // gone past in a toast.
+                    if (!settled && e && e.isServerRejection && e.serverMessage) {
+                        settled = true;
+                        reject(new Error(e.serverMessage));
+                        return;
+                    }
                     // Only a server-issued protocol rejection (type:'error' frame,
                     // e.g. "unequip it first") is worth surfacing to the player —
                     // a raw socket failure has no actionable server message and
