@@ -44,6 +44,10 @@ function fakePool() {
   return withConnect({
     deletes,
     query: async (sql, params) => {
+      // SOMET-260: join resolves the character before anything else; a pool
+      // that falls through to rows:[] refuses the join, which HANGS the test
+      // on nextMsg('joined') rather than failing it.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] }; // matches token()'s tv:1 → passes the on-connect version check
       if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
@@ -80,6 +84,10 @@ function fakePool() {
             defense: null, resistances: null },
         ] };
       }
+      // SOMET-260: join now resolves the character before anything else, and a
+      // fake pool that falls through to rows:[] refuses the join -- which makes the
+      // test HANG waiting for 'joined' rather than fail. Answer it explicitly.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/FROM player_items/i.test(sql)) return { rows: [] };
       if (/FROM player_equipment/i.test(sql)) return { rows: [] };
       if (/INSERT INTO player_items/i.test(sql)) return { rows: [], rowCount: 1 };
@@ -124,7 +132,7 @@ test('an adjacent aggro creature damages the player (state.hp drops)', async () 
   const { url, handle, server } = await bootWith(fakePool());
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   const joined = await nextMsg(ws, 'joined');
   let hurt = false;
   for (let i = 0; i < 60 && !hurt; i++) {
@@ -141,7 +149,7 @@ test('attack kills an adjacent creature (DELETE issued, gone from creatures)', a
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
   // Chunk activation (DB roundtrip) races the first broadcast — the first
   // 'creatures' message is always empty because recomputeActive() kicks off
@@ -204,6 +212,10 @@ function fakePoolWithBow() {
   return withConnect({
     deletes, rawDeletes, dropQueries, itemInserts,
     query: async (sql, params) => {
+      // SOMET-260: join resolves the character before anything else; a pool
+      // that falls through to rows:[] refuses the join, which HANGS the test
+      // on nextMsg('joined') rather than failing it.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/^\s*INSERT INTO player_progression/i.test(sql)) { progressionRow(params[0]); return { rows: [], rowCount: 0 }; }
       if (/^\s*UPDATE player_progression/i.test(sql)) {
         const row = progressionRow(params[0]);
@@ -283,7 +295,7 @@ test('a creature killed BY A PROJECTILE routes through the shared kill funnel (D
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
   let loaded = false;
   for (let i = 0; i < 20 && !loaded; i++) {

@@ -84,7 +84,17 @@ async function commitCreatureDeath(pool, entry, creatureId, {
     let leveledUp = false;
     let newLevel = null;
     let awarded = 0;
-    if (killerUserId != null) {
+    // killerUserId stays the IN-MEMORY identity all the way through the kill
+    // pipeline (world.js, projectiles.js) -- it is what getPlayer is keyed by.
+    // Progression, though, is per-character (SOMET-257), so the id the XP
+    // write needs is resolved here from the live player rather than threaded
+    // through three more files. A killer who disconnected between the killing
+    // blow and this commit has no player object and simply earns nothing,
+    // which is the same outcome as before for a vanished killer.
+    const killerCharacterId = killerUserId == null
+      ? null
+      : ((entry.world.getPlayer(killerUserId) || {}).characterId ?? null);
+    if (killerCharacterId != null) {
       // Read BEFORE awardXp so the kill's XP is scaled by the killer's level
       // AT THIS MOMENT, not a value awardXp happens to re-derive. This is an
       // unlocked read (awardXp takes its own locked read right after, inside
@@ -92,9 +102,9 @@ async function commitCreatureDeath(pool, entry, creatureId, {
       // fixed signature (amount in, not creature level + player level), not
       // a correctness gap: the actual write is still serialized by awardXp's
       // own row lock.
-      const before = await loadProgression(client, killerUserId);
+      const before = await loadProgression(client, killerCharacterId);
       const amount = xpForKill(Number(dead.level) || 1, before.level);
-      const award = await awardXp(client, killerUserId, amount, 'kill');
+      const award = await awardXp(client, killerCharacterId, amount, 'kill');
       progression = award.progression;
       leveledUp = award.leveledUp;
       newLevel = award.newLevel;
@@ -203,16 +213,16 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
 // NOTE: the query is not wrapped in a try/catch, so a DB-level failure (e.g.
 // a dropped connection) rejects out of this function. server.js's `pickup`
 // handler catches it; any future auto-loot caller must too.
-async function claimItem(pool, entry, userId, groundItemId) {
+async function claimItem(pool, entry, userId, characterId, groundItemId) {
   if (entry.claiming.has(groundItemId)) return null;
   entry.claiming.add(groundItemId);
   try {
     const r = await pool.query(
       `WITH d AS (DELETE FROM world_items WHERE id = $1 RETURNING item_type_id, quantity)
-       INSERT INTO player_items (user_id, item_type_id, quantity)
+       INSERT INTO player_items (character_id, item_type_id, quantity)
        SELECT $2, item_type_id, quantity FROM d
        RETURNING id, item_type_id, quantity`,
-      [groundItemId, userId],
+      [groundItemId, characterId],
     );
     if (r.rowCount !== 1) {
       entry.world.groundItems.remove(groundItemId); // stale row, evict
@@ -293,7 +303,7 @@ function dropGraceActive(p, groundItemId, now) {
   return true;
 }
 
-async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000, now = Date.now(), graceMs = DROP_GRACE_MS } = {}) {
+async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 600000, now = Date.now(), graceMs = DROP_GRACE_MS } = {}) {
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
 
@@ -312,15 +322,15 @@ async function dropItem(pool, entry, userId, itemId, { ttlMs = 600000, now = Dat
   // them — a dropped connection, a pool timeout, or world_items.world_id's
   // FK rejecting because an admin deleted the world out from under a live
   // session — committed the DELETE and never ran the INSERT, destroying the
-  // item (F-016 / SOMET-196). The user_id predicate IS the ownership check —
+  // item (F-016 / SOMET-196). The character_id predicate IS the ownership check —
   // a forged itemId naming someone else's item deletes (and therefore
   // inserts) nothing.
   const r = await pool.query(
-    `WITH d AS (DELETE FROM player_items WHERE id = $1 AND user_id = $2 RETURNING item_type_id, quantity)
+    `WITH d AS (DELETE FROM player_items WHERE id = $1 AND character_id = $2 RETURNING item_type_id, quantity)
      INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
      SELECT $3, item_type_id, $4, $5, now() + ($6::int * interval '1 millisecond'), quantity FROM d
      RETURNING id, item_type_id, x, y, expires_at, quantity`,
-    [itemId, userId, entry.worldId, cx, cy, ttlMs],
+    [itemId, characterId, entry.worldId, cx, cy, ttlMs],
   );
   if (r.rowCount !== 1) return { ok: false, reason: 'you do not own that item' };
 

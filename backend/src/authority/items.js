@@ -1,6 +1,7 @@
-// Account-scoped item layer: the generalized item catalog plus a user's
+// Character-scoped item layer: the generalized item catalog plus a character's
 // inventory and paper-doll equipment. Inventory/equipment are keyed by
-// user_id and are independent of any world.
+// character_id (SOMET-257 re-keyed them off user_id) and are independent of
+// any world. Gold is the exception and stays on users -- it is account-wide.
 
 const DEFAULT_WEAPON_NAME = 'dagger';
 const SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
@@ -73,17 +74,15 @@ function resolveGoldItemTypeId(itemTypes) {
   return null;
 }
 
-const STARTING_LOADOUT = ['dagger', 'leather-vest'];
-
-// A user's owned instances + their paper-doll, both account-wide.
-async function loadInventory(pool, userId) {
+// A character's owned instances + their paper-doll, both character-scoped.
+async function loadInventory(pool, characterId) {
   const ir = await pool.query(
-    'SELECT id, item_type_id, quantity FROM player_items WHERE user_id = $1 ORDER BY created_at ASC, id ASC',
-    [userId],
+    'SELECT id, item_type_id, quantity FROM player_items WHERE character_id = $1 ORDER BY created_at ASC, id ASC',
+    [characterId],
   );
   const er = await pool.query(
-    'SELECT slot, item_id FROM player_equipment WHERE user_id = $1',
-    [userId],
+    'SELECT slot, item_id FROM player_equipment WHERE character_id = $1',
+    [characterId],
   );
   const equipment = {};
   for (const row of er.rows) equipment[row.slot] = row.item_id;
@@ -93,7 +92,7 @@ async function loadInventory(pool, userId) {
   };
 }
 
-// Grant the starter set, once per ACCOUNT, ever. F-013 (P0): this used to be
+// Grant the starter set, once per CHARACTER, ever. F-013 (P0): this used to be
 // gated on "the account currently owns zero items" (a SELECT against
 // player_items), which a player can re-enter at will by selling or dropping
 // the starter items and reconnecting — the join handler saw an empty
@@ -101,31 +100,42 @@ async function loadInventory(pool, userId) {
 // the dagger+vest to a merchant and reconnect for free gold (0 -> 21 -> 42),
 // or drop them and reconnect for a free duplicate pair.
 //
-// Gated instead on users.starting_loadout_granted_at, a fact about the
-// account rather than a snapshot of current ownership, via a single
-// conditional UPDATE ... WHERE ... IS NULL RETURNING. This is a single
-// statement specifically so two concurrent joins on the same fresh account
-// cannot both read "not granted yet" before either writes: Postgres takes
-// the row lock on the first UPDATE that reaches it, the second blocks until
-// that transaction commits, then re-evaluates the WHERE clause against the
-// now-committed row and affects zero rows. The winner grants; the loser sees
-// rowCount 0 and skips — no read-then-write race window exists to lose.
-async function grantStartingLoadout(pool, userId, itemTypes) {
+// Gated instead on starting_loadout_granted_at, a fact about the character
+// rather than a snapshot of current ownership, via a single conditional
+// UPDATE ... WHERE ... IS NULL RETURNING. This is a single statement
+// specifically so two concurrent joins on the same fresh character cannot both
+// read "not granted yet" before either writes: Postgres takes the row lock on
+// the first UPDATE that reaches it, the second blocks until that transaction
+// commits, then re-evaluates the WHERE clause against the now-committed row
+// and affects zero rows. The winner grants; the loser sees rowCount 0 and
+// skips — no read-then-write race window exists to lose.
+//
+// What SOMET-258 changed is only WHERE the flag lives and WHAT is granted: the
+// flag moved from users to characters (the loadout is class-dependent, so a
+// second character must get its own), and the item list moved from a hardcoded
+// STARTING_LOADOUT array to the class_loadouts table keyed by the character's
+// entity_type_id. `character` is { id, entityTypeId } -- the shape
+// services/characters.js#ownedCharacter returns.
+async function grantStartingLoadout(pool, character, itemTypes) {
   const claim = await pool.query(
-    `UPDATE users SET starting_loadout_granted_at = now()
+    `UPDATE characters SET starting_loadout_granted_at = now()
       WHERE id = $1 AND starting_loadout_granted_at IS NULL
       RETURNING id`,
-    [userId],
+    [character.id],
   );
   if (claim.rowCount === 0) return false;
-  const byName = new Map();
-  for (const t of itemTypes.values()) byName.set(t.name, t.id);
-  for (const name of STARTING_LOADOUT) {
-    const typeId = byName.get(name);
-    if (typeId == null) continue; // catalog missing this type -> skip, don't crash
+  const rows = await pool.query(
+    'SELECT item_type_id, quantity FROM class_loadouts WHERE entity_type_id = $1 ORDER BY id ASC',
+    [character.entityTypeId],
+  );
+  for (const row of rows.rows) {
+    // The fk on class_loadouts already guarantees the item type exists in the
+    // database. This guard is about the in-memory catalog the world was built
+    // from, which can legitimately predate a catalog change.
+    if (!itemTypes.has(row.item_type_id)) continue;
     await pool.query(
-      'INSERT INTO player_items (user_id, item_type_id) VALUES ($1, $2)',
-      [userId, typeId],
+      'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1, $2, $3)',
+      [character.id, row.item_type_id, row.quantity],
     );
   }
   return true;
@@ -191,7 +201,7 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
 
 // Equip with write-through. Clears any slot the instance currently occupies and,
 // for a two-handed weapon, the off hand.
-async function equip(pool, userId, inv, itemTypes, itemId, slot) {
+async function equip(pool, characterId, inv, itemTypes, itemId, slot) {
   const check = canEquip(inv, itemTypes, itemId, slot);
   if (!check.ok) return check;
 
@@ -201,23 +211,23 @@ async function equip(pool, userId, inv, itemTypes, itemId, slot) {
   if (slot === 'main_hand' && type.two_handed && inv.equipment.off_hand) toClear.push('off_hand');
 
   for (const s of toClear) {
-    await pool.query('DELETE FROM player_equipment WHERE user_id = $1 AND slot = $2', [userId, s]);
+    await pool.query('DELETE FROM player_equipment WHERE character_id = $1 AND slot = $2', [characterId, s]);
     delete inv.equipment[s];
   }
   await pool.query(
-    `INSERT INTO player_equipment (user_id, slot, item_id) VALUES ($1,$2,$3)
-     ON CONFLICT (user_id, slot) DO UPDATE SET item_id = $3`,
-    [userId, slot, itemId],
+    `INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)
+     ON CONFLICT (character_id, slot) DO UPDATE SET item_id = $3`,
+    [characterId, slot, itemId],
   );
   inv.equipment[slot] = itemId;
   return { ok: true };
 }
 
-async function unequip(pool, userId, inv, slot) {
+async function unequip(pool, characterId, inv, slot) {
   if (!SLOTS.includes(slot)) return { ok: false, reason: 'unknown slot' };
-  await pool.query('DELETE FROM player_equipment WHERE user_id = $1 AND slot = $2', [userId, slot]);
+  await pool.query('DELETE FROM player_equipment WHERE character_id = $1 AND slot = $2', [characterId, slot]);
   delete inv.equipment[slot];
   return { ok: true };
 }
 
-module.exports = { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory, grantStartingLoadout, STARTING_LOADOUT, canEquip, mitigation, activeWeaponType, equip, unequip };
+module.exports = { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory, grantStartingLoadout, canEquip, mitigation, activeWeaponType, equip, unequip };

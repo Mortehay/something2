@@ -124,6 +124,28 @@ async function dropUser(pool, userId) {
   if (userId != null) await pool.query('DELETE FROM users WHERE id = $1', [userId]).catch(() => {});
 }
 
+// SOMET-257 made progression per-character, so every throwaway user in this
+// file needs a character to hang progression off. Created here rather than in
+// createTestUser's INSERT so the name stays unique per user and the character
+// cascades away with dropUser.
+async function createTestCharacter(pool, userId) {
+  const r = await pool.query(
+    `INSERT INTO characters (user_id, slot, name, entity_type_id)
+     SELECT $1, 1, $2, e.id FROM entity_types e WHERE e.name = 'Warrior'
+     RETURNING id`,
+    [userId, `progression-routes-char-${userId}-${process.pid}`],
+  );
+  return r.rows[0].id;
+}
+
+// The character id for a throwaway user, resolved on demand so the existing
+// tests keep reading as "do this for `user`" rather than threading a second
+// variable through every one of them.
+async function charOf(pool, userId) {
+  const r = await pool.query('SELECT id FROM characters WHERE user_id = $1', [userId]);
+  return r.rows.length ? r.rows[0].id : await createTestCharacter(pool, userId);
+}
+
 // token_version defaults to 1 (migrations/1714440025000_users.js) and
 // createTestUser never overrides it, so every token here is signed to match.
 function tokenFor(userId) {
@@ -142,11 +164,11 @@ test('GET returns the derived bundle alongside the raw row', async (t) => {
   try {
     user = await createTestUser(dbPool, 'get');
 
-    const res = await request(app).get('/api/progression').set(authed(user));
+    const res = await request(app).get('/api/progression').query({ character_id: await charOf(dbPool, user) }).set(authed(user));
 
     assert.equal(res.status, 200);
     // The raw row: a fresh character at level 1 / 0 xp / every stat at base.
-    assert.equal(res.body.progression.user_id, user);
+    assert.equal(res.body.progression.character_id, await charOf(dbPool, user));
     assert.equal(res.body.progression.level, 1);
     assert.equal(res.body.progression.experience, 0);
     assert.equal(res.body.progression.stat_points, 0);
@@ -178,22 +200,32 @@ test('allocate acts on the authenticated user, not a body-supplied id', async (t
   try {
     userA = await createTestUser(dbPool, 'alloc-self');
     userB = await createTestUser(dbPool, 'alloc-other');
-    await loadProgression(dbPool, userA);
-    await loadProgression(dbPool, userA); // idempotent; keeps the sequence obvious
-    await dbPool.query('UPDATE player_progression SET stat_points = 5 WHERE user_id = $1', [userA]);
-    const before = await loadProgression(dbPool, userB); // userB's untouched baseline
+    await loadProgression(dbPool, await charOf(dbPool, userA));
+    await loadProgression(dbPool, await charOf(dbPool, userA)); // idempotent; keeps the sequence obvious
+    await dbPool.query('UPDATE player_progression SET stat_points = 5 WHERE character_id = (SELECT id FROM characters WHERE user_id = $1)', [userA]);
+    const before = await loadProgression(dbPool, await charOf(dbPool, userB)); // userB's untouched baseline
 
     const res = await request(app).post('/api/progression/allocate').set(authed(userA))
-      .send({ stat: 'strength', count: 1, userId: userB });
+      .send({ character_id: await charOf(dbPool, userA), stat: 'strength', count: 1, userId: userB });
 
     assert.equal(res.status, 200);
     // The caller's (userA's) own row is the one that must have moved.
-    assert.equal(res.body.progression.user_id, userA);
+    assert.equal(res.body.progression.character_id, await charOf(dbPool, userA));
     assert.equal(res.body.progression.strength, C.BASE_STAT + 1);
     assert.equal(res.body.progression.stat_points, 4);
 
-    const after = await loadProgression(dbPool, userB);
+    const after = await loadProgression(dbPool, await charOf(dbPool, userB));
     assert.deepEqual(after, before, "the OTHER user's (body-supplied) progression must be completely untouched");
+
+    // SOMET-257 made the route take a character_id from the request, which is
+    // a new way to try to reach someone else's progression -- and therefore a
+    // new thing to prove is closed. Naming userB's character explicitly must
+    // be refused outright, not quietly redirected to the caller's own.
+    const cross = await request(app).post('/api/progression/allocate').set(authed(userA))
+      .send({ character_id: await charOf(dbPool, userB), stat: 'strength', count: 1 });
+    assert.equal(cross.status, 403);
+    const stillUntouched = await loadProgression(dbPool, await charOf(dbPool, userB));
+    assert.deepEqual(stillUntouched, before, "userB's progression must survive a cross-account allocate");
   } finally {
     await dropUser(dbPool, userA);
     await dropUser(dbPool, userB);
@@ -205,16 +237,16 @@ test('allocate rejects an unknown stat with 400', async (t) => {
   let user;
   try {
     user = await createTestUser(dbPool, 'alloc-badstat');
-    await loadProgression(dbPool, user);
-    await dbPool.query('UPDATE player_progression SET stat_points = 5 WHERE user_id = $1', [user]);
-    const before = await loadProgression(dbPool, user);
+    await loadProgression(dbPool, await charOf(dbPool, user));
+    await dbPool.query('UPDATE player_progression SET stat_points = 5 WHERE character_id = (SELECT id FROM characters WHERE user_id = $1)', [user]);
+    const before = await loadProgression(dbPool, await charOf(dbPool, user));
 
     const res = await request(app).post('/api/progression/allocate').set(authed(user))
-      .send({ stat: 'luck', count: 1 });
+      .send({ character_id: await charOf(dbPool, user), stat: 'luck', count: 1 });
 
     assert.equal(res.status, 400);
     assert.equal(res.body.error, 'unknown stat');
-    const after = await loadProgression(dbPool, user);
+    const after = await loadProgression(dbPool, await charOf(dbPool, user));
     assert.deepEqual(after, before, 'a rejected allocation must change nothing');
   } finally {
     await dropUser(dbPool, user);
@@ -226,16 +258,16 @@ test('allocate with more points than held returns 400 and changes nothing', asyn
   let user;
   try {
     user = await createTestUser(dbPool, 'alloc-overspend');
-    await loadProgression(dbPool, user);
-    await dbPool.query('UPDATE player_progression SET stat_points = 2 WHERE user_id = $1', [user]);
-    const before = await loadProgression(dbPool, user);
+    await loadProgression(dbPool, await charOf(dbPool, user));
+    await dbPool.query('UPDATE player_progression SET stat_points = 2 WHERE character_id = (SELECT id FROM characters WHERE user_id = $1)', [user]);
+    const before = await loadProgression(dbPool, await charOf(dbPool, user));
 
     const res = await request(app).post('/api/progression/allocate').set(authed(user))
-      .send({ stat: 'strength', count: 5 });
+      .send({ character_id: await charOf(dbPool, user), stat: 'strength', count: 5 });
 
     assert.equal(res.status, 400);
     assert.equal(res.body.error, 'not enough points');
-    const after = await loadProgression(dbPool, user);
+    const after = await loadProgression(dbPool, await charOf(dbPool, user));
     assert.deepEqual(after, before, 'an over-budget allocation must change nothing, including the unspent points');
   } finally {
     await dropUser(dbPool, user);
@@ -247,23 +279,23 @@ test('respec without the gold returns 402 and changes nothing', async (t) => {
   let user;
   try {
     user = await createTestUser(dbPool, 'respec-poor');
-    await loadProgression(dbPool, user);
+    await loadProgression(dbPool, await charOf(dbPool, user));
     // Level 4 (9 points granted by leveling), 5 of them already spent into
     // strength, 199 gold against a cost of RESPEC_BASE(50) * 4 = 200.
     await dbPool.query(
-      'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE user_id = $1',
+      'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE character_id = (SELECT id FROM characters WHERE user_id = $1)',
       [user],
     );
     await dbPool.query('UPDATE users SET gold = 199 WHERE id = $1', [user]);
-    const beforeProgression = await loadProgression(dbPool, user);
+    const beforeProgression = await loadProgression(dbPool, await charOf(dbPool, user));
 
-    const res = await request(app).post('/api/progression/respec').set(authed(user)).send({});
+    const res = await request(app).post('/api/progression/respec').set(authed(user)).send({ character_id: await charOf(dbPool, user) });
 
     assert.equal(res.status, 402);
     assert.equal(res.body.error, 'not enough gold');
     assert.equal(res.body.cost, 200);
 
-    const afterProgression = await loadProgression(dbPool, user);
+    const afterProgression = await loadProgression(dbPool, await charOf(dbPool, user));
     assert.deepEqual(afterProgression, beforeProgression, 'stats and unspent points must be unchanged');
     const g = await dbPool.query('SELECT gold FROM users WHERE id = $1', [user]);
     assert.equal(Number(g.rows[0].gold), 199, 'gold must not move');
@@ -333,6 +365,9 @@ function fakeAuthorityPool() {
       // token_version lookup on every WS connect/upgrade -- must match the
       // tokenVersion the join token below is signed with.
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+      // SOMET-260: the join resolves the character first; falling through to
+      // rows:[] refuses the join and HANGS the test on nextMsg('joined').
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: 1, entity_type_id: 1 }] };
       return { rows: [] }; // world_players, player_binds, item_types, player_items/equipment, gold, player_progression
     },
     connect: async () => ({ query: async () => ({ rows: [] }), release: () => {} }),
@@ -365,8 +400,8 @@ test('a successful allocation reaches the live authority session (real lookup, n
   let server;
   try {
     user = await createTestUser(dbPool, 'live-allocate-e2e');
-    await loadProgression(dbPool, user);
-    await dbPool.query('UPDATE player_progression SET stat_points = 1 WHERE user_id = $1', [user]);
+    await loadProgression(dbPool, await charOf(dbPool, user));
+    await dbPool.query('UPDATE player_progression SET stat_points = 1 WHERE character_id = (SELECT id FROM characters WHERE user_id = $1)', [user]);
 
     let url;
     ({ url, handle, server } = await bootAuthority(fakeAuthorityPool()));
@@ -375,7 +410,7 @@ test('a successful allocation reaches the live authority session (real lookup, n
     });
     ws = new WebSocket(`${url}?token=${encodeURIComponent(joinToken)}`);
     await new Promise((r) => ws.on('open', r));
-    ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+    ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
     await nextMsg(ws, 'joined');
 
     // The player joined via loadProgression's DEFAULT_PROGRESSION fallback
@@ -391,7 +426,7 @@ test('a successful allocation reaches the live authority session (real lookup, n
     const progressionMsgP = nextMsg(ws, 'progression');
 
     const res = await request(app).post('/api/progression/allocate').set(authed(user))
-      .send({ stat: 'constitution', count: 1 });
+      .send({ character_id: await charOf(dbPool, user), stat: 'constitution', count: 1 });
     const msg = await progressionMsgP;
 
     assert.equal(res.status, 200);
@@ -413,7 +448,7 @@ test('a failed allocation does not touch the live authority session', async (t) 
   let user;
   try {
     user = await createTestUser(dbPool, 'live-allocate-fail');
-    await loadProgression(dbPool, user); // stat_points stays 0
+    await loadProgression(dbPool, await charOf(dbPool, user)); // stat_points stays 0
 
     const handle = fakeAuthorityHandle(user);
     const player = handle.world.getPlayer(user);
@@ -422,7 +457,7 @@ test('a failed allocation does not touch the live authority session', async (t) 
     __setAuthorityHandle(handle);
 
     const res = await request(app).post('/api/progression/allocate').set(authed(user))
-      .send({ stat: 'constitution', count: 1 });
+      .send({ character_id: await charOf(dbPool, user), stat: 'constitution', count: 1 });
 
     assert.equal(res.status, 400);
     assert.equal(handle.calls.length, 0, 'refreshPlayerStats must not be called on a rejected allocation');
@@ -439,9 +474,9 @@ test('a refused respec does not touch the live authority session', async (t) => 
   let user;
   try {
     user = await createTestUser(dbPool, 'live-respec-fail');
-    await loadProgression(dbPool, user);
+    await loadProgression(dbPool, await charOf(dbPool, user));
     await dbPool.query(
-      'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE user_id = $1',
+      'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE character_id = (SELECT id FROM characters WHERE user_id = $1)',
       [user],
     );
     await dbPool.query('UPDATE users SET gold = 199 WHERE id = $1', [user]); // cost is 200
@@ -452,7 +487,7 @@ test('a refused respec does not touch the live authority session', async (t) => 
     player.hp = 60;
     __setAuthorityHandle(handle);
 
-    const res = await request(app).post('/api/progression/respec').set(authed(user)).send({});
+    const res = await request(app).post('/api/progression/respec').set(authed(user)).send({ character_id: await charOf(dbPool, user) });
 
     assert.equal(res.status, 402);
     assert.equal(handle.calls.length, 0, 'refreshPlayerStats must not be called on a refused respec');
@@ -487,9 +522,9 @@ test('a successful respec reaches the live authority session (real lookup, not a
   let server;
   try {
     user = await createTestUser(dbPool, 'live-respec-e2e');
-    await loadProgression(dbPool, user);
+    await loadProgression(dbPool, await charOf(dbPool, user));
     await dbPool.query(
-      'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE user_id = $1',
+      'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE character_id = (SELECT id FROM characters WHERE user_id = $1)',
       [user],
     );
     await dbPool.query('UPDATE users SET gold = 250 WHERE id = $1', [user]); // cost is RESPEC_BASE(50)*4 = 200
@@ -501,7 +536,7 @@ test('a successful respec reaches the live authority session (real lookup, not a
     });
     ws = new WebSocket(`${url}?token=${encodeURIComponent(joinToken)}`);
     await new Promise((r) => ws.on('open', r));
-    ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+    ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
     await nextMsg(ws, 'joined');
 
     const player = handle.worlds.get('w1').world.getPlayer(String(user));
@@ -518,7 +553,7 @@ test('a successful respec reaches the live authority session (real lookup, not a
     __setAuthorityHandle(handle);
     const progressionMsgP = nextMsg(ws, 'progression');
 
-    const res = await request(app).post('/api/progression/respec').set(authed(user)).send({});
+    const res = await request(app).post('/api/progression/respec').set(authed(user)).send({ character_id: await charOf(dbPool, user) });
     const msg = await progressionMsgP;
 
     assert.equal(res.status, 200);

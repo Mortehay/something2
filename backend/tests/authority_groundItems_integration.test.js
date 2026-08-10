@@ -76,6 +76,10 @@ function makePool(chunkSize, { itemsFor, claim } = {}) {
       // the moment a test in this file starts caring about creatures.)
       if (/FROM entity_types e[\s\S]*WHERE e\.is_creature/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 }; // already materialized
+      // SOMET-260: join now resolves the character before anything else, and a
+      // fake pool that falls through to rows:[] refuses the join -- which makes
+      // the test HANG waiting for 'joined' rather than fail. Answer it explicitly.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] }; // default center spawn
       if (/FROM world_creatures/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
@@ -131,7 +135,7 @@ test('items in a chunk\'s bbox load into the sim on activation and are pickup-ab
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const picked = await pollPickup(ws, 1500);
@@ -147,7 +151,7 @@ test('the ground-item bbox is half-open and matches the creature query\'s conven
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   // Give activateChunk a couple of broadcast cycles to run for chunk (0,0).
@@ -181,7 +185,7 @@ test('a transiently failed ground-item load leaves the chunk out of loadedChunks
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   // recomputeActive retries every broadcast cycle since a failed
@@ -218,7 +222,7 @@ test('pruneInactive (wired through flushAndPrune) evicts out-of-range ground ite
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   const joined = await nextMsg(ws, 'joined');
   const spawnX = joined.spawn.x; // world-center spawn, chunk (0,0)
 

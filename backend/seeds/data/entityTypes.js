@@ -177,4 +177,54 @@ const CREATURE_DROPS = [
   { creature: 'Wolf', item: 'dagger', chance: 0.5, min_qty: 1, max_qty: 1 },
 ];
 
-module.exports = { HOSTILE_CREATURES, CREATURE_DROPS };
+// The playable classes (SOMET-258). Here as well as in migration
+// 1714440091000_playable_classes.js for exactly the reason this whole file
+// exists: an entity type the repo cannot rebuild disappears when the Postgres
+// volume is rebuilt, and characters.entity_type_id carries a foreign key to
+// these three rows -- so losing them does not degrade gracefully the way a
+// missing creature does, it orphans every character on the server.
+//
+// WARRIOR'S NUMBERS ARE THE 'Player' ROW'S NUMBERS (1714440006000). The
+// migration derives them with a SELECT so the two cannot drift there; this
+// file has to state them literally, so it IS a second source of truth. That is
+// covered rather than hoped for: playable_classes_db.test.js asserts Warrior
+// equals Player field for field and fails if either side moves. If you change
+// Player, change Warrior here too.
+//
+// is_creature is deliberately absent (defaults false): a class is not a
+// spawnable creature, and the wild-spawn pool reads that flag.
+const PLAYABLE_CLASSES = [
+  {
+    name: 'Warrior', color: '#b03a2e', walkable: true, spawn_tiles: [], chance: 0,
+    strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
+    hp: 100, max_hp: 100, hp_regen_rate: 1, mana: 50, max_mana: 50, mana_regen_rate: 0.5,
+  },
+  {
+    name: 'Ranger', color: '#1e8449', walkable: true, spawn_tiles: [], chance: 0,
+    strength: 10, dexterity: 12, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
+    hp: 85, max_hp: 85, hp_regen_rate: 1, mana: 50, max_mana: 50, mana_regen_rate: 0.5,
+  },
+  {
+    name: 'Mage', color: '#5b2c94', walkable: true, spawn_tiles: [], chance: 0,
+    strength: 10, dexterity: 10, constitution: 10, intelligence: 12, wisdom: 10, charisma: 10,
+    hp: 75, max_hp: 75, hp_regen_rate: 1, mana: 70, max_mana: 70, mana_regen_rate: 0.5,
+  },
+];
+
+// Per-class starting gear, mirroring the migration's CLASS_LOADOUTS. Restoring
+// the classes without these would leave a rebuilt volume handing every new
+// character an empty inventory.
+//
+// There is no shield in item_types -- no off_hand item exists at all -- so the
+// Warrior gets a one-handed sword and armour rather than sword-and-board.
+const CLASS_LOADOUTS = [
+  { class: 'Warrior', item: 'short sword', quantity: 1 },
+  { class: 'Warrior', item: 'leather-vest', quantity: 1 },
+  { class: 'Ranger', item: 'bow', quantity: 1 },
+  { class: 'Ranger', item: 'arrow', quantity: 20 },
+  { class: 'Ranger', item: 'leather-vest', quantity: 1 },
+  { class: 'Mage', item: 'apprentice staff', quantity: 1 },
+  { class: 'Mage', item: 'arcane-ward', quantity: 1 },
+];
+
+module.exports = { HOSTILE_CREATURES, CREATURE_DROPS, PLAYABLE_CLASSES, CLASS_LOADOUTS };

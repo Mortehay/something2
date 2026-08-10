@@ -16,6 +16,11 @@ export const NAV_SECTIONS = [
     adminOnly: false,
     items: [
       { id: 'game', label: 'Game View', path: '/game', Icon: HiOutlinePuzzlePiece },
+      // The PLAYER's read-only fog-of-war map (SOMET-263), not the admin
+      // editor below. Both are called "World Map" to the person looking at
+      // them, so the admin one is relabelled rather than this one -- a player
+      // should see the plain name for the only map they have.
+      { id: 'playermap', label: 'World Map', path: '/game/map', Icon: HiOutlineGlobeAlt },
     ],
   },
   {
@@ -28,7 +33,9 @@ export const NAV_SECTIONS = [
       { id: 'maps',     label: 'Maps',       path: '/game/maps',      Icon: HiOutlineMap,     adminType: 'maps' },
       { id: 'biomes',   label: 'Biomes',     path: '/game/biomes',    Icon: HiOutlineGlobeAlt, adminType: 'maps' },
       { id: 'creature-behaviors', label: 'Creature Behaviors', path: '/game/creature-behaviors', Icon: HiOutlineBolt, adminType: 'entity' },
-      { id: 'worldmap', label: 'World Map',  path: '/game/world-map', Icon: HiOutlineShare,   adminType: 'maps' },
+      // Relabelled, not moved: the id is referenced elsewhere and the path is
+      // the admin route. See the player entry in the section above.
+      { id: 'worldmap', label: 'World Map Editor', path: '/game/world-map', Icon: HiOutlineShare, adminType: 'maps' },
     ],
   },
 ];

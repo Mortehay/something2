@@ -94,12 +94,18 @@ const guardPool = {
   query: (sql, params) => pool.query(sql, params),
   connect: (...args) => pool.connect(...args),
 };
-const { requireAdmin } = require('./auth/middleware.js');
+const { requireAdmin, requireAuth } = require('./auth/middleware.js');
 const { assertJwtSecretOrExit } = require('./auth/assertJwtSecret.js');
 const authRouter = require('./auth/routes.js');
 const progressionRoutes = require('./api/progressionRoutes.js');
+const characterRoutes = require('./api/characterRoutes.js');
+const { ownedCharacter } = require('./services/characters.js');
+const { listVisited } = require('./services/visitedWorlds.js');
 // Single admin guard applied to every mutating admin route below.
 const adminGuard = requireAdmin(guardPool);
+// Authenticated-but-not-admin guard, for the player-facing routes declared
+// directly on `app` (the sub-routers build their own).
+const playerGuard = requireAuth(guardPool);
 
 // Job ids returned by sprite-gen's /generate. These three routes proxy an
 // unauthenticated :jobId straight into a sprite-gen path segment (services/
@@ -247,6 +253,20 @@ const assetStore = require('./services/assetStore');
 
 const runner = require('node-pg-migrate').default;
 
+// node-pg-migrate require()s EVERY file in the migrations directory. With no
+// ignorePattern it filters nothing at all (migration.js: `ignorePattern ===
+// undefined ? files : ...`), so a single non-JS file in there -- like
+// test-user-readme.md, which SOMET-264 puts next to the migration it documents
+// -- makes every migration fail to load with a SyntaxError, in the app's own
+// boot path as well as the CLI's.
+//
+// The pattern is anchored by the library as `^(...)$` and names what to SKIP,
+// so this reads "skip anything that is not a .js file". Kept in step with the
+// --ignore-pattern in package.json's migrate scripts by
+// migration_ignore_pattern.test.js; the two runners must agree or the CLI and
+// the container disagree about what a migration is.
+const MIGRATION_IGNORE_PATTERN = '(?!.*\\.js$).*';
+
 // Run migrations
 async function runMigrations() {
   try {
@@ -255,6 +275,7 @@ async function runMigrations() {
       dir: path.join(__dirname, '..', 'migrations'),
       direction: 'up',
       migrationsTable: 'pgmigrations',
+      ignorePattern: MIGRATION_IGNORE_PATTERN,
       verbose: true,
     });
     console.log('Migrations completed successfully');
@@ -333,6 +354,94 @@ app.use('/api/auth', authRouter(guardPool));
 // an allocation or a respec. Every route is behind requireAuth and acts on
 // req.user.id -- see api/progressionRoutes.js's header comment.
 app.use('/api/progression', progressionRoutes(guardPool, refreshLivePlayerStats));
+
+// Character slots (SOMET-259): list / create / delete, plus the playable-class
+// catalog the creation form reads. Behind requireAuth, scoped to req.user.id.
+app.use('/api/characters', characterRoutes(guardPool));
+
+// The player's fog-of-war world map (SOMET-263). Read-only, and deliberately
+// NOT the payload the admin World Map tab reads from /api/world-graph: that one
+// returns every world unconditionally.
+//
+// AN UNVISITED NEIGHBOUR COMES BACK AS A BARE ID -- no name, no level band, no
+// coordinates -- so the graph can draw an anonymous stub without spoiling what
+// lies through the door. Withholding the name HERE rather than in the component
+// is the whole point: a component-side filter still ships the name to the
+// browser, where the network tab shows it to anyone who looks.
+app.get('/api/player/world-map', playerGuard, async (req, res) => {
+  try {
+    const requested = req.query.character_id;
+    if (requested === undefined || requested === '') {
+      return res.status(400).json({ error: 'character_id required' });
+    }
+    // Scoped by req.user.id inside the same statement, like every route in
+    // characterRoutes. 403 for both "not yours" and "does not exist" -- a 404
+    // for the second would make this an oracle for which character ids are real.
+    const character = await ownedCharacter(pool, req.user.id, requested);
+    if (!character) return res.status(403).json({ error: 'forbidden' });
+
+    const visited = (await listVisited(pool, character.id)).map((v) => v.worldId);
+    if (visited.length === 0) {
+      return res.json({ worlds: [], links: [], unvisited: [], currentWorldId: null });
+    }
+
+    const worlds = (await pool.query(
+      `SELECT id, name, graph_x, graph_y, is_entry, level_min, level_max
+         FROM worlds WHERE id = ANY($1::uuid[]) ORDER BY name`,
+      [visited])).rows;
+
+    // Outgoing rows only. That is complete rather than a half-view, because
+    // setLink and setPortalLink both write the mirror row: every link out of a
+    // visited world is here, and a link INTO a visited world from an unvisited
+    // one is reachable only through its own mirror, which we correctly do not
+    // show.
+    const edges = (await pool.query(
+      `SELECT from_world_id, to_world_id, edge
+         FROM map_links WHERE from_world_id = ANY($1::uuid[])
+        ORDER BY from_world_id, edge, from_x NULLS FIRST, from_y NULLS FIRST`,
+      [visited])).rows;
+
+    const seen = new Set(visited);
+    // Keyed on the UNORDERED pair. Both mirrors are present whenever both ends
+    // are visited, so the naive one-row-per-edge build draws every corridor
+    // twice; several PORTAL rows between the same two worlds (one per staircase
+    // tile) would multiply it further. The lower id wins so the surviving row's
+    // `edge` always describes the direction it is reported in.
+    const links = new Map();
+    const unvisited = new Map();
+    for (const e of edges) {
+      if (seen.has(e.to_world_id)) {
+        const key = e.from_world_id < e.to_world_id
+          ? `${e.from_world_id}|${e.to_world_id}` : `${e.to_world_id}|${e.from_world_id}`;
+        const canonical = e.from_world_id < e.to_world_id;
+        if (!links.has(key) || canonical) {
+          links.set(key, { from: e.from_world_id, to: e.to_world_id, edge: e.edge });
+        }
+      } else if (!unvisited.has(e.to_world_id)) {
+        // `edge` and nothing else. It says "there is an exit east from here",
+        // which the player can already see in-world, and the map layout needs
+        // it to place the stub next to the world it hangs off -- a stub with no
+        // edge cannot be positioned at all. The name, level band and
+        // coordinates stay withheld.
+        unvisited.set(e.to_world_id, { id: e.to_world_id, from: e.from_world_id, edge: e.edge });
+      }
+    }
+
+    const cur = await pool.query(
+      'SELECT world_id FROM world_players WHERE character_id = $1 ORDER BY updated_at DESC LIMIT 1',
+      [character.id]);
+
+    res.json({
+      worlds,
+      links: [...links.values()],
+      unvisited: [...unvisited.values()],
+      currentWorldId: cur.rows.length ? cur.rows[0].world_id : null,
+    });
+  } catch (err) {
+    console.error('player world map failed:', err);
+    res.status(500).json({ error: 'failed to load world map' });
+  }
+});
 
 // The /api/dev-token endpoint was removed: it minted a correctly-signed JWT for
 // any user_id with no credentials — a verified account-takeover primitive.
@@ -728,14 +837,21 @@ app.delete('/api/item-types/:id', adminGuard, async (req, res) => {
   }
 });
 
-// Admin grant: give a user an instance of an item type.
-app.post('/api/players/:userId/items', adminGuard, async (req, res) => {
+// Admin grant: give a CHARACTER an instance of an item type.
+//
+// SOMET-257 re-keyed player_items off user_id, so the path parameter is a
+// character id now, not an account id. The path kept its `/api/players/`
+// prefix -- renaming it is an admin-UI change this slice does not carry -- but
+// the parameter name did not, precisely so a call site passing an account id
+// fails loudly on the foreign key rather than silently granting the item to
+// whichever character happens to share that integer.
+app.post('/api/players/:characterId/items', adminGuard, async (req, res) => {
   try {
     const { item_type_id } = req.body;
     if (item_type_id == null) return res.status(400).json({ error: 'item_type_id is required' });
     const result = await pool.query(
-      'INSERT INTO player_items (user_id, item_type_id) VALUES ($1,$2) RETURNING *',
-      [req.params.userId, item_type_id],
+      'INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING *',
+      [req.params.characterId, item_type_id],
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {

@@ -6,6 +6,11 @@ import { Game } from "./src/js/main.js";
 import { useMapTiles, useMapConfig, useVfxEffects } from "./useMaps.js";
 import { useWorlds } from "./useWorlds";
 import { autoJoinTarget } from "./autoJoin.js";
+import CharacterSelect from "./CharacterSelect.jsx";
+import { useCharacters } from "./useCharacters.js";
+import {
+  readActiveCharacterId, writeActiveCharacterId, clearActiveCharacterId, resolveActiveCharacter,
+} from "./characterSession.js";
 import { bindGameCanvas } from "./gameCanvasBinding.js";
 import { MAP_TILE_SIZE } from "./src/js/core/constants.js";
 import { useAuth } from "../../context/AuthContext";
@@ -182,6 +187,28 @@ export default function GameShell() {
   // dedupes them by query key, so this is one request, not two.
   const { worlds } = useWorlds();
 
+  // SOMET-262: the authority refuses a join with no character, so the canvas is
+  // gated behind a choice. `characters` undefined means "still loading" -- a
+  // THIRD state, distinct from "no character": treating it as the latter
+  // flashes the picker for a frame before the canvas on every reload.
+  const { characters, maxCharacters, isLoadingCharacters } = useCharacters();
+  const [activeCharacterId, setActiveCharacterId] = useState(() => readActiveCharacterId());
+  const activeCharacter = resolveActiveCharacter(activeCharacterId, characters);
+
+  // A stored id whose character no longer exists (deleted from another device)
+  // resolves to null. Drop it rather than letting it reach a join the server
+  // will reject -- that surfaces as an error the player has to dismiss instead
+  // of simply landing on the picker.
+  useEffect(() => {
+    if (!isLoadingCharacters && Array.isArray(characters)
+        && activeCharacterId != null && !activeCharacter) {
+      clearActiveCharacterId();
+      setActiveCharacterId(null);
+    }
+  }, [isLoadingCharacters, characters, activeCharacterId, activeCharacter]);
+
+  const playCharacter = (id) => { writeActiveCharacterId(id); setActiveCharacterId(id); };
+
   const resume = () => {
     if (gameRef.current) gameRef.current.resume();
   };
@@ -221,6 +248,18 @@ export default function GameShell() {
     if (isPlaying) enterGameFullscreen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying]);
+
+  // Leaves the world and returns to the picker. autoJoinedRef is reset so the
+  // next choice can auto-join again; without that a non-admin would land on a
+  // dead canvas after switching.
+  const changeCharacter = () => {
+    exitToMenu();
+    gameRef.current?.destroy?.();
+    gameRef.current = null;
+    clearActiveCharacterId();
+    setActiveCharacterId(null);
+    autoJoinedRef.current = false;
+  };
 
   const exitToMenu = () => {
     exitGameFullscreen();
@@ -289,6 +328,10 @@ export default function GameShell() {
 
   const enterWorld = async (worldId = selectedWorldId) => {
     if (!worldId || !gameRef.current) return;
+    // Read through the ref-free closure: enterWorld is re-created every render,
+    // and handleEnterRef below always points at the latest one, so this sees
+    // the current character rather than the one active at mount.
+    if (!activeCharacter) return;
 
     try {
       const world = worlds?.find(w => w.id === worldId);
@@ -297,6 +340,7 @@ export default function GameShell() {
 
       await gameRef.current.initChunked({
         worldId,
+        characterId: activeCharacter.id,
         chunkSize,
         tileTypes: mapTiles,
         vfxEffects: vfxEffects || null,
@@ -327,14 +371,23 @@ export default function GameShell() {
     const targetId = autoJoinTarget({
       isAdmin, isPlaying, alreadyJoined: autoJoinedRef.current,
       hasGame: !!gameRef.current, worlds, mapTiles, mapConfig,
+      // SOMET-260 added `hasCharacter` to autoJoinTarget and this call site did
+      // not supply it, so it arrived `undefined` and the guard returned null
+      // every time -- auto-join was dead for EVERY player, not just for one
+      // without a character. autoJoin.test.js passed the flag explicitly and
+      // stayed green throughout. Caught in the browser.
+      hasCharacter: !!activeCharacter,
     });
     if (targetId == null) return;
     autoJoinedRef.current = true;
     enterWorld(targetId);
     // enterWorld is stable enough for this one-shot; deps kept
-    // minimal so it fires once the inputs become ready.
+    // minimal so it fires once the inputs become ready. activeCharacter is a
+    // real dependency, not bookkeeping: choosing a character is the LAST input
+    // to become ready, and without it here the effect never re-runs after the
+    // picker closes -- the player sits on the world list forever.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [worlds, mapTiles, mapConfig, isAdmin, isPlaying, isGameRoute]);
+  }, [worlds, mapTiles, mapConfig, isAdmin, isPlaying, isGameRoute, activeCharacter]);
 
   return (
     <StyledGameContainer>
@@ -381,10 +434,39 @@ export default function GameShell() {
 
         <Outlet context={{
           gameRef, isPlaying, isPaused, isFullscreen,
+          // The player map route reads this rather than re-reading
+          // localStorage, so there is one source of truth for which character
+          // is active and it cannot disagree with the one the canvas is using.
+          activeCharacterId,
           selectedWorldId, setSelectedWorldId,
-          enterWorld, resume, exitToMenu, toggleFullscreen,
+          enterWorld, resume, exitToMenu, changeCharacter, toggleFullscreen,
           openHelp: () => setHelpOpen(true),
         }} />
+
+        {/* The character gate. Rendered BESIDE the Outlet and the canvas, not
+            instead of them: CharacterSelect's own Panel is `position:absolute;
+            inset:0` with a z-index above the world picker, so it covers the
+            content area while leaving the canvas element mounted underneath.
+            Swapping it in for the canvas would recreate the element
+            RenderSystem captured -- the bug the comment below this describes.
+
+            AFTER the Outlet, so DOM order matches paint order and tab order
+            lands in the picker rather than in the world list behind it.
+
+            Gated on `activeCharacter`, the RESOLVED character, not on
+            activeCharacterId: a stored id whose character was deleted
+            elsewhere resolves to null, and the player belongs on the picker
+            rather than at a join the server will refuse. While the query is in
+            flight `characters` is undefined and resolveActiveCharacter returns
+            null, so the picker shows its own loading state rather than the
+            world list flashing past. */}
+        {isGameRoute && !isPlaying && !activeCharacter && (
+          <CharacterSelect
+            characters={characters}
+            maxCharacters={maxCharacters}
+            onPlay={playCharacter}
+          />
+        )}
 
         {/* Kept mounted across route changes, NOT nested in the game route's
             element. RenderSystem captures this element and its 2d context when

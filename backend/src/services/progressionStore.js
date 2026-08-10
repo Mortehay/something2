@@ -7,7 +7,7 @@ const {
 const C = require('./progressionConstants.js');
 
 const XP_SOURCES = ['kill', 'chest', 'dungeon_clear'];
-const COLUMNS = `user_id, experience, level, stat_points,
+const COLUMNS = `character_id, experience, level, stat_points,
                  strength, dexterity, constitution, intelligence, wisdom, charisma`;
 
 // experience is bigint, which node-postgres returns as a STRING to avoid
@@ -15,7 +15,7 @@ const COLUMNS = `user_id, experience, level, stat_points,
 // remember -- a forgotten Number() turns `xp + 10` into "0" + 10 === "010".
 function mapRow(r) {
   return {
-    user_id: r.user_id,
+    character_id: r.character_id,
     experience: Number(r.experience) || 0,
     level: Number(r.level) || 1,
     stat_points: Number(r.stat_points) || 0,
@@ -39,16 +39,16 @@ function mapRow(r) {
 // even returns -- so it exists solely for awardXp, which is documented to
 // always run inside the caller's transaction. Every other caller stays on
 // the plain unlocked read.
-async function loadProgression(db, userId, { forUpdate = false } = {}) {
+async function loadProgression(db, characterId, { forUpdate = false } = {}) {
   await db.query(
-    'INSERT INTO player_progression (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING',
-    [userId],
+    'INSERT INTO player_progression (character_id) VALUES ($1) ON CONFLICT (character_id) DO NOTHING',
+    [characterId],
   );
   const r = await db.query(
-    `SELECT ${COLUMNS} FROM player_progression WHERE user_id = $1${forUpdate ? ' FOR UPDATE' : ''}`,
-    [userId],
+    `SELECT ${COLUMNS} FROM player_progression WHERE character_id = $1${forUpdate ? ' FOR UPDATE' : ''}`,
+    [characterId],
   );
-  return r.rows.length ? mapRow(r.rows[0]) : { ...DEFAULT_PROGRESSION, user_id: userId };
+  return r.rows.length ? mapRow(r.rows[0]) : { ...DEFAULT_PROGRESSION, character_id: characterId };
 }
 
 // Takes `db`, not `pool`: the kill path calls this INSIDE its own transaction
@@ -66,8 +66,8 @@ async function loadProgression(db, userId, { forUpdate = false } = {}) {
 // the XP. The row lock forces the second-and-later transactions to block
 // until the first commits, so each one re-reads the just-committed value
 // rather than a stale one.
-async function awardXp(db, userId, amount, source) {
-  const before = await loadProgression(db, userId, { forUpdate: true });
+async function awardXp(db, characterId, amount, source) {
+  const before = await loadProgression(db, characterId, { forUpdate: true });
   const amt = Math.floor(Number(amount) || 0);
   // An unrecognised source is refused rather than defaulted. `chest` and
   // `dungeon_clear` are accepted today and unused -- they are the seam B and
@@ -83,9 +83,9 @@ async function awardXp(db, userId, amount, source) {
   const r = await db.query(
     `UPDATE player_progression
         SET experience = $2, level = $3, stat_points = stat_points + $4, updated_at = now()
-      WHERE user_id = $1
+      WHERE character_id = $1
       RETURNING ${COLUMNS}`,
-    [userId, experience, newLevel, pointsGained],
+    [characterId, experience, newLevel, pointsGained],
   );
   return {
     progression: mapRow(r.rows[0]),
@@ -96,32 +96,37 @@ async function awardXp(db, userId, amount, source) {
   };
 }
 
-async function allocateStat(pool, userId, statKey, count) {
+async function allocateStat(pool, characterId, statKey, count) {
   // Whitelist, not interpolation. statKey reaches this from an HTTP body.
   if (!C.STAT_KEYS.includes(statKey)) return { ok: false, reason: 'unknown stat' };
   const n = Number(count);
   if (!Number.isInteger(n) || n < 1) return { ok: false, reason: 'invalid count' };
 
-  await loadProgression(pool, userId);
+  await loadProgression(pool, characterId);
   // The guard is in the WHERE clause, not in a read-then-write pair: two
   // concurrent requests both pass a read-first check and both spend the same
   // points. Postgres serialises the UPDATE, so exactly one matches.
   const r = await pool.query(
     `UPDATE player_progression
         SET ${statKey} = ${statKey} + $2, stat_points = stat_points - $2, updated_at = now()
-      WHERE user_id = $1 AND stat_points >= $2
+      WHERE character_id = $1 AND stat_points >= $2
       RETURNING ${COLUMNS}`,
-    [userId, n],
+    [characterId, n],
   );
   if (r.rowCount !== 1) return { ok: false, reason: 'not enough points' };
   return { ok: true, progression: mapRow(r.rows[0]) };
 }
 
-async function respec(pool, userId) {
+// Takes BOTH ids, and they are not interchangeable: the stat reset is
+// per-character (player_progression), while the gold that pays for it is
+// per-ACCOUNT (users.gold stayed on users in SOMET-257). Passing a character id
+// to the gold UPDATE would charge whichever account happens to share that
+// integer, or silently charge nobody.
+async function respec(pool, userId, characterId) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const before = await loadProgression(client, userId);
+    const before = await loadProgression(client, characterId);
     const cost = C.RESPEC_BASE * before.level;
     // Gold moves first, guarded in its own WHERE. If it does not move, the
     // whole transaction rolls back -- a failed payment must never yield a
@@ -140,9 +145,9 @@ async function respec(pool, userId) {
           SET strength = $2, dexterity = $2, constitution = $2,
               intelligence = $2, wisdom = $2, charisma = $2,
               stat_points = stat_points + $3, updated_at = now()
-        WHERE user_id = $1
+        WHERE character_id = $1
         RETURNING ${COLUMNS}`,
-      [userId, C.BASE_STAT, refund],
+      [characterId, C.BASE_STAT, refund],
     );
     await client.query('COMMIT');
     return {
@@ -175,11 +180,11 @@ async function respec(pool, userId) {
 // `rng` is injectable so a test can pin the roll, matching the convention
 // commitCreatureDeath already uses. The draw is taken here and handed to the
 // pure penalty maths rather than generated inside it.
-async function applyDeath(pool, userId, { rng = Math.random } = {}) {
+async function applyDeath(pool, characterId, { rng = Math.random } = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const before = await loadProgression(client, userId, { forUpdate: true });
+    const before = await loadProgression(client, characterId, { forUpdate: true });
     const { experience, lost } = applyDeathPenalty(before.experience, before.level, rng());
     if (lost <= 0) {
       await client.query('COMMIT');
@@ -187,8 +192,8 @@ async function applyDeath(pool, userId, { rng = Math.random } = {}) {
     }
     const r = await client.query(
       `UPDATE player_progression SET experience = $2, updated_at = now()
-        WHERE user_id = $1 RETURNING ${COLUMNS}`,
-      [userId, experience],
+        WHERE character_id = $1 RETURNING ${COLUMNS}`,
+      [characterId, experience],
     );
     await client.query('COMMIT');
     return { progression: mapRow(r.rows[0]), lost };

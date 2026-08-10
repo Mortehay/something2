@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { loadItemTypes, grantStartingLoadout, STARTING_LOADOUT } = require('../src/authority/items.js');
+const { loadItemTypes, grantStartingLoadout } = require('../src/authority/items.js');
 
 // F-013 (P0) regression suite, against a REAL database. Every test in
 // tests/authority_items_inventory.test.js mocks the pool, which can enforce
@@ -30,6 +30,32 @@ async function openPool() {
   }
 }
 
+// SOMET-258: grantStartingLoadout takes a CHARACTER ({ id, entityTypeId }),
+// stamps characters.starting_loadout_granted_at, and reads the item list from
+// class_loadouts keyed by the class -- there is no STARTING_LOADOUT array any
+// more. Each test therefore needs a real character of a known class, and the
+// expected item count is that class's row count rather than a constant.
+async function createTestCharacter(pool, tag, className = 'Warrior') {
+  const userId = await createTestUser(pool, tag);
+  const r = await pool.query(
+    `INSERT INTO characters (user_id, slot, name, entity_type_id)
+     SELECT $1, 1, $2, e.id FROM entity_types e WHERE e.name = $3
+     RETURNING id, entity_type_id`,
+    [userId, `loadout-db-char-${tag}-${process.pid}-${Date.now()}`, className],
+  );
+  return { userId, character: { id: r.rows[0].id, entityTypeId: r.rows[0].entity_type_id } };
+}
+
+// How many item rows that class's loadout should produce. Read from the
+// catalog rather than hardcoded so the test states "the class's loadout", not
+// "two things" -- but it is a COUNT of rows, independent of the code under
+// test, so a grant that writes nothing still fails.
+async function loadoutSize(pool, entityTypeId) {
+  const r = await pool.query(
+    'SELECT count(*)::int AS n FROM class_loadouts WHERE entity_type_id = $1', [entityTypeId]);
+  return r.rows[0].n;
+}
+
 async function createTestUser(pool, tag) {
   const username = `loadout-db-test-${tag}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const r = await pool.query(
@@ -39,13 +65,13 @@ async function createTestUser(pool, tag) {
   return r.rows[0].id;
 }
 
-async function itemCount(pool, userId) {
-  const r = await pool.query('SELECT count(*)::int AS n FROM player_items WHERE user_id = $1', [userId]);
+async function itemCount(pool, characterId) {
+  const r = await pool.query('SELECT count(*)::int AS n FROM player_items WHERE character_id = $1', [characterId]);
   return r.rows[0].n;
 }
 
-async function grantedAt(pool, userId) {
-  const r = await pool.query('SELECT starting_loadout_granted_at FROM users WHERE id = $1', [userId]);
+async function grantedAt(pool, characterId) {
+  const r = await pool.query('SELECT starting_loadout_granted_at FROM characters WHERE id = $1', [characterId]);
   return r.rows[0].starting_loadout_granted_at;
 }
 
@@ -62,16 +88,19 @@ test('grantStartingLoadout against a REAL database: first join on a fresh accoun
     return;
   }
   let user;
+  let character;
+  let expectedItems;
   try {
-    user = await createTestUser(pool, 'fresh');
-    assert.equal(await grantedAt(pool, user), null, 'setup: a brand-new account starts unclaimed');
+    ({ userId: user, character } = await createTestCharacter(pool, 'fresh'));
+    expectedItems = await loadoutSize(pool, character.entityTypeId);
+    assert.equal(await grantedAt(pool, character.id), null, 'setup: a brand-new account starts unclaimed');
 
     const itemTypes = await loadItemTypes(pool);
-    const granted = await grantStartingLoadout(pool, user, itemTypes);
+    const granted = await grantStartingLoadout(pool, character, itemTypes);
 
     assert.equal(granted, true);
-    assert.equal(await itemCount(pool, user), STARTING_LOADOUT.length);
-    assert.ok(await grantedAt(pool, user) != null, 'starting_loadout_granted_at must be stamped after the grant');
+    assert.equal(await itemCount(pool, character.id), expectedItems);
+    assert.ok(await grantedAt(pool, character.id) != null, 'starting_loadout_granted_at must be stamped after the grant');
   } finally {
     if (user != null) await pool.query('DELETE FROM users WHERE id = $1', [user]).catch(() => {});
     await pool.end().catch(() => {});
@@ -94,14 +123,17 @@ test('grantStartingLoadout against a REAL database: a second join after the inve
     return;
   }
   let user;
+  let character;
+  let expectedItems;
   try {
-    user = await createTestUser(pool, 'sell-reconnect');
+    ({ userId: user, character } = await createTestCharacter(pool, 'sell-reconnect'));
+    expectedItems = await loadoutSize(pool, character.entityTypeId);
     const itemTypes = await loadItemTypes(pool);
 
     // First join: legitimately granted, as any fresh account would be.
-    const firstGrant = await grantStartingLoadout(pool, user, itemTypes);
+    const firstGrant = await grantStartingLoadout(pool, character, itemTypes);
     assert.equal(firstGrant, true, 'setup: the first join must grant normally');
-    assert.equal(await itemCount(pool, user), STARTING_LOADOUT.length);
+    assert.equal(await itemCount(pool, character.id), expectedItems);
 
     // Sell-and-reconnect route: a merchant sale (or dropItem, see below)
     // DELETEs the player_items rows directly, exactly like a real sale/drop
@@ -109,16 +141,16 @@ test('grantStartingLoadout against a REAL database: a second join after the inve
     // those are irrelevant to what's under test: the ONLY thing that matters
     // is that player_items is empty again afterward, which is the state the
     // old code keyed the grant on.
-    await pool.query('DELETE FROM player_items WHERE user_id = $1', [user]);
-    assert.equal(await itemCount(pool, user), 0, 'setup: inventory is empty again, same as after a sale');
+    await pool.query('DELETE FROM player_items WHERE character_id = $1', [character.id]);
+    assert.equal(await itemCount(pool, character.id), 0, 'setup: inventory is empty again, same as after a sale');
 
     // Reconnect: the join handler's own gate (server.js) is "inventory
     // empty -> try to grant" — call grantStartingLoadout exactly as it does.
-    const secondGrant = await grantStartingLoadout(pool, user, itemTypes);
+    const secondGrant = await grantStartingLoadout(pool, character, itemTypes);
 
     assert.equal(secondGrant, false,
       'THE EXPLOIT: an emptied-but-previously-granted account must NOT receive a second loadout');
-    assert.equal(await itemCount(pool, user), 0,
+    assert.equal(await itemCount(pool, character.id), 0,
       'no items must have been inserted on the reconnect that follows a sale');
   } finally {
     if (user != null) await pool.query('DELETE FROM users WHERE id = $1', [user]).catch(() => {});
@@ -141,26 +173,29 @@ test('grantStartingLoadout against a REAL database: the drop-and-reconnect route
     return;
   }
   let user;
+  let character;
+  let expectedItems;
   try {
-    user = await createTestUser(pool, 'drop-reconnect');
+    ({ userId: user, character } = await createTestCharacter(pool, 'drop-reconnect'));
+    expectedItems = await loadoutSize(pool, character.entityTypeId);
     const itemTypes = await loadItemTypes(pool);
 
-    const firstGrant = await grantStartingLoadout(pool, user, itemTypes);
+    const firstGrant = await grantStartingLoadout(pool, character, itemTypes);
     assert.equal(firstGrant, true);
-    const r = await pool.query('SELECT id FROM player_items WHERE user_id = $1', [user]);
-    assert.equal(r.rows.length, STARTING_LOADOUT.length);
+    const r = await pool.query('SELECT id FROM player_items WHERE character_id = $1', [character.id]);
+    assert.equal(r.rows.length, expectedItems);
 
     // dropItem (src/authority/loot.js) DELETEs the player_items row per
     // dropped instance and inserts a world_items row instead; the
     // player_items side of that is what matters here.
     for (const row of r.rows) {
-      await pool.query('DELETE FROM player_items WHERE id = $1 AND user_id = $2', [row.id, user]);
+      await pool.query('DELETE FROM player_items WHERE id = $1 AND character_id = $2', [row.id, character.id]);
     }
-    assert.equal(await itemCount(pool, user), 0, 'setup: both items dropped, inventory empty');
+    assert.equal(await itemCount(pool, character.id), 0, 'setup: both items dropped, inventory empty');
 
-    const secondGrant = await grantStartingLoadout(pool, user, itemTypes);
+    const secondGrant = await grantStartingLoadout(pool, character, itemTypes);
     assert.equal(secondGrant, false, 'drop-and-reconnect must not regrant either');
-    assert.equal(await itemCount(pool, user), 0);
+    assert.equal(await itemCount(pool, character.id), 0);
   } finally {
     if (user != null) await pool.query('DELETE FROM users WHERE id = $1', [user]).catch(() => {});
     await pool.end().catch(() => {});
@@ -181,20 +216,23 @@ test('grantStartingLoadout against a REAL database: two concurrent joins on a fr
     return;
   }
   let user;
+  let character;
+  let expectedItems;
   try {
-    user = await createTestUser(pool, 'concurrent');
+    ({ userId: user, character } = await createTestCharacter(pool, 'concurrent'));
+    expectedItems = await loadoutSize(pool, character.entityTypeId);
     const itemTypes = await loadItemTypes(pool);
 
     const [g1, g2] = await Promise.all([
-      grantStartingLoadout(pool, user, itemTypes),
-      grantStartingLoadout(pool, user, itemTypes),
+      grantStartingLoadout(pool, character, itemTypes),
+      grantStartingLoadout(pool, character, itemTypes),
     ]);
 
     // Exactly one loadout's worth of items must exist, regardless of which
     // call reports true.
-    assert.equal(await itemCount(pool, user), STARTING_LOADOUT.length,
-      `two concurrent joins must grant exactly one loadout (${STARTING_LOADOUT.length} items), `
-      + `not ${STARTING_LOADOUT.length * 2}`);
+    assert.equal(await itemCount(pool, character.id), expectedItems,
+      `two concurrent joins must grant exactly one loadout (${expectedItems} items), `
+      + `not ${expectedItems * 2}`);
     assert.equal([g1, g2].filter(Boolean).length, 1, 'exactly one of the two racing calls must report granted=true');
   } finally {
     if (user != null) await pool.query('DELETE FROM users WHERE id = $1', [user]).catch(() => {});
@@ -211,21 +249,27 @@ test('grantStartingLoadout against a REAL database: an account backfilled as alr
     return;
   }
   let user;
+  let character;
+  let expectedItems;
   try {
-    user = await createTestUser(pool, 'backfilled');
+    ({ userId: user, character } = await createTestCharacter(pool, 'backfilled'));
+    expectedItems = await loadoutSize(pool, character.entityTypeId);
     // Simulate what the migration's backfill does to every pre-existing
     // account: stamp the column without ever having inserted player_items
-    // rows through grantStartingLoadout itself (an existing account may
+    // rows through grantStartingLoadout itself (an existing character may
     // have obtained its items some other way, or none at all — the backfill
-    // doesn't care, it only marks the account as already handled).
-    await pool.query('UPDATE users SET starting_loadout_granted_at = now() WHERE id = $1', [user]);
-    assert.equal(await itemCount(pool, user), 0, 'setup: backfilled account owns nothing yet');
+    // doesn't care, it only marks it as already handled). The stamp moved from
+    // users to characters in SOMET-257 for exactly this reason: the loadout is
+    // class-dependent, so it is a fact about the character, not the account.
+    await pool.query('UPDATE characters SET starting_loadout_granted_at = now() WHERE id = $1', [character.id]);
+    assert.equal(await itemCount(pool, character.id), 0, 'setup: backfilled account owns nothing yet');
 
     const itemTypes = await loadItemTypes(pool);
-    const granted = await grantStartingLoadout(pool, user, itemTypes);
+    const granted = await grantStartingLoadout(pool, character, itemTypes);
 
-    assert.equal(granted, false, 'a backfilled account must not be re-kitted on its next join');
-    assert.equal(await itemCount(pool, user), 0);
+    assert.equal(granted, false, 'a backfilled character must not be re-kitted on its next join');
+    void expectedItems;
+    assert.equal(await itemCount(pool, character.id), 0);
   } finally {
     if (user != null) await pool.query('DELETE FROM users WHERE id = $1', [user]).catch(() => {});
     await pool.end().catch(() => {});

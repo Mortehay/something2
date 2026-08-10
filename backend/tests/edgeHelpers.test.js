@@ -28,31 +28,36 @@ test('arrivalPoint lands one tile inside the arrive edge, player-centered', () =
   assert.deepEqual(arrivalPoint(24, 24, 'S'), { x: 12 * 100 + 18, y: 22 * 100 + 18 });
 });
 
+// The five chooseSpawn cases below gained `viaPortalFallback: false` in
+// SOMET-261. Their x/y/viaDoorway expectations are untouched -- the new
+// nearest-portal step is inert for every one of them (none passes `portals` or
+// `isWalkable`), and only the returned object's shape changed. See
+// spawn_portal_fallback.test.js for the new branch itself.
 test('chooseSpawn: pending arrival wins', () => {
   const s = chooseSpawn({ pending: { x: 111, y: 222 }, persisted: { x: 9, y: 9 },
     worldRow: { width: 24, height: 24 }, chunkSize: 64 });
-  assert.deepEqual(s, { x: 111, y: 222, viaDoorway: true });
+  assert.deepEqual(s, { x: 111, y: 222, viaDoorway: true, viaPortalFallback: false });
 });
 
 test('chooseSpawn: persisted position when no pending', () => {
   const s = chooseSpawn({ pending: null, persisted: { x: 500, y: 600 },
     worldRow: { width: 24, height: 24 }, chunkSize: 64 });
-  assert.deepEqual(s, { x: 500, y: 600, viaDoorway: false });
+  assert.deepEqual(s, { x: 500, y: 600, viaDoorway: false, viaPortalFallback: false });
 });
 
 test('chooseSpawn: entry_spawn for a first-join entry world', () => {
   const s = chooseSpawn({ pending: null, persisted: null,
     worldRow: { width: 24, height: 24, is_entry: true, entry_spawn: { x: 1200, y: 1200 } }, chunkSize: 64 });
-  assert.deepEqual(s, { x: 1200, y: 1200, viaDoorway: false });
+  assert.deepEqual(s, { x: 1200, y: 1200, viaDoorway: false, viaPortalFallback: false });
 });
 
 test('chooseSpawn: bounded world clamps to interior center (not chunk-center)', () => {
   // 24x24 bounded: interior center tile (12,12) => player top-left (12*100+18)
   const s = chooseSpawn({ pending: null, persisted: null, worldRow: { width: 24, height: 24 }, chunkSize: 64 });
-  assert.deepEqual(s, { x: 12 * 100 + 18, y: 12 * 100 + 18, viaDoorway: false });
+  assert.deepEqual(s, { x: 12 * 100 + 18, y: 12 * 100 + 18, viaDoorway: false, viaPortalFallback: false });
 });
 
 test('chooseSpawn: unbounded world uses chunk-center', () => {
   const s = chooseSpawn({ pending: null, persisted: null, worldRow: { width: null, height: null }, chunkSize: 64 });
-  assert.deepEqual(s, { x: (64 * 100) / 2, y: (64 * 100) / 2, viaDoorway: false });
+  assert.deepEqual(s, { x: (64 * 100) / 2, y: (64 * 100) / 2, viaDoorway: false, viaPortalFallback: false });
 });

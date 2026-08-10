@@ -56,13 +56,14 @@ function tablesWithWorldsCascade() {
 test('every table with an ON DELETE CASCADE FK to worlds is named in CASCADES', () => {
   const found = tablesWithWorldsCascade();
 
-  // Sanity check on the scanner itself: if this list drifts from the eight
-  // the brief names, something about the migrations (or the regex) changed
-  // in a way worth looking at directly, not just silently trusting the set.
+  // Sanity check on the scanner itself: if this list drifts, something about
+  // the migrations (or the regex) changed in a way worth looking at directly,
+  // not just silently trusting the set. character_visited_worlds joined in
+  // SOMET-263 -- this test is what caught that CASCADES had not been told.
   assert.deepEqual(
     [...found].sort(),
-    ['map_links', 'merchant_stock', 'player_binds', 'villages',
-     'world_chunks', 'world_creatures', 'world_items', 'world_players'].sort(),
+    ['character_visited_worlds', 'map_links', 'merchant_stock', 'player_binds',
+     'villages', 'world_chunks', 'world_creatures', 'world_items', 'world_players'].sort(),
   );
 
   for (const table of found) {

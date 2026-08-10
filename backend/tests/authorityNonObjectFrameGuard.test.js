@@ -41,7 +41,7 @@ function withConnect(pool) {
 // than imported since that helper is private to its file.
 function fakePool() {
   return withConnect({
-    query: async (sql) => {
+    query: async (sql, params) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
         return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
       }
@@ -55,6 +55,10 @@ function fakePool() {
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
       if (/FROM item_types/i.test(sql)) return { rows: [] };
+      // SOMET-260: join now resolves the character before anything else, and a
+      // fake pool that falls through to rows:[] refuses the join -- which makes the
+      // test HANG waiting for 'joined' rather than fail. Answer it explicitly.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/FROM player_items/i.test(sql)) return { rows: [] };
       if (/FROM player_equipment/i.test(sql)) return { rows: [] };
       if (/INSERT INTO player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
@@ -132,7 +136,7 @@ for (const [frame, label] of NON_OBJECT_FRAMES) {
 
     // Establish a session so this exercises the real post-join dispatch path,
     // not just the pre-join gate.
-    ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+    ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
     await nextMsg(ws, 'joined');
 
     // The bad frame must be silently ignored: no crash, no error reply, no
@@ -153,7 +157,7 @@ test('a batch of non-object frames back-to-back does not crash the server or dro
   const { url } = await boot();
   const ws = connect(url, 2);
   await new Promise((res) => ws.on('open', res));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   for (const [frame] of NON_OBJECT_FRAMES) ws.send(frame);

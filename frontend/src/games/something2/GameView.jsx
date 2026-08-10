@@ -71,6 +71,14 @@ const HowToButton = styled.button`
   &:hover { background: var(--s2-panel-veil-solid); color: var(--s2-accent); }
 `;
 
+// Sits directly under "How to play", in the same always-visible in-game
+// control stack. NOT in the pause overlay: nothing in this app ever sets
+// isPaused to true, so that overlay is unreachable and a control placed there
+// would be as inert as the handler was before it had a caller at all.
+const ChangeCharacterButton = styled(HowToButton)`
+  top: 296px;
+`;
+
 const Panel = styled.div`
   background: var(--s2-panel-veil);
   backdrop-filter: blur(8px);
@@ -186,7 +194,7 @@ export default function GameView() {
   const {
     gameRef, isPlaying, isPaused, isFullscreen,
     selectedWorldId, setSelectedWorldId,
-    enterWorld, resume, exitToMenu, toggleFullscreen, openHelp,
+    enterWorld, resume, exitToMenu, changeCharacter, toggleFullscreen, openHelp,
   } = useOutletContext();
 
   const { isAdmin } = useAuth();
@@ -251,6 +259,18 @@ export default function GameView() {
         >
           <HiOutlineQuestionMarkCircle /> How to play
         </HowToButton>
+      )}
+      {/* SOMET-262: GameShell defined changeCharacter and referenced it
+          nowhere, so switching characters was impossible without hand-clearing
+          localStorage -- an acceptance criterion that shipped unreachable. */}
+      {isPlaying && (
+        <ChangeCharacterButton
+          type="button"
+          title="Leave this world and pick a different character"
+          onClick={changeCharacter}
+        >
+          Change Character
+        </ChangeCharacterButton>
       )}
       {!isPlaying && (
         <UIOverlay>

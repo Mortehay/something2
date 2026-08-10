@@ -9,8 +9,13 @@ const WORLDS = [
   { id: 7, name: 'Caves', is_entry: true },
 ];
 
+// hasCharacter is required as of SOMET-262: the authority refuses a join with
+// no character, so the ready baseline has to include one. The "refuses without
+// a character" case lives in characterGating.test.js alongside the rest of the
+// character wiring.
 const base = {
   isAdmin: false, isPlaying: false, alreadyJoined: false, hasGame: true,
+  hasCharacter: true,
   worlds: WORLDS, mapTiles: TILES, mapConfig: CONFIG,
 };
 

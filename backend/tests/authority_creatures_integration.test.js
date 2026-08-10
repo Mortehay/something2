@@ -27,6 +27,10 @@ function fakePool() {
   return withConnect({
     updates,
     query: async (sql, params) => {
+      // SOMET-260: join resolves the character before anything else; a pool
+      // that falls through to rows:[] refuses the join, which HANGS the test
+      // on nextMsg('joined') rather than failing it.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] }; // matches token()'s tv:1 → passes the on-connect version check
       if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
@@ -57,9 +61,12 @@ function fakePool() {
       }] };
       if (/INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 }; // already materialized
       if (/FROM world_players WHERE/i.test(sql)) {
-        const uid = params[1];
-        if (uid === '2') return { rows: [{ x: 100000, y: 100000 }] }; // far away
-        return { rows: [] }; // user 1 → default center
+        // Keyed by CHARACTER now (SOMET-257), not by user. The AOI test joins
+        // its far player as character 2 precisely so this branch can still tell
+        // the two apart.
+        const cid = String(params[1]);
+        if (cid === '2') return { rows: [{ x: 100000, y: 100000 }] }; // far away
+        return { rows: [] }; // character 1 → default center
       }
       if (/FROM world_creatures/i.test(sql)) {
         // bbox load: return the wolf only for chunk (0,0) span [0,800).
@@ -83,6 +90,10 @@ function fakePool() {
         }] };
         return { rows: [] };
       }
+      // SOMET-260: join now resolves the character before anything else, and a
+      // fake pool that falls through to rows:[] refuses the join -- which makes
+      // the test HANG waiting for 'joined' rather than fail. Answer it explicitly.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/UPDATE world_creatures/i.test(sql)) { updates.push(params); return { rows: [] }; }
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
       return { rows: [] };
@@ -98,6 +109,10 @@ function fakePoolFlaky() {
   let thrown = false;
   return withConnect({
     query: async (sql, params) => {
+      // SOMET-260: join resolves the character before anything else; a pool
+      // that falls through to rows:[] refuses the join, which HANGS the test
+      // on nextMsg('joined') rather than failing it.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] }; // matches token()'s tv:1 → passes the on-connect version check
       if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
@@ -163,7 +178,7 @@ test('a joined player receives its neighborhood creatures and they roam', async 
   const { url, handle, server } = await bootWith(fakePool());
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   // Collect a couple of creature messages; the wolf should appear and move.
@@ -200,7 +215,7 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/le
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
   await nextMsg(ws, 'creatures');
 
@@ -303,7 +318,7 @@ test('a live creature instance carries the abilities its chunk load returned', a
   const { url, handle, server } = await bootWith(fakePool());
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
   await nextMsg(ws, 'creatures');
 
@@ -328,9 +343,9 @@ test('a live creature instance carries the abilities its chunk load returned', a
 
 test('AOI: a far player does not receive the wolf', async () => {
   const { url, handle, server } = await bootWith(fakePool());
-  const ws = connect(url, 2); // persisted far away
+  const ws = connect(url, 2); // character 2 is persisted far away
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 2, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
   let sawWolf = false;
   for (let i = 0; i < 10; i++) {
@@ -345,7 +360,7 @@ test('a transiently failed chunk activation is retried, not stuck unloaded', asy
   const { url, handle, server } = await bootWith(fakePoolFlaky());
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   // The wolf's chunk (0,0) fails its first activation attempt. Because
@@ -378,7 +393,7 @@ test('dirty creatures are flushed with UPDATEs', async () => {
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
   // Let it roam + hit the 100ms creature flush a few times.
   for (let i = 0; i < 20; i++) await nextMsg(ws, 'creatures');

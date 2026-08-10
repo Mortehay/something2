@@ -12,6 +12,7 @@ const { Pool } = require('pg');
 const CASCADES = [
   'world_chunks', 'world_creatures', 'world_players', 'world_items',
   'map_links', 'villages', 'merchant_stock', 'player_binds (every player\'s respawn point)',
+  'character_visited_worlds (every character\'s explored map)',
 ];
 
 async function clearMaps(pool) {

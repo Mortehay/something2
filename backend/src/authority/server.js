@@ -6,6 +6,8 @@ const { ServerMap } = require('./collision');
 const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
+const { ownedCharacter } = require('../services/characters.js');
+const { recordVisit } = require('../services/visitedWorlds.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
 const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
@@ -247,7 +249,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const worlds = new Map(); // world_id -> { world, row, sockets: Map<userId, ws> }
   const loading = new Map(); // world_id -> in-flight loadWorld promise (cold-start dedupe)
   const sessionsByUser = new Map(); // userId -> ws (exactly one live authority session per account)
-  const pendingArrivals = new Map(); // userId -> { worldId, x, y } : a doorway-arrival spawn override
+  const pendingArrivals = new Map(); // characterId -> { worldId, x, y } : a doorway-arrival spawn override
 
   httpServer.on('upgrade', (req, socket, head) => {
     // The whole handler is wrapped so an async rejection (a DB error from the
@@ -370,20 +372,43 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }
 
-  async function loadSpawn(worldId, userId, chunkSize, worldRow) {
-    const pend = pendingArrivals.get(userId);
+  async function loadSpawn(worldId, characterId, chunkSize, worldRow, entry) {
+    // Keyed by CHARACTER: a transition is a fact about the character that
+    // walked through the door, not about the account. Keying it by user would
+    // hand the arrival point to whichever character next joined on that
+    // account.
+    const pend = pendingArrivals.get(characterId);
     const pending = (pend && pend.worldId === worldId) ? { x: pend.x, y: pend.y } : null;
-    if (pending) pendingArrivals.delete(userId);
+    if (pending) pendingArrivals.delete(characterId);
     let persisted = null;
     const r = await pool.query(
-      'SELECT x, y FROM world_players WHERE world_id = $1 AND user_id = $2',
-      [worldId, userId]
+      'SELECT x, y FROM world_players WHERE world_id = $1 AND character_id = $2',
+      [worldId, characterId]
     );
     if (r.rows.length) persisted = { x: r.rows[0].x, y: r.rows[0].y };
-    const spawn = chooseSpawn({ pending, persisted, worldRow, chunkSize });
+    // SOMET-261: a persisted position that is now out of bounds or inside
+    // geometry falls back to the nearest portal rather than to the world
+    // centre. Both arguments come from the already-loaded world entry, so this
+    // costs no extra query.
+    //
+    // chooseSpawn defaults both to inert values, so forgetting to pass them
+    // here would disable the fallback silently rather than fail -- that is what
+    // spawn_portal_fallback.test.js's source-text guard exists to catch.
+    const portals = [...entry.portalLinks.values()]
+      .map((l) => ({ x: l.fromX, y: l.fromY }))
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+    const map = entry.world && entry.world.map;
+    const isWalkable = map ? (x, y) => map.isWalkable(x, y) : null;
+    const spawn = chooseSpawn({ pending, persisted, worldRow, chunkSize, portals, isWalkable });
+    if (spawn.viaPortalFallback) {
+      // Worth a line in the log: a spike here means a world was resized or
+      // regenerated in a way that stranded the players saved inside it.
+      console.log(`spawn: relocated character ${characterId} in world ${worldId} to nearest portal `
+        + `(saved position ${persisted && persisted.x},${persisted && persisted.y} is no longer valid)`);
+    }
     const b = await pool.query(
-      'SELECT x, y FROM player_binds WHERE user_id = $1 AND world_id = $2',
-      [userId, worldId],
+      'SELECT x, y FROM player_binds WHERE character_id = $1 AND world_id = $2',
+      [characterId, worldId],
     );
     spawn.respawn = b.rows.length ? { x: b.rows[0].x, y: b.rows[0].y } : { x: spawn.x, y: spawn.y };
     return spawn;
@@ -458,8 +483,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // `rng` is the same injectable draw the loot roll uses (opts.rng, defaulted
   // above), threaded through so the death penalty's 0.5%-10% roll can be
   // pinned in a test instead of leaving these assertions to chance.
-  const onPlayerDeath = (entry, userId) => applyDeath(pool, userId, { rng })
-    .then(({ progression, lost }) => {
+  // The XP penalty is per-character; the socket lookup is per-account. The
+  // caller passes the in-memory userId, so the character id is resolved off
+  // the live player here.
+  const onPlayerDeath = (entry, userId) => {
+    const characterId = (entry.world.getPlayer(userId) || {}).characterId;
+    // No live player means the socket closed between the killing blow and
+    // this call. There is no character to penalise and applyDeath(undefined)
+    // would throw inside a fire-and-forget promise.
+    if (characterId == null) return Promise.resolve();
+    return applyDeath(pool, characterId, { rng })
+      .then(({ progression, lost }) => {
       if (lost <= 0) return; // at the level floor: nothing changed, nothing to push
       // Best-effort: the player's socket may be gone (disconnected between
       // the death and this commit finishing) — entry.sockets.get returns
@@ -467,7 +501,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const sock = entry.sockets.get(userId);
       if (sock) send(sock, { type: 'progression', progression, lost });
     })
-    .catch((err) => console.error('death penalty commit failed:', err));
+      .catch((err) => console.error('death penalty commit failed:', err));
+  };
 
   // Every kill channel now reports { id, killerUserId } objects rather than
   // bare ids (Task 5), so the `new Set(...)` de-dup this file used everywhere
@@ -487,21 +522,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
   }
 
-  async function persist(worldId, userId, p) {
+  async function persist(worldId, characterId, p) {
     await pool.query(
-      `INSERT INTO world_players (world_id, user_id, x, y, updated_at)
+      `INSERT INTO world_players (world_id, character_id, x, y, updated_at)
        VALUES ($1, $2, $3, $4, now())
-       ON CONFLICT (world_id, user_id) DO UPDATE SET x = $3, y = $4, updated_at = now()`,
-      [worldId, userId, p.x, p.y]
+       ON CONFLICT (world_id, character_id) DO UPDATE SET x = $3, y = $4, updated_at = now()`,
+      [worldId, characterId, p.x, p.y]
     );
   }
 
-  async function upsertBind(userId, worldId, x, y) {
+  async function upsertBind(characterId, worldId, x, y) {
     await pool.query(
-      `INSERT INTO player_binds (user_id, world_id, x, y, updated_at)
+      `INSERT INTO player_binds (character_id, world_id, x, y, updated_at)
          VALUES ($1, $2, $3, $4, now())
-       ON CONFLICT (user_id) DO UPDATE SET world_id = $2, x = $3, y = $4, updated_at = now()`,
-      [userId, worldId, x, y],
+       ON CONFLICT (character_id) DO UPDATE SET world_id = $2, x = $3, y = $4, updated_at = now()`,
+      [characterId, worldId, x, y],
     );
   }
 
@@ -749,6 +784,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
     async join(ws, msg) {
       if (ws.worldId != null) { send(ws, { type: 'error', message: 'already joined' }); return; }
 
+      // SOMET-260: a client-supplied character id is checked against the
+      // token's user before anything is loaded. There is deliberately NO
+      // "default to the account's first character" fallback — a silent default
+      // would turn a client bug, or a forged frame, into a successful join as
+      // somebody else's character rather than a refusal.
+      const character = await ownedCharacter(pool, Number(ws.userId), msg.character_id)
+        .catch(() => null);
+      if (!character) { send(ws, { type: 'error', message: 'unknown character' }); return; }
+
       const entry = await loadWorld(msg.world_id).catch(() => null);
       if (!entry) { send(ws, { type: 'error', message: 'unknown world' }); return; }
 
@@ -758,7 +802,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // off the canonical id) is matched by strict worldId equality in
         // loadSpawn — passing the client's raw spelling back in here would
         // silently reintroduce the same split for doorway arrivals.
-        const spawn = await loadSpawn(entry.worldId, ws.userId, entry.row.chunk_size, entry.row);
+        const spawn = await loadSpawn(entry.worldId, character.id, entry.row.chunk_size, entry.row, entry);
         if (ws.readyState !== ws.OPEN) return; // client vanished while we awaited spawn
 
         // One live session per account: the newest join wins. (Refusing instead
@@ -780,14 +824,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // player yet (they null-check getPlayer), so this is safe.
         entry.sockets.set(ws.userId, ws);
 
-        let inv = await loadInventory(pool, ws.userId);
-        if (inv.items.length === 0) {
-          const granted = await grantStartingLoadout(pool, ws.userId, entry.world.weapons);
-          if (granted) inv = await loadInventory(pool, ws.userId);
-        }
+        let inv = await loadInventory(pool, character.id);
+        // Unconditional, no longer gated on an empty inventory. The gate was
+        // only ever a cheap pre-filter in front of grantStartingLoadout's real
+        // once-ever check, and it is now actively wrong: a second character on
+        // an account can legitimately have items in the world while this one
+        // has never been granted anything.
+        const granted = await grantStartingLoadout(pool, character, entry.world.weapons);
+        if (granted) inv = await loadInventory(pool, character.id);
+        // Gold stays per-ACCOUNT (SOMET-257 left it on users), so this is the
+        // one lookup in the join path still keyed by user rather than character.
         const gr = await pool.query('SELECT gold FROM users WHERE id = $1', [ws.userId]);
         const gold = gr.rows.length ? Number(gr.rows[0].gold) || 0 : 0;
-        const progression = await loadProgression(pool, ws.userId);
+        const progression = await loadProgression(pool, character.id);
         const stats = derivePlayerStats(progression);
 
         // A newer session for this same account may have won (and kicked
@@ -805,7 +854,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
 
         ws.worldId = entry.worldId; // canonical (F-014), not the client's raw spelling
-        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats);
+        ws.characterId = character.id;
+        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id);
         if (spawn.viaDoorway) {
           const p = entry.world.getPlayer(ws.userId);
           if (p) {
@@ -826,7 +876,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           }
         }
         send(ws, {
-          type: 'joined', user_id: ws.userId, spawn, tickRate: 1000 / tickMs,
+          type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
           itemTypes: [...entry.world.weapons.values()],
           items: inv.items,
           equipment: inv.equipment,
@@ -841,6 +891,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
             .filter((v) => v.merchantX != null && v.merchantY != null)
             .map((v) => ({ villageId: v.id, x: v.merchantX, y: v.merchantY })),
         });
+        // Fog of war (SOMET-263). Fire-and-forget: a failed bookkeeping write
+        // must never break a join. Call site 1 of 2 -- the other is the
+        // transition path below, and visited_worlds_db.test.js asserts both.
+        recordVisit(pool, character.id, entry.worldId)
+          .catch((e) => console.error('recordVisit (join)', e));
       } catch (err) {
         console.error('join failed:', err);
         if (entry.sockets.get(ws.userId) === ws) entry.sockets.delete(ws.userId);
@@ -898,7 +953,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // chained between the two): always spend the CURRENT weapon's
         // ammo, and fall back to the sync path if it now needs none.
         const ammoTypeId = g.weapon.ammo_type_id;
-        if (ammoTypeId != null && !(await consumeAmmo(pool, ws.userId, ammoTypeId))) {
+        if (ammoTypeId != null && !(await consumeAmmo(pool, ws.characterId, ammoTypeId))) {
           // The type id is carried so the client can zero ITS displayed
           // count for exactly this ammo type. Without it the HUD keeps
           // rendering whatever it last believed while the server refuses
@@ -920,7 +975,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // delay or skip the resolution that already succeeded.
         if (ammoTypeId != null) {
           try {
-            const count = await ammoCount(pool, ws.userId, ammoTypeId);
+            const count = await ammoCount(pool, ws.characterId, ammoTypeId);
             send(ws, { type: 'ammo', item_type_id: ammoTypeId, count });
           } catch (err) {
             console.error('ammoCount failed:', err);
@@ -945,7 +1000,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           const got = await claimGold(pool, entry, ws.userId, target.id);
           if (got) send(ws, { type: 'wallet', gold: got.gold });
         } else {
-          const got = await claimItem(pool, entry, ws.userId, target.id);
+          const got = await claimItem(pool, entry, ws.userId, ws.characterId, target.id);
           if (got) send(ws, { type: 'picked', item: got });
         }
       }, { notify: false });
@@ -962,7 +1017,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (!entry) return;
       if (typeof msg.itemId !== 'string') return; // wire hygiene: ids are strings
       chainOp(ws, 'drop', async () => {
-        const r = await dropItem(pool, entry, ws.userId, msg.itemId, { ttlMs: groundItemTtlMs });
+        const r = await dropItem(pool, entry, ws.userId, ws.characterId, msg.itemId, { ttlMs: groundItemTtlMs });
         if (r.ok) send(ws, { type: 'dropped', itemId: msg.itemId });
         else send(ws, { type: 'error', message: r.reason });
       });
@@ -992,7 +1047,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
-        const r = await buyStock(pool, entry, ws.userId, msg.stockId, village.id);
+        const r = await buyStock(pool, entry, ws.userId, ws.characterId, msg.stockId, village.id);
         if (r.ok) {
           send(ws, { type: 'bought', item: r.item, gold: r.gold });
           send(ws, { type: 'wallet', gold: r.gold });
@@ -1010,7 +1065,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
-        const r = await sellItem(pool, entry, ws.userId, village.id, msg.itemId);
+        const r = await sellItem(pool, entry, ws.userId, ws.characterId, village.id, msg.itemId);
         if (r.ok) {
           send(ws, { type: 'sold', itemId: msg.itemId, price: r.price, gold: r.gold });
           send(ws, { type: 'wallet', gold: r.gold });
@@ -1078,7 +1133,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // player/world state.
       if (entry.sockets.get(ws.userId) !== ws) return;
       const p = entry.world.getPlayer(ws.userId);
-      if (p) { try { await persist(ws.worldId, ws.userId, p); } catch { /* best-effort */ } }
+      if (p) { try { await persist(ws.worldId, ws.characterId, p); } catch { /* best-effort */ } }
       entry.world.removePlayer(ws.userId);
       entry.sockets.delete(ws.userId);
       if (entry.world.isEmpty()) {
@@ -1111,9 +1166,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
           });
           if (t) {
             p._doorwayCdUntil = now + 1500;                       // suppress duplicate sends during reconnect
-            pendingArrivals.set(p.userId, { worldId: t.toWorldId, x: t.arriveX, y: t.arriveY });
+            pendingArrivals.set(p.characterId, { worldId: t.toWorldId, x: t.arriveX, y: t.arriveY });
             const ws = entry.sockets.get(p.userId);
             if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
+            // Fog of war: the destination is visited the moment the server
+            // commits the move, not when the client re-joins -- a client that
+            // never completes the rejoin has still been there.
+            recordVisit(pool, p.characterId, t.toWorldId)
+              .catch((e) => console.error('recordVisit (transition)', e));
           }
         }
       }
@@ -1156,9 +1216,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
             continue;
           }
           p._portalCdUntil = now + 1500;
-          pendingArrivals.set(p.userId, { worldId: t.toWorldId, x: t.arriveX, y: t.arriveY });
+          pendingArrivals.set(p.characterId, { worldId: t.toWorldId, x: t.arriveX, y: t.arriveY });
           const ws = entry.sockets.get(p.userId);
           if (ws) send(ws, { type: 'transition', toWorldId: t.toWorldId, arriveX: t.arriveX, arriveY: t.arriveY });
+          recordVisit(pool, p.characterId, t.toWorldId)
+            .catch((e) => console.error('recordVisit (transition)', e));
         }
       }
       if (entry.villages && entry.villages.length) {
@@ -1169,7 +1231,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           if (v) {
             p._boundVillageId = v.id;
             p.spawn = { x: v.spawnX, y: v.spawnY };
-            upsertBind(p.userId, entry.worldId, v.spawnX, v.spawnY).catch((e) => console.error('upsertBind', e));
+            upsertBind(p.characterId, entry.worldId, v.spawnX, v.spawnY).catch((e) => console.error('upsertBind', e));
           }
         }
       }
@@ -1201,7 +1263,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           if (it.typeId === entry.goldItemTypeId) {
             claims.push(claimGold(pool, entry, p.userId, it.id));
           } else {
-            claims.push(claimItem(pool, entry, p.userId, it.id));
+            claims.push(claimItem(pool, entry, p.userId, p.characterId, it.id));
           }
         }
         if (claims.length === 0) continue;
@@ -1268,7 +1330,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
     for (const [worldId, entry] of worlds) {
       for (const [userId] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
-        if (p) persist(worldId, userId, p).catch(() => {});
+        // p.characterId, not the map key: the socket map is keyed by account,
+        // but world_players is keyed by character.
+        if (p) persist(worldId, p.characterId, p).catch(() => {});
       }
     }
   }, flushMs);

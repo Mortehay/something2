@@ -44,7 +44,7 @@ function withConnect(pool) {
 // player rows, and a no-op upsert.
 function fakePool() {
   return withConnect({
-    query: async (sql) => {
+    query: async (sql, params) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
         return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
       }
@@ -72,6 +72,10 @@ function fakePool() {
             projectile_radius: null, pierce: null, mana_cost: 0, element: null, defense: 2, resistances: {} },
         ] };
       }
+      // SOMET-260: join now resolves the character before anything else, and a
+      // fake pool that falls through to rows:[] refuses the join -- which makes the
+      // test HANG waiting for 'joined' rather than fail. Answer it explicitly.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/FROM player_items/i.test(sql)) return { rows: [{ id: 'i1', item_type_id: 1 }, { id: 'i3', item_type_id: 3 }, { id: 'i5', item_type_id: 5 }] };
       if (/FROM player_equipment/i.test(sql)) return { rows: [] };
       if (/INSERT INTO player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
@@ -202,7 +206,7 @@ test('join → joined with a spawn; input → state includes the moved player', 
   const { url, handle, server } = await boot();
   const ws = connect(url, 1);
   await new Promise((res) => ws.on('open', res));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   const joined = await nextMsg(ws, 'joined');
   assert.equal(joined.type, 'joined');
   assert.equal(joined.user_id, '1');
@@ -230,8 +234,8 @@ test('two clients in one world see each other', async () => {
     new Promise((r) => a.on('open', r)),
     new Promise((r) => b.on('open', r)),
   ]);
-  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
-  b.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  a.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  b.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(a, 'joined');
   await nextMsg(b, 'joined');
   // a's state should eventually list both player ids.
@@ -271,7 +275,7 @@ test('a frame within maxPayload is processed normally', async () => {
   const { url, handle, server } = await boot();
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   const joined = await nextMsg(ws, 'joined');
   assert.equal(joined.type, 'joined', 'a normal, well-under-limit frame is unaffected by the cap');
   ws.close(); handle.close(); server.close();
@@ -305,7 +309,7 @@ test('a token bucket of capacity 1 admits the join frame, then drops everything 
   const { url, handle, server } = await bootRate(1, 0);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined'); // spends the sole token
 
   const pongs = [];
@@ -322,7 +326,7 @@ test('a burst beyond the token bucket capacity is dropped, not queued for later'
   const { url, handle, server } = await bootRate(5, 0);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const pongs = [];
@@ -337,7 +341,7 @@ test('frames sent well within the production rate limit are never dropped', asyn
   const { url, handle, server } = await bootRate(60, 40); // production defaults
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const pongs = [];
@@ -356,7 +360,7 @@ test('an unrecognized message type is silently ignored and does not disrupt late
   const { url, handle, server } = await boot();
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   ws.send(JSON.stringify({ type: 'this-type-does-not-exist', anything: 'goes' }));
@@ -370,7 +374,7 @@ test('the token bucket refills over time, so a client is not permanently penaliz
   const { url, handle, server } = await bootRate(3, 1000); // tiny capacity, fast refill
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const pongs = [];
@@ -409,8 +413,8 @@ test('two clients naming the same world with different id spellings still see ea
     new Promise((r) => a.on('open', r)),
     new Promise((r) => b.on('open', r)),
   ]);
-  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
-  b.send(JSON.stringify({ type: 'join', world_id: 'W1' })); // same DB row, different spelling
+  a.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  b.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'W1' })); // same DB row, different spelling
   await nextMsg(a, 'joined');
   await nextMsg(b, 'joined');
 
@@ -444,8 +448,8 @@ test('concurrent first-joins to a fresh (unloaded) world both get ticked, not or
   ]);
   // Fire both joins as close together as possible so they race the same
   // cold-start load.
-  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
-  b.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  a.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  b.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await Promise.all([nextMsg(a, 'joined'), nextMsg(b, 'joined')]);
 
   let both = false;
@@ -641,7 +645,7 @@ test('reaps a dead socket that stops answering protocol pings', async () => {
   // instead of by two real heartbeatMs ticks.
   const dead = new WebSocket(`${url}?token=${encodeURIComponent(token(1))}`, [], { autoPong: false });
   await new Promise((res) => dead.on('open', res));
-  dead.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  dead.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(dead, 'joined');
 
   const closed = new Promise((res) => dead.on('close', () => res(true)));
@@ -662,7 +666,7 @@ test('does not reap a live socket that answers protocol pings', async () => {
   const { url, handle, server } = await bootHeartbeat(HB_DISABLED);
   const live = connect(url, 2); // default autoPong:true → auto-replies to pings
   await new Promise((res) => live.on('open', res));
-  live.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  live.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(live, 'joined');
 
   // The server-side socket for this session, reached via `worlds` (already
@@ -687,7 +691,7 @@ test('equip switches the weapon; a later state reflects equipment.main_hand', as
   const { url, handle, server } = await boot();
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   const joined = await nextMsg(ws, 'joined');
   assert.ok(Array.isArray(joined.itemTypes) && joined.itemTypes.length >= 1, 'joined lists the item catalog');
   ws.send(JSON.stringify({ type: 'equip', itemId: 'i3', slot: 'main_hand' })); // bow
@@ -705,7 +709,7 @@ test('a projectile attack makes a projectile appear in a later state', async () 
   const { url, handle, server } = await boot();
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
   ws.send(JSON.stringify({ type: 'equip', itemId: 'i3', slot: 'main_hand' })); // bow (fast)
   // equip is now async (DB write-through); wait for it to land before
@@ -732,7 +736,7 @@ test('joined carries the item catalog, the owned items and the equipment map', a
   const { url, handle, server } = await boot();
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   const joined = await nextMsg(ws, 'joined');
   assert.ok(Array.isArray(joined.itemTypes) && joined.itemTypes.length >= 2);
   assert.ok(Array.isArray(joined.items) && joined.items.length >= 1);
@@ -745,7 +749,7 @@ test('equip is reflected in a later state; unequip clears it', async () => {
   const { url, handle, server } = await boot();
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   ws.send(JSON.stringify({ type: 'equip', itemId: 'i5', slot: 'chest' }));
@@ -772,14 +776,14 @@ test('a second session for the same account kicks the first (newest wins)', asyn
   const { url, handle, server } = await boot();
   const a = connect(url, 1);
   await new Promise((r) => a.on('open', r));
-  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  a.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(a, 'joined');
 
   // Second connection, same user id.
   const b = connect(url, 1);
   await new Promise((r) => b.on('open', r));
   const aClosed = new Promise((res) => a.on('close', () => res(true)));
-  b.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  b.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(b, 'joined');
 
   const closed = await Promise.race([aClosed, new Promise((r) => setTimeout(() => r(false), 1500))]);
@@ -804,6 +808,9 @@ function equipRacePool(delayMs = 20) {
   const usedItemIds = new Set();
   return withConnect({
     query: async (sql, params) => {
+      // SOMET-260: join resolves the character first; falling through to
+      // rows:[] refuses the join and HANGS the test waiting for 'joined'.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       if (/INSERT INTO player_equipment/i.test(sql)) {
         await new Promise((r) => setTimeout(r, delayMs));
         const itemId = params[2];
@@ -838,7 +845,7 @@ test('concurrent double-equip of the same item into two hand slots does not cras
   const { url, handle, server } = await bootWith(equipRacePool());
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   ws.send(JSON.stringify({ type: 'equip', itemId: 'i1', slot: 'main_hand' }));
@@ -865,7 +872,7 @@ test('isWorldLive reflects a real connected player, then clears once they discon
 
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
   assert.equal(handle.isWorldLive('w1'), true, 'a connected player makes the world live');
   assert.equal(handle.evictWorld('w1'), false, 'eviction must be refused while live');
@@ -887,10 +894,10 @@ test('a second join on the same socket is rejected (no free re-heal / no ghost)'
   const { url, handle, server } = await boot();
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   const err = await nextMsg(ws, 'error');
   assert.match(err.message, /already joined/i, 'the second join on the same socket is refused');
 
@@ -953,6 +960,9 @@ async function mkAttackHarness(opts = {}) {
   const base = fakePool();
   const pool = withConnect({
     query: async (sql, params) => {
+      // SOMET-260: join resolves the character first; falling through to
+      // rows:[] refuses the join and HANGS the test waiting for 'joined'.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
       // Must be matched BEFORE the generic /FROM player_items/ branch: the
       // consume statement mentions player_items in its subquery too.
       //
@@ -993,7 +1003,7 @@ async function mkAttackHarness(opts = {}) {
     const m = JSON.parse(data);
     if (m.type !== 'state' && m.type !== 'creatures') sent.push(m);
   });
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const world = handle.worlds.get('w1').world;
@@ -1207,7 +1217,7 @@ test('a state frame with no detonations omits the field entirely', async () => {
   const { url, handle, server } = await boot();
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
   const s = await nextMsg(ws, 'state');
   assert.equal(s.detonations, undefined);
@@ -1223,13 +1233,13 @@ test('a kicked socket closing mid-join does not tear down the new session', asyn
   const { url, handle, server } = await bootWith(delayedFakePool(0, { itemsDelayMs: 60 }));
   const a = connect(url, 1);
   await new Promise((r) => a.on('open', r));
-  a.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  a.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(a, 'joined');
 
   const b = connect(url, 1); // same user id as a → a gets kicked
   await new Promise((r) => b.on('open', r));
   const aClosed = new Promise((res) => a.on('close', () => res(true)));
-  b.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  b.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
 
   const closed = await Promise.race([aClosed, new Promise((r) => setTimeout(() => r(false), 5000))]);
   assert.ok(closed, 'the kicked (old) session should be terminated');
@@ -1267,7 +1277,7 @@ test('refreshPlayerStats moves a live player\'s pools and pushes a progression m
   const { url, handle, server } = await boot();
   const ws = connect(url, 7);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const world = handle.worlds.get('w1').world;
@@ -1304,7 +1314,7 @@ test('refreshPlayerStats does not revive a player sitting at hp <= 0', async () 
   const { url, handle, server } = await boot();
   const ws = connect(url, 9);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const world = handle.worlds.get('w1').world;
@@ -1350,7 +1360,7 @@ test('refreshPlayerStats accepts a numeric userId (as req.user.id arrives from t
   const { url, handle, server } = await boot();
   const ws = connect(url, 11); // token signs user_id: 11 (a number); the WS boundary stores ws.userId = '11'
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const world = handle.worlds.get('w1').world;
@@ -1381,13 +1391,20 @@ test('refreshPlayerStats accepts a numeric userId (as req.user.id arrives from t
 // only exercises World#addPlayer(..., stats) directly, never through join.
 // This is the single most load-bearing wire in the whole slice: it is what
 // makes a character's stats mean anything at all on connect.
-function highConProgressionPool(userId) {
+// `characterId`, not userId: SOMET-257 re-keyed player_progression, and this
+// mock matching the OLD column name is not a harmless miss -- it falls through
+// to fakePool's empty default, the join derives BASE_STATS, and the test fails
+// claiming the wire is broken when only the fixture is.
+function highConProgressionPool(characterId) {
   const base = fakePool();
   return withConnect({
     query: async (sql, params) => {
-      if (/FROM player_progression WHERE user_id/i.test(sql)) {
+      // SOMET-260: join resolves the character first; falling through to
+      // rows:[] refuses the join and HANGS the test waiting for 'joined'.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+      if (/FROM player_progression WHERE character_id/i.test(sql)) {
         return { rows: [{
-          user_id: String(userId), experience: '0', level: 1, stat_points: 0,
+          character_id: Number(characterId), experience: '0', level: 1, stat_points: 0,
           strength: 5, dexterity: 5, constitution: 15, intelligence: 5, wisdom: 5, charisma: 5,
         }] };
       }
@@ -1400,7 +1417,9 @@ test('a player who joins with a real CON-15 progression row receives derived sta
   const { url, handle, server } = await bootWith(highConProgressionPool(7));
   const ws = connect(url, 7);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  // character 7 for user 7: the ids happen to match here only so the fixture
+  // reads coherently -- nothing requires it.
+  ws.send(JSON.stringify({ type: 'join', character_id: 7, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const player = handle.worlds.get('w1').world.getPlayer('7');

@@ -11,6 +11,21 @@
 **Spec:** `docs/superpowers/specs/2026-08-09-player-characters-design.md`
 **Prerequisite:** `docs/superpowers/plans/2026-08-09-player-characters-backend.md` must be complete and its Task 11 green.
 
+## Carried over from the backend plan
+
+Two things the backend work changed that this plan must account for, neither of
+which was anticipated when it was written:
+
+1. **`/api/progression` now requires a `character_id`.** `GET` reads it from the
+   query string, `POST /allocate` and `POST /respec` from the body; all three
+   check ownership and answer 403 otherwise, 400 when it is missing. Progression
+   is per-character, so there was no honest way to keep the old signature. Every
+   frontend caller of the character sheet must pass the active character id —
+   fold this into Task 3, where the active character becomes available.
+2. **`POST /api/players/:characterId/items`** (the admin grant) takes a character
+   id now, not an account id. The path prefix is unchanged; the parameter name
+   is not. If any admin screen calls it, it needs a character picker.
+
 ## Global Constraints
 
 - **Branch:** continues `feat/player-characters`. This plan's Task 9 is the merge gate for the whole epic.
