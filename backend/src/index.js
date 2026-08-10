@@ -253,6 +253,20 @@ const assetStore = require('./services/assetStore');
 
 const runner = require('node-pg-migrate').default;
 
+// node-pg-migrate require()s EVERY file in the migrations directory. With no
+// ignorePattern it filters nothing at all (migration.js: `ignorePattern ===
+// undefined ? files : ...`), so a single non-JS file in there -- like
+// test-user-readme.md, which SOMET-264 puts next to the migration it documents
+// -- makes every migration fail to load with a SyntaxError, in the app's own
+// boot path as well as the CLI's.
+//
+// The pattern is anchored by the library as `^(...)$` and names what to SKIP,
+// so this reads "skip anything that is not a .js file". Kept in step with the
+// --ignore-pattern in package.json's migrate scripts by
+// migration_ignore_pattern.test.js; the two runners must agree or the CLI and
+// the container disagree about what a migration is.
+const MIGRATION_IGNORE_PATTERN = '(?!.*\\.js$).*';
+
 // Run migrations
 async function runMigrations() {
   try {
@@ -261,6 +275,7 @@ async function runMigrations() {
       dir: path.join(__dirname, '..', 'migrations'),
       direction: 'up',
       migrationsTable: 'pgmigrations',
+      ignorePattern: MIGRATION_IGNORE_PATTERN,
       verbose: true,
     });
     console.log('Migrations completed successfully');
