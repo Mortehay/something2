@@ -125,7 +125,9 @@ test('applying a spec twice produces identical rows', async (t) => {
       // fire, not a wiring bug that skipped calling it altogether. The
       // "seeding populates every world with creatures" test below is what
       // proves the non-empty path actually places rows.
-      assert.deepEqual(result, { worlds: 2, links: 1, villages: 1, portalGuards: 0, creatures: 0 },
+      assert.deepEqual(
+        result,
+        { worlds: 2, links: 1, villages: 1, portalGuards: 0, creatures: 0, vaultChests: 0 },
         'applyMapSpec must report exactly what it wrote, not just resolve');
 
       // Correctness rule 3: is_entry must actually be set on the spec's

@@ -26,6 +26,7 @@ const { validateMapSpec } = require('../seeds/mapSpec.js');
 const { fetchLinks, setLink, setPortalLink } = require('../src/services/mapLinks.js');
 const { createVillage, fetchVillages } = require('../src/services/villages.js');
 const { insertPortalGuards } = require('../src/services/dungeonGuards.js');
+const { insertVaultChest } = require('../src/services/chests.js');
 const { populateWorld } = require('../src/services/worldPopulation.js');
 const { assertNavigable } = require('../src/services/navigability.js');
 const { buildWorldGenConfig } = require('../src/services/worldGenConfig.js');
@@ -155,6 +156,7 @@ async function applyMapSpec(pool, spec) {
     let linksWritten = 0;
     let portalGuardsWritten = 0;
     let creaturesWritten = 0;
+    let vaultChestsWritten = 0;
 
     for (const w of spec.worlds) {
       // A grid-less (portal-only) world has nothing to derive a World Map
@@ -243,6 +245,28 @@ async function applyMapSpec(pool, spec) {
       }
     }
 
+    // Vault chests: same idempotency shape as villages just above (one
+    // authored chest per seeded world, guarded by insertVaultChest the same
+    // way createVillage guards a village). Runs after villages and before
+    // populateWorld -- so a chest and a village guard both exist before
+    // populateWorld samples tile candidates, and so a future teach-in of
+    // creatureTileCandidates to avoid chest tiles (not done by this task,
+    // see Task 3's "explicitly out of scope") has a chest row to check
+    // against once it lands.
+    for (const w of spec.worlds) {
+      if (!w.chest) continue;
+      const worldId = idByKey.get(w.key);
+      const existing = await client.query('SELECT id FROM world_chests WHERE world_id = $1', [worldId]);
+      if (existing.rowCount === 0) {   // idempotent: one authored chest per seeded world
+        await insertVaultChest(client, worldId, {
+          x: w.chest.x, y: w.chest.y,
+          guardCreatureType: w.chest.guard_creature_type,
+          level: w.chest.level,
+        });
+        vaultChestsWritten += 1;
+      }
+    }
+
     // MUST be after links (populateWorld reads them for doorway tiles), after
     // portal guards (its delete spares guards, but a guard must already exist
     // to be spared) and -- the non-obvious one -- after VILLAGES.
@@ -311,6 +335,7 @@ async function applyMapSpec(pool, spec) {
     return {
       worlds: worldsWritten, links: linksWritten, villages,
       portalGuards: portalGuardsWritten, creatures: creaturesWritten,
+      vaultChests: vaultChestsWritten,
     };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -335,7 +360,7 @@ if (require.main === module) {
     .then((n) => {
       console.log(
         `applied ${name}: ${n.worlds} worlds, ${n.links} links, ${n.villages} villages, `
-        + `${n.portalGuards} portal guards, ${n.creatures} creatures`);
+        + `${n.portalGuards} portal guards, ${n.creatures} creatures, ${n.vaultChests} vault chests`);
       // See this file's header: only the world_chunks cache is reachable from
       // here. Printed unconditionally rather than probed -- this process has no
       // way to tell whether a backend is up, and a note that only appears
