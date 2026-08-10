@@ -346,3 +346,43 @@ test('the retired creature_count field is rejected, pointing at density', () => 
   assert.ok(errors.some((e) => e.includes('creature_count') && e.includes('density')),
     `expected a creature_count error mentioning density, got ${JSON.stringify(errors)}`);
 });
+
+// allows_fast_travel gates map-based travel (Plan B slice 1). It is optional
+// and defaults to FALSE, which is the safety property: a world added later is
+// not a travel target until someone deliberately says so, so the portal guards
+// that gate dungeon entrances cannot be skipped by omission.
+test('allows_fast_travel is optional', () => {
+  const spec = valid();
+  delete spec.worlds[0].allows_fast_travel;
+  assert.deepEqual(validateMapSpec(spec), []);
+});
+
+test('allows_fast_travel accepts booleans', () => {
+  for (const v of [true, false]) {
+    const spec = valid();
+    spec.worlds[0].allows_fast_travel = v;
+    assert.deepEqual(validateMapSpec(spec), []);
+  }
+});
+
+// Rejected rather than coerced. "true"/1 are the two ways a hand-edited spec
+// expresses this wrongly, and silently coercing either would flag a world as a
+// travel target on the strength of a typo.
+test('a non-boolean allows_fast_travel is rejected', () => {
+  for (const bad of ['true', 1, 'yes', null]) {
+    const spec = valid();
+    spec.worlds[0].allows_fast_travel = bad;
+    const errors = validateMapSpec(spec);
+    assert.ok(errors.some((e) => e.includes('allows_fast_travel')),
+      `expected an allows_fast_travel error for ${JSON.stringify(bad)}, got ${JSON.stringify(errors)}`);
+  }
+});
+
+// Unlike is_entry, MANY worlds may carry it -- it is not mutually exclusive,
+// so there is no "exactly one" rule and no clear-the-others step on seed.
+test('several worlds may allow fast travel at once', () => {
+  const spec = valid();
+  spec.worlds[0].allows_fast_travel = true;
+  spec.worlds[1].allows_fast_travel = true;
+  assert.deepEqual(validateMapSpec(spec), []);
+});

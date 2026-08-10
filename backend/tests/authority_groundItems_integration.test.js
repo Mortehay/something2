@@ -80,6 +80,11 @@ function makePool(chunkSize, { itemsFor, claim } = {}) {
       // fake pool that falls through to rows:[] refuses the join -- which makes
       // the test HANG waiting for 'joined' rather than fail. Answer it explicitly.
       if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+      // Plan B slice 3: the join policy's world+visit lookup, which now runs
+      // on every join. Falling through to rows:[] refuses it, and the test
+      // then HANGS waiting for 'joined' rather than failing. is_entry with no
+      // history is the first-join leg -- what these fixtures actually are.
+      if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] }; // default center spawn
       if (/FROM world_creatures/i.test(sql)) return { rows: [] };
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };

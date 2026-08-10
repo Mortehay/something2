@@ -386,7 +386,13 @@ app.get('/api/player/world-map', playerGuard, async (req, res) => {
     }
 
     const worlds = (await pool.query(
-      `SELECT id, name, graph_x, graph_y, is_entry, level_min, level_max
+      // allows_fast_travel is emitted for VISITED worlds only -- this SELECT is
+      // scoped to them, and the `unvisited` stubs built below carry nothing but
+      // an id, the world they hang off and a compass edge. A stub already
+      // withholds its name, level band and coordinates; "this unseen place is a
+      // travel hub" is a different shape of the same leak, and it would tell a
+      // player which unexplored doors are worth taking.
+      `SELECT id, name, graph_x, graph_y, is_entry, level_min, level_max, allows_fast_travel
          FROM worlds WHERE id = ANY($1::uuid[]) ORDER BY name`,
       [visited])).rows;
 

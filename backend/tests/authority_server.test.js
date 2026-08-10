@@ -76,6 +76,11 @@ function fakePool() {
       // fake pool that falls through to rows:[] refuses the join -- which makes the
       // test HANG waiting for 'joined' rather than fail. Answer it explicitly.
       if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+      // Plan B slice 3: the join policy's world+visit lookup, which now runs
+      // on every join. Falling through to rows:[] refuses it, and the test
+      // then HANGS waiting for 'joined' rather than failing. is_entry with no
+      // history is the first-join leg -- what these fixtures actually are.
+      if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
       if (/FROM player_items/i.test(sql)) return { rows: [{ id: 'i1', item_type_id: 1 }, { id: 'i3', item_type_id: 3 }, { id: 'i5', item_type_id: 5 }] };
       if (/FROM player_equipment/i.test(sql)) return { rows: [] };
       if (/INSERT INTO player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
@@ -222,6 +227,60 @@ test('join → joined with a spawn; input → state includes the moved player', 
     if (me && me.x > startX) moved = me;
   }
   assert.ok(moved, 'player should move east after input');
+  ws.close();
+  handle.close(); server.close();
+});
+
+// --- Join authorization (Plan B slice 3) -------------------------------------
+//
+// The player World Map only OFFERS worlds that are visited and flagged
+// allows_fast_travel, but that offer is made in the browser. These two tests
+// are the hand-crafted join frames the plan calls for: the socket is already
+// open and authenticated, so nothing stops a client from naming any world id it
+// likes. Before this rule, every one of them succeeded.
+function fakePoolWithFacts(facts) {
+  const pool = fakePool();
+  const inner = pool.query;
+  pool.query = async (sql, params) => {
+    if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [facts] };
+    return inner(sql, params);
+  };
+  return withConnect(pool);
+}
+
+test('a forged join into an unreachable world is refused', async () => {
+  // A character with history (so the first-join allowance is spent) naming a
+  // world it has never visited and which is not a travel target: a dungeon
+  // interior behind a portal guard, in the shape the live data has.
+  const { url, handle, server } = await bootWith(fakePoolWithFacts({
+    is_entry: false, allows_fast_travel: false,
+    visited: false, visited_any: true, last_world: 'somewhere-else',
+  }));
+  const ws = connect(url, 1);
+  await new Promise((res) => ws.on('open', res));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  // FIRST message, not the first `error`. Waiting specifically for an error
+  // would silently pass if the server sent `joined` and then errored for some
+  // unrelated reason afterwards -- which is the very outcome under test.
+  const first = await nextMsg(ws);
+  assert.equal(first.type, 'error', 'the join must be refused, not completed');
+  assert.equal(first.message, 'you cannot travel there');
+  ws.close();
+  handle.close(); server.close();
+});
+
+test('a visited, flagged world is joinable', async () => {
+  // The positive control. Without it the test above is satisfied by a server
+  // that refuses everything, which would "pass" while the game was unplayable.
+  const { url, handle, server } = await bootWith(fakePoolWithFacts({
+    is_entry: false, allows_fast_travel: true,
+    visited: true, visited_any: true, last_world: 'somewhere-else',
+  }));
+  const ws = connect(url, 1);
+  await new Promise((res) => ws.on('open', res));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  const joined = await nextMsg(ws, 'joined');
+  assert.equal(joined.type, 'joined');
   ws.close();
   handle.close(); server.close();
 });
@@ -811,6 +870,11 @@ function equipRacePool(delayMs = 20) {
       // SOMET-260: join resolves the character first; falling through to
       // rows:[] refuses the join and HANGS the test waiting for 'joined'.
       if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+      // Plan B slice 3: the join policy's world+visit lookup, which now runs
+      // on every join. Falling through to rows:[] refuses it, and the test
+      // then HANGS waiting for 'joined' rather than failing. is_entry with no
+      // history is the first-join leg -- what these fixtures actually are.
+      if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
       if (/INSERT INTO player_equipment/i.test(sql)) {
         await new Promise((r) => setTimeout(r, delayMs));
         const itemId = params[2];
@@ -963,6 +1027,11 @@ async function mkAttackHarness(opts = {}) {
       // SOMET-260: join resolves the character first; falling through to
       // rows:[] refuses the join and HANGS the test waiting for 'joined'.
       if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+      // Plan B slice 3: the join policy's world+visit lookup, which now runs
+      // on every join. Falling through to rows:[] refuses it, and the test
+      // then HANGS waiting for 'joined' rather than failing. is_entry with no
+      // history is the first-join leg -- what these fixtures actually are.
+      if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
       // Must be matched BEFORE the generic /FROM player_items/ branch: the
       // consume statement mentions player_items in its subquery too.
       //
@@ -1402,6 +1471,11 @@ function highConProgressionPool(characterId) {
       // SOMET-260: join resolves the character first; falling through to
       // rows:[] refuses the join and HANGS the test waiting for 'joined'.
       if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+      // Plan B slice 3: the join policy's world+visit lookup, which now runs
+      // on every join. Falling through to rows:[] refuses it, and the test
+      // then HANGS waiting for 'joined' rather than failing. is_entry with no
+      // history is the first-join leg -- what these fixtures actually are.
+      if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
       if (/FROM player_progression WHERE character_id/i.test(sql)) {
         return { rows: [{
           character_id: Number(characterId), experience: '0', level: 1, stat_points: 0,

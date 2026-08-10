@@ -579,3 +579,48 @@ test('seeding refuses a world sealed by its own terrain', async (t) => {
     await pool.end();
   }
 });
+
+// allows_fast_travel, seeded for real rather than asserted from source text
+// (Plan B slice 1). The half-wiring this guards against: a column present in
+// the INSERT but missing from the ON CONFLICT SET works on a fresh database
+// and then silently stops updating on every re-seed, so the spec and the live
+// row drift apart with nothing failing.
+test('allows_fast_travel round-trips through a real seed, both directions', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — fast-travel seeding is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  const flagOf = async (name) => (await pool.query(
+    'SELECT allows_fast_travel FROM worlds WHERE name = $1', [name])).rows[0]?.allows_fast_travel;
+  try {
+    await cleanup(pool);
+    await withEntryPreserved(pool, async () => {
+      // One world opts in, the other omits the key entirely.
+      const s = spec();
+      s.worlds[0].allows_fast_travel = true;
+      delete s.worlds[1].allows_fast_travel;
+      await applyMapSpec(pool, s);
+
+      assert.equal(await flagOf('zzTestAlpha'), true, 'an opted-in world must be seeded true');
+      assert.equal(await flagOf('zzTestBeta'), false,
+        'a world that omits the key must be false, never null or true');
+
+      // Now take it away. The spec is the source of truth, so removing the key
+      // must turn the flag back OFF -- a world must not stay permanently
+      // travellable because it once was. This is the assertion that fails if
+      // the ON CONFLICT SET is missing.
+      const s2 = spec();
+      delete s2.worlds[0].allows_fast_travel;
+      await applyMapSpec(pool, s2);
+
+      assert.equal(await flagOf('zzTestAlpha'), false,
+        're-seeding without the key must clear the flag (ON CONFLICT SET missing?)');
+    });
+  } finally {
+    await cleanup(pool);
+    await pool.end().catch(() => {});
+  }
+});

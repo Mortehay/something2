@@ -109,11 +109,11 @@ async function createTestCharacter(pool, userId, slot = 1) {
 // content, and a leftover throwaway world shows up in the admin map. Every
 // world created here is tracked and deleted in the finally below; map_links and
 // character_visited_worlds cascade off it.
-async function createTestWorld(pool, created, { name, x, y }) {
+async function createTestWorld(pool, created, { name, x, y, fastTravel = false }) {
   const r = await pool.query(
-    `INSERT INTO worlds (name, seed, graph_x, graph_y, level_min, level_max)
-     VALUES ($1, 1, $2, $3, 1, 3) RETURNING id`,
-    [name, x, y]);
+    `INSERT INTO worlds (name, seed, graph_x, graph_y, level_min, level_max, allows_fast_travel)
+     VALUES ($1, 1, $2, $3, 1, 3, $4) RETURNING id`,
+    [name, x, y, fastTravel]);
   created.push(r.rows[0].id);
   return r.rows[0].id;
 }
@@ -293,6 +293,53 @@ test('the map is fogged: visited worlds named, neighbours anonymous, the rest ab
     assert.ok(!serialised.includes(d), 'a world two hops out must not appear even as an id');
 
     assert.equal(body.currentWorldId, b);
+  } finally {
+    await cleanup(dbPool, { users, worlds });
+  }
+});
+
+// Plan B slice 3. The flag is what makes a node clickable, so it has to reach
+// the client -- but only for worlds the character has actually been to.
+test('the travel flag is emitted for visited worlds and withheld from stubs', async (t) => {
+  if (!dbReady(t, 'the fast-travel flag on the wire')) return;
+  const users = [];
+  const worlds = [];
+  try {
+    const user = await createTestUser(dbPool);
+    users.push(user);
+    const character = await createTestCharacter(dbPool, user);
+
+    const hubName = uniq('Hub');
+    const roomName = uniq('Room');
+    // hub: visited AND a travel target. room: visited, NOT a target (the
+    // dungeon-interior case). beyond: unvisited and flagged, which is the leak
+    // this test is really about.
+    const hub = await createTestWorld(dbPool, worlds, { name: hubName, x: 0, y: 0, fastTravel: true });
+    const room = await createTestWorld(dbPool, worlds, { name: roomName, x: 1, y: 0, fastTravel: false });
+    const beyond = await createTestWorld(dbPool, worlds, { name: uniq('Beyond'), x: 2, y: 0, fastTravel: true });
+    await link(dbPool, hub, room, 'E');
+    await link(dbPool, room, beyond, 'E');
+    for (const w of [hub, room]) {
+      await dbPool.query(
+        'INSERT INTO character_visited_worlds (character_id, world_id) VALUES ($1, $2)',
+        [character, w]);
+    }
+
+    const res = await request(app).get('/api/player/world-map')
+      .query({ character_id: character }).set(authed(user));
+    assert.equal(res.status, 200);
+
+    const byName = Object.fromEntries(res.body.worlds.map((w) => [w.name, w]));
+    assert.equal(byName[hubName].allows_fast_travel, true);
+    // Both directions: a test that only ever saw `true` would pass against a
+    // hardcoded field, and the whole mechanic is that SOME worlds are not
+    // targets.
+    assert.equal(byName[roomName].allows_fast_travel, false);
+
+    // The stub stays bare. `beyond` is flagged, so if the field ever reached
+    // the unvisited list it would tell the player which unexplored door leads
+    // somewhere worth going -- the same class of leak as its name.
+    assert.deepEqual(res.body.unvisited, [{ id: beyond, from: room, edge: 'E' }]);
   } finally {
     await cleanup(dbPool, { users, worlds });
   }

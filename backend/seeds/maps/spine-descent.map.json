@@ -5,6 +5,7 @@
     {
       "key": "entry",
       "name": "Old Trailhead",
+      "allows_fast_travel": true,
       "grid": [0, 0],
       "seed": 1001,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -17,6 +18,7 @@
     {
       "key": "pass",
       "name": "Windwatch Pass",
+      "allows_fast_travel": true,
       "grid": [1, 0],
       "seed": 1002,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -28,6 +30,7 @@
     {
       "key": "cache",
       "name": "Hollow Cache",
+      "allows_fast_travel": true,
       "grid": [1, -1],
       "seed": 1003,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -39,6 +42,7 @@
     {
       "key": "elite",
       "name": "Ashfang Den",
+      "allows_fast_travel": true,
       "grid": [1, 1],
       "seed": 1004,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -50,6 +54,7 @@
     {
       "key": "gorge",
       "name": "Shrikewind Gorge",
+      "allows_fast_travel": true,
       "grid": [2, 0],
       "seed": 1005,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -61,6 +66,7 @@
     {
       "key": "shrine",
       "name": "Frostbound Shrine",
+      "allows_fast_travel": true,
       "grid": [2, 1],
       "seed": 1006,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -72,6 +78,7 @@
     {
       "key": "deep",
       "name": "The Deep Cut",
+      "allows_fast_travel": true,
       "grid": [3, 0],
       "seed": 1007,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -83,6 +90,7 @@
     {
       "key": "end",
       "name": "Glacier's End",
+      "allows_fast_travel": true,
       "grid": [4, 0],
       "seed": 1008,
       "width": 64, "height": 64, "chunk_size": 32,

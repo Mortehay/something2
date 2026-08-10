@@ -143,6 +143,30 @@ test('characters service', { skip: !url ? 'no database URL' : false }, async (t)
       const [row] = await listCharacters(pool, userId);
       assert.equal(row.level, 1);
       assert.equal(row.lastWorldName, null, 'a character that has never played has no last world');
+      assert.equal(row.lastWorldId, null, 'and no last world id to auto-join into');
+    });
+  });
+
+  // The id, not just the name. Auto-join resumes the world a character logged
+  // out of, and it needs an id to do it -- the name was already exposed for
+  // display and is useless for joining. Asserted against the SPECIFIC world,
+  // and against the most recent one when there are several, because "returns
+  // some world the character has been in" is exactly the bug this guards.
+  await t.test('the list carries the most recently occupied world id', async () => {
+    await withUser('zzSvcLastWorld', async (userId) => {
+      const c = await createCharacter(pool, userId, 'zzSvcLastWorldChar', warrior.id);
+      const worlds = (await pool.query('SELECT id, name FROM worlds ORDER BY name LIMIT 2')).rows;
+      // Older row first, then a newer one in a different world.
+      await pool.query(
+        `INSERT INTO world_players (world_id, character_id, x, y, updated_at)
+         VALUES ($1, $2, 10, 10, now() - interval '1 hour')`, [worlds[0].id, c.id]);
+      await pool.query(
+        `INSERT INTO world_players (world_id, character_id, x, y, updated_at)
+         VALUES ($1, $2, 20, 20, now())`, [worlds[1].id, c.id]);
+
+      const [row] = await listCharacters(pool, userId);
+      assert.equal(row.lastWorldId, worlds[1].id, 'must be the most recent world, not the first');
+      assert.equal(row.lastWorldName, worlds[1].name, 'name and id must describe the SAME world');
     });
   });
 

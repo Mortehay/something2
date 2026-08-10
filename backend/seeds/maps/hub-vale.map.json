@@ -5,6 +5,7 @@
     {
       "key": "hub",
       "name": "Vale Crossing",
+      "allows_fast_travel": true,
       "grid": [0, 0],
       "seed": 2001,
       "width": 96, "height": 96, "chunk_size": 32,
@@ -20,6 +21,7 @@
     {
       "key": "forest",
       "name": "Thornbriar Reach",
+      "allows_fast_travel": true,
       "grid": [1, 0],
       "seed": 2002,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -30,6 +32,7 @@
     {
       "key": "dunes",
       "name": "Sunscar Flats",
+      "allows_fast_travel": true,
       "grid": [-1, 0],
       "seed": 2003,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -40,6 +43,7 @@
     {
       "key": "frozen",
       "name": "Rimehollow",
+      "allows_fast_travel": true,
       "grid": [0, -1],
       "seed": 2004,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -50,6 +54,7 @@
     {
       "key": "mire",
       "name": "Blackfen Sinks",
+      "allows_fast_travel": true,
       "grid": [0, 1],
       "seed": 2005,
       "width": 64, "height": 64, "chunk_size": 32,

@@ -30,14 +30,43 @@ export function pickEntryWorld(worlds) {
 }
 
 // The full auto-join decision. Returns the world id to join, or null.
-export function autoJoinTarget({ isAdmin, isPlaying, alreadyJoined, hasGame, hasCharacter, worlds, mapTiles, mapConfig }) {
+export function autoJoinTarget({
+  isAdmin, isPlaying, alreadyJoined, hasGame, hasCharacter, lastWorldId, isGameRoute,
+  worlds, mapTiles, mapConfig,
+}) {
   if (isAdmin || isPlaying || alreadyJoined) return null;
+  // Only on the game route. This used to be enforced by ACCIDENT: the Game
+  // instance was created in an effect gated on the same route, so `hasGame` was
+  // false everywhere else and auto-join could not fire. SOMET-271 removed that
+  // gate (a direct load of /game/map left gameRef null forever, which silently
+  // broke click-to-travel), and the accident went with it -- auto-join then
+  // fired while the player was reading the World Map and, worse, RACED travel:
+  // observed live, a click entered Old Trailhead and auto-join dragged the
+  // character back to its last world nine seconds later. Resuming into a world
+  // is a thing to do when the player is looking at the game, not at a map.
+  if (!isGameRoute) return null;
   if (!hasGame) return null;
   // SOMET-260: the authority refuses a join with no character, so firing before
   // one is chosen is a guaranteed error toast rather than a race that sometimes
   // works. Same reasoning as worldAssetsReady below -- wait, don't retry.
   if (!hasCharacter) return null;
   if (!worldAssetsReady(mapTiles, mapConfig)) return null;
+
+  // Where this character actually logged out wins over the entry world.
+  // pickEntryWorld answers "where does a BRAND NEW character start", which is
+  // not the same question; using it unconditionally is what made "resume where
+  // you logged out" restore the right coordinates in the wrong world -- the
+  // authority then read world_players for the ENTRY world, so a character that
+  // left via a doorway came back somewhere it had not been.
+  //
+  // Membership-checked against the loaded list: a world deleted from another
+  // session since this character last played would otherwise produce a join the
+  // server refuses, and a refused join never sends 'joined' -- the client would
+  // hang rather than surface an error.
+  if (lastWorldId != null && (worlds || []).some((w) => w.id === lastWorldId)) {
+    return lastWorldId;
+  }
+
   const target = pickEntryWorld(worlds);
   return target ? target.id : null;
 }

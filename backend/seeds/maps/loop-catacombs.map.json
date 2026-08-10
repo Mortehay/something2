@@ -5,6 +5,7 @@
     {
       "key": "entry",
       "name": "Catacomb Threshold",
+      "allows_fast_travel": true,
       "grid": [0, 0],
       "seed": 3001,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -16,6 +17,7 @@
     {
       "key": "crypt",
       "name": "Sealed Mausoleum",
+      "allows_fast_travel": true,
       "grid": [-1, 0],
       "seed": 3002,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -26,6 +28,7 @@
     {
       "key": "eastwing",
       "name": "Sunken Eastwing",
+      "allows_fast_travel": true,
       "grid": [1, 0],
       "seed": 3003,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -36,6 +39,7 @@
     {
       "key": "southwing",
       "name": "Drowned Southwing",
+      "allows_fast_travel": true,
       "grid": [0, 1],
       "seed": 3004,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -46,6 +50,7 @@
     {
       "key": "farhall",
       "name": "Farrow Hall",
+      "allows_fast_travel": true,
       "grid": [2, 0],
       "seed": 3005,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -56,6 +61,7 @@
     {
       "key": "deepvault",
       "name": "Deepvault Row",
+      "allows_fast_travel": true,
       "grid": [1, 1],
       "seed": 3006,
       "width": 64, "height": 64, "chunk_size": 32,
@@ -66,6 +72,7 @@
     {
       "key": "heart",
       "name": "Frozen Ossuary Heart",
+      "allows_fast_travel": true,
       "grid": [2, 1],
       "seed": 3007,
       "width": 64, "height": 64, "chunk_size": 32,

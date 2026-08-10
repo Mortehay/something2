@@ -165,8 +165,9 @@ async function applyMapSpec(pool, spec) {
       const r = await client.query(
         `INSERT INTO worlds (name, seed, chunk_size, width, height,
                              allowed_creature_types, entry_spawn, biomes, biome_cell,
-                             graph_x, graph_y, level_min, level_max, density)
-         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14)
+                             graph_x, graph_y, level_min, level_max, density,
+                             allows_fast_travel)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15)
          ON CONFLICT (name) DO UPDATE
            SET seed = EXCLUDED.seed, chunk_size = EXCLUDED.chunk_size,
                width = EXCLUDED.width, height = EXCLUDED.height,
@@ -175,7 +176,12 @@ async function applyMapSpec(pool, spec) {
                biome_cell = EXCLUDED.biome_cell,
                graph_x = EXCLUDED.graph_x, graph_y = EXCLUDED.graph_y,
                level_min = EXCLUDED.level_min, level_max = EXCLUDED.level_max,
-               density = EXCLUDED.density
+               density = EXCLUDED.density,
+               -- Re-asserted on every seed, like every other authored column.
+               -- The spec is the source of truth, so removing the key from a
+               -- spec must take the flag back OFF rather than leave a world
+               -- permanently travellable because it once was.
+               allows_fast_travel = EXCLUDED.allows_fast_travel
          RETURNING id`,
         [w.name, w.seed, w.chunk_size ?? 64, w.width, w.height,
          JSON.stringify(w.allowed_creature_types ?? []),
@@ -184,7 +190,8 @@ async function applyMapSpec(pool, spec) {
          pos.x, pos.y,
          w.level_band ? w.level_band[0] : 1,
          w.level_band ? w.level_band[1] : 1,
-         w.density ?? 'normal'],
+         w.density ?? 'normal',
+         w.allows_fast_travel === true],
       );
       idByKey.set(w.key, r.rows[0].id);
       worldsWritten += 1;

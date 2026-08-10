@@ -368,6 +368,11 @@ function fakeAuthorityPool() {
       // SOMET-260: the join resolves the character first; falling through to
       // rows:[] refuses the join and HANGS the test on nextMsg('joined').
       if (/FROM characters/i.test(sql)) return { rows: [{ id: 1, entity_type_id: 1 }] };
+      // Plan B slice 3: the join policy's world+visit lookup, which now runs on
+      // every join. Same trap as the line above -- rows:[] refuses the join and
+      // the test hangs on nextMsg('joined') rather than failing. is_entry with
+      // no history is the first-join leg, which is what this fixture is.
+      if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
       return { rows: [] }; // world_players, player_binds, item_types, player_items/equipment, gold, player_progression
     },
     connect: async () => ({ query: async () => ({ rows: [] }), release: () => {} }),
