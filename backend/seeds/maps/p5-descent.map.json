@@ -1604,6 +1604,7 @@
     {
       "key": "surface_highlands_0",
       "name": "Highlands Reach",
+      "allows_fast_travel": true,
       "grid": [
         20,
         -1
@@ -1631,6 +1632,7 @@
     {
       "key": "surface_highlands_1",
       "name": "Highlands Frontier",
+      "allows_fast_travel": true,
       "grid": [
         32,
         -2
@@ -1658,6 +1660,7 @@
     {
       "key": "surface_verdant_jungle_0",
       "name": "Verdant Jungle Reach",
+      "allows_fast_travel": true,
       "grid": [
         34,
         0
@@ -1685,6 +1688,7 @@
     {
       "key": "surface_verdant_jungle_1",
       "name": "Verdant Jungle Frontier",
+      "allows_fast_travel": true,
       "grid": [
         21,
         -2
@@ -1712,6 +1716,7 @@
     {
       "key": "surface_storm_coast_0",
       "name": "Storm Coast Reach",
+      "allows_fast_travel": true,
       "grid": [
         21,
         2
@@ -1739,6 +1744,7 @@
     {
       "key": "surface_storm_coast_1",
       "name": "Storm Coast Frontier",
+      "allows_fast_travel": true,
       "grid": [
         33,
         1
@@ -1766,6 +1772,7 @@
     {
       "key": "surface_sunken_ruins_0",
       "name": "Sunken Ruins Reach",
+      "allows_fast_travel": true,
       "grid": [
         31,
         -1
@@ -1793,6 +1800,7 @@
     {
       "key": "surface_sunken_ruins_1",
       "name": "Sunken Ruins Frontier",
+      "allows_fast_travel": true,
       "grid": [
         22,
         -1
@@ -1820,6 +1828,7 @@
     {
       "key": "surface_ashfields_0",
       "name": "Ashfields Reach",
+      "allows_fast_travel": true,
       "grid": [
         23,
         1
@@ -1847,6 +1856,7 @@
     {
       "key": "surface_ashfields_1",
       "name": "Ashfields Frontier",
+      "allows_fast_travel": true,
       "grid": [
         33,
         -2

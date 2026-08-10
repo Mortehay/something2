@@ -247,3 +247,39 @@ test('every hub-vale world still pairs its original biome with one new surface b
       `${w.key} must gain exactly one new surface biome, got ${JSON.stringify(w.biomes)}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Fast-travel safety invariant (Plan B slice 2).
+//
+// This does NOT pin which worlds are travel targets -- that is a curation
+// decision and is expected to change. It pins the one property that must hold
+// however the curation is revised: a DUNGEON ROOM is never a target.
+//
+// 7 creatures carry blocks_portal_id to gate dungeon entrances. Fast travel
+// into a dungeon interior walks straight past them, so one wrongly-flagged
+// world silently defeats a mechanic that took deliberate work to place. The
+// naming convention is the discriminator the shipped content actually uses:
+// every dungeon room is "The <Dungeon>: <Room>". It correctly excludes "The
+// Deep Cut" (no colon), which is a surface gorge, and correctly includes all
+// 56 rooms across the six dungeon chains.
+// ---------------------------------------------------------------------------
+const DUNGEON_ROOM = /^The .+: .+$/;
+
+test('no dungeon room is a fast-travel target', () => {
+  const flagged = [];
+  const offenders = [];
+  for (const file of fs.readdirSync(MAPS_DIR).filter((f) => f.endsWith('.json'))) {
+    const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, file), 'utf8'));
+    for (const w of spec.worlds) {
+      if (w.allows_fast_travel !== true) continue;
+      flagged.push(w.name);
+      if (DUNGEON_ROOM.test(w.name)) offenders.push(`${file}: ${w.name}`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'these dungeon rooms would let a character skip their portal guard');
+  // Non-vacuous: an invariant over an empty set proves nothing, and this test
+  // would pass trivially if every flag were accidentally deleted.
+  assert.ok(flagged.length > 0,
+    'no world allows fast travel at all -- the invariant above is vacuous');
+});
