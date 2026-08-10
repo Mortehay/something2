@@ -377,6 +377,10 @@ export default function GameShell() {
       // without a character. autoJoin.test.js passed the flag explicitly and
       // stayed green throughout. Caught in the browser.
       hasCharacter: !!activeCharacter,
+      // Where this character logged out. Read off activeCharacter, which is
+      // also this effect's dependency, so a character switch re-evaluates the
+      // target rather than resuming the previous character's world.
+      lastWorldId: activeCharacter ? activeCharacter.lastWorldId : null,
     });
     if (targetId == null) return;
     autoJoinedRef.current = true;

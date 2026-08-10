@@ -103,6 +103,18 @@ describe('auto-join waits for a character', () => {
     expect(gameShellSource).toMatch(/autoJoinTarget\(\{[\s\S]{0,600}hasCharacter:/);
   });
 
+  it('GameShell SUPPLIES lastWorldId to autoJoinTarget', () => {
+    // The same failure mode as hasCharacter below: the pure function can prefer
+    // the last world all it likes, but if the call site never passes it the
+    // argument is undefined and every player silently resumes into the entry
+    // world -- with autoJoin.test.js green throughout, because it passes the
+    // value explicitly. The guard has to be on the CALL SITE.
+    // Generous window: the call site carries long rationale comments between
+    // the opening brace and this argument, and a window tight enough to be
+    // "precise" just fails on prose.
+    expect(gameShellSource).toMatch(/autoJoinTarget\(\{[\s\S]{0,1500}lastWorldId:/);
+  });
+
   it('re-runs the auto-join effect when the character changes', () => {
     // Choosing a character is the LAST input to become ready. Without it in
     // the dependency array the effect never fires again after the picker

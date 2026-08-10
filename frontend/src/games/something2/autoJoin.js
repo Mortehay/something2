@@ -30,7 +30,10 @@ export function pickEntryWorld(worlds) {
 }
 
 // The full auto-join decision. Returns the world id to join, or null.
-export function autoJoinTarget({ isAdmin, isPlaying, alreadyJoined, hasGame, hasCharacter, worlds, mapTiles, mapConfig }) {
+export function autoJoinTarget({
+  isAdmin, isPlaying, alreadyJoined, hasGame, hasCharacter, lastWorldId,
+  worlds, mapTiles, mapConfig,
+}) {
   if (isAdmin || isPlaying || alreadyJoined) return null;
   if (!hasGame) return null;
   // SOMET-260: the authority refuses a join with no character, so firing before
@@ -38,6 +41,22 @@ export function autoJoinTarget({ isAdmin, isPlaying, alreadyJoined, hasGame, has
   // works. Same reasoning as worldAssetsReady below -- wait, don't retry.
   if (!hasCharacter) return null;
   if (!worldAssetsReady(mapTiles, mapConfig)) return null;
+
+  // Where this character actually logged out wins over the entry world.
+  // pickEntryWorld answers "where does a BRAND NEW character start", which is
+  // not the same question; using it unconditionally is what made "resume where
+  // you logged out" restore the right coordinates in the wrong world -- the
+  // authority then read world_players for the ENTRY world, so a character that
+  // left via a doorway came back somewhere it had not been.
+  //
+  // Membership-checked against the loaded list: a world deleted from another
+  // session since this character last played would otherwise produce a join the
+  // server refuses, and a refused join never sends 'joined' -- the client would
+  // hang rather than surface an error.
+  if (lastWorldId != null && (worlds || []).some((w) => w.id === lastWorldId)) {
+    return lastWorldId;
+  }
+
   const target = pickEntryWorld(worlds);
   return target ? target.id : null;
 }

@@ -72,3 +72,35 @@ describe('autoJoinTarget', () => {
     expect(autoJoinTarget({ ...base, worlds: [] })).toBeNull();
   });
 });
+
+// The epic's headline requirement is "log in at the point where you logged
+// out", and the WORLD is half of that point. Before this, auto-join always
+// targeted the is_entry world, so a character that logged out in Caves was
+// restored to its last position inside Overworld instead -- right coordinates,
+// wrong world.
+describe('autoJoinTarget resumes the last world', () => {
+  it('prefers the character last world over the entry world', () => {
+    // 3 is not the entry world (7 is), so this fails against the old code.
+    expect(autoJoinTarget({ ...base, lastWorldId: 3 })).toBe(3);
+  });
+
+  it('falls back to the entry world for a character that has never played', () => {
+    expect(autoJoinTarget({ ...base, lastWorldId: null })).toBe(7);
+    expect(autoJoinTarget({ ...base, lastWorldId: undefined })).toBe(7);
+  });
+
+  it('falls back when the last world no longer exists', () => {
+    // Deleted from another session since this character last played. Joining it
+    // would be a guaranteed server refusal, and a refused join never sends
+    // 'joined' -- the client would sit there forever rather than error.
+    expect(autoJoinTarget({ ...base, lastWorldId: 999 })).toBe(7);
+  });
+
+  it('still respects every other gate', () => {
+    // A last world must not become a way around the readiness rules.
+    expect(autoJoinTarget({ ...base, lastWorldId: 3, isAdmin: true })).toBeNull();
+    expect(autoJoinTarget({ ...base, lastWorldId: 3, hasCharacter: false })).toBeNull();
+    expect(autoJoinTarget({ ...base, lastWorldId: 3, mapConfig: undefined })).toBeNull();
+    expect(autoJoinTarget({ ...base, lastWorldId: 3, alreadyJoined: true })).toBeNull();
+  });
+});

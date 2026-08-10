@@ -42,7 +42,8 @@ async function listCharacters(pool, userId) {
     `SELECT c.id, c.slot, c.name, c.entity_type_id,
             e.name AS class_name,
             COALESCE(pr.level, 1) AS level,
-            w.name AS last_world_name
+            w.name AS last_world_name,
+            lw.world_id AS last_world_id
        FROM characters c
        JOIN entity_types e ON e.id = c.entity_type_id
        LEFT JOIN player_progression pr ON pr.character_id = c.id
@@ -62,6 +63,10 @@ async function listCharacters(pool, userId) {
     entityTypeId: x.entity_type_id,
     level: Number(x.level),
     lastWorldName: x.last_world_name,
+    // The id the client auto-joins into on the next login. lastWorldName is
+    // for display only; resuming needs the id. Both come from the same LATERAL
+    // row, so they can never describe different worlds.
+    lastWorldId: x.last_world_id,
   }));
 }
 
