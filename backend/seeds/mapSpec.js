@@ -119,6 +119,17 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
         `world "${w.key}" density must be one of ${DENSITY_NAMES.join(', ')} (got "${w.density}")`);
     }
 
+    // Optional, defaults to false at the column. Rejected rather than coerced:
+    // "true" and 1 are the two ways a hand-edited spec gets this wrong, and
+    // coercing either would flag a world as a fast-travel target on the
+    // strength of a typo -- which is exactly how a portal-guarded dungeon
+    // would quietly become reachable without passing its guard.
+    if (w.allows_fast_travel !== undefined && typeof w.allows_fast_travel !== 'boolean') {
+      errors.push(
+        `world "${w.key}" allows_fast_travel must be true or false `
+        + `(got ${JSON.stringify(w.allows_fast_travel)})`);
+    }
+
     // Retired: creature_count is now derived from `density` by populateWorld
     // and written back to the column. Accepting both would give one number two
     // authored sources, and the spec's would silently lose on every populate.
