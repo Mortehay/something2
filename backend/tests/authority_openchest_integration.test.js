@@ -56,7 +56,15 @@ const SPAWN = { x: 500, y: 500 };
 // chests in one world: one opened via the real `openchest` WS flow, one
 // reset by the real `_chestRespawnSweep` test seam, asserting the sweep
 // never disturbs the first).
-function makePool({ chestSeed, guardAlive = false, extraChests = [] } = {}) {
+// `progressionAfter` overrides the row UPDATE player_progression returns
+// (defaults to the fixed level:1/all-base-stat row every other test in this
+// file relies on) -- the level-up/applyDerivedStats test below needs a
+// non-base constitution here so entry.world.getPlayer(...).maxHp actually
+// moves, proving world.applyDerivedStats really ran with THIS row rather
+// than merely not crashing.
+function makePool({
+  chestSeed, guardAlive = false, extraChests = [], progressionAfter,
+} = {}) {
   const calls = [];
   let chestState = chestSeed.state;
   const pool = {
@@ -97,6 +105,24 @@ function makePool({ chestSeed, guardAlive = false, extraChests = [] } = {}) {
       // both patterns match that fallback's broader regex.
       if (/SELECT count\(\*\) .* FROM world_creatures/i.test(sql)) {
         return { rows: [{ count: guardAlive ? '1' : '0' }], rowCount: 1 };
+      }
+      // injectGuardIntoSim's per-id load (server.js) -- checked BEFORE the
+      // generic bbox-load fallback below for the same reason as the count
+      // query above (both match that fallback's broader regex). Returns one
+      // full joined-shape row per requested id so entry.world.creatures
+      // actually gains the freshly-respawned guard (the respawn-sweep
+      // regression test below asserts on this).
+      if (/WHERE wc\.id = ANY/i.test(sql)) {
+        const ids = params[0] || [];
+        return {
+          rows: ids.map((id) => ({
+            id, type: 'Wolf', x: SPAWN.x, y: SPAWN.y, hp: 30, facing: 'S',
+            home_x: SPAWN.x, home_y: SPAWN.y, level: 5, damage: 5, blocks_portal_id: null,
+            defense: 2, color: null, resistances: {}, faction: 'hostile', attack_element: 'physical',
+            behavior_name: null,
+          })),
+          rowCount: ids.length,
+        };
       }
       if (/FROM world_creatures/i.test(sql)) return { rows: [] }; // bbox load at world load
       if (/^\s*DELETE FROM world_items WHERE expires_at/i.test(sql)) return { rows: [], rowCount: 0 };
@@ -176,7 +202,7 @@ function makePool({ chestSeed, guardAlive = false, extraChests = [] } = {}) {
       }
       if (/UPDATE player_progression/i.test(sql)) {
         return {
-          rows: [{
+          rows: [progressionAfter || {
             user_id: '1', experience: 50, level: 1, stat_points: 0,
             strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
           }],
@@ -248,7 +274,9 @@ test('openchest against an unlocked chest in range sends chestOpened with items+
   ws.send(JSON.stringify({ type: 'openchest' }));
   const opened = await nextMsg(ws, 'chestOpened');
   assert.equal(opened.chestId, 'chest-1');
-  assert.deepEqual(opened.items, [7]);
+  // Final-review fix (SOMET-244 Important #2): the full inserted
+  // player_items row, not a bare item_type_id -- see chestLoot.test.js.
+  assert.deepEqual(opened.items, [{ id: 'pi1', item_type_id: 7, quantity: 1 }]);
   assert.ok(opened.awarded > 0, 'a guard-level-5 chest opened by a level-1 player must award positive XP');
 
   const entry = handle.worlds.get('w1');
@@ -256,6 +284,16 @@ test('openchest against an unlocked chest in range sends chestOpened with items+
   assert.equal(entry.chests[0].state, 'opened', 'the in-memory cache must reflect the DB write openChest committed');
   assert.ok(entry.chests[0].openedAt, 'openedAt must be carried into the in-memory cache too, not just the DB row');
   assert.equal(entry.chests[0].respawnAt, null, 'a vault chest never gets a respawn timer');
+
+  // Final-review fix (SOMET-244 Important #2): the granted item must land
+  // on the player's IN-MEMORY inventory too, mirroring claimItem's own
+  // pattern (loot.js:232) -- otherwise it cannot be equipped/dropped/sold
+  // until the player reconnects and reloads their inventory from the DB.
+  const p = entry.world.getPlayer('1');
+  assert.ok(
+    p.inv.items.some((it) => it.id === 'pi1' && it.typeId === 7 && it.quantity === 1),
+    'the chest-granted item must be pushed onto p.inv.items, matching claimItem\'s {id, typeId, quantity} shape',
+  );
 
   // A second attempt: nearestChest excludes an opened vault chest, so this
   // never even reaches openChest / the DB again.
@@ -341,6 +379,98 @@ test('the chest respawn sweep patches only the reset chest in place, leaving a c
   assert.equal(far.openedAt, null);
   assert.equal(far.respawnAt, null);
   assert.deepEqual(far.guardCreatureIds, ['respawned-guard-1']);
+
+  ws.close(); handle.close(); server.close();
+});
+
+// Final-review fix (SOMET-244 Critical #1), respawn-sweep half. The `use`
+// handler's half of this same fix is covered in
+// authority_use_field_chest_integration.test.js -- this proves the
+// respawn sweep's freshly-INSERTed guard (world_creatures row
+// 'respawned-guard-1' from the sweep above) actually lands in
+// entry.world.creatures, not just the DB, once the sweep resolves. Before
+// the fix, a chunk holding a player never unloads (every world in the live
+// DB fits inside one player's 3x3 neighborhood), so activateChunk never
+// re-fires to pick up this row -- the respawned guard stayed invisible and
+// unkillable for the rest of the session.
+test('the chest respawn sweep injects the freshly-respawned guard into entry.world.creatures, not just the DB', async () => {
+  const pool = makePool({
+    chestSeed: {
+      id: 'chest-near', x: SPAWN.x, y: SPAWN.y, kind: 'field', state: 'unlocked', guardLevel: 5, guardCreatureIds: [],
+    },
+    extraChests: [
+      {
+        id: 'chest-far', x: 5000, y: 5000, kind: 'field', state: 'opened', guardLevel: 5, guardCreatureIds: [], due: true,
+      },
+    ],
+  });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = await joinAndGetPlayer(url);
+
+  const entry = handle.worlds.get('w1');
+  assert.equal(entry.world.creatures.creatures.has('respawned-guard-1'), false, 'not present before the sweep');
+
+  await handle._chestRespawnSweep();
+
+  assert.equal(
+    entry.world.creatures.creatures.has('respawned-guard-1'), true,
+    'the respawn sweep must inject the new guard into the live sim, or openchest can never see it die',
+  );
+
+  ws.close(); handle.close(); server.close();
+});
+
+// Final-review fix (SOMET-244 Important #3). Mirrors the kill path's own
+// coverage (progression_kill_xp.test.js) for the chest-open path: a
+// level-up must both raise the running game's derived stats (maxHp here)
+// AND push a `progression` frame, not just persist the new level to the
+// DB. guardLevel 20 vs. a level-1 player guarantees xpForChest's XP-diff
+// factor is capped at its max (guard 19+ levels above the player), so the
+// single chest-open XP award crosses the level-2 (xp>=100) AND level-3
+// (xp>=300) thresholds in one shot.
+test('openchest applies derived stats and sends a progression frame on a level-up', async () => {
+  const pool = makePool({
+    chestSeed: {
+      id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'unlocked', guardLevel: 20, guardCreatureIds: [],
+    },
+    progressionAfter: {
+      user_id: '1', experience: 400, level: 3, stat_points: 6,
+      strength: 5, dexterity: 5, constitution: 15, intelligence: 5, wisdom: 5, charisma: 5,
+    },
+  });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = await joinAndGetPlayer(url);
+
+  const entry = handle.worlds.get('w1');
+  const p = entry.world.getPlayer('1');
+  assert.equal(p.maxHp, 100, 'sanity: a fresh level-1 player starts at base maxHp');
+
+  // Both listeners registered BEFORE the triggering send: the handler emits
+  // chestOpened and progression back-to-back with no await between them, so
+  // awaiting nextMsg(ws, 'chestOpened') and only THEN calling nextMsg(ws,
+  // 'progression') can miss the second frame if it already arrived (the
+  // exact race progression_kill_xp.test.js's own harness avoids the same
+  // way, at its line 439).
+  const openedP = nextMsg(ws, 'chestOpened');
+  const progressionMsgP = nextMsg(ws, 'progression');
+  ws.send(JSON.stringify({ type: 'openchest' }));
+  const opened = await openedP;
+  assert.equal(opened.leveledUp, true, 'a guard 19 levels above a level-1 player must level them up');
+  assert.equal(opened.newLevel, 3);
+
+  const progressionMsg = await progressionMsgP;
+  assert.equal(progressionMsg.leveledUp, true);
+  assert.equal(progressionMsg.newLevel, 3);
+  assert.equal(progressionMsg.awarded, opened.awarded);
+  assert.equal(
+    progressionMsg.progression.constitution, 15,
+    'the progression frame must carry the same progression openChest/awardXp returned',
+  );
+
+  // The defect this fix closes: without calling world.applyDerivedStats,
+  // maxHp would still read 100 here -- correct in the DB (constitution:
+  // 15), invisible in the running game until reconnect.
+  assert.equal(p.maxHp, 200, 'applyDerivedStats must raise the running player\'s maxHp on a chest-open level-up');
 
   ws.close(); handle.close(); server.close();
 });

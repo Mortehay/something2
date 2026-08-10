@@ -78,7 +78,17 @@ test('openChest CAS: only the request that flips locked->opened grants loot and 
   ]);
   const result = await openChest(pool, 'c1', 'user1', { rng: () => 0 });
   assert.equal(result.ok, true);
-  assert.deepEqual(result.items, [3]);
+  // Final-review fix (SOMET-244 Important #2): the full inserted
+  // player_items row ({id, item_type_id, quantity}), matching claimItem's
+  // own shape (loot.js:232) -- not a bare item_type_id. The `openchest`
+  // handler needs the id/quantity to push each grant onto p.inv.items.
+  assert.deepEqual(result.items, [{ id: 'pi1', item_type_id: 3, quantity: 1 }]);
+  // Final-review fix (SOMET-244 Important #3): awardXp always computes a
+  // `progression` object (even on a no-op award) -- openChest must hand it
+  // back so the caller can call world.applyDerivedStats on a level-up,
+  // mirroring the kill path (server.js:426-463).
+  assert.equal(result.progression.level, 2);
+  assert.equal(result.progression.experience, 150);
 });
 
 test('openChest CAS: a losing request (already opened) grants nothing', async () => {

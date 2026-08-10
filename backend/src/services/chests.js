@@ -252,8 +252,12 @@ async function respawnDueFieldChests(client, { getWorld, onReset = () => {} }) {
       reset += 1;
       // Counted above unconditionally: the DB write already committed, so
       // this chest WAS reset regardless of whether the caller's onReset
-      // (best-effort cache sync) throws.
-      onReset({
+      // (best-effort cache sync) throws. Awaited (onReset may be async --
+      // server.js's own onReset now injects the fresh guard into the live
+      // sim, a DB round trip) so a caller driving one sweep pass
+      // deterministically (the `_chestRespawnSweep` test seam) observes the
+      // injection as having happened before the sweep call resolves.
+      await onReset({
         id: chest.id,
         worldId: chest.world_id,
         state: 'locked',

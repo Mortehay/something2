@@ -4,6 +4,7 @@ const http = require('node:http');
 const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const { attachAuthority } = require('../src/authority/server.js');
+const { worldOverviewCache, clearOverviewCache } = require('../src/services/overviewCache.js');
 
 // Harness follows authority_groundItems_integration.test.js exactly (same
 // fakePool shape, same bootWith/nextMsg helpers, same connect() proxy) --
@@ -87,6 +88,23 @@ function makePool({ bounded = true, userItems = [] } = {}) {
       if (/FROM world_players WHERE/i.test(sql)) return { rows: [] }; // default center spawn
       if (/^\s*INSERT INTO world_players/i.test(sql)) return { rows: [] };
       if (/^\s*INSERT INTO world_creatures/i.test(sql)) return { rows: [{ id: 'guard-x' }], rowCount: 1 };
+      // injectGuardIntoSim's per-id load (server.js), checked BEFORE the
+      // generic bbox-load fallback below for the same reason as everywhere
+      // else this pattern appears -- both match that fallback's broader
+      // regex. Returns one full joined-shape row per requested id so
+      // entry.world.creatures actually gains the freshly-spawned guard.
+      if (/WHERE wc\.id = ANY/i.test(sql)) {
+        const ids = params[0] || [];
+        return {
+          rows: ids.map((id) => ({
+            id, type: 'Wolf', x: 550, y: 550, hp: 30, facing: 'S',
+            home_x: 550, home_y: 550, level: 5, damage: 5, blocks_portal_id: null,
+            defense: 2, color: null, resistances: {}, faction: 'hostile', attack_element: 'physical',
+            behavior_name: null,
+          })),
+          rowCount: ids.length,
+        };
+      }
       if (/FROM world_creatures/i.test(sql)) return { rows: [] }; // bbox load (no "FROM" in the INSERT above)
       if (/^\s*DELETE FROM world_items WHERE expires_at/i.test(sql)) return { rows: [], rowCount: 0 };
       if (/SELECT.*FROM world_items/i.test(sql)) return { rows: [], rowCount: 0 }; // ground-item bbox load
@@ -227,4 +245,60 @@ test('use with the loot_map item successfully sends a used frame, deletes the pl
   assert.ok('guardEntityTypeId' in entry.chests[0]);
 
   ws.close(); handle.close(); server.close();
+});
+
+// Final-review fix (SOMET-244 Critical #1), `use`-handler half. Every world
+// in the live DB fits inside a single player's 3x3 chunk neighborhood, so a
+// chunk holding a player never unloads -- activateChunk (the ONLY other
+// path that feeds entry.world.creatures) never re-fires to pick up the
+// guard spawnFieldChest just INSERTed into world_creatures. Without the
+// fix, this guard would stay DB-only: invisible, unkillable, and
+// openchest's guard-alive check would refuse forever ("guard is still
+// alive") since the DB row it counts never dies.
+test('use with the loot_map item injects the spawned guard into entry.world.creatures, not just the DB', async () => {
+  const pool = makePool({ bounded: true, userItems: [{ id: 'map-1', item_type_id: 2, quantity: 1 }] });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = await joinAndGetPlayer(url);
+
+  const entry = handle.worlds.get('w1');
+  assert.equal(entry.world.creatures.creatures.has('guard-x'), false, 'not present before the spawn');
+
+  ws.send(JSON.stringify({ type: 'use', itemId: 'map-1' }));
+  await nextMsg(ws, 'used');
+
+  assert.equal(
+    entry.world.creatures.creatures.has('guard-x'), true,
+    'the newly-spawned guard must be injected into the live sim, or it can never be killed to unlock the chest',
+  );
+
+  ws.close(); handle.close(); server.close();
+});
+
+// Final-review fix (SOMET-244 Important #4). Task 6b's own clearOverviewCache
+// fix (commit 0eb4891) covered the open and respawn paths but missed this
+// third mutation site: a field chest spawned via `use` also changes what
+// /overview shows (a brand-new chest marker), and with no TTL on that cache,
+// an already-cached window would otherwise stay stale until an unrelated
+// explicit clear or the 64-entry FIFO eviction reached it.
+test('use with the loot_map item invalidates the /overview cache for this world', async () => {
+  const pool = makePool({ bounded: true, userItems: [{ id: 'map-1', item_type_id: 2, quantity: 1 }] });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = await joinAndGetPlayer(url);
+
+  // Seed a cached /overview entry the same way the real route keys it
+  // (worldId:snappedCol:snappedRow) -- the exact prefix clearOverviewCache
+  // matches on.
+  worldOverviewCache.set('w1:0:0', { chests: [] });
+  assert.ok(worldOverviewCache.has('w1:0:0'), 'sanity: the cache entry exists before the spawn');
+
+  ws.send(JSON.stringify({ type: 'use', itemId: 'map-1' }));
+  await nextMsg(ws, 'used');
+
+  assert.equal(
+    worldOverviewCache.has('w1:0:0'), false,
+    'a field-chest spawn via `use` must clear this world\'s cached /overview entries',
+  );
+
+  ws.close(); handle.close(); server.close();
+  clearOverviewCache('w1'); // leave no cross-test residue in the shared singleton Map
 });

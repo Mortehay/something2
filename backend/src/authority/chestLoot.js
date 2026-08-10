@@ -99,13 +99,20 @@ async function openChest(pool, chestId, userId, { rng = Math.random } = {}) {
       // One row per unit (rollChestLoot/rollDrops already repeats
       // itemTypeId per unit rolled), same one-row-per-unit shape
       // claimItem/spawnDrops use elsewhere in loot.js. `items` reports the
-      // bare item_type_id list, not the inserted row objects.
-      await client.query(
+      // FULL inserted row ({id, item_type_id, quantity}, matching
+      // claimItem's own shape at loot.js:232) rather than a bare
+      // item_type_id -- the caller (server.js's `openchest` handler) needs
+      // the id/quantity to push each grant onto p.inv.items the same way
+      // claimItem does ("so a later equip validates without a reload"). A
+      // bare item_type_id list gave the handler nothing to push, so a
+      // chest-granted item could not be equipped/dropped/sold until the
+      // player reconnected and reloaded their inventory from the DB.
+      const ins = await client.query(
         `INSERT INTO player_items (user_id, item_type_id, quantity)
          VALUES ($1,$2,1) RETURNING id, item_type_id, quantity`,
         [userId, itemTypeId],
       );
-      items.push(itemTypeId);
+      items.push(ins.rows[0]);
     }
 
     const before = await loadProgression(client, userId);
@@ -119,6 +126,14 @@ async function openChest(pool, chestId, userId, { rng = Math.random } = {}) {
       awarded: award.awarded,
       leveledUp: award.leveledUp,
       newLevel: award.newLevel,
+      // awardXp always computes this (even on a no-op award), and the
+      // `openchest` handler needs it to call world.applyDerivedStats on a
+      // level-up -- the exact call the kill path makes (server.js:426-463)
+      // and the exact thing the kill path's own comment calls out as "the
+      // exact defect A1's review caught" when omitted: a player's max HP
+      // rises in the DB but the running game never reflects it until
+      // reconnect.
+      progression: award.progression,
       // Handed back so the caller (server.js's `openchest` handler) can carry
       // these onto the in-memory entry.chests element alongside `state`,
       // not just persist them to the DB row -- otherwise a respawned field

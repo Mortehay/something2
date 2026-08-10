@@ -186,6 +186,26 @@ function drainAttacks(entry) {
   return Array.isArray(batch) ? batch : [];
 }
 
+// The joined creature-instance SELECT, shared verbatim by activateChunk's
+// per-chunk load (WHERE wc.world_id = ... AND x/y BETWEEN ..., below) and
+// injectGuardIntoSim's per-id load (WHERE wc.id = ANY(...), also below).
+// Factored out so the two call sites cannot drift apart: see
+// activateChunk's own inline comment for the column-by-column rationale
+// (dropping any of them silently makes some creature mechanic inert rather
+// than throwing). Both call sites append their own WHERE clause.
+const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
+                wc.level, wc.damage, wc.blocks_portal_id,
+                COALESCE(wc.defense, et.defense) AS defense,
+                et.color, et.resistances, et.faction, et.attack_element,
+                b.name AS behavior_name, b.aggro_radius, b.leash_radius,
+                b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
+                b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
+                b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
+                ab.abilities
+         FROM world_creatures wc
+         LEFT JOIN entity_types et ON et.name = wc.type
+         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}`;
+
 // Attach the authoritative WebSocket simulation to an existing http server.
 // Returns { close() } so callers/tests can tear it down.
 function attachAuthority(httpServer, pool, opts = {}) {
@@ -618,19 +638,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // IS real) reads that one alias unconditionally, so both SELECTs must
       // agree on it. b.aura_* columns have no collision anywhere and stay
       // unaliased, same as aggro_radius/leash_radius/etc.
+      //
+      // The SELECT/FROM/JOIN text lives in CREATURE_JOINED_SELECT (module
+      // scope, above attachAuthority) rather than inline here, so
+      // injectGuardIntoSim below shares this EXACT shape instead of
+      // maintaining a second, driftable copy -- see that function's header
+      // comment for why it needs the identical columns.
       const rows = await pool.query(
-        `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
-                wc.level, wc.damage, wc.blocks_portal_id,
-                COALESCE(wc.defense, et.defense) AS defense,
-                et.color, et.resistances, et.faction, et.attack_element,
-                b.name AS behavior_name, b.aggro_radius, b.leash_radius,
-                b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
-                b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
-                b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
-                ab.abilities
-         FROM world_creatures wc
-         LEFT JOIN entity_types et ON et.name = wc.type
-         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}
+        `${CREATURE_JOINED_SELECT}
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
@@ -650,6 +665,40 @@ function attachAuthority(httpServer, pool, opts = {}) {
       console.error('chunk activation failed:', chunkKey, err);
     } finally {
       entry.chunkLoads.delete(chunkKey);
+    }
+  }
+
+  // Final-review fix (SOMET-244): the ONLY path that ever puts a
+  // world_creatures row into the live entry.world.creatures sim is
+  // activateChunk above, triggered exclusively by an unloaded->loaded chunk
+  // transition. Every world in the live DB fits inside a single player's
+  // 3x3 chunk neighborhood, so a chunk holding a player never unloads --
+  // meaning a guard INSERTed mid-session (spawnFieldChest's `use`-handler
+  // spawn, or respawnDueFieldChests' sweep) would otherwise stay DB-only:
+  // invisible, unkillable, and openChest's guard-alive check would refuse
+  // forever ("guard is still alive") since the DB row it counts never dies.
+  //
+  // Fix: after such an INSERT commits, re-run the SAME joined SELECT
+  // activateChunk uses (CREATURE_JOINED_SELECT, so the two can never
+  // disagree on shape) for just the new id(s) and feed the row(s) straight
+  // into addCreatures. addCreatures dedupes by id (creatures.js:427), so
+  // this is safe to call even if the id somehow already made it into the
+  // sim by another path.
+  async function injectGuardIntoSim(entry, ids) {
+    if (!entry || !ids || ids.length === 0) return;
+    try {
+      const rows = await pool.query(
+        `${CREATURE_JOINED_SELECT}
+         WHERE wc.id = ANY($1::uuid[])`,
+        [ids],
+      );
+      entry.world.creatures.addCreatures(rows.rows);
+    } catch (err) {
+      // Best-effort, same posture as activateChunk's own catch: log so a
+      // persistently failing injection is visible to an operator instead of
+      // silently leaving a guard unkillable, but never let it take down the
+      // caller (a field-chest `use`, or a background respawn sweep pass).
+      console.error('injectGuardIntoSim failed:', ids, err);
     }
   }
 
@@ -1090,6 +1139,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // rather than waiting for a reload.
           p.inv.items = p.inv.items.filter((it) => it.id !== msg.itemId);
           entry.chests.push(spawned.row);
+          // Final-review fix (SOMET-244 Critical #1): without this, the
+          // guard spawnFieldChest just wrote to world_creatures stays
+          // DB-only for the rest of the session -- see
+          // injectGuardIntoSim's header comment. Uses the outer `pool`, not
+          // `client`: the transaction already committed above, and this
+          // query has nothing to do inside it.
+          await injectGuardIntoSim(entry, [spawned.guardCreatureId]);
+          // Final-review fix (SOMET-244 Important #4): matches the
+          // open/respawn paths' own clearOverviewCache call -- a newly
+          // spawned field chest is a state change /overview must reflect
+          // too, or it stays invisible on an already-cached window
+          // indefinitely (no TTL, only explicit clear or FIFO eviction).
+          clearOverviewCache(entry.worldId);
           send(ws, { type: 'used', itemId: msg.itemId, spawnedChestId: spawned.id });
         } catch (err) {
           await client.query('ROLLBACK').catch(() => {});
@@ -1133,6 +1195,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const result = await openChest(pool, chest.id, ws.userId);
         if (!result.ok) { send(ws, { type: 'error', message: result.reason }); return; }
 
+        // Final-review fix (SOMET-244 Important #2): openChest now returns
+        // full player_items rows ({id, item_type_id, quantity} each), not
+        // bare item_type_ids -- push each onto p.inv.items the same way
+        // claimItem does at loot.js:232 ("so a later equip validates
+        // without a reload"). Without this a chest-granted item could not
+        // be equipped/dropped/sold for the rest of the session (canEquip/
+        // dropItem/sellItem all validate against p.inv.items).
+        for (const it of result.items) {
+          p.inv.items.push({ id: it.id, typeId: it.item_type_id, quantity: Number(it.quantity) || 1 });
+        }
+
         // openedAt/respawnAt (undefined for a vault chest -- openChest
         // returns respawnAt: null there) must land on entry.chests too, not
         // just the DB row openChest just committed: the respawn sweep below
@@ -1148,9 +1221,30 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // call covers both transitions since they already committed
         // atomically before this handler ever resumes.
         clearOverviewCache(entry.worldId);
+
+        // Final-review fix (SOMET-244 Important #3): mirrors onCreatureDeath's
+        // own leveledUp handling (server.js:426-463) exactly -- same call,
+        // same hp>0 guard (a level-up landing while this player is
+        // currently sitting at hp<=0 awaiting resolveDeaths() must not have
+        // applyDerivedStats revive them; it clamps current hp to a floor of
+        // 1 unconditionally). Without this, a chest-open level-up raised
+        // max HP in the DB but never in the running game until reconnect --
+        // "the exact defect A1's review caught."
+        if (result.leveledUp && p.hp > 0) {
+          entry.world.applyDerivedStats(ws.userId, derivePlayerStats(result.progression));
+        }
         send(ws, {
           type: 'chestOpened', chestId: chest.id, items: result.items,
           awarded: result.awarded, leveledUp: result.leveledUp, newLevel: result.newLevel,
+        });
+        // Separate progression frame, matching the kill path's own frame
+        // shape (onCreatureDeath sends `{type:'progression', progression,
+        // leveledUp, newLevel, awarded}`) so the client's existing
+        // progression handling (built for kills) also picks up chest XP
+        // without a second, chest-specific client-side path.
+        send(ws, {
+          type: 'progression', progression: result.progression,
+          leveledUp: result.leveledUp, newLevel: result.newLevel, awarded: result.awarded,
         });
       });
     },
@@ -1494,7 +1588,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           const entry = worlds.get(worldId);
           return entry ? { ...entry.mapGenConfig, id: worldId } : null;
         },
-        onReset: ({ id, worldId, ...patch }) => {
+        onReset: async ({ id, worldId, ...patch }) => {
           // Same reasoning as the openchest handler's own clearOverviewCache
           // call: the DB write already committed (respawnDueFieldChests'
           // header comment on `reset` being counted unconditionally applies
@@ -1506,6 +1600,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
           if (!entry) return;
           const chest = entry.chests.find((c) => c.id === id);
           if (chest) Object.assign(chest, patch);
+          // Final-review fix (SOMET-244 Critical #1): the respawn sweep's
+          // INSERT into world_creatures has the identical gap the `use`
+          // handler's field-chest spawn has -- see injectGuardIntoSim's
+          // header comment. `await`ed (respawnDueFieldChests now awaits
+          // onReset itself) so the `_chestRespawnSweep` test seam observes
+          // the new guard in entry.world.creatures once the sweep resolves.
+          await injectGuardIntoSim(entry, patch.guardCreatureIds);
         },
       });
     } catch (err) {
