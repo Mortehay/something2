@@ -165,7 +165,7 @@ test('converting existing magic weapons to stones round-trips cleanly through do
     assert.equal(stoneType.rows[0].element, 'fire', 'the stone must carry the weapon element');
     assert.equal(Number(stoneType.rows[0].mana_cost), 10, 'the stone must carry the weapon mana_cost');
     assert.equal(Number(stoneType.rows[0].damage), 12, 'the stone must carry the weapon damage');
-    assert.equal(Number(stoneType.rows[0].cooldown), 0, 'a stone itself has no attack cooldown');
+    assert.equal(Number(stoneType.rows[0].cooldown), 0.5, 'the stone must carry the weapon cooldown -- combat (Task 5) reads a socketed spell stone\'s cooldown as authoritative, so a hardcoded 0 here would give every converted weapon a zero-cooldown exploit');
     assert.equal(stoneType.rows[0].stackable, false);
 
     const stones = await client.query(

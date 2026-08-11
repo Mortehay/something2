@@ -92,7 +92,7 @@ exports.up = (pgm) => {
   // deterministically from the weapon so a repair-run ON CONFLICT is safe.
   pgm.sql(`
     INSERT INTO item_types (name, category, element, mana_cost, damage, cooldown, stackable)
-    SELECT 'stone_of_' || wt.name, 'stone', wt.element, wt.mana_cost, wt.damage, 0, false
+    SELECT 'stone_of_' || wt.name, 'stone', wt.element, wt.mana_cost, wt.damage, wt.cooldown, false
       FROM item_types wt
      WHERE wt.category = 'weapon' AND wt.element IS NOT NULL AND wt.element <> 'physical'
     ON CONFLICT (name) DO NOTHING
