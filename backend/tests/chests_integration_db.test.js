@@ -36,18 +36,17 @@ async function openPool() {
   catch (err) { await pool.end().catch(() => {}); return { unreachable: err.message }; }
 }
 
-async function withEntryPreserved(pool, fn) {
-  const before = await pool.query('SELECT id FROM worlds WHERE is_entry = true');
-  const beforeId = before.rows[0]?.id ?? null;
-  try {
-    return await fn();
-  } finally {
-    await pool.query(
-      'UPDATE worlds SET is_entry = COALESCE(id = $1, false) WHERE is_entry = true OR id = $1',
-      [beforeId],
-    );
-  }
-}
+// Was a private copy of withEntryPreserved carrying the pre-SOMET-265 restore
+// (`SET is_entry = COALESCE(id = $1, false)`), which clears every row and sets
+// none when beforeId is null -- i.e. whenever this file snapshotted while
+// another parallel file was mid-apply. This suite is also the one that had
+// never actually run until it was un-skipped, so its copy started wiping the
+// dev database's entry world the moment it came to life.
+//
+// Now the shared helper, which guards the whole save/restore window with an
+// advisory lock. A private copy does not take that lock and therefore breaks
+// the serialisation for every other file too.
+const { withEntryPreserved } = require('./helpers/entryWorld.js');
 
 async function cleanup(pool, usernamePrefix) {
   await pool.query("DELETE FROM worlds WHERE name = 'zz Chest Integration World'").catch(() => {});

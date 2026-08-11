@@ -23,32 +23,24 @@ async function openPool() {
   catch (err) { await pool.end().catch(() => {}); return { unreachable: err.message }; }
 }
 
-// Snapshot whichever world is currently is_entry (0 or 1 of them), run fn,
-// then restore exactly that snapshot -- copied from
-// tests/seed_map_db.test.js's helper of the same name (see its comment for
-// the full rationale). Our spec's `surface` world declares is_entry: true,
-// and applyMapSpec's own is_entry step clears every OTHER world when it sets
-// a new one -- so without this, running these tests against a real dev DB
-// steals is_entry off whatever the real entry world is (e.g. "Old
-// Trailhead"), and then `finally` deletes `surface` outright, leaving ZERO
-// worlds with is_entry = true anywhere in the database.
-async function withEntryPreserved(pool, fn) {
-  const before = await pool.query('SELECT id FROM worlds WHERE is_entry = true');
-  const beforeId = before.rows[0]?.id ?? null;
-  try {
-    return await fn();
-  } finally {
-    // Single atomic UPDATE, not two separate ones: a crash between "clear
-    // every is_entry" and "set it back on beforeId" used to be able to leave
-    // the database with ZERO entry worlds. COALESCE(id = $1, false) keeps
-    // the SET expression a plain boolean (never SQL NULL) when beforeId is
-    // null -- is_entry is NOT NULL, so assigning NULL would throw.
-    await pool.query(
-      'UPDATE worlds SET is_entry = COALESCE(id = $1, false) WHERE is_entry = true OR id = $1',
-      [beforeId],
-    );
-  }
-}
+// This file used to carry its OWN copy of withEntryPreserved, and that copy is
+// the reason the dev database kept ending up with zero entry worlds long after
+// the "fix". Its restore was the pre-SOMET-265 statement:
+//
+//   UPDATE worlds SET is_entry = COALESCE(id = $1, false)
+//    WHERE is_entry = true OR id = $1
+//
+// When beforeId is null -- which happens whenever this file snapshots while
+// ANOTHER parallel test file is mid-apply, or after some other copy already
+// wiped it -- that clears every is_entry row and sets none. The shared helper
+// was written to be the one implementation and its comment even counted the
+// copies; it counted two, and there were four. This was one of the two it
+// missed (see also chests_integration_db.test.js).
+//
+// The shared helper also holds a Postgres advisory lock for the whole
+// save/restore window. A private copy does not take that lock, so it defeats
+// the serialisation for every other file as well as itself.
+const { withEntryPreserved } = require('./helpers/entryWorld.js');
 
 // Every world name in this spec carries a random uuid suffix so concurrent
 // or repeated runs never collide with each other or with a real seeded map.

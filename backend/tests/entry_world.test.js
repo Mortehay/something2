@@ -57,6 +57,48 @@ test('no caller keeps its own clear-then-set pair', () => {
   }
 });
 
+// The guard above scans three files under src/ and scripts/ -- and every
+// instance of this bug that actually reached the dev database lived in
+// tests/, which it never looked at. FOUR copies of withEntryPreserved existed
+// while the shared helper's own comment said there were two; the two it missed
+// (seed_map_portals, chests_integration_db) still carried the destructive
+// COALESCE restore and wiped is_entry for weeks after the "fix".
+//
+// So this scans the whole test suite. Two things are banned outright:
+//   1. the COALESCE clear-and-maybe-set restore, in any file
+//   2. a local `function withEntryPreserved` -- the helper takes an advisory
+//      lock, and a private copy silently opts out of the serialisation for
+//      every OTHER file too, not just its own
+test('no test file keeps its own entry-world save/restore', () => {
+  const dir = __dirname;
+  const offenders = { coalesce: [], localCopy: [] };
+  const walk = (d) => {
+    for (const name of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, name.name);
+      if (name.isDirectory()) { walk(p); continue; }
+      if (!name.name.endsWith('.js')) continue;
+      // The one legitimate definition.
+      if (p === path.join(dir, 'helpers', 'entryWorld.js')) continue;
+      // Comments stripped FIRST. Both bans are things worth explaining in
+      // prose right where they were removed, and the first version of this
+      // guard flagged its own explanatory comments -- a check that fires on
+      // documentation is one someone eventually deletes instead of obeying.
+      const src = fs.readFileSync(p, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      if (/is_entry\s*=\s*COALESCE\s*\(/i.test(src)) offenders.coalesce.push(name.name);
+      // A definition, not a call: `require`ing the shared helper is the point.
+      if (/(async\s+)?function\s+withEntryPreserved\s*\(/.test(src)) offenders.localCopy.push(name.name);
+    }
+  };
+  walk(dir);
+
+  assert.deepEqual(offenders.coalesce, [],
+    'these files restore is_entry with the COALESCE form, which clears every row and sets none when the snapshot was null');
+  assert.deepEqual(offenders.localCopy, [],
+    'these files define their own withEntryPreserved instead of requiring tests/helpers/entryWorld.js, which bypasses its advisory lock');
+});
+
 const url = process.env.TEST_DATABASE_URL;
 
 test('against the live database', { skip: !url ? 'no TEST_DATABASE_URL' : false }, async (t) => {
