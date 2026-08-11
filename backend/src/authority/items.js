@@ -405,6 +405,26 @@ async function socketStone(pool, characterId, inv, stonePlayerItemId, hostPlayer
     return { ok: true };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
+    // A genuine concurrent race: two requests both pass the plain
+    // (non-locking) `occupant` pre-check above before either commits, and
+    // the LOSING request's own UPDATE hits the partial unique index
+    // (stone_instances_socketed_into_unique, 1714440166000) instead. That
+    // index is the real backstop for this exact condition -- the pre-check
+    // above is only a fast, non-authoritative path to the same reason,
+    // read-only and unlocked (see this function's header comment on why:
+    // it isn't part of the two locked, joined rows). Catch ONLY this
+    // specific constraint violation (23505 + the exact constraint name, not
+    // any other unique-violation this function might theoretically hit) and
+    // report it the same graceful shape the pre-check already uses for the
+    // identical logical condition, rather than letting a raw Postgres error
+    // escape as an unhandled-exception-shaped failure for the loser of a
+    // real race. Review finding (SOMET-245 Task 8 follow-up): confirmed via
+    // stones_integration_db.test.js's own "concurrent-looking" stress case
+    // that a genuine race on this UPDATE previously surfaced exactly this
+    // raw error.
+    if (err.code === '23505' && err.constraint === 'stone_instances_socketed_into_unique') {
+      return { ok: false, reason: 'host already has a socketed stone' };
+    }
     throw err;
   } finally {
     client.release();
