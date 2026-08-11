@@ -30,6 +30,7 @@ const { knockbackPosition } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
+const { awardStoneXp, STONE_XP_PER_HIT } = require('./stoneXp.js');
 
 const MAP_TILE_SIZE = 100;
 
@@ -546,6 +547,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (sock) send(sock, { type: 'progression', progression, leveledUp, newLevel, awarded });
       })
       .catch((err) => console.error('death commit failed:', err));
+
+  // Magic Stones (SOMET-245) Task 7: fire-and-forget entry point for a
+  // landed spell-stone hit, mirroring onCreatureDeath's exact shape just
+  // above -- both the sync `attack` message handler and the tick loop's
+  // tickProjectiles consumer are on the hot path and must not await a DB
+  // round trip, and an unhandled rejection here would kill the process the
+  // same way an unhandled onCreatureDeath rejection would. No player-facing
+  // frame is sent on success (unlike onCreatureDeath's 'progression' push) --
+  // a stone's xp/level are read on demand (inventory/socket UI), not pushed
+  // live every hit, so there is nothing to notify here yet.
+  const onStoneHit = (stoneItemId) => awardStoneXp(pool, stoneItemId, STONE_XP_PER_HIT)
+    .catch((err) => console.error('stone xp award failed:', err));
 
   // Fire-and-forget entry point for a PLAYER death: resolveDeaths() (the
   // single player-death path, world.js) is synchronous and on the tick
@@ -1120,9 +1133,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Ammo-free weapons (all melee, all staves, darts) keep the fully
       // synchronous path: no DB round trip on the hot path.
       if (gate.weapon.ammo_type_id == null) {
-        const { kills, attacks } = entry.world.attack(ws.userId, ax, ay);
+        const { kills, attacks, stoneHit } = entry.world.attack(ws.userId, ax, ay);
         pushAttacks(entry, attacks);
         for (const k of dedupeKillsById(kills)) onCreatureDeath(entry, k.id, k.killerUserId);
+        // Magic Stones (SOMET-245) Task 7: a landed melee spell-stone hit is
+        // known synchronously (world.js's attack() already confirmed the
+        // swing connected) -- fire-and-forget the award the same way kills
+        // are, just off a single flag rather than a list.
+        if (stoneHit) onStoneHit(stoneHit.stoneItemId);
         return;
       }
 
@@ -1162,9 +1180,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
           send(ws, { type: 'noammo', item_type_id: ammoTypeId }); // no cooldown consumed
           return;
         }
-        const { kills, attacks } = cur.world.attack(ws.userId, ax, ay);
+        const { kills, attacks, stoneHit } = cur.world.attack(ws.userId, ax, ay);
         pushAttacks(cur, attacks);
         for (const k of dedupeKillsById(kills)) onCreatureDeath(cur, k.id, k.killerUserId);
+        // Same fire-and-forget award as the ammo-free branch above -- always
+        // null on THIS path in practice (ammo-gated weapons are projectile
+        // weapons, whose stoneHit only resolves later via tickProjectiles),
+        // but wired identically for shape consistency and so this stays
+        // correct if a melee weapon ever legitimately carries an ammo cost.
+        if (stoneHit) onStoneHit(stoneHit.stoneItemId);
         // The shot is already committed above (ammo spent, kills
         // resolved) — pushing the client its new count is best-effort on
         // top of that, not a condition of it. Isolated in its own
@@ -1716,8 +1740,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // drop roll stay authoritative.
       const { kills: killedByGuards } = entry.world.tickCreatures(dt, entry.activeChunks);
       for (const k of dedupeKillsById(killedByGuards)) onCreatureDeath(entry, k.id, k.killerUserId);
-      const { kills: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
+      const { kills: killedByProjectiles, detonations, stoneHits } = entry.world.tickProjectiles(dt);
       for (const k of dedupeKillsById(killedByProjectiles)) onCreatureDeath(entry, k.id, k.killerUserId);
+      // Magic Stones (SOMET-245) Task 7: a projectile's landed spell-stone
+      // hit is only known HERE, at actual impact (see projectiles.js'
+      // step()/`_detonate` -- world.js's attack() itself only spawns the
+      // shot and cannot know yet whether it will connect). Each entry is a
+      // real distinct landed hit (including multiple from one piercing
+      // projectile, or multiple targets in one AoE blast) -- no dedup like
+      // `kills` needs, since there is no shared id to collide on here.
+      for (const h of stoneHits) onStoneHit(h.stoneItemId);
       // Stashed for this tick's broadcast (below). REPLACED, not appended, so
       // an unconsumed stash can never grow without bound.
       entry.pendingDetonations = detonations;

@@ -216,6 +216,10 @@ test('a successful socket sends a socketed frame and the stone/host stay in sync
   const p = entry.world.getPlayer('1');
   const hostItem = p.inv.items.find((it) => it.id === 'weapon-1');
   assert.equal(hostItem.socketedStoneTypeId, SPELL_STONE_TYPE_ID, 'in-memory inv must reflect the socketing without a reload');
+  // SOMET-245 Task 7: the stone's OWN instance id must ALSO be cached live,
+  // not just its catalog type -- combat's activeWeaponType reads this to
+  // award stone XP against the right stone_instances row on a landed hit.
+  assert.equal(hostItem.socketedStoneItemId, 'stone-1', 'the stone\'s own instance id must be cached too, not just its type');
 
   ws.close(); handle.close(); server.close();
 });

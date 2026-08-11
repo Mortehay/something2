@@ -66,6 +66,52 @@ test('activeWeaponType with a spell stone socketed keeps the weapon\'s own comba
   assert.equal(resolved.cooldown, 300, 'cooldown IS one of the four spell fields -- must come from the stone');
 });
 
+// SOMET-245 Task 7: activeWeaponType must also surface the socketed stone's
+// OWN player_items.id (distinct from socketedStoneTypeId, the CATALOG type
+// id) so a caller resolving the active weapon for combat -- world.js's
+// attack() -- can award XP to the exact stone instance that lands a hit,
+// without a second DB round trip keyed off the host item.
+test('activeWeaponType exposes the socketed stone\'s own player_items id as stoneItemId', () => {
+  const stoneType = { id: 99, category: 'stone', element: 'fire', mana_cost: 5, damage: 40, cooldown: 300 };
+  const weaponType = { id: 5, category: 'weapon', element: 'physical', mana_cost: 0, kind: 'melee' };
+  const itemTypes = new Map([[5, weaponType], [99, stoneType]]);
+  const inv = {
+    equipment: { main_hand: 'weapon-instance-1' },
+    items: [{
+      id: 'weapon-instance-1', typeId: 5, quantity: 1,
+      socketedStoneTypeId: 99, socketedStoneItemId: 'stone-instance-77',
+    }],
+  };
+  const resolved = activeWeaponType(inv, itemTypes, 5);
+  assert.equal(resolved.stoneItemId, 'stone-instance-77', 'must be the STONE\'s own instance id, not its type id (99) or the weapon\'s own id');
+});
+
+// A weapon can carry socketedStoneTypeId (older hydration, or a test fixture
+// that only set the type) without socketedStoneItemId ever having been
+// cached -- must not crash, and must not silently invent a wrong id.
+test('activeWeaponType returns stoneItemId null when a stone is socketed but no instance id was ever cached', () => {
+  const stoneType = { id: 99, category: 'stone', element: 'fire', mana_cost: 5 };
+  const weaponType = { id: 5, category: 'weapon', element: 'physical', mana_cost: 0 };
+  const itemTypes = new Map([[5, weaponType], [99, stoneType]]);
+  const inv = {
+    equipment: { main_hand: 'weapon-instance-1' },
+    items: [{ id: 'weapon-instance-1', typeId: 5, quantity: 1, socketedStoneTypeId: 99 }], // no socketedStoneItemId
+  };
+  const resolved = activeWeaponType(inv, itemTypes, 5);
+  assert.equal(resolved.stoneItemId, null);
+});
+
+test('activeWeaponType with no stone socketed does not carry a stoneItemId field bleeding in from a stale cache', () => {
+  const weaponType = { id: 5, category: 'weapon', element: 'physical', mana_cost: 0 };
+  const itemTypes = new Map([[5, weaponType]]);
+  const inv = {
+    equipment: { main_hand: 'weapon-instance-1' },
+    items: [{ id: 'weapon-instance-1', typeId: 5, quantity: 1 }],
+  };
+  const resolved = activeWeaponType(inv, itemTypes, 5);
+  assert.equal(resolved.stoneItemId, undefined, 'a bare weapon must not carry a stoneItemId at all');
+});
+
 // Design doc "Combat integration -- replace semantics", point 4: with no
 // spell stone socketed, the weapon's own baked-in element/mana_cost become
 // vestigial -- the weapon attacks as plain physical at zero mana cost, even

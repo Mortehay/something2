@@ -113,7 +113,8 @@ async function loadInventory(pool, characterId) {
     [characterId],
   );
   const sr = await pool.query(
-    `SELECT si.socketed_into_id AS host_id, stone_pi.item_type_id AS stone_type_id
+    `SELECT si.socketed_into_id AS host_id, si.player_item_id AS stone_item_id,
+            stone_pi.item_type_id AS stone_type_id
        FROM stone_instances si
        JOIN player_items stone_pi ON stone_pi.id = si.player_item_id
        JOIN player_items host_pi ON host_pi.id = si.socketed_into_id
@@ -126,7 +127,17 @@ async function loadInventory(pool, characterId) {
   const byId = new Map(items.map((it) => [it.id, it]));
   for (const row of sr.rows) {
     const hostItem = byId.get(row.host_id);
-    if (hostItem) hostItem.socketedStoneTypeId = row.stone_type_id;
+    if (hostItem) {
+      hostItem.socketedStoneTypeId = row.stone_type_id;
+      // Magic Stones (SOMET-245) Task 7: the stone's OWN player_items.id,
+      // distinct from socketedStoneTypeId (the stone's CATALOG type, used to
+      // resolve its element/mana_cost/damage/cooldown). Stone XP is written
+      // against stone_instances.player_item_id, which is this instance id,
+      // never the type id -- without caching it here too, a hit landed by a
+      // weapon loaded at join time (rather than socketed live this session)
+      // would have no instance id to award XP against.
+      hostItem.socketedStoneItemId = row.stone_item_id;
+    }
   }
   return { items, equipment };
 }
@@ -262,6 +273,17 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
           mana_cost: stoneType.mana_cost,
           damage: stoneType.damage,
           cooldown: stoneType.cooldown,
+          // Magic Stones (SOMET-245) Task 7: the socketed stone's own
+          // player_items.id (NOT its catalog type id, already merged above),
+          // so a caller resolving the active weapon for combat -- world.js's
+          // attack() -- can award XP to the exact stone instance that landed
+          // the hit, without a second lookup keyed off the host item.
+          // Explicit `?? null` rather than passthrough-undefined: a weapon
+          // whose socket was hydrated by an older cache write that predates
+          // this field would otherwise carry `undefined` here, which is
+          // truthy-adjacent enough (`!= null` checks would still catch it,
+          // but downstream code should never have to know the difference).
+          stoneItemId: item.socketedStoneItemId ?? null,
         };
       }
       // Only allocate the physical-forcing copy for a weapon that actually
@@ -374,7 +396,12 @@ async function socketStone(pool, characterId, inv, stonePlayerItemId, hostPlayer
     await client.query('COMMIT');
 
     const hostItem = findItem(inv, hostPlayerItemId);
-    if (hostItem) hostItem.socketedStoneTypeId = stoneTypeId;
+    if (hostItem) {
+      hostItem.socketedStoneTypeId = stoneTypeId;
+      // Task 7: cache the stone's own instance id alongside its type,
+      // mirroring loadInventory's hydration above -- see that comment.
+      hostItem.socketedStoneItemId = stonePlayerItemId;
+    }
     return { ok: true };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -415,7 +442,10 @@ async function unsocketStone(pool, characterId, inv, stonePlayerItemId, { confir
 
     if (destroyed) inv.items = inv.items.filter((it) => it.id !== stonePlayerItemId);
     const hostItem = findItem(inv, hostPlayerItemId);
-    if (hostItem) delete hostItem.socketedStoneTypeId;
+    if (hostItem) {
+      delete hostItem.socketedStoneTypeId;
+      delete hostItem.socketedStoneItemId; // Task 7: clear alongside the type cache
+    }
 
     return { ok: true, destroyed };
   } catch (err) {

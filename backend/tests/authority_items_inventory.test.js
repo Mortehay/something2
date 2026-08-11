@@ -59,6 +59,29 @@ test('loadInventory hydrates socketedStoneTypeId for a host that already has a s
   assert.deepEqual(stoneCall.params, ['char-1']);
 });
 
+// SOMET-245 Task 7: loadInventory must also hydrate the stone's OWN
+// player_items.id (si.player_item_id, aliased stone_item_id), not just its
+// catalog type -- stone XP is written against stone_instances.player_item_id,
+// and a weapon loaded already-socketed at join time (rather than socketed
+// live this session) needs this cached the same way socketStone caches it
+// live (see items.js).
+test('loadInventory hydrates socketedStoneItemId (the stone\'s OWN instance id) alongside socketedStoneTypeId', async () => {
+  const pool = recordingPool([
+    [/FROM player_items/i, () => ({ rows: [
+      { id: 'weapon-1', item_type_id: 5 },
+      { id: 'stone-1', item_type_id: 40 },
+    ] })],
+    [/FROM player_equipment/i, () => ({ rows: [{ slot: 'main_hand', item_id: 'weapon-1' }] })],
+    [/FROM stone_instances/i, () => ({ rows: [
+      { host_id: 'weapon-1', stone_item_id: 'stone-1', stone_type_id: 40 },
+    ] })],
+  ]);
+  const inv = await loadInventory(pool, 'char-1');
+  const hostItem = inv.items.find((it) => it.id === 'weapon-1');
+  assert.equal(hostItem.socketedStoneItemId, 'stone-1',
+    'must be the STONE\'s own player_items id, distinct from its catalog type (40)');
+});
+
 test('loadInventory leaves socketedStoneTypeId unset when nothing is socketed', async () => {
   const pool = recordingPool([
     [/FROM player_items/i, () => ({ rows: [{ id: 'weapon-1', item_type_id: 5 }] })],

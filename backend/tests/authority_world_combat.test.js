@@ -350,12 +350,20 @@ TYPES.set(6, { id: 6, name: 'flame-halberd', category: 'weapon', kind: 'melee', 
 TYPES.set(7, { id: 7, name: 'frost-halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, element: 'ice' });
 TYPES.set(41, { id: 41, name: 'stone_of_flame-halberd', category: 'stone', element: 'fire', mana_cost: 0, damage: 18, cooldown: 0.9 });
 TYPES.set(42, { id: 42, name: 'stone_of_frost-halberd', category: 'stone', element: 'ice', mana_cost: 0, damage: 18, cooldown: 0.9 });
+// A buff stone (element null, stat_bonus_stat set) -- SOMET-245 Task 7's
+// "buff stone never awards combat XP" test below.
+TYPES.set(77, { id: 77, category: 'stone', element: null, stat_bonus_stat: 'strength', stat_bonus_amount: 3 });
 const ELEMENTAL_STONE_BY_WEAPON = { 6: 41, 7: 42 };
 
+// socketedStoneItemId (the stone's OWN player_items id, SOMET-245 Task 7) is
+// set here too, alongside socketedStoneTypeId -- a plain string distinct
+// from the catalog type id, matching how items.js's socketStone/loadInventory
+// cache it live.
 function elementalMeleeWorld(typeId) {
   const w = armWorld();
   const socketedStoneTypeId = ELEMENTAL_STONE_BY_WEAPON[typeId];
-  w.addPlayer('u1', { x: 100, y: 100 }, { items: [{ id: 'e1', typeId, socketedStoneTypeId }], equipment: { main_hand: 'e1' } });
+  const socketedStoneItemId = `stone-instance-${typeId}`;
+  w.addPlayer('u1', { x: 100, y: 100 }, { items: [{ id: 'e1', typeId, socketedStoneTypeId, socketedStoneItemId }], equipment: { main_hand: 'e1' } });
   w.addPlayer('u2', { x: 150, y: 100 }); // center 182,132 — east, inside reach 190
   w.creatures.addCreatures([{ id: 'c1', type: 'wolf', x: 150, y: 108, hp: 500, facing: 'S', color: '#f00' }]);
   return w;
@@ -399,6 +407,69 @@ test('the melee rider is stamped with the world clock, so it expires on the worl
   const u2 = w.getPlayer('u2');
   assert.equal(u2.effects.get(BURN).until, w.now + BURN_DURATION_MS,
     'the rider must use the world clock, not 0 — otherwise it is born expired');
+});
+
+// --- Stone XP on a landed hit (SOMET-245 Task 7) ----------------------------
+//
+// world.js's attack() must surface enough for server.js's fire-and-forget
+// onStoneHit to award XP to the exact socketed stone INSTANCE that landed
+// the hit -- not just its catalog type. items.js's activeWeaponType merges
+// `stoneItemId` onto the resolved weapon only when a SPELL stone (element
+// set) actually supplied the attack's magic; attack() must gate the award on
+// that field being present AND the swing having actually connected.
+
+test('a melee swing that connects with a socketed spell stone reports stoneHit with the STONE\'s own instance id', () => {
+  const w = elementalMeleeWorld(6); // stone_of_flame-halberd, instance id 'stone-instance-6'
+  const { stoneHit } = w.attack('u1', 1, 0);
+  assert.deepEqual(stoneHit, { stoneItemId: 'stone-instance-6' },
+    'must carry the STONE\'s own player_items id, not the weapon\'s or the stone\'s catalog type id (41)');
+});
+
+test('a melee swing with NO stone socketed reports stoneHit: null even though it lands', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, longReachInv()); // halberd, no socket at all
+  w.addPlayer('u2', { x: 150, y: 100 });
+  const { attacks, stoneHit } = w.attack('u1', 1, 0);
+  assert.equal(attacks[0].hit, true, 'sanity: the swing must actually land for this test to mean anything');
+  assert.equal(stoneHit, null);
+});
+
+test('a melee swing that whiffs (nothing in the arc) reports stoneHit: null even with a spell stone socketed', () => {
+  const w = armWorld();
+  const socketedStoneTypeId = 41; // stone_of_flame-halberd
+  w.addPlayer('u1', { x: 100, y: 100 }, {
+    items: [{ id: 'e1', typeId: 6, socketedStoneTypeId, socketedStoneItemId: 'stone-far' }],
+    equipment: { main_hand: 'e1' },
+  });
+  // No other player, no creature anywhere near — this swing cannot land.
+  const { attacks, stoneHit } = w.attack('u1', 1, 0);
+  assert.equal(attacks[0].hit, false, 'sanity: nothing was in range to hit');
+  assert.equal(stoneHit, null, 'a stone must not earn XP for a swing that landed on nothing');
+});
+
+test('a buff stone socketed into a weapon never produces a stoneHit (buff stones do not touch combat)', () => {
+  const w = armWorld();
+  // Buff stone: element null, stat_bonus_stat set -- items.js's
+  // activeWeaponType never merges stoneItemId for this branch (the merge
+  // only happens when stoneType.element != null).
+  w.addPlayer('u1', { x: 100, y: 100 }, {
+    items: [{ id: 'e1', typeId: 2, socketedStoneTypeId: 77, socketedStoneItemId: 'buff-stone-1' }],
+    equipment: { main_hand: 'e1' },
+  });
+  w.addPlayer('u2', { x: 150, y: 100 });
+  const { attacks, stoneHit } = w.attack('u1', 1, 0);
+  assert.equal(attacks[0].hit, true, 'sanity: the swing must land');
+  assert.equal(stoneHit, null, 'a buff stone must never award combat XP');
+});
+
+test('a projectile attack with a socketed spell stone reports stoneHit: null at spawn time (landing is confirmed later, not here)', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, {
+    items: [{ id: 'i4', typeId: 4, socketedStoneTypeId: 40, socketedStoneItemId: 'bolt-stone-1' }],
+    equipment: { main_hand: 'i4' },
+  });
+  const { stoneHit } = w.attack('u1', 1, 0);
+  assert.equal(stoneHit, null, 'attack() only SPAWNS a projectile -- it cannot yet know whether it will land');
 });
 
 test('a melee attack returns one descriptor carrying the real weapon geometry', () => {

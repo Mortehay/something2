@@ -100,6 +100,10 @@ test('socketStone succeeds: writes stone_instances.socketed_into_id and updates 
   assert.deepEqual(update.params, ['host-1', 'stone-1']);
   const hostItem = inv.items.find((it) => it.id === 'host-1');
   assert.equal(hostItem.socketedStoneTypeId, 10, 'the host\'s in-memory record must reflect the socketed stone type');
+  // SOMET-245 Task 7: the stone's OWN instance id (the socketStone caller's
+  // own 'stone-1' argument) must also be cached on the host, distinct from
+  // the catalog type (10) above -- combat reads this to award stone XP.
+  assert.equal(hostItem.socketedStoneItemId, 'stone-1', 'the host\'s in-memory record must also cache the stone\'s own instance id');
   assert.ok(pool.calls.some((c) => c.sql === 'COMMIT'));
 });
 
@@ -127,7 +131,7 @@ test('unsocketStone: destroy roll below threshold deletes the stone and its inst
     [STONE_DELETE, { rows: [], rowCount: 1 }],
   ]);
   const inv = {
-    items: [{ id: 'stone-1', typeId: 10 }, { id: 'host-1', typeId: 20, socketedStoneTypeId: 10 }],
+    items: [{ id: 'stone-1', typeId: 10 }, { id: 'host-1', typeId: 20, socketedStoneTypeId: 10, socketedStoneItemId: 'stone-1' }],
     equipment: {},
   };
   const r = await unsocketStone(pool, 'char-1', inv, 'stone-1', { confirm: true, rng: () => 0 });
@@ -139,6 +143,7 @@ test('unsocketStone: destroy roll below threshold deletes the stone and its inst
   assert.ok(!inv.items.some((it) => it.id === 'stone-1'), 'destroyed stone must be removed from the in-memory inventory');
   const hostItem = inv.items.find((it) => it.id === 'host-1');
   assert.equal(hostItem.socketedStoneTypeId, undefined, 'the host\'s cache entry must be cleared too');
+  assert.equal(hostItem.socketedStoneItemId, undefined, 'the host\'s stone-instance-id cache must be cleared too (SOMET-245 Task 7)');
 });
 
 test('unsocketStone: destroy roll at/above threshold clears socketed_into_id and preserves xp/level', async () => {
@@ -147,7 +152,7 @@ test('unsocketStone: destroy roll at/above threshold clears socketed_into_id and
     [UNSOCKET_CLEAR_UPDATE, { rows: [], rowCount: 1 }],
   ]);
   const inv = {
-    items: [{ id: 'stone-1', typeId: 10 }, { id: 'host-1', typeId: 20, socketedStoneTypeId: 10 }],
+    items: [{ id: 'stone-1', typeId: 10 }, { id: 'host-1', typeId: 20, socketedStoneTypeId: 10, socketedStoneItemId: 'stone-1' }],
     equipment: {},
   };
   const r = await unsocketStone(pool, 'char-1', inv, 'stone-1', { confirm: true, rng: () => 0.99 });
@@ -160,4 +165,5 @@ test('unsocketStone: destroy roll at/above threshold clears socketed_into_id and
   assert.ok(inv.items.some((it) => it.id === 'stone-1'), 'a surviving stone stays in the in-memory inventory (xp/level untouched)');
   const hostItem = inv.items.find((it) => it.id === 'host-1');
   assert.equal(hostItem.socketedStoneTypeId, undefined, 'the host\'s cache entry must be cleared even when the stone survives');
+  assert.equal(hostItem.socketedStoneItemId, undefined, 'the host\'s stone-instance-id cache must be cleared even when the stone survives (SOMET-245 Task 7)');
 });
