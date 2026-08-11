@@ -172,11 +172,18 @@ test('unsocket without confirm:true sends an error frame and makes no socket/uns
   const pool = makePool({ userItems: [] });
   const { url, handle, server } = await bootWith(pool);
   const ws = await joinAndGetPlayer(url);
+  // Magic-stones Task 5: loadInventory now hydrates the socketedStoneTypeId
+  // cache from stone_instances on every join (see items.js), so the pool
+  // legitimately already has one such call by the time joinAndGetPlayer
+  // returns -- that is unrelated to unsocket's confirm gate. Snapshot the
+  // count AFTER join and assert no NEW stone_instances call, rather than
+  // zero ever, so this test keeps testing what it says it tests.
+  const beforeUnsocket = pool.matching(/stone_instances/i).length;
 
   ws.send(JSON.stringify({ type: 'unsocket', stoneId: 'stone-1' })); // confirm omitted
   const err = await nextMsg(ws, 'error');
   assert.match(err.message, /confirm/i);
-  assert.equal(pool.matching(/stone_instances/i).length, 0, 'no DB call before the confirm gate');
+  assert.equal(pool.matching(/stone_instances/i).length, beforeUnsocket, 'no DB call before the confirm gate');
 
   ws.close(); handle.close(); server.close();
 });

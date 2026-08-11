@@ -250,7 +250,16 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
           cooldown: stoneType.cooldown,
         };
       }
-      if (type.element !== 'physical' || type.mana_cost) {
+      // Only allocate the physical-forcing copy for a weapon that actually
+      // carries vestigial magic (a non-null, non-physical element or a
+      // nonzero mana_cost) -- an ordinary weapon's element is already null,
+      // which every consumer (damage.js's ELEMENTS fallback, effects.js's
+      // ELEMENT_EFFECTS lookup) already treats identically to the string
+      // 'physical', so returning it unchanged is a no-op transformation.
+      // This function runs on the hot path (every player swing, per the
+      // design doc's own performance note), and ordinary non-magic weapons
+      // are the overwhelming majority of attacks -- worth not allocating for.
+      if (type.mana_cost || (type.element != null && type.element !== 'physical')) {
         return { ...type, element: 'physical', mana_cost: 0 };
       }
       return type;

@@ -30,6 +30,45 @@ test('loadInventory returns owned instances and the equipment map', async () => 
   assert.deepEqual(inv.equipment, { main_hand: 'i1' });
 });
 
+// Magic-stones Task 5: loadInventory hydrates each host item's
+// socketedStoneTypeId from stone_instances at LOAD time, not just from live
+// socketStone/unsocketStone writes during the session (Task 4). Without
+// this, a character who joins with an already-socketed weapon -- every
+// migration-converted magic weapon included -- would have an empty
+// in-memory cache despite the DB truthfully recording a socketed stone.
+test('loadInventory hydrates socketedStoneTypeId for a host that already has a stone socketed in the DB', async () => {
+  const pool = recordingPool([
+    [/FROM player_items/i, () => ({ rows: [
+      { id: 'weapon-1', item_type_id: 5 },
+      { id: 'stone-1', item_type_id: 40 },
+    ] })],
+    [/FROM player_equipment/i, () => ({ rows: [{ slot: 'main_hand', item_id: 'weapon-1' }] })],
+    [/FROM stone_instances/i, () => ({ rows: [
+      { host_id: 'weapon-1', stone_type_id: 40 },
+    ] })],
+  ]);
+  const inv = await loadInventory(pool, 'char-1');
+  const hostItem = inv.items.find((it) => it.id === 'weapon-1');
+  assert.equal(hostItem.socketedStoneTypeId, 40,
+    'a weapon already socketed in the DB must have its cache hydrated at load, not just from a live socketStone call');
+  const stoneItem = inv.items.find((it) => it.id === 'stone-1');
+  assert.equal(stoneItem.socketedStoneTypeId, undefined, 'only the HOST gets the cache field, not the stone itself');
+  // Same ownership-scoping convention as every other query in this file:
+  // the hydration join is predicated on this character's id.
+  const stoneCall = pool.calls.find((c) => /FROM stone_instances/i.test(c.sql));
+  assert.deepEqual(stoneCall.params, ['char-1']);
+});
+
+test('loadInventory leaves socketedStoneTypeId unset when nothing is socketed', async () => {
+  const pool = recordingPool([
+    [/FROM player_items/i, () => ({ rows: [{ id: 'weapon-1', item_type_id: 5 }] })],
+    [/FROM player_equipment/i, () => ({ rows: [] })],
+    [/FROM stone_instances/i, () => ({ rows: [] })],
+  ]);
+  const inv = await loadInventory(pool, 'char-1');
+  assert.equal(inv.items[0].socketedStoneTypeId, undefined);
+});
+
 test('grantStartingLoadout inserts the class loadout for a fresh character (never granted)', async () => {
   const inserts = [];
   const pool = recordingPool([
