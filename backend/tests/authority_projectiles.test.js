@@ -67,6 +67,54 @@ test('step hits a player (not the owner), reduces hp', () => {
   assert.equal(sim.count(), 0); // pierce:1 → despawned after the single player hit
 });
 
+// --- Stone XP on a landed hit (SOMET-245 Task 7) ----------------------------
+//
+// world.js's attack() cannot know at spawn time whether a spawned spell
+// projectile will actually land -- spawn() reads `weapon.stoneItemId` (set
+// only when items.js's activeWeaponType merged a socketed SPELL stone's
+// fields onto the weapon) and carries it on the projectile record, so
+// step()/`_detonate` can report a landed hit for it at the real moment of
+// impact, exactly like `kills` already does for the projectile's owner.
+
+test('step returns stoneHits: [] when the weapon carries no stoneItemId, even on a landed hit', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 100 } });
+  const creatures = creaturesStub([{ id: 'c1', x: 30, y: -24, width: 48, height: 48, hp: 10 }]);
+  const out = sim.step(0.1, { creatures, players: [], map: WALK_ALL });
+  assert.deepEqual(out.kills, [{ id: 'c1', killerUserId: 'u1' }], 'sanity: the hit landed');
+  assert.deepEqual(out.stoneHits, []);
+});
+
+test('step reports a stoneHit carrying the stone\'s instance id when a stone-carrying projectile lands on a creature', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 100, stoneItemId: 'stone-77' } });
+  const creatures = creaturesStub([{ id: 'c1', x: 30, y: -24, width: 48, height: 48, hp: 10000 }]); // survives
+  const out = sim.step(0.1, { creatures, players: [], map: WALK_ALL });
+  assert.deepEqual(out.stoneHits, [{ stoneItemId: 'stone-77' }],
+    'must fire on a non-kill landed hit too, not only a kill');
+});
+
+test('step reports a stoneHit when a stone-carrying projectile lands on a player', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 20, stoneItemId: 'stone-88' } });
+  const target = { userId: 'u2', x: 62, y: -32, width: 64, height: 64, hp: 100 };
+  const out = sim.step(0.12, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
+  assert.deepEqual(out.stoneHits, [{ stoneItemId: 'stone-88' }]);
+});
+
+test('a creature-fired projectile never carries a stoneItemId even if its ability object happens to set element (players\' stones only)', () => {
+  const sim = new ProjectileSim();
+  // A creature ability's weapon-shaped object (world.js's tickCreatures
+  // builds these without a stoneItemId field at all -- this simulates that).
+  sim.spawn({
+    ownerId: 'c-shooter', ownerKind: 'creature', ownerFaction: 'hostile',
+    x: 0, y: 0, nx: 1, ny: 0, weapon: { ...BOW, damage: 20, element: 'fire' },
+  });
+  const target = { userId: 'u2', x: 62, y: -32, width: 64, height: 64, hp: 100 };
+  const out = sim.step(0.12, { creatures: creaturesStub([]), players: [target], map: WALK_ALL });
+  assert.deepEqual(out.stoneHits, [], 'a creature-owned shot must never be able to award a player stone XP');
+});
+
 test('a non-finite-velocity projectile is culled, not leaked', () => {
   const sim = new ProjectileSim();
   sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: NaN, ny: 0, weapon: BOW });
@@ -179,6 +227,27 @@ test('AoE: a creature in radius with clear terrain is damaged by the blast, cred
   const c = mkCreature('c1', 60, 0);
   const out = sim.step(1, { creatures: creaturesStub([c]), players: [], map: WALK_ALL });
   assert.deepEqual(out.kills, [{ id: 'c1', killerUserId: 'u1' }]);
+});
+
+// SOMET-245 Task 7: an AoE blast awards stone XP per target it actually
+// caught, not once per detonation regardless of how many it hit -- two
+// targets in the same blast means two stoneHits entries.
+test('AoE: a blast that catches TWO targets reports TWO stoneHits when the projectile carries a stoneItemId', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, damage: 5, stoneItemId: 'aoe-stone-1' } });
+  const c = mkCreature('c1', 60, 0, 10000); // survives the blast (low damage, falloff)
+  const pl = mkPlayer('u2', 90, 0);
+  const out = sim.step(1, { creatures: creaturesStub([c]), players: [pl], map: WALK_ALL });
+  assert.deepEqual(out.stoneHits, [{ stoneItemId: 'aoe-stone-1' }, { stoneItemId: 'aoe-stone-1' }],
+    'one entry per target actually caught in the blast');
+});
+
+test('AoE: a blast from a weapon with no stoneItemId reports no stoneHits', () => {
+  const sim = new ProjectileSim();
+  sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, damage: 500 } });
+  const c = mkCreature('c1', 60, 0);
+  const out = sim.step(1, { creatures: creaturesStub([c]), players: [], map: WALK_ALL });
+  assert.deepEqual(out.stoneHits, []);
 });
 
 test('AoE: blast damage falls off with distance', () => {

@@ -23,11 +23,40 @@ async function openPool() {
   const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 2000, max: 4 });
   try {
     await pool.query('SELECT 1');
-    return pool;
   } catch (err) {
     await pool.end().catch(() => {});
-    return { unreachable: err.message };
+    return { unreachable: `NO DATABASE at ${DB_URL} (${err.message})` };
   }
+  // Magic Stones (SOMET-245) Task 1's migration (1714440165000_stone_item_
+  // type.js) adds item_types.stat_bonus_stat/stat_bonus_amount. Task 6's fix
+  // to loadItemTypes (src/authority/items.js) now selects both columns on
+  // every call, including the loadItemTypes(pool) call every test below
+  // makes against a REAL database -- so a DB that IS reachable but hasn't
+  // had that migration applied yet fails hard with `column "stat_bonus_stat"
+  // does not exist` instead of running. This shared dev DB is exactly that
+  // case (confirmed: `SELECT name FROM pgmigrations` stops at
+  // 1714440164000), and the project forbids running migrate up/down against
+  // it just to make a test pass (migration_convert_magic_weapons_db.test.js
+  // hit the identical situation and documents the same rule). Same
+  // information_schema.columns precondition-check pattern
+  // characters_schema_db.test.js/creature_levels_db.test.js use elsewhere in
+  // this repo, reused here as a SKIP gate (not just an assertion) so a stale
+  // schema degrades to "unverified", not "broken" -- and folded into the
+  // SAME `{ unreachable }` shape the SELECT-1 check above already returns,
+  // so every `if (pool.unreachable)` gate below needs no changes at all to
+  // pick this up.
+  const col = await pool.query(
+    `SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'item_types' AND column_name = 'stat_bonus_stat'`,
+  );
+  if (col.rowCount === 0) {
+    await pool.end().catch(() => {});
+    return {
+      unreachable: `item_types.stat_bonus_stat is missing on ${DB_URL} `
+        + '(migration 1714440165000_stone_item_type.js not applied)',
+    };
+  }
+  return pool;
 }
 
 // SOMET-258: grantStartingLoadout takes a CHARACTER ({ id, entityTypeId }),
@@ -75,14 +104,18 @@ async function grantedAt(pool, characterId) {
   return r.rows[0].starting_loadout_granted_at;
 }
 
-function skipMsg(what) {
-  return `NO DATABASE at ${DB_URL} — ${what} is UNVERIFIED on this run`;
+// `reason` is `pool.unreachable` -- either "NO DATABASE at ..." (SELECT 1
+// failed) or the stale-schema message above (SELECT 1 succeeded, but the
+// stat_bonus_stat column is missing). Both are complete sentences on their
+// own; this just appends what specifically went unverified.
+function skipMsg(what, reason) {
+  return `${reason} — ${what} is UNVERIFIED on this run`;
 }
 
 test('grantStartingLoadout against a REAL database: first join on a fresh account grants the loadout and stamps the account', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) {
-    const msg = skipMsg('the F-013 fix');
+    const msg = skipMsg('the F-013 fix', pool.unreachable);
     if (process.env.CI) assert.fail(msg);
     t.skip(msg);
     return;
@@ -117,7 +150,7 @@ test('grantStartingLoadout against a REAL database: first join on a fresh accoun
 test('grantStartingLoadout against a REAL database: a second join after the inventory is emptied grants NOTHING (F-013 exploit regression)', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) {
-    const msg = skipMsg('the F-013 exploit regression');
+    const msg = skipMsg('the F-013 exploit regression', pool.unreachable);
     if (process.env.CI) assert.fail(msg);
     t.skip(msg);
     return;
@@ -167,7 +200,7 @@ test('grantStartingLoadout against a REAL database: a second join after the inve
 test('grantStartingLoadout against a REAL database: the drop-and-reconnect route is also closed', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) {
-    const msg = skipMsg('the F-013 drop-and-reconnect regression');
+    const msg = skipMsg('the F-013 drop-and-reconnect regression', pool.unreachable);
     if (process.env.CI) assert.fail(msg);
     t.skip(msg);
     return;
@@ -210,7 +243,7 @@ test('grantStartingLoadout against a REAL database: the drop-and-reconnect route
 test('grantStartingLoadout against a REAL database: two concurrent joins on a fresh account grant exactly one loadout', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) {
-    const msg = skipMsg('the F-013 concurrency guard');
+    const msg = skipMsg('the F-013 concurrency guard', pool.unreachable);
     if (process.env.CI) assert.fail(msg);
     t.skip(msg);
     return;
@@ -243,7 +276,7 @@ test('grantStartingLoadout against a REAL database: two concurrent joins on a fr
 test('grantStartingLoadout against a REAL database: an account backfilled as already-granted gets nothing on join', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) {
-    const msg = skipMsg('the F-013 backfill contract');
+    const msg = skipMsg('the F-013 backfill contract', pool.unreachable);
     if (process.env.CI) assert.fail(msg);
     t.skip(msg);
     return;

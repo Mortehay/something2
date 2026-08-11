@@ -54,10 +54,21 @@ const TYPES = new Map([
     id: 5, name: 'fire-bow', category: 'weapon', kind: 'projectile', damage: 10, cooldown: 0.6,
     range: 700, projectile_speed: 900, projectile_radius: 8, pierce: 1, mana_cost: 0, element: 'fire',
   }],
+  // Magic-stones Task 5 ("replace semantics"): a weapon's own baked-in
+  // element is vestigial once sockets exist -- fire-blade/fire-bow above KEEP
+  // their element:'fire' columns (mirroring real converted-weapon data), but
+  // combat only reads that element through a SOCKETED spell stone now. These
+  // mirror weapons 2 and 5's own numbers exactly, so this suite's INT/STR
+  // scaling assertions observe identical behavior to before sockets existed.
+  [20, { id: 20, name: 'stone_of_fire-blade', category: 'stone', element: 'fire', mana_cost: 0, damage: 10, cooldown: 0.5 }],
+  [21, { id: 21, name: 'stone_of_fire-bow', category: 'stone', element: 'fire', mana_cost: 0, damage: 10, cooldown: 0.6 }],
 ]);
 
+const STONE_BY_WEAPON = { 2: 20, 5: 21 };
+
 function invFor(typeId) {
-  return { items: [{ id: `i${typeId}`, typeId }], equipment: { main_hand: `i${typeId}` } };
+  const socketedStoneTypeId = STONE_BY_WEAPON[typeId];
+  return { items: [{ id: `i${typeId}`, typeId, socketedStoneTypeId }], equipment: { main_hand: `i${typeId}` } };
 }
 
 function armWorld() { return new World(stubMap(), TYPES, 1); }

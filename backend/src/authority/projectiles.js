@@ -93,6 +93,17 @@ class ProjectileSim {
       // is the only live non-zero source until item_types gains its own.
       knockback: Number.isFinite(weapon.knockback) ? weapon.knockback : 0,
       hitIds: new Set(), // 'c:<id>' / 'p:<id>' already hit by this projectile
+      // Magic Stones (SOMET-245) Task 7: the socketed spell stone's own
+      // player_items.id, read straight off `weapon` (items.js's
+      // activeWeaponType already merged it there when a spell stone is
+      // active -- see that function). null for every ordinary
+      // weapon-shaped source, including every creature-fired ability
+      // (world.js's tickCreatures builds those objects without this field),
+      // so a creature's shot never awards a player's stone XP. Snapshotted
+      // at spawn, same as `damage` above -- a projectile already in flight
+      // must not change which stone it credits because the player
+      // unsocketed mid-flight.
+      stoneItemId: weapon.stoneItemId ?? null,
     });
     return id;
   }
@@ -112,7 +123,14 @@ class ProjectileSim {
   // creature this blast finishes off is credited to `p.ownerId`, the
   // projectile's OWN owner (captured once, at spawn), regardless of who is
   // currently attacking when the shot actually lands.
-  _detonate(p, bx, by, { creatureList, creatures, players, map, now }, kills) {
+  // `stoneHits` accumulates one entry per creature/player this blast actually
+  // damaged (mirrors `kills`' own per-target accumulation) -- ONLY when this
+  // projectile carries a stoneItemId, so an ordinary AoE weapon (no stone
+  // socketed) pushes nothing. Task 7: an AoE spell stone's XP is earned per
+  // target caught in the blast, matching the direct-hit branches in step()
+  // below rather than a single flat award per detonation regardless of how
+  // many targets it actually caught.
+  _detonate(p, bx, by, { creatureList, creatures, players, map, now }, kills, stoneHits) {
     const r = p.aoeRadius;
     for (const c of creatureList) {
       if (!projectileHitsCreature(p, c)) continue;
@@ -132,6 +150,7 @@ class ProjectileSim {
         // detonated.
         shoveAwayFrom(map, bx, by, c, p.knockback);
       }
+      if (p.stoneItemId != null) stoneHits.push({ stoneItemId: p.stoneItemId });
       // The rider is applied at FULL duration: falloff scales damage only. A
       // target clipped by the blast edge still burns for the full time —
       // scaling the duration too would give it a burn too short to ever tick.
@@ -158,6 +177,7 @@ class ProjectileSim {
       // death (resolveDeaths respawns them separately), so the check here is
       // the same hp > 0 gate creatures.js uses, not a delete-happened check.
       if (pl.hp > 0 && p.knockback > 0) shoveAwayFrom(map, bx, by, pl, p.knockback);
+      if (p.stoneItemId != null) stoneHits.push({ stoneItemId: p.stoneItemId });
     }
     return { x: bx, y: by, radius: r, element: p.element };
   }
@@ -182,6 +202,13 @@ class ProjectileSim {
     const kills = [];
     const detonations = [];
     const survivors = [];
+    // Magic Stones (SOMET-245) Task 7: one entry per landed hit whose
+    // projectile carries a stoneItemId (spawn() reads this off the merged
+    // weapon -- see the field's own comment there). Threaded through
+    // exactly like `kills` is: pushed at every point a hit actually lands
+    // (direct or via _detonate), returned from step() for the caller
+    // (world.js's tickProjectiles -> server.js) to award XP against.
+    const stoneHits = [];
     const creatureList = creatures.all(); // hoisted: creatures don't move during this step
     const ctx = { creatureList, creatures, players, map, now };
     for (const p of this.projectiles) {
@@ -198,7 +225,7 @@ class ProjectileSim {
 
         // Terrain: walls stop projectiles.
         if (!map.isWalkable(p.x, p.y)) {
-          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, kills));
+          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits));
           dead = true; break;
         }
 
@@ -212,7 +239,7 @@ class ProjectileSim {
           const rr = p.radius + half;
           if (dist2(p.x, p.y, cx, cy) <= rr * rr) {
             if (p.aoeRadius) {
-              detonations.push(this._detonate(p, p.x, p.y, ctx, kills));
+              detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits));
               dead = true; break;
             }
             p.hitIds.add(key);
@@ -228,6 +255,7 @@ class ProjectileSim {
             // p.ownerId -- the same uuid-into-killerUserId bug, reachable
             // here via a later burn tick rather than this hit itself.
             applyElementEffect(c, p.element, now, killerUserIdFor(p));
+            if (p.stoneItemId != null) stoneHits.push({ stoneItemId: p.stoneItemId });
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
           }
@@ -244,7 +272,7 @@ class ProjectileSim {
           const rr = p.radius + half;
           if (dist2(p.x, p.y, px, py) <= rr * rr) {
             if (p.aoeRadius) {
-              detonations.push(this._detonate(p, p.x, p.y, ctx, kills));
+              detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits));
               dead = true; break;
             }
             p.hitIds.add(key);
@@ -253,6 +281,7 @@ class ProjectileSim {
             // Survivors only. Origin is the projectile's own current
             // position, matching the creature branch just above.
             if (pl.hp > 0 && p.knockback > 0) shoveAwayFrom(map, p.x, p.y, pl, p.knockback);
+            if (p.stoneItemId != null) stoneHits.push({ stoneItemId: p.stoneItemId });
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
           }
@@ -262,7 +291,7 @@ class ProjectileSim {
         // Out of range counts as an impact: a fireball that reaches the end of
         // its flight without touching anything still explodes.
         if (p.remaining <= 0) {
-          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, kills));
+          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits));
           dead = true; break;
         }
       }
@@ -270,7 +299,7 @@ class ProjectileSim {
       if (!dead) survivors.push(p);
     }
     this.projectiles = survivors;
-    return { kills, detonations };
+    return { kills, detonations, stoneHits };
   }
 
   snapshot() {

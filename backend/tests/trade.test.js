@@ -134,7 +134,9 @@ test('buyStock with insufficient gold errors, grants nothing, and rolls back', a
 test('sellItem removes the item, credits gold, and inserts a buyback row', async () => {
   const p = PLAYER();
   const pool = mkPool([
+    [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 0, rows: [] })],
     [/DELETE FROM player_items/i, (sql) => { assert.match(sql, /character_id = \$2/, 'ownership enforced in SQL'); return { rowCount: 1, rows: [{ item_type_id: 3, quantity: 1 }] }; }],
+    [/UPDATE stone_instances SET socketed_into_id = NULL/i, () => ({ rowCount: 0 })],
     [/SELECT value FROM item_types/i, () => ({ rows: [{ value: 20 }] })],
     [/UPDATE users SET gold = gold \+ /i, () => ({ rowCount: 1, rows: [{ gold: 110 }] })],
     [/INSERT INTO merchant_stock/i, () => ({ rows: [{ id: 'b1' }] })],
@@ -149,6 +151,36 @@ test('sellItem removes the item, credits gold, and inserts a buyback row', async
   assert.equal(pool.rolledBack, false);
   assert.match(pool.seen[0], /^BEGIN$/i);
   assert.match(pool.seen[pool.seen.length - 1], /^COMMIT$/i);
+});
+
+// SOMET-245 Task 4b: stone_instances.socketed_into_id has its own
+// ON DELETE SET NULL FK back to player_items, so the DB already ejects a
+// socketed stone the instant its host's row is deleted -- this test pins
+// the SAME-TRANSACTION explicit call sellItem now also makes (belt and
+// suspenders, and load-bearing if that FK is ever altered): the eject must
+// run on the SAME checked-out client, after the DELETE is confirmed
+// (rowCount === 1) and before COMMIT, keyed on the host's itemId.
+test('sellItem ejects a stone socketed into the sold item, in the same transaction as the delete', async () => {
+  const p = PLAYER();
+  const seenOrder = [];
+  const pool = mkPool([
+    [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 0, rows: [] })],
+    [/DELETE FROM player_items/i, () => { seenOrder.push('delete'); return { rowCount: 1, rows: [{ item_type_id: 3, quantity: 1 }] }; }],
+    [/UPDATE stone_instances SET socketed_into_id = NULL/i, (sql, params) => {
+      seenOrder.push('eject');
+      assert.deepStrictEqual(params, ['i1'], 'eject must target the sold item as the host');
+      return { rowCount: 1 };
+    }],
+    [/SELECT value FROM item_types/i, () => ({ rows: [{ value: 20 }] })],
+    [/UPDATE users SET gold = gold \+ /i, () => ({ rowCount: 1, rows: [{ gold: 110 }] })],
+    [/INSERT INTO merchant_stock/i, () => ({ rows: [{ id: 'b1' }] })],
+  ]);
+  const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'i1');
+  assert.equal(r.ok, true);
+  assert.deepStrictEqual(seenOrder, ['delete', 'eject'], 'eject must run after the delete is confirmed, both inside the transaction');
+  assert.equal(pool.committed, true, 'eject must be committed as part of the same transaction as the delete');
+  assert.match(pool.seen[0], /^BEGIN$/i, 'eject must be inside BEGIN...COMMIT, not before it');
+  assert.match(pool.seen[pool.seen.length - 1], /^COMMIT$/i, 'eject must be inside BEGIN...COMMIT, not after it');
 });
 
 // F-022 (SOMET-202): player_items.quantity is read and preserved by every
@@ -166,7 +198,12 @@ test('sellItem removes the item, credits gold, and inserts a buyback row', async
 test('sellItem refuses to sell a stacked item (quantity > 1) and rolls back instead of destroying units (F-022)', async () => {
   const p = PLAYER(); p.inv.items = [{ id: 'i1', typeId: 3, quantity: 5 }];
   const pool = mkPool([
+    [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 0, rows: [] })],
     [/DELETE FROM player_items/i, () => ({ rowCount: 1, rows: [{ item_type_id: 3, quantity: 5 }] })],
+    // The eject runs (same transaction, right after the DELETE) before the
+    // stack check rolls everything back -- both undone together, so this
+    // must still be routed rather than throwing "unexpected".
+    [/UPDATE stone_instances SET socketed_into_id = NULL/i, () => ({ rowCount: 0 })],
   ]);
   const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'i1');
   assert.equal(r.ok, false);
@@ -193,6 +230,7 @@ test('sellItem refuses an equipped item, mutates nothing, and never opens a tran
 test('sellItem refuses an item the player does not own and rolls back', async () => {
   const p = PLAYER();
   const pool = mkPool([
+    [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 0, rows: [] })],
     [/DELETE FROM player_items/i, () => ({ rowCount: 0, rows: [] })],
   ]);
   const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'nope');
@@ -202,6 +240,72 @@ test('sellItem refuses an item the player does not own and rolls back', async ()
   assert.ok(!pool.seen.some((s) => /INSERT INTO merchant_stock/i.test(s)), 'no buyback row on rejection');
   assert.equal(pool.committed, false, 'must not commit on rejection');
   assert.equal(pool.rolledBack, true, 'must roll back on rejection');
+});
+
+// Critical #1 fix (SOMET-245 final review): stone_instances.player_item_id
+// is ON DELETE CASCADE and no acquisition path (buyStock included) ever
+// recreates one -- selling a stone (loose OR socketed) would permanently
+// destroy its xp/level and make a buyback-and-repurchase of the exact same
+// item unsocketable forever. sellItem must refuse before ever deleting the
+// row, with a clear, specific reason (not the generic "you do not own that
+// item").
+test('sellItem refuses a LOOSE (unsocketed) stone, deletes nothing, and rolls back', async () => {
+  const p = PLAYER(); p.inv.items = [{ id: 'stone1', typeId: 9, quantity: 1 }];
+  const pool = mkPool([
+    [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 1, rows: [{ '?column?': 1 }] })], // IS a stone
+    [/DELETE FROM player_items/i, () => { throw new Error('must never delete a refused stone'); }],
+  ]);
+  const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'stone1');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /unsocket/i, 'must give a clear, specific reason');
+  assert.ok(!pool.seen.some((s) => /DELETE FROM player_items/i.test(s)), 'must never delete the stone\'s row');
+  assert.equal(pool.committed, false);
+  assert.equal(pool.rolledBack, true, 'must roll back rather than leave the transaction open');
+  assert.equal(p.gold, 100, 'wallet untouched');
+  assert.equal(p.inv.items.length, 1, 'the stone remains in in-memory inventory -- the sale never happened');
+});
+
+test('sellItem refuses a SOCKETED stone the same way as a loose one', async () => {
+  // Same guard, same query shape as the loose case -- the check is purely
+  // "does this player_items row have a stone_instances row", irrespective
+  // of socketed_into_id. Pinned separately per the finding's own
+  // requirement that BOTH cases be covered.
+  const p = PLAYER(); p.inv.items = [{ id: 'stone1', typeId: 9, quantity: 1 }];
+  const pool = mkPool([
+    [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 1, rows: [{ '?column?': 1 }] })],
+    [/DELETE FROM player_items/i, () => { throw new Error('must never delete a refused stone'); }],
+  ]);
+  const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'stone1');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /unsocket/i);
+  assert.ok(!pool.seen.some((s) => /DELETE FROM player_items/i.test(s)));
+});
+
+// Critical #2 (SOMET-245 final review): verifies Critical #1's fix actually
+// closes the stale-cache scenario for the sellItem path -- attempting to
+// sell a SOCKETED stone must be refused before the host's in-memory
+// socketedStoneTypeId/socketedStoneItemId cache (activeWeaponType/
+// socketedBuffStones both read this) could ever go stale. Sets up a host
+// weapon whose cache already reflects a live socket (the same shape
+// items.js's socketStone/loadInventory write), attempts to sell the STONE
+// itself, and asserts the host's cache is completely untouched by the
+// refusal.
+test('sellItem refusing a socketed stone leaves the HOST item\'s in-memory socket cache untouched (Critical #2 closure)', async () => {
+  const p = PLAYER();
+  p.inv.items = [
+    { id: 'weapon1', typeId: 3, quantity: 1, socketedStoneTypeId: 9, socketedStoneItemId: 'stone1' },
+    { id: 'stone1', typeId: 9, quantity: 1 },
+  ];
+  const pool = mkPool([
+    [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 1, rows: [{ '?column?': 1 }] })],
+    [/DELETE FROM player_items/i, () => { throw new Error('must never delete a refused stone'); }],
+  ]);
+  const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'stone1');
+  assert.equal(r.ok, false);
+  const host = p.inv.items.find((it) => it.id === 'weapon1');
+  assert.equal(host.socketedStoneTypeId, 9, 'the host\'s cached stone TYPE must survive a refused sell of the stone');
+  assert.equal(host.socketedStoneItemId, 'stone1', 'the host\'s cached stone INSTANCE id must survive a refused sell of the stone');
+  assert.ok(p.inv.items.some((it) => it.id === 'stone1'), 'the stone itself must still be owned');
 });
 
 test('buyStock requires an inventory (fails loud like sellItem, not silently)', async () => {

@@ -335,6 +335,48 @@ test("dropping another user's item deletes nothing and spawns nothing", async ()
     'ownership predicate must bind the CALLER\'s character (31), not the forged itemId');
 });
 
+// Critical #1 fix (SOMET-245 final review): stone_instances.player_item_id
+// is ON DELETE CASCADE, and nothing on any acquisition path (claimItem,
+// buyStock) ever recreates a stone_instances row -- so dropping a stone
+// (loose OR socketed) would permanently destroy its xp/level and make a
+// re-acquired copy unsocketable forever. dropItem must refuse rather than
+// silently allow it, the same "unequip it first"-shaped rejection as the
+// equipped-item guard right above.
+const STONE_CHECK_RE = /^\s*SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i;
+
+test('dropItem refuses a LOOSE (unsocketed) stone, deletes nothing, and gives a clear reason', async () => {
+  const entry = armDropEntry();
+  const pool = scriptedPool([
+    [STONE_CHECK_RE, { rows: [{ '?column?': 1 }], rowCount: 1 }], // itemId IS a stone
+    [DROP_RE, () => { throw new Error('must never reach the delete+insert CTE'); }],
+  ]);
+
+  const r = await dropItem(pool, entry, 'u1', 31, 'i1', { ttlMs: 1000 });
+
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /unsocket/i, 'must give a clear, specific reason -- not the generic "you do not own that item"');
+  assert.strictEqual(pool.matching(DROP_RE).length, 0, 'must not touch player_items at all');
+  assert.strictEqual(entry.world.getPlayer('u1').inv.items.length, 1, 'still owned -- nothing removed from in-memory inventory');
+});
+
+test('dropItem refuses a SOCKETED stone the same way as a loose one', async () => {
+  // The guard keys purely on "does this player_items row have a
+  // stone_instances row" -- socketed_into_id being set or NULL is
+  // irrelevant to the check itself, but this pins the socketed case
+  // explicitly per the finding's own requirement (both must be refused).
+  const entry = armDropEntry();
+  const pool = scriptedPool([
+    [STONE_CHECK_RE, { rows: [{ '?column?': 1 }], rowCount: 1 }],
+    [DROP_RE, () => { throw new Error('must never reach the delete+insert CTE'); }],
+  ]);
+
+  const r = await dropItem(pool, entry, 'u1', 31, 'i1', { ttlMs: 1000 });
+
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /unsocket/i);
+  assert.strictEqual(pool.matching(DROP_RE).length, 0);
+});
+
 // F-016 (SOMET-196): dropItem used to issue the DELETE FROM player_items and
 // the INSERT INTO world_items as two INDEPENDENT pool.query calls -- two
 // separate connections, two separate implicit transactions. A failure between
@@ -359,8 +401,46 @@ test('dropItem persists the delete+insert as ONE atomic statement, not two indep
   const r = await dropItem(pool, entry, 'u1', 31, 'i1', { ttlMs: 1000 });
 
   assert.strictEqual(r.ok, true);
-  assert.strictEqual(pool.calls.length, 1,
+  // SOMET-245 final review Critical #1 added a preliminary, READ-ONLY
+  // stone_instances check ahead of this CTE (see loot.js) -- it does not
+  // reopen the F-016 window this test guards (that window is specifically a
+  // WRITE succeeding on one connection while a dependent WRITE fails on
+  // another; a prior SELECT carries no such risk), so the assertion now
+  // scopes to the delete+insert CTE call specifically rather than the total
+  // call count.
+  assert.strictEqual(pool.matching(DROP_RE).length, 1,
     'the delete and the insert must reach the pool as a single atomic statement, not two independent queries');
+});
+
+// SOMET-245 Task 4b: stone_instances.socketed_into_id has its own
+// ON DELETE SET NULL FK back to player_items, so the DB already ejects a
+// socketed stone the instant its host's row is deleted -- this test pins
+// the explicit, SAME-STATEMENT eject dropItem now also does (belt and
+// suspenders, and load-bearing if that FK is ever altered). It has to be
+// folded into the existing CTE rather than a second pool.query call:
+// dropItem has no checked-out client (see the atomicity test above), so a
+// separate call would be a separate implicit transaction, reopening the
+// exact crash window this exists to close.
+test('dropItem ejects a stone socketed into the dropped item, in the same atomic statement as the delete', async () => {
+  const entry = armDropEntry();
+  const pool = scriptedPool([
+    [DROP_RE, (p) => ({
+      rows: [{ id: 'g9', item_type_id: 7, x: p[3], y: p[4], expires_at: '2999-01-01T00:00:00Z' }],
+      rowCount: 1,
+    })],
+  ]);
+
+  const r = await dropItem(pool, entry, 'u1', 31, 'i1', { ttlMs: 1000 });
+
+  assert.strictEqual(r.ok, true);
+  // See the atomicity test above for why this now scopes to DROP_RE rather
+  // than the total call count (SOMET-245 final review Critical #1 added a
+  // preliminary read-only stone_instances check ahead of this CTE).
+  assert.strictEqual(pool.matching(DROP_RE).length, 1,
+    'the eject must ride the SAME statement as the delete+insert, not a second query');
+  const q = pool.matching(DROP_RE)[0];
+  assert.match(q.sql, /UPDATE stone_instances SET socketed_into_id = NULL FROM d WHERE stone_instances\.socketed_into_id = \$1/i,
+    'must eject any stone socketed into the dropped item, keyed on the same $1 (itemId) as the delete');
 });
 
 test('a successful drop spawns a ground item at the player centre and removes the instance', async () => {

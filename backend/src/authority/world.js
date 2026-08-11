@@ -366,21 +366,21 @@ class World {
   // DELETE and credit.
   attack(userId, ax, ay) {
     const p = this.players.get(userId);
-    if (!p || p._attackCd > 0) return { kills: [], attacks: [] };
+    if (!p || p._attackCd > 0) return { kills: [], attacks: [], stoneHit: null };
     // Shock's interrupt. Checked alongside the cooldown and BEFORE any resource
     // is deducted or any cooldown is stamped, matching the existing rule that a
     // refused attack costs nothing: an interrupt that silently ate the mana or
     // started the cooldown would punish the player twice for one hit.
-    if (!canAct(p, this.now)) return { kills: [], attacks: [] };
+    if (!canAct(p, this.now)) return { kills: [], attacks: [], stoneHit: null };
     const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
-    if (!w) return { kills: [], attacks: [] };
+    if (!w) return { kills: [], attacks: [], stoneHit: null };
 
     const manaCost = w.mana_cost || 0;
     const staminaCost = w.stamina_cost || 0;
     // Both resources are checked BEFORE either is deducted, and a denied
     // attack does NOT consume the cooldown — matching mana's existing rule,
     // now covering the melee branch too (melee weapons can carry a cost).
-    if (p.mana < manaCost || p.stamina < staminaCost) return { kills: [], attacks: [] };
+    if (p.mana < manaCost || p.stamina < staminaCost) return { kills: [], attacks: [], stoneHit: null };
 
     const { nx, ny } = normalizeAim(ax, ay, p.facing);
     const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
@@ -434,6 +434,20 @@ class World {
         }
       }
       applyAttackCooldown(p, w);
+      const landed = creatureTargets.length > 0 || playerHits > 0;
+      // Magic Stones (SOMET-245) Task 7: a socketed SPELL stone gains XP the
+      // instant its swing actually connects with something -- landed is the
+      // exact same fact the descriptor's own `hit` field below already
+      // computes, just also gating the award. `w.stoneItemId` is set only
+      // when activeWeaponType (items.js) actually merged a spell stone's
+      // fields onto this weapon (never for a bare weapon, never for a buff
+      // stone, whose element is null and never reaches that merge branch) --
+      // see items.js's activeWeaponType for where this field comes from.
+      // One award per landed swing, not one per target it happened to hit:
+      // the brief calls this "on a landed spell-stone hit," and a swing is
+      // the unit of "a hit" from the player's perspective (matches the
+      // descriptor's own single boolean `hit`, not a per-target count).
+      const stoneHit = (w.stoneItemId != null && landed) ? { stoneItemId: w.stoneItemId } : null;
       // The descriptor exposes facts this method already computed — the aim
       // vector, the attacker's centre, the catalog's reach/arc. Nothing here
       // is derived, and the effect NAME is resolved on this side so the
@@ -449,8 +463,9 @@ class World {
           x: cx, y: cy,
           nx, ny,
           reach: w.reach, arc: w.arc_width,
-          hit: creatureTargets.length > 0 || playerHits > 0,
+          hit: landed,
         }],
+        stoneHit,
       };
     }
 
@@ -467,8 +482,13 @@ class World {
     // slice D, so slice A emits no descriptor for them. A projectile never
     // kills on the SAME tick it is fired — any kill it eventually scores is
     // reported later, by tickProjectiles, credited to `p.ownerId` (this
-    // userId) rather than whoever is attacking when it lands.
-    return { kills: [], attacks: [] };
+    // userId) rather than whoever is attacking when it lands. Stone XP for a
+    // spawned spell projectile follows the identical rule: `stoneHit` here
+    // is always null (nothing has landed yet) -- if `w.stoneItemId` is set,
+    // ProjectileSim.spawn (below) reads it straight off `w` and carries it
+    // on the projectile so tickProjectiles' own step() can award XP at the
+    // actual moment of impact, not at the moment of firing.
+    return { kills: [], attacks: [], stoneHit: null };
   }
 
   // Returns the whole step result — { kills, detonations } — so AoE blasts

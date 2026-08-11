@@ -4,8 +4,9 @@ const { WebSocketServer } = require('ws');
 const { currentUserForToken } = require('../auth/tokens.js');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
-const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
+const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout, socketStone, unsocketStone } = require('./items');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
+const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
 const { ownedCharacter } = require('../services/characters.js');
 const { recordVisit } = require('../services/visitedWorlds.js');
 const { mayJoin, joinPolicyFacts } = require('../services/joinPolicy.js');
@@ -29,6 +30,7 @@ const { knockbackPosition } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
+const { awardStoneXp, STONE_XP_PER_HIT } = require('./stoneXp.js');
 
 const MAP_TILE_SIZE = 100;
 
@@ -528,7 +530,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // PvP path is the one gap that check does not cover, hence this
           // guard rather than relying on tick timing alone.
           if (p && p.hp > 0) {
-            entry.world.applyDerivedStats(result.killerUserId, derivePlayerStats(progression));
+            // Magic Stones (SOMET-245) Task 6: fold in any socketed buff-stone
+            // bonuses before deriving, so a kill-triggered level-up does not
+            // silently drop a buff already reflected in this player's live
+            // stats -- derivePlayerStats(progression) alone would compute the
+            // RAW bundle and overwrite the buffed one applyDerivedStats set.
+            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
+            entry.world.applyDerivedStats(result.killerUserId, derivePlayerStats(withStoneBonuses(progression, buffs)));
           }
         }
         // Best-effort: the killer's socket may be gone (disconnected between
@@ -539,6 +547,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (sock) send(sock, { type: 'progression', progression, leveledUp, newLevel, awarded });
       })
       .catch((err) => console.error('death commit failed:', err));
+
+  // Magic Stones (SOMET-245) Task 7: fire-and-forget entry point for a
+  // landed spell-stone hit, mirroring onCreatureDeath's exact shape just
+  // above -- both the sync `attack` message handler and the tick loop's
+  // tickProjectiles consumer are on the hot path and must not await a DB
+  // round trip, and an unhandled rejection here would kill the process the
+  // same way an unhandled onCreatureDeath rejection would. No player-facing
+  // frame is sent on success (unlike onCreatureDeath's 'progression' push) --
+  // a stone's xp/level are read on demand (inventory/socket UI), not pushed
+  // live every hit, so there is nothing to notify here yet.
+  const onStoneHit = (stoneItemId) => awardStoneXp(pool, stoneItemId, STONE_XP_PER_HIT)
+    .catch((err) => console.error('stone xp award failed:', err));
 
   // Fire-and-forget entry point for a PLAYER death: resolveDeaths() (the
   // single player-death path, world.js) is synchronous and on the tick
@@ -1007,7 +1027,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const gr = await pool.query('SELECT gold FROM users WHERE id = $1', [ws.userId]);
         const gold = gr.rows.length ? Number(gr.rows[0].gold) || 0 : 0;
         const progression = await loadProgression(pool, character.id);
-        const stats = derivePlayerStats(progression);
+        // Magic Stones (SOMET-245) Task 6: `inv` (loaded above) already has
+        // its socketedStoneTypeId cache hydrated by loadInventory for EVERY
+        // join, including a reconnect that finds a buff stone still socketed
+        // from a previous session -- fold that bonus in here too, or a
+        // rejoining player would sit at the wrong maxHp/maxMana/etc until
+        // their next kill, chest, or socket/unsocket action re-derives it.
+        const stats = derivePlayerStats(withStoneBonuses(progression, socketedBuffStones(inv, entry.world.weapons)));
 
         // A newer session for this same account may have won (and kicked
         // us) while we awaited inventory above. If so, our reservation was
@@ -1107,9 +1133,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Ammo-free weapons (all melee, all staves, darts) keep the fully
       // synchronous path: no DB round trip on the hot path.
       if (gate.weapon.ammo_type_id == null) {
-        const { kills, attacks } = entry.world.attack(ws.userId, ax, ay);
+        const { kills, attacks, stoneHit } = entry.world.attack(ws.userId, ax, ay);
         pushAttacks(entry, attacks);
         for (const k of dedupeKillsById(kills)) onCreatureDeath(entry, k.id, k.killerUserId);
+        // Magic Stones (SOMET-245) Task 7: a landed melee spell-stone hit is
+        // known synchronously (world.js's attack() already confirmed the
+        // swing connected) -- fire-and-forget the award the same way kills
+        // are, just off a single flag rather than a list.
+        if (stoneHit) onStoneHit(stoneHit.stoneItemId);
         return;
       }
 
@@ -1149,9 +1180,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
           send(ws, { type: 'noammo', item_type_id: ammoTypeId }); // no cooldown consumed
           return;
         }
-        const { kills, attacks } = cur.world.attack(ws.userId, ax, ay);
+        const { kills, attacks, stoneHit } = cur.world.attack(ws.userId, ax, ay);
         pushAttacks(cur, attacks);
         for (const k of dedupeKillsById(kills)) onCreatureDeath(cur, k.id, k.killerUserId);
+        // Same fire-and-forget award as the ammo-free branch above -- always
+        // null on THIS path in practice (ammo-gated weapons are projectile
+        // weapons, whose stoneHit only resolves later via tickProjectiles),
+        // but wired identically for shape consistency and so this stays
+        // correct if a melee weapon ever legitimately carries an ammo cost.
+        if (stoneHit) onStoneHit(stoneHit.stoneItemId);
         // The shot is already committed above (ammo spent, kills
         // resolved) — pushing the client its new count is best-effort on
         // top of that, not a condition of it. Isolated in its own
@@ -1171,6 +1208,98 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
     equip: equipOrUnequip,
     unequip: equipOrUnequip,
+
+    // Socket a stone into a host item (weapon/armor). itemTypes comes from
+    // entry.world.weapons -- the brief's draft assumed a field named
+    // entry.itemTypes, which does not exist on the loaded world entry
+    // (grepped: no entry\.\w*[Ii]tem[Tt]ype anywhere in this file); the real
+    // catalog map is threaded through the World constructor and lives at
+    // this.weapons (world.js:127), the exact map equipOrUnequip's own
+    // World#setEquipment already resolves against internally, and the one
+    // `use`'s handler above reads directly (entry.world.weapons.get(...)).
+    // characterId comes from ws.characterId (set at join, server.js:1027),
+    // matching drop/use/buy/sell's own direct-call handlers below rather
+    // than equip/unequip's indirection through a World wrapper method --
+    // socketStone/unsocketStone take the same low-level (pool, characterId,
+    // inv, ..., itemTypes) shape items.js's own equip/unequip do, so no new
+    // World method is needed to bridge them.
+    socket(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.stoneId !== 'string' || typeof msg.hostId !== 'string') return; // wire hygiene, matches drop/use
+      chainOp(ws, 'socket', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        // Magic Stones (SOMET-245) Task 6: capture whether this is a BUFF
+        // stone (stat_bonus_stat set) before socketStone runs, off the
+        // stone's own item -- socketStone only mutates the HOST item's
+        // socketedStoneTypeId cache, and this stone item's own typeId never
+        // changes across the call either way, so pre- or post-call both work
+        // here; pre-call matches unsocket's shape (below), which has no
+        // choice but to read it before the call.
+        const stoneItem = p.inv.items.find((it) => it.id === msg.stoneId);
+        const stoneType = stoneItem ? entry.world.weapons.get(stoneItem.typeId) : null;
+        const isBuffStone = !!(stoneType && stoneType.stat_bonus_stat != null);
+        const r = await socketStone(pool, ws.characterId, p.inv, msg.stoneId, msg.hostId, entry.world.weapons);
+        if (r.ok) {
+          send(ws, { type: 'socketed', stoneId: msg.stoneId, hostId: msg.hostId });
+          // Trigger an immediate re-derive so a socketed buff stone's effect
+          // applies right away, not just at the next level-up/kill -- same
+          // hp>0 guard as every other applyDerivedStats call site (a dying
+          // player must not be revived by this). Skipped entirely for a
+          // spell stone: no stat changed, so there is nothing to re-derive or
+          // push.
+          if (isBuffStone && p.hp > 0) {
+            const currentProgression = await loadProgression(pool, p.characterId);
+            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
+            entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(currentProgression, buffs)));
+            send(ws, {
+              type: 'progression', progression: currentProgression,
+              leveledUp: false, newLevel: currentProgression.level, awarded: 0,
+            });
+          }
+        } else send(ws, { type: 'error', message: r.reason });
+      });
+    },
+
+    // Unsocket requires an explicit confirm:true frame field -- a client
+    // that omits it is refused before any DB call (checked inside
+    // unsocketStone itself, ahead of the destroy roll).
+    unsocket(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.stoneId !== 'string') return;
+      chainOp(ws, 'unsocket', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        // Magic Stones (SOMET-245) Task 6: must capture whether this was a
+        // BUFF stone BEFORE unsocketStone runs -- on a destroy roll it
+        // deletes the stone's player_items row outright (filtered out of
+        // p.inv.items), and on survival it still clears the host's
+        // socketedStoneTypeId cache, so there is no way to recover "was this
+        // a buff stone" from p.inv AFTER the call either way.
+        const stoneItem = p.inv.items.find((it) => it.id === msg.stoneId);
+        const stoneType = stoneItem ? entry.world.weapons.get(stoneItem.typeId) : null;
+        const wasBuffStone = !!(stoneType && stoneType.stat_bonus_stat != null);
+        const r = await unsocketStone(pool, ws.characterId, p.inv, msg.stoneId, { confirm: msg.confirm === true });
+        if (r.ok) {
+          send(ws, { type: 'unsocketed', stoneId: msg.stoneId, destroyed: r.destroyed });
+          // Trigger an immediate re-derive so removing a buff stone's effect
+          // applies right away, whether it survived (ejected, no longer
+          // socketed anywhere) or was destroyed (gone outright) -- either way
+          // socketedBuffStones(p.inv, ...) below no longer counts it.
+          if (wasBuffStone && p.hp > 0) {
+            const currentProgression = await loadProgression(pool, p.characterId);
+            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
+            entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(currentProgression, buffs)));
+            send(ws, {
+              type: 'progression', progression: currentProgression,
+              leveledUp: false, newLevel: currentProgression.level, awarded: 0,
+            });
+          }
+        } else send(ws, { type: 'error', message: r.reason });
+      });
+    },
 
     pickup(ws) {
       const entry = worlds.get(ws.worldId);
@@ -1380,7 +1509,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // max HP in the DB but never in the running game until reconnect --
         // "the exact defect A1's review caught."
         if (result.leveledUp && p.hp > 0) {
-          entry.world.applyDerivedStats(ws.userId, derivePlayerStats(result.progression));
+          // Magic Stones (SOMET-245) Task 6: same fold-in as onCreatureDeath's
+          // level-up path above -- a chest-XP level-up must not overwrite an
+          // already-live buff-stone bonus with the unbuffed bundle.
+          const buffs = socketedBuffStones(p.inv, entry.world.weapons);
+          entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(result.progression, buffs)));
         }
         send(ws, {
           type: 'chestOpened', chestId: chest.id, items: result.items,
@@ -1607,8 +1740,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // drop roll stay authoritative.
       const { kills: killedByGuards } = entry.world.tickCreatures(dt, entry.activeChunks);
       for (const k of dedupeKillsById(killedByGuards)) onCreatureDeath(entry, k.id, k.killerUserId);
-      const { kills: killedByProjectiles, detonations } = entry.world.tickProjectiles(dt);
+      const { kills: killedByProjectiles, detonations, stoneHits } = entry.world.tickProjectiles(dt);
       for (const k of dedupeKillsById(killedByProjectiles)) onCreatureDeath(entry, k.id, k.killerUserId);
+      // Magic Stones (SOMET-245) Task 7: a projectile's landed spell-stone
+      // hit is only known HERE, at actual impact (see projectiles.js'
+      // step()/`_detonate` -- world.js's attack() itself only spawns the
+      // shot and cannot know yet whether it will connect). Each entry is a
+      // real distinct landed hit (including multiple from one piercing
+      // projectile, or multiple targets in one AoE blast) -- no dedup like
+      // `kills` needs, since there is no shared id to collide on here.
+      for (const h of stoneHits) onStoneHit(h.stoneItemId);
       // Stashed for this tick's broadcast (below). REPLACED, not appended, so
       // an unconsumed stash can never grow without bound.
       entry.pendingDetonations = detonations;
@@ -1891,9 +2032,20 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (!entry) return false;
       const p = entry.world.getPlayer(uid);
       if (!p || p.hp <= 0) return false;
-      entry.world.applyDerivedStats(uid, stats);
+      // Magic Stones (SOMET-245) Task 6: `stats` arrives from
+      // progressionRoutes.js, which has no access to this session's
+      // inv/itemTypes and so computed it from `progression` alone -- using it
+      // as-is here would silently WIPE a buff-stone bonus already live on
+      // this player (applied by a prior kill/join/socket) back down to the
+      // unbuffed bundle on every allocate/respec. Recompute with the current
+      // socketed buff stones folded in, the same way the other three
+      // applyDerivedStats call sites do, and push THAT (not the passed-in
+      // `stats`) both into the world and onto the wire.
+      const buffs = socketedBuffStones(p.inv, entry.world.weapons);
+      const buffedStats = derivePlayerStats(withStoneBonuses(progression, buffs));
+      entry.world.applyDerivedStats(uid, buffedStats);
       const sock = entry.sockets.get(uid);
-      if (sock) send(sock, { type: 'progression', progression, stats });
+      if (sock) send(sock, { type: 'progression', progression, stats: buffedStats });
       return true;
     },
     close() {

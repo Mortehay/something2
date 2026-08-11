@@ -314,6 +314,37 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 6000
     return { ok: false, reason: 'unequip it first' };
   }
 
+  // Guard (Critical #1, SOMET-245 final review): stone_instances.player_item_id
+  // is ON DELETE CASCADE, and nothing on any acquisition path (claimItem,
+  // buyStock) ever recreates a stone_instances row -- the conversion
+  // migration (Task 2) is the only writer in the whole branch. Dropping a
+  // stone (socketed or loose in the backpack) would therefore permanently
+  // destroy its stone_instances row -- xp/level gone, and a re-acquired copy
+  // of the same physical item can never be socketed again (socketStone joins
+  // player_items to stone_instances and would report 'stone not found'
+  // forever). A stone must leave a socket via unsocketStone, which correctly
+  // deletes-or-preserves its row; refuse the drop instead of silently
+  // destroying state a normal pickup can never restore. Mirrors the
+  // 'unequip it first' guard shape immediately above.
+  //
+  // Joined against player_items on character_id, the same ownership
+  // predicate the DELETE below uses -- NOT a bare stone_instances lookup by
+  // itemId alone. Without the join, a caller could pass an itemId they do
+  // not own at all and learn whether it happens to be a stone (a distinct
+  // 'unsocket it first' vs. the generic 'you do not own that item' the
+  // ownership check further down would otherwise give) -- a small
+  // information leak about another player's inventory. Scoped, an unowned
+  // id (stone or not) always falls through to that same generic rejection.
+  const stoneCheck = await pool.query(
+    `SELECT 1 FROM stone_instances si
+       JOIN player_items pi ON pi.id = si.player_item_id
+      WHERE si.player_item_id = $1 AND pi.character_id = $2`,
+    [itemId, characterId],
+  );
+  if (stoneCheck.rowCount > 0) {
+    return { ok: false, reason: 'unsocket it first' };
+  }
+
   const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
   // One statement does the DELETE ... RETURNING and the world_items INSERT
   // together via a CTE (mirrors claimItem), so Postgres commits or rolls
@@ -325,8 +356,25 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 6000
   // item (F-016 / SOMET-196). The character_id predicate IS the ownership check —
   // a forged itemId naming someone else's item deletes (and therefore
   // inserts) nothing.
+  // `eject` mirrors services/stoneEject.js's ejectSocketedStone, inlined as
+  // its own writable CTE rather than a separate call: dropItem has no
+  // checked-out transaction client (the delete+insert pair is already one
+  // atomic pool.query statement, per the F-016 comment above), so a second,
+  // separate ejectSocketedStone(pool, itemId) call would be a second
+  // implicit transaction -- a crash between the two would reopen exactly the
+  // dangling-socket window this exists to close. `FROM d` (not `WHERE EXISTS
+  // (SELECT ... FROM d)`) deliberately avoids the "select ... from d" text
+  // shape the test below pins for the INSERT's own projection -- and ties
+  // the UPDATE to d the same way: 0 rows in d (forged/unowned itemId) means
+  // the join has no partner, so 0 rows update; the deleted host's real id in
+  // d makes it match plain equality on socketed_into_id. Postgres executes
+  // every writable CTE in a WITH clause for its side effects even when, as
+  // here, nothing downstream reads its output (verified directly against
+  // Postgres, including this exact WITH-DELETE-then-INSERT shape, before
+  // relying on it).
   const r = await pool.query(
-    `WITH d AS (DELETE FROM player_items WHERE id = $1 AND character_id = $2 RETURNING item_type_id, quantity)
+    `WITH d AS (DELETE FROM player_items WHERE id = $1 AND character_id = $2 RETURNING item_type_id, quantity),
+          eject AS (UPDATE stone_instances SET socketed_into_id = NULL FROM d WHERE stone_instances.socketed_into_id = $1)
      INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
      SELECT $3, item_type_id, $4, $5, now() + ($6::int * interval '1 millisecond'), quantity FROM d
      RETURNING id, item_type_id, x, y, expires_at, quantity`,

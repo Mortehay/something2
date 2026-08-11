@@ -3,6 +3,8 @@
 // character_id (SOMET-257 re-keyed them off user_id) and are independent of
 // any world. Gold is the exception and stays on users -- it is account-wide.
 
+const { isCompatible, stoneKind, rollDestroy } = require('../services/stones.js');
+
 const DEFAULT_WEAPON_NAME = 'dagger';
 const SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
 
@@ -13,7 +15,8 @@ async function loadItemTypes(pool) {
   const r = await pool.query(
     `SELECT id, name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
             range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element,
-            defense, resistances, stackable, ammo_type_id, aoe_radius, vfx, knockback
+            defense, resistances, stackable, ammo_type_id, aoe_radius, vfx, knockback,
+            stat_bonus_stat, stat_bonus_amount
      FROM item_types ORDER BY id ASC`,
   );
   const m = new Map();
@@ -51,6 +54,19 @@ async function loadItemTypes(pool) {
       // SELECT list, so world.attack's `w.knockback > 0` check silently read
       // undefined forever despite a correct migration and correct world.js.
       knockback: Number(row.knockback ?? 0),
+      // Magic Stones (SOMET-245) Task 6 prerequisite fix: these two columns
+      // were added to the schema by Task 1 (1714440165000_stone_item_type.js)
+      // but never selected/mapped here, so every in-memory item-type object
+      // had stat_bonus_stat/stat_bonus_amount permanently undefined regardless
+      // of the DB row -- the exact same "column added to the schema but
+      // missing from an explicit SELECT list" shape the `knockback` comment
+      // above already documents for P2a. Left as raw values (null passthrough,
+      // Number(...) for the amount) rather than defaulted to 0/'' -- callers
+      // (stoneBonuses.js's socketedBuffStones) test `stat_bonus_stat != null`
+      // to distinguish a buff stone from a spell stone, and a coerced '' or 0
+      // would make every stone look like a buff stone.
+      stat_bonus_stat: row.stat_bonus_stat ?? null,
+      stat_bonus_amount: row.stat_bonus_amount == null ? null : Number(row.stat_bonus_amount),
     });
   }
   return m;
@@ -75,6 +91,18 @@ function resolveGoldItemTypeId(itemTypes) {
 }
 
 // A character's owned instances + their paper-doll, both character-scoped.
+//
+// Hydrates each host item's socketedStoneTypeId cache from stone_instances at
+// LOAD time, not just from live socketStone/unsocketStone writes during the
+// session (Task 4). Without this, a character who joins (or reconnects) with
+// an already-socketed weapon -- which is every migration-converted magic
+// weapon, plus anything socketed and left socketed across a previous session
+// -- would have an empty in-memory cache despite the DB truthfully recording
+// a socketed stone, and combat's activeWeaponType (items.js) would silently
+// treat the weapon as bare (plain physical, per the "replace semantics"
+// design) until the player happened to touch the socket UI again. Scoped to
+// this character via the host_pi join predicate, matching every other
+// ownership check in this file.
 async function loadInventory(pool, characterId) {
   const ir = await pool.query(
     'SELECT id, item_type_id, quantity FROM player_items WHERE character_id = $1 ORDER BY created_at ASC, id ASC',
@@ -84,12 +112,34 @@ async function loadInventory(pool, characterId) {
     'SELECT slot, item_id FROM player_equipment WHERE character_id = $1',
     [characterId],
   );
+  const sr = await pool.query(
+    `SELECT si.socketed_into_id AS host_id, si.player_item_id AS stone_item_id,
+            stone_pi.item_type_id AS stone_type_id
+       FROM stone_instances si
+       JOIN player_items stone_pi ON stone_pi.id = si.player_item_id
+       JOIN player_items host_pi ON host_pi.id = si.socketed_into_id
+      WHERE host_pi.character_id = $1 AND si.socketed_into_id IS NOT NULL`,
+    [characterId],
+  );
   const equipment = {};
   for (const row of er.rows) equipment[row.slot] = row.item_id;
-  return {
-    items: ir.rows.map((r) => ({ id: r.id, typeId: r.item_type_id, quantity: Number(r.quantity ?? 1) })),
-    equipment,
-  };
+  const items = ir.rows.map((r) => ({ id: r.id, typeId: r.item_type_id, quantity: Number(r.quantity ?? 1) }));
+  const byId = new Map(items.map((it) => [it.id, it]));
+  for (const row of sr.rows) {
+    const hostItem = byId.get(row.host_id);
+    if (hostItem) {
+      hostItem.socketedStoneTypeId = row.stone_type_id;
+      // Magic Stones (SOMET-245) Task 7: the stone's OWN player_items.id,
+      // distinct from socketedStoneTypeId (the stone's CATALOG type, used to
+      // resolve its element/mana_cost/damage/cooldown). Stone XP is written
+      // against stone_instances.player_item_id, which is this instance id,
+      // never the type id -- without caching it here too, a hit landed by a
+      // weapon loaded at join time (rather than socketed live this session)
+      // would have no instance id to award XP against.
+      hostItem.socketedStoneItemId = row.stone_item_id;
+    }
+  }
+  return { items, equipment };
 }
 
 // Grant the starter set, once per CHARACTER, ever. F-013 (P0): this used to be
@@ -189,12 +239,118 @@ function mitigation(inv, itemTypes) {
 }
 
 // The item type driving attacks: whatever is in main_hand, else the default.
+// "Combat integration -- replace semantics" (design doc): a socketed SPELL
+// stone (element set) supplies the "spell" -- element, mana_cost, damage,
+// cooldown, per 1714440167000_convert_magic_weapons_to_stones.js's own
+// authoritative enumeration of exactly which fields are spell-relevant vs.
+// weapon mechanics. A socketed BUFF stone (stat_bonus_*, no element) never
+// touches attack resolution. Everything else -- kind, reach, arc_width,
+// range, projectile_*, pierce, stamina_cost, knockback, vfx, ammo_type_id,
+// aoe_radius -- is weapon mechanics and always comes from the weapon's own
+// item_types row, never the stone's: returning the stone's row wholesale
+// (as opposed to merging just the spell fields onto the weapon) would zero
+// out a socketed weapon's reach/damage/cooldown and misroute melee weapons
+// into the projectile branch (stone rows carry no `kind`).
+//
+// With nothing eligible socketed, the weapon's own baked-in element/mana_cost
+// columns are vestigial (left in place by the conversion migration for that
+// migration to read from, not for combat to read from any more) -- the
+// weapon attacks as plain physical at zero mana cost. This is a real
+// behavior change from pre-socket baked-in magic, called out explicitly in
+// the design doc: it only matters once a player unsockets a converted
+// weapon's spell stone and leaves the weapon bare.
 function activeWeaponType(inv, itemTypes, defaultWeaponId) {
   const itemId = inv.equipment.main_hand;
   if (itemId) {
     const item = findItem(inv, itemId);
     const type = item ? itemTypes.get(item.typeId) : null;
-    if (type && type.category === 'weapon') return type;
+    if (type && type.category === 'weapon') {
+      const stoneType = item.socketedStoneTypeId != null ? itemTypes.get(item.socketedStoneTypeId) : null;
+      if (stoneType && stoneType.element != null) {
+        return {
+          ...type,
+          element: stoneType.element,
+          mana_cost: stoneType.mana_cost,
+          damage: stoneType.damage,
+          cooldown: stoneType.cooldown,
+          // Magic Stones (SOMET-245) Task 7: the socketed stone's own
+          // player_items.id (NOT its catalog type id, already merged above),
+          // so a caller resolving the active weapon for combat -- world.js's
+          // attack() -- can award XP to the exact stone instance that landed
+          // the hit, without a second lookup keyed off the host item.
+          // Explicit `?? null` rather than passthrough-undefined: a weapon
+          // whose socket was hydrated by an older cache write that predates
+          // this field would otherwise carry `undefined` here, which is
+          // truthy-adjacent enough (`!= null` checks would still catch it,
+          // but downstream code should never have to know the difference).
+          stoneItemId: item.socketedStoneItemId ?? null,
+        };
+      }
+      // Only allocate the physical-forcing copy for a weapon that actually
+      // carries vestigial magic (a non-null, non-physical element or a
+      // nonzero mana_cost) -- an ordinary weapon's element is already null,
+      // which every consumer (damage.js's ELEMENTS fallback, effects.js's
+      // ELEMENT_EFFECTS lookup) already treats identically to the string
+      // 'physical', so returning it unchanged is a no-op transformation.
+      // This function runs on the hot path (every player swing, per the
+      // design doc's own performance note), and ordinary non-magic weapons
+      // are the overwhelming majority of attacks -- worth not allocating for.
+      if (type.mana_cost || (type.element != null && type.element !== 'physical')) {
+        // Important #3 fix (SOMET-245 final review, corrected per a
+        // re-review of the first fix -- see the user-directed correction
+        // below). damage used to be left at the weapon's own magic-tuned
+        // value here -- only element/mana_cost were neutralized. Per the
+        // conversion migration's own authoritative split (1714440167000's
+        // header comment: element, mana_cost, damage, cooldown together ARE
+        // "the complete spell" -- but that split is about what the STONE
+        // carries, not about what the bare weapon resets to), that left an
+        // unsocketed magic weapon hitting with its full spell damage at ZERO
+        // mana cost: a permanent, un-costed power buff. This is also the
+        // ONLY state any magic weapon acquired after the one-time conversion
+        // migration ran (bought from a merchant, dropped by a creature) can
+        // ever be in -- stone content-seeding is explicitly out of scope
+        // this slice, so such a weapon can never be socketed at all.
+        //
+        // damage falls back to DEFAULT_WEAPON_NAME's ('dagger') own damage
+        // -- not an invented number: it is the SAME reference weapon this
+        // function already falls back to wholesale a few lines down when no
+        // weapon is equipped at all, so "an unsocketed magic weapon hits
+        // like the game's own baseline ordinary weapon" is the one baseline
+        // already meaningful in this file, not a new one invented here.
+        // `baseline` guards the pathological case of a catalog with no
+        // default weapon at all (should never happen -- dagger is always
+        // seeded): damage is left unchanged rather than crash.
+        //
+        // cooldown is DELIBERATELY NOT touched here (first version of this
+        // fix wrongly replaced it with the dagger's cooldown too -- caught
+        // by a re-review against the live catalog and corrected per an
+        // explicit user decision). Attack rate is weapon mechanics, the same
+        // category as kind/reach/range/arc_width/projectile_*/aoe_radius,
+        // all of which already correctly stay the weapon's own a few lines
+        // below and a few lines above (the spell-stone merge branch) --
+        // cooldown should never have been grouped with the spell fields on
+        // THIS (bare-weapon) side of the split, only on the stone's own
+        // side. Overriding it to the dagger's fast melee rate made the
+        // original bug WORSE, not better: it kept the weapon's own
+        // long-range/AoE mechanics (kind/range/aoe_radius untouched) while
+        // giving it the dagger's 0.3s attack rate -- e.g. a bare archmage
+        // staff (800 range, 110 aoe_radius, originally 1.1s cooldown) would
+        // have become a free, ammo-less AoE weapon firing 3.7x/s, strictly
+        // dominating the bow. Leaving cooldown as `type.cooldown` (the
+        // weapon's own real, original attack rate) means damage still drops
+        // to baseline (still strictly worse than the pre-fix "free spell"
+        // state) but the weapon's attack RATE is exactly what it always was
+        // for a physical weapon of that kind.
+        const baseline = itemTypes.get(defaultWeaponId);
+        return {
+          ...type,
+          element: 'physical',
+          mana_cost: 0,
+          damage: baseline ? baseline.damage : type.damage,
+        };
+      }
+      return type;
+    }
   }
   return itemTypes.get(defaultWeaponId) || null;
 }
@@ -230,4 +386,148 @@ async function unequip(pool, characterId, inv, slot) {
   return { ok: true };
 }
 
-module.exports = { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory, grantStartingLoadout, canEquip, mitigation, activeWeaponType, equip, unequip };
+// Socket/unsocket. NOTE these deliberately do NOT mirror equip/unequip's
+// shape above -- equip/unequip (read in full before writing this) are plain
+// sequential pool.query calls with no transaction, because each is a single
+// idempotent write (DELETE, or INSERT ... ON CONFLICT DO UPDATE) and
+// ownership is checked purely in-memory via findItem(inv, itemId). Socketing
+// has a real multi-step check-then-act shape (ownership + already-socketed +
+// host-occupancy + compatibility, THEN one write) backed by a DB-level
+// invariant (stone_instances' partial unique index on socketed_into_id), so
+// this instead mirrors sellItem/openChest/chestLoot in this same directory:
+// one checked-out client, explicit BEGIN/COMMIT/ROLLBACK, and the
+// character_id predicate on every SELECT/UPDATE as the actual authoritative
+// ownership check (FOR UPDATE locks the row for the duration of the
+// transaction, same as openChest's guard-check/CAS).
+
+// Socket a stone into a host item. Ownership of BOTH instances is checked
+// against characterId via the DB predicate (never trust a client-supplied
+// pair blindly) -- the partial unique index on stone_instances.socketed_into_id
+// is the DB-level backstop; this also checks explicitly first for a clean
+// error message rather than surfacing a raw constraint violation to the
+// caller. On success, also writes inv's in-memory record for the host item so
+// a later action in the same session (canEquip, a second socket attempt, and
+// eventually combat's activeWeaponType) sees the change without a reload --
+// same reason claimItem/dropItem/sellItem push/filter p.inv.items in place.
+async function socketStone(pool, characterId, inv, stonePlayerItemId, hostPlayerItemId, itemTypes) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const stoneRow = await client.query(
+      `SELECT pi.item_type_id, si.socketed_into_id
+         FROM player_items pi JOIN stone_instances si ON si.player_item_id = pi.id
+        WHERE pi.id = $1 AND pi.character_id = $2 FOR UPDATE`,
+      [stonePlayerItemId, characterId],
+    );
+    if (stoneRow.rowCount === 0) { await client.query('ROLLBACK'); return { ok: false, reason: 'stone not found' }; }
+    if (stoneRow.rows[0].socketed_into_id != null) {
+      await client.query('ROLLBACK'); return { ok: false, reason: 'stone is already socketed' };
+    }
+
+    const hostRow = await client.query(
+      'SELECT item_type_id FROM player_items WHERE id = $1 AND character_id = $2 FOR UPDATE',
+      [hostPlayerItemId, characterId],
+    );
+    if (hostRow.rowCount === 0) { await client.query('ROLLBACK'); return { ok: false, reason: 'host item not found' }; }
+
+    const occupant = await client.query(
+      'SELECT 1 FROM stone_instances WHERE socketed_into_id = $1', [hostPlayerItemId],
+    );
+    if (occupant.rowCount > 0) { await client.query('ROLLBACK'); return { ok: false, reason: 'host already has a socketed stone' }; }
+
+    const stoneTypeId = stoneRow.rows[0].item_type_id;
+    const stoneType = itemTypes.get(stoneTypeId);
+    const hostType = itemTypes.get(hostRow.rows[0].item_type_id);
+    if (!stoneType || !hostType || !isCompatible(stoneKind(stoneType), hostType.category)) {
+      await client.query('ROLLBACK'); return { ok: false, reason: 'stone is not compatible with this item' };
+    }
+
+    await client.query('UPDATE stone_instances SET socketed_into_id = $1 WHERE player_item_id = $2',
+      [hostPlayerItemId, stonePlayerItemId]);
+    await client.query('COMMIT');
+
+    const hostItem = findItem(inv, hostPlayerItemId);
+    if (hostItem) {
+      hostItem.socketedStoneTypeId = stoneTypeId;
+      // Task 7: cache the stone's own instance id alongside its type,
+      // mirroring loadInventory's hydration above -- see that comment.
+      hostItem.socketedStoneItemId = stonePlayerItemId;
+    }
+    return { ok: true };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    // A genuine concurrent race: two requests both pass the plain
+    // (non-locking) `occupant` pre-check above before either commits, and
+    // the LOSING request's own UPDATE hits the partial unique index
+    // (stone_instances_socketed_into_unique, 1714440166000) instead. That
+    // index is the real backstop for this exact condition -- the pre-check
+    // above is only a fast, non-authoritative path to the same reason,
+    // read-only and unlocked (see this function's header comment on why:
+    // it isn't part of the two locked, joined rows). Catch ONLY this
+    // specific constraint violation (23505 + the exact constraint name, not
+    // any other unique-violation this function might theoretically hit) and
+    // report it the same graceful shape the pre-check already uses for the
+    // identical logical condition, rather than letting a raw Postgres error
+    // escape as an unhandled-exception-shaped failure for the loser of a
+    // real race. Review finding (SOMET-245 Task 8 follow-up): confirmed via
+    // stones_integration_db.test.js's own "concurrent-looking" stress case
+    // that a genuine race on this UPDATE previously surfaced exactly this
+    // raw error.
+    if (err.code === '23505' && err.constraint === 'stone_instances_socketed_into_unique') {
+      return { ok: false, reason: 'host already has a socketed stone' };
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Unsocket. Requires an explicit confirm flag -- checked BEFORE any query, so
+// a client that forgot it costs nothing. On a destroy roll, deletes the
+// stone's own player_items row (stone_instances cascades via ON DELETE
+// CASCADE). On survival, clears socketed_into_id only -- the stone's row,
+// xp and level are untouched. Either way the host item's in-memory cache
+// entry is cleared: the stone no longer occupies it.
+async function unsocketStone(pool, characterId, inv, stonePlayerItemId, { confirm, rng = Math.random } = {}) {
+  if (!confirm) return { ok: false, reason: 'unsocketing requires explicit confirmation' };
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const stoneRow = await client.query(
+      `SELECT si.socketed_into_id FROM player_items pi
+         JOIN stone_instances si ON si.player_item_id = pi.id
+        WHERE pi.id = $1 AND pi.character_id = $2 AND si.socketed_into_id IS NOT NULL FOR UPDATE`,
+      [stonePlayerItemId, characterId],
+    );
+    if (stoneRow.rowCount === 0) { await client.query('ROLLBACK'); return { ok: false, reason: 'stone not found or not socketed' }; }
+    const hostPlayerItemId = stoneRow.rows[0].socketed_into_id;
+
+    const destroyed = rollDestroy(rng);
+    if (destroyed) {
+      await client.query('DELETE FROM player_items WHERE id = $1', [stonePlayerItemId]);
+    } else {
+      await client.query('UPDATE stone_instances SET socketed_into_id = NULL WHERE player_item_id = $1', [stonePlayerItemId]);
+    }
+    await client.query('COMMIT');
+
+    if (destroyed) inv.items = inv.items.filter((it) => it.id !== stonePlayerItemId);
+    const hostItem = findItem(inv, hostPlayerItemId);
+    if (hostItem) {
+      delete hostItem.socketedStoneTypeId;
+      delete hostItem.socketedStoneItemId; // Task 7: clear alongside the type cache
+    }
+
+    return { ok: true, destroyed };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = {
+  loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory,
+  grantStartingLoadout, canEquip, mitigation, activeWeaponType, equip, unequip, socketStone, unsocketStone,
+};
