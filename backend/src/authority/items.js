@@ -191,12 +191,22 @@ function mitigation(inv, itemTypes) {
 }
 
 // The item type driving attacks: whatever is in main_hand, else the default.
+// A socketed SPELL stone (element set) overrides the weapon's own attack
+// fields (element, mana_cost, etc.) -- a socketed BUFF stone (stat_bonus_*,
+// no element) has no attack-relevant fields and must not affect combat, so
+// it falls through to the weapon itself.
 function activeWeaponType(inv, itemTypes, defaultWeaponId) {
   const itemId = inv.equipment.main_hand;
   if (itemId) {
     const item = findItem(inv, itemId);
     const type = item ? itemTypes.get(item.typeId) : null;
-    if (type && type.category === 'weapon') return type;
+    if (type && type.category === 'weapon') {
+      if (item.socketedStoneTypeId != null) {
+        const stoneType = itemTypes.get(item.socketedStoneTypeId);
+        if (stoneType && stoneType.element != null) return stoneType;
+      }
+      return type;
+    }
   }
   return itemTypes.get(defaultWeaponId) || null;
 }
