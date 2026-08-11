@@ -118,16 +118,65 @@ test('activeWeaponType with no stone socketed does not carry a stoneItemId field
 // if item_types still carries old magic-weapon data (e.g. a player unsocketed
 // a converted weapon's spell stone, leaving the weapon's own vestigial
 // columns from before this system existed).
-test('activeWeaponType forces plain physical/zero mana cost when the weapon\'s own item_types row still carries vestigial magic and nothing is socketed', () => {
+//
+// Important #3 fix (SOMET-245 final review): damage/cooldown must ALSO fall
+// back, the same as element/mana_cost -- leaving them at the weapon's own
+// magic-tuned values (25 damage / 400 cooldown here) gave an unsocketed
+// magic weapon its full spell damage/cooldown at ZERO mana cost, a
+// permanent, un-costed power buff. The fallback is DEFAULT_WEAPON_NAME's
+// ('dagger') own damage/cooldown -- itemTypes now carries a SEPARATE dagger
+// row (id 1) distinct from the magic weapon (id 5) so this test cannot pass
+// by accident the way a fixture reusing one id for both would.
+const DAGGER_TYPE = { id: 1, category: 'weapon', name: 'dagger', element: null, mana_cost: 0, damage: 8, cooldown: 0.3 };
+
+test('activeWeaponType forces plain physical/zero mana cost, and dagger-baseline damage/cooldown, when the weapon\'s own item_types row still carries vestigial magic and nothing is socketed', () => {
   const weaponType = { id: 5, category: 'weapon', element: 'fire', mana_cost: 8, kind: 'melee', reach: 80, damage: 25, cooldown: 400 };
-  const itemTypes = new Map([[5, weaponType]]);
+  const itemTypes = new Map([[5, weaponType], [1, DAGGER_TYPE]]);
   const inv = {
     equipment: { main_hand: 'weapon-instance-1' },
     items: [{ id: 'weapon-instance-1', typeId: 5, quantity: 1 }], // unsocketed -- no socketedStoneTypeId
   };
-  const resolved = activeWeaponType(inv, itemTypes, 5);
+  const resolved = activeWeaponType(inv, itemTypes, 1); // defaultWeaponId=1 (dagger), DISTINCT from the magic weapon's own id 5
   assert.equal(resolved.element, 'physical', 'the weapon\'s own vestigial element must not drive combat once sockets exist');
   assert.equal(resolved.mana_cost, 0, 'the weapon\'s own vestigial mana_cost must not be charged once sockets exist');
   assert.equal(resolved.reach, 80, 'reach is unaffected -- it was never a spell field');
-  assert.equal(resolved.damage, 25, 'damage stays the weapon\'s own physical damage when nothing is socketed');
+  assert.equal(resolved.damage, DAGGER_TYPE.damage, 'damage must fall back to the dagger baseline, not the weapon\'s own magic-tuned 25');
+  assert.equal(resolved.cooldown, DAGGER_TYPE.cooldown, 'cooldown must fall back to the dagger baseline, not the weapon\'s own magic-tuned 400');
+  assert.notEqual(resolved.damage, weaponType.damage, 'must not silently keep the magic weapon\'s own damage');
+  assert.notEqual(resolved.cooldown, weaponType.cooldown, 'must not silently keep the magic weapon\'s own cooldown');
+});
+
+// Same neutralization, reached via the OTHER trigger (nonzero mana_cost with
+// a physical/null element) rather than a non-physical element -- pins that
+// both branches of the `if` guard above get the same damage/cooldown fallback.
+test('activeWeaponType neutralizes damage/cooldown for a weapon with vestigial mana_cost but a physical element', () => {
+  const weaponType = { id: 5, category: 'weapon', element: 'physical', mana_cost: 6, kind: 'projectile', damage: 30, cooldown: 900 };
+  const itemTypes = new Map([[5, weaponType], [1, DAGGER_TYPE]]);
+  const inv = {
+    equipment: { main_hand: 'weapon-instance-1' },
+    items: [{ id: 'weapon-instance-1', typeId: 5, quantity: 1 }],
+  };
+  const resolved = activeWeaponType(inv, itemTypes, 1);
+  assert.equal(resolved.mana_cost, 0);
+  assert.equal(resolved.damage, DAGGER_TYPE.damage);
+  assert.equal(resolved.cooldown, DAGGER_TYPE.cooldown);
+});
+
+// Pathological catalog (no default weapon resolvable at all): must not
+// crash, and degrades to the OLD behavior (weapon's own damage/cooldown)
+// rather than inventing a number -- this should never happen in practice
+// (DEFAULT_WEAPON_NAME's dagger is always seeded), but the fallback must be
+// safe if it ever does.
+test('activeWeaponType leaves damage/cooldown unchanged if the default weapon id does not resolve in the catalog', () => {
+  const weaponType = { id: 5, category: 'weapon', element: 'fire', mana_cost: 8, damage: 25, cooldown: 400 };
+  const itemTypes = new Map([[5, weaponType]]); // no entry for id 1
+  const inv = {
+    equipment: { main_hand: 'weapon-instance-1' },
+    items: [{ id: 'weapon-instance-1', typeId: 5, quantity: 1 }],
+  };
+  const resolved = activeWeaponType(inv, itemTypes, 1); // defaultWeaponId=1, not in itemTypes
+  assert.equal(resolved.element, 'physical');
+  assert.equal(resolved.mana_cost, 0);
+  assert.equal(resolved.damage, 25, 'no baseline available -- must not crash, falls back to the weapon\'s own damage');
+  assert.equal(resolved.cooldown, 400, 'no baseline available -- must not crash, falls back to the weapon\'s own cooldown');
 });

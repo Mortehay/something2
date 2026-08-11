@@ -296,7 +296,40 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
       // design doc's own performance note), and ordinary non-magic weapons
       // are the overwhelming majority of attacks -- worth not allocating for.
       if (type.mana_cost || (type.element != null && type.element !== 'physical')) {
-        return { ...type, element: 'physical', mana_cost: 0 };
+        // Important #3 fix (SOMET-245 final review): damage/cooldown used to
+        // be left at the weapon's own magic-tuned values here -- only
+        // element/mana_cost were neutralized. Per the conversion migration's
+        // own authoritative split (1714440167000's header comment: element,
+        // mana_cost, damage, cooldown together ARE "the complete spell"),
+        // that left an unsocketed magic weapon hitting with its full spell
+        // damage/cooldown at ZERO mana cost: a permanent, un-costed power
+        // buff over an ordinary weapon. This is also the ONLY state any
+        // magic weapon acquired after the one-time conversion migration ran
+        // (bought from a merchant, dropped by a creature) can ever be in --
+        // stone content-seeding is explicitly out of scope this slice, so
+        // such a weapon can never be socketed at all.
+        //
+        // Falls back to DEFAULT_WEAPON_NAME's ('dagger') own damage/cooldown
+        // -- not an invented number: it is the SAME reference weapon this
+        // function already falls back to wholesale a few lines down when no
+        // weapon is equipped at all, so "an unsocketed magic weapon hits
+        // like the game's own baseline ordinary weapon" is the one baseline
+        // already meaningful in this file, not a new one invented here.
+        // kind/reach/range/projectile_*/etc. all stay the weapon's own (the
+        // spread below only overrides damage/cooldown/element/mana_cost), so
+        // a bare staff still fires as a projectile at its own range -- only
+        // its damage-per-hit and attack rate drop to dagger-equivalent.
+        // `baseline` guards the pathological case of a catalog with no
+        // default weapon at all (should never happen -- dagger is always
+        // seeded): damage/cooldown are left unchanged rather than crash.
+        const baseline = itemTypes.get(defaultWeaponId);
+        return {
+          ...type,
+          element: 'physical',
+          mana_cost: 0,
+          damage: baseline ? baseline.damage : type.damage,
+          cooldown: baseline ? baseline.cooldown : type.cooldown,
+        };
       }
       return type;
     }

@@ -125,7 +125,12 @@ test('dropping a stack carries the DELETEd quantity through to the INSERT via SQ
   // the other 39, so pin the SQL shape directly: the INSERT names `quantity`
   // in its column list and the SELECT ... FROM d projects it (not a literal).
   let sql = '';
+  // SOMET-245 final review Critical #1: dropItem now issues a preliminary
+  // read-only stone_instances check before the CTE below (see loot.js) --
+  // must report "not a stone" (rowCount 0) so it doesn't interfere with this
+  // test's SQL-shape assertions on the CTE itself.
   const pool = { query: async (q) => {
+    if (/FROM stone_instances/i.test(q)) return { rowCount: 0, rows: [] };
     sql = q;
     return { rowCount: 1, rows: [{ id: 'g1', item_type_id: 7, x: 0, y: 0, quantity: 40 }] };
   } };

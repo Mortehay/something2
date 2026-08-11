@@ -85,6 +85,34 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
   try {
     await client.query('BEGIN');
 
+    // Guard (Critical #1, SOMET-245 final review): stone_instances.player_
+    // item_id is ON DELETE CASCADE, and no acquisition path (buyStock
+    // included) ever recreates a stone_instances row once one is gone -- the
+    // conversion migration (Task 2) is the only writer in the whole branch.
+    // Selling a stone (socketed or loose) would CASCADE-delete its
+    // stone_instances row (xp/level gone), and a buyback-and-repurchase of
+    // the exact same physical item afterward could never be socketed again
+    // (socketStone joins player_items to stone_instances and would report
+    // 'stone not found' forever). Must run BEFORE the DELETE below, in the
+    // SAME transaction: checking after would find nothing (the CASCADE has
+    // already fired by then). unsocketStone is the only sanctioned way to
+    // part a stone from its host.
+    //
+    // Joined against player_items on character_id (same ownership predicate
+    // the DELETE below uses), not a bare lookup by itemId alone -- see
+    // loot.js's dropItem for why: an unscoped check would let a caller probe
+    // whether an itemId they don't even own happens to be a stone.
+    const stoneCheck = await client.query(
+      `SELECT 1 FROM stone_instances si
+         JOIN player_items pi ON pi.id = si.player_item_id
+        WHERE si.player_item_id = $1 AND pi.character_id = $2`,
+      [itemId, characterId],
+    );
+    if (stoneCheck.rowCount > 0) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'unsocket it first' };
+    }
+
     // The character_id predicate IS the ownership check.
     const del = await client.query(
       'DELETE FROM player_items WHERE id = $1 AND character_id = $2 RETURNING item_type_id, quantity',

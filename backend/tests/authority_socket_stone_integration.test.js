@@ -341,6 +341,12 @@ test('socketing a buff stone sends an immediate progression frame and raises max
   const entry = handle.worlds.get('w1');
   const player = entry.world.getPlayer('1');
   const before = player.maxHp;
+  // Important #4 fix (SOMET-245 final review): socketedBuffStones now only
+  // counts a stone socketed into an EQUIPPED item (see stoneBonuses.js) --
+  // this fixture's makePool always answers the player_equipment load with
+  // no rows, so equip weapon-1 directly in-memory, the same way
+  // stones_integration_db.test.js's DB-backed equivalent does.
+  player.inv.equipment.main_hand = 'weapon-1';
 
   ws.send(JSON.stringify({ type: 'socket', stoneId: 'stone-buff', hostId: 'weapon-1' }));
   const socketed = await next('socketed');
@@ -368,6 +374,9 @@ test('unsocketing a buff stone (survives) sends an immediate progression frame a
   const entry = handle.worlds.get('w1');
   const player = entry.world.getPlayer('1');
   const baseline = player.maxHp;
+  // See the socket test above: socketedBuffStones now requires the host to
+  // be equipped, so equip weapon-1 directly in-memory.
+  player.inv.equipment.main_hand = 'weapon-1';
 
   // Socket first (setup), same as the previous test -- confirms the boosted
   // state before removing it.

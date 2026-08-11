@@ -8,6 +8,8 @@ const {
   loadItemTypes, loadInventory, socketStone, unsocketStone,
 } = require('../src/authority/items.js');
 const { World } = require('../src/authority/world.js');
+const { dropItem } = require('../src/authority/loot.js');
+const { sellItem } = require('../src/authority/trade.js');
 const { awardStoneXp, STONE_XP_PER_HIT } = require('../src/authority/stoneXp.js');
 const { withStoneBonuses, socketedBuffStones } = require('../src/services/stoneBonuses.js');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../src/services/playerStats.js');
@@ -274,6 +276,11 @@ test('end-to-end: socket a spell stone, combat reads it, XP accrues on a landed 
     assert.ok(!inv.items.some((i) => i.id === spellStoneItemId), 'the in-memory inv must also drop the destroyed stone');
 
     // --- buff stone: socket into armor, confirm the real stat overlay ---
+    // Important #4 fix (SOMET-245 final review): socketedBuffStones now only
+    // counts a stone socketed into an item that is ALSO currently equipped
+    // (see stoneBonuses.js) -- the armor must actually be worn, not merely
+    // owned, for its buff to count.
+    inv.equipment.chest = armorItemId;
     const buffSocket = await socketStone(pool, characterId, inv, buffStoneItemId, armorItemId, itemTypes);
     assert.equal(buffSocket.ok, true, buffSocket.reason);
 
@@ -529,6 +536,99 @@ test('stress: attacking with a weapon whose socketed stone was removed mid-sessi
     const after = world.attack(characterId, 1, 0);
     assert.equal(after.attacks[0].hit, true, 'the swing must still land physically -- only the spell is gone');
     assert.equal(after.stoneHit, null, 'the removed stone must no longer earn XP -- combat reads the LIVE in-memory cache, not a stale snapshot from before the unsocket');
+  } finally {
+    await client.query('ROLLBACK').catch(() => {});
+    await client.end().catch(() => {});
+  }
+});
+
+// Critical #1 + #2 fix (SOMET-245 final review), proven end-to-end against a
+// real database: dropItem and sellItem must refuse a stone (both loose and
+// currently socketed into a weapon) rather than CASCADE-deleting its
+// stone_instances row -- and because the refusal happens before any DELETE,
+// the host's in-memory socket cache (socketedStoneTypeId/socketedStoneItemId)
+// can never go stale either (Critical #2 is closed as a direct consequence
+// of Critical #1's guard, not a separate fix).
+test('dropItem and sellItem both refuse a stone -- loose and socketed -- leaving the real DB row and the in-memory cache untouched', async (t) => {
+  const client = await openTxClient(t);
+  if (!client) return;
+  const pool = savepointPool(client);
+  const tag = uniqueTag();
+
+  try {
+    const characterId = await createZzCharacter(client, tag);
+
+    const weaponTypeId = await insertItemType(client, {
+      name: `zz-stones-dropsell-wand-${tag}`, category: 'weapon', kind: 'melee',
+      damage: 8, cooldown: 0.3, reach: 80, arc_width: 0.6, mana_cost: 0, element: null, stackable: false,
+    });
+    const spellStoneTypeId = await insertItemType(client, {
+      name: `stone_of_zz_dropsell_${tag}`, category: 'stone', element: 'fire',
+      mana_cost: 0, damage: 20, cooldown: 0.5, stackable: false,
+    });
+
+    const weaponItemId = await grantItem(client, characterId, weaponTypeId);
+    const looseStoneItemId = await grantItem(client, characterId, spellStoneTypeId);
+    const socketedStoneItemId = await grantItem(client, characterId, spellStoneTypeId);
+    await makeLooseStoneInstance(client, looseStoneItemId);
+    await makeLooseStoneInstance(client, socketedStoneItemId);
+
+    const itemTypes = await loadItemTypes(pool);
+    const inv = await loadInventory(pool, characterId);
+    inv.equipment.main_hand = weaponItemId;
+
+    const sock = await socketStone(pool, characterId, inv, socketedStoneItemId, weaponItemId, itemTypes);
+    assert.equal(sock.ok, true, sock.reason);
+    const hostBefore = inv.items.find((i) => i.id === weaponItemId);
+    assert.equal(hostBefore.socketedStoneTypeId, spellStoneTypeId, 'setup: host cache reflects the live socket');
+    assert.equal(hostBefore.socketedStoneItemId, socketedStoneItemId);
+
+    const entry = { worldId: 'w1', world: new World(stubMap(), itemTypes, weaponTypeId, 64) };
+    entry.world.addPlayer(characterId, { x: 100, y: 100 }, inv);
+
+    // --- dropItem refuses both the loose stone and the socketed one ---
+    const dropLoose = await dropItem(pool, entry, characterId, characterId, looseStoneItemId, { ttlMs: 1000 });
+    assert.equal(dropLoose.ok, false);
+    assert.match(dropLoose.reason, /unsocket/i);
+
+    const dropSocketed = await dropItem(pool, entry, characterId, characterId, socketedStoneItemId, { ttlMs: 1000 });
+    assert.equal(dropSocketed.ok, false);
+    assert.match(dropSocketed.reason, /unsocket/i);
+
+    // --- sellItem refuses both the same way ---
+    const sellLoose = await sellItem(pool, entry, characterId, characterId, 'zz-village-1', looseStoneItemId);
+    assert.equal(sellLoose.ok, false);
+    assert.match(sellLoose.reason, /unsocket/i);
+
+    const sellSocketed = await sellItem(pool, entry, characterId, characterId, 'zz-village-1', socketedStoneItemId);
+    assert.equal(sellSocketed.ok, false);
+    assert.match(sellSocketed.reason, /unsocket/i);
+
+    // --- the real DB rows survived every refused attempt ---
+    const looseRow = await client.query('SELECT 1 FROM player_items WHERE id = $1', [looseStoneItemId]);
+    assert.equal(looseRow.rowCount, 1, 'the loose stone\'s player_items row must still exist');
+    const looseInstance = await client.query('SELECT 1 FROM stone_instances WHERE player_item_id = $1', [looseStoneItemId]);
+    assert.equal(looseInstance.rowCount, 1, 'the loose stone\'s stone_instances row (xp/level) must still exist');
+
+    const socketedRow = await client.query('SELECT 1 FROM player_items WHERE id = $1', [socketedStoneItemId]);
+    assert.equal(socketedRow.rowCount, 1, 'the socketed stone\'s player_items row must still exist');
+    const socketedInstance = await client.query(
+      'SELECT socketed_into_id FROM stone_instances WHERE player_item_id = $1', [socketedStoneItemId],
+    );
+    assert.equal(socketedInstance.rowCount, 1, 'the socketed stone\'s stone_instances row must still exist');
+    assert.equal(socketedInstance.rows[0].socketed_into_id, weaponItemId, 'must still be socketed into the SAME host -- never ejected by a refused drop/sell');
+
+    // --- Critical #2: the host's in-memory cache is untouched by any of
+    // the four refused attempts above ---
+    const hostAfter = inv.items.find((i) => i.id === weaponItemId);
+    assert.equal(hostAfter.socketedStoneTypeId, spellStoneTypeId, 'host cache TYPE must survive every refused drop/sell of its socketed stone');
+    assert.equal(hostAfter.socketedStoneItemId, socketedStoneItemId, 'host cache INSTANCE id must survive every refused drop/sell of its socketed stone');
+
+    // --- combat still reads the (unchanged, still-socketed) stone correctly ---
+    addTargetCreature(entry.world, 'zz-target-dropsell-1');
+    const attack = entry.world.attack(characterId, 1, 0);
+    assert.ok(attack.stoneHit, 'the socketed stone must still be live for combat -- none of the refused calls above ejected it');
+    assert.equal(attack.stoneHit.stoneItemId, socketedStoneItemId);
   } finally {
     await client.query('ROLLBACK').catch(() => {});
     await client.end().catch(() => {});
