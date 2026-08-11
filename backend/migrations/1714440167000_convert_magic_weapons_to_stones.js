@@ -51,16 +51,42 @@ exports.shorthands = undefined;
 // weapon type and asserts each gets its own distinct, correctly-socketed
 // stone (see migration_convert_magic_weapons_db.test.js).
 //
-// IDEMPOTENCY SCOPE: per the task interface, only the catalog-row creation
-// (the first statement) is idempotent (ON CONFLICT (name) DO NOTHING) --
-// safe to repeat in a repair scenario. The player-instance conversion
-// (second statement) is NOT idempotent: re-running up() after a successful
-// run will insert a second stone for every already-converted weapon
-// instance and then hit stone_instances_socketed_into_unique (Task 1's
-// one-stone-per-host partial unique index) on the SECOND stone competing
-// for the same already-occupied weapon slot, aborting the whole statement
-// loudly. That is the intended, safer failure mode -- a silent duplicate
-// stone is worse than a migration that refuses to double-run.
+// NAME-COLLISION RISK (review finding, fixed here). `targets` joins on
+// `st.name = 'stone_of_' || wt.name` -- WITHOUT also requiring
+// `st.category = 'stone'`, that join matches ANY item_types row that
+// happens to already carry that name, stone or not. Combined with statement
+// 1's `ON CONFLICT (name) DO NOTHING` (which silently no-ops if a
+// same-named row of ANY category already exists, rather than only a real
+// stone), a pre-existing unrelated row named e.g. 'stone_of_flame staff'
+// (category='consumable', from some other seed/admin action) would have
+// caused `targets` to pair that weapon's owners with the DECOY row instead
+// of a real stone -- granting a bogus item and creating a stone_instances
+// row pointing at a player_items row that isn't even a stone. Reproduced
+// and confirmed by code review before this fix; the corrected join below
+// requires `st.category = 'stone'`, so a name collision with a non-stone
+// row now means that weapon type is silently skipped (no bogus grant, no
+// error) rather than silently corrupted -- the same "fail safe, not
+// silent-corrupt" posture as the multi-instance fix above. down() already
+// filtered on `category = 'stone'` (see below), so up() and down() now
+// agree on exactly which rows count as "a stone this migration created".
+//
+// IDEMPOTENCY SCOPE (review finding: the original claim here was WRONG,
+// corrected). Statement 1 (catalog rows) is genuinely idempotent via
+// `ON CONFLICT (name) DO NOTHING`. Statement 2 now also skips any weapon
+// instance that currently has ANY stone socketed into it (see the
+// `NOT EXISTS` guard below) -- so an immediate re-run, before any stone has
+// ever been unsocketed, is a safe no-op instead of erroring on
+// stone_instances_socketed_into_unique. THIS GUARD DOES NOT COVER
+// UNSOCKETING. Once a converted stone is removed from its weapon (a stated
+// goal of this whole epic -- sockets are meant to be reusable), the weapon
+// row satisfies `NOT EXISTS` again indistinguishably from "never
+// converted", and a second up() WILL grant it a second, duplicate stone.
+// There is no durable marker in this data model that survives an unsocket
+// and records "this weapon already received its one-time conversion grant"
+// -- adding one would mean a schema change, out of scope for this data-only
+// migration. Practical consequence: this migration must be treated as a
+// genuine one-time operation once the socket system is live and players can
+// unsocket stones -- do not re-run it after that point.
 exports.up = (pgm) => {
   // 1. One stone item_type per distinct magic weapon type. Named
   // deterministically from the weapon so a repair-run ON CONFLICT is safe.
@@ -73,20 +99,24 @@ exports.up = (pgm) => {
   `);
 
   // 2. One stone player_items row + stone_instances row, pre-socketed, for
-  // every player_items row of a converted weapon type. `targets` is
-  // MATERIALIZED (forced, not left to the planner's referenced-more-than-once
-  // default) so gen_random_uuid() is evaluated exactly once per weapon
-  // instance and that same id is reused by both INSERTs below -- this is
-  // what makes the stone-to-weapon pairing exact regardless of duplicate
-  // ownership (see the design note above).
+  // every player_items row of a converted weapon type that doesn't already
+  // have a stone socketed into it. `targets` is MATERIALIZED (forced, not
+  // left to the planner's referenced-more-than-once default) so
+  // gen_random_uuid() is evaluated exactly once per weapon instance and
+  // that same id is reused by both INSERTs below -- this is what makes the
+  // stone-to-weapon pairing exact regardless of duplicate ownership (see
+  // the design note above). The `st.category = 'stone'` predicate closes
+  // the name-collision risk above; the `NOT EXISTS` predicate is the
+  // partial re-run guard described above.
   pgm.sql(`
     WITH targets AS MATERIALIZED (
       SELECT pi.id AS weapon_player_item_id, pi.character_id, st.id AS stone_type_id,
              gen_random_uuid() AS stone_player_item_id
         FROM player_items pi
         JOIN item_types wt ON wt.id = pi.item_type_id
-        JOIN item_types st ON st.name = 'stone_of_' || wt.name
+        JOIN item_types st ON st.name = 'stone_of_' || wt.name AND st.category = 'stone'
        WHERE wt.category = 'weapon' AND wt.element IS NOT NULL AND wt.element <> 'physical'
+         AND NOT EXISTS (SELECT 1 FROM stone_instances si WHERE si.socketed_into_id = pi.id)
     ),
     ins_items AS (
       INSERT INTO player_items (id, character_id, item_type_id, quantity)
@@ -101,16 +131,42 @@ exports.up = (pgm) => {
 };
 
 exports.down = (pgm) => {
-  // stone_instances rows cascade away with their player_items row
-  // (stone_instances.player_item_id ON DELETE CASCADE, 1714440166000), so
-  // deleting the stone player_items rows is enough to unwind step 2. The
-  // weapon's own player_items row and item_types columns were never touched
-  // by up(), so there is nothing to reconstruct on that side.
+  // LOSSY BY DESIGN FOR ANY STONE ACQUIRED AFTER up() RAN, NOT JUST THE ONES
+  // up() ITSELF CREATED (review finding). This deletes EVERY player_items
+  // row whose item_type is a 'stone_of_%' catalog row, and then deletes
+  // those catalog rows outright -- it has no way to distinguish "a stone
+  // this migration granted" from "a stone of the exact same type a player
+  // later legitimately dropped, crafted, traded for, or bought from a
+  // merchant" once the socket system is live, because nothing marks a
+  // player_items row with which migration run created it. Running this
+  // down() against a database where players have acquired 'stone_of_%'
+  // items through ordinary gameplay DESTROYS that real, legitimately-owned
+  // property, not just the migration's own backfill.
+  //
+  // Deleting the item_types rows is ALSO destructive beyond player
+  // inventories: any catalog table that references a stone_of_% item_type
+  // with ON DELETE CASCADE (behavior_drops, chest_loot, creature_drops,
+  // merchant_stock, class_loadouts, as of this writing) loses its rows for
+  // that item silently along with it -- e.g. a chest or merchant stock
+  // slot configured to award a converted stone would have its config
+  // erased, not just left dangling.
+  //
+  // This is acceptable ONLY the same way 1714440092000_characters.js's down()
+  // is acceptable: as a rollback of a bad deploy on a database that has NOT
+  // yet grown the state this asymmetry would destroy (i.e. immediately after
+  // up() runs, before any player has touched a stone). It is NOT a
+  // general-purpose rollback and must not be run against a live server where
+  // players have been playing with sockets.
+  //
+  // Uses starts_with(), not `LIKE 'stone_of_%'`: LIKE's `_` is itself a
+  // single-character wildcard, so an unescaped `LIKE 'stone_of_%'` matches
+  // more than the literal prefix (e.g. 'stoneXofX...'). starts_with() is an
+  // exact prefix test with no wildcard semantics to get wrong.
   pgm.sql(`
     DELETE FROM player_items
      WHERE item_type_id IN (
-       SELECT id FROM item_types WHERE category = 'stone' AND name LIKE 'stone_of_%'
+       SELECT id FROM item_types WHERE category = 'stone' AND starts_with(name, 'stone_of_')
      )
   `);
-  pgm.sql(`DELETE FROM item_types WHERE category = 'stone' AND name LIKE 'stone_of_%'`);
+  pgm.sql(`DELETE FROM item_types WHERE category = 'stone' AND starts_with(name, 'stone_of_')`);
 };
