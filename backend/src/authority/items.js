@@ -15,7 +15,8 @@ async function loadItemTypes(pool) {
   const r = await pool.query(
     `SELECT id, name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
             range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element,
-            defense, resistances, stackable, ammo_type_id, aoe_radius, vfx, knockback
+            defense, resistances, stackable, ammo_type_id, aoe_radius, vfx, knockback,
+            stat_bonus_stat, stat_bonus_amount
      FROM item_types ORDER BY id ASC`,
   );
   const m = new Map();
@@ -53,6 +54,19 @@ async function loadItemTypes(pool) {
       // SELECT list, so world.attack's `w.knockback > 0` check silently read
       // undefined forever despite a correct migration and correct world.js.
       knockback: Number(row.knockback ?? 0),
+      // Magic Stones (SOMET-245) Task 6 prerequisite fix: these two columns
+      // were added to the schema by Task 1 (1714440165000_stone_item_type.js)
+      // but never selected/mapped here, so every in-memory item-type object
+      // had stat_bonus_stat/stat_bonus_amount permanently undefined regardless
+      // of the DB row -- the exact same "column added to the schema but
+      // missing from an explicit SELECT list" shape the `knockback` comment
+      // above already documents for P2a. Left as raw values (null passthrough,
+      // Number(...) for the amount) rather than defaulted to 0/'' -- callers
+      // (stoneBonuses.js's socketedBuffStones) test `stat_bonus_stat != null`
+      // to distinguish a buff stone from a spell stone, and a coerced '' or 0
+      // would make every stone look like a buff stone.
+      stat_bonus_stat: row.stat_bonus_stat ?? null,
+      stat_bonus_amount: row.stat_bonus_amount == null ? null : Number(row.stat_bonus_amount),
     });
   }
   return m;

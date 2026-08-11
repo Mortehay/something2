@@ -43,11 +43,20 @@ const ROWS = [
   { id: 6, name: 'arcane-ward', category: 'armor', slot: 'head', two_handed: false, kind: null,
     damage: '0', cooldown: '0', reach: null, arc_width: null, range: null, projectile_speed: null,
     projectile_radius: null, pierce: null, mana_cost: '0', element: null, defense: '1', resistances: { arcane: 0.3 } },
+  // Magic Stones (SOMET-245) Task 6 prerequisite: stat_bonus_stat/
+  // stat_bonus_amount exist on item_types since Task 1 but loadItemTypes
+  // never selected or mapped them -- every buff stone loaded with both
+  // fields undefined regardless of the DB row. This row round-trips a
+  // buff-stone shape through the real loader to guard against a regression.
+  { id: 7, name: 'stone_of_vigor', category: 'stone', slot: null, two_handed: false, kind: null,
+    damage: '0', cooldown: '0', reach: null, arc_width: null, range: null, projectile_speed: null,
+    projectile_radius: null, pierce: null, mana_cost: '0', element: null, defense: '0', resistances: null,
+    stat_bonus_stat: 'constitution', stat_bonus_amount: '5' },
 ];
 
 test('loadItemTypes maps weapons and armor, coercing numbers and defaulting resistances', async () => {
   const m = await loadItemTypes(fakePool(ROWS));
-  assert.equal(m.size, 4);
+  assert.equal(m.size, 5);
   const dagger = m.get(1);
   assert.equal(dagger.category, 'weapon');
   assert.strictEqual(dagger.damage, 8);
@@ -62,6 +71,15 @@ test('loadItemTypes maps weapons and armor, coercing numbers and defaulting resi
   assert.strictEqual(vest.defense, 2);
   const ward = m.get(6);
   assert.deepEqual(ward.resistances, { arcane: 0.3 });
+  // stat_bonus_stat/stat_bonus_amount must round-trip, not stay undefined
+  // (the Task 6 prerequisite bug this guards against).
+  const buffStone = m.get(7);
+  assert.equal(buffStone.stat_bonus_stat, 'constitution');
+  assert.strictEqual(buffStone.stat_bonus_amount, 5, 'must be coerced to a number');
+  // A row with no stat_bonus_* columns (every other fixture row here) must
+  // load as null, not undefined -- socketedBuffStones tests `!= null`.
+  assert.strictEqual(dagger.stat_bonus_stat, null);
+  assert.strictEqual(dagger.stat_bonus_amount, null);
 });
 
 test('resolveDefaultWeaponId returns the dagger weapon id', async () => {

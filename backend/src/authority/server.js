@@ -6,6 +6,7 @@ const { ServerMap } = require('./collision');
 const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout, socketStone, unsocketStone } = require('./items');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
+const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
 const { ownedCharacter } = require('../services/characters.js');
 const { recordVisit } = require('../services/visitedWorlds.js');
 const { mayJoin, joinPolicyFacts } = require('../services/joinPolicy.js');
@@ -528,7 +529,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // PvP path is the one gap that check does not cover, hence this
           // guard rather than relying on tick timing alone.
           if (p && p.hp > 0) {
-            entry.world.applyDerivedStats(result.killerUserId, derivePlayerStats(progression));
+            // Magic Stones (SOMET-245) Task 6: fold in any socketed buff-stone
+            // bonuses before deriving, so a kill-triggered level-up does not
+            // silently drop a buff already reflected in this player's live
+            // stats -- derivePlayerStats(progression) alone would compute the
+            // RAW bundle and overwrite the buffed one applyDerivedStats set.
+            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
+            entry.world.applyDerivedStats(result.killerUserId, derivePlayerStats(withStoneBonuses(progression, buffs)));
           }
         }
         // Best-effort: the killer's socket may be gone (disconnected between
@@ -1007,7 +1014,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const gr = await pool.query('SELECT gold FROM users WHERE id = $1', [ws.userId]);
         const gold = gr.rows.length ? Number(gr.rows[0].gold) || 0 : 0;
         const progression = await loadProgression(pool, character.id);
-        const stats = derivePlayerStats(progression);
+        // Magic Stones (SOMET-245) Task 6: `inv` (loaded above) already has
+        // its socketedStoneTypeId cache hydrated by loadInventory for EVERY
+        // join, including a reconnect that finds a buff stone still socketed
+        // from a previous session -- fold that bonus in here too, or a
+        // rejoining player would sit at the wrong maxHp/maxMana/etc until
+        // their next kill, chest, or socket/unsocket action re-derives it.
+        const stats = derivePlayerStats(withStoneBonuses(progression, socketedBuffStones(inv, entry.world.weapons)));
 
         // A newer session for this same account may have won (and kicked
         // us) while we awaited inventory above. If so, our reservation was
@@ -1193,9 +1206,35 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'socket', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        // Magic Stones (SOMET-245) Task 6: capture whether this is a BUFF
+        // stone (stat_bonus_stat set) before socketStone runs, off the
+        // stone's own item -- socketStone only mutates the HOST item's
+        // socketedStoneTypeId cache, and this stone item's own typeId never
+        // changes across the call either way, so pre- or post-call both work
+        // here; pre-call matches unsocket's shape (below), which has no
+        // choice but to read it before the call.
+        const stoneItem = p.inv.items.find((it) => it.id === msg.stoneId);
+        const stoneType = stoneItem ? entry.world.weapons.get(stoneItem.typeId) : null;
+        const isBuffStone = !!(stoneType && stoneType.stat_bonus_stat != null);
         const r = await socketStone(pool, ws.characterId, p.inv, msg.stoneId, msg.hostId, entry.world.weapons);
-        if (r.ok) send(ws, { type: 'socketed', stoneId: msg.stoneId, hostId: msg.hostId });
-        else send(ws, { type: 'error', message: r.reason });
+        if (r.ok) {
+          send(ws, { type: 'socketed', stoneId: msg.stoneId, hostId: msg.hostId });
+          // Trigger an immediate re-derive so a socketed buff stone's effect
+          // applies right away, not just at the next level-up/kill -- same
+          // hp>0 guard as every other applyDerivedStats call site (a dying
+          // player must not be revived by this). Skipped entirely for a
+          // spell stone: no stat changed, so there is nothing to re-derive or
+          // push.
+          if (isBuffStone && p.hp > 0) {
+            const currentProgression = await loadProgression(pool, p.characterId);
+            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
+            entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(currentProgression, buffs)));
+            send(ws, {
+              type: 'progression', progression: currentProgression,
+              leveledUp: false, newLevel: currentProgression.level, awarded: 0,
+            });
+          }
+        } else send(ws, { type: 'error', message: r.reason });
       });
     },
 
@@ -1209,9 +1248,32 @@ function attachAuthority(httpServer, pool, opts = {}) {
       chainOp(ws, 'unsocket', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
+        // Magic Stones (SOMET-245) Task 6: must capture whether this was a
+        // BUFF stone BEFORE unsocketStone runs -- on a destroy roll it
+        // deletes the stone's player_items row outright (filtered out of
+        // p.inv.items), and on survival it still clears the host's
+        // socketedStoneTypeId cache, so there is no way to recover "was this
+        // a buff stone" from p.inv AFTER the call either way.
+        const stoneItem = p.inv.items.find((it) => it.id === msg.stoneId);
+        const stoneType = stoneItem ? entry.world.weapons.get(stoneItem.typeId) : null;
+        const wasBuffStone = !!(stoneType && stoneType.stat_bonus_stat != null);
         const r = await unsocketStone(pool, ws.characterId, p.inv, msg.stoneId, { confirm: msg.confirm === true });
-        if (r.ok) send(ws, { type: 'unsocketed', stoneId: msg.stoneId, destroyed: r.destroyed });
-        else send(ws, { type: 'error', message: r.reason });
+        if (r.ok) {
+          send(ws, { type: 'unsocketed', stoneId: msg.stoneId, destroyed: r.destroyed });
+          // Trigger an immediate re-derive so removing a buff stone's effect
+          // applies right away, whether it survived (ejected, no longer
+          // socketed anywhere) or was destroyed (gone outright) -- either way
+          // socketedBuffStones(p.inv, ...) below no longer counts it.
+          if (wasBuffStone && p.hp > 0) {
+            const currentProgression = await loadProgression(pool, p.characterId);
+            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
+            entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(currentProgression, buffs)));
+            send(ws, {
+              type: 'progression', progression: currentProgression,
+              leveledUp: false, newLevel: currentProgression.level, awarded: 0,
+            });
+          }
+        } else send(ws, { type: 'error', message: r.reason });
       });
     },
 
@@ -1423,7 +1485,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // max HP in the DB but never in the running game until reconnect --
         // "the exact defect A1's review caught."
         if (result.leveledUp && p.hp > 0) {
-          entry.world.applyDerivedStats(ws.userId, derivePlayerStats(result.progression));
+          // Magic Stones (SOMET-245) Task 6: same fold-in as onCreatureDeath's
+          // level-up path above -- a chest-XP level-up must not overwrite an
+          // already-live buff-stone bonus with the unbuffed bundle.
+          const buffs = socketedBuffStones(p.inv, entry.world.weapons);
+          entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(result.progression, buffs)));
         }
         send(ws, {
           type: 'chestOpened', chestId: chest.id, items: result.items,
@@ -1934,9 +2000,20 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (!entry) return false;
       const p = entry.world.getPlayer(uid);
       if (!p || p.hp <= 0) return false;
-      entry.world.applyDerivedStats(uid, stats);
+      // Magic Stones (SOMET-245) Task 6: `stats` arrives from
+      // progressionRoutes.js, which has no access to this session's
+      // inv/itemTypes and so computed it from `progression` alone -- using it
+      // as-is here would silently WIPE a buff-stone bonus already live on
+      // this player (applied by a prior kill/join/socket) back down to the
+      // unbuffed bundle on every allocate/respec. Recompute with the current
+      // socketed buff stones folded in, the same way the other three
+      // applyDerivedStats call sites do, and push THAT (not the passed-in
+      // `stats`) both into the world and onto the wire.
+      const buffs = socketedBuffStones(p.inv, entry.world.weapons);
+      const buffedStats = derivePlayerStats(withStoneBonuses(progression, buffs));
+      entry.world.applyDerivedStats(uid, buffedStats);
       const sock = entry.sockets.get(uid);
-      if (sock) send(sock, { type: 'progression', progression, stats });
+      if (sock) send(sock, { type: 'progression', progression, stats: buffedStats });
       return true;
     },
     close() {
