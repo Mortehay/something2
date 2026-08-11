@@ -296,39 +296,57 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
       // design doc's own performance note), and ordinary non-magic weapons
       // are the overwhelming majority of attacks -- worth not allocating for.
       if (type.mana_cost || (type.element != null && type.element !== 'physical')) {
-        // Important #3 fix (SOMET-245 final review): damage/cooldown used to
-        // be left at the weapon's own magic-tuned values here -- only
-        // element/mana_cost were neutralized. Per the conversion migration's
-        // own authoritative split (1714440167000's header comment: element,
-        // mana_cost, damage, cooldown together ARE "the complete spell"),
-        // that left an unsocketed magic weapon hitting with its full spell
-        // damage/cooldown at ZERO mana cost: a permanent, un-costed power
-        // buff over an ordinary weapon. This is also the ONLY state any
-        // magic weapon acquired after the one-time conversion migration ran
-        // (bought from a merchant, dropped by a creature) can ever be in --
-        // stone content-seeding is explicitly out of scope this slice, so
-        // such a weapon can never be socketed at all.
+        // Important #3 fix (SOMET-245 final review, corrected per a
+        // re-review of the first fix -- see the user-directed correction
+        // below). damage used to be left at the weapon's own magic-tuned
+        // value here -- only element/mana_cost were neutralized. Per the
+        // conversion migration's own authoritative split (1714440167000's
+        // header comment: element, mana_cost, damage, cooldown together ARE
+        // "the complete spell" -- but that split is about what the STONE
+        // carries, not about what the bare weapon resets to), that left an
+        // unsocketed magic weapon hitting with its full spell damage at ZERO
+        // mana cost: a permanent, un-costed power buff. This is also the
+        // ONLY state any magic weapon acquired after the one-time conversion
+        // migration ran (bought from a merchant, dropped by a creature) can
+        // ever be in -- stone content-seeding is explicitly out of scope
+        // this slice, so such a weapon can never be socketed at all.
         //
-        // Falls back to DEFAULT_WEAPON_NAME's ('dagger') own damage/cooldown
+        // damage falls back to DEFAULT_WEAPON_NAME's ('dagger') own damage
         // -- not an invented number: it is the SAME reference weapon this
         // function already falls back to wholesale a few lines down when no
         // weapon is equipped at all, so "an unsocketed magic weapon hits
         // like the game's own baseline ordinary weapon" is the one baseline
         // already meaningful in this file, not a new one invented here.
-        // kind/reach/range/projectile_*/etc. all stay the weapon's own (the
-        // spread below only overrides damage/cooldown/element/mana_cost), so
-        // a bare staff still fires as a projectile at its own range -- only
-        // its damage-per-hit and attack rate drop to dagger-equivalent.
         // `baseline` guards the pathological case of a catalog with no
         // default weapon at all (should never happen -- dagger is always
-        // seeded): damage/cooldown are left unchanged rather than crash.
+        // seeded): damage is left unchanged rather than crash.
+        //
+        // cooldown is DELIBERATELY NOT touched here (first version of this
+        // fix wrongly replaced it with the dagger's cooldown too -- caught
+        // by a re-review against the live catalog and corrected per an
+        // explicit user decision). Attack rate is weapon mechanics, the same
+        // category as kind/reach/range/arc_width/projectile_*/aoe_radius,
+        // all of which already correctly stay the weapon's own a few lines
+        // below and a few lines above (the spell-stone merge branch) --
+        // cooldown should never have been grouped with the spell fields on
+        // THIS (bare-weapon) side of the split, only on the stone's own
+        // side. Overriding it to the dagger's fast melee rate made the
+        // original bug WORSE, not better: it kept the weapon's own
+        // long-range/AoE mechanics (kind/range/aoe_radius untouched) while
+        // giving it the dagger's 0.3s attack rate -- e.g. a bare archmage
+        // staff (800 range, 110 aoe_radius, originally 1.1s cooldown) would
+        // have become a free, ammo-less AoE weapon firing 3.7x/s, strictly
+        // dominating the bow. Leaving cooldown as `type.cooldown` (the
+        // weapon's own real, original attack rate) means damage still drops
+        // to baseline (still strictly worse than the pre-fix "free spell"
+        // state) but the weapon's attack RATE is exactly what it always was
+        // for a physical weapon of that kind.
         const baseline = itemTypes.get(defaultWeaponId);
         return {
           ...type,
           element: 'physical',
           mana_cost: 0,
           damage: baseline ? baseline.damage : type.damage,
-          cooldown: baseline ? baseline.cooldown : type.cooldown,
         };
       }
       return type;

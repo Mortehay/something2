@@ -119,17 +119,26 @@ test('activeWeaponType with no stone socketed does not carry a stoneItemId field
 // a converted weapon's spell stone, leaving the weapon's own vestigial
 // columns from before this system existed).
 //
-// Important #3 fix (SOMET-245 final review): damage/cooldown must ALSO fall
-// back, the same as element/mana_cost -- leaving them at the weapon's own
-// magic-tuned values (25 damage / 400 cooldown here) gave an unsocketed
-// magic weapon its full spell damage/cooldown at ZERO mana cost, a
-// permanent, un-costed power buff. The fallback is DEFAULT_WEAPON_NAME's
-// ('dagger') own damage/cooldown -- itemTypes now carries a SEPARATE dagger
-// row (id 1) distinct from the magic weapon (id 5) so this test cannot pass
-// by accident the way a fixture reusing one id for both would.
+// Important #3 fix (SOMET-245 final review, corrected after a re-review):
+// damage must fall back, the same as element/mana_cost -- leaving it at the
+// weapon's own magic-tuned value (25 here) gave an unsocketed magic weapon
+// its full spell damage at ZERO mana cost, a permanent, un-costed power
+// buff. The fallback is DEFAULT_WEAPON_NAME's ('dagger') own damage --
+// itemTypes carries a SEPARATE dagger row (id 1) distinct from the magic
+// weapon (id 5) so this test cannot pass by accident the way a fixture
+// reusing one id for both would.
+//
+// cooldown must NOT fall back -- a first version of this fix replaced
+// cooldown with the dagger's too, which a re-review caught as making the
+// original bug WORSE: kind/range/aoe_radius stay the weapon's own (a
+// long-range/AoE weapon), so giving it the dagger's fast melee attack RATE
+// on top produced a free, ammo-less, rapid-fire AoE weapon that dominated
+// ordinary ranged weapons. cooldown is weapon mechanics, the same category
+// as kind/reach/range/arc_width -- it must stay `type.cooldown`, the
+// weapon's own real, original attack rate.
 const DAGGER_TYPE = { id: 1, category: 'weapon', name: 'dagger', element: null, mana_cost: 0, damage: 8, cooldown: 0.3 };
 
-test('activeWeaponType forces plain physical/zero mana cost, and dagger-baseline damage/cooldown, when the weapon\'s own item_types row still carries vestigial magic and nothing is socketed', () => {
+test('activeWeaponType forces plain physical/zero mana cost and dagger-baseline damage, but keeps the weapon\'s OWN cooldown, when the weapon\'s own item_types row still carries vestigial magic and nothing is socketed', () => {
   const weaponType = { id: 5, category: 'weapon', element: 'fire', mana_cost: 8, kind: 'melee', reach: 80, damage: 25, cooldown: 400 };
   const itemTypes = new Map([[5, weaponType], [1, DAGGER_TYPE]]);
   const inv = {
@@ -141,15 +150,15 @@ test('activeWeaponType forces plain physical/zero mana cost, and dagger-baseline
   assert.equal(resolved.mana_cost, 0, 'the weapon\'s own vestigial mana_cost must not be charged once sockets exist');
   assert.equal(resolved.reach, 80, 'reach is unaffected -- it was never a spell field');
   assert.equal(resolved.damage, DAGGER_TYPE.damage, 'damage must fall back to the dagger baseline, not the weapon\'s own magic-tuned 25');
-  assert.equal(resolved.cooldown, DAGGER_TYPE.cooldown, 'cooldown must fall back to the dagger baseline, not the weapon\'s own magic-tuned 400');
   assert.notEqual(resolved.damage, weaponType.damage, 'must not silently keep the magic weapon\'s own damage');
-  assert.notEqual(resolved.cooldown, weaponType.cooldown, 'must not silently keep the magic weapon\'s own cooldown');
+  assert.equal(resolved.cooldown, weaponType.cooldown, 'cooldown is weapon mechanics -- it must stay the weapon\'s OWN 400, not fall back to the dagger\'s 0.3');
 });
 
 // Same neutralization, reached via the OTHER trigger (nonzero mana_cost with
 // a physical/null element) rather than a non-physical element -- pins that
-// both branches of the `if` guard above get the same damage/cooldown fallback.
-test('activeWeaponType neutralizes damage/cooldown for a weapon with vestigial mana_cost but a physical element', () => {
+// both branches of the `if` guard above get the same damage fallback and the
+// same untouched cooldown.
+test('activeWeaponType neutralizes mana_cost/damage but keeps cooldown for a weapon with vestigial mana_cost but a physical element', () => {
   const weaponType = { id: 5, category: 'weapon', element: 'physical', mana_cost: 6, kind: 'projectile', damage: 30, cooldown: 900 };
   const itemTypes = new Map([[5, weaponType], [1, DAGGER_TYPE]]);
   const inv = {
@@ -159,15 +168,16 @@ test('activeWeaponType neutralizes damage/cooldown for a weapon with vestigial m
   const resolved = activeWeaponType(inv, itemTypes, 1);
   assert.equal(resolved.mana_cost, 0);
   assert.equal(resolved.damage, DAGGER_TYPE.damage);
-  assert.equal(resolved.cooldown, DAGGER_TYPE.cooldown);
+  assert.equal(resolved.cooldown, weaponType.cooldown, 'cooldown must stay the weapon\'s own 900, not the dagger\'s');
 });
 
 // Pathological catalog (no default weapon resolvable at all): must not
-// crash, and degrades to the OLD behavior (weapon's own damage/cooldown)
-// rather than inventing a number -- this should never happen in practice
+// crash, and degrades to the OLD behavior (weapon's own damage) rather than
+// inventing a number -- this should never happen in practice
 // (DEFAULT_WEAPON_NAME's dagger is always seeded), but the fallback must be
-// safe if it ever does.
-test('activeWeaponType leaves damage/cooldown unchanged if the default weapon id does not resolve in the catalog', () => {
+// safe if it ever does. cooldown was never touched by this branch at all,
+// so it is unaffected regardless of baseline resolution.
+test('activeWeaponType leaves damage unchanged if the default weapon id does not resolve in the catalog (cooldown is always the weapon\'s own, baseline or not)', () => {
   const weaponType = { id: 5, category: 'weapon', element: 'fire', mana_cost: 8, damage: 25, cooldown: 400 };
   const itemTypes = new Map([[5, weaponType]]); // no entry for id 1
   const inv = {
@@ -178,5 +188,53 @@ test('activeWeaponType leaves damage/cooldown unchanged if the default weapon id
   assert.equal(resolved.element, 'physical');
   assert.equal(resolved.mana_cost, 0);
   assert.equal(resolved.damage, 25, 'no baseline available -- must not crash, falls back to the weapon\'s own damage');
-  assert.equal(resolved.cooldown, 400, 'no baseline available -- must not crash, falls back to the weapon\'s own cooldown');
+  assert.equal(resolved.cooldown, 400, 'cooldown is always the weapon\'s own value in this branch');
+});
+
+// Re-review regression (real catalog numbers, per the re-reviewer's own
+// trace of 1714440016000_create_weapon_types.js /
+// 1714440019000_weapon_catalog.js): a bare archmage staff must NOT become a
+// faster-attacking weapon than it originally was, and must NOT out-DPS the
+// bow. Before the correction, cooldown fell back to the dagger's 0.3s while
+// kind/range/aoe_radius stayed the staff's own (800 range, projectile) --
+// a free, ammo-less, 800-range AoE weapon firing 3.3x/s, strictly dominating
+// the bow (12 damage / 0.6s cooldown = 20 dps, costs stamina + arrows).
+test('a bare archmage staff keeps its OWN original attack rate and does not out-DPS the bow (re-review regression, real catalog numbers)', () => {
+  const DAGGER = {
+    id: 1, category: 'weapon', name: 'dagger', kind: 'melee', element: null, mana_cost: 0, damage: 8, cooldown: 0.3,
+  };
+  const BOW = {
+    id: 2, category: 'weapon', name: 'bow', kind: 'projectile', element: null, mana_cost: 0, damage: 12, cooldown: 0.6,
+  };
+  // archmage staff, exact catalog row: damage 24, cooldown 1.10, range 800,
+  // aoe_radius not modeled in this fixture set (irrelevant to this assertion
+  // -- the point is attack rate, not aoe -- but kind/range are included to
+  // prove they stay untouched too).
+  const ARCHMAGE_STAFF = {
+    id: 5, category: 'weapon', name: 'archmage staff', kind: 'projectile', two_handed: true,
+    element: 'arcane', mana_cost: 32, damage: 24, cooldown: 1.10, range: 800, projectile_speed: 850,
+  };
+  const itemTypes = new Map([[1, DAGGER], [2, BOW], [5, ARCHMAGE_STAFF]]);
+  const inv = {
+    equipment: { main_hand: 'weapon-instance-1' },
+    items: [{ id: 'weapon-instance-1', typeId: 5, quantity: 1 }], // unsocketed
+  };
+  const resolved = activeWeaponType(inv, itemTypes, 1); // defaultWeaponId=1 (dagger)
+
+  assert.equal(resolved.cooldown, ARCHMAGE_STAFF.cooldown, 'attack rate must stay the staff\'s OWN original 1.10s, not the dagger\'s 0.3s');
+  assert.equal(resolved.kind, 'projectile', 'kind stays the weapon\'s own -- unaffected by this branch');
+  assert.equal(resolved.range, 800, 'range stays the weapon\'s own -- unaffected by this branch');
+  assert.equal(resolved.damage, DAGGER.damage, 'damage still resets to the dagger baseline');
+
+  const bareStaffDps = resolved.damage / resolved.cooldown;
+  const bowDps = BOW.damage / BOW.cooldown;
+  assert.ok(bareStaffDps < bowDps,
+    `a bare (unsocketed) magic weapon must not out-DPS an ordinary ranged weapon of similar tier -- got staff ${bareStaffDps.toFixed(2)} dps vs bow ${bowDps.toFixed(2)} dps`);
+
+  // And explicitly: attack rate must not have gotten FASTER than the
+  // weapon's own original cooldown (the exact shape of the re-reviewer's
+  // complaint -- "3.7x/s" would be 1/0.3 from the dagger fallback).
+  const attacksPerSecond = 1 / resolved.cooldown;
+  assert.ok(attacksPerSecond <= 1 / ARCHMAGE_STAFF.cooldown + 1e-9,
+    'bare weapon must not attack faster than its own original rate');
 });
