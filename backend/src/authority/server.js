@@ -4,7 +4,7 @@ const { WebSocketServer } = require('ws');
 const { currentUserForToken } = require('../auth/tokens.js');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
-const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout } = require('./items');
+const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout, socketStone, unsocketStone } = require('./items');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { ownedCharacter } = require('../services/characters.js');
 const { recordVisit } = require('../services/visitedWorlds.js');
@@ -1171,6 +1171,49 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
     equip: equipOrUnequip,
     unequip: equipOrUnequip,
+
+    // Socket a stone into a host item (weapon/armor). itemTypes comes from
+    // entry.world.weapons -- the brief's draft assumed a field named
+    // entry.itemTypes, which does not exist on the loaded world entry
+    // (grepped: no entry\.\w*[Ii]tem[Tt]ype anywhere in this file); the real
+    // catalog map is threaded through the World constructor and lives at
+    // this.weapons (world.js:127), the exact map equipOrUnequip's own
+    // World#setEquipment already resolves against internally, and the one
+    // `use`'s handler above reads directly (entry.world.weapons.get(...)).
+    // characterId comes from ws.characterId (set at join, server.js:1027),
+    // matching drop/use/buy/sell's own direct-call handlers below rather
+    // than equip/unequip's indirection through a World wrapper method --
+    // socketStone/unsocketStone take the same low-level (pool, characterId,
+    // inv, ..., itemTypes) shape items.js's own equip/unequip do, so no new
+    // World method is needed to bridge them.
+    socket(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.stoneId !== 'string' || typeof msg.hostId !== 'string') return; // wire hygiene, matches drop/use
+      chainOp(ws, 'socket', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const r = await socketStone(pool, ws.characterId, p.inv, msg.stoneId, msg.hostId, entry.world.weapons);
+        if (r.ok) send(ws, { type: 'socketed', stoneId: msg.stoneId, hostId: msg.hostId });
+        else send(ws, { type: 'error', message: r.reason });
+      });
+    },
+
+    // Unsocket requires an explicit confirm:true frame field -- a client
+    // that omits it is refused before any DB call (checked inside
+    // unsocketStone itself, ahead of the destroy roll).
+    unsocket(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.stoneId !== 'string') return;
+      chainOp(ws, 'unsocket', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const r = await unsocketStone(pool, ws.characterId, p.inv, msg.stoneId, { confirm: msg.confirm === true });
+        if (r.ok) send(ws, { type: 'unsocketed', stoneId: msg.stoneId, destroyed: r.destroyed });
+        else send(ws, { type: 'error', message: r.reason });
+      });
+    },
 
     pickup(ws) {
       const entry = worlds.get(ws.worldId);

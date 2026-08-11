@@ -3,6 +3,8 @@
 // character_id (SOMET-257 re-keyed them off user_id) and are independent of
 // any world. Gold is the exception and stays on users -- it is account-wide.
 
+const { isCompatible, stoneKind, rollDestroy } = require('../services/stones.js');
+
 const DEFAULT_WEAPON_NAME = 'dagger';
 const SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
 
@@ -230,4 +232,120 @@ async function unequip(pool, characterId, inv, slot) {
   return { ok: true };
 }
 
-module.exports = { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory, grantStartingLoadout, canEquip, mitigation, activeWeaponType, equip, unequip };
+// Socket/unsocket. NOTE these deliberately do NOT mirror equip/unequip's
+// shape above -- equip/unequip (read in full before writing this) are plain
+// sequential pool.query calls with no transaction, because each is a single
+// idempotent write (DELETE, or INSERT ... ON CONFLICT DO UPDATE) and
+// ownership is checked purely in-memory via findItem(inv, itemId). Socketing
+// has a real multi-step check-then-act shape (ownership + already-socketed +
+// host-occupancy + compatibility, THEN one write) backed by a DB-level
+// invariant (stone_instances' partial unique index on socketed_into_id), so
+// this instead mirrors sellItem/openChest/chestLoot in this same directory:
+// one checked-out client, explicit BEGIN/COMMIT/ROLLBACK, and the
+// character_id predicate on every SELECT/UPDATE as the actual authoritative
+// ownership check (FOR UPDATE locks the row for the duration of the
+// transaction, same as openChest's guard-check/CAS).
+
+// Socket a stone into a host item. Ownership of BOTH instances is checked
+// against characterId via the DB predicate (never trust a client-supplied
+// pair blindly) -- the partial unique index on stone_instances.socketed_into_id
+// is the DB-level backstop; this also checks explicitly first for a clean
+// error message rather than surfacing a raw constraint violation to the
+// caller. On success, also writes inv's in-memory record for the host item so
+// a later action in the same session (canEquip, a second socket attempt, and
+// eventually combat's activeWeaponType) sees the change without a reload --
+// same reason claimItem/dropItem/sellItem push/filter p.inv.items in place.
+async function socketStone(pool, characterId, inv, stonePlayerItemId, hostPlayerItemId, itemTypes) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const stoneRow = await client.query(
+      `SELECT pi.item_type_id, si.socketed_into_id
+         FROM player_items pi JOIN stone_instances si ON si.player_item_id = pi.id
+        WHERE pi.id = $1 AND pi.character_id = $2 FOR UPDATE`,
+      [stonePlayerItemId, characterId],
+    );
+    if (stoneRow.rowCount === 0) { await client.query('ROLLBACK'); return { ok: false, reason: 'stone not found' }; }
+    if (stoneRow.rows[0].socketed_into_id != null) {
+      await client.query('ROLLBACK'); return { ok: false, reason: 'stone is already socketed' };
+    }
+
+    const hostRow = await client.query(
+      'SELECT item_type_id FROM player_items WHERE id = $1 AND character_id = $2 FOR UPDATE',
+      [hostPlayerItemId, characterId],
+    );
+    if (hostRow.rowCount === 0) { await client.query('ROLLBACK'); return { ok: false, reason: 'host item not found' }; }
+
+    const occupant = await client.query(
+      'SELECT 1 FROM stone_instances WHERE socketed_into_id = $1', [hostPlayerItemId],
+    );
+    if (occupant.rowCount > 0) { await client.query('ROLLBACK'); return { ok: false, reason: 'host already has a socketed stone' }; }
+
+    const stoneTypeId = stoneRow.rows[0].item_type_id;
+    const stoneType = itemTypes.get(stoneTypeId);
+    const hostType = itemTypes.get(hostRow.rows[0].item_type_id);
+    if (!stoneType || !hostType || !isCompatible(stoneKind(stoneType), hostType.category)) {
+      await client.query('ROLLBACK'); return { ok: false, reason: 'stone is not compatible with this item' };
+    }
+
+    await client.query('UPDATE stone_instances SET socketed_into_id = $1 WHERE player_item_id = $2',
+      [hostPlayerItemId, stonePlayerItemId]);
+    await client.query('COMMIT');
+
+    const hostItem = findItem(inv, hostPlayerItemId);
+    if (hostItem) hostItem.socketedStoneTypeId = stoneTypeId;
+    return { ok: true };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Unsocket. Requires an explicit confirm flag -- checked BEFORE any query, so
+// a client that forgot it costs nothing. On a destroy roll, deletes the
+// stone's own player_items row (stone_instances cascades via ON DELETE
+// CASCADE). On survival, clears socketed_into_id only -- the stone's row,
+// xp and level are untouched. Either way the host item's in-memory cache
+// entry is cleared: the stone no longer occupies it.
+async function unsocketStone(pool, characterId, inv, stonePlayerItemId, { confirm, rng = Math.random } = {}) {
+  if (!confirm) return { ok: false, reason: 'unsocketing requires explicit confirmation' };
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const stoneRow = await client.query(
+      `SELECT si.socketed_into_id FROM player_items pi
+         JOIN stone_instances si ON si.player_item_id = pi.id
+        WHERE pi.id = $1 AND pi.character_id = $2 AND si.socketed_into_id IS NOT NULL FOR UPDATE`,
+      [stonePlayerItemId, characterId],
+    );
+    if (stoneRow.rowCount === 0) { await client.query('ROLLBACK'); return { ok: false, reason: 'stone not found or not socketed' }; }
+    const hostPlayerItemId = stoneRow.rows[0].socketed_into_id;
+
+    const destroyed = rollDestroy(rng);
+    if (destroyed) {
+      await client.query('DELETE FROM player_items WHERE id = $1', [stonePlayerItemId]);
+    } else {
+      await client.query('UPDATE stone_instances SET socketed_into_id = NULL WHERE player_item_id = $1', [stonePlayerItemId]);
+    }
+    await client.query('COMMIT');
+
+    if (destroyed) inv.items = inv.items.filter((it) => it.id !== stonePlayerItemId);
+    const hostItem = findItem(inv, hostPlayerItemId);
+    if (hostItem) delete hostItem.socketedStoneTypeId;
+
+    return { ok: true, destroyed };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = {
+  loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory,
+  grantStartingLoadout, canEquip, mitigation, activeWeaponType, equip, unequip, socketStone, unsocketStone,
+};
