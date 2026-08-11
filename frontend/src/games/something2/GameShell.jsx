@@ -170,6 +170,10 @@ export default function GameShell() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Bumped whenever the Game instance is thrown away, to make the bind effect
+  // below build a new one. A ref cannot be an effect dependency, so nulling
+  // gameRef on its own is invisible to React -- see changeCharacter.
+  const [gameEpoch, setGameEpoch] = useState(0);
   const { isAdmin } = useAuth();
 
   // Replaces the old `activeTab === 'game'`. useMatch is an exact match, so this
@@ -259,6 +263,18 @@ export default function GameShell() {
     clearActiveCharacterId();
     setActiveCharacterId(null);
     autoJoinedRef.current = false;
+    // REQUIRED, and its absence was a hard dead end. The two lines above
+    // destroy the Game and null the ref, but the effect that builds one is
+    // keyed on [isGameRoute] -- and switching characters never leaves /game,
+    // so nothing rebuilt it. Every downstream path then refused, silently:
+    // autoJoinTarget returns null on `hasGame: false`, so the next character
+    // never auto-joined, and enterWorld opens with
+    // `if (!worldId || !gameRef.current) return false`, so the recovery
+    // panel's "Try again" did nothing at all. Only a full page reload
+    // recovered. Reported from the game: "logout of game, selected another
+    // character, then i stuck at map page" and "when i click try again
+    // nothing happens".
+    setGameEpoch((n) => n + 1);
   };
 
   const exitToMenu = () => {
@@ -323,7 +339,11 @@ export default function GameShell() {
     // NOTE: no engine teardown on cleanup. The old cleanup disconnected
     // `engineRef`, which was never assigned -- dead code. Real teardown is the
     // mount-once destroy effect below.
-  }, [isGameRoute]);
+    //
+    // gameEpoch is a dependency because changeCharacter destroys the Game and
+    // nulls the ref while staying on /game: without it this effect never
+    // re-ran and the ref stayed null for the rest of the session.
+  }, [isGameRoute, gameEpoch]);
 
   // Mount-once effect whose cleanup only fires on true component unmount
   // (empty dep array), unlike the [isGameRoute] effect above, which reruns on

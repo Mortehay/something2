@@ -67,7 +67,16 @@ describe('GameShell only shows the canvas on the exact /game route', () => {
     expect(source).not.toMatch(/useMatch\('\/game\/\*'\)/);
   });
 
-  it('closes the canvas-bind effect on [isGameRoute] only', () => {
-    expect(source).toMatch(/\}, \[isGameRoute\]\);/);
+  it('keys the canvas-bind effect on isGameRoute, plus the rebuild counter', () => {
+    // Was `[isGameRoute]` alone. isGameRoute is still required -- that is what
+    // rebinds the Game to the canvas on navigation into /game.
+    //
+    // gameEpoch joined it for SOMET-262: changeCharacter destroys the Game and
+    // nulls gameRef WITHOUT leaving /game, so with isGameRoute as the only
+    // dependency this effect never re-ran and the ref stayed null for the rest
+    // of the session -- auto-join and the recovery panel's "Try again" both
+    // refused silently on `!gameRef.current`. A ref cannot be a dependency, so
+    // the rebuild is driven by state instead.
+    expect(source).toMatch(/\}, \[isGameRoute, gameEpoch\]\);/);
   });
 });

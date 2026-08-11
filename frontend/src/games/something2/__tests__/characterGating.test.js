@@ -92,6 +92,28 @@ describe('GameShell gates the canvas behind a character', () => {
     // detached node -- the exact bug the comment above that canvas describes.
     expect(source).toMatch(/display:\s*isGameRoute && isPlaying \? 'block' : 'none'/);
   });
+
+  it('rebuilds the Game instance after changeCharacter throws it away', () => {
+    // changeCharacter destroys the Game and nulls gameRef. The effect that
+    // builds one is keyed on [isGameRoute], and switching characters never
+    // leaves /game -- so nothing rebuilt it, and gameRef stayed null for the
+    // rest of the session. Everything downstream then refused SILENTLY:
+    // autoJoinTarget returns null on `hasGame: false`, and enterWorld opens
+    // with `if (!worldId || !gameRef.current) return false`, so even the
+    // recovery panel's "Try again" did nothing. Reported from the game as
+    // "selected another character then i stuck at map page".
+    //
+    // A ref cannot be an effect dependency, so the rebuild has to be driven by
+    // state. Both halves are pinned: the bump and the dependency.
+    expect(source).toMatch(/setGameEpoch\(\(n\) => n \+ 1\)/);
+    expect(source).toMatch(/\}, \[isGameRoute, gameEpoch\]\)/);
+    // ...and the bump must live in changeCharacter, not just exist somewhere.
+    const changeCharacterBody = source.slice(
+      source.indexOf('const changeCharacter'),
+      source.indexOf('const exitToMenu'),
+    );
+    expect(changeCharacterBody).toMatch(/setGameEpoch/);
+  });
 });
 
 describe('auto-join waits for a character', () => {
