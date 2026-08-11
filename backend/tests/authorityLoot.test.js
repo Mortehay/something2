@@ -363,6 +363,34 @@ test('dropItem persists the delete+insert as ONE atomic statement, not two indep
     'the delete and the insert must reach the pool as a single atomic statement, not two independent queries');
 });
 
+// SOMET-245 Task 4b: stone_instances.socketed_into_id has its own
+// ON DELETE SET NULL FK back to player_items, so the DB already ejects a
+// socketed stone the instant its host's row is deleted -- this test pins
+// the explicit, SAME-STATEMENT eject dropItem now also does (belt and
+// suspenders, and load-bearing if that FK is ever altered). It has to be
+// folded into the existing CTE rather than a second pool.query call:
+// dropItem has no checked-out client (see the atomicity test above), so a
+// separate call would be a separate implicit transaction, reopening the
+// exact crash window this exists to close.
+test('dropItem ejects a stone socketed into the dropped item, in the same atomic statement as the delete', async () => {
+  const entry = armDropEntry();
+  const pool = scriptedPool([
+    [DROP_RE, (p) => ({
+      rows: [{ id: 'g9', item_type_id: 7, x: p[3], y: p[4], expires_at: '2999-01-01T00:00:00Z' }],
+      rowCount: 1,
+    })],
+  ]);
+
+  const r = await dropItem(pool, entry, 'u1', 31, 'i1', { ttlMs: 1000 });
+
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(pool.calls.length, 1,
+    'the eject must ride the SAME statement as the delete+insert, not a second query');
+  const q = pool.matching(DROP_RE)[0];
+  assert.match(q.sql, /UPDATE stone_instances SET socketed_into_id = NULL FROM d WHERE stone_instances\.socketed_into_id = \$1/i,
+    'must eject any stone socketed into the dropped item, keyed on the same $1 (itemId) as the delete');
+});
+
 test('a successful drop spawns a ground item at the player centre and removes the instance', async () => {
   const entry = armDropEntry();
   const pool = scriptedPool([

@@ -4,6 +4,7 @@
 // against fresh state.
 
 const { sellPriceFor, insertBuyback, BUYBACK_DAYS } = require('../services/merchantStock');
+const { ejectSocketedStone } = require('../services/stoneEject');
 
 async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
   const p = entry.world.getPlayer(userId);
@@ -94,6 +95,15 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
       return { ok: false, reason: 'you do not own that item' };
     }
     const itemTypeId = del.rows[0].item_type_id;
+
+    // Same transaction as the DELETE above, so a crash between the two is
+    // impossible, not just unlikely -- a dangling socketed_into_id can never
+    // be observed even mid-crash. Only reached once the DELETE is confirmed
+    // (rowCount === 1): running this before that check would key off an
+    // itemId the caller might not even own, risking ejecting a stone out of
+    // a DIFFERENT player's item that merely shares this id in a forged
+    // request.
+    await ejectSocketedStone(client, itemId);
 
     // Nothing in this codebase currently grants a player_items row with
     // quantity > 1 (grep confirms it: trade.js's own buy INSERT hardcodes 1,

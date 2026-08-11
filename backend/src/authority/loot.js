@@ -325,8 +325,25 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 6000
   // item (F-016 / SOMET-196). The character_id predicate IS the ownership check —
   // a forged itemId naming someone else's item deletes (and therefore
   // inserts) nothing.
+  // `eject` mirrors services/stoneEject.js's ejectSocketedStone, inlined as
+  // its own writable CTE rather than a separate call: dropItem has no
+  // checked-out transaction client (the delete+insert pair is already one
+  // atomic pool.query statement, per the F-016 comment above), so a second,
+  // separate ejectSocketedStone(pool, itemId) call would be a second
+  // implicit transaction -- a crash between the two would reopen exactly the
+  // dangling-socket window this exists to close. `FROM d` (not `WHERE EXISTS
+  // (SELECT ... FROM d)`) deliberately avoids the "select ... from d" text
+  // shape the test below pins for the INSERT's own projection -- and ties
+  // the UPDATE to d the same way: 0 rows in d (forged/unowned itemId) means
+  // the join has no partner, so 0 rows update; the deleted host's real id in
+  // d makes it match plain equality on socketed_into_id. Postgres executes
+  // every writable CTE in a WITH clause for its side effects even when, as
+  // here, nothing downstream reads its output (verified directly against
+  // Postgres, including this exact WITH-DELETE-then-INSERT shape, before
+  // relying on it).
   const r = await pool.query(
-    `WITH d AS (DELETE FROM player_items WHERE id = $1 AND character_id = $2 RETURNING item_type_id, quantity)
+    `WITH d AS (DELETE FROM player_items WHERE id = $1 AND character_id = $2 RETURNING item_type_id, quantity),
+          eject AS (UPDATE stone_instances SET socketed_into_id = NULL FROM d WHERE stone_instances.socketed_into_id = $1)
      INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
      SELECT $3, item_type_id, $4, $5, now() + ($6::int * interval '1 millisecond'), quantity FROM d
      RETURNING id, item_type_id, x, y, expires_at, quantity`,
