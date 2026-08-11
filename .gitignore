@@ -35,6 +35,10 @@ frontend/dist/
 .vscode/*
 !.vscode/extensions.json
 .claude/settings.local.json
+# Agent worktrees live INSIDE the repo. Each is a full second checkout, and it
+# is untracked, so a `git add -A` from the main checkout sweeps the whole thing
+# into a commit. Same class of accident as the node_modules symlink above.
+.claude/worktrees/
 .idea
 .DS_Store
 *.suo
