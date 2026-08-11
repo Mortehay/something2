@@ -279,6 +279,22 @@ test('every shipped spec applies cleanly', async (t) => {
   }
   const dir = path.join(__dirname, '..', 'seeds', 'maps');
   try {
+    // withEntryPreserved, like EVERY other applyMapSpec call in this file --
+    // this test was the one exception, and that exception is SOMET-265's
+    // deterministic cause, not a race.
+    //
+    // applyMapSpec CLEARS is_entry everywhere before setting the spec's own.
+    // hub-vale.map.json currently THROWS partway through (world "mire" is
+    // sealed -- SOMET-273), so the clear lands and the set never does, and
+    // the run ends with ZERO entry worlds. Auto-join then has nowhere to send
+    // a player with no last world, which is the "I can't log in to the map"
+    // symptom. Reproduced live on 2026-08-11: a full `npm test` with
+    // TEST_DATABASE_URL set left the shared dev database with no entry world,
+    // and `node scripts/dungeon/restore-entry.js "Old Trailhead"` put it back.
+    //
+    // The restore is in withEntryPreserved's `finally`, so it runs on the
+    // throwing path -- which is the only path that matters here.
+    await withEntryPreserved(pool, async () => {
     // This test intentionally never tears down what it seeds (see the note
     // above the test suite), so on a re-run against the same DB, hub-vale's
     // village will already exist -- the applier's `existing.rowCount === 0`
@@ -342,6 +358,7 @@ test('every shipped spec applies cleanly', async (t) => {
       'North neighbour must land at -y (screen-up) — a sign flip here mirrors the World Map tab vertically');
     assert.ok(Number(byName['Blackfen Sinks'].graph_y) > 0,
       'South neighbour must land at +y (screen-down)');
+    });
   } finally { await pool.end(); }
 });
 
