@@ -55,6 +55,12 @@ function makePool({ chests = [] } = {}) {
         };
       }
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+      // Two answers this fixture predates, both from the player-characters
+      // line of work that landed in parallel with chests (SOMET-260/271).
+      // Unanswered, the join is REFUSED and the test hangs on
+      // nextMsg('joined') rather than failing.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: 1, entity_type_id: 1 }] };
+      if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
       if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
       if (/FROM entity_types e[\s\S]*WHERE e\.is_creature/i.test(sql)) return { rows: [] };
       if (/FROM item_types/i.test(sql)) return { rows: [{ id: 1, name: 'dagger', category: 'weapon', stackable: false }] };
@@ -92,7 +98,7 @@ test('a chest in entry.chests reaches a connected player on the live "chests" br
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const msg = await nextMsg(ws, 'chests');
@@ -113,7 +119,7 @@ test('a chest outside the player\'s active-chunk neighborhood is omitted from th
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const msg = await nextMsg(ws, 'chests');
@@ -134,7 +140,7 @@ test('a chest state mutated on entry.chests (in place) is reflected on the next 
   const { url, handle, server } = await bootWith(pool);
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
 
   const first = await nextMsg(ws, 'chests');

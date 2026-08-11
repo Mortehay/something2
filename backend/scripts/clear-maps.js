@@ -13,6 +13,7 @@ const CASCADES = [
   'world_chunks', 'world_creatures', 'world_players', 'world_items',
   'map_links', 'villages', 'merchant_stock', 'player_binds (every player\'s respawn point)',
   'character_visited_worlds (every character\'s explored map)',
+  'world_chests (every chest, including vault chests authored in a map spec)',
 ];
 
 async function clearMaps(pool) {

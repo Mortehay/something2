@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Pool } = require('pg');
 const { applyMapSpec, GRID_SPACING } = require('../scripts/seed-map.js');
+const { withEntryPreserved } = require('./helpers/entryWorld.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL
   || process.env.DATABASE_URL
@@ -88,23 +89,6 @@ async function cleanup(pool) {
 // both UPDATEs scoped by id, the same idiom applyMapSpec itself uses at
 // scripts/seed-map.js's own "set is_entry LAST" step. Never leaves the real
 // dev DB's entry world flipped just because a test happened to run.
-async function withEntryPreserved(pool, fn) {
-  const before = await pool.query('SELECT id FROM worlds WHERE is_entry = true');
-  const beforeId = before.rows[0]?.id ?? null;
-  try {
-    return await fn();
-  } finally {
-    // Single atomic UPDATE, not two separate ones: a crash between "clear
-    // every is_entry" and "set it back on beforeId" used to be able to leave
-    // the database with ZERO entry worlds. COALESCE(id = $1, false) keeps
-    // the SET expression a plain boolean (never SQL NULL) when beforeId is
-    // null -- is_entry is NOT NULL, so assigning NULL would throw.
-    await pool.query(
-      'UPDATE worlds SET is_entry = COALESCE(id = $1, false) WHERE is_entry = true OR id = $1',
-      [beforeId],
-    );
-  }
-}
 
 test('applying a spec twice produces identical rows', async (t) => {
   const pool = await openPool();

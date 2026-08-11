@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
 const { applyMapSpec } = require('../scripts/seed-map.js');
+const { withEntryPreserved } = require('./helpers/entryWorld.js');
 
 // Mirrors seed_map_db.test.js's DB setup exactly: same connection fallback,
 // same graceful-skip-if-unreachable shape, same zz-prefix convention, and
@@ -20,18 +21,6 @@ async function openPool() {
   catch (err) { await pool.end().catch(() => {}); return { unreachable: err.message }; }
 }
 
-async function withEntryPreserved(pool, fn) {
-  const before = await pool.query('SELECT id FROM worlds WHERE is_entry = true');
-  const beforeId = before.rows[0]?.id ?? null;
-  try {
-    return await fn();
-  } finally {
-    await pool.query(
-      'UPDATE worlds SET is_entry = COALESCE(id = $1, false) WHERE is_entry = true OR id = $1',
-      [beforeId],
-    );
-  }
-}
 
 async function cleanup(pool) {
   await pool.query("DELETE FROM worlds WHERE name = 'zz Vault Chest World'").catch(() => {});

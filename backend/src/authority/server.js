@@ -1215,7 +1215,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // `itemTypes`/`items` payload comes from, no extra DB round trip needed
     // just to look category up), the same way dropItem's equipped-guard
     // check reads p.inv rather than querying first; the DB DELETE below is
-    // still what's actually authoritative (guarded by user_id, mirrors
+    // still what's actually authoritative (guarded by character_id, mirrors
     // dropItem), so a stale in-memory snapshot can only ever cause a
     // spurious rejection, never a double-spend.
     use(ws, msg) {
@@ -1251,9 +1251,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
             send(ws, { type: 'error', message: 'no legal spot for a chest right now' });
             return;
           }
+          // character_id, not user_id (SOMET-257/260 merge): player_items lost
+          // its user_id column when inventory moved to characters, so this
+          // DELETE threw `column "user_id" does not exist` and using a loot
+          // map failed outright. The chests branch was written against the
+          // account-keyed schema and the merge of the two lines is textually
+          // clean but semantically wrong.
           const del = await client.query(
-            'DELETE FROM player_items WHERE id = $1 AND user_id = $2 RETURNING quantity',
-            [msg.itemId, ws.userId],
+            'DELETE FROM player_items WHERE id = $1 AND character_id = $2 RETURNING quantity',
+            [msg.itemId, ws.characterId],
           );
           if (del.rowCount !== 1) {
             await client.query('ROLLBACK');
@@ -1335,7 +1341,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const chest = nearestChest(entry.chests, cx, cy, INTERACT_RADIUS);
         if (!chest) { send(ws, { type: 'error', message: 'no chest nearby' }); return; }
 
-        const result = await openChest(pool, chest.id, ws.userId);
+        const result = await openChest(pool, chest.id, ws.characterId);
         if (!result.ok) { send(ws, { type: 'error', message: result.reason }); return; }
 
         // Final-review fix (SOMET-244 Important #2): openChest now returns

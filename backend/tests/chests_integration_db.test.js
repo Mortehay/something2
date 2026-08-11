@@ -55,13 +55,25 @@ async function cleanup(pool, usernamePrefix) {
   await pool.query('DELETE FROM users WHERE username LIKE $1', [`${usernamePrefix}%`]).catch(() => {});
 }
 
+// Returns a character as well as a user. openChest grants items and XP to a
+// CHARACTER (SOMET-257/260), which this fixture predates -- it was written on
+// the chests branch against the account-keyed schema, and guarded itself with a
+// skip until the two lines merged. They have now merged, so it creates the
+// character and the test actually runs.
 async function createTestUser(pool) {
   const username = `zz-chest-integration-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const r = await pool.query(
     `INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'player') RETURNING id`,
     [username],
   );
-  return { userId: r.rows[0].id, username };
+  const userId = r.rows[0].id;
+  const c = await pool.query(
+    `INSERT INTO characters (user_id, slot, name, entity_type_id)
+     SELECT $1, 1, $2, e.id FROM entity_types e WHERE e.name = 'Warrior' RETURNING id`,
+    [userId, `${username}-char`],
+  );
+  assert.ok(c.rows.length, 'fixture setup failed: no Warrior class in entity_types');
+  return { userId, characterId: c.rows[0].id, username };
 }
 
 // Wolf is the same pre-existing, read-only baseline creature type Task 3's
@@ -91,34 +103,13 @@ test('full vault-chest flow: seed -> guard blocks open -> kill guard -> open gra
     t.skip(msg);
     return;
   }
-  // Precondition, checked BEFORE any seeding/mutation: this branch's own
-  // migrations (1714440017000_items_inventory.js) define player_items with
-  // a `user_id` column, and openChest's item grant
-  // (`INSERT INTO player_items (user_id, item_type_id, quantity)`) is
-  // written against that shape. The SHARED dev DB this test runs against
-  // also carries a concurrent, unmerged branch's migrations
-  // (1714440091000_playable_classes / 1714440092000_characters), which have
-  // been observed (via `information_schema.columns`) to replace
-  // player_items.user_id with character_id on THIS shared instance. That is
-  // a cross-branch DB-state drift, not a defect in this feature's code or a
-  // regression this task introduced -- and this task's own DB-safety rules
-  // forbid touching migrations or altering shared schema to work around it.
-  // Skip cleanly (same idiom as the "NO DATABASE" skip above) rather than
-  // reporting a false regression when that drift is present; see the task-7
-  // report for the full finding.
-  const hasUserId = await pool.query(
-    `SELECT 1 FROM information_schema.columns WHERE table_name = 'player_items' AND column_name = 'user_id'`,
-  );
-  if (hasUserId.rowCount === 0) {
-    const msg = 'player_items.user_id does not exist on this shared DB (superseded by character_id from a '
-      + 'concurrent, unmerged player-characters/classes branch\'s migrations) -- openChest\'s item grant is '
-      + 'UNVERIFIED against this DB state; this is the same cross-branch schema drift already responsible for '
-      + 'this suite\'s known pre-existing consumeAmmo/grantStartingLoadout failures, not a chest-feature defect';
-    if (process.env.CI) assert.fail(msg);
-    t.skip(msg);
-    await pool.end();
-    return;
-  }
+  // The skip that used to live here waited for a merge that has now happened.
+  // It checked for player_items.user_id and bailed when the shared dev DB had
+  // character_id instead, calling that "cross-branch DB-state drift". It was
+  // right to skip rather than report a false regression -- but with the
+  // player-characters line merged in, character_id IS the schema, openChest
+  // has been rekeyed to it, and this test has to actually run or the rekeying
+  // is unverified against a real database.
 
   const usernamePrefix = 'zz-chest-integration-test-';
   try {
@@ -141,7 +132,7 @@ test('full vault-chest flow: seed -> guard blocks open -> kill guard -> open gra
       [TEST_LEVEL, itemTypeId],
     );
 
-    const { userId } = await createTestUser(pool);
+    const { userId, characterId } = await createTestUser(pool);
 
     let worldId; let chestId; let guardCreatureId;
     await withEntryPreserved(pool, async () => {
@@ -164,7 +155,7 @@ test('full vault-chest flow: seed -> guard blocks open -> kill guard -> open gra
 
       // --- Step: opening while the guard is alive must be refused, and the
       // chest must stay locked (real DB guard-alive check, not mocked). ---
-      const blocked = await openChest(pool, chestId, userId);
+      const blocked = await openChest(pool, chestId, characterId);
       assert.equal(blocked.ok, false);
       assert.equal(blocked.reason, 'guard is still alive');
       const stillLocked = await pool.query('SELECT state FROM world_chests WHERE id = $1', [chestId]);
@@ -187,20 +178,29 @@ test('full vault-chest flow: seed -> guard blocks open -> kill guard -> open gra
       assert.equal(guardGone.rows[0].n, 0, 'the guard row must be gone after commitCreatureDeath');
 
       // --- Step: open the now-unguarded chest -- items granted, XP awarded. ---
-      const opened = await openChest(pool, chestId, userId);
+      const opened = await openChest(pool, chestId, characterId);
       assert.equal(opened.ok, true, `open must now succeed: ${opened.reason}`);
-      assert.deepEqual(opened.items, [itemTypeId, itemTypeId], 'exactly 2 units of the seeded loot_map drop, deterministic under chance=1/min=max=2');
+      // `items` is FULL player_items rows ({id, item_type_id, quantity}), not
+      // bare item_type_ids -- SOMET-244's own final-review fix changed that so
+      // the openchest handler could push each grant onto p.inv.items. This
+      // assertion still expected the old bare-id shape, and nobody noticed
+      // because the whole test self-skipped on this database until now.
+      assert.equal(opened.items.length, 2,
+        'exactly 2 units of the seeded loot_map drop, deterministic under chance=1/min=max=2');
+      assert.deepEqual(opened.items.map((i) => i.item_type_id), [itemTypeId, itemTypeId]);
+      assert.ok(opened.items.every((i) => i.id && Number(i.quantity) === 1),
+        'each granted row must carry the id and quantity the handler needs to update the live inventory');
       assert.ok(opened.awarded > 0, 'a level-500 guard opened by a level-1 player must award positive XP');
       assert.equal(opened.respawnAt, null, 'a vault chest never gets a respawn timer');
       assert.ok(opened.openedAt, 'openedAt must be set on a successful open');
 
       const grantedItems = await pool.query(
-        'SELECT item_type_id FROM player_items WHERE user_id = $1 ORDER BY id', [userId],
+        'SELECT item_type_id FROM player_items WHERE character_id = $1 ORDER BY id', [characterId],
       );
       assert.equal(grantedItems.rowCount, 2, 'exactly 2 player_items rows must be persisted');
       assert.ok(grantedItems.rows.every((r) => r.item_type_id === itemTypeId));
 
-      const progression = await pool.query('SELECT experience FROM player_progression WHERE user_id = $1', [userId]);
+      const progression = await pool.query('SELECT experience FROM player_progression WHERE character_id = $1', [characterId]);
       assert.equal(progression.rowCount, 1, 'opening a chest must lazily create/update a player_progression row');
       assert.equal(Number(progression.rows[0].experience), opened.awarded, 'the persisted XP must match the amount openChest reported');
 
@@ -209,13 +209,13 @@ test('full vault-chest flow: seed -> guard blocks open -> kill guard -> open gra
 
       // --- Step: a second open of the same, now-opened chest must be
       // rejected -- and must not grant a second round of items/XP. ---
-      const second = await openChest(pool, chestId, userId);
+      const second = await openChest(pool, chestId, characterId);
       assert.equal(second.ok, false);
       assert.equal(second.reason, 'already opened');
 
-      const itemsAfterSecond = await pool.query('SELECT count(*)::int AS n FROM player_items WHERE user_id = $1', [userId]);
+      const itemsAfterSecond = await pool.query('SELECT count(*)::int AS n FROM player_items WHERE character_id = $1', [characterId]);
       assert.equal(itemsAfterSecond.rows[0].n, 2, 'a rejected second open must not grant any additional items');
-      const xpAfterSecond = await pool.query('SELECT experience FROM player_progression WHERE user_id = $1', [userId]);
+      const xpAfterSecond = await pool.query('SELECT experience FROM player_progression WHERE character_id = $1', [characterId]);
       assert.equal(Number(xpAfterSecond.rows[0].experience), opened.awarded, 'a rejected second open must not award any additional XP');
     });
   } finally {

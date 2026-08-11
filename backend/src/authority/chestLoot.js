@@ -34,7 +34,13 @@ function xpForChest(guardLevel, playerLevel) {
 // and XP award, so two concurrent opens of the same chest cannot
 // double-grant. Everything runs inside one transaction, same posture as
 // commitCreatureDeath.
-async function openChest(pool, chestId, userId, { rng = Math.random } = {}) {
+// `characterId`, not a user id (SOMET-257/260 merge). player_items,
+// player_progression and awardXp are all keyed by CHARACTER now; this function
+// was written on a parallel branch against the account-keyed schema, and the
+// merge of the two lines is textually clean but semantically wrong -- the
+// INSERT below referenced a player_items.user_id column that no longer exists,
+// so opening a chest threw at runtime rather than granting anything.
+async function openChest(pool, chestId, characterId, { rng = Math.random } = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -108,16 +114,16 @@ async function openChest(pool, chestId, userId, { rng = Math.random } = {}) {
       // chest-granted item could not be equipped/dropped/sold until the
       // player reconnected and reloaded their inventory from the DB.
       const ins = await client.query(
-        `INSERT INTO player_items (user_id, item_type_id, quantity)
+        `INSERT INTO player_items (character_id, item_type_id, quantity)
          VALUES ($1,$2,1) RETURNING id, item_type_id, quantity`,
-        [userId, itemTypeId],
+        [characterId, itemTypeId],
       );
       items.push(ins.rows[0]);
     }
 
-    const before = await loadProgression(client, userId);
+    const before = await loadProgression(client, characterId);
     const amount = xpForChest(chest.guard_level, before.level);
-    const award = await awardXp(client, userId, amount, 'chest');
+    const award = await awardXp(client, characterId, amount, 'chest');
 
     await client.query('COMMIT');
     return {

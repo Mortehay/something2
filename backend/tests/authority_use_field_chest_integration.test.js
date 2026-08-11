@@ -66,6 +66,12 @@ function makePool({ bounded = true, userItems = [] } = {}) {
         };
       }
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+      // Two answers this fixture predates, both from the player-characters
+      // line of work that landed in parallel with chests (SOMET-260/271).
+      // Unanswered, the join is REFUSED and the test hangs on
+      // nextMsg('joined') rather than failing.
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]) || 1, entity_type_id: 1 }] };
+      if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
       if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
       // Creature-type catalog loader (SOMET-249 LEFT JOINs creature_behaviors,
       // so the SELECT reads "FROM entity_types e ... WHERE e.is_creature").
@@ -120,15 +126,19 @@ function makePool({ bounded = true, userItems = [] } = {}) {
         };
       }
       if (/FROM world_chests WHERE world_id/i.test(sql)) return { rows: [] }; // fetchChests at load: none yet
-      if (/^\s*SELECT id, item_type_id, quantity FROM player_items WHERE user_id/i.test(sql)) {
+      if (/^\s*SELECT id, item_type_id, quantity FROM player_items WHERE character_id/i.test(sql)) {
         return { rows: userItems };
       }
-      if (/FROM player_equipment WHERE user_id/i.test(sql)) return { rows: [] };
+      if (/FROM player_equipment WHERE character_id/i.test(sql)) return { rows: [] };
       if (/SELECT gold FROM users WHERE id/i.test(sql)) return { rows: [{ gold: 0 }] };
-      if (/^\s*DELETE FROM player_items WHERE id = \$1 AND user_id = \$2/i.test(sql)) {
-        const [itemId, userId] = params;
+      if (/^\s*DELETE FROM player_items WHERE id = \$1 AND character_id = \$2/i.test(sql)) {
+        // $2 is the CHARACTER id now, and it arrives as the number this
+        // fixture's `FROM characters` answer hands back -- not the string the
+        // WS layer mints for a user id. Compared loosely on purpose: the point
+        // of this branch is "does the owner match", not what type the id is.
+        const [itemId, ownerId] = params;
         const owned = userItems.find((it) => it.id === itemId);
-        const owns = owned && userId === '1';
+        const owns = owned && String(ownerId) === '1';
         return owns
           ? { rows: [{ quantity: owned.quantity }], rowCount: 1 }
           : { rows: [], rowCount: 0 };
@@ -148,7 +158,7 @@ function makePool({ bounded = true, userItems = [] } = {}) {
 async function joinAndGetPlayer(url) {
   const ws = connect(url, 1);
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ type: 'join', world_id: 'w1' }));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
   await nextMsg(ws, 'joined');
   return ws;
 }

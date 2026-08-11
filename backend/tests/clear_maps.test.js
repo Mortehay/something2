@@ -59,11 +59,15 @@ test('every table with an ON DELETE CASCADE FK to worlds is named in CASCADES', 
   // Sanity check on the scanner itself: if this list drifts, something about
   // the migrations (or the regex) changed in a way worth looking at directly,
   // not just silently trusting the set. character_visited_worlds joined in
-  // SOMET-263 -- this test is what caught that CASCADES had not been told.
+  // SOMET-263 and world_chests in SOMET-244 -- this test is what caught, both
+  // times, that CASCADES had not been told. The second time it caught it
+  // across a MERGE: the chests branch added the table, this branch owns the
+  // list, and the two never touch the same line so git merged them cleanly.
   assert.deepEqual(
     [...found].sort(),
     ['character_visited_worlds', 'map_links', 'merchant_stock', 'player_binds',
-     'villages', 'world_chunks', 'world_creatures', 'world_items', 'world_players'].sort(),
+     'villages', 'world_chests', 'world_chunks', 'world_creatures', 'world_items',
+     'world_players'].sort(),
   );
 
   for (const table of found) {
