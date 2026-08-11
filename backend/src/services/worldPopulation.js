@@ -104,8 +104,22 @@ async function populateWorld(client, worldRow, { rngSeed }) {
   // into applyMapSpec (SOMET-246 Task 6): seed_map_portals.test.js already
   // covered this and started failing once population ran in the same
   // transaction as portal guards for the first time.
+  //
+  // SOMET-244: vault chests (chests.js's insertVaultChest) hit the exact
+  // same class of bug -- a spec can declare `chest: { guard_creature_type:
+  // 'Wolf', ... }`, so a vault guard can just as easily have neither
+  // type = 'Village Guard' nor a blocks_portal_id. home_x IS NOT NULL is the
+  // general structural marker every guard shares (village, portal, and vault
+  // alike all leash to a post via home_x/home_y; scattered/packed hostiles
+  // from THIS module's own inserts below never set it), so sparing on it
+  // covers vault guards too without adding a fourth special case per guard
+  // kind. Caught by seed_map_vault_chests_db.test.js: without this, the vault
+  // guard placed by the chest-stamping pass just above (applyMapSpec, before
+  // this populateWorld loop) was deleted again in the very same transaction,
+  // moments after being inserted.
   await client.query(
-    'DELETE FROM world_creatures WHERE world_id = $1 AND type <> $2 AND blocks_portal_id IS NULL',
+    'DELETE FROM world_creatures WHERE world_id = $1 AND type <> $2 '
+    + 'AND blocks_portal_id IS NULL AND home_x IS NULL',
     [worldRow.id, GUARD_TYPE],
   );
 

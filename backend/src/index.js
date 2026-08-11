@@ -8,6 +8,8 @@ const path = require('path');
 const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS } = require('./services/villages');
+const { fetchChests } = require('./services/chests.js');
+const { worldOverviewCache, clearOverviewCache } = require('./services/overviewCache.js');
 const { seedItemAcrossVillages } = require('./services/merchantStock');
 const { populateWorld } = require('./services/worldPopulation');
 const { MAX_WORLD_CREATURES } = require('./services/densityTiers');
@@ -162,7 +164,10 @@ const MAX_MAP_DIM = 500;
 const PREVIEW_DIM = 64;
 const worldPreviewCache = new Map(); // world_id -> data (dim x dim biome+path grid)
 
-// World overview memo (player-centered minimap window, SOMET minimap HUD)
+// World overview memo (player-centered minimap window, SOMET minimap HUD).
+// worldOverviewCache/clearOverviewCache live in services/overviewCache.js
+// (not here) so authority-side chest mutation paths can invalidate it too --
+// see that module's header comment for why.
 const OVERVIEW_SPAN = 256;   // tiles per side of the player-centered window
 const OVERVIEW_STEP = 4;     // downsample factor -> 64x64 coarse cells
 // Unlike worldPreviewCache (one entry per world), a roaming player can mint one
@@ -170,13 +175,6 @@ const OVERVIEW_STEP = 4;     // downsample factor -> 64x64 coarse cells
 // on a long-running server -- so this cache needs a size cap (SOMET minimap
 // HUD final review).
 const OVERVIEW_CACHE_MAX = 64;
-const worldOverviewCache = new Map(); // "worldId:snappedCol:snappedRow" -> payload
-
-function clearOverviewCache(worldId) {
-  for (const key of worldOverviewCache.keys()) {
-    if (key.startsWith(`${worldId}:`)) worldOverviewCache.delete(key);
-  }
-}
 
 // Insert into a Map with a FIFO size cap: once it exceeds `max`, evict the
 // oldest-inserted entry (Map preserves insertion order). Re-setting an
@@ -2638,7 +2636,23 @@ app.get('/api/worlds/:id/overview', async (req, res) => {
       buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes }),
       centerCol, centerRow, OVERVIEW_SPAN, OVERVIEW_STEP,
     );
-    const payload = { world_id: worldId, ...data };
+    // Chests are point entities with a real stored world-pixel x/y (mapChestRow),
+    // not a derived center like a village's bounding box or a doorway's edge --
+    // they never stamp terrain, so (unlike villages/doorways) there is no need to
+    // thread them through buildWorldGenConfig/generateWorldOverview. Fetched fresh
+    // per request (this route has no in-memory chest cache; that's entry.chests,
+    // scoped to a live authority world) and projected into the SAME col/row tile
+    // grid every other overview marker uses, so the client can plot them on one
+    // consistent grid.
+    const chests = await fetchChests(pool, world.id);
+    const chestMarkers = chests.map((c) => ({
+      id: c.id,
+      col: Math.floor(c.x / CREATURE_TILE_PX),
+      row: Math.floor(c.y / CREATURE_TILE_PX),
+      kind: c.kind,
+      state: c.state,
+    }));
+    const payload = { world_id: worldId, ...data, chests: chestMarkers };
     boundedCacheSet(worldOverviewCache, cacheKey, payload, OVERVIEW_CACHE_MAX);
     res.json(payload);
   } catch (err) {

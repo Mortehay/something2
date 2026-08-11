@@ -10,11 +10,16 @@ const { ownedCharacter } = require('../services/characters.js');
 const { recordVisit } = require('../services/visitedWorlds.js');
 const { mayJoin, joinPolicyFacts } = require('../services/joinPolicy.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
-const { chunkOf, parseKey, neighborhoodKeys } = require('./coords');
+const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
 const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
+const {
+  fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests,
+} = require('../services/chests.js');
+const { openChest } = require('./chestLoot.js');
+const { clearOverviewCache } = require('../services/overviewCache.js');
 const { fetchShop } = require('../services/merchantStock');
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
@@ -176,6 +181,13 @@ function nearestMerchantVillage(villages, cx, cy, radius) {
   return best;
 }
 
+// Guard-type allowlist for a field chest spawned via `use`ing a loot_map.
+// Content decision (which creature types can guard a field chest) is out of
+// scope for this task -- see the design spec; a single, always-present
+// creature type keeps the wire behavior testable without depending on a
+// content decision.
+const ALLOWED_FIELD_CHEST_GUARDS = ['Wolf'];
+
 // Cap on a single world's un-broadcast attack batch. Attacks arrive from the
 // socket handler BETWEEN ticks, so unlike pendingDetonations (produced inside
 // the tick and replaced wholesale) this stash must ACCUMULATE — replacing it
@@ -200,6 +212,26 @@ function drainAttacks(entry) {
   entry.pendingAttacks = null;
   return Array.isArray(batch) ? batch : [];
 }
+
+// The joined creature-instance SELECT, shared verbatim by activateChunk's
+// per-chunk load (WHERE wc.world_id = ... AND x/y BETWEEN ..., below) and
+// injectGuardIntoSim's per-id load (WHERE wc.id = ANY(...), also below).
+// Factored out so the two call sites cannot drift apart: see
+// activateChunk's own inline comment for the column-by-column rationale
+// (dropping any of them silently makes some creature mechanic inert rather
+// than throwing). Both call sites append their own WHERE clause.
+const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
+                wc.level, wc.damage, wc.blocks_portal_id,
+                COALESCE(wc.defense, et.defense) AS defense,
+                et.color, et.resistances, et.faction, et.attack_element,
+                b.name AS behavior_name, b.aggro_radius, b.leash_radius,
+                b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
+                b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
+                b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
+                ab.abilities
+         FROM world_creatures wc
+         LEFT JOIN entity_types et ON et.name = wc.type
+         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}`;
 
 // Attach the authoritative WebSocket simulation to an existing http server.
 // Returns { close() } so callers/tests can tear it down.
@@ -377,16 +409,26 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const villages = await fetchVillages(pool, canonicalId);
         const decorationDefs = await loadDecorationDefs(pool);
         const biomes = await loadBiomes(pool, row.biomes);
-        const map = new ServerMap({
-          ...buildWorldGenConfig({
-            row, tileTypes, doorways: [...links.keys()], villages, biomes,
-          }),
-          decorationDefs,
+        const chests = await fetchChests(pool, canonicalId);
+        // Cached once here, rather than rebuilt per spawnFieldChest call, so
+        // the `use` handler can hand placeMapCreatures the exact same
+        // tile-legality config the map itself was generated from. `row`
+        // alone is NOT this shape: it's missing tileTypes/doorways/villages/
+        // biomes entirely, and its level band is `level_min`/`level_max`
+        // (snake_case, straight off the SQL SELECT) where placeMapCreatures
+        // reads camelCase `levelMin`/`levelMax` off its `world` argument
+        // directly (worldConfig() never derives these -- see
+        // worldGenConfig.js's own comment on that exact silent-undefined
+        // trap). Passing `row` as-is would throw ("worldConfig: tileTypes is
+        // empty") before ever reaching a placement.
+        const mapGenConfig = buildWorldGenConfig({
+          row, tileTypes, doorways: [...links.keys()], villages, biomes,
         });
+        const map = new ServerMap({ ...mapGenConfig, decorationDefs });
         const entry = {
           worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
           tileTypes, creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
-          goldItemTypeId, links, portalLinks, villages,
+          goldItemTypeId, links, portalLinks, villages, chests, mapGenConfig,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -664,19 +706,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // IS real) reads that one alias unconditionally, so both SELECTs must
       // agree on it. b.aura_* columns have no collision anywhere and stay
       // unaliased, same as aggro_radius/leash_radius/etc.
+      //
+      // The SELECT/FROM/JOIN text lives in CREATURE_JOINED_SELECT (module
+      // scope, above attachAuthority) rather than inline here, so
+      // injectGuardIntoSim below shares this EXACT shape instead of
+      // maintaining a second, driftable copy -- see that function's header
+      // comment for why it needs the identical columns.
       const rows = await pool.query(
-        `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
-                wc.level, wc.damage, wc.blocks_portal_id,
-                COALESCE(wc.defense, et.defense) AS defense,
-                et.color, et.resistances, et.faction, et.attack_element,
-                b.name AS behavior_name, b.aggro_radius, b.leash_radius,
-                b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
-                b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
-                b.gold_min AS behavior_gold_min, b.gold_max AS behavior_gold_max,
-                ab.abilities
-         FROM world_creatures wc
-         LEFT JOIN entity_types et ON et.name = wc.type
-         LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}
+        `${CREATURE_JOINED_SELECT}
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
@@ -696,6 +733,40 @@ function attachAuthority(httpServer, pool, opts = {}) {
       console.error('chunk activation failed:', chunkKey, err);
     } finally {
       entry.chunkLoads.delete(chunkKey);
+    }
+  }
+
+  // Final-review fix (SOMET-244): the ONLY path that ever puts a
+  // world_creatures row into the live entry.world.creatures sim is
+  // activateChunk above, triggered exclusively by an unloaded->loaded chunk
+  // transition. Every world in the live DB fits inside a single player's
+  // 3x3 chunk neighborhood, so a chunk holding a player never unloads --
+  // meaning a guard INSERTed mid-session (spawnFieldChest's `use`-handler
+  // spawn, or respawnDueFieldChests' sweep) would otherwise stay DB-only:
+  // invisible, unkillable, and openChest's guard-alive check would refuse
+  // forever ("guard is still alive") since the DB row it counts never dies.
+  //
+  // Fix: after such an INSERT commits, re-run the SAME joined SELECT
+  // activateChunk uses (CREATURE_JOINED_SELECT, so the two can never
+  // disagree on shape) for just the new id(s) and feed the row(s) straight
+  // into addCreatures. addCreatures dedupes by id (creatures.js:427), so
+  // this is safe to call even if the id somehow already made it into the
+  // sim by another path.
+  async function injectGuardIntoSim(entry, ids) {
+    if (!entry || !ids || ids.length === 0) return;
+    try {
+      const rows = await pool.query(
+        `${CREATURE_JOINED_SELECT}
+         WHERE wc.id = ANY($1::uuid[])`,
+        [ids],
+      );
+      entry.world.creatures.addCreatures(rows.rows);
+    } catch (err) {
+      // Best-effort, same posture as activateChunk's own catch: log so a
+      // persistently failing injection is visible to an operator instead of
+      // silently leaving a guard unkillable, but never let it take down the
+      // caller (a field-chest `use`, or a background respawn sweep pass).
+      console.error('injectGuardIntoSim failed:', ids, err);
     }
   }
 
@@ -743,6 +814,32 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const { cx, cy } = chunkOf(p.x, p.y, N);
       const keys = neighborhoodKeys(cx, cy, 1);
       send(ws, { type: 'items', items: entry.world.groundItems.snapshotForNeighborhood(keys) });
+    }
+  }
+
+  // Live minimap/AOI chest markers. Unlike creatures/items, entry.chests is a
+  // plain array (not a chunk-indexed Sim class -- chests are map-spec-authored
+  // or field-spawned, never numerous enough per world to warrant one), so the
+  // neighborhood filter is inlined here rather than via a snapshotForNeighborhood
+  // method. Same field-naming/coordinate convention as creatures/items ({id, x,
+  // y, ...} in world-pixel space): a chest's x/y is a real stored position
+  // (mapChestRow), not a derived center like a village's, so it belongs with the
+  // point-entity family, not the bounding-box-marker family. `state` rides along
+  // (not just kind) so the client can render locked/unlocked/opened distinctly.
+  function broadcastChests(entry) {
+    const N = entry.row.chunk_size;
+    for (const [userId, ws] of entry.sockets) {
+      const p = entry.world.getPlayer(userId);
+      if (!p) continue;
+      const { cx, cy } = chunkOf(p.x, p.y, N);
+      const keys = new Set(neighborhoodKeys(cx, cy, 1));
+      const chests = (entry.chests || [])
+        .filter((c) => {
+          const { cx: ccx, cy: ccy } = chunkOf(c.x, c.y, N);
+          return keys.has(CHUNK_KEY(ccx, ccy));
+        })
+        .map((c) => ({ id: c.id, x: c.x, y: c.y, kind: c.kind, state: c.state }));
+      send(ws, { type: 'chests', chests });
     }
   }
 
@@ -1111,6 +1208,103 @@ function attachAuthority(httpServer, pool, opts = {}) {
       });
     },
 
+    // Consumes a `consumable`-category item (currently only `loot_map`) to
+    // spawn a field chest + its guard on a legal tile. Ownership/category/
+    // name checks happen against the in-memory catalog/inventory first
+    // (entry.world.weapons and p.inv.items -- same source `joined`'s own
+    // `itemTypes`/`items` payload comes from, no extra DB round trip needed
+    // just to look category up), the same way dropItem's equipped-guard
+    // check reads p.inv rather than querying first; the DB DELETE below is
+    // still what's actually authoritative (guarded by user_id, mirrors
+    // dropItem), so a stale in-memory snapshot can only ever cause a
+    // spurious rejection, never a double-spend.
+    use(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.itemId !== 'string') return; // wire hygiene: ids are strings, matches drop's guard
+      chainOp(ws, 'use', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p || !p.inv) return;
+        const item = p.inv.items.find((it) => it.id === msg.itemId);
+        if (!item) { send(ws, { type: 'error', message: 'you do not own that item' }); return; }
+        const itemType = entry.world.weapons.get(item.typeId);
+        if (!itemType || itemType.category !== 'consumable') {
+          send(ws, { type: 'error', message: 'this item has no use action' });
+          return;
+        }
+        if (itemType.name !== 'loot_map') {
+          send(ws, { type: 'error', message: 'unrecognized consumable' });
+          return;
+        }
+
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const spawned = await spawnFieldChest(
+            client,
+            { ...entry.mapGenConfig, id: entry.worldId },
+            ALLOWED_FIELD_CHEST_GUARDS,
+            Math.floor(rng() * 2 ** 31),
+          );
+          if (!spawned) {
+            await client.query('ROLLBACK');
+            send(ws, { type: 'error', message: 'no legal spot for a chest right now' });
+            return;
+          }
+          const del = await client.query(
+            'DELETE FROM player_items WHERE id = $1 AND user_id = $2 RETURNING quantity',
+            [msg.itemId, ws.userId],
+          );
+          if (del.rowCount !== 1) {
+            await client.query('ROLLBACK');
+            send(ws, { type: 'error', message: 'you do not own that item' });
+            return;
+          }
+          // Mirrors sellItem's own guard in trade.js against the SAME table
+          // and the SAME failure shape: `loot_map` is seeded `stackable:
+          // true` (1714440152000_loot_map_item.js), and nothing here prices
+          // or consumes per-unit -- a stacked row would have this DELETE
+          // (already run above) destroy every unit in the stack while only
+          // spawning ONE chest. Unreachable today (nothing grants loot_map
+          // with quantity > 1 yet), but refuse rather than leave a second
+          // unguarded copy of a failure mode this codebase already paid down
+          // once. The DELETE already ran, so this must roll back, not just
+          // error.
+          const quantity = Number(del.rows[0].quantity) || 1;
+          if (quantity !== 1) {
+            await client.query('ROLLBACK');
+            send(ws, { type: 'error', message: 'cannot use a stacked item' });
+            return;
+          }
+          await client.query('COMMIT');
+          // Keep the in-memory caches in sync, the same reason claimItem/
+          // dropItem mutate p.inv.items / entry.world.groundItems directly
+          // rather than waiting for a reload.
+          p.inv.items = p.inv.items.filter((it) => it.id !== msg.itemId);
+          entry.chests.push(spawned.row);
+          // Final-review fix (SOMET-244 Critical #1): without this, the
+          // guard spawnFieldChest just wrote to world_creatures stays
+          // DB-only for the rest of the session -- see
+          // injectGuardIntoSim's header comment. Uses the outer `pool`, not
+          // `client`: the transaction already committed above, and this
+          // query has nothing to do inside it.
+          await injectGuardIntoSim(entry, [spawned.guardCreatureId]);
+          // Final-review fix (SOMET-244 Important #4): matches the
+          // open/respawn paths' own clearOverviewCache call -- a newly
+          // spawned field chest is a state change /overview must reflect
+          // too, or it stays invisible on an already-cached window
+          // indefinitely (no TTL, only explicit clear or FIFO eviction).
+          clearOverviewCache(entry.worldId);
+          send(ws, { type: 'used', itemId: msg.itemId, spawnedChestId: spawned.id });
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          client.release();
+        }
+      });
+    },
+
     interact(ws) {
       const entry = worlds.get(ws.worldId);
       if (!entry) return;
@@ -1122,6 +1316,79 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
         const shop = await fetchShop(pool, village.id);
         send(ws, { type: 'shop', villageId: village.id, catalog: shop.catalog, buyback: shop.buyback });
+      });
+    },
+
+    // Opens the nearest in-range chest (proximity-picked, same pattern as
+    // `interact` above -- the client sends no chest id). openChest owns the
+    // guard-check/CAS/loot-roll/XP-award transaction; this handler only
+    // finds the target and keeps entry.chests in sync with the DB write
+    // openChest just committed, the same reason `use`'s handler pushes onto
+    // entry.chests after spawnFieldChest commits.
+    openchest(ws) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      chainOp(ws, 'openchest', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const chest = nearestChest(entry.chests, cx, cy, INTERACT_RADIUS);
+        if (!chest) { send(ws, { type: 'error', message: 'no chest nearby' }); return; }
+
+        const result = await openChest(pool, chest.id, ws.userId);
+        if (!result.ok) { send(ws, { type: 'error', message: result.reason }); return; }
+
+        // Final-review fix (SOMET-244 Important #2): openChest now returns
+        // full player_items rows ({id, item_type_id, quantity} each), not
+        // bare item_type_ids -- push each onto p.inv.items the same way
+        // claimItem does at loot.js:232 ("so a later equip validates
+        // without a reload"). Without this a chest-granted item could not
+        // be equipped/dropped/sold for the rest of the session (canEquip/
+        // dropItem/sellItem all validate against p.inv.items).
+        for (const it of result.items) {
+          p.inv.items.push({ id: it.id, typeId: it.item_type_id, quantity: Number(it.quantity) || 1 });
+        }
+
+        // openedAt/respawnAt (undefined for a vault chest -- openChest
+        // returns respawnAt: null there) must land on entry.chests too, not
+        // just the DB row openChest just committed: the respawn sweep below
+        // (itemSweepTimer) acts on the DB's respawn_at directly, but without
+        // this, entry.chests would never show a respawn_at at all, and a
+        // chest the sweep later relocks would look permanently 'opened' to
+        // an already-connected player until a full world reload.
+        Object.assign(chest, { state: 'opened', openedAt: result.openedAt, respawnAt: result.respawnAt });
+        // openChest's own transaction may have flipped state locked ->
+        // unlocked -> opened in one shot (the guard-dead check folds the
+        // unlock into the same call) -- either way this chest's `state` on
+        // the /overview payload is now stale wherever it was cached. One
+        // call covers both transitions since they already committed
+        // atomically before this handler ever resumes.
+        clearOverviewCache(entry.worldId);
+
+        // Final-review fix (SOMET-244 Important #3): mirrors onCreatureDeath's
+        // own leveledUp handling (server.js:426-463) exactly -- same call,
+        // same hp>0 guard (a level-up landing while this player is
+        // currently sitting at hp<=0 awaiting resolveDeaths() must not have
+        // applyDerivedStats revive them; it clamps current hp to a floor of
+        // 1 unconditionally). Without this, a chest-open level-up raised
+        // max HP in the DB but never in the running game until reconnect --
+        // "the exact defect A1's review caught."
+        if (result.leveledUp && p.hp > 0) {
+          entry.world.applyDerivedStats(ws.userId, derivePlayerStats(result.progression));
+        }
+        send(ws, {
+          type: 'chestOpened', chestId: chest.id, items: result.items,
+          awarded: result.awarded, leveledUp: result.leveledUp, newLevel: result.newLevel,
+        });
+        // Separate progression frame, matching the kill path's own frame
+        // shape (onCreatureDeath sends `{type:'progression', progression,
+        // leveledUp, newLevel, awarded}`) so the client's existing
+        // progression handling (built for kills) also picks up chest XP
+        // without a second, chest-specific client-side path.
+        send(ws, {
+          type: 'progression', progression: result.progression,
+          leveledUp: result.leveledUp, newLevel: result.newLevel, awarded: result.awarded,
+        });
       });
     },
 
@@ -1409,6 +1676,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         recomputeActive(entry);
         broadcastCreatures(entry);
         broadcastItems(entry);
+        broadcastChests(entry);
       }
     }
   }, tickMs);
@@ -1444,6 +1712,66 @@ function attachAuthority(httpServer, pool, opts = {}) {
   }
   const heartbeatTimer = setInterval(heartbeatSweep, heartbeatMs);
 
+  // Field chest respawn: rides the ground-item sweep's interval below rather
+  // than a second, independently-scheduled one. Named (like heartbeatSweep
+  // above) so it can be exposed as `_chestRespawnSweep`: a test seam that
+  // lets tests drive one sweep pass deterministically and await its
+  // completion, instead of racing wall-clock itemSweepMs.
+  //
+  // getWorld only serves CURRENTLY LOADED worlds (the `worlds` map) --
+  // reconstructing mapGenConfig for an unloaded world here would either
+  // duplicate loadWorld's tileTypes/villages/biomes assembly or, if done by
+  // calling loadWorld() itself, leak a permanently-loaded empty world
+  // (nothing besides a socket's close handler currently evicts an empty
+  // entry, and this sweep never fires that handler). A chest whose world is
+  // offline simply stays due and is retried on a later sweep.
+  //
+  // onReset patches ONLY the matching entry.chests element in place
+  // (Object.assign, same convention every other chest write already follows
+  // -- the `use` handler's push, the `openchest` handler's Object.assign)
+  // rather than replacing entry.chests wholesale from a fresh fetchChests
+  // query. A full-array replace raced a concurrent openchest handler's
+  // in-memory write for an UNRELATED chest in the same world: if the
+  // replace's fetchChests SELECT ran before that handler's commit but its
+  // `.then()` resolved after the handler's own Object.assign, the
+  // just-opened chest's in-memory state would silently revert to stale.
+  // Per-chest, per-object patching driven directly off what THIS sweep pass
+  // itself just wrote (see respawnDueFieldChests' onReset contract) makes
+  // that race structurally impossible: there is no separate read to race
+  // against, and an unrelated chest's object is never touched.
+  async function chestRespawnSweep() {
+    try {
+      await respawnDueFieldChests(pool, {
+        getWorld: (worldId) => {
+          const entry = worlds.get(worldId);
+          return entry ? { ...entry.mapGenConfig, id: worldId } : null;
+        },
+        onReset: async ({ id, worldId, ...patch }) => {
+          // Same reasoning as the openchest handler's own clearOverviewCache
+          // call: the DB write already committed (respawnDueFieldChests'
+          // header comment on `reset` being counted unconditionally applies
+          // here too), so the cache is stale regardless of whether the
+          // owning world is even loaded right now to receive the in-memory
+          // patch below.
+          clearOverviewCache(worldId);
+          const entry = worlds.get(worldId);
+          if (!entry) return;
+          const chest = entry.chests.find((c) => c.id === id);
+          if (chest) Object.assign(chest, patch);
+          // Final-review fix (SOMET-244 Critical #1): the respawn sweep's
+          // INSERT into world_creatures has the identical gap the `use`
+          // handler's field-chest spawn has -- see injectGuardIntoSim's
+          // header comment. `await`ed (respawnDueFieldChests now awaits
+          // onReset itself) so the `_chestRespawnSweep` test seam observes
+          // the new guard in entry.world.creatures once the sweep resolves.
+          await injectGuardIntoSim(entry, patch.guardCreatureIds);
+        },
+      });
+    } catch (err) {
+      console.error('field chest respawn sweep failed:', err);
+    }
+  }
+
   // Expired ground items: delete from the DB and evict from every live sim.
   // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
   // sweep by up to itemSweepMs; the two are complementary (DB delete is
@@ -1461,6 +1789,8 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
       })
       .catch((err) => console.error('ground item sweep failed:', err));
+
+    chestRespawnSweep();
   }, itemSweepMs);
 
   return {
@@ -1478,6 +1808,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // 'pong' event (observable via `worlds.get(id).sockets`) between calls
     // rather than sleeping a guessed duration.
     _heartbeatSweep: heartbeatSweep,
+    // Test seam, same reasoning as _heartbeatSweep above: run one field
+    // chest respawn pass synchronously (and await its completion, unlike the
+    // real itemSweepTimer's fire-and-forget call) instead of waiting for or
+    // racing wall-clock itemSweepMs.
+    _chestRespawnSweep: chestRespawnSweep,
     // Evict an IDLE world from the in-memory cache so the next entry reloads it
     // from the DB (fresh seed + creatures). Refuses to evict a world with live
     // sockets to avoid tearing down active sessions.
