@@ -77,6 +77,18 @@ function resolveGoldItemTypeId(itemTypes) {
 }
 
 // A character's owned instances + their paper-doll, both character-scoped.
+//
+// Hydrates each host item's socketedStoneTypeId cache from stone_instances at
+// LOAD time, not just from live socketStone/unsocketStone writes during the
+// session (Task 4). Without this, a character who joins (or reconnects) with
+// an already-socketed weapon -- which is every migration-converted magic
+// weapon, plus anything socketed and left socketed across a previous session
+// -- would have an empty in-memory cache despite the DB truthfully recording
+// a socketed stone, and combat's activeWeaponType (items.js) would silently
+// treat the weapon as bare (plain physical, per the "replace semantics"
+// design) until the player happened to touch the socket UI again. Scoped to
+// this character via the host_pi join predicate, matching every other
+// ownership check in this file.
 async function loadInventory(pool, characterId) {
   const ir = await pool.query(
     'SELECT id, item_type_id, quantity FROM player_items WHERE character_id = $1 ORDER BY created_at ASC, id ASC',
@@ -86,12 +98,23 @@ async function loadInventory(pool, characterId) {
     'SELECT slot, item_id FROM player_equipment WHERE character_id = $1',
     [characterId],
   );
+  const sr = await pool.query(
+    `SELECT si.socketed_into_id AS host_id, stone_pi.item_type_id AS stone_type_id
+       FROM stone_instances si
+       JOIN player_items stone_pi ON stone_pi.id = si.player_item_id
+       JOIN player_items host_pi ON host_pi.id = si.socketed_into_id
+      WHERE host_pi.character_id = $1 AND si.socketed_into_id IS NOT NULL`,
+    [characterId],
+  );
   const equipment = {};
   for (const row of er.rows) equipment[row.slot] = row.item_id;
-  return {
-    items: ir.rows.map((r) => ({ id: r.id, typeId: r.item_type_id, quantity: Number(r.quantity ?? 1) })),
-    equipment,
-  };
+  const items = ir.rows.map((r) => ({ id: r.id, typeId: r.item_type_id, quantity: Number(r.quantity ?? 1) }));
+  const byId = new Map(items.map((it) => [it.id, it]));
+  for (const row of sr.rows) {
+    const hostItem = byId.get(row.host_id);
+    if (hostItem) hostItem.socketedStoneTypeId = row.stone_type_id;
+  }
+  return { items, equipment };
 }
 
 // Grant the starter set, once per CHARACTER, ever. F-013 (P0): this used to be
@@ -191,19 +214,44 @@ function mitigation(inv, itemTypes) {
 }
 
 // The item type driving attacks: whatever is in main_hand, else the default.
-// A socketed SPELL stone (element set) overrides the weapon's own attack
-// fields (element, mana_cost, etc.) -- a socketed BUFF stone (stat_bonus_*,
-// no element) has no attack-relevant fields and must not affect combat, so
-// it falls through to the weapon itself.
+// "Combat integration -- replace semantics" (design doc): a socketed SPELL
+// stone (element set) supplies the "spell" -- element, mana_cost, damage,
+// cooldown, per 1714440167000_convert_magic_weapons_to_stones.js's own
+// authoritative enumeration of exactly which fields are spell-relevant vs.
+// weapon mechanics. A socketed BUFF stone (stat_bonus_*, no element) never
+// touches attack resolution. Everything else -- kind, reach, arc_width,
+// range, projectile_*, pierce, stamina_cost, knockback, vfx, ammo_type_id,
+// aoe_radius -- is weapon mechanics and always comes from the weapon's own
+// item_types row, never the stone's: returning the stone's row wholesale
+// (as opposed to merging just the spell fields onto the weapon) would zero
+// out a socketed weapon's reach/damage/cooldown and misroute melee weapons
+// into the projectile branch (stone rows carry no `kind`).
+//
+// With nothing eligible socketed, the weapon's own baked-in element/mana_cost
+// columns are vestigial (left in place by the conversion migration for that
+// migration to read from, not for combat to read from any more) -- the
+// weapon attacks as plain physical at zero mana cost. This is a real
+// behavior change from pre-socket baked-in magic, called out explicitly in
+// the design doc: it only matters once a player unsockets a converted
+// weapon's spell stone and leaves the weapon bare.
 function activeWeaponType(inv, itemTypes, defaultWeaponId) {
   const itemId = inv.equipment.main_hand;
   if (itemId) {
     const item = findItem(inv, itemId);
     const type = item ? itemTypes.get(item.typeId) : null;
     if (type && type.category === 'weapon') {
-      if (item.socketedStoneTypeId != null) {
-        const stoneType = itemTypes.get(item.socketedStoneTypeId);
-        if (stoneType && stoneType.element != null) return stoneType;
+      const stoneType = item.socketedStoneTypeId != null ? itemTypes.get(item.socketedStoneTypeId) : null;
+      if (stoneType && stoneType.element != null) {
+        return {
+          ...type,
+          element: stoneType.element,
+          mana_cost: stoneType.mana_cost,
+          damage: stoneType.damage,
+          cooldown: stoneType.cooldown,
+        };
+      }
+      if (type.element !== 'physical' || type.mana_cost) {
+        return { ...type, element: 'physical', mana_cost: 0 };
       }
       return type;
     }

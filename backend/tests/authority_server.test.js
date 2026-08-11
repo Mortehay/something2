@@ -1021,6 +1021,14 @@ async function mkAttackHarness(opts = {}) {
   // test can make it move (e.g. decrement in lockstep with onConsume) to
   // simulate the summed-across-stacks total draining shot by shot.
   const ammoCountFn = opts.ammoCountFn || (() => 5);
+  // Magic-stones Task 5: a weapon's own baked-in element is vestigial once
+  // sockets exist -- combat only reads it through a SOCKETED spell stone
+  // (loadInventory hydrates the socketedStoneTypeId cache from
+  // stone_instances at join). A test that needs an elemental attack (e.g.
+  // the AoE detonation test below) passes opts.stone, which this harness
+  // wires up end to end: the stone's own item_types row, a player_items row
+  // for the stone instance, and the stone_instances join loadInventory reads.
+  const stone = opts.stone || null;
   const base = fakePool();
   const pool = withConnect({
     query: async (sql, params) => {
@@ -1054,10 +1062,16 @@ async function mkAttackHarness(opts = {}) {
       if (/SELECT COALESCE\(SUM\(quantity\)/i.test(sql)) {
         return { rows: [{ n: ammoCountFn(params) }] };
       }
-      if (/FROM item_types/i.test(sql)) return { rows: [weapon] };
+      if (/FROM item_types/i.test(sql)) return { rows: stone ? [weapon, stone] : [weapon] };
+      // Must be matched BEFORE the generic /FROM player_items/ branch below.
+      if (/FROM stone_instances/i.test(sql)) {
+        return { rows: stone ? [{ host_id: 'i9', stone_type_id: stone.id }] : [] };
+      }
       if (/FROM player_items/i.test(sql)) {
-        return { rows: [{ id: 'i9', item_type_id: 9, quantity: 1 },
-                        { id: 'ammo1', item_type_id: AMMO_TYPE_ID, quantity: 5 }] };
+        const rows = [{ id: 'i9', item_type_id: 9, quantity: 1 },
+                       { id: 'ammo1', item_type_id: AMMO_TYPE_ID, quantity: 5 }];
+        if (stone) rows.push({ id: 's9', item_type_id: stone.id, quantity: 1 });
+        return { rows };
       }
       if (/FROM player_equipment/i.test(sql)) return { rows: [{ slot: 'main_hand', item_id: 'i9' }] };
       return base.query(sql, params);
@@ -1235,11 +1249,17 @@ test('firing with no ammo does not push an ammo frame', async () => {
 // ---------------------------------------------------------------------------
 
 // An ammo-free AoE bow with a very short range, so the projectile runs out of
-// flight (which counts as an impact) and detonates within a tick or two.
+// flight (which counts as an impact) and detonates within a tick or two. Its
+// own element is left null (a bare weapon post-Task-5 -- see mkAttackHarness'
+// `stone` note): the arcane element that makes this an ELEMENTAL detonation
+// comes from AOE_STONE, socketed via mkAttackHarness({ stone: AOE_STONE }).
 const AOE_BOW = {
   kind: 'projectile', damage: 12, cooldown: 5, range: 60, projectile_speed: 900,
-  projectile_radius: 8, pierce: null, aoe_radius: 96, element: 'arcane',
+  projectile_radius: 8, pierce: null, aoe_radius: 96, element: null,
   ammo_type_id: null,
+};
+const AOE_STONE = {
+  id: 90, name: 'stone_of_aoe-bow', category: 'stone', element: 'arcane', mana_cost: 0, damage: 12, cooldown: 5,
 };
 
 test('a detonation reaches the client on the state frame, and only once', async () => {
@@ -1248,7 +1268,7 @@ test('a detonation reaches the client on the state frame, and only once', async 
   // stash is replaced (not appended to) every tick, an unconsumed detonation
   // is silently overwritten ~20ms later and no blast ever renders. This test
   // fails outright if the broadcast does not carry it.
-  const h = await mkAttackHarness({ weapon: AOE_BOW });
+  const h = await mkAttackHarness({ weapon: AOE_BOW, stone: AOE_STONE });
 
   const frames = [];
   h.ws.on('message', (data) => {

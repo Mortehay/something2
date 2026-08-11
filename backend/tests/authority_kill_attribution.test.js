@@ -25,10 +25,14 @@ const TYPES = new Map([
     id: 3, name: 'flame-dagger', category: 'weapon', kind: 'melee', damage: 5,
     cooldown: 0.3, reach: 80, arc_width: 0.6, mana_cost: 0, element: 'fire',
   }],
+  // Magic-stones Task 5 ("replace semantics"): flame-dagger's own element is
+  // vestigial once sockets exist -- combat only reads fire through a
+  // SOCKETED spell stone now. Mirrors weapon 3's own numbers exactly.
+  [30, { id: 30, name: 'stone_of_flame-dagger', category: 'stone', element: 'fire', mana_cost: 0, damage: 5, cooldown: 0.3 }],
 ]);
 const DEFAULT_ID = 1;
 const bowInv = () => ({ items: [{ id: 'b1', typeId: 2 }], equipment: { main_hand: 'b1' } });
-const flameInv = () => ({ items: [{ id: 'f1', typeId: 3 }], equipment: { main_hand: 'f1' } });
+const flameInv = () => ({ items: [{ id: 'f1', typeId: 3, socketedStoneTypeId: 30 }], equipment: { main_hand: 'f1' } });
 
 function armWorld() {
   const map = {

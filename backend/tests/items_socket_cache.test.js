@@ -37,3 +37,51 @@ test('activeWeaponType ignores a socketed BUFF stone for attack resolution (buff
   const resolved = activeWeaponType(inv, itemTypes, 5);
   assert.equal(resolved.element, 'physical', 'a buff stone must not override the weapon attack');
 });
+
+// Regression coverage for a bug the plan's literal Step 3 snippet would have
+// shipped: returning the socketed stone's item_types row WHOLESALE (rather
+// than merging just its spell fields onto the weapon) loses every weapon
+// mechanic a stone row doesn't carry -- reach/arc_width/kind included. A
+// melee weapon with a spell stone socketed must still be a MELEE weapon with
+// its own reach/arc, dealing the STONE's damage and on the STONE's cooldown
+// -- see 1714440167000_convert_magic_weapons_to_stones.js's comment
+// enumerating element/mana_cost/damage/cooldown as the complete "spell",
+// with reach/arc_width/kind/knockback/etc. staying weapon mechanics.
+test('activeWeaponType with a spell stone socketed keeps the weapon\'s own combat-mechanic fields (reach, arc, kind)', () => {
+  const stoneType = { id: 99, category: 'stone', element: 'fire', mana_cost: 5, damage: 40, cooldown: 300 };
+  const weaponType = {
+    id: 5, category: 'weapon', element: 'physical', mana_cost: 0,
+    kind: 'melee', reach: 80, arc_width: 1.2, damage: 10, cooldown: 500, knockback: 0,
+  };
+  const itemTypes = new Map([[5, weaponType], [99, stoneType]]);
+  const inv = {
+    equipment: { main_hand: 'weapon-instance-1' },
+    items: [{ id: 'weapon-instance-1', typeId: 5, quantity: 1, socketedStoneTypeId: 99 }],
+  };
+  const resolved = activeWeaponType(inv, itemTypes, 5);
+  assert.equal(resolved.kind, 'melee', 'a melee weapon with a stone socketed must stay melee, not fall through to the projectile branch');
+  assert.equal(resolved.reach, 80, 'reach is a weapon mechanic, not a spell field -- must come from the weapon');
+  assert.equal(resolved.arc_width, 1.2, 'arc_width is a weapon mechanic, not a spell field -- must come from the weapon');
+  assert.equal(resolved.damage, 40, 'damage IS one of the four spell fields -- must come from the stone');
+  assert.equal(resolved.cooldown, 300, 'cooldown IS one of the four spell fields -- must come from the stone');
+});
+
+// Design doc "Combat integration -- replace semantics", point 4: with no
+// spell stone socketed, the weapon's own baked-in element/mana_cost become
+// vestigial -- the weapon attacks as plain physical at zero mana cost, even
+// if item_types still carries old magic-weapon data (e.g. a player unsocketed
+// a converted weapon's spell stone, leaving the weapon's own vestigial
+// columns from before this system existed).
+test('activeWeaponType forces plain physical/zero mana cost when the weapon\'s own item_types row still carries vestigial magic and nothing is socketed', () => {
+  const weaponType = { id: 5, category: 'weapon', element: 'fire', mana_cost: 8, kind: 'melee', reach: 80, damage: 25, cooldown: 400 };
+  const itemTypes = new Map([[5, weaponType]]);
+  const inv = {
+    equipment: { main_hand: 'weapon-instance-1' },
+    items: [{ id: 'weapon-instance-1', typeId: 5, quantity: 1 }], // unsocketed -- no socketedStoneTypeId
+  };
+  const resolved = activeWeaponType(inv, itemTypes, 5);
+  assert.equal(resolved.element, 'physical', 'the weapon\'s own vestigial element must not drive combat once sockets exist');
+  assert.equal(resolved.mana_cost, 0, 'the weapon\'s own vestigial mana_cost must not be charged once sockets exist');
+  assert.equal(resolved.reach, 80, 'reach is unaffected -- it was never a spell field');
+  assert.equal(resolved.damage, 25, 'damage stays the weapon\'s own physical damage when nothing is socketed');
+});

@@ -55,6 +55,15 @@ const TYPES = new Map([
   [3, { id: 3, name: 'bow', category: 'weapon', kind: 'projectile', damage: 12, cooldown: 0.6, range: 700, projectile_speed: 900, projectile_radius: 8, pierce: 1, mana_cost: 0, element: null }],
   [4, { id: 4, name: 'magic-bolt', category: 'weapon', kind: 'projectile', damage: 14, cooldown: 0.7, range: 600, projectile_speed: 700, projectile_radius: 12, pierce: 1, mana_cost: 15, element: 'arcane' }],
   [5, { id: 5, name: 'greatsword', category: 'weapon', kind: 'melee', damage: 25, cooldown: 0.5, reach: 90, arc_width: 0.7, mana_cost: 0, stamina_cost: 20, element: null }],
+  // Magic-stones Task 5 ("replace semantics"): a weapon's own baked-in
+  // element/mana_cost is vestigial once sockets exist -- magic-bolt (id 4)
+  // above KEEPS its old element:'arcane'/mana_cost:15 columns (mirroring how
+  // the real conversion migration leaves a converted weapon's own columns
+  // untouched), but combat now only sees that magic through a SOCKETED spell
+  // stone. This stone mirrors magic-bolt's pre-sockets numbers exactly, so
+  // every test below that equips id 4 with this stone socketed observes the
+  // identical mana-gating behavior it did before sockets existed.
+  [40, { id: 40, name: 'stone_of_magic-bolt', category: 'stone', element: 'arcane', mana_cost: 15, damage: 14, cooldown: 0.7 }],
 ]);
 const DEFAULT_ID = 1;
 const heavyWeapon = TYPES.get(5);
@@ -89,7 +98,7 @@ test('melee attack hits creatures AND other players in the arc', () => {
 
 test('projectile attack spawns a projectile and deducts mana', () => {
   const w = armWorld();
-  w.addPlayer('u1', { x: 0, y: 0 }, { items: [{ id: 'i4', typeId: 4 }], equipment: { main_hand: 'i4' } }); // magic-bolt, cost 15
+  w.addPlayer('u1', { x: 0, y: 0 }, { items: [{ id: 'i4', typeId: 4, socketedStoneTypeId: 40 }], equipment: { main_hand: 'i4' } }); // magic-bolt, cost 15 (via socketed stone -- weapon's own baked-in element/mana_cost is now vestigial)
   const before = w.getPlayer('u1').mana;
   w.attack('u1', 1, 0);
   assert.equal(w.snapshot().projectiles.length, 1);
@@ -98,7 +107,7 @@ test('projectile attack spawns a projectile and deducts mana', () => {
 
 test('projectile attack with insufficient mana is denied, no cooldown consumed', () => {
   const w = armWorld();
-  w.addPlayer('u1', { x: 0, y: 0 }, { items: [{ id: 'i4', typeId: 4 }], equipment: { main_hand: 'i4' } }); // magic-bolt, cost 15
+  w.addPlayer('u1', { x: 0, y: 0 }, { items: [{ id: 'i4', typeId: 4, socketedStoneTypeId: 40 }], equipment: { main_hand: 'i4' } }); // magic-bolt, cost 15 (via socketed stone -- weapon's own baked-in element/mana_cost is now vestigial)
   const p = w.getPlayer('u1');
   p.mana = 5;                                      // below cost 15
   const out = w.attack('u1', 1, 0);
@@ -297,7 +306,7 @@ test('canAttack reports false with insufficient stamina', () => {
 
 test('canAttack reports false with insufficient mana', () => {
   const w = armWorld();
-  w.addPlayer('u1', { x: 0, y: 0 }, { items: [{ id: 'i4', typeId: 4 }], equipment: { main_hand: 'i4' } }); // magic-bolt, cost 15
+  w.addPlayer('u1', { x: 0, y: 0 }, { items: [{ id: 'i4', typeId: 4, socketedStoneTypeId: 40 }], equipment: { main_hand: 'i4' } }); // magic-bolt, cost 15 (via socketed stone -- weapon's own baked-in element/mana_cost is now vestigial)
   w.getPlayer('u1').mana = 5;
   const r = w.canAttack('u1');
   assert.equal(r.ok, false);
@@ -332,20 +341,28 @@ test('canAttack reports false for an unknown player', () => {
 
 const { BURN, CHILL, BURN_DURATION_MS } = require('../src/authority/effects.js');
 
-// Elemental melee weapons, added to the shared catalog above.
+// Elemental melee weapons, added to the shared catalog above. Their own
+// element/mana_cost columns are vestigial post-Task-5 (magic-stones "replace
+// semantics" -- see the stone_of_magic-bolt comment above); each gets a
+// matching spell stone below so elementalMeleeWorld's swings still resolve
+// through the socket, the only path combat reads magic from now.
 TYPES.set(6, { id: 6, name: 'flame-halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, element: 'fire' });
 TYPES.set(7, { id: 7, name: 'frost-halberd', category: 'weapon', kind: 'melee', damage: 18, cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, element: 'ice' });
+TYPES.set(41, { id: 41, name: 'stone_of_flame-halberd', category: 'stone', element: 'fire', mana_cost: 0, damage: 18, cooldown: 0.9 });
+TYPES.set(42, { id: 42, name: 'stone_of_frost-halberd', category: 'stone', element: 'ice', mana_cost: 0, damage: 18, cooldown: 0.9 });
+const ELEMENTAL_STONE_BY_WEAPON = { 6: 41, 7: 42 };
 
 function elementalMeleeWorld(typeId) {
   const w = armWorld();
-  w.addPlayer('u1', { x: 100, y: 100 }, { items: [{ id: 'e1', typeId }], equipment: { main_hand: 'e1' } });
+  const socketedStoneTypeId = ELEMENTAL_STONE_BY_WEAPON[typeId];
+  w.addPlayer('u1', { x: 100, y: 100 }, { items: [{ id: 'e1', typeId, socketedStoneTypeId }], equipment: { main_hand: 'e1' } });
   w.addPlayer('u2', { x: 150, y: 100 }); // center 182,132 — east, inside reach 190
   w.creatures.addCreatures([{ id: 'c1', type: 'wolf', x: 150, y: 108, hp: 500, facing: 'S', color: '#f00' }]);
   return w;
 }
 
 test('a melee arc applies the weapon element to the creatures AND the players it hits', () => {
-  const w = elementalMeleeWorld(6); // fire
+  const w = elementalMeleeWorld(6); // fire (via socketed stone_of_flame-halberd)
   w.attack('u1', 1, 0);
   const u2 = w.getPlayer('u2');
   const c1 = w.creatures.creatures.get('c1');
@@ -356,7 +373,7 @@ test('a melee arc applies the weapon element to the creatures AND the players it
 });
 
 test('the melee rider follows the weapon element, not a hardcoded one', () => {
-  const w = elementalMeleeWorld(7); // ice
+  const w = elementalMeleeWorld(7); // ice (via socketed stone_of_frost-halberd)
   w.attack('u1', 1, 0);
   assert.equal(w.getPlayer('u2').effects.has(CHILL), true);
   assert.equal(w.getPlayer('u2').effects.size, 1);
