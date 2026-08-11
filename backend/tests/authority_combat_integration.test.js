@@ -4,6 +4,7 @@ const http = require('node:http');
 const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const { attachAuthority } = require('../src/authority/server.js');
+const { STONE_XP_PER_HIT, LEVEL_XP_THRESHOLD } = require('../src/authority/stoneXp.js');
 
 const SECRET = 'test-secret';
 
@@ -334,5 +335,139 @@ test('a creature killed BY A PROJECTILE routes through the shared kill funnel (D
   assert.strictEqual(pool.rawDeletes.length, 0, 'no non-funnel DELETE was issued');
   assert.ok(pool.dropQueries.includes(42), 'a drop roll followed: creature_drops was consulted for the killed entity type');
   assert.ok(pool.itemInserts.length > 0, 'the rolled drop was actually spawned as a world_items row');
+  ws.close(); handle.close(); server.close();
+});
+
+// --- SOMET-245 Task 7 review fix ---------------------------------------
+//
+// A WS-level end-to-end proof that server.js's glue actually fires an
+// UPDATE stone_instances call for a REAL socketed spell stone on a REAL
+// landed hit -- not just that world.js/items.js/projectiles.js each
+// individually compute the right value in isolation. Mirrors
+// fakePoolWithBow's own end-to-end proof for onCreatureDeath ->
+// player_progression just above, for the identical reason stated in that
+// function's header comment: a field-name mismatch, a dropped `if`, or a
+// promise that silently never fires in the glue (server.js:1136/1183/1743's
+// `if (stoneHit) onStoneHit(...)` / `for (const h of stoneHits) ...`, and
+// onStoneHit itself) is invisible to a pure unit test on
+// awardStoneXp/activeWeaponType/attack() alone.
+//
+// Reuses fakePool()'s wolf/dagger world almost verbatim (same non-RETURNING
+// DELETE mock shape, so commitCreatureDeath's `rowCount !== 1` guard bails
+// before player_progression is ever touched -- this test is about stone XP,
+// not player XP), adding only: a spell-stone item_types row, the
+// weapon+stone player_items rows, main_hand equipment, and the
+// stone_instances hydration join loadInventory issues at join time (Task 5)
+// so the dagger is ALREADY socketed by the time this player attacks --
+// the same "already socketed at join" case
+// items_socket_cache.test.js/authority_items_inventory.test.js cover at the
+// unit level, exercised here through the real join handler instead.
+function fakePoolWithSocketedSpellStone() {
+  const deletes = [];
+  const stoneUpdates = []; // every UPDATE stone_instances SET xp = xp + ... call, {sql, params}
+  return withConnect({
+    deletes,
+    stoneUpdates,
+    query: async (sql, params) => {
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+      if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
+      if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
+      if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+      if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
+      if (/FROM entity_types e[\s\S]*WHERE e\.is_creature/i.test(sql)) return { rows: [{
+        name: 'Wolf', color: '#c00', hp: 5, attack_element: 'physical',
+        behavior_name: 'Line', attack_kind: 'melee', attack_range: 60, attack_cooldown: 1,
+        projectile_speed: 0, projectile_radius: 0, aggro_radius: 444, leash_radius: 777,
+        chase_style: 'skirmish', preferred_range: 111, move_speed_mult: 1.3, damage_override: 9,
+      }] };
+      // Dagger (weapon) + stone_of_dagger (a fire SPELL stone -- element
+      // set, so activeWeaponType's merge branch actually fires). Same
+      // omnidirectional arc as fakePool()'s own dagger, so this test stays
+      // independent of the player's facing at attack time.
+      if (/FROM item_types/i.test(sql)) {
+        return { rows: [
+          { id: 1, name: 'dagger', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'melee',
+            damage: 10, cooldown: 0.3, reach: 90, arc_width: Math.PI * 2,
+            range: null, projectile_speed: null, projectile_radius: null, pierce: null, mana_cost: 0, element: null,
+            defense: null, resistances: null },
+          { id: 2, name: 'stone_of_dagger', category: 'stone', slot: null, two_handed: false, kind: null,
+            damage: 10, cooldown: 0.3, reach: null, arc_width: null,
+            range: null, projectile_speed: null, projectile_radius: null, pierce: null, mana_cost: 0, element: 'fire',
+            defense: null, resistances: null },
+        ] };
+      }
+      // This character owns both the dagger and the stone; the dagger is
+      // ALREADY socketed with the stone (see the stone_instances hydration
+      // route below), matching what a real player would have after Task
+      // 4/5's live socket flow, persisted across a reconnect.
+      if (/FROM player_items/i.test(sql)) return { rows: [
+        { id: 'weapon-1', item_type_id: 1, quantity: 1 },
+        { id: 'stone-1', item_type_id: 2, quantity: 1 },
+      ] };
+      if (/FROM player_equipment/i.test(sql)) return { rows: [{ slot: 'main_hand', item_id: 'weapon-1' }] };
+      // loadInventory's join-time hydration query (items.js) -- this exact
+      // regex is what makes activeWeaponType see the dagger as socketed
+      // WITHOUT a live 'socket' message anywhere in this test.
+      if (/SELECT si\.socketed_into_id AS host_id/i.test(sql)) {
+        return { rows: [{ host_id: 'weapon-1', stone_item_id: 'stone-1', stone_type_id: 2 }] };
+      }
+      if (/INSERT INTO player_items/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/INSERT INTO player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/DELETE FROM player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 };
+      if (/FROM world_players WHERE/i.test(sql)) return { rows: [] }; // spawn = center 400,400
+      // DELETE check must come before the generic bbox-SELECT check below,
+      // same non-RETURNING shape as fakePool()'s own DELETE mock -- see this
+      // function's header comment for why that keeps player_progression out
+      // of scope for this test.
+      if (/DELETE FROM world_creatures/i.test(sql)) { deletes.push(params[0]); return { rows: [] }; }
+      if (/FROM world_creatures/i.test(sql)) {
+        if (params[1] === 0) return { rows: [{ id: 'wolf1', type: 'Wolf', x: 410, y: 400, hp: 5, facing: 'S', color: '#c00' }] };
+        return { rows: [] };
+      }
+      if (/UPDATE world_creatures/i.test(sql)) return { rows: [] };
+      if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
+      // stoneXp.js's own two queries -- the whole point of this test.
+      if (/SELECT level FROM stone_instances/i.test(sql)) return { rows: [{ level: 1 }], rowCount: 1 };
+      if (/UPDATE stone_instances SET xp = xp \+ \$1/i.test(sql)) {
+        stoneUpdates.push({ sql, params });
+        return { rows: [{ xp: params[0], level: 1 }], rowCount: 1 };
+      }
+      return { rows: [] };
+    },
+  });
+}
+
+test('a melee hit landed with a socketed spell stone awards stone XP end-to-end (server.js wiring: attack -> onStoneHit -> UPDATE stone_instances)', async () => {
+  const pool = fakePoolWithSocketedSpellStone();
+  const { url, handle, server } = await bootWith(pool);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+  let loaded = false;
+  for (let i = 0; i < 20 && !loaded; i++) {
+    const m = await nextMsg(ws, 'creatures');
+    if (m.creatures.some((c) => c.id === 'wolf1')) loaded = true;
+  }
+  assert.ok(loaded, 'wolf loaded before attack');
+
+  ws.send(JSON.stringify({ type: 'attack' }));
+
+  // onStoneHit is deliberately fire-and-forget (server.js never awaits it --
+  // it's on the hot path), so there is no reply frame to wait on. Poll the
+  // fake pool's own call log instead, the same technique this file already
+  // uses above to wait for the wolf's removal from the creature broadcast,
+  // just against a different observable.
+  let awarded = false;
+  for (let i = 0; i < 40 && !awarded; i++) {
+    if (pool.stoneUpdates.length > 0) { awarded = true; break; }
+    await new Promise((r) => { setTimeout(r, 20); });
+  }
+  assert.ok(awarded, 'server.js must fire an UPDATE stone_instances call after a landed spell-stone hit');
+  assert.equal(pool.stoneUpdates.length, 1, 'exactly one landed swing must award exactly one stone-XP call');
+  assert.deepEqual(pool.stoneUpdates[0].params, [STONE_XP_PER_HIT, LEVEL_XP_THRESHOLD, 'stone-1'],
+    'must award STONE_XP_PER_HIT to stone-1 SPECIFICALLY -- the stone\'s own instance id, not the weapon\'s (weapon-1) or the stone\'s catalog type id (2)');
+
   ws.close(); handle.close(); server.close();
 });
