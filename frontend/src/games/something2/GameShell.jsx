@@ -477,6 +477,13 @@ export default function GameShell() {
           // localStorage, so there is one source of truth for which character
           // is active and it cannot disagree with the one the canvas is using.
           activeCharacterId,
+          // The RESOLVED character too, not just the id. GameView needs to know
+          // whether entering a world is possible at all, and that is exactly
+          // the question enterWorld answers with `if (!activeCharacter)`.
+          // Deriving it again from the id in the consumer would be a second
+          // copy of resolveActiveCharacter's rule, free to disagree with this
+          // one.
+          activeCharacter,
           selectedWorldId, setSelectedWorldId,
           enterWorld, resume, exitToMenu, changeCharacter, toggleFullscreen,
           openHelp: () => setHelpOpen(true),

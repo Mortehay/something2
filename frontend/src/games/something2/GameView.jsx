@@ -195,6 +195,10 @@ export default function GameView() {
     gameRef, isPlaying, isPaused, isFullscreen,
     selectedWorldId, setSelectedWorldId,
     enterWorld, resume, exitToMenu, changeCharacter, toggleFullscreen, openHelp,
+    // The RESOLVED character, not the stored id: a stored id whose character
+    // was deleted elsewhere resolves to null, and that is precisely the case
+    // where entering a world must not be offered.
+    activeCharacter,
   } = useOutletContext();
 
   const { isAdmin } = useAuth();
@@ -272,7 +276,22 @@ export default function GameView() {
           Change Character
         </ChangeCharacterButton>
       )}
-      {!isPlaying && (
+      {/* SOMET-262: `isAdmin`, not just `!isPlaying`. The whole picker is an
+          admin surface -- this item's own description says admins go through
+          the character gate "then their existing world picker". Previously only
+          the trash icon and the create form inside it were gated (SOMET-226,
+          which framed this as destructive-controls-only), so a player-role
+          account still had the full world list in its DOM: all 86 worlds with
+          names, seeds and chunk sizes, including every dungeon interior, plus
+          an enabled Enter World button.
+
+          CharacterSelect's overlay happens to paint over this, so a sighted
+          mouse user never saw it -- but it was in the accessibility tree and
+          reachable by keyboard, and it directly contradicts SOMET-263, which
+          goes to the trouble of hiding unvisited world NAMES behind anonymous
+          "?" stubs on the World Map. Relying on one component covering another
+          is not a gate. */}
+      {!isPlaying && isAdmin && (
         <UIOverlay>
             <Panel>
               <h2 style={{ color: 'var(--s2-text-strong)', margin: '0 0 15px 0', fontSize: '20px' }}>Worlds</h2>
@@ -342,13 +361,27 @@ export default function GameView() {
                 </div>
               )}
 
+              {/* SOMET-262: also disabled without an ACTIVE CHARACTER, and it
+                  says why. GameShell's enterWorld opens with
+                  `if (!activeCharacter) return false;` -- a silent refusal --
+                  and this picker is shown in exactly the state where that is
+                  true (no active character is also what puts CharacterSelect
+                  on screen). So the button was dead on arrival for admins too:
+                  clicking it did nothing, printed nothing, and looked
+                  identical to a click that worked. Better to refuse up front
+                  with a reason than to toast after the fact. */}
               <Button
                 onClick={() => enterWorld()}
-                disabled={!selectedWorldId}
+                disabled={!selectedWorldId || !activeCharacter}
                 style={{ width: '100%', marginTop: '10px', background: 'var(--s2-success-alt)' }}
               >
                 Enter World (chunked)
               </Button>
+              {!activeCharacter && (
+                <p style={{ color: 'var(--s2-text-dim)', fontSize: '12px', margin: '8px 0 0 0' }}>
+                  Choose a character first — a world is entered as a character.
+                </p>
+              )}
             </Panel>
         </UIOverlay>
       )}
@@ -386,7 +419,14 @@ export default function GameView() {
           color: 'rgba(255,255,255,0.35)', // s2-theme-exempt(rgba(255,255,255,0.35)): text over the always-dark canvas viewport
           fontSize: '15px'
         }}>
-          Select a world to preview it, then Enter World.
+          {/* Role-aware: a player no longer has a picker to select from, so
+              the admin instruction would be describing a control that is not
+              there. Mostly read by screen readers here -- CharacterSelect
+              paints over this area -- which is the same reason it should not
+              be lying. */}
+          {isAdmin
+            ? 'Select a world to preview it, then Enter World.'
+            : 'Choose a character to enter the world.'}
         </div>
       )}
     </>
