@@ -15,9 +15,15 @@ const { setEntryWorld } = require('../../src/services/entryWorld.js');
 //   target no longer existed. Result: ZERO entry worlds, permanently, and
 //   auto-join silently dead for every player with no last world.
 //
-// That is the most plausible account of SOMET-265, and it matches the
-// intermittency: it needs two spec-applying files to interleave, which only
-// became possible when the chests work added a second one.
+// That was originally written up as the account of SOMET-265. It is a real
+// hazard and the fix below stands, but it is NOT what was actually firing.
+// The real cause is deterministic: seed_map_db.test.js's "every shipped spec
+// applies cleanly" was the one applyMapSpec call not wrapped in this helper,
+// and hub-vale.map.json throws partway through (SOMET-273), so applyMapSpec's
+// global is_entry CLEAR landed and its SET never did. Every full suite run
+// against a real database ended with zero entry worlds. Fixed 2026-08-11 by
+// wrapping that call too -- which is the argument for this helper being used
+// at EVERY apply site, not just the ones that looked risky.
 //
 // The restore goes through services/entryWorld.js, whose UPDATE is guarded by
 // an EXISTS on the target. A vanished target is now a NO-OP rather than a
