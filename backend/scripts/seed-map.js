@@ -31,6 +31,7 @@ const { assertNavigable } = require('../src/services/navigability.js');
 const { buildWorldGenConfig } = require('../src/services/worldGenConfig.js');
 const { loadTileTypes } = require('../src/services/tileTypes.js');
 const { loadBiomes } = require('../src/services/biomes.js');
+const { setEntryWorld } = require('../src/services/entryWorld.js');
 
 // Pixels per grid cell for the World Map tab's canvas coordinates. Deriving
 // graph_x/graph_y from the same grid the links were validated against is what
@@ -309,9 +310,12 @@ async function applyMapSpec(pool, spec) {
     // so doing this mid-apply would fight itself as later worlds are written.
     const entry = spec.worlds.find((w) => w.is_entry);
     if (entry) {
-      await client.query('UPDATE worlds SET is_entry = false WHERE is_entry = true AND id <> $1',
-        [idByKey.get(entry.key)]);
-      await client.query('UPDATE worlds SET is_entry = true WHERE id = $1', [idByKey.get(entry.key)]);
+      // One atomic statement via the shared writer (services/entryWorld.js).
+      // This site was already safe -- it runs inside the apply transaction, so
+      // its old clear-then-set pair could not be observed half-done -- but it
+      // is the third copy of an idiom whose other two copies were both wrong,
+      // and a third copy is how the next one goes wrong too.
+      await setEntryWorld(client, idByKey.get(entry.key));
     }
 
     await client.query('COMMIT');

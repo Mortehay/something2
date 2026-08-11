@@ -169,18 +169,45 @@ test('PUT /api/worlds/:id ignores entry_spawn bounds when the world is unbounded
   assert.equal(res.status, 200);
 });
 
-test('PUT /api/worlds/:id with is_entry clears the previous entry first', async () => {
+// Renamed from "clears the previous entry FIRST", which is precisely what it
+// must no longer do. Clearing first opened a window with zero entry worlds, and
+// an id that did not exist cleared every entry world and then updated nothing
+// at all -- a silent, guaranteed loss, no error required (SOMET-265). The
+// single-entry rule is now enforced after the main update, in one atomic
+// statement (services/entryWorld.js).
+test('PUT /api/worlds/:id makes the world the sole entry, without a zero window', async () => {
   const pool = mockPool([
     [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],
-    [/UPDATE worlds SET is_entry = false/i, () => ({ rows: [], rowCount: 1 })],
+    [/UPDATE worlds SET is_entry = \(id = \$1\)/i, () => ({ rows: [], rowCount: 1 })],
     [/UPDATE worlds SET/i, (p) => ({ rows: [{ id: 'w1', name: p[0], is_entry: true }] })],
   ]);
   __setPool(pool);
   const res = await request(app).put('/api/worlds/w1').set(...AUTH)
     .send({ name: 'Entry', is_entry: true, entry_spawn: { x: 1200, y: 1200 } });
   assert.equal(res.status, 200);
-  const clearedFirst = pool.calls.some(c => /UPDATE worlds SET is_entry = false/i.test(c.sql));
-  assert.ok(clearedFirst, 'previous entry cleared');
+
+  const sqls = pool.calls.map((c) => c.sql);
+  const atomic = sqls.findIndex((s) => /UPDATE worlds SET is_entry = \(id = \$1\)/i.test(s));
+  const main = sqls.findIndex((s) => /UPDATE worlds SET name/i.test(s));
+  assert.ok(atomic >= 0, 'the single-entry rule must still be enforced');
+  assert.ok(main >= 0 && atomic > main,
+    'it must run AFTER the main update -- running first is what could leave zero');
+  assert.ok(!sqls.some((s) => /UPDATE worlds SET is_entry = false/i.test(s)),
+    'the old clear-everything statement must be gone entirely');
+});
+
+test('PUT /api/worlds/:id with is_entry false does not touch other worlds', async () => {
+  // The converse, so the rule above cannot be satisfied by always running.
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],
+    [/UPDATE worlds SET/i, (p) => ({ rows: [{ id: 'w1', name: p[0], is_entry: false }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).put('/api/worlds/w1').set(...AUTH)
+    .send({ name: 'Plain', is_entry: false });
+  assert.equal(res.status, 200);
+  assert.ok(!pool.calls.some((c) => /is_entry = \(id = \$1\)/i.test(c.sql)),
+    'a non-entry update must not rewrite whichever world IS the entry');
 });
 
 test('PUT /api/worlds/:id deletes chunks + clears cache when bounds change', async () => {

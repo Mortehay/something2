@@ -101,6 +101,7 @@ const progressionRoutes = require('./api/progressionRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const { ownedCharacter } = require('./services/characters.js');
 const { listVisited } = require('./services/visitedWorlds.js');
+const { setEntryWorld } = require('./services/entryWorld.js');
 // Single admin guard applied to every mutating admin route below.
 const adminGuard = requireAdmin(guardPool);
 // Authenticated-but-not-admin guard, for the player-facing routes declared
@@ -2088,10 +2089,14 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
       }
     }
 
-    // Enforce a single entry world.
-    if (entry) {
-      await pool.query('UPDATE worlds SET is_entry = false WHERE is_entry = true AND id <> $1', [id]);
-    }
+    // Enforcing "a single entry world" USED TO HAPPEN HERE, as a bare
+    // `UPDATE ... SET is_entry = false WHERE id <> $1` -- before the ~30 lines
+    // of chunk deletes and guard-spawn rewrites below and before the world's
+    // own UPDATE. Anything throwing in between left the game with ZERO entry
+    // worlds, and an `id` that did not exist cleared every entry world and then
+    // updated nothing at all: a guaranteed, silent loss. It has now moved BELOW
+    // the main UPDATE and become one atomic statement (services/entryWorld.js),
+    // so there is no window in which nothing is the entry.
     // A bounds change reshapes the wall ring, and a biome-set/biome_cell change
     // reshapes the terrain those bounds contain: either invalidates persisted +
     // preview terrain the same way.
@@ -2134,6 +2139,12 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
       ],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'world not found' });
+    // Single entry world, enforced AFTER the world itself is known to exist and
+    // to have updated. The UPDATE above has already set is_entry on this world;
+    // this clears it from any other, atomically. Order matters: doing it first
+    // (as this route used to) can leave zero, doing it last can at worst leave
+    // two for the duration of one statement.
+    if (entry) await setEntryWorld(pool, id);
     const liveWarning = (boundsChanged || biomesChanged) ? evictOrWarn(id) : undefined;
     res.json(liveWarning ? { ...result.rows[0], liveWarning } : result.rows[0]);
   } catch (err) {

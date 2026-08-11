@@ -321,11 +321,14 @@ test('PUT /api/worlds/:id omitting biomes leaves the stored set alone', async ()
   const pool = mockPool([
     [/SELECT id, width, height, biomes, biome_cell FROM worlds WHERE id/i,
       () => ({ rows: [{ id: 'w1', width: 30, height: 30, biomes: ['Meadow'], biome_cell: 32 }] })],
-    // is_entry: true issues an extra `UPDATE worlds SET is_entry = false ...`
-    // before the main update, which also matches /UPDATE worlds SET/i -- give
-    // it its own earlier handler so the main-update handler below only sees
-    // the actual UPDATE we care about.
-    [/UPDATE worlds SET is_entry = false/i, () => ({ rows: [] })],
+    // is_entry: true issues an extra single-entry-world UPDATE, which also
+    // matches /UPDATE worlds SET/i -- give it its own earlier handler so the
+    // main-update handler below only sees the actual UPDATE we care about.
+    // It now runs AFTER the main update and is one atomic statement
+    // (services/entryWorld.js); it used to be a bare
+    // `UPDATE worlds SET is_entry = false` BEFORE it, which could leave the
+    // game with zero entry worlds. Unanswered, it throws and the route 500s.
+    [/UPDATE worlds SET is_entry = \(id = \$1\)/i, () => ({ rows: [], rowCount: 1 })],
     // biomes is $8 in the UPDATE below -> params[7]; biome_cell is $9 -> params[8].
     [/UPDATE worlds SET name/i, (params) => {
       assert.equal(params[7], JSON.stringify(['Meadow']), 'an omitted biomes field must preserve the stored set');

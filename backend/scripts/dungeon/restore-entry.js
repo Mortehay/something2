@@ -9,14 +9,20 @@
 // handling" section.
 //
 // Usage: node scripts/dungeon/restore-entry.js "<world name>"
+const { setEntryWorldByName } = require('../../src/services/entryWorld.js');
 // The caller must capture the previous entry's name BEFORE running
 // `make seed-map SPEC=p5-descent` -- seed-map clears it, so it cannot be
 // read back afterward.
 async function restoreEntry(pool, worldName) {
-  await pool.query('UPDATE worlds SET is_entry = false WHERE is_entry = true');
-  const result = await pool.query('UPDATE worlds SET is_entry = true WHERE name = $1', [worldName]);
-  if (result.rowCount === 0) {
-    throw new Error(`restore-entry: world "${worldName}" not found -- is_entry was cleared but not restored`);
+  // Was a clear-then-set pair whose own failure message admitted the hazard:
+  // "is_entry was cleared but not restored". A typo in the world name left the
+  // game with no entry world at all -- from a script whose entire job is to put
+  // one back. setEntryWorldByName resolves first and updates atomically, so an
+  // unknown name now changes nothing and this throws with the previous entry
+  // world still in place.
+  const changed = await setEntryWorldByName(pool, worldName);
+  if (changed === 0) {
+    throw new Error(`restore-entry: world "${worldName}" not found -- is_entry was left untouched`);
   }
 }
 
