@@ -144,6 +144,30 @@ const Button = styled.button`
   }
 `;
 
+// Centred over the canvas area rather than in the top-right UIOverlay stack:
+// this is the only thing on screen when it shows, and a player who has just
+// been dropped out of their world should not have to hunt for the way back.
+const RecoveryPanel = styled.div`
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 380px;
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid var(--s2-border);
+  background: var(--s2-panel-veil-solid);
+  color: var(--s2-text);
+  box-shadow: 0 8px 32px var(--s2-shadow);
+  pointer-events: auto;
+  font-size: 14px;
+  line-height: 1.5;
+`;
+
 const PauseOverlay = styled.div`
   position: absolute;
   top: 0;
@@ -194,7 +218,7 @@ export default function GameView() {
   const {
     gameRef, isPlaying, isPaused, isFullscreen,
     selectedWorldId, setSelectedWorldId,
-    enterWorld, resume, exitToMenu, changeCharacter, toggleFullscreen, openHelp,
+    enterWorld, retryJoin, resume, exitToMenu, changeCharacter, toggleFullscreen, openHelp,
     // The RESOLVED character, not the stored id: a stored id whose character
     // was deleted elsewhere resolves to null, and that is precisely the case
     // where entering a world must not be offered.
@@ -402,6 +426,43 @@ export default function GameView() {
         </PauseOverlay>
       )}
 
+      {/* SOMET-262: a player's way OUT of a failed join.
+          The auto-join effect sets autoJoinedRef BEFORE awaiting enterWorld, so
+          a join that fails never retries, and enterWorld's own comment leaned on
+          the world picker being "a safe fallback". For an admin it still is.
+          For a player the picker is now (correctly) gone, and without this they
+          are stranded: active character set, isPlaying false, a static
+          WorldPreview on screen and not one control to escape it.
+          Reproduced live -- a second tab on the same account triggered
+          "kicked: signed in elsewhere", isPlaying went false, and the session
+          was a dead end.
+          Both routes out are offered, because the right one depends on why the
+          join failed: retry the same world (transient -- a kick, a dropped
+          socket), or go back and pick a character (the character itself is the
+          problem). */}
+      {!isPlaying && !isAdmin && activeCharacter && (
+        <RecoveryPanel role="alert">
+          <strong>You are not in a world.</strong>
+          <span>
+            The connection to your last world did not complete. This usually
+            means you signed in somewhere else, or the connection dropped.
+          </span>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {/* retryJoin, NOT enterWorld(): enterWorld with no argument falls
+                back to selectedWorldId, which nothing has set on a fresh page
+                load -- the exact situation this panel exists for. The first
+                version of this button was therefore permanently disabled
+                precisely when it was needed. retryJoin re-runs the auto-join
+                rule and clears the one-shot guard. */}
+            <Button onClick={retryJoin}>
+              Try again
+            </Button>
+            <Button onClick={changeCharacter} style={{ background: 'var(--s2-btn-grey)' }}>
+              Choose a character
+            </Button>
+          </div>
+        </RecoveryPanel>
+      )}
       {!isPlaying && selectedWorldId && (
         <WorldPreview worldId={selectedWorldId} tileColors={tileColors} />
       )}

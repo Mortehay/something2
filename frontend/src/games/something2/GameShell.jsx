@@ -399,24 +399,43 @@ export default function GameShell() {
   // also sets it -- a `const` referenced from a closure defined earlier works
   // only because the closure runs after render, which is a footgun nobody
   // should have to re-derive.
+  // One place builds autoJoinTarget's arguments, because there are now TWO
+  // callers -- the effect below and the player's manual retry. A second
+  // hand-written argument list is exactly how `hasCharacter` came to be
+  // omitted at this call site and silently disabled auto-join for everyone.
+  const joinTargetArgs = () => ({
+    isAdmin, isPlaying, alreadyJoined: autoJoinedRef.current,
+    hasGame: !!gameRef.current, worlds, mapTiles, mapConfig,
+    // Was implicit in `hasGame` until SOMET-271; now passed explicitly,
+    // because the Game instance is no longer route-gated. See autoJoin.js.
+    isGameRoute,
+    // SOMET-260 added `hasCharacter` to autoJoinTarget and this call site did
+    // not supply it, so it arrived `undefined` and the guard returned null
+    // every time -- auto-join was dead for EVERY player, not just for one
+    // without a character. autoJoin.test.js passed the flag explicitly and
+    // stayed green throughout. Caught in the browser.
+    hasCharacter: !!activeCharacter,
+    // Where this character logged out. Read off activeCharacter, which is
+    // also the effect's dependency, so a character switch re-evaluates the
+    // target rather than resuming the previous character's world.
+    lastWorldId: activeCharacter ? activeCharacter.lastWorldId : null,
+  });
+
+  // The player's way back after a failed or kicked join. Forces the two
+  // "already handled" guards off: `alreadyJoined` is set BEFORE the await in
+  // the effect, so after a failure it is stuck true and the effect will never
+  // try again on its own. Deliberately re-uses autoJoinTarget rather than
+  // retrying `selectedWorldId` -- on a fresh page load nothing has set that,
+  // which is precisely the case where the retry is needed and the first
+  // version of this button sat there disabled.
+  const retryJoin = () => {
+    const targetId = autoJoinTarget({ ...joinTargetArgs(), isPlaying: false, alreadyJoined: false });
+    autoJoinedRef.current = true;
+    return enterWorld(targetId == null ? selectedWorldId : targetId);
+  };
+
   useEffect(() => {
-    const targetId = autoJoinTarget({
-      isAdmin, isPlaying, alreadyJoined: autoJoinedRef.current,
-      hasGame: !!gameRef.current, worlds, mapTiles, mapConfig,
-      // Was implicit in `hasGame` until SOMET-271; now passed explicitly,
-      // because the Game instance is no longer route-gated. See autoJoin.js.
-      isGameRoute,
-      // SOMET-260 added `hasCharacter` to autoJoinTarget and this call site did
-      // not supply it, so it arrived `undefined` and the guard returned null
-      // every time -- auto-join was dead for EVERY player, not just for one
-      // without a character. autoJoin.test.js passed the flag explicitly and
-      // stayed green throughout. Caught in the browser.
-      hasCharacter: !!activeCharacter,
-      // Where this character logged out. Read off activeCharacter, which is
-      // also this effect's dependency, so a character switch re-evaluates the
-      // target rather than resuming the previous character's world.
-      lastWorldId: activeCharacter ? activeCharacter.lastWorldId : null,
-    });
+    const targetId = autoJoinTarget(joinTargetArgs());
     if (targetId == null) return;
     autoJoinedRef.current = true;
     enterWorld(targetId);
@@ -485,7 +504,7 @@ export default function GameShell() {
           // one.
           activeCharacter,
           selectedWorldId, setSelectedWorldId,
-          enterWorld, resume, exitToMenu, changeCharacter, toggleFullscreen,
+          enterWorld, retryJoin, resume, exitToMenu, changeCharacter, toggleFullscreen,
           openHelp: () => setHelpOpen(true),
         }} />
 

@@ -56,6 +56,18 @@ describe('Worlds picker admin gating', () => {
     expect(source.match(/worlds\?\.map\(/g) || []).toHaveLength(1);
   });
 
+  it('leaves a player a way out when a join fails', () => {
+    // Removing the picker removed the escape hatch enterWorld's own comment
+    // called "a safe fallback": the auto-join effect sets autoJoinedRef BEFORE
+    // awaiting enterWorld, so a failed join never retries, and a player was
+    // left with an active character, isPlaying false, and no control at all.
+    // Reproduced live via "kicked: signed in elsewhere".
+    expect(source).toMatch(/\{!isPlaying\s*&&\s*!isAdmin\s*&&\s*activeCharacter\s*&&\s*\(/);
+    // Both routes out, not one: retry the same world, or go back to the picker.
+    expect(source).toMatch(/<RecoveryPanel/);
+    expect(source).toMatch(/onClick=\{changeCharacter\}/);
+  });
+
   it('refuses to offer Enter World without an active character', () => {
     // GameShell's enterWorld opens `if (!activeCharacter) return false;` -- a
     // SILENT refusal. The picker appears in exactly that state, so without

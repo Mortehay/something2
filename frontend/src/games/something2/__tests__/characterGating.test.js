@@ -103,7 +103,23 @@ describe('auto-join waits for a character', () => {
     // Window widened alongside the lastWorldId guard below: the call site keeps
     // growing rationale comments between the opening brace and this argument,
     // and a window tight enough to feel "precise" just fails on prose.
-    expect(gameShellSource).toMatch(/autoJoinTarget\(\{[\s\S]{0,1500}hasCharacter:/);
+    //
+    // SOMET-262: the arguments moved into a `joinTargetArgs()` builder, because
+    // a SECOND caller appeared (the player's manual retry) and two hand-written
+    // argument lists is exactly how this field got dropped the first time. The
+    // guard follows the arguments -- it is not relaxed. Both assertions still
+    // hold: the field must be supplied, and every autoJoinTarget call must go
+    // through the builder rather than assembling its own list.
+    expect(gameShellSource).toMatch(/joinTargetArgs\s*=\s*\(\)\s*=>\s*\(\{[\s\S]{0,1500}hasCharacter:/);
+    // EVERY call must go through the builder -- including the retry, which
+    // spreads it to override two flags. A call that assembled its own literal
+    // would be free to omit a field again, which is the whole failure this
+    // guard exists for.
+    const calls = gameShellSource.match(/autoJoinTarget\([^)]*/g) || [];
+    expect(calls.length).toBeGreaterThan(0);
+    // `joinTargetArgs\(` without the closing paren on purpose: the slice above
+    // stops at the FIRST ')', which is the builder's own.
+    for (const call of calls) expect(call).toMatch(/joinTargetArgs\(/);
   });
 
   it('GameShell SUPPLIES lastWorldId to autoJoinTarget', () => {
@@ -115,7 +131,9 @@ describe('auto-join waits for a character', () => {
     // Generous window: the call site carries long rationale comments between
     // the opening brace and this argument, and a window tight enough to be
     // "precise" just fails on prose.
-    expect(gameShellSource).toMatch(/autoJoinTarget\(\{[\s\S]{0,1500}lastWorldId:/);
+    // SOMET-262 moved the arguments into `joinTargetArgs()` -- see the note on
+    // the hasCharacter guard above. Same assertion, following the arguments.
+    expect(gameShellSource).toMatch(/joinTargetArgs\s*=\s*\(\)\s*=>\s*\(\{[\s\S]{0,1500}lastWorldId:/);
   });
 
   it('re-runs the auto-join effect when the character changes', () => {
