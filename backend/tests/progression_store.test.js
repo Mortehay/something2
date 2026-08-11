@@ -64,6 +64,40 @@ async function dropUser(pool, userId) {
   if (userId != null) await pool.query('DELETE FROM users WHERE id = $1', [userId]).catch(() => {});
 }
 
+// SOMET-257 moved progression off the account and onto the character, so a
+// throwaway user on its own is no longer a usable fixture:
+// player_progression.character_id is NOT NULL and FK'd to characters, and
+// every function in progressionStore.js takes a CHARACTER id. This file kept
+// passing user ids and failed at the foreign key.
+//
+// `respec` is the one exception and takes BOTH -- the stat reset is
+// per-character but the gold that pays for it is per-account -- so the pair is
+// returned rather than just the character id.
+//
+// dropUser still cleans up everything: characters cascades from users and
+// player_progression cascades from characters, so one DELETE reaches all three.
+async function createTestActor(pool, tag) {
+  const user = await createTestUser(pool, tag);
+  // Cleans up its OWN user on failure. Callers assign via destructuring
+  // (`({ user, character } = await createTestActor(...))`), so a throw here
+  // leaves the caller's `user` undefined and its `finally` block's dropUser a
+  // no-op -- the account would leak into the shared dev database. Missing
+  // 'Warrior' in entity_types is a real, reachable way for that to happen.
+  try {
+    const r = await pool.query(
+      `INSERT INTO characters (user_id, slot, name, entity_type_id)
+       SELECT $1, 1, $2, e.id FROM entity_types e WHERE e.name = 'Warrior'
+       RETURNING id`,
+      [user, `progression-store-char-${user}-${process.pid}`],
+    );
+    assert.equal(r.rows.length, 1, "entity_types has no 'Warrior' -- run seed-catalogs");
+    return { user, character: r.rows[0].id };
+  } catch (err) {
+    await dropUser(pool, user);
+    throw err;
+  }
+}
+
 function skipMsg(what) {
   return `NO DATABASE at ${DB_URL} -- ${what} is UNVERIFIED on this run`;
 }
@@ -72,12 +106,12 @@ test('loadProgression creates a base row on first call and is idempotent', async
   if (!requireTestDb(t, 'this test creates a throwaway user and a player_progression row')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('lazy row creation'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'lazy');
+    ({ user, character } = await createTestActor(pool, 'lazy'));
 
-    const first = await loadProgression(pool, user);
-    const second = await loadProgression(pool, user);
+    const first = await loadProgression(pool, character);
+    const second = await loadProgression(pool, character);
 
     assert.deepEqual(first, second, 'two calls must return an identical row');
     assert.equal(first.level, 1);
@@ -85,7 +119,7 @@ test('loadProgression creates a base row on first call and is idempotent', async
     assert.equal(first.stat_points, 0);
     for (const k of C.STAT_KEYS) assert.equal(first[k], C.BASE_STAT, `${k} must start at the base stat`);
 
-    const count = await pool.query('SELECT count(*)::int AS n FROM player_progression WHERE user_id = $1', [user]);
+    const count = await pool.query('SELECT count(*)::int AS n FROM player_progression WHERE character_id = $1', [character]);
     assert.equal(count.rows[0].n, 1, 'exactly one row must exist after two lazy-create calls');
   } finally {
     await dropUser(pool, user);
@@ -97,13 +131,13 @@ test('awardXp levels up and grants the documented points', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user and awards XP')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('awardXp leveling'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'xp-250');
-    await loadProgression(pool, user); // start from level 1 / 0 xp
+    ({ user, character } = await createTestActor(pool, 'xp-250'));
+    await loadProgression(pool, character); // start from level 1 / 0 xp
 
     // from level 1 / 0 xp, +250 xp -> level 2 (floor 100), not level 3 (floor 300)
-    const r = await awardXp(pool, user, 250, 'kill');
+    const r = await awardXp(pool, character, 250, 'kill');
     assert.equal(r.leveledUp, true);
     assert.equal(r.newLevel, 2);
     assert.equal(r.pointsGained, 3);
@@ -122,13 +156,13 @@ test('awardXp can cross more than one level at once', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user and awards a large XP grant')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('awardXp multi-level crossing'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'xp-600');
-    await loadProgression(pool, user); // start from level 1 / 0 xp
+    ({ user, character } = await createTestActor(pool, 'xp-600'));
+    await loadProgression(pool, character); // start from level 1 / 0 xp
 
     // +600 from scratch -> level 4, 9 points (3 levels x 3)
-    const r = await awardXp(pool, user, 600, 'kill');
+    const r = await awardXp(pool, character, 600, 'kill');
     assert.equal(r.leveledUp, true);
     assert.equal(r.newLevel, 4);
     assert.equal(r.pointsGained, 9);
@@ -143,13 +177,13 @@ test('awardXp rejects an unknown source and writes nothing', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user and calls awardXp with a bogus source')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('unknown-source rejection'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'xp-bogus-source');
-    const before = await loadProgression(pool, user);
-    const r = await awardXp(pool, user, 100, 'nonsense');
+    ({ user, character } = await createTestActor(pool, 'xp-bogus-source'));
+    const before = await loadProgression(pool, character);
+    const r = await awardXp(pool, character, 100, 'nonsense');
     assert.equal(r.awarded, 0);
-    const after = await loadProgression(pool, user);
+    const after = await loadProgression(pool, character);
     assert.equal(after.experience, before.experience);
     assert.equal(after.level, before.level);
     assert.equal(after.stat_points, before.stat_points);
@@ -163,20 +197,20 @@ test('awardXp ignores a non-positive amount', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user and awards zero/negative XP')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('non-positive amount rejection'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'xp-nonpositive');
-    const before = await loadProgression(pool, user);
+    ({ user, character } = await createTestActor(pool, 'xp-nonpositive'));
+    const before = await loadProgression(pool, character);
 
-    const zero = await awardXp(pool, user, 0, 'kill');
+    const zero = await awardXp(pool, character, 0, 'kill');
     assert.equal(zero.awarded, 0);
     assert.equal(zero.leveledUp, false);
 
-    const negative = await awardXp(pool, user, -50, 'kill');
+    const negative = await awardXp(pool, character, -50, 'kill');
     assert.equal(negative.awarded, 0);
     assert.equal(negative.leveledUp, false);
 
-    const after = await loadProgression(pool, user);
+    const after = await loadProgression(pool, character);
     assert.equal(after.experience, before.experience, 'a non-positive amount must write nothing');
   } finally {
     await dropUser(pool, user);
@@ -195,26 +229,37 @@ test('awardXp is callable inside the caller\'s own transaction and rolls back wi
   if (!requireTestDb(t, 'this test creates a throwaway user and runs awardXp inside a caller-managed transaction')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('awardXp transactional callability'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   const client = await pool.connect();
   try {
-    user = await createTestUser(pool, 'xp-in-caller-txn');
+    ({ user, character } = await createTestActor(pool, 'xp-in-caller-txn'));
 
     await client.query('BEGIN');
-    const r = await awardXp(client, user, 300, 'kill');
+    const r = await awardXp(client, character, 300, 'kill');
     assert.equal(r.leveledUp, true, 'sanity: this grant does level the fresh row up');
     // Read back on the SAME client, inside the still-open transaction: the
     // write must be visible here even though nothing has committed yet.
-    const midTxn = await client.query('SELECT experience FROM player_progression WHERE user_id = $1', [user]);
+    const midTxn = await client.query('SELECT experience FROM player_progression WHERE character_id = $1', [character]);
     assert.equal(Number(midTxn.rows[0].experience), 300);
     await client.query('ROLLBACK');
 
     // A fresh connection must see NOTHING: no row at all, because the lazy
     // INSERT that loadProgression issued was also part of the rolled-back
     // transaction.
-    const after = await pool.query('SELECT count(*)::int AS n FROM player_progression WHERE user_id = $1', [user]);
+    const after = await pool.query('SELECT count(*)::int AS n FROM player_progression WHERE character_id = $1', [character]);
     assert.equal(after.rows[0].n, 0, 'the award (and the lazy row it created) must not have survived the rollback');
   } finally {
+    // ROLLBACK before release, and BEFORE dropUser. node-postgres does not
+    // roll back on release(): a client returned mid-transaction goes back
+    // into the pool still inside it. When this test FAILED (it did, from
+    // SOMET-257 until this fix), the throw came out of awardXp with the
+    // transaction open and ABORTED, and the very next pool.query -- dropUser's
+    // DELETE -- could be handed that same poisoned connection, fail with
+    // "current transaction is aborted", and vanish into dropUser's own
+    // `.catch(() => {})`. Sixteen throwaway accounts accumulated in the shared
+    // dev database that way. A ROLLBACK on a transaction that already ended is
+    // a harmless no-op, so this is unconditional.
+    await client.query('ROLLBACK').catch(() => {});
     client.release();
     await dropUser(pool, user);
     await pool.end().catch(() => {});
@@ -251,11 +296,11 @@ test('awardXp serializes concurrent awards for the same user so none of them clo
   if (pool.unreachable) { const m = skipMsg('concurrent-award row lock'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
   const AWARDS = 5;
   const AMOUNT = 10;
-  let user;
+  let user; let character;
   const clients = [];
   try {
-    user = await createTestUser(pool, 'xp-race');
-    await loadProgression(pool, user); // row exists at level 1 / 0 xp before the race starts
+    ({ user, character } = await createTestActor(pool, 'xp-race'));
+    await loadProgression(pool, character); // row exists at level 1 / 0 xp before the race starts
 
     for (let i = 0; i < AWARDS; i++) {
       const c = await pool.connect();
@@ -264,10 +309,10 @@ test('awardXp serializes concurrent awards for the same user so none of them clo
     }
 
     await Promise.all(
-      clients.map((c) => awardXp(c, user, AMOUNT, 'kill').then(() => c.query('COMMIT'))),
+      clients.map((c) => awardXp(c, character, AMOUNT, 'kill').then(() => c.query('COMMIT'))),
     );
 
-    const after = await loadProgression(pool, user);
+    const after = await loadProgression(pool, character);
     // 5 awards of 10 -> 50, a literal expected value, not a recomputation of
     // the sum under test. Staying well below the level-2 floor (100) keeps
     // this test about the lost-update hazard alone, with no level/points
@@ -322,8 +367,8 @@ test('awardXp serializes concurrent awards for the same user so none of them clo
 // 10/10 runs against the UNLOCKED (pre-fix) applyDeath. Not a false negative
 // from bad luck -- investigated with per-query timing logs, and the cause is
 // structural: loadProgression's own lazy row-creation statement,
-// `INSERT INTO player_progression (user_id) VALUES ($1) ON CONFLICT (user_id)
-// DO NOTHING`, is issued FIRST by BOTH awardXp and applyDeath on every call
+// `INSERT INTO player_progression (character_id) VALUES ($1) ON CONFLICT
+// (character_id) DO NOTHING`, is issued FIRST by BOTH awardXp and applyDeath on every call
 // (locked or not), and Postgres makes THAT specific statement block on any
 // concurrent transaction already holding a lock on the conflicting row --
 // the same as a real UPDATE would, even though DO NOTHING never touches a
@@ -372,13 +417,13 @@ test('applyDeath and a concurrent awardXp for the same user serialize instead of
   const pool = raceablePool(pgPool);
   const AMOUNT = 2;
   const COMMIT_DELAY_MS = 40;
-  let user;
+  let user; let character;
   let awardClient;
   try {
-    user = await createTestUser(pgPool, 'death-race');
-    await loadProgression(pgPool, user);
+    ({ user, character } = await createTestActor(pgPool, 'death-race'));
+    await loadProgression(pgPool, character);
     // Level 4 (floor 600), 40 XP into the level.
-    await pgPool.query('UPDATE player_progression SET level = 4, experience = 640 WHERE user_id = $1', [user]);
+    await pgPool.query('UPDATE player_progression SET level = 4, experience = 640 WHERE character_id = $1', [character]);
 
     awardClient = await pgPool.connect();
     await awardClient.query('BEGIN');
@@ -387,20 +432,20 @@ test('applyDeath and a concurrent awardXp for the same user serialize instead of
     // start before either commits -- otherwise they never actually contend
     // (same rationale as the awardXp race above). applyDeath is passed the
     // WRAPPED pool, matching its real call site's contract (server.js's
-    // onPlayerDeath calls applyDeath(pool, userId)): with the fix, it opens
+    // onPlayerDeath calls applyDeath(pool, characterId)): with the fix, it opens
     // and manages its own transaction internally via pool.connect(), exactly
     // like respec (untouched by the wrapper); with the fix reverted (the
     // mutation check), it issues plain unlocked pool.query calls instead,
     // and the wrapper's one intercepted statement is what lets those calls
     // actually contend instead of serializing by accident.
     await Promise.all([
-      awardXp(awardClient, user, AMOUNT, 'kill')
+      awardXp(awardClient, character, AMOUNT, 'kill')
         .then(() => new Promise((r) => setTimeout(r, COMMIT_DELAY_MS)))
         .then(() => awardClient.query('COMMIT')),
-      applyDeath(pool, user, { rng: () => 0.5 }),
+      applyDeath(pool, character, { rng: () => 0.5 }),
     ]);
 
-    const after = await loadProgression(pgPool, user);
+    const after = await loadProgression(pgPool, character);
     assert.equal(after.experience, 621, 'both the award and the penalty must land, in EITHER serialization order');
   } finally {
     if (awardClient) {
@@ -416,11 +461,11 @@ test('allocateStat spends points atomically', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user and races two concurrent allocations')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('atomic allocation'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'allocate-race');
-    await loadProgression(pool, user);
-    await pool.query('UPDATE player_progression SET stat_points = 3 WHERE user_id = $1', [user]);
+    ({ user, character } = await createTestActor(pool, 'allocate-race'));
+    await loadProgression(pool, character);
+    await pool.query('UPDATE player_progression SET stat_points = 3 WHERE character_id = $1', [character]);
 
     // Fire TWO allocations of 2 CONCURRENTLY, via Promise.all against the
     // shared pool (max: 4 above) -- NOT awaited one after the other. `pool`
@@ -431,11 +476,11 @@ test('allocateStat spends points atomically', async (t) => {
     // atomicity at all -- that exact vacuous shape has shipped on this repo
     // before (see authority_items_loadout_db.test.js's own note on this).
     const [a, b] = await Promise.all([
-      allocateStat(pool, user, 'strength', 2),
-      allocateStat(pool, user, 'strength', 2),
+      allocateStat(pool, character, 'strength', 2),
+      allocateStat(pool, character, 'strength', 2),
     ]);
     assert.equal([a.ok, b.ok].filter(Boolean).length, 1, 'exactly one must win');
-    const after = await loadProgression(pool, user);
+    const after = await loadProgression(pool, character);
     assert.equal(after.stat_points, 1);
     assert.equal(after.strength, 7);
   } finally {
@@ -448,13 +493,13 @@ test('allocateStat refuses an unknown stat key', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user and calls allocateStat with a bogus key')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('unknown stat key rejection'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'allocate-badkey');
-    await loadProgression(pool, user);
-    await pool.query('UPDATE player_progression SET stat_points = 5 WHERE user_id = $1', [user]);
+    ({ user, character } = await createTestActor(pool, 'allocate-badkey'));
+    await loadProgression(pool, character);
+    await pool.query('UPDATE player_progression SET stat_points = 5 WHERE character_id = $1', [character]);
 
-    const r = await allocateStat(pool, user, 'luck', 1);
+    const r = await allocateStat(pool, character, 'luck', 1);
     assert.equal(r.ok, false);
     assert.equal(r.reason, 'unknown stat');
 
@@ -462,11 +507,11 @@ test('allocateStat refuses an unknown stat key', async (t) => {
     // the UPDATE's column list. This must be refused by the whitelist
     // exactly like any other unknown key, and MUST NOT reach Postgres as
     // part of the SQL text.
-    const injected = await allocateStat(pool, user, 'strength; DROP TABLE users; --', 1);
+    const injected = await allocateStat(pool, character, 'strength; DROP TABLE users; --', 1);
     assert.equal(injected.ok, false);
     assert.equal(injected.reason, 'unknown stat');
 
-    const after = await loadProgression(pool, user);
+    const after = await loadProgression(pool, character);
     assert.equal(after.stat_points, 5, 'no points may be spent on a rejected key');
     // Prove the table survived, i.e. the injection attempt never ran as SQL.
     const stillThere = await pool.query('SELECT count(*)::int AS n FROM users WHERE id = $1', [user]);
@@ -481,19 +526,19 @@ test('allocateStat refuses a non-positive or non-integer count', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user and calls allocateStat with bad counts')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('invalid count rejection'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'allocate-badcount');
-    await loadProgression(pool, user);
-    await pool.query('UPDATE player_progression SET stat_points = 5 WHERE user_id = $1', [user]);
+    ({ user, character } = await createTestActor(pool, 'allocate-badcount'));
+    await loadProgression(pool, character);
+    await pool.query('UPDATE player_progression SET stat_points = 5 WHERE character_id = $1', [character]);
 
     for (const bad of [0, -1, 1.5, NaN]) {
-      const r = await allocateStat(pool, user, 'strength', bad);
+      const r = await allocateStat(pool, character, 'strength', bad);
       assert.equal(r.ok, false, `count ${bad} must be refused`);
       assert.equal(r.reason, 'invalid count');
     }
 
-    const after = await loadProgression(pool, user);
+    const after = await loadProgression(pool, character);
     assert.equal(after.stat_points, 5, 'no points may be spent on any rejected count');
     assert.equal(after.strength, C.BASE_STAT);
   } finally {
@@ -507,11 +552,15 @@ test('allocateStat refuses a non-positive or non-integer count', async (t) => {
 // and strength 10. level is only ever raised by awardXp, so it's seeded
 // directly here by UPDATE rather than by grinding XP through the API (per
 // the task's ambiguity resolution). Cost is RESPEC_BASE * 4 = 200.
-async function seedRespecCharacter(pool, user, gold) {
-  await loadProgression(pool, user);
+// Takes both ids on purpose: the stats being reset live on the CHARACTER and
+// the gold paying for the reset lives on the ACCOUNT. Seeding both through one
+// id would have silently worked while `respec` still keyed everything off
+// users, and silently stopped meaning anything once it did not.
+async function seedRespecCharacter(pool, user, character, gold) {
+  await loadProgression(pool, character);
   await pool.query(
-    'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE user_id = $1',
-    [user],
+    'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE character_id = $1',
+    [character],
   );
   await pool.query('UPDATE users SET gold = $2 WHERE id = $1', [user, gold]);
 }
@@ -520,12 +569,12 @@ test('respec moves the gold and resets the stats in one transaction', async (t) 
   if (!requireTestDb(t, 'this test creates a throwaway user, seeds a level-4 character and respecs it')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('successful respec'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'respec-ok');
-    await seedRespecCharacter(pool, user, 250);
+    ({ user, character } = await createTestActor(pool, 'respec-ok'));
+    await seedRespecCharacter(pool, user, character, 250);
 
-    const r = await respec(pool, user);
+    const r = await respec(pool, user, character);
     assert.equal(r.ok, true);
     assert.equal(r.cost, 200);
     assert.equal(r.gold, 50);
@@ -545,17 +594,17 @@ test('respec with insufficient gold changes nothing at all', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user, seeds a level-4 character short on gold and attempts a respec')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('failed respec'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'respec-poor');
+    ({ user, character } = await createTestActor(pool, 'respec-poor'));
     // same character, but 199 gold against a cost of 200
-    await seedRespecCharacter(pool, user, 199);
+    await seedRespecCharacter(pool, user, character, 199);
 
-    const r = await respec(pool, user);
+    const r = await respec(pool, user, character);
     assert.equal(r.ok, false);
     assert.equal(r.cost, 200);
 
-    const after = await loadProgression(pool, user);
+    const after = await loadProgression(pool, character);
     assert.equal(after.strength, 10, 'a failed payment must not yield a free respec');
     assert.equal(after.stat_points, 4, 'the points must not be refunded either');
 
@@ -571,20 +620,20 @@ test('applyDeath never de-levels and persists the loss', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user, seeds progress into a level, and applies a death')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('death penalty application'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'death-loss');
-    await loadProgression(pool, user);
+    ({ user, character } = await createTestActor(pool, 'death-loss'));
+    await loadProgression(pool, character);
     // Level 3's floor is 300 and the level is worth 300, so a pinned draw of
     // 0.5 costs 5.25% of 300 = floor(15.75) = 15. Progress is 50, comfortably
     // more than 15, so the never-de-level clamp does not bind here -- the
     // clamped case has its own test in player_stats.test.js.
     await pool.query(
-      'UPDATE player_progression SET level = 3, experience = 350 WHERE user_id = $1',
-      [user],
+      'UPDATE player_progression SET level = 3, experience = 350 WHERE character_id = $1',
+      [character],
     );
 
-    const r = await applyDeath(pool, user, { rng: () => 0.5 });
+    const r = await applyDeath(pool, character, { rng: () => 0.5 });
     assert.equal(r.lost, 15);
     assert.equal(r.progression.experience, 335);
     assert.equal(r.progression.level, 3, 'death must never change level directly');
@@ -599,14 +648,14 @@ test('applyDeath is a no-op at the very start of a level (zero progress to lose)
   if (!requireTestDb(t, 'this test creates a throwaway user sitting exactly on a level floor and applies a death')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('zero-loss death penalty'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user;
+  let user; let character;
   try {
-    user = await createTestUser(pool, 'death-noloss');
-    const before = await loadProgression(pool, user); // level 1, xp 0 -- exactly on the floor
+    ({ user, character } = await createTestActor(pool, 'death-noloss'));
+    const before = await loadProgression(pool, character); // level 1, xp 0 -- exactly on the floor
 
     // Deliberately NOT pinning the roll: sitting exactly on the floor must
     // cost nothing at EVERY draw, and the real Math.random exercises that.
-    const r = await applyDeath(pool, user);
+    const r = await applyDeath(pool, character);
     assert.equal(r.lost, 0);
     assert.deepEqual(r.progression, before, 'nothing to lose means nothing changes');
   } finally {

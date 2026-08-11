@@ -638,6 +638,7 @@ test('a failed XP award rolls back the creature deletion -- against a real datab
   let user;
   let worldId;
   let creatureId;
+  let characterId;
   try {
     user = await createTestUser(pgPool, 'rollback');
     const w = await pgPool.query(
@@ -651,8 +652,26 @@ test('a failed XP award rolls back the creature deletion -- against a real datab
     );
     creatureId = c.rows[0].id;
 
+    // The killer must be a LIVE player in the world carrying a character id.
+    // commitCreatureDeath resolves killerUserId -> characterId through
+    // entry.world.getPlayer(...) (loot.js:94) and skips the whole XP path
+    // when that comes back null. Without this the forced UPDATE never runs,
+    // nothing throws, and the test fails on "Missing expected rejection" --
+    // which is exactly how it broke when SOMET-257 made progression
+    // per-character and this fixture kept passing a bare user id.
+    const ch = await pgPool.query(
+      `INSERT INTO characters (user_id, slot, name, entity_type_id)
+       SELECT $1, 1, $2, e.id FROM entity_types e WHERE e.name = 'Warrior'
+       RETURNING id`,
+      [user, `progression-kill-xp-test-char-${user}-${process.pid}`],
+    );
+    assert.equal(ch.rows.length, 1, "entity_types has no 'Warrior' -- run seed-catalogs");
+    characterId = ch.rows[0].id;
+
     const map = { chunkSize: 8, isWalkable: () => true, speedAt: () => 1, getChunk: () => [] };
-    const entry = { worldId, world: new World(map, new Map(), null, 8), creatureTypeIds: new Map() };
+    const world = new World(map, new Map(), null, 8);
+    world.addPlayer(user, { x: 0, y: 0 }, { items: [], equipment: {} }, { x: 0, y: 0 }, 0, undefined, characterId);
+    const entry = { worldId, world, creatureTypeIds: new Map() };
     const pool = poolWithForcedAwardFailure(pgPool);
 
     await assert.rejects(
@@ -668,7 +687,7 @@ test('a failed XP award rolls back the creature deletion -- against a real datab
     // the row present-but-unmodified. Zero rows is the proof that nothing
     // XP-adjacent survived, matching progression_store.test.js's own
     // rolled-back-transaction assertion at line 194.
-    const prog = await pgPool.query('SELECT count(*)::int AS n FROM player_progression WHERE user_id = $1', [user]);
+    const prog = await pgPool.query('SELECT count(*)::int AS n FROM player_progression WHERE character_id = $1', [characterId]);
     assert.equal(prog.rows[0].n, 0, 'no progression row (not even the lazy-created one) may survive a failed award');
   } finally {
     if (worldId != null) await pgPool.query('DELETE FROM worlds WHERE id = $1', [worldId]).catch(() => {}); // cascades to world_creatures
