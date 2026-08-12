@@ -647,9 +647,37 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
   }
 });
 
+// SOMET-238: this used to be a bare DELETE with no reference check, even
+// though the PUT rename route right above already refuses a rename that
+// would orphan a reference (F-018/SOMET-185+SOMET-207 pattern). References
+// are by NAME in jsonb arrays with no FK, so the database can't stop this
+// either -- an admin could delete an entity type a world still allowed, a
+// biome still listed, or that was actually placed in world_creatures, and
+// the name would just silently stop resolving downstream (dropped
+// creatures/flora, not an error). Same guard as the rename above, copied
+// verbatim: same three reference sites, same 409 shape.
 app.delete('/api/entity-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
+    const cur = await pool.query('SELECT name FROM entity_types WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
+    const name = cur.rows[0].name;
+    const [worldsRef, creaturesRef, biomesRef] = await Promise.all([
+      pool.query('SELECT id, name FROM worlds WHERE allowed_creature_types @> $1::jsonb', [JSON.stringify([name])]),
+      pool.query('SELECT 1 FROM world_creatures WHERE type = $1 LIMIT 1', [name]),
+      pool.query(
+        'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
+        [JSON.stringify([name])],
+      ),
+    ]);
+    if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0) {
+      return res.status(409).json({
+        error: `Cannot delete '${name}': still referenced by allowed_creature_types, placed creatures, or a biome`,
+        referencing_worlds: worldsRef.rows.map((w) => ({ id: w.id, name: w.name })),
+        referencing_biomes: biomesRef.rows.map((b) => ({ id: b.id, name: b.name })),
+        has_placed_creatures: creaturesRef.rows.length > 0,
+      });
+    }
     const result = await pool.query('DELETE FROM entity_types WHERE id = $1 RETURNING id', [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
     res.json({ success: true, id: result.rows[0].id });
@@ -935,9 +963,27 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
   }
 });
 
+// SOMET-238: same asymmetry as entity types -- rename is guarded (above),
+// delete was not, though the reference is by NAME with no FK either way.
+// Same two reference sites as the rename guard, same 409 shape.
 app.delete('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
+    const cur = await pool.query('SELECT name FROM tile_types WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Tile type not found' });
+    const name = cur.rows[0].name;
+    const [entityRef, biomeRef] = await Promise.all([
+      pool.query('SELECT id, name FROM entity_types WHERE spawn_tiles @> $1::jsonb', [JSON.stringify([name])]),
+      pool.query('SELECT id, name FROM biomes WHERE terrain_tiles @> $1::jsonb', [JSON.stringify([name])]),
+    ]);
+    if (entityRef.rows.length > 0 || biomeRef.rows.length > 0) {
+      return res.status(409).json({
+        error: `Cannot delete '${name}': still referenced by an entity type's spawn tiles or a biome`,
+        referencing_entity_types: entityRef.rows.map((e) => ({ id: e.id, name: e.name })),
+        referencing_biomes: biomeRef.rows.map((b) => ({ id: b.id, name: b.name })),
+      });
+    }
+
     const result = await pool.query('DELETE FROM tile_types WHERE id = $1 RETURNING id', [id]);
 
     if (result.rows.length === 0) {
