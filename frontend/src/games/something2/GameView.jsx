@@ -230,9 +230,10 @@ export default function GameView() {
   const [newWorldSeed, setNewWorldSeed] = useState('');
   const [newWorldChunkSize, setNewWorldChunkSize] = useState('64');
 
-  // Same query keys GameShell uses; TanStack serves both from one cache entry.
+  // Same query key GameShell uses (same character id) so TanStack serves both
+  // from one cache entry -- see the comment on GameShell's useWorlds() call.
   const { mapTiles } = useMapTiles();
-  const { worlds, isLoadingWorlds } = useWorlds();
+  const { worlds, isLoadingWorlds } = useWorlds(activeCharacter?.id);
   const createWorldMutation = useCreateWorld();
   const deleteWorldMutation = useDeleteWorld();
 

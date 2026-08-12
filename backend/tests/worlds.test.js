@@ -82,11 +82,15 @@ test('POST /api/worlds returns 409 on a duplicate name instead of a raw 500', as
   assert.match(res.body.error, /already exists/i);
 });
 
+// SOMET-276: GET /api/worlds now requires auth (previously wide open). These
+// two mockPool fixtures resolve the auth middleware's user lookup to an admin
+// row (isUserLookup/ADMIN_USER_ROW in helpers/auth.js), so an admin token
+// still gets the full, unprojected SELECT * shape these tests pin.
 test('GET /api/worlds lists worlds', async () => {
   __setPool(mockPool([
     [/FROM worlds/i, () => ({ rows: [{ id: 'w1', name: 'A' }, { id: 'w2', name: 'B' }] })],
   ]));
-  const res = await request(app).get('/api/worlds');
+  const res = await request(app).get('/api/worlds').set(...AUTH);
   assert.equal(res.status, 200);
   assert.equal(res.body.length, 2);
 });
@@ -95,7 +99,7 @@ test('GET /api/worlds/:id returns 404 when absent', async () => {
   __setPool(mockPool([
     [/FROM worlds WHERE id/i, () => ({ rows: [] })],
   ]));
-  const res = await request(app).get('/api/worlds/nope');
+  const res = await request(app).get('/api/worlds/nope').set(...AUTH);
   assert.equal(res.status, 404);
 });
 
