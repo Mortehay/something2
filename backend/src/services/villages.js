@@ -206,32 +206,40 @@ const GUARD_TYPE = 'Village Guard';
 const GUARD_FALLBACK_HP = 300;
 const GUARD_FALLBACK_DEFENSE = 10;
 
-// SOMET-279. A guard's level/hp/damage/defense come from its world's level
-// band, through the SAME scaleCreature curve placeMapCreatures /
-// placeCreaturePacks / insertVaultChest already use for every other creature.
-// A second curve here would drift from that one the first time either is
-// tuned -- this repo has been bitten by exactly that.
+// SOMET-285 — every village guard is level 150, in every world.
 //
-// The level is the band's TOP (worlds.level_max), not a roll and not the
-// bottom: a guard exists to beat the hostiles of its own world, and a guard
-// rolled at level_min in a 46..50 world would be facing level-50 hostiles
-// with level-46 numbers. Guards are structural (fixed posts, fixed count),
-// so there is nothing for a random roll to add.
+// This replaces SOMET-279's band-derived level (worlds.level_max, i.e. 1 in
+// Vale Crossing up to 50 in The Abyss: Hub). The product decision is that a
+// guard is not "a strong local creature" but a fixed, overwhelming wall:
+// "guards are 150 lvl and they are very strong". 150 is far above the top of
+// the highest band in the game (50), so the ordering holds in every world at
+// once and there is no band whose hostiles a guard is merely level-matched
+// against.
 //
-// Relative to a same-level hostile the guard's advantage is entirely the
-// Village Guard entity type's own base stats, carried through the shared
-// curve -- no extra guard-only multiplier is introduced here. At every level
-// that is 10x a Line's hp, 5x its damage and 3.3x its defense (2.3x hp / 5x
-// damage / 0.92x defense against an Apex), which keeps a guard's
-// time-to-kill on a hostile roughly level-invariant instead of collapsing to
-// the applyDamage floor the way a flat 25 damage does above level ~25.
-async function guardStatsForWorld(db, worldId) {
-  const w = await db.query('SELECT level_max FROM worlds WHERE id = $1', [worldId]);
-  const rawLevel = w.rows[0] ? Number(w.rows[0].level_max) : NaN;
-  // Same posture rollCreatureLevel takes on a missing/invalid band: fall back
-  // to 1 (today's behaviour exactly) rather than throw inside the caller's
-  // transaction.
-  const level = Number.isFinite(rawLevel) && rawLevel >= 1 ? Math.floor(rawLevel) : 1;
+// A world lookup is therefore no longer performed at all -- there is nothing
+// left for it to decide, and it was a round-trip inside the caller's
+// transaction. That is also why this function no longer takes a worldId (it
+// was renamed from guardStatsForWorld for the same reason: the name would
+// have been a lie).
+const GUARD_LEVEL = 150;
+
+// SOMET-279's rule, kept: hp/damage/defense come from the Village Guard entity
+// type's base stats run through the SAME scaleCreature curve placeMapCreatures
+// / placeCreaturePacks / insertVaultChest already use for every other
+// creature. A second curve here would drift from that one the first time
+// either is tuned -- this repo has been bitten by exactly that. Only the LEVEL
+// fed into it changed.
+//
+// At level 150 that curve yields hp 7005, damage 397.5, defense 84.5 (base
+// 300 / 25 / 10; +15% hp, +10% damage, +0.5 defense per level over 149 steps).
+// Against the strongest hostile in the catalog -- an Apex at the top band's
+// level 50: hp 1086, damage 29.5, defense 37.5 -- that is 360 damage a swing
+// (4 swings to kill it) while the Apex's own 29.5 is below the guard's 84.5
+// defense and so lands on applyDamage's MIN_DAMAGE floor: 1 per hit, 7005 hits
+// to fell a guard. A guard overwhelms any hostile at any tier, which is the
+// point. (Pinned in tests/village_guard_level_scaling.test.js.)
+async function guardStats(db) {
+  const level = GUARD_LEVEL;
 
   const t = await db.query('SELECT hp, defense FROM entity_types WHERE name = $1', [GUARD_TYPE]);
   const row = t.rows[0] || {};
@@ -257,20 +265,18 @@ async function guardStatsForWorld(db, worldId) {
 // `db` is any queryable (the module-level pool, or a connected client mid-
 // transaction — village create/delete, the creature re-roll route, and the
 // regenerate-terrain route (SOMET-252) all pass their transaction's client
-// so this participates in it, F-007 / SOMET-187). The two extra SELECTs
-// guardStatsForWorld makes therefore run on the caller's client too, and see
-// the caller's uncommitted world row.
+// so this participates in it, F-007 / SOMET-187). The SELECT guardStats makes
+// therefore runs on the caller's client too.
 //
-// One band lookup per call, not per guard: every village passed in belongs to
-// `worldId` by construction (both callers derive `villages` from that world).
+// One catalog lookup per call, not per guard.
 async function insertVillageGuards(db, worldId, villages) {
-  // Nothing to place -> no band lookup. The village DELETE route calls this
+  // Nothing to place -> no catalog lookup. The village DELETE route calls this
   // with the villages that SURVIVE the delete, so removing a world's last
-  // village lands here with an empty list; querying the world band and the
-  // Village Guard row to scale zero guards is two pointless round-trips
-  // inside the caller's transaction.
+  // village lands here with an empty list; querying the Village Guard row to
+  // scale zero guards is a pointless round-trip inside the caller's
+  // transaction.
   if (!villages || villages.length === 0) return;
-  const stats = await guardStatsForWorld(db, worldId);
+  const stats = await guardStats(db);
   for (const v of villages) {
     for (const post of villageGatePosts(v)) {
       await db.query(
@@ -309,8 +315,8 @@ async function createVillage(client, worldId, village) {
 }
 
 module.exports = {
-  fetchVillages, createVillage, insertVillageGuards, guardStatsForWorld,
-  GUARD_TYPE, VILLAGE_LIMITS,
+  fetchVillages, createVillage, insertVillageGuards, guardStats,
+  GUARD_TYPE, GUARD_LEVEL, VILLAGE_LIMITS,
   villageGeometryError,
   // The two halves, exported for tests that need to attribute a rejection to
   // one rule or the other.

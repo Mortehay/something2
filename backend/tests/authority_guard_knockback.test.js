@@ -18,6 +18,13 @@
 //
 // Test 1 reproduces exactly that: a chasing player with a knife, driven
 // through the REAL World.attack path, not through the primitive.
+//
+// SOMET-285 UPDATE: the player-melee entry point into this shove is now closed
+// upstream — meleeArcTargets skips guards, so a player's swing neither damages
+// nor displaces one, and test 1 asserts that directly. The clamp itself is
+// NOT dead code and is still pinned here by the tests that drive
+// shoveCreature directly and by the creature-owned-projectile test at the
+// bottom, which is the one live shove source that can still reach a guard.
 const test = require('node:test');
 const assert = require('node:assert');
 const { World } = require('../src/authority/world.js');
@@ -104,9 +111,17 @@ test('a chasing player cannot punt a village guard off its post (SOMET-283)', ()
 
   const g = w.creatures.creatures.get('g');
   assert.ok(g, 'the guard must have survived — this test is about displacement, not death');
-  // 200 swings x MIN_DAMAGE 1 (knife damage 6 < defense 10) = 200 of 300 hp.
-  assert.ok(g.hp > 0, `sanity: the guard must still be alive, hp=${g.hp}`);
-  assert.ok(g.hp < 300, 'sanity: the swings must actually have been landing');
+  // SOMET-285 changed what "landing" means here. Before it, each of these 200
+  // swings dealt MIN_DAMAGE (knife damage 6 < defense 10) and delivered a 30px
+  // shove that the SOMET-283 clamp then had to refuse; the assertion at this
+  // point was `g.hp < 300` ("the swings must actually have been landing").
+  // Now a player's swing does not reach a guard AT ALL: meleeArcTargets
+  // excludes it, so there is no damage, no rider and no impulse to clamp. The
+  // hp assertion is inverted rather than dropped, because it is still the
+  // sanity check that the loop below is exercising a real swing path -- see
+  // guard_player_immunity.test.js, which pins that the identical loop DOES
+  // damage a hostile.
+  assert.equal(g.hp, 300, 'a player\'s swings must not damage a guard at all (SOMET-285)');
 
   const d = distHome(g);
   assert.ok(

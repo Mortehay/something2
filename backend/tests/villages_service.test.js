@@ -38,16 +38,22 @@ test('createVillage inserts the row, then guards, then merchant stock', async ()
     if (/INSERT INTO villages/i.test(s)) return 'row';
     if (/INSERT INTO world_creatures/i.test(s)) return 'guards';
     if (/INSERT INTO merchant_stock/i.test(s)) return 'stock';
-    // SOMET-279: guard placement is preceded by two reads -- the world's level
-    // band and the Village Guard base stats -- which is what makes a guard
-    // scale to its world. Named here rather than lumped into 'other' so this
-    // sequence still fails loudly if they ever move or disappear.
+    // SOMET-279: guard placement is preceded by a read of the Village Guard
+    // base stats, which is what makes a guard scale. Named here rather than
+    // lumped into 'other' so this sequence still fails loudly if it ever moves
+    // or disappears.
+    //
+    // SOMET-285 removed the SECOND read that used to sit beside it -- the
+    // world's level band -- because a guard's level is now the fixed 150
+    // regardless of world. 'band' is still mapped, and the expectation below
+    // still lists every statement in order, so a band read reappearing (or the
+    // catalog read vanishing) fails here rather than passing quietly.
     if (/FROM worlds WHERE id/i.test(s)) return 'band';
     // `seen` truncates each statement to 40 chars, so match on the table only.
     if (/FROM entity_types/i.test(s)) return 'guard-base';
     return 'other';
   });
-  assert.deepEqual(kinds, ['row', 'band', 'guard-base', 'guards', 'guards', 'stock'],
-    'createVillage must insert the row, read the level band and guard base stats, then insert '
+  assert.deepEqual(kinds, ['row', 'guard-base', 'guards', 'guards', 'stock'],
+    'createVillage must insert the row, read the guard base stats, then insert '
     + 'both gate guards, then merchant stock, in that order');
 });

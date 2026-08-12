@@ -24,6 +24,7 @@ const { Pool } = require('pg');
 
 const { scaleCreature } = require('../src/services/creatureLevel.js');
 const { MIN_DAMAGE } = require('../src/authority/damage.js');
+const { GUARD_LEVEL } = require('../src/services/villages.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL
   || process.env.DATABASE_URL
@@ -59,7 +60,7 @@ test('the Guard behaviour does not shadow per-instance guard damage', async (t) 
   }
 });
 
-test('every live village guard is scaled to its world\'s band and out-damages the local hostiles', async (t) => {
+test('every live village guard is level 150 and out-damages the toughest hostile in the game', async (t) => {
   const pool = await openPool(t, 'the live guard rows');
   if (!pool) return;
   try {
@@ -86,19 +87,34 @@ test('every live village guard is scaled to its world\'s band and out-damages th
       defense: Number(worst.rows[0].defense),
     };
 
+    // SOMET-285: the comparison is no longer against the guard's OWN band. The
+    // level is fixed at 150 everywhere, so the hostile every guard is measured
+    // against is the strongest one that exists anywhere in the game -- the
+    // toughest rung, at the top of the highest band any world carries.
+    const topBand = await pool.query('SELECT MAX(level_max) AS top FROM worlds');
+    const topLevel = Number(topBand.rows[0].top) || 1;
+    const hostile = scaleCreature(hostileBase, topLevel);
+
     for (const g of guards.rows) {
       const level = Number(g.level);
-      assert.equal(level, Number(g.level_max),
-        `${g.world}: guard level ${level} does not match the world band top ${g.level_max}`);
+      assert.equal(level, GUARD_LEVEL,
+        `${g.world}: guard level ${level} is not the fixed guard level ${GUARD_LEVEL} `
+        + '(migration 1714440176000 lifts every row)');
 
-      const hostile = scaleCreature(hostileBase, level);
       const net = Number(g.damage) - hostile.defense;
       assert.ok(net > MIN_DAMAGE,
         `${g.world}: a guard hitting for ${g.damage} against defense ${hostile.defense} lands `
         + `${Math.max(MIN_DAMAGE, net)} -- that is the ten-minute standoff SOMET-279 fixed`);
       // A bounded fight, not a war of attrition.
       assert.ok(hostile.hp / net <= 20,
-        `${g.world}: ${Math.ceil(hostile.hp / net)} swings to kill the toughest local hostile`);
+        `${g.world}: ${Math.ceil(hostile.hp / net)} swings to kill the toughest hostile in the game`);
+
+      // The other direction, which is what "very strong" means: the toughest
+      // hostile's own swing must land on the MIN_DAMAGE floor against this
+      // guard's defence.
+      assert.ok(hostile.damage - Number(g.defense) <= MIN_DAMAGE,
+        `${g.world}: the toughest hostile hits for ${hostile.damage} against a guard's `
+        + `${g.defense} defense -- a guard must take the floor, not a real hit`);
 
       assert.ok(Number(g.hp) > 0, `${g.world}: guard hp must be positive`);
       assert.ok(g.defense != null, `${g.world}: guard defense must be written per-instance`);

@@ -520,8 +520,19 @@ test('an arcane AoE blast damages but applies no rider', () => {
 
 // --- creature-owned projectiles: targeting (Task 8) -------------------------
 
+// SOMET-285: a guard-faction target also carries the RESOLVED BEHAVIOUR a real
+// one has. CreatureSim.addCreatures -> resolveInstanceBehavior stamps
+// GUARD_DEFAULT_BEHAVIOR (chaseStyle 'guard') on every guard-faction row with
+// no profile of its own, and projectileHitsCreature keys the player-damage
+// exclusion on that behaviour — the same notion of "guard" the tick uses —
+// not on the faction string. Without this field the guard rows below would be
+// plain hostiles as far as the predicate is concerned, and the
+// player-vs-guard cell of the matrix would pass no matter what the predicate
+// said.
 function mkFactionCreature(id, faction) {
-  return { id, x: 30, y: -24, width: 48, height: 48, hp: 100, faction };
+  const c = { id, x: 30, y: -24, width: 48, height: 48, hp: 100, faction };
+  if (faction === 'guard') c.behavior = { chaseStyle: 'guard' };
+  return c;
 }
 
 // Builds a projectile in flight and a single target directly in its path,
@@ -557,7 +568,9 @@ test('projectile targeting matrix by owner kind and faction', () => {
   const cases = [
     // ownerKind, ownerFaction, target faction/kind, expect damage
     ['player',   null,      'creature:hostile', true],
-    ['player',   null,      'creature:guard',   true],
+    // SOMET-285: a player's shot cannot damage a guard. This cell was `true`
+    // until that ticket; it is the projectile half of the fix.
+    ['player',   null,      'creature:guard',   false],
     ['player',   null,      'player:other',     true],
     ['player',   null,      'player:self',      false],
     ['creature', 'hostile', 'player:other',     true],

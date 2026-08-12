@@ -12,7 +12,11 @@ const { shoveAwayFrom } = require('./knockback');
 // rule and lives next to the guard constants that define what a post is, rather
 // than being duplicated here. No import cycle: creatures.js does not require
 // this module.
-const { shoveCreature } = require('./creatures');
+// SOMET-285: immuneToPlayerDamage is creatures.js's ONE guard predicate (the
+// resolved behaviour's chaseStyle), imported rather than re-expressed here as
+// a faction test -- a second definition would drift from the tick's own
+// routing and would wrongly sweep in the hostile portal guards.
+const { shoveCreature, immuneToPlayerDamage } = require('./creatures');
 
 // Sub-step resolution for terrain sampling, shared with the melee
 // line-of-sight walk in weapons.js. Defined in subStep.js (see the note there
@@ -29,8 +33,23 @@ function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * d
 //
 // The owner exclusion is folded in here as the same rule generalised: a
 // projectile never damages its own shooter, whoever that is.
+//
+// SOMET-285: a PLAYER's shot hits any creature EXCEPT a guard. This one
+// predicate is the whole projectile half of the fix -- both the swept
+// direct-hit branch and the AoE `_detonate` gate every creature they touch on
+// it, so the damage, the element's status rider, the knockback and the stone
+// XP all fall away together for a guard rather than one of them being missed.
+//
+// A HOSTILE's shot still hits a guard (the line below is unchanged, and
+// 'hostile' !== 'guard'). That is deliberate: this ticket removes the PLAYER
+// from a guard's damage graph, and a hostile that could not scratch a guard
+// would make the guard-vs-hostile fight -- the one fight guards exist for --
+// one-sided in a way nobody asked for. It is not an exploit route either: at
+// level 150 a guard's 84.5 defence puts every hostile in the catalog on the
+// MIN_DAMAGE floor, i.e. 7005 landed shots to kill one, while the guard needs
+// 4 swings to kill the hostile.
 function projectileHitsCreature(p, creature) {
-  if (p.ownerKind !== 'creature') return true;        // player shots hit any creature
+  if (p.ownerKind !== 'creature') return !immuneToPlayerDamage(creature);
   if (p.ownerId === creature.id) return false;        // never its own shooter
   const targetFaction = creature.faction || 'hostile';
   return p.ownerFaction !== targetFaction;            // never same faction

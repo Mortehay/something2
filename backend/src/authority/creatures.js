@@ -270,10 +270,55 @@ function withinLeash(x, y, home, radius) {
 // freely shoveable and a guard-style creature stays anchored regardless of the
 // faction string on its row. A guard with no home anchor is unconstrained,
 // exactly as withinLeash above already treats one.
-function leashAnchorOf(creature) {
+// THE definition of "this creature is a guard", used by every rule in this
+// file that treats guards differently: the leash anchor (SOMET-283) and the
+// player-damage immunity (SOMET-285) below, and the tick's own `bh.chaseStyle
+// === 'guard'` routing that both of them mirror.
+//
+// Keyed on the resolved BEHAVIOUR and not on `faction`, for the reason the
+// tick already gives: whether a creature is a guard is catalog data. This is
+// deliberately the ONLY notion of guard-ness outside the tick -- a second
+// predicate keyed on the faction string would drift from the branch that
+// actually decides how a guard behaves, and would sweep in the portal/dungeon
+// guards (services/dungeonGuards.js), which are ordinary hostile entity types
+// with a home anchor and MUST stay killable or their portal never opens.
+//
+// Every creature reaching this predicate in production has been through
+// addCreatures -> resolveInstanceBehavior, which always stamps a complete
+// behaviour object, so `!bh` here means a hand-built object, never a real
+// creature.
+function isGuardCreature(creature) {
   const bh = creature && creature.behavior;
-  if (!bh || bh.chaseStyle !== 'guard') return null;
+  return !!bh && bh.chaseStyle === 'guard';
+}
+
+// SOMET-285 — a player's damage cannot reach a guard.
+//
+// The exploit this closes: a guard never targets a player (selectGuardTarget
+// takes hostiles only) and so never retaliates, and world_creatures carries no
+// respawn path for one. Level 150 alone does not fix that, because
+// applyDamage floors every hit at MIN_DAMAGE (1) no matter how far defence
+// exceeds the raw damage -- so any amount of hp merely sets the length of a
+// completely riskless grind (7005 swings at level 150, ~30 minutes with a
+// knife). The only fix that is not a number is to remove the player from the
+// guard's damage graph entirely.
+//
+// Applied at the two places a player's damage enters the creature sim --
+// meleeArcTargets below (the whole melee arc: damage, riders, knockback and
+// the client's hit/impact feedback all derive from that one list) and
+// projectiles.js's projectileHitsCreature (both the swept direct hit and the
+// AoE detonation) -- and nowhere else. In particular this is NOT applied
+// inside applyDamage/damageCreatureById, which are shared with creature-owned
+// damage: a guard must still be damageable BY a hostile, and must still damage
+// hostiles itself.
+function immuneToPlayerDamage(creature) {
+  return isGuardCreature(creature);
+}
+
+function leashAnchorOf(creature) {
+  if (!isGuardCreature(creature)) return null;
   const home = creature.home;
+  const bh = creature.behavior;
   if (!home || !Number.isFinite(home.x) || !Number.isFinite(home.y)) return null;
   const radius = Number.isFinite(bh.leashRadius) ? bh.leashRadius : GUARD_LEASH_RADIUS;
   return { home, radius };
@@ -1137,10 +1182,18 @@ class CreatureSim {
 
   // Player melee: damage creatures within `range` of (px,py); remove + return dead ids.
   // `now` is the world clock, needed to stamp the element's status rider.
+  //
+  // No production caller today (world.js's melee branch uses the arc pair
+  // below); kept because several combat tests drive it directly. SOMET-285's
+  // guard exclusion is applied here anyway rather than only on the live path:
+  // this is by declaration a PLAYER melee primitive, and leaving one
+  // unfiltered player-damage door open would be re-opened by the first caller
+  // that ever reaches for it.
   applyAttack(px, py, range, damage, element, now = 0) {
     const killed = [];
     const r2 = range * range;
     for (const [id, c] of this.creatures) {
+      if (immuneToPlayerDamage(c)) continue;
       const cc = center(c);
       if (dist2(cc.x, cc.y, px, py) > r2) continue;
       applyDamageWithEffects(c, damage, element, effectiveMit(c), now);
@@ -1151,16 +1204,27 @@ class CreatureSim {
     return killed;
   }
 
-  // Ids of every live creature a melee swing would connect with: inside the
-  // arc AND with line of sight. Damages nothing.
+  // Ids of every live creature a PLAYER's melee swing would connect with:
+  // inside the arc AND with line of sight. Damages nothing.
   //
   // Split out of applyMeleeArc so an attack can report whether it CONNECTED
   // (frame.attacks `hit`) — killed ids alone cannot answer that, since a
   // creature hit for non-lethal damage appears in neither list. applyMeleeArc
   // iterates this, so both share ONE arc rule and cannot drift apart.
+  //
+  // SOMET-285: this is the SINGLE list world.js's player-melee branch derives
+  // everything from — the damage (applyMeleeArc iterates it), the element's
+  // status rider (applied inside that loop), the knockback loop, the impact
+  // descriptors and the swing's own `hit` flag. Excluding guards HERE is
+  // therefore the whole of the melee half of the fix, and it is why a player
+  // can no longer shove a guard either (see the module note on
+  // immuneToPlayerDamage). The one creature-owned caller of this file's melee
+  // code — the tick's guard branch — does not go through this method, so a
+  // guard's own strike on a hostile is untouched.
   meleeArcTargets(ox, oy, nx, ny, reach, arcWidth) {
     const ids = [];
     for (const [id, c] of this.creatures) {
+      if (immuneToPlayerDamage(c)) continue;
       const cc = center(c);
       if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth)) continue;
       // Terrain blocks the swing, exactly as it blocks a projectile.
@@ -1279,6 +1343,10 @@ module.exports = {
   // the guard branch's own strike below), exported so its clamp can be pinned
   // directly instead of only through a full tick.
   shoveCreature, leashAnchorOf,
+  // SOMET-285: the one guard predicate, exported so projectiles.js filters
+  // player shots on exactly the notion of "guard" this file's tick and leash
+  // rules use, and so tests can pin it directly.
+  isGuardCreature, immuneToPlayerDamage,
   // SOMET-154: exported so the wall-ring tests can pin the path search itself
   // (and its bounds) without having to infer it from 1500 ticks of movement.
   findHomePath, GUARD_RETURN_STALL_TICKS, GUARD_MAX_REPATHS, GUARD_PATH_RANGE,
