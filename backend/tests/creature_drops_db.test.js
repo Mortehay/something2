@@ -1,6 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
+const { withAdvisoryLock } = require('./helpers/advisoryLock.js');
+
+// SOMET-255: same fixed integer as seed_catalogs_db.test.js's CATALOG_LOCK_KEY
+// -- both files touch entity_types/creature_drops, and this test's
+// whole-catalog invariant used to be able to observe seed_catalogs_db's
+// mid-test Wolf delete/restore when node --test ran the two files in
+// parallel. Wrapping both in the same key makes the two sections mutually
+// exclusive across processes without serializing the rest of the suite.
+const CATALOG_LOCK_KEY = 748213905;
 
 // THE COVERAGE GAP THIS FILE CLOSES: adding a creature is a one-line INSERT in
 // a migration, and nothing anywhere else in the codebase has to change for it
@@ -50,29 +59,38 @@ test('EVERY creature type has at least one creature_drops row', async (t) => {
     return;
   }
   try {
-    // Scoped to the HOSTILE faction: this invariant is about huntable content —
-    // a mob a player kills must yield something. Guard-faction creatures
-    // (village gate guards) are defenders, not loot piles: they are never a
-    // kill target for progression and deliberately have no drop rule.
-    const creatures = await pool.query(
-      "SELECT id, name FROM entity_types WHERE is_creature = true AND faction = 'hostile' ORDER BY name ASC",
-    );
-    // Guard the guard: if the creature list ever comes back empty this test
-    // would "pass" having asserted nothing at all — the vacuous-green failure
-    // mode. There is always at least one creature (Wolf predates this slice).
-    assert.ok(creatures.rowCount > 0,
-      'no creature types found — this test cannot prove anything against an empty catalog');
+    // SOMET-255: seed_catalogs_db.test.js's "seeding restores a creature that
+    // is missing from the catalog" test deletes and restores the Wolf
+    // entity_types row (and its cascaded creature_drops row) in the same
+    // catalog this invariant reads. Holding CATALOG_LOCK_KEY for the whole
+    // read keeps this from running mid-delete in that other file.
+    await withAdvisoryLock(pool, CATALOG_LOCK_KEY, async () => {
+      // Scoped to the HOSTILE faction: this invariant is about huntable
+      // content — a mob a player kills must yield something. Guard-faction
+      // creatures (village gate guards) are defenders, not loot piles: they
+      // are never a kill target for progression and deliberately have no
+      // drop rule.
+      const creatures = await pool.query(
+        "SELECT id, name FROM entity_types WHERE is_creature = true AND faction = 'hostile' ORDER BY name ASC",
+      );
+      // Guard the guard: if the creature list ever comes back empty this test
+      // would "pass" having asserted nothing at all — the vacuous-green
+      // failure mode. There is always at least one creature (Wolf predates
+      // this slice).
+      assert.ok(creatures.rowCount > 0,
+        'no creature types found — this test cannot prove anything against an empty catalog');
 
-    const dropless = await pool.query(
-      `SELECT et.name
-         FROM entity_types et
-         LEFT JOIN creature_drops cd ON cd.entity_type_id = et.id
-        WHERE et.is_creature = true AND et.faction = 'hostile' AND cd.id IS NULL
-        ORDER BY et.name ASC`,
-    );
-    assert.deepEqual(dropless.rows.map((r) => r.name), [],
-      'these creature types have NO drop rule and will die yielding nothing — '
-      + 'add a creature_drops row in a new migration (see 1714440024000_elements_creature_drops.js)');
+      const dropless = await pool.query(
+        `SELECT et.name
+           FROM entity_types et
+           LEFT JOIN creature_drops cd ON cd.entity_type_id = et.id
+          WHERE et.is_creature = true AND et.faction = 'hostile' AND cd.id IS NULL
+          ORDER BY et.name ASC`,
+      );
+      assert.deepEqual(dropless.rows.map((r) => r.name), [],
+        'these creature types have NO drop rule and will die yielding nothing — '
+        + 'add a creature_drops row in a new migration (see 1714440024000_elements_creature_drops.js)');
+    });
   } finally {
     await pool.end().catch(() => {});
   }

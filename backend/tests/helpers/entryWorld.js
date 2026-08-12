@@ -1,9 +1,8 @@
-const { Client } = require('pg');
 const { setEntryWorld } = require('../../src/services/entryWorld.js');
+const { withAdvisoryLock } = require('./advisoryLock.js');
 
 // Any fixed integer; it only has to be the same in every process.
 const ENTRY_LOCK_KEY = 626526517;
-const LOCK_WAIT_MS = 30000;
 
 // Save whichever world is currently is_entry, run fn, restore it -- and hold a
 // Postgres advisory lock for the whole window so no other test process can be
@@ -45,37 +44,13 @@ const LOCK_WAIT_MS = 30000;
 //
 // The restore goes through services/entryWorld.js, whose UPDATE is guarded by
 // an EXISTS on the target. A vanished target is a NO-OP rather than a wipe.
+//
+// The lock-acquire/release mechanics (own connection, try-in-a-loop with a
+// bounded wait, loud degrade-to-unlocked past the deadline) live in
+// advisoryLock.js now, shared with SOMET-255's catalog-row lock. Only the
+// save/restore behaviour above is specific to this file.
 async function withEntryPreserved(pool, fn) {
-  // Same database as the caller's pool, separate session. If the pool was not
-  // built from a connectionString there is nothing to connect with, so fall
-  // back to running unlocked rather than failing the caller's test outright.
-  const connectionString = pool.options && pool.options.connectionString;
-  const locker = connectionString ? new Client({ connectionString }) : null;
-  let locked = false;
-
-  if (locker) {
-    await locker.connect();
-    // try-in-a-loop rather than a blocking pg_advisory_lock: a plain blocking
-    // acquire turns "another test is slow" into "the suite hangs until its
-    // timeout". Past the deadline this proceeds WITHOUT the lock -- degraded
-    // to the old behaviour, and loud about it -- because a wrong entry world
-    // is recoverable and a hung suite is not.
-    const deadline = Date.now() + LOCK_WAIT_MS;
-    while (Date.now() < deadline) {
-      const r = await locker.query('SELECT pg_try_advisory_lock($1) AS got', [ENTRY_LOCK_KEY]);
-      if (r.rows[0].got) { locked = true; break; }
-      await new Promise((res) => { setTimeout(res, 50); });
-    }
-    if (!locked) {
-      console.error(
-        `withEntryPreserved: could not take the entry-world lock in ${LOCK_WAIT_MS}ms -- `
-        + 'running unguarded; is_entry may be left wrong. Check '
-        + 'SELECT count(*) FROM worlds WHERE is_entry after this run.',
-      );
-    }
-  }
-
-  try {
+  return withAdvisoryLock(pool, ENTRY_LOCK_KEY, async () => {
     const before = await pool.query('SELECT id FROM worlds WHERE is_entry = true');
     const beforeId = before.rows[0] ? before.rows[0].id : null;
     try {
@@ -89,12 +64,7 @@ async function withEntryPreserved(pool, fn) {
       // apply".
       if (beforeId != null) await setEntryWorld(pool, beforeId);
     }
-  } finally {
-    if (locker) {
-      if (locked) await locker.query('SELECT pg_advisory_unlock($1)', [ENTRY_LOCK_KEY]).catch(() => {});
-      await locker.end().catch(() => {});
-    }
-  }
+  });
 }
 
 module.exports = { withEntryPreserved, ENTRY_LOCK_KEY };
