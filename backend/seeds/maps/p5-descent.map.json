@@ -258,8 +258,8 @@
         "width": 6,
         "height": 5,
         "gate_edge": "S",
-        "spawn_x": 3250,
-        "spawn_y": 3250
+        "spawn_x": 3150,
+        "spawn_y": 3150
       },
       "level_band": [
         8,
@@ -855,8 +855,8 @@
         "width": 6,
         "height": 5,
         "gate_edge": "S",
-        "spawn_x": 3250,
-        "spawn_y": 3250
+        "spawn_x": 3150,
+        "spawn_y": 3150
       },
       "level_band": [
         19,
@@ -1452,8 +1452,8 @@
         "width": 6,
         "height": 5,
         "gate_edge": "S",
-        "spawn_x": 3250,
-        "spawn_y": 3250
+        "spawn_x": 3150,
+        "spawn_y": 3150
       },
       "level_band": [
         46,

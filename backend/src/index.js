@@ -7,7 +7,9 @@ const fs = require('fs');
 const path = require('path');
 const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
-const { fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS } = require('./services/villages');
+const {
+  fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS, villageSpawnError,
+} = require('./services/villages');
 const { fetchChests } = require('./services/chests.js');
 const { worldOverviewCache, clearOverviewCache } = require('./services/overviewCache.js');
 const { seedItemAcrossVillages } = require('./services/merchantStock');
@@ -2559,10 +2561,13 @@ function validateVillageBody(body, worldRow, existing) {
   if (worldRow.width && (min_col + width > worldRow.width || min_row + height > worldRow.height)) {
     return 'village box must fit inside the world bounds';
   }
-  // spawn must land on an interior tile of the box
-  const sCol = Math.floor(spawn_x / 100), sRow = Math.floor(spawn_y / 100);
-  const inInterior = sRow > min_row && sRow < min_row + height - 1 && sCol > min_col && sCol < min_col + width - 1;
-  if (!inInterior) return 'spawn point must be inside the village interior';
+  // spawn must land on an interior tile of the box. The rule itself lives in
+  // services/villages.js so the seed path (seeds/mapSpec.js) enforces the
+  // byte-identical rule instead of a second, subtly different copy of it
+  // (SOMET-153: the seed path had no copy at all and wrote three villages
+  // whose spawn sat on the wall ring).
+  const spawnErr = villageSpawnError(body);
+  if (spawnErr) return spawnErr;
   // no overlap with an existing village box
   for (const v of existing) {
     const overlap = min_col <= v.min_col + v.width - 1 && min_col + width - 1 >= v.min_col &&

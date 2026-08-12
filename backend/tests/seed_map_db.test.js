@@ -470,7 +470,13 @@ const villagePopulationSpec = () => ({
       // matches allowed_creature_types below.
       chunk_size: 64, biomes: ['Meadow'], biome_cell: 32,
       allowed_creature_types: ['Slime'], is_entry: true, entry_spawn: { x: 3200, y: 3200 },
-      village: { ...VILLAGE_BOX, gate_edge: 'S', spawn_x: 2350, spawn_y: 2650 } },
+      // Spawn is the interior tile just inside the S gate (gate col =
+      // 20 + floor(8/2) = 24; interior rows 21..24, cols 21..26), i.e. tile
+      // (row 24, col 24) -> pixel centre (2450,2450). It used to read
+      // (2350,2650) = tile (row 26, col 23), one row BELOW the box entirely --
+      // harmless to this fixture's assertions but not a legal village, and
+      // validateMapSpec now rejects it (SOMET-153).
+      village: { ...VILLAGE_BOX, gate_edge: 'S', spawn_x: 2450, spawn_y: 2450 } },
   ],
   links: [],
 });

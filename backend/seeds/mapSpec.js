@@ -27,7 +27,7 @@ const EDGE_DELTA = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
 // drift apart. mapService.js and merchantStock.js (villages.js's own
 // requires) have no top-level DB/pool creation, so this stays a pure,
 // database-free require.
-const { VILLAGE_LIMITS } = require('../src/services/villages.js');
+const { VILLAGE_LIMITS, villageSpawnError } = require('../src/services/villages.js');
 
 const { DENSITY_NAMES } = require('../src/services/densityTiers.js');
 
@@ -149,6 +149,14 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       if (!['N', 'E', 'S', 'W'].includes(v.gate_edge)) {
         errors.push(`world "${w.key}" village gate_edge must be one of N,E,S,W`);
       }
+      // The spawn rule the HTTP API has always enforced (validateVillageBody
+      // in src/index.js), imported rather than restated. seed-map.js calls
+      // createVillage directly and so never passed through that route: three
+      // seeded hubs shipped with a spawn on the SOUTH wall ring, and
+      // respawn-at-village dropped the player inside the wall (SOMET-153).
+      // Same function, so the two call sites cannot drift.
+      const spawnErr = villageSpawnError(v);
+      if (spawnErr) errors.push(`world "${w.key}" village ${spawnErr}`);
     }
 
     if (biomeNames) {
