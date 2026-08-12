@@ -54,12 +54,23 @@ test('POST /api/entity-types persists place_order', async () => {
 
 test('PUT /api/entity-types/:id persists place_order', async () => {
   let captured = null;
-  __setPool({
-    query: withAuth(async (sql, params) => {
+  // PUT /api/entity-types/:id acquires a client (pool.connect()) now so a
+  // rename's cascade and the entity_types UPDATE commit together (SOMET-228)
+  // -- name is unchanged here ('goblin' -> 'goblin'), so the cascade never
+  // runs and only the UPDATE itself needs a response.
+  const client = {
+    query: async (sql, params) => {
+      const trimmed = sql.trim();
+      if (/^(BEGIN|COMMIT|ROLLBACK)$/i.test(trimmed)) return { rows: [] };
       if (/SELECT name FROM entity_types/i.test(sql)) return { rows: [{ name: 'goblin' }] };
       captured = { sql, params };
       return { rows: [{ id: 9 }] };
-    }),
+    },
+    release: () => {},
+  };
+  __setPool({
+    query: withAuth(async () => { throw new Error('unexpected pool.query: route should use the client'); }),
+    connect: async () => client,
   });
   const res = await request(app).put('/api/entity-types/9').set(...AUTH)
     .send({ name: 'goblin', color: '#0f0', place_order: 3 });
