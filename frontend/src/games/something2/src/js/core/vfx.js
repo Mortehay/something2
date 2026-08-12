@@ -53,6 +53,10 @@ export function addEffects(list, events, nowMs, defs) {
       reach: Number.isFinite(e.reach) ? e.reach : 0,
       arc: Number.isFinite(e.arc) ? e.arc : 0,
       hit: e.hit === true,
+      // Slice C: the weapon's element, carried on impact descriptors so the
+      // burst can be tinted. Copied through here rather than looked up at
+      // draw time -- the client has no weapon catalog, by design.
+      el: typeof e.el === "string" ? e.el : null,
       startedAt: nowMs,
     });
   }
@@ -106,4 +110,99 @@ export function effectAlpha(fx, nowMs) {
 // the direction the player aimed.
 export function isoArcAngle(nx, ny) {
   return Math.atan2(ny, nx) + Math.PI / 4;
+}
+
+// ---------------------------------------------------------------------------
+// Particles (slice C, SOMET-160).
+// ---------------------------------------------------------------------------
+
+// Hard ceiling on particles ALIVE across every effect on screen. The design
+// names particles as the one real performance risk in this epic: 22 weapons
+// bursting in a crowded neighbourhood. Eviction is oldest-first, so a burst of
+// simultaneous impacts costs the OLDEST sparks rather than refusing the newest
+// -- the newest are the ones the player is looking at.
+export const MAX_LIVE_PARTICLES = 300;
+
+// Deterministic scalar in [0,1) from two integers. A hash, NOT Math.random():
+// the draw loop runs every frame, so a random call there would make the same
+// effect jitter frame to frame, differ between clients watching the same
+// fight, and be impossible to unit test. Seeding per (effect, index) makes
+// particlesAt a pure function of its inputs.
+function hash01(seed, i) {
+  let h = (seed ^ (i * 0x9e3779b1)) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x21f0aaad) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), 0x735a2d97) >>> 0;
+  return ((h ^ (h >>> 15)) >>> 0) / 4294967296;
+}
+
+// A stable per-effect seed. Derived from the arrival time and position rather
+// than a counter so two effects in the same tick still differ, and so the same
+// effect replayed from the same frame data looks identical.
+export function effectSeed(fx) {
+  const t = Math.floor(fx.startedAt || 0);
+  const x = Math.floor(fx.x || 0);
+  const y = Math.floor(fx.y || 0);
+  return ((t * 73856093) ^ (x * 19349663) ^ (y * 83492791)) >>> 0;
+}
+
+// Particle offsets for an effect at raw progress `t` (0..1), in WORLD units
+// relative to the effect's own origin. Pure: same (fx, t) always gives the
+// same array, which is what makes the determinism test meaningful and what
+// stops two clients disagreeing about a fight they both watched.
+//
+// Returns [] for an effect with no particles, so callers need no guard.
+export function particlesAt(fx, t) {
+  const def = fx && fx.def;
+  const count = def ? Math.floor(Number(def.particle_count) || 0) : 0;
+  if (count <= 0) return [];
+  const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
+  const seed = effectSeed(fx);
+  const spread = Number(def.particle_spread);
+  const speed = Number(def.particle_speed) || 0;
+  const gravity = Number(def.particle_gravity) || 0;
+  const life = (Number(def.particle_lifetime_ms) || 300) / 1000;
+  const arc = Number.isFinite(spread) ? spread : Math.PI * 2;
+
+  // Aim the cone along the effect's own direction when it is narrower than a
+  // full circle; a full circle has no meaningful centre so the offset is
+  // harmless there.
+  const base = Math.atan2(Number(fx.ny) || 0, Number(fx.nx) || 0);
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const a = base + (hash01(seed, i) - 0.5) * arc;
+    // Vary speed per particle so a burst does not read as a rigid ring.
+    const v = speed * (0.5 + hash01(seed, i + 1013) * 0.5);
+    const age = clamped * life;
+    out.push({
+      dx: Math.cos(a) * v * age,
+      // +y is DOWN in world space, so gravity adds. Classic 1/2 g t^2.
+      dy: Math.sin(a) * v * age + 0.5 * gravity * age * age,
+      // Particles fade independently of the effect body, so a long-lived
+      // spark can outlive the flash that spawned it.
+      alpha: 1 - clamped,
+    });
+  }
+  return out;
+}
+
+// Trim the live list so the total particle budget holds, oldest first.
+// Returns a NEW array (same contract as pruneEffects) and leaves the input
+// untouched, so a draw loop mid-iteration is never mutated out from under.
+export function capParticles(list, max = MAX_LIVE_PARTICLES) {
+  if (!Array.isArray(list) || list.length === 0) return list || [];
+  let total = 0;
+  for (const fx of list) total += (fx.def && Number(fx.def.particle_count)) || 0;
+  if (total <= max) return list.slice();
+
+  // Newest LAST in the list (addEffects pushes), so walk backwards keeping the
+  // newest until the budget runs out.
+  const kept = [];
+  let used = 0;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const n = (list[i].def && Number(list[i].def.particle_count)) || 0;
+    if (n > 0 && used + n > max) continue;   // drop this one, keep looking for
+    used += n;                               // cheaper ones behind it
+    kept.push(list[i]);
+  }
+  return kept.reverse();
 }

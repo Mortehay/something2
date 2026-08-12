@@ -207,6 +207,27 @@ function pushAttacks(entry, attacks) {
   }
 }
 
+// Slice C (SOMET-160). Same stash-and-drain shape as attacks above, and
+// bounded by the same constant for the same reason: a crowded fight is
+// exactly when this list grows, and it is also exactly when the frame can
+// least afford to be large. Impacts past the cap are DROPPED rather than
+// queued -- an impact spark that arrives a tick late is worse than one that
+// never arrives, because it draws where the target no longer is.
+function pushImpacts(entry, impacts) {
+  if (!Array.isArray(impacts) || impacts.length === 0) return;
+  if (!entry.pendingImpacts) entry.pendingImpacts = [];
+  for (const i of impacts) {
+    if (entry.pendingImpacts.length >= MAX_PENDING_ATTACKS) return;
+    entry.pendingImpacts.push(i);
+  }
+}
+
+function drainImpacts(entry) {
+  const batch = entry.pendingImpacts;
+  entry.pendingImpacts = null;
+  return Array.isArray(batch) ? batch : [];
+}
+
 // Take this tick's batch and clear the stash in one step, so no caller can
 // read it and forget to clear it.
 function drainAttacks(entry) {
@@ -1141,8 +1162,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Ammo-free weapons (all melee, all staves, darts) keep the fully
       // synchronous path: no DB round trip on the hot path.
       if (gate.weapon.ammo_type_id == null) {
-        const { kills, attacks, stoneHit } = entry.world.attack(ws.userId, ax, ay);
+        const { kills, attacks, impacts, stoneHit } = entry.world.attack(ws.userId, ax, ay);
         pushAttacks(entry, attacks);
+        pushImpacts(entry, impacts);
         for (const k of dedupeKillsById(kills)) onCreatureDeath(entry, k.id, k.killerUserId);
         // Magic Stones (SOMET-245) Task 7: a landed melee spell-stone hit is
         // known synchronously (world.js's attack() already confirmed the
@@ -1188,8 +1210,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
           send(ws, { type: 'noammo', item_type_id: ammoTypeId }); // no cooldown consumed
           return;
         }
-        const { kills, attacks, stoneHit } = cur.world.attack(ws.userId, ax, ay);
+        const { kills, attacks, impacts, stoneHit } = cur.world.attack(ws.userId, ax, ay);
         pushAttacks(cur, attacks);
+        pushImpacts(cur, impacts);
         for (const k of dedupeKillsById(kills)) onCreatureDeath(cur, k.id, k.killerUserId);
         // Same fire-and-forget award as the ammo-free branch above -- always
         // null on THIS path in practice (ammo-gated weapons are projectile
@@ -1820,11 +1843,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // pays nothing per frame.
       const atks = drainAttacks(entry);
       const hasAtks = atks.length > 0;
+      const imps = drainImpacts(entry);
+      const hasImps = imps.length > 0;
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
         const frame = { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players, projectiles: snap.projectiles };
         if (hasDets) frame.detonations = dets;
         if (hasAtks) frame.attacks = atks;
+        // Omitted entirely when nothing was hit, exactly as detonations and
+        // attacks already are -- a quiet tick must cost no bytes.
+        if (hasImps) frame.impacts = imps;
         send(ws, frame);
       }
       if (tick % creatureBroadcastEvery === 0) {

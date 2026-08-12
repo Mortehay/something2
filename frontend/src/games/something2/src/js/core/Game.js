@@ -18,7 +18,7 @@ import { aimVector } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { addBlasts, pruneBlasts } from "./blasts.js";
-import { indexEffects, addEffects, pruneEffects } from "./vfx.js";
+import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
@@ -620,6 +620,17 @@ export class Game {
         // THIS frame — there is no snapshot to re-read them from later.
         if (msg.attacks && msg.attacks.length) {
             addEffects(this.vfx, msg.attacks, performance.now(), this.vfxDefs);
+        }
+        // Slice C: impacts ride the same frame and are equally single-shot.
+        // They go through addEffects too -- an impact IS an effect, just one
+        // positioned on the target rather than the attacker -- so pruning,
+        // easing and the particle cap all apply to them for free rather than
+        // needing a parallel list that could drift.
+        if (msg.impacts && msg.impacts.length) {
+            addEffects(this.vfx, msg.impacts, performance.now(), this.vfxDefs);
+            // Enforce the live-particle budget the moment the list grows,
+            // which is exactly when a crowded fight would blow it.
+            this.vfx = capParticles(this.vfx);
         }
     }
 

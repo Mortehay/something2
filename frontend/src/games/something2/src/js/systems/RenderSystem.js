@@ -7,7 +7,7 @@ import { TileDiamondCache } from "./tileTexture.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
-import { effectProgress, effectAlpha, isoArcAngle } from "../core/vfx.js";
+import { effectProgress, effectAlpha, isoArcAngle, particlesAt } from "../core/vfx.js";
 import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffects.js";
 
 // Mirrors PICKUP_RADIUS in backend/src/authority/groundItems.js — used here
@@ -311,6 +311,9 @@ export class RenderSystem {
     this.ctx.save();
     for (const fx of effects) {
       if (!fx.def) continue;
+      // Slice C: particles are drawn for ANY shape that carries them, before
+      // the geometry, so the body of the effect sits on top of its own spray.
+      this._drawVfxParticles(fx, now);
       if (fx.def.shape !== "arc") { this._drawVfxShape(fx, now); continue; }
       const t = effectProgress(fx, now);
       // Same conversion as drawBlasts above — worldToScreen gives the tile
@@ -347,6 +350,52 @@ export class RenderSystem {
       this.ctx.stroke();
     }
     this.ctx.restore();
+  }
+
+  // Element tints for an impact burst (slice C). The impact EFFECT rows are
+  // already element-specific, so this is a second, cheaper lever: a generic
+  // effect fired by an elemental weapon still reads as that element rather
+  // than as a white spark. `el` rides the impact descriptor from the server.
+  static get ELEMENT_TINT() {
+    return {
+      fire: "#ff9a4d", ice: "#8fdcff", lightning: "#ffe66b", arcane: "#c08cff",
+      physical: null,   // explicitly no tint -- the effect's own colour wins
+    };
+  }
+
+  // Particles for one effect. Positions come from vfx.js's particlesAt, which
+  // is PURE and seeded -- there is deliberately no Math.random() here, because
+  // this runs every frame: a random call would make the same burst jitter
+  // frame to frame and differ between two clients watching the same fight.
+  _drawVfxParticles(fx, now) {
+    const def = fx.def;
+    const count = Math.floor(Number(def.particle_count) || 0);
+    if (count <= 0) return;
+
+    // RAW progress, not eased: easing is a display curve for the geometry, and
+    // particles have their own lifetime. Reusing the eased value would make
+    // gravity look wrong.
+    const life = Number(def.particle_lifetime_ms) || 300;
+    const t = (now - fx.startedAt) / life;
+    if (t < 0 || t > 1) return;
+
+    const parts = particlesAt(fx, t);
+    if (parts.length === 0) return;
+
+    const tint = RenderSystem.ELEMENT_TINT[fx.el] || null;
+    const size = Math.max(0, Number(def.particle_size) || 2);
+    if (size === 0) return;
+
+    this.ctx.fillStyle = tint || def.color || "#ffffff";
+    for (const pt of parts) {
+      // Each particle is a world-space offset from the impact point, so it
+      // goes through the SAME projection as everything else rather than being
+      // nudged in screen space.
+      const s = worldToScreen(fx.x + pt.dx, fx.y + pt.dy);
+      this.ctx.globalAlpha = pt.alpha;
+      this.ctx.fillRect(s.x - size / 2, s.y - ISO_TILE_H / 2 - size / 2, size, size);
+    }
+    this.ctx.globalAlpha = 1;
   }
 
   // The four non-arc shapes (slice B). Split out so drawVfx's arc branch --

@@ -1,5 +1,5 @@
 const { resolveMove } = require('./collision');
-const { CreatureSim } = require('./creatures');
+const { CreatureSim, CREATURE_SIZE } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
 const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
 const { resolveEffectName, momentForAttack } = require('./vfx.js');
@@ -366,21 +366,21 @@ class World {
   // DELETE and credit.
   attack(userId, ax, ay) {
     const p = this.players.get(userId);
-    if (!p || p._attackCd > 0) return { kills: [], attacks: [], stoneHit: null };
+    if (!p || p._attackCd > 0) return { kills: [], attacks: [], impacts: [], stoneHit: null };
     // Shock's interrupt. Checked alongside the cooldown and BEFORE any resource
     // is deducted or any cooldown is stamped, matching the existing rule that a
     // refused attack costs nothing: an interrupt that silently ate the mana or
     // started the cooldown would punish the player twice for one hit.
-    if (!canAct(p, this.now)) return { kills: [], attacks: [], stoneHit: null };
+    if (!canAct(p, this.now)) return { kills: [], attacks: [], impacts: [], stoneHit: null };
     const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
-    if (!w) return { kills: [], attacks: [], stoneHit: null };
+    if (!w) return { kills: [], attacks: [], impacts: [], stoneHit: null };
 
     const manaCost = w.mana_cost || 0;
     const staminaCost = w.stamina_cost || 0;
     // Both resources are checked BEFORE either is deducted, and a denied
     // attack does NOT consume the cooldown — matching mana's existing rule,
     // now covering the melee branch too (melee weapons can carry a cost).
-    if (p.mana < manaCost || p.stamina < staminaCost) return { kills: [], attacks: [], stoneHit: null };
+    if (p.mana < manaCost || p.stamina < staminaCost) return { kills: [], attacks: [], impacts: [], stoneHit: null };
 
     const { nx, ny } = normalizeAim(ax, ay, p.facing);
     const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
@@ -393,6 +393,17 @@ class World {
       // Queried BEFORE applyMeleeArc, which deletes whatever it kills: after
       // the fact a one-shot kill would look like a miss.
       const creatureTargets = this.creatures.meleeArcTargets(cx, cy, nx, ny, w.reach, w.arc_width);
+      // Slice C (SOMET-160): where each impact happened. Captured HERE, before
+      // applyMeleeArc, for exactly the reason creatureTargets is -- a
+      // one-shot kill removes the creature, and reading its position
+      // afterwards would give nothing for precisely the hits that matter
+      // most. The list is built from the targets already computed; this
+      // exposes a fact, it does not recompute one.
+      const impactAt = [];
+      for (const id of creatureTargets) {
+        const c = this.creatures.get(id);
+        if (c) impactAt.push({ t: `c:${id}`, x: c.x + CREATURE_SIZE / 2, y: c.y + CREATURE_SIZE / 2 });
+      }
       const killed = this.creatures.applyMeleeArc(
         cx, cy, nx, ny, w.reach, w.arc_width, weaponDamage(p, w), w.element, this.now, userId,
       );
@@ -422,6 +433,10 @@ class World {
           applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION, this.now);
           applyElementEffect(other, w.element, this.now, userId);
           playerHits++;
+          // Same list as the creature impacts above -- a player hit and a
+          // creature hit are one event kind, distinguished only by the id
+          // prefix, so the client draws them through one path.
+          impactAt.push({ t: `p:${other.userId}`, x: ocx, y: ocy });
           // Survivors only -- a player at <=0 hp is picked up by
           // resolveDeaths() and respawned elsewhere; shoving first would move
           // a position respawn is about to overwrite anyway. Written straight
@@ -470,6 +485,16 @@ class World {
           reach: w.reach, arc: w.arc_width,
           hit: landed,
         }],
+        // Slice C: exactly the targets this swing damaged, each with the
+        // resolved impact effect and the weapon's element for tinting. An
+        // empty swing carries an EMPTY list, and server.js omits the key from
+        // the frame entirely -- the same treatment detonations already get,
+        // so a quiet tick costs no bytes.
+        impacts: impactAt.map((i) => ({
+          ...i,
+          v: resolveEffectName(w, 'impact'),
+          el: w.element || null,
+        })),
         stoneHit,
       };
     }
@@ -493,7 +518,7 @@ class World {
     // ProjectileSim.spawn (below) reads it straight off `w` and carries it
     // on the projectile so tickProjectiles' own step() can award XP at the
     // actual moment of impact, not at the moment of firing.
-    return { kills: [], attacks: [], stoneHit: null };
+    return { kills: [], attacks: [], impacts: [], stoneHit: null };
   }
 
   // Returns the whole step result — { kills, detonations } — so AoE blasts
