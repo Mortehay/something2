@@ -5,7 +5,7 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
+const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS } = require('./services/villages');
 const { fetchChests } = require('./services/chests.js');
@@ -65,16 +65,10 @@ app.use(apiRateLimiter());
 // body) was fully buffered and parsed before the 404 was produced, and
 // backend RSS jumped from ~37MiB to ~181MiB for that one request.
 //
-// 256kb comfortably covers every route's legitimate payload except the
-// map-entities bulk upload, which needs headroom for a full map's obstacle
-// array. That route gets its own larger, path-scoped parser registered
-// FIRST: body-parser no-ops on a second parse attempt once req._body is set
-// (node_modules/body-parser/lib/types/json.js), so registering the tighter
-// global limit first would silently pre-empt any larger per-route override
-// declared later inside the route itself -- the ordering here, not just the
-// limit, is what makes the exception real.
-const ENTITY_UPLOAD_PATH = '/api/maps/:id/entities';
-app.use(ENTITY_UPLOAD_PATH, express.json({ limit: '10mb' }));
+// 256kb comfortably covers every route's legitimate payload. A path-scoped
+// override used to run ahead of this for the map-entities bulk upload route
+// (SOMET-233 removed that route as dead legacy-flat-map surface, so the
+// override went with it).
 app.use(express.json({ limit: '256kb' }));
 app.use(express.urlencoded({ limit: '256kb', extended: true }));
 
@@ -154,11 +148,6 @@ function invalidId(id) {
 // Two literal 2000s would let the API's advertised limit and the limit
 // actually enforced during placement drift apart.
 const MAX_CREATURE_COUNT = MAX_WORLD_CREATURES;
-// Upper bound for POST /api/maps/generate rows/cols. This route eagerly
-// builds an rows*cols in-memory array and JSON.stringifies the whole thing
-// into a single row, unlike chunked worlds -- an unvalidated 100000x100000
-// request exhausts the heap (SOMET-188 / F-008).
-const MAX_MAP_DIM = 500;
 
 // World preview memo
 const PREVIEW_DIM = 64;
@@ -451,23 +440,6 @@ app.get('/api/player/world-map', playerGuard, async (req, res) => {
 // The /api/dev-token endpoint was removed: it minted a correctly-signed JWT for
 // any user_id with no credentials — a verified account-takeover primitive.
 // Use POST /api/auth/login instead.
-
-// List all maps
-app.get('/api/maps', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT 
-        m.id, m.name, m.description, m.created_at, m.updated_at,
-        EXISTS(SELECT 1 FROM map_entities me WHERE me.map_id = m.id) as has_entities
-      FROM maps m 
-      ORDER BY m.created_at DESC
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch maps' });
-  }
-});
 
 // List all map configuration (tiles + entities)
 app.get('/api/map/config', async (req, res) => {
@@ -1161,7 +1133,8 @@ app.post('/api/creature-behaviors', adminGuard, async (req, res) => {
   // Acquired inside the try: pool.connect() can reject (DB restart, pool
   // exhaustion) and Express 4.x does not catch async handler rejections, so
   // an unguarded await here would escape as an unhandledRejection and kill
-  // the process. Same hardening as /api/maps/:id/entities.
+  // the process. Same hardening as every other route below that acquires a
+  // client inside its try block.
   let client = null;
   try {
     client = await pool.connect();
@@ -1478,203 +1451,6 @@ app.delete('/api/biomes/:id', adminGuard, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete biome' });
-  }
-});
-
-// Get a specific map
-app.get('/api/maps/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query('SELECT * FROM maps WHERE id = $1', [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Map not found' });
-    }
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch map' });
-  }
-});
-
-// Generate a new map
-app.post('/api/maps/generate', adminGuard, async (req, res) => {
-  try {
-    const { name, description, rows = 100, cols = 100, seed } = req.body;
-    const r = Number.isFinite(rows) ? Math.floor(rows) : NaN;
-    const c = Number.isFinite(cols) ? Math.floor(cols) : NaN;
-    if (!Number.isInteger(r) || !Number.isInteger(c) || r < 1 || r > MAX_MAP_DIM || c < 1 || c > MAX_MAP_DIM) {
-      return res.status(400).json({ error: `rows and cols must be integers between 1 and ${MAX_MAP_DIM}` });
-    }
-
-    console.log(`Generating map: ${name} (${r}x${c})`);
-
-    // Fetch tile types from DB for generation
-    const tileTypes = await getTileTypesMap();
-    const worldSeed = Number.isFinite(seed) ? seed : Date.now();
-    const mapData = generateWorld(r, c, tileTypes, { seed: worldSeed });
-    
-    const result = await pool.query(
-      'INSERT INTO maps (name, data, description) VALUES ($1, $2, $3) RETURNING id, name, created_at',
-      [name || `Map ${new Date().toLocaleString()}`, JSON.stringify(mapData), description || 'Procedurally generated map']
-    );
-    
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to generate map' });
-  }
-});
-
-
-// Delete a map
-app.delete('/api/maps/:id', adminGuard, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query('DELETE FROM maps WHERE id = $1 RETURNING id', [id]);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Map not found' });
-    }
-    
-    res.json({ success: true, id: result.rows[0].id });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to delete map' });
-  }
-});
-
-// Save map entities. Frontend payload: [{ type: "Tree"|"Stone"|..., row, col, name }, ...].
-// Persisted as row-per-entity in map_entities (type='obstacle', entity_type_id resolved by name,
-// x = col + 0.5, y = row + 0.5 in tile coords).
-app.post('/api/maps/:id/entities', adminGuard, async (req, res) => {
-  // Acquired inside the try: pool.connect() can reject (DB restart, pool
-  // exhaustion) and Express 4.x does not catch async handler rejections, so
-  // an unguarded await here would escape as an unhandledRejection and kill
-  // the process (and every WS player co-hosted on it). Same hardening as
-  // auth/middleware.js.
-  let client = null;
-  try {
-    client = await pool.connect();
-    const { id } = req.params;
-    const { entities } = req.body;
-
-    const mapResult = await client.query('SELECT id FROM maps WHERE id = $1', [id]);
-    if (mapResult.rows.length === 0) return res.status(404).json({ error: 'Map not found' });
-
-    const typeResult = await client.query('SELECT id, name FROM entity_types');
-    const idByName = new Map(typeResult.rows.map((t) => [t.name, t.id]));
-
-    await client.query('BEGIN');
-    await client.query(`DELETE FROM map_entities WHERE map_id = $1 AND type = 'obstacle'`, [id]);
-
-    if (entities && entities.length > 0) {
-      for (const e of entities) {
-        const name = e.type || e.name;
-        const etId = idByName.get(name);
-        if (!etId) {
-          console.warn(`save-entities: skipping unknown entity_type "${name}"`);
-          continue;
-        }
-        const r = e.row ?? 0;
-        const c = e.col ?? 0;
-        await client.query(
-          `INSERT INTO map_entities (map_id, type, entity_type_id, x, y)
-           VALUES ($1, 'obstacle', $2, $3, $4)`,
-          [id, etId, c + 0.5, r + 0.5]
-        );
-      }
-    }
-    await client.query('COMMIT');
-    res.json({ success: true });
-  } catch (err) {
-    await client?.query('ROLLBACK').catch(() => {});
-    console.error(err);
-    res.status(500).json({ error: 'Failed to save entities' });
-  } finally {
-    client?.release();
-  }
-});
-
-// Load map entities. Returns the legacy frontend shape derived from row-per-entity rows:
-// { type: <entity_type.name>, name: <entity_type.name>, row, col, id }.
-app.get('/api/maps/:id/entities', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query(
-      `SELECT me.id, et.name, me.x, me.y
-       FROM map_entities me
-       JOIN entity_types et ON et.id = me.entity_type_id
-       WHERE me.map_id = $1 AND me.type = 'obstacle'
-       ORDER BY me.id`,
-      [id]
-    );
-    res.json(
-      result.rows.map((r) => ({
-        id: r.id,
-        type: r.name,
-        name: r.name,
-        row: Math.floor(r.y),
-        col: Math.floor(r.x),
-      }))
-    );
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch entities' });
-  }
-});
-
-// Generate static obstacles (type='obstacle') from entity_types.spawn_tiles + chance.
-app.post('/api/maps/:id/generate-entities', adminGuard, async (req, res) => {
-  const { id } = req.params;
-  // Acquired inside the try: see the /entities route above for why.
-  let client = null;
-  try {
-    client = await pool.connect();
-    const mapResult = await client.query('SELECT data FROM maps WHERE id = $1', [id]);
-    if (mapResult.rows.length === 0) return res.status(404).json({ error: 'Map not found' });
-    const tiles = mapResult.rows[0].data;
-
-    const typeResult = await client.query('SELECT * FROM entity_types');
-    const entityTypes = typeResult.rows.filter((t) => t.walkable === false);
-
-    // Density-driven clustered placement: objects clump (forest stands), while
-    // carved paths and clearings stay open. Deterministic per optional seed.
-    const pathTile = detectPathTile(uniqueTileNames(tiles));
-    const placeSeed = Number.isFinite(req.body?.seed) ? req.body.seed : Date.now();
-    const { placed } = placeEntities(tiles, entityTypes, {
-      seed: placeSeed,
-      pathTiles: pathTile ? [pathTile] : [],
-    });
-    const generated = placed.map((p) => ({
-      entity_type_id: p.def.id,
-      name: p.def.name,
-      row: p.row,
-      col: p.col,
-    }));
-
-    await client.query('BEGIN');
-    await client.query(`DELETE FROM map_entities WHERE map_id = $1 AND type = 'obstacle'`, [id]);
-    for (const g of generated) {
-      await client.query(
-        `INSERT INTO map_entities (map_id, type, entity_type_id, x, y)
-         VALUES ($1, 'obstacle', $2, $3, $4)`,
-        [id, g.entity_type_id, g.col + 0.5, g.row + 0.5]
-      );
-    }
-    await client.query('COMMIT');
-    await client.query('UPDATE maps SET updated_at = NOW() WHERE id = $1', [id]);
-
-    res.json({
-      success: true,
-      count: generated.length,
-      entities: generated.map((g) => ({ type: g.name, name: g.name, row: g.row, col: g.col })),
-    });
-  } catch (err) {
-    await client?.query('ROLLBACK').catch(() => {});
-    console.error(err);
-    res.status(500).json({ error: 'Generation failed: ' + err.message });
-  } finally {
-    client?.release();
   }
 });
 
@@ -2289,8 +2065,8 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
   // client acquired inside the try: pool.connect() can reject (DB restart,
   // pool exhaustion) and Express 4.x does not catch an async handler's
   // rejection, so an unguarded await here would escape as an
-  // unhandledRejection and kill the process (same hardening as
-  // POST /api/maps/:id/entities).
+  // unhandledRejection and kill the process (same hardening pattern used
+  // throughout this file wherever a route acquires a client).
   let client = null;
   try {
     const { id } = req.params;
@@ -2404,7 +2180,7 @@ app.get('/api/worlds/:id/villages', async (req, res) => {
 
 app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
   // client acquired inside the try: same pool.connect()-rejection hardening
-  // as POST /api/maps/:id/entities.
+  // used throughout this file wherever a route acquires a client.
   let client = null;
   try {
     const { id } = req.params;
