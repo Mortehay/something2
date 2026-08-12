@@ -6,6 +6,7 @@ const { resolveMove } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc, hasLineOfSight } = require('./weapons');
 const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
+const { resolveEffectName } = require('./vfx.js');
 const { applyElementEffect, activeEffectKeys, canAct } = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
 const { shoveAwayFrom } = require('./knockback');
@@ -193,6 +194,40 @@ async function loadCreatureTypes(pool) {
 }
 
 function center(o) { return { x: o.x + o.width / 2, y: o.y + o.height / 2 }; }
+
+// Slice D (SOMET-161): stamp a creature's contact attack in the SAME shape a
+// player swing produces (world.js's melee branch), so the client has one
+// drawing path for both. Called from the two _attackCd contact sites.
+//
+// The effect name is resolved SERVER-side here exactly as it is for players --
+// the client never holds the creature catalog either. A creature carries its
+// bindings on `c.vfx` (entity_types.vfx, added by this slice's migration);
+// with none, resolveEffectName falls to the creature kind default, which is
+// why a wolf bite is visible even before anyone authors a binding for it.
+//
+// `reach`/`arc` are the contact geometry, not a weapon's: a creature has no
+// item_types row. CONTACT_RANGE is the distance it actually had to close to
+// land the hit, so the swing drawn is the swing that happened.
+function stampCreatureAttack(attacks, impacts, c, target, from, to) {
+  const nx0 = to.x - from.x;
+  const ny0 = to.y - from.y;
+  const len = Math.hypot(nx0, ny0) || 1;
+  attacks.push({
+    a: `c:${c.id}`,
+    v: resolveEffectName({ kind: 'creature', vfx: c.vfx }, 'attack'),
+    x: from.x, y: from.y,
+    nx: nx0 / len, ny: ny0 / len,
+    reach: CONTACT_RANGE,
+    arc: 1.2,
+    hit: true,          // a contact attack only stamps once it has landed
+  });
+  impacts.push({
+    t: target.userId != null ? `p:${target.userId}` : `c:${target.id}`,
+    x: to.x, y: to.y,
+    v: resolveEffectName({ kind: 'creature', vfx: c.vfx }, 'impact'),
+    el: 'physical',     // contact damage is always physical (see the sites)
+  });
+}
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
 // A guard with no home anchor is unconstrained (matches a hostile's
@@ -431,6 +466,10 @@ class CreatureSim {
         width: CREATURE_SIZE, height: CREATURE_SIZE, speed: CREATURE_SPEED,
         facing: c.facing || 'S', hp: c.hp, maxHp: c.hp, color: c.color,
         mit: creatureMitigation(c),
+        // Slice D: effect bindings from entity_types.vfx, normalized to null
+        // so stampCreatureAttack never sees undefined. A creature with none
+        // falls to the `creature` kind default and is still visible.
+        vfx: c.vfx || null,
         // Persisted per instance (world_creatures.level/.damage), already
         // scaled at spawn -- the sim never rescales. The fallbacks cover
         // rows written before the level migration and unit-test fixtures.
@@ -483,6 +522,10 @@ class CreatureSim {
     // in line of sight. Plain data, not a callback -- World spawns these into
     // its own ProjectileSim so CreatureSim never depends on that module.
     const shots = [];
+    // Slice D (SOMET-161): creature attack + impact descriptors, drained by
+    // World.tick and pushed onto the same frame keys player swings use.
+    const attacks = [];
+    const impacts = [];
     const all = [...this.creatures.values()];
     // Computed once per tick over the whole set, not per creature: an aura is
     // a property of the field, and recomputing it inside the loop would let a
@@ -577,6 +620,12 @@ class CreatureSim {
             // could never fire.
             const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
             applyDamageWithEffects(tgt, dmg, 'physical', effectiveMit(tgt), now);
+            // Slice D (SOMET-161): the SAME descriptor shape a player swing
+            // emits. This is what makes "every actor is visible" one code
+            // path rather than two -- the client draws a wolf bite through
+            // exactly the code that draws a halberd, and neither can be fixed
+            // without fixing the other.
+            stampCreatureAttack(attacks, impacts, c, tgt, cc, tc);
             tgt.dirty = true;
             c._abilityCd.set(ability.slot, ability.attackCooldown);
             if (tgt.hp <= 0) { this.creatures.delete(tgt.id); killed.push(tgt.id); }
@@ -706,6 +755,8 @@ class CreatureSim {
             // defence, so tp.mit is read as-is here, unlike the three
             // creature-target sites below which read effectiveMit(target).
             applyDamageWithEffects(tp, dmg, 'physical', tp.mit || NO_MITIGATION, now);
+            // Second of the two contact sites -- same stamp, same shape.
+            stampCreatureAttack(attacks, impacts, c, tp, center(c), center(tp));
             c._abilityCd.set(ability.slot, ability.attackCooldown);
             // Survivors only -- a dead player is about to be respawned by
             // resolveDeaths(), and shoving them first would move a position
@@ -775,7 +826,7 @@ class CreatureSim {
         c._dir = (c._dir + 1) % DIRS.length; // blocked → turn
       }
     }
-    return { killed, shots };
+    return { killed, shots, attacks, impacts };
   }
 
   // Player melee: damage creatures within `range` of (px,py); remove + return dead ids.

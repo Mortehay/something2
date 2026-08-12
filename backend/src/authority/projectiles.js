@@ -3,6 +3,7 @@
 // players (never the owner). Ranged and magic share this one path; they differ
 // only by weapon data.
 
+const { resolveEffectName } = require('./vfx.js');
 const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
 const { hasLineOfSight } = require('./weapons');
 const { applyElementEffect } = require('./effects');
@@ -88,6 +89,14 @@ class ProjectileSim {
       // so a 0/negative/non-finite radius can never reach the falloff division.
       aoeRadius: weapon.aoe_radius > 0 ? weapon.aoe_radius : null,
       element: weapon.element ?? null,
+      // Slice D (SOMET-161): the resolved TRAIL effect name, taken once at
+      // launch and carried for the shot's whole flight. Resolved server-side
+      // like every other effect name -- the client has no weapon catalog --
+      // and taken at spawn for the same reason `damage` is: swapping weapons
+      // mid-flight must not restyle a shot already in the air.
+      // null when the weapon binds no trail, which is the client's signal to
+      // fall back to the plain dot rather than draw nothing.
+      vfxTrail: resolveEffectName(weapon, 'trail'),
       // 0 for every weapon-shaped source that carries no knockback field
       // (every player weapon today) -- a creature shot's ability.knockback
       // is the only live non-zero source until item_types gains its own.
@@ -303,7 +312,20 @@ class ProjectileSim {
   }
 
   snapshot() {
-    return this.projectiles.map((p) => ({ id: p.id, x: p.x, y: p.y, element: p.element }));
+    return this.projectiles.map((p) => ({
+      id: p.id, x: p.x, y: p.y, element: p.element,
+      // Unit direction of travel. The snapshot carried position ONLY, so a
+      // client drawing a trail had nothing to orient it by -- it would have
+      // fallen back to the plain dot on every shot, forever, with every test
+      // still green. Normalized here rather than shipping raw vx/vy so the
+      // client cannot accidentally scale a streak by projectile speed.
+      nx: p.vx / (Math.hypot(p.vx, p.vy) || 1),
+      ny: p.vy / (Math.hypot(p.vx, p.vy) || 1),
+      // Carried on every snapshot rather than sent once at spawn: the client
+      // has no projectile-spawn message to hang it off, and a shot that flies
+      // into a newly-streamed neighbourhood must still draw its trail.
+      v: p.vfxTrail || null,
+    }));
   }
 
   count() { return this.projectiles.length; }

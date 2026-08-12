@@ -247,6 +247,13 @@ const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.fac
                 wc.level, wc.damage, wc.blocks_portal_id,
                 COALESCE(wc.defense, et.defense) AS defense,
                 et.color, et.resistances, et.faction, et.attack_element,
+                -- Slice D (SOMET-161). This is THE loader the live simulation
+                -- reads: loadCreatureTypes builds a catalog nothing downstream
+                -- ticks (see its own comment). A column added to the schema and
+                -- missing from THIS list is the project's documented inertness
+                -- trap -- the binding would exist in the database, and every
+                -- creature would silently draw the kind default forever.
+                et.vfx,
                 b.name AS behavior_name, b.aggro_radius, b.leash_radius,
                 b.chase_style, b.preferred_range, b.move_speed_mult, b.damage_override,
                 b.aura_radius, b.aura_damage_mult, b.aura_defense_mult, b.aura_speed_mult,
@@ -1678,7 +1685,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // tick is reported here and goes through the SAME death commit as a
       // melee or projectile kill — burn must not become a fourth way to die
       // that skips loot or deletes twice.
-      const { kills: killedByEffects } = entry.world.tick(dt);
+      const {
+        kills: killedByEffects, attacks: creatureAttacks, impacts: creatureImpacts,
+      } = entry.world.tick(dt);
+      // Slice D: a wolf bite goes onto the same stash a halberd swing does,
+      // and is bounded by the same cap -- creatures are the numerous actors,
+      // so leaving them unbounded would be the one thing able to blow the
+      // frame in a pack fight.
+      pushAttacks(entry, creatureAttacks);
+      pushImpacts(entry, creatureImpacts);
       for (const k of dedupeKillsById(killedByEffects)) onCreatureDeath(entry, k.id, k.killerUserId);
       if (entry.links && entry.links.size > 0) {
         const now = Date.now();

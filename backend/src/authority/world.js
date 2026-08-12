@@ -286,8 +286,9 @@ class World {
     // SOMET-254: CreatureSim.tick always ends `return { killed, shots };` --
     // no early return, nothing else in its body returns -- so the `|| {
     // killed: [], shots: [] }` fallback here could never fire. Removed.
-    const { killed: killedIds, shots } = this.creatures.tick(
-      dt, activeKeys, [...this.players.values()], this.now);
+    const {
+      killed: killedIds, shots, attacks: creatureAttacks, impacts: creatureImpacts,
+    } = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now);
 
     for (const s of shots) {
       if (this.projectiles.countByOwnerKind('creature') >= MAX_CREATURE_PROJECTILES) break;
@@ -316,7 +317,15 @@ class World {
     }
 
     // A guard's kill has no player behind it — always null, never omitted.
-    return { kills: killedIds.map((id) => ({ id, killerUserId: null })) };
+    // Slice D: creature attacks ride the SAME frame keys player swings do, so
+    // server.js pushes them through the same two helpers and the client draws
+    // them through the same path. Defaulted to [] because several tests build
+    // a CreatureSim-shaped double that predates these fields.
+    return {
+      kills: killedIds.map((id) => ({ id, killerUserId: null })),
+      attacks: creatureAttacks || [],
+      impacts: creatureImpacts || [],
+    };
   }
 
   activeWeapon(userId) {

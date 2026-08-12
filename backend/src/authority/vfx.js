@@ -21,10 +21,15 @@ const MOMENTS = ['attack', 'impact', 'miss', 'trail'];
 // missing 'miss' binding to the ATTACK effect would draw a hit on a whiff and
 // destroy the very distinction slice B adds. A moment with no default for a
 // kind resolves to nothing, deliberately.
+// `creature` is a kind alongside the two item_types kinds, per the design:
+// "Defaults are keyed on item_types.kind (melee -> generic slash, projectile
+// -> generic bolt) and on is_creature for entities." Creature contact damage
+// was previously an invisible HP drain -- the default is what stops that
+// being the case for any creature nobody has authored a binding for.
 const KIND_DEFAULTS = {
-  attack: { melee: 'generic_slash', projectile: 'generic_bolt' },
+  attack: { melee: 'generic_slash', projectile: 'generic_bolt', creature: 'generic_slash' },
   miss: { melee: 'generic_whiff', projectile: 'generic_whiff' },
-  impact: {},
+  impact: { creature: 'spark_hit' },
   trail: {},
 };
 

@@ -4,6 +4,12 @@ const fs = require('fs');
 const path = require('path');
 const { resolveEffectName, momentForAttack, KIND_DEFAULTS } = require('../src/authority/vfx.js');
 const { EFFECTS, BINDINGS } = require('../migrations/1714440168000_vfx_slice_b_effects.js');
+// Slice C seeds the impact/particle rows, and slice D's creature defaults
+// point at one of them -- so "is this default actually seeded" has to look
+// across every migration that seeds effects, not just this slice's. The guard
+// caught exactly that when the creature default was added.
+const { IMPACTS } = require('../migrations/1714440169000_vfx_particles.js');
+const SEEDED = new Set([...EFFECTS.map(([n]) => n), ...IMPACTS.map(([n]) => n), 'sweep_arc']);
 
 // ---------------------------------------------------------------------------
 // Slice B (SOMET-159): fallback resolution order, miss feedback, and the
@@ -51,19 +57,17 @@ test('a MISS resolves the miss binding, never the attack one', () => {
 test('every kind default names an effect this migration actually seeds', () => {
   // A default pointing at a row that does not exist is silently invisible --
   // the client drops an event whose name it cannot look up.
-  const seeded = new Set(EFFECTS.map(([n]) => n));
   for (const [moment, byKind] of Object.entries(KIND_DEFAULTS)) {
     for (const [kind, name] of Object.entries(byKind)) {
-      assert.ok(seeded.has(name), `KIND_DEFAULTS.${moment}.${kind} -> "${name}" is not seeded`);
+      assert.ok(SEEDED.has(name), `KIND_DEFAULTS.${moment}.${kind} -> "${name}" is not seeded by ANY migration`);
     }
   }
 });
 
 test('every binding names an effect that is seeded (or slice A\'s sweep_arc)', () => {
-  const seeded = new Set([...EFFECTS.map(([n]) => n), 'sweep_arc']);
   for (const [weapon, bindings] of Object.entries(BINDINGS)) {
     for (const [moment, name] of Object.entries(bindings)) {
-      assert.ok(seeded.has(name), `${weapon}.${moment} -> "${name}" is not seeded anywhere`);
+      assert.ok(SEEDED.has(name), `${weapon}.${moment} -> "${name}" is not seeded anywhere`);
     }
   }
 });

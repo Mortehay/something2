@@ -710,7 +710,7 @@ export class Game {
                 decoTypes: this.decoTypes,
                 toast: this.toast,
                 blasts: this.blasts,
-                vfx: this.vfx,
+                vfx: this.vfx, vfxDefs: this.vfxDefs,
                 // null whenever the equipped weapon needs no ammo — the HUD
                 // then draws no ammo line at all.
                 ammo: resolveAmmoHud(this.inventory),

@@ -136,7 +136,14 @@ export class RenderSystem {
     groundItems = [], autoLoot = false, gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     merchants = [], shop = null, shopOpen = false, decoTypes = null,
+    // Slice D: the effect LIBRARY, needed by the projectile trail. Effects in
+    // `vfx` already carry their own resolved `def`; a projectile is a
+    // persistent object that only carries a NAME, so the lookup happens here.
+    // Passed per frame rather than stashed at construction because the library
+    // arrives asynchronously, after the renderer exists.
+    vfxDefs = null,
   }) {
+    if (vfxDefs) this.vfxDefs = vfxDefs;
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     // Timestamp for this frame; animated tile textures advance off it (unlike
@@ -227,6 +234,17 @@ export class RenderSystem {
 
     // Projectiles render on top — small, fast, no depth-sort needed.
     for (const pr of projectiles) {
+      // Slice D (SOMET-161): the trail retires the identical 6px dot every
+      // ranged and magic weapon used to draw. `pr.v` is the trail effect name
+      // the server resolved at launch; `vfxDefs` is the same library the
+      // attack effects resolve against.
+      //
+      // The dot is KEPT as the fallback, deliberately. A weapon with no trail
+      // binding -- or one whose binding names a row someone renamed, which
+      // jsonb-with-no-FK makes possible -- must still show a visible
+      // projectile. Drawing nothing would be indistinguishable from the shot
+      // never having fired, which is the exact complaint this epic opened on.
+      if (this._drawProjectileTrail(pr)) continue;
       const s = worldToScreen(pr.x, pr.y);
       this.ctx.beginPath();
       this.ctx.arc(s.x, s.y - ISO_TILE_H / 2, 6, 0, Math.PI * 2);
@@ -350,6 +368,42 @@ export class RenderSystem {
       this.ctx.stroke();
     }
     this.ctx.restore();
+  }
+
+  // A projectile's trail (slice D). Returns true when it drew one, false to
+  // tell the caller to fall back to the plain dot.
+  //
+  // The trail is drawn as a streak BEHIND the projectile's current position,
+  // along its own direction of travel, rather than as a lifetime-animated
+  // effect: a projectile is a persistent object that moves, not a one-shot
+  // event, so there is no arrival time to animate against. That difference is
+  // why this does not reuse drawVfx.
+  _drawProjectileTrail(pr) {
+    const def = pr && pr.v && this.vfxDefs ? this.vfxDefs[pr.v] : null;
+    if (!def) return false;
+
+    const s = worldToScreen(pr.x, pr.y);
+    const cy = s.y - ISO_TILE_H / 2;
+    // Unit direction of travel, sent on the snapshot. Without it the streak
+    // has no meaningful orientation, and a plain dot reads better than a
+    // streak pointing the wrong way -- so that case falls back rather than
+    // guessing.
+    const nx = Number(pr.nx);
+    const ny = Number(pr.ny);
+    if (!Number.isFinite(nx) || !Number.isFinite(ny) || (nx === 0 && ny === 0)) return false;
+
+    const TRAIL_WORLD_LEN = 34;
+    const back = worldToScreen(pr.x - nx * TRAIL_WORLD_LEN, pr.y - ny * TRAIL_WORLD_LEN);
+    this.ctx.save();
+    this.ctx.strokeStyle = def.color || elementColor(pr.element);
+    this.ctx.lineWidth = Number(def.width) || 3;
+    this.ctx.globalAlpha = 0.9;
+    this.ctx.beginPath();
+    this.ctx.moveTo(back.x, back.y - ISO_TILE_H / 2);
+    this.ctx.lineTo(s.x, cy);
+    this.ctx.stroke();
+    this.ctx.restore();
+    return true;
   }
 
   // Element tints for an impact burst (slice C). The impact EFFECT rows are
