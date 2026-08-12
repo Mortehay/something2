@@ -261,6 +261,75 @@ function withinLeash(x, y, home, radius) {
   return dist2(x, y, home.x, home.y) <= radius * radius;
 }
 
+// SOMET-283 — the post anchor a creature is held to, or null if it is free to
+// be displaced anywhere.
+//
+// Deliberately keyed on the resolved BEHAVIOUR (`chaseStyle === 'guard'`) and
+// not on `faction`, matching the tick's own routing: whether a creature is
+// post-bound is catalog data, so a hostile that is given a home column stays
+// freely shoveable and a guard-style creature stays anchored regardless of the
+// faction string on its row. A guard with no home anchor is unconstrained,
+// exactly as withinLeash above already treats one.
+function leashAnchorOf(creature) {
+  const bh = creature && creature.behavior;
+  if (!bh || bh.chaseStyle !== 'guard') return null;
+  const home = creature.home;
+  if (!home || !Number.isFinite(home.x) || !Number.isFinite(home.y)) return null;
+  const radius = Number.isFinite(bh.leashRadius) ? bh.leashRadius : GUARD_LEASH_RADIUS;
+  return { home, radius };
+}
+
+// SOMET-283 — shove a CREATURE away from a point, honouring its post.
+//
+// knockback.js's shoveAwayFrom is pure geometry: it displaces anything with an
+// x/y/width/height away from an origin, wall-aware but with no notion of where
+// that thing belongs. That is the right shape for the primitive and it must
+// stay that way -- the portal bounce and the player-vs-player shove have no
+// leash to respect. The creature-domain rule ("a guard is anchored to its
+// post") belongs here, next to withinLeash and the guard constants that define
+// what a post IS.
+//
+// Why it exists: every melee weapon in the catalog carries knockback 30 and
+// none of the three shove call sites (world.js's player melee, projectiles.js's
+// direct hit and its AoE detonation) faction-filtered or leash-clamped. A
+// guard never targets a player and so never retaliates, and its defense (10)
+// exceeds the damage of every starter weapon, so applyDamage's MIN_DAMAGE floor
+// caps a knife at 1 damage per swing -- 300 free swings against a 300hp guard,
+// each one a 30px punt. That is a ~9000px displacement budget against a 300px
+// leash, and it is how both of Vale Crossing's guards were persisted 1685px and
+// 3755px off their posts (see SOMET-283 / SOMET-154).
+//
+// The rule is MONOTONE rather than a hard "inside the leash" test: a shove is
+// committed only if it leaves the guard no further from its post than the
+// larger of (a) its leash radius and (b) where it already was. (a) is the
+// normal case -- a guard on station can be jostled anywhere inside its own
+// radius, so hitting one still reads as connecting. (b) is what keeps a guard
+// that is ALREADY displaced (a legacy row, a bad spawn) from being pushed
+// further out while it walks home; without it the clamp would refuse every
+// shove for such a guard, which is the same outcome but for the wrong reason
+// and would silently stop applying the moment the guard re-entered its radius.
+//
+// All-or-nothing, like shoveAwayFrom itself: a shove that would break the leash
+// is not scaled down to one that fits, it simply does not happen. A guard
+// standing exactly on its leash edge therefore absorbs a hit entirely, which is
+// the intended reading -- guards hold the gate.
+//
+// Non-guard creatures are untouched by this: the shove is applied and returned
+// exactly as shoveAwayFrom would, so a hostile is still knocked back normally
+// (SOMET-253).
+function shoveCreature(map, fromX, fromY, creature, distance) {
+  const anchor = leashAnchorOf(creature);
+  if (!anchor) { shoveAwayFrom(map, fromX, fromY, creature, distance); return; }
+  const beforeX = creature.x, beforeY = creature.y;
+  const beforeD2 = dist2(beforeX + creature.width / 2, beforeY + creature.height / 2,
+    anchor.home.x, anchor.home.y);
+  shoveAwayFrom(map, fromX, fromY, creature, distance);
+  const after = center(creature);
+  const afterD2 = dist2(after.x, after.y, anchor.home.x, anchor.home.y);
+  const budget2 = Math.max(anchor.radius * anchor.radius, beforeD2);
+  if (afterD2 > budget2) { creature.x = beforeX; creature.y = beforeY; }
+}
+
 // SOMET-154 — tile-grid path from a guard's current tile to its post, as
 // world-space waypoints (tile centres). Breadth-first over 4-connected
 // walkable tiles, so the first path found is a shortest one and no heuristic
@@ -766,7 +835,13 @@ class CreatureSim {
               // Survivors only -- a target the line above already deleted
               // must never be shoved. `cc` (the guard's PRE-move centre, the
               // same point the range gate above used) is the shove origin.
-              shoveAwayFrom(this.map, cc.x, cc.y, tgt, ability.knockback);
+              // SOMET-283: routed through the creature-aware shove like every
+              // other creature-targeting knockback site. `tgt` here is always
+              // hostile (selectGuardTarget refuses anything else), so the
+              // clamp is inert for it today -- it goes through the same door
+              // so that a future post-bound target cannot be punted off its
+              // post by this path alone.
+              shoveCreature(this.map, cc.x, cc.y, tgt, ability.knockback);
               tgt.dirty = true;
             }
           }
@@ -1199,6 +1274,11 @@ module.exports = {
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
   GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE, GUARD_HOME_EPSILON,
   withinLeash, selectGuardTarget,
+  // SOMET-283: the leash-aware shove every creature-targeting knockback site
+  // goes through (world.js's melee, projectiles.js's direct hit and AoE, and
+  // the guard branch's own strike below), exported so its clamp can be pinned
+  // directly instead of only through a full tick.
+  shoveCreature, leashAnchorOf,
   // SOMET-154: exported so the wall-ring tests can pin the path search itself
   // (and its bounds) without having to infer it from 1500 ticks of movement.
   findHomePath, GUARD_RETURN_STALL_TICKS, GUARD_MAX_REPATHS, GUARD_PATH_RANGE,

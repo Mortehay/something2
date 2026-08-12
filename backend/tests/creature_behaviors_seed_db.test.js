@@ -38,8 +38,19 @@ test('creature_behaviors seeding', { skip: !url ? 'no database URL' : false }, a
     const b = r.rows[0];
     assert.equal(b.aggro_radius, 400);
     assert.equal(b.leash_radius, 300);
-    assert.equal(b.damage_override, 25);
     assert.equal(b.chase_style, 'guard');
+    // SOMET-279: NULL, not 25. This assertion read `25` until now and had
+    // been failing silently ever since migration 1714440173000 nulled the
+    // column -- silently because the whole file is DB-gated and a bare
+    // `npm test` skips it. The tick computes a hit as
+    // `(bh.damageOverride ?? c.damage)`, so any value here shadows the
+    // per-instance world_creatures.damage every level-scaled village guard
+    // now carries and puts every guard in every world back on a flat 25 (=
+    // the applyDamage floor of 1 against a level-50 hostile). GUARD_DAMAGE
+    // survives as villages.js's level-1 base damage, not as a catalog column.
+    assert.equal(b.damage_override, null,
+      'creature_behaviors.Guard.damage_override must be NULL, or every level-scaled guard is '
+      + 'shadowed back to a flat hit');
   });
 
   await t.test('every chase style value has at least one profile using it', async () => {

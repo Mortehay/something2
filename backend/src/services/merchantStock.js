@@ -68,8 +68,75 @@ async function seedItemAcrossVillages(pool, itemTypeId) {
   );
 }
 
-// Lazily sweep expired buyback rows, then read the shop.
-async function fetchShop(pool, villageId) {
+// SOMET-281: merchant_stock.price is a SNAPSHOT of item_types.value, taken
+// when the base-catalog row is seeded. PUT /api/item-types never refreshed it,
+// so raising an item's value left every village SELLING it at the old price
+// while trade.js sellItem PAYS sellPriceFor(the NEW value) -- a catalog edit
+// alone opened an unbounded buy-low/sell-high gold fountain.
+//
+// Only base-catalog rows (seller_user_id IS NULL) may be repriced. A buyback
+// row's price is the price the seller was actually paid, and SOMET-156
+// promises that player they can buy it back "at the same price they sold for";
+// repricing it would either rob or gift a specific player. `seller_user_id IS
+// NULL` is therefore load-bearing in BOTH statements below, not a filter for
+// tidiness.
+//
+// value <= 0 means "not sold in shops" -- that is exactly the rule
+// seedBaseCatalog/seedItemAcrossVillages apply when deciding what to stock --
+// so dropping the value to 0 must REMOVE the base-catalog rows, not reprice
+// them to 0 (which would hand out free gear). The reverse direction (0 -> a
+// real price) is handled by the route calling seedItemAcrossVillages, which
+// already re-seeds only what qualifies.
+//
+// Returns the number of base-catalog rows changed.
+async function repriceBaseCatalog(pool, itemTypeId, value) {
+  const price = Number(value) || 0;
+  if (price <= 0) {
+    const del = await pool.query(
+      `DELETE FROM merchant_stock
+        WHERE item_type_id = $1 AND seller_user_id IS NULL`,
+      [itemTypeId],
+    );
+    return del.rowCount || 0;
+  }
+  const upd = await pool.query(
+    `UPDATE merchant_stock SET price = $2
+      WHERE item_type_id = $1 AND seller_user_id IS NULL AND price <> $2`,
+    [itemTypeId, price],
+  );
+  return upd.rowCount || 0;
+}
+
+// Lazily sweep expired buyback rows, then read the shop AS SEEN BY ONE PLAYER.
+//
+// SOMET-280: buyback used to be a shared shelf -- every buyback row in the
+// village was listed to everyone, so another player could snipe the gear you
+// had just sold, inside the 3-day window, with no notification to you. That
+// contradicts SOMET-156's own acceptance wording ("the player can buy them
+// back"). viewerUserId now scopes the buyback list to its seller; the base
+// catalog (seller_user_id IS NULL) is public and unaffected.
+//
+// Scoped by USER, not by character, deliberately:
+//   - merchant_stock.seller_user_id is a users.id FK; there is no character_id
+//     column, so character scoping would need a schema change.
+//   - The sale proceeds landed in users.gold, which is per ACCOUNT (SOMET-257
+//     made inventory/progression per character, but NOT the wallet). The gold
+//     a second character would spend buying the row back is the very gold the
+//     first character's sale created. Scoping tighter than the wallet would be
+//     inconsistent: same purse, different shelf.
+//   - Character deletion would otherwise strand the row -- unreachable by
+//     anyone until it expires -- while the account keeps the gold.
+// So a player's second character DOES see (and may buy back) stock the first
+// character sold. It never leaves the account that sold it.
+//
+// The sweep DELETE is intentionally NOT scoped to the viewer: an expired row
+// is garbage regardless of who sold it, and whoever opens the shop next
+// should clear it.
+//
+// Fails CLOSED on a missing viewerUserId: `seller_user_id = NULL` is never
+// true, so a caller that forgets the argument sees an empty buyback list
+// rather than everyone's.
+async function fetchShop(pool, villageId, viewerUserId) {
   await pool.query(
     'DELETE FROM merchant_stock WHERE village_id = $1 AND expires_at IS NOT NULL AND expires_at < now()',
     [villageId],
@@ -77,8 +144,9 @@ async function fetchShop(pool, villageId) {
   const r = await pool.query(
     `SELECT id, item_type_id, price, quantity, seller_user_id FROM merchant_stock
       WHERE village_id = $1 AND (expires_at IS NULL OR expires_at > now())
+        AND (seller_user_id IS NULL OR seller_user_id = $2)
       ORDER BY seller_user_id NULLS FIRST, created_at ASC`,
-    [villageId],
+    [villageId, viewerUserId == null ? null : Number(viewerUserId)],
   );
   const rows = r.rows.map(mapRow);
   return {
@@ -99,5 +167,5 @@ async function insertBuyback(pool, worldId, villageId, itemTypeId, price, seller
 
 module.exports = {
   SELL_FRACTION, BUYBACK_DAYS, sellPriceFor,
-  seedBaseCatalog, seedItemAcrossVillages, fetchShop, insertBuyback,
+  seedBaseCatalog, seedItemAcrossVillages, repriceBaseCatalog, fetchShop, insertBuyback,
 };

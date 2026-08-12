@@ -12,7 +12,11 @@
       "biomes": ["Meadow"], "biome_cell": 16,
       "allowed_creature_types": ["Slime"],
       "is_entry": true,
-      "entry_spawn": { "x": 3250, "y": 3250 },
+      "entry_spawn": { "x": 3150, "y": 3250 },
+      "village": {
+        "min_row": 31, "min_col": 30, "width": 6, "height": 4,
+        "gate_edge": "S", "spawn_x": 3150, "spawn_y": 3250
+      },
       "level_band": [1, 2]
     },
     {

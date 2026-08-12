@@ -1487,7 +1487,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
         const village = nearestMerchantVillage(entry.villages, cx, cy, INTERACT_RADIUS);
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
-        const shop = await fetchShop(pool, village.id);
+        // ws.userId, not ws.characterId: merchant_stock.seller_user_id is a
+        // users.id and buyback is account-scoped (SOMET-280 — see fetchShop).
+        const shop = await fetchShop(pool, village.id, ws.userId);
         send(ws, { type: 'shop', villageId: village.id, catalog: shop.catalog, buyback: shop.buyback });
       });
     },

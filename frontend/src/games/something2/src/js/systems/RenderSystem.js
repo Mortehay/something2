@@ -1036,9 +1036,11 @@ export class RenderSystem {
   //   - Catalog: the village's base stock (infinite — buying never removes
   //     the row), `kind:'buy'` keyed on the merchant_stock row id (`row.id`,
   //     i.e. the stockId `sendBuy` expects).
-  //   - Buyback: other players' sold-back items, same `kind:'buy'` action
-  //     but visually distinguished (amber) and finite — buying one deletes
-  //     the row.
+  //   - Buyback: items THIS player sold here, still reclaimable at the price
+  //     they were paid, same `kind:'buy'` action but visually distinguished
+  //     (amber) and finite — buying one deletes the row. The server sends
+  //     only the viewer's own rows (SOMET-280) and refuses a buy of anyone
+  //     else's, so this list is never another player's stock.
   //   - Your items: the player's own inventory, `kind:'sell'` keyed on the
   //     item instance id (the itemId `sendSell` expects). Names/stats are
   //     resolved the same way renderInventory's owned-item list does; the
@@ -1135,6 +1137,8 @@ export class RenderSystem {
 
     // Tabs. Counts live in the labels so a player who just sold something can
     // see there is buyback stock without having to click the tab to find out.
+    // The buyback count is the player's OWN reclaimable stock (SOMET-280), so
+    // it changes only when they sell, buy back, or a row expires.
     const tabs = [
       { id: "catalog", label: `Catalog (${catalog.length})`, accent: "#4a9eff", on: "rgba(74,158,255,0.28)" },
       { id: "buyback", label: `Buyback (${buyback.length})`, accent: "#caa24a", on: "rgba(202,162,74,0.28)" },

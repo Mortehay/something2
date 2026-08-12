@@ -15,6 +15,13 @@ function mockPool(handlers) {
     if (isUserLookup(sql)) return ADMIN_USER_ROW;
     if (/^(BEGIN|COMMIT|ROLLBACK)$/i.test(sql.trim())) return { rows: [] };
     calls.push({ sql, params });
+    // SOMET-279: insertVillageGuards reads the world's level band and the
+    // Village Guard base stats so it can scale the guards it places. Checked
+    // BEFORE `handlers` because the re-roll test registers a broad
+    // /FROM entity_types/i handler that would otherwise answer the guard's
+    // base-stat lookup with a Slime.
+    if (/SELECT level_max FROM worlds WHERE id = \$1/i.test(sql)) return { rows: [{ level_max: 1 }] };
+    if (/SELECT hp, defense FROM entity_types WHERE name = \$1/i.test(sql)) return { rows: [{ hp: 300, defense: 10 }] };
     for (const [re, fn] of handlers) if (re.test(sql)) return fn(params);
     throw new Error(`unexpected query: ${sql}`);
   };
@@ -25,14 +32,18 @@ test('creating a village inserts two Village Guard creatures at the gate posts',
   const pool = mockPool([
     [/SELECT id, width, height FROM worlds WHERE id = \$1/i, (p) => ({ rows: [{ id: p[0], width: 30, height: 30 }] })],
     [/SELECT min_row, min_col, width, height FROM villages WHERE world_id/i, () => ({ rows: [] })],
-    [/INSERT INTO villages/i, () => ({ rows: [{ id: 'v1', min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S' }] })],
+    // 6x4, not 8x6: SOMET-282 caps width + height at VILLAGE_LIMITS.maxSum
+    // (10 tiles), so an 8x6 POST is now a 400 and would never reach the guard
+    // inserts this test is about. Interior of this box is rows 6..7, cols
+    // 6..9, so spawn (850,750) = tile (row 7, col 8) is still legal.
+    [/INSERT INTO villages/i, () => ({ rows: [{ id: 'v1', min_row: 5, min_col: 5, width: 6, height: 4, gate_edge: 'S' }] })],
     [/INSERT INTO world_creatures/i, () => ({ rows: [] })],
     [/INSERT INTO merchant_stock/i, () => ({ rows: [] })],
     [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
   ]);
   __setPool(pool);
   const res = await request(app).post('/api/worlds/w1/villages').set(...AUTH)
-    .send({ min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S', spawn_x: 850, spawn_y: 750 });
+    .send({ min_row: 5, min_col: 5, width: 6, height: 4, gate_edge: 'S', spawn_x: 850, spawn_y: 750 });
   assert.equal(res.status, 200);
   const guardInserts = pool.calls.filter((c) => /INSERT INTO world_creatures/i.test(c.sql));
   assert.equal(guardInserts.length, 2, 'exactly two guards per village');

@@ -142,7 +142,21 @@ function buildDungeon(dungeon, dungeonIndex) {
       is_entry: false,
     };
     if (skeleton.needsVillageAtEntry && room.role === 'entry') {
-      world.village = { min_row: 28, min_col: 28, width: 6, height: 5, gate_edge: 'S', spawn_x: PORTAL_TILE_PX, spawn_y: PORTAL_TILE_PX };
+      // 6x4, NOT 6x5: SOMET-282 caps width + height at VILLAGE_LIMITS.maxSum
+      // (10 tiles), the largest village whose on-screen bounding box fits in a
+      // quarter of the 1280x720 viewport. See services/villages.js for the
+      // derivation.
+      //
+      // The spawn is tile (row 29, col 30) -- interior for this box (rows
+      // 29..30, cols 29..32), and the whole 64px player square lands inside
+      // the interior from there, which the just-inside-the-gate tile (row 30,
+      // col 31) would not do. It also avoids the merchant post (row 29, col
+      // 31) and both gate-guard posts (row 30, cols 30 and 32). This used to
+      // read PORTAL_TILE_PX (3250,3250), which is the SOUTH WALL RING of the
+      // old 6x5 box -- the exact SOMET-153 defect, still latent here because
+      // the checked-in p5-descent.map.json was patched by hand and the
+      // generator was not.
+      world.village = { min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S', spawn_x: 3050, spawn_y: 2950 };
     }
     worlds.push(world);
   });

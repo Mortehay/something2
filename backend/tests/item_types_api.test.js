@@ -134,8 +134,14 @@ test('POST /api/item-types rejects armor with a stray non-null kind (400, not 50
   assert.match(res.body.error, /kind/i);
 });
 
+// SOMET-278: PUT now reads the stored row before validating (the reserved-row
+// guard has to key off the database, not the request body), so this mock
+// answers that lookup with an ordinary armor row. The assertion is unchanged:
+// a stray kind is still a 400, and still never reaches the UPDATE.
 test('PUT /api/item-types/:id rejects armor with a stray non-null kind (400, not 500)', async () => {
-  __setPool(mockPool([]));
+  __setPool(mockPool([
+    [/SELECT .*FROM item_types WHERE id/i, () => ({ rows: [{ id: 1, name: 'old-armor', category: 'armor', value: 5 }] })],
+  ]));
   const res = await request(app).put('/api/item-types/1').set(...AUTH).send({
     name: 'stray-kind-armor', category: 'armor', slot: 'chest', defense: 1, kind: 'anything',
   });
@@ -289,14 +295,21 @@ test('POST /api/item-types INSERT names every load-bearing column with a positio
 });
 
 test('PUT /api/item-types/:id UPDATE names every load-bearing column with a positionally-aligned placeholder', async () => {
-  const pool = mockPool([
-    [/UPDATE item_types/i, (p) => ({ rows: [{ id: 1, name: p[0], category: p[1] }] })],
-  ]);
-  __setPool(pool);
   const body = {
     name: 'y', category: 'weapon', kind: 'projectile', range: 620, projectile_speed: 650, projectile_radius: 12,
     stamina_cost: 9, element: 'ice', stackable: false, ammo_type_id: 5, aoe_radius: 30, value: 40,
   };
+  const pool = mockPool([
+    [/SELECT .*FROM item_types WHERE id/i, () => ({ rows: [{ id: 1, name: 'y', category: 'weapon', value: 10 }] })],
+    // The stored row the UPDATE returns is what the reprice below reads, so the
+    // mock has to carry `value` like the real RETURNING * does.
+    [/UPDATE item_types/i, (p) => ({ rows: [{ id: 1, name: p[0], category: p[1], value: body.value }] })],
+    // SOMET-281: a value edit now re-prices existing base-catalog stock and
+    // backfills villages that never had the row.
+    [/UPDATE merchant_stock/i, () => ({ rowCount: 0 })],
+    [/INSERT INTO merchant_stock/i, () => ({ rows: [] })],
+  ]);
+  __setPool(pool);
   const res = await request(app).put('/api/item-types/1').set(...AUTH).send(body);
   assert.equal(res.status, 200);
 

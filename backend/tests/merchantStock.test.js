@@ -26,10 +26,34 @@ test('fetchShop sweeps expired rows, then splits catalog vs buyback', async () =
     }
     throw new Error('unexpected ' + sql);
   } };
-  const shop = await fetchShop(pool, 'v1');
+  const shop = await fetchShop(pool, 'v1', 7);
   assert.ok(calls.some((s) => /DELETE FROM merchant_stock/i.test(s)), 'expired sweep ran');
   assert.deepEqual(shop.catalog, [{ id: 'c1', itemTypeId: 1, price: 20, quantity: 1, sellerUserId: null }]);
   assert.deepEqual(shop.buyback, [{ id: 'b1', itemTypeId: 2, price: 5, quantity: 1, sellerUserId: 7 }]);
+});
+
+// SOMET-280. A mock pool returns whatever the fixture declared regardless of
+// the WHERE clause, so this can only check that the read is SHAPED to scope
+// buyback to its seller and is parameterized on the viewer -- a filter written
+// against the wrong parameter would still pass here. The behavioural proof (B
+// genuinely does not receive A's row) is in merchant_buyback_scope_db.test.js,
+// against a real database. This case is the cheap sentinel that runs even with
+// no Postgres around.
+test('fetchShop scopes buyback rows to the viewing user, and keeps the base catalog public', async () => {
+  let readSql = '', readParams = null;
+  const pool = { query: async (sql, params) => {
+    if (/DELETE FROM merchant_stock/i.test(sql)) {
+      assert.ok(!/seller_user_id/i.test(sql),
+        'the expired sweep must stay global: an expired row is garbage whoever sold it');
+      return { rowCount: 0 };
+    }
+    readSql = sql; readParams = params;
+    return { rows: [] };
+  } };
+  await fetchShop(pool, 'v1', 42);
+  assert.match(readSql, /seller_user_id IS NULL OR seller_user_id = \$2/i,
+    'base catalog stays public; seller-owned rows are restricted to their seller');
+  assert.deepEqual(readParams, ['v1', 42], 'the viewer id must be the second bound parameter');
 });
 
 test('seedBaseCatalog inserts only sellable weapon/armor types at price = value', async () => {

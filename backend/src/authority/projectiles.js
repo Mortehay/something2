@@ -8,6 +8,11 @@ const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
 const { hasLineOfSight } = require('./weapons');
 const { applyElementEffect } = require('./effects');
 const { shoveAwayFrom } = require('./knockback');
+// SOMET-283: the leash-aware creature shove. The clamp is a creature-domain
+// rule and lives next to the guard constants that define what a post is, rather
+// than being duplicated here. No import cycle: creatures.js does not require
+// this module.
+const { shoveCreature } = require('./creatures');
 
 // Sub-step resolution for terrain sampling, shared with the melee
 // line-of-sight walk in weapons.js. Defined in subStep.js (see the note there
@@ -157,7 +162,11 @@ class ProjectileSim {
         // never be shoved. Origin is the blast centre, not the projectile's
         // travel direction: an AoE's shove radiates outward from where it
         // detonated.
-        shoveAwayFrom(map, bx, by, c, p.knockback);
+        //
+        // SOMET-283: shoveCreature, not the raw shoveAwayFrom -- a blast is a
+        // creature-targeting displacement like any other, so a guard caught in
+        // one is held to its post. Inert for a hostile.
+        shoveCreature(map, bx, by, c, p.knockback);
       }
       if (p.stoneItemId != null) stoneHits.push({ stoneItemId: p.stoneItemId });
       // The rider is applied at FULL duration: falloff scales damage only. A
@@ -258,7 +267,12 @@ class ProjectileSim {
               // Survivors only. Origin is the projectile's own current
               // position -- the point of direct contact, not the blast
               // centre (this is the swept/direct-hit path, not an AoE).
-              shoveAwayFrom(map, p.x, p.y, c, p.knockback);
+              //
+              // SOMET-283: leash-aware, same reason as the AoE branch above.
+              // No player weapon carries projectile knockback today, but a
+              // creature-fired shot does (`shots[].knockback`) and
+              // projectileHitsCreature lets a hostile's shot hit a guard.
+              shoveCreature(map, p.x, p.y, c, p.knockback);
             }
             // See the _detonate comment above: killerUserIdFor(p), not
             // p.ownerId -- the same uuid-into-killerUserId bug, reachable

@@ -103,13 +103,25 @@ async function seedOneBiome(db, b) {
 //     falls back, so it has not yet had occasion to protect a hand-tuned
 //     admin value for these four.
 //   - damage_override, aura_radius, aura_damage_mult, aura_defense_mult,
-//     aura_speed_mult, gold_min, gold_max are genuinely exercised: only
-//     Guard sets damage_override (the other eleven rows fall back to
-//     whatever value is already in the column on reseed), only Champion
-//     sets the four aura_* fields, and only Guard omits gold_min/gold_max.
+//     aura_speed_mult, gold_min, gold_max are genuinely exercised: NO row
+//     sets damage_override any more (all twelve fall back to whatever value
+//     is already in the column on reseed), only Champion sets the four
+//     aura_* fields, and only Guard omits gold_min/gold_max.
 //   Read "COALESCE-guarded" as "will protect an admin edit if this seed
 //   row is ever missing the field", not as "is currently protecting one" --
 //   only the second group's fallback is presently reached by a real row.
+//
+// SOMET-279: damage_override's COALESCE is now load-bearing rather than
+// nominal, and it must stay a COALESCE. Guard used to author 25 here, which
+// the tick reads as `(bh.damageOverride ?? c.damage)` -- a non-null override
+// SHADOWS the per-instance world_creatures.damage every level-scaled guard
+// carries, so a reseed silently flattened a level-50 guard back to 25 (i.e.
+// to the applyDamage floor of 1 against a level-50 hostile) with no error.
+// The seed row dropped the field; because $7 is then NULL, this UPDATE keeps
+// whatever the column already holds -- migration 1714440173000 set it to
+// NULL, and reseeding leaves it NULL. Writing EXCLUDED (or a literal) here
+// instead would put the landmine straight back. Pinned by
+// tests/village_guard_seed_durability.test.js.
 //
 // SOMET-253 Task 3 dropped attack_kind/attack_range/attack_cooldown/
 // projectile_speed/projectile_radius from creature_behaviors -- the attack

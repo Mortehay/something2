@@ -200,8 +200,18 @@ async function grantStartingLoadout(pool, character, itemTypes) {
       // database. This guard is about the in-memory catalog the world was built
       // from, which can legitimately predate a catalog change.
       if (!itemTypes.has(row.item_type_id)) continue;
+      // SOMET-277: soulbound = true, on the INSTANCE. The per-character flag
+      // this function claims above closes the sell-then-RECONNECT exploit but
+      // not sell-then-DELETE-the-character: the flag dies with the character,
+      // the gold (users.gold, account-wide) does not. Binding the granted
+      // instances is what makes the loadout non-monetizable, and doing it per
+      // instance rather than per item TYPE is what keeps a looted or bought
+      // short sword worth its full 32. See 1714440174000_soulbound_items.js.
+      // Written inside this same transaction as the claim, so a grant is
+      // still all-or-nothing -- there is no path that inserts a granted row
+      // and leaves it unbound.
       await client.query(
-        'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1, $2, $3)',
+        'INSERT INTO player_items (character_id, item_type_id, quantity, soulbound) VALUES ($1, $2, $3, true)',
         [character.id, row.item_type_id, row.quantity],
       );
     }

@@ -1,5 +1,5 @@
 const { resolveMove } = require('./collision');
-const { CreatureSim, CREATURE_SIZE } = require('./creatures');
+const { CreatureSim, CREATURE_SIZE, shoveCreature } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
 const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
 const { resolveEffectName, momentForAttack } = require('./vfx.js');
@@ -429,7 +429,13 @@ class World {
           if (killedSet.has(id)) continue;
           const c = this.creatures.get(id);
           if (!c) continue;
-          shoveAwayFrom(this.map, cx, cy, c, w.knockback);
+          // SOMET-283: shoveCreature, not the raw shoveAwayFrom -- this is the
+          // site that punted both of Vale Crossing's guards off their posts.
+          // A guard never targets a player and so never fights back, and
+          // MIN_DAMAGE caps a starter weapon at 1 damage against its defense,
+          // so this loop was a free 30px-per-swing conveyor with no leash and
+          // no faction filter. A hostile is still shoved exactly as before.
+          shoveCreature(this.map, cx, cy, c, w.knockback);
           c.dirty = true;
         }
       }

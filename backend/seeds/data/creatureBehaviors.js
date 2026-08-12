@@ -9,10 +9,23 @@
 // Nine rungs come from the Bestiary Program umbrella
 // (docs/superpowers/specs/2026-08-06-bestiary-program-design.md). Three do not:
 //
-//   Guard  -- today's hardcoded guard constants, moved into data. Its
-//             damage_override of 25 is GUARD_DAMAGE; without that column the
-//             Guard profile could not reproduce current behaviour, which is
-//             this sub-project's load-bearing invariant.
+//   Guard  -- today's hardcoded guard constants, moved into data. It
+//             ORIGINALLY carried damage_override: 25 (= GUARD_DAMAGE), which
+//             is what migration 1714440080000 still inserts. SOMET-279
+//             removed it here and migration 1714440173000 nulled the live
+//             column: the tick computes a hit as
+//             `(bh.damageOverride ?? c.damage)`, so ANY non-null override on
+//             this row SHADOWS the per-instance world_creatures.damage that
+//             level-scaled guards now carry -- a level-50 guard went back to
+//             hitting for a flat 25, i.e. the applyDamage floor of 1 against
+//             a level-50 hostile. Re-authoring it here would silently undo
+//             that on the next `npm run seed:catalogs`. GUARD_DAMAGE lives on
+//             as the level-1 BASE damage villages.js feeds to scaleCreature,
+//             and as the unprofiled-guard fallback in
+//             authority/creatures.js's GUARD_DEFAULT_BEHAVIOR -- not as a
+//             catalog column. Pinned by
+//             creature_behaviors_invariants.test.js and
+//             village_guard_seed_durability.test.js.
 //   Sentry -- gives the `hold` style a consumer. An immobile ranged turret.
 //   Lurker -- gives the `ambush` style a consumer. Dormant, then a fast charge.
 //
@@ -39,7 +52,8 @@ const CREATURE_BEHAVIORS = [
   { name: 'Champion',   attack_kind: 'melee',  attack_range: 65,  attack_cooldown: 1.1, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 480, leash_radius: 900,  chase_style: 'charge',   preferred_range: 0,   move_speed_mult: 1.05,
     aura_radius: 260, aura_damage_mult: 1.25, aura_defense_mult: 1.2, aura_speed_mult: 1.1, gold_min: 10, gold_max: 30 },
   { name: 'Apex',       attack_kind: 'cast',   attack_range: 260, attack_cooldown: 2.0, projectile_speed: 460, projectile_radius: 10, aggro_radius: 600, leash_radius: 1200, chase_style: 'charge',   preferred_range: 0,   move_speed_mult: 0.95, gold_min: 25, gold_max: 80 },
-  { name: 'Guard',      attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 1.0, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 400, leash_radius: 300,  chase_style: 'guard',    preferred_range: 0,   move_speed_mult: 1.0, damage_override: 25 },
+  // No damage_override -- deliberately. See the Guard note in the header.
+  { name: 'Guard',      attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 1.0, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 400, leash_radius: 300,  chase_style: 'guard',    preferred_range: 0,   move_speed_mult: 1.0 },
   { name: 'Sentry',     attack_kind: 'ranged', attack_range: 380, attack_cooldown: 2.0, projectile_speed: 500, projectile_radius: 6,  aggro_radius: 400, leash_radius: 800,  chase_style: 'hold',     preferred_range: 0,   move_speed_mult: 1.0, gold_min: 2,  gold_max: 9 },
   { name: 'Lurker',     attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 0.9, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 180, leash_radius: 700,  chase_style: 'ambush',   preferred_range: 0,   move_speed_mult: 1.6, gold_min: 2,  gold_max: 7 },
 ];

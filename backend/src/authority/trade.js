@@ -30,6 +30,31 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
       return { ok: false, reason: 'that item is no longer for sale' };
     }
     const stock = sr.rows[0];
+
+    // SOMET-280: fetchShop no longer LISTS another player's buyback row, but a
+    // list filter is not an authorization check -- a crafted `buy` frame
+    // carries a raw stockId and never goes near fetchShop. This is the half
+    // that actually enforces it.
+    //
+    // Runs on the row the SELECT ... FOR UPDATE above already locked, inside
+    // the same transaction, so there is no check-then-act window: the row
+    // cannot change seller (or be deleted and re-created under this id)
+    // between the check and the DELETE below. A pre-check outside the
+    // transaction would have exactly that race.
+    //
+    // seller_user_id IS NULL is the infinite base catalog and stays public --
+    // only a seller-owned row is restricted, and only to the ACCOUNT that
+    // sold it (see fetchShop's header for why user, not character).
+    //
+    // Deliberately reuses the 'no longer for sale' wording rather than
+    // "belongs to another player": to a legitimate client this row does not
+    // exist, and a distinct message would confirm to a prober that a given id
+    // is a live row someone else owns.
+    if (stock.seller_user_id != null && Number(stock.seller_user_id) !== Number(userId)) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'that item is no longer for sale' };
+    }
+
     const price = Number(stock.price) || 0;
 
     // Overdraft-safe: the WHERE guard makes "not enough gold" a 0-row result
@@ -115,7 +140,7 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
 
     // The character_id predicate IS the ownership check.
     const del = await client.query(
-      'DELETE FROM player_items WHERE id = $1 AND character_id = $2 RETURNING item_type_id, quantity',
+      'DELETE FROM player_items WHERE id = $1 AND character_id = $2 RETURNING item_type_id, quantity, soulbound',
       [itemId, characterId],
     );
     if (del.rowCount !== 1) {
@@ -123,6 +148,32 @@ async function sellItem(pool, entry, userId, characterId, villageId, itemId) {
       return { ok: false, reason: 'you do not own that item' };
     }
     const itemTypeId = del.rows[0].item_type_id;
+
+    // SOMET-277: the starting loadout is granted per CHARACTER but gold is
+    // per ACCOUNT (users.gold), so "sell the granted gear, delete the
+    // character, create another" was an unbounded faucet that the
+    // characters.starting_loadout_granted_at flag cannot see -- the flag dies
+    // with the character. Granted instances are marked soulbound at grant
+    // time (items.js's grantStartingLoadout) and refuse to become gold here.
+    //
+    // Read off the DELETE's own RETURNING rather than a separate pre-SELECT:
+    // it is the same row, already locked by this transaction, so there is no
+    // check-then-act window at all -- exactly the shape the stacked-quantity
+    // refusal below already uses. The DELETE has therefore already happened,
+    // which is why this MUST roll back rather than merely return.
+    //
+    // Per-INSTANCE, never per item TYPE: an identical short sword looted from
+    // a creature or bought from a merchant carries soulbound = false and
+    // sells for its full value. That distinction is the entire point of the
+    // column.
+    //
+    // Message names the concrete cause because grantStartingLoadout is the
+    // only writer of soulbound today; if a second source of bound items ever
+    // appears it should generalize to "this item is bound to you".
+    if (del.rows[0].soulbound === true) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'starting gear cannot be sold' };
+    }
 
     // Same transaction as the DELETE above, so a crash between the two is
     // impossible, not just unlikely -- a dangling socketed_into_id can never

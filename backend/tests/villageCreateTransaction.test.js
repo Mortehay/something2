@@ -38,6 +38,10 @@ function mkTransactionalPool({ failMerchantStock = false } = {}) {
         pending.push(row);
         return { rows: [row] };
       }
+      // SOMET-279: guard placement reads the world's level band and the
+      // Village Guard base stats on the SAME client, inside the transaction.
+      if (/SELECT level_max FROM worlds WHERE id = \$1/i.test(sql)) return { rows: [{ level_max: 1 }] };
+      if (/SELECT hp, defense FROM entity_types WHERE name = \$1/i.test(sql)) return { rows: [{ hp: 300, defense: 10 }] };
       if (/INSERT INTO world_creatures/i.test(sql)) return { rows: [] };
       if (/INSERT INTO merchant_stock/i.test(sql)) {
         if (failMerchantStock) throw new Error('simulated merchant_stock insert failure');
@@ -67,7 +71,7 @@ test('a failed village create rolls back: the village does not appear in a later
   __setPool(pool);
 
   const createRes = await request(app).post('/api/worlds/w1/villages').set(...AUTH)
-    .send({ min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });
+    .send({ min_row: 5, min_col: 5, width: 6, height: 4, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });   // 6x4: SOMET-282 caps width + height at 10
   assert.equal(createRes.status, 500);
 
   const listRes = await request(app).get('/api/worlds/w1/villages');
@@ -82,7 +86,7 @@ test('a successful village create is visible in a later GET (control for the rol
   __setPool(pool);
 
   const createRes = await request(app).post('/api/worlds/w1/villages').set(...AUTH)
-    .send({ min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });
+    .send({ min_row: 5, min_col: 5, width: 6, height: 4, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });   // 6x4: SOMET-282 caps width + height at 10
   assert.equal(createRes.status, 200);
 
   const listRes = await request(app).get('/api/worlds/w1/villages');

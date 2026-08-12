@@ -52,8 +52,8 @@ function renderer(ctx) {
 }
 
 // The live shape: 24 sellable item types per village (confirmed against the
-// merchant_stock rows: 96 rows / 4 villages), plus buyback rows other players
-// have sold in.
+// merchant_stock rows: 96 rows / 4 villages), plus the buyback rows THIS
+// player sold in — since SOMET-280 the server sends no one else's.
 const CATALOG = Array.from({ length: 24 }, (_, i) => ({
   id: 100 + i, itemTypeId: 1 + i, price: 10 + i,
 }));

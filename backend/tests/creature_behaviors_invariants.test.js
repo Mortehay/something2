@@ -98,11 +98,61 @@ test('the database Guard row equals today\'s GUARD_* constants', () => {
   assert.equal(guard.chase_style, 'guard');
   assert.equal(guard.aggro_radius, GUARD_AGGRO_RADIUS, 'Guard.aggro_radius must equal GUARD_AGGRO_RADIUS');
   assert.equal(guard.leash_radius, GUARD_LEASH_RADIUS, 'Guard.leash_radius must equal GUARD_LEASH_RADIUS');
-  // damage_override is the one column DEFAULT_BEHAVIOR-style comparisons
-  // exempt everywhere else in this fix wave (0 is a real value, "hits for
-  // nothing") -- but Guard's own value must still equal GUARD_DAMAGE, the
-  // constant it exists to reproduce.
-  assert.equal(guard.damage_override, GUARD_DAMAGE, 'Guard.damage_override must equal GUARD_DAMAGE');
+});
+
+// SOMET-279. This assertion is the INVERSE of the one that stood here until
+// now ("Guard.damage_override must equal GUARD_DAMAGE"), and the inversion is
+// the whole point: that assertion defended the bug.
+//
+// The tick computes every hit as `(bh.damageOverride ?? c.damage)`
+// (authority/creatures.js). Village guards are level-scaled per instance --
+// migration 1714440173000 wrote level/hp/damage/defense onto every live
+// world_creatures row and villages.js writes them for new guards, so a guard
+// in The Abyss: Hub carries damage 147.5. A non-null damage_override on the
+// shared Guard behaviour SHADOWS all of it: every guard in every world hits
+// for a flat 25, which applyDamage (`raw - defense`, floored at MIN_DAMAGE)
+// turns into literally 1 against a level-50 hostile.
+//
+// The migration nulled the live column, but the seed file kept authoring 25
+// and scripts/seed-catalogs.js writes what the seed file carries -- so a
+// routine `npm run seed:catalogs` re-broke level scaling silently, and the
+// old assertion here made the suite green while it did. GUARD_DAMAGE is not
+// retired: it is still the level-1 BASE damage villages.js feeds to
+// scaleCreature, and still the unprofiled-guard fallback in
+// GUARD_DEFAULT_BEHAVIOR. It is simply no longer a catalog column.
+test('the seeded Guard row does NOT carry a damage_override', () => {
+  const guard = CREATURE_BEHAVIORS.find((b) => b.name === 'Guard');
+  assert.ok(guard, 'Guard is missing from the seed catalog');
+
+  assert.equal(guard.damage_override ?? null, null,
+    'Guard.damage_override must be absent: `(bh.damageOverride ?? c.damage)` makes any value here '
+    + 'shadow every level-scaled guard\'s per-instance world_creatures.damage, and seeding it back '
+    + 'flattens every guard to a flat hit with no error');
+
+  // No OTHER behaviour may quietly acquire one either. damage_override is a
+  // legitimate column (an admin can set one through the behaviours API), but
+  // nothing in the shipped catalog should carry one: the whole catalog is
+  // per-instance-scaled now, so a seeded override is always a shadow.
+  const withOverride = CREATURE_BEHAVIORS.filter((b) => (b.damage_override ?? null) !== null);
+  assert.deepEqual(withOverride.map((b) => b.name), [],
+    'a seeded damage_override shadows that rung\'s per-instance world_creatures.damage for every '
+    + 'creature using it — if one is genuinely wanted, say so here deliberately');
+});
+
+// GUARD_DAMAGE keeps its meaning even though it is no longer a catalog
+// column: villages.js feeds it to scaleCreature as the guard's LEVEL-1
+// damage, so a level-1 guard must still hit for exactly what guards have
+// always hit for. Migration 1714440080000's frozen array is the independent
+// historical record of that number -- comparing against it (rather than
+// re-typing 25) is what makes this a pin and not a restatement.
+test('GUARD_DAMAGE still equals the damage guards historically hit for', () => {
+  const row = MIGRATION_BEHAVIORS.find((r) => r[0] === 'Guard');
+  assert.ok(row, 'Guard is missing from the migration array');
+  const historical = row[MIGRATION_FIELD_ORDER.indexOf('damage_override')];
+  assert.equal(historical, 25, 'fixture check: the frozen migration value');
+  assert.equal(GUARD_DAMAGE, historical,
+    'GUARD_DAMAGE is villages.js\'s level-1 base damage — drift here silently rebalances every '
+    + 'guard in the game against the number they were built at');
 });
 
 // The migration inserts BEHAVIORS as positional arrays; the seed file carries
@@ -119,9 +169,28 @@ const MIGRATION_FIELD_ORDER = [
   'preferred_range', 'move_speed_mult', 'damage_override',
 ];
 
+// SOMET-279 introduced the FIRST deliberate divergence between the two
+// copies, and it is exactly one cell: Guard.damage_override.
+//
+// 1714440080000 inserted Guard with 25 and is frozen history — a migration
+// states what the database was set to on a date and must never be rewritten.
+// 1714440173000 then SET that column to NULL, because a non-null override
+// shadows every level-scaled guard's per-instance damage (see the Guard test
+// above). The seed file is the live catalog, so it follows the LATER
+// migration, not the earlier one.
+//
+// Enumerated as a map with the superseded value spelled out, and both sides
+// asserted below, rather than skipped: the exception cannot silently widen to
+// another row or another column, and it goes red if anyone "fixes" the
+// history by editing 1714440080000.
+const SUPERSEDED_BY_LATER_MIGRATION = new Map([
+  ['Guard.damage_override', { migration: 25, seed: null, by: '1714440173000' }],
+]);
+
 test('the seed catalog and the migration\'s BEHAVIORS array cannot diverge, field for field', () => {
   assert.ok(MIGRATION_BEHAVIORS.length > 0, 'no migration rows — this test would assert nothing');
   const seedByName = new Map(CREATURE_BEHAVIORS.map((b) => [b.name, b]));
+  const exceptionsSeen = new Set();
 
   for (const row of MIGRATION_BEHAVIORS) {
     const [name] = row;
@@ -130,8 +199,25 @@ test('the seed catalog and the migration\'s BEHAVIORS array cannot diverge, fiel
     MIGRATION_FIELD_ORDER.forEach((field, i) => {
       const migrationValue = row[i] === null ? null : row[i];
       const seedValue = field === 'damage_override' ? (seedRow[field] ?? null) : seedRow[field];
+
+      const exception = SUPERSEDED_BY_LATER_MIGRATION.get(`${name}.${field}`);
+      if (exception) {
+        exceptionsSeen.add(`${name}.${field}`);
+        assert.equal(migrationValue, exception.migration,
+          `${name}.${field}: the frozen migration value changed — history was rewritten`);
+        assert.equal(seedValue, exception.seed,
+          `${name}.${field}: the seed file must carry ${exception.seed}, superseded by migration `
+          + `${exception.by}; re-authoring the old value re-breaks it on the next seed run`);
+        return;
+      }
+
       assert.equal(seedValue, migrationValue,
         `${name}.${field}: seed=${seedValue} migration=${migrationValue}`);
     });
   }
+
+  // A stale exception is as bad as a missing one: it would exempt a cell that
+  // no longer needs exempting, hiding a real divergence there forever.
+  assert.deepEqual([...exceptionsSeen].sort(), [...SUPERSEDED_BY_LATER_MIGRATION.keys()].sort(),
+    'every declared exception must correspond to a real migration cell');
 });

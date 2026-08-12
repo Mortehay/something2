@@ -63,6 +63,10 @@ test('buyStock debits gold, grants the item, and leaves a base-catalog row in pl
   assert.match(pool.seen[pool.seen.length - 1], /^COMMIT$/i);
 });
 
+// SOMET-280 changed this fixture's seller from 7 to 1: a buyback row is now
+// only buyable by the account that sold it, and the buying userId here is 1.
+// With the old seller the case would be testing the refusal path instead of
+// the consume-on-buy path it is named for.
 test('buying a buyback row deletes it', async () => {
   const p = PLAYER();
   let deleted = false;
@@ -71,8 +75,11 @@ test('buying a buyback row deletes it', async () => {
     // "DELETE FROM merchant_stock WHERE id = $1" also matches
     // /FROM merchant_stock WHERE id/i and would otherwise be misrouted.
     [/DELETE FROM merchant_stock/i, () => { deleted = true; return { rowCount: 1 }; }],
-    [/FROM merchant_stock WHERE id/i, () => ({ rows: [{ id: 's2', item_type_id: 3, price: 5, seller_user_id: 7, village_id: 'v1' }] })],
-    [/UPDATE users SET gold = gold - /i, () => ({ rowCount: 1, rows: [{ gold: 95 }] })],
+    [/FROM merchant_stock WHERE id/i, () => ({ rows: [{ id: 's2', item_type_id: 3, price: 5, seller_user_id: 1, village_id: 'v1' }] })],
+    [/UPDATE users SET gold = gold - /i, (sql, params) => {
+      assert.equal(params[1], 5, 'the seller buys back at the price they were paid');
+      return { rowCount: 1, rows: [{ gold: 95 }] };
+    }],
     [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new2', item_type_id: 3, quantity: 1 }] })],
   ]);
   const r = await buyStock(pool, mkEntry(p), 1, 31, 's2');
@@ -80,6 +87,48 @@ test('buying a buyback row deletes it', async () => {
   assert.equal(deleted, true, 'buyback rows are one-off and must be removed');
   assert.equal(pool.committed, true);
   assert.equal(pool.rolledBack, false);
+});
+
+// SOMET-280: buyback belongs to the account that sold the item. fetchShop no
+// longer LISTS someone else's row, but a `buy` frame carries a raw stockId and
+// never goes near fetchShop -- the list filter stops an honest client, this
+// check stops a crafted one. mkPool ignores bind parameters, so the refusal
+// below is decided by the code reading the locked row, not by a mock that was
+// told the answer in advance.
+test("buyStock REFUSES another player's buyback row even when handed its correct id", async () => {
+  const p = PLAYER();
+  const pool = mkPool([
+    [/DELETE FROM merchant_stock/i, () => { assert.fail('must not consume a row it refused to sell'); }],
+    // seller 7 vs buyer 1: the row exists, is unexpired, and is in the right
+    // village and world -- every other guard in buyStock passes it.
+    [/FROM merchant_stock WHERE id/i, () => ({ rows: [{ id: 's2', item_type_id: 3, price: 5, seller_user_id: 7, village_id: 'v1' }] })],
+    [/UPDATE users SET gold = gold - /i, () => { assert.fail('must not debit gold for a row the buyer cannot buy'); }],
+    [/INSERT INTO player_items/i, () => { assert.fail("must not grant another player's item"); }],
+  ]);
+  const r = await buyStock(pool, mkEntry(p), 1, 31, 's2');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /no longer for sale/i,
+    'wording must not confirm to a prober that the id names a live row someone else owns');
+  assert.equal(p.gold, 100, 'wallet untouched');
+  assert.equal(p.inv.items.length, 1, 'inventory unchanged');
+  assert.equal(pool.committed, false, 'must not commit');
+  assert.equal(pool.rolledBack, true, 'must roll back the transaction it opened');
+});
+
+// A seller_user_id arriving as a string (pg returns bigints/numerics as text;
+// integer columns come back as numbers today, but nothing in this file
+// guarantees the column type never widens) must still match its owner. A ===
+// comparison would silently refuse every seller their own row.
+test("buyStock matches the seller by value, not by type, so the owner is never locked out", async () => {
+  const p = PLAYER();
+  const pool = mkPool([
+    [/DELETE FROM merchant_stock/i, () => ({ rowCount: 1 })],
+    [/FROM merchant_stock WHERE id/i, () => ({ rows: [{ id: 's2', item_type_id: 3, price: 5, seller_user_id: '1', village_id: 'v1' }] })],
+    [/UPDATE users SET gold = gold - /i, () => ({ rowCount: 1, rows: [{ gold: 95 }] })],
+    [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new2', item_type_id: 3, quantity: 1 }] })],
+  ]);
+  const r = await buyStock(pool, mkEntry(p), 1, 31, 's2');
+  assert.equal(r.ok, true);
 });
 
 test('buyStock locks the stock row FOR UPDATE to prevent a concurrent double-sell', async () => {
@@ -102,7 +151,9 @@ test('a buyback whose row vanishes out from under the DELETE (lost race) rolls b
     // wait for the winner's lock, then re-read), but by the time this tx's
     // DELETE runs the row is already gone — defensive rowCount check catches it.
     [/DELETE FROM merchant_stock/i, () => ({ rowCount: 0 })],
-    [/FROM merchant_stock WHERE id/i, () => ({ rows: [{ id: 's2', item_type_id: 3, price: 5, seller_user_id: 7, village_id: 'v1' }] })],
+    // seller_user_id 1 === the buying userId (SOMET-280): this case is about
+    // losing the race for a row the buyer IS allowed to buy.
+    [/FROM merchant_stock WHERE id/i, () => ({ rows: [{ id: 's2', item_type_id: 3, price: 5, seller_user_id: 1, village_id: 'v1' }] })],
     [/UPDATE users SET gold = gold - /i, () => ({ rowCount: 1, rows: [{ gold: 95 }] })],
     [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new2', item_type_id: 3, quantity: 1 }] })],
   ]);

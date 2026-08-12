@@ -419,6 +419,44 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 6000
     return { ok: false, reason: 'unsocket it first' };
   }
 
+  // SOMET-277: soulbound instances (the starting loadout, marked at grant
+  // time by items.js's grantStartingLoadout) cannot be dropped either.
+  //
+  // This is NOT a separate policy decision from the sell refusal in
+  // trade.js -- it is what makes that refusal mean anything. The statement
+  // below moves the row OUT of player_items and into world_items, and
+  // world_items carries no soulbound column; claimItem then INSERTs a BRAND
+  // NEW player_items row from it, which takes the column default (false).
+  // So drop-then-pick-it-back-up would launder a bound item into an unbound
+  // one in two keystrokes and hand the whole faucet straight back. The
+  // alternatives were carrying the flag through world_items and claimItem
+  // (a wider change to the ground-item path for an item the player is not
+  // allowed to monetize anyway) or leaving the hole open; refusing the drop
+  // is the smallest change that actually binds the instance.
+  //
+  // Consumption is deliberately NOT blocked: ammo.js decrements/deletes
+  // player_items rows when a Ranger fires their granted arrows, and that
+  // must keep working -- soulbound restricts TRANSFER (sell, drop, and
+  // therefore any hand-off to another character), not use.
+  //
+  // Joined on character_id, the same ownership predicate the DELETE below
+  // uses and the same reason spelled out for stoneCheck above: an unowned
+  // id must fall through to the generic 'you do not own that item' rather
+  // than leaking whether it happens to be someone's bound gear. Checked
+  // before the write rather than off a RETURNING (which is how sellItem
+  // does it) because this path has no transaction to roll back -- the CTE
+  // is a single autocommitted statement. Safe as a pre-check because
+  // soulbound is monotonic: nothing in the codebase ever clears it, so
+  // there is no window in which it can flip to false between here and the
+  // DELETE.
+  const boundCheck = await pool.query(
+    'SELECT 1 FROM player_items WHERE id = $1 AND character_id = $2 AND soulbound = true',
+    [itemId, characterId],
+  );
+  if (boundCheck.rowCount > 0) {
+    return { ok: false, reason: 'starting gear cannot be dropped' };
+  }
+
   const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
   // One statement does the DELETE ... RETURNING and the world_items INSERT
   // together via a CTE (mirrors claimItem), so Postgres commits or rolls

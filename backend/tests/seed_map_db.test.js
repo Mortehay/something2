@@ -442,15 +442,27 @@ test('seeding populates every world with creatures', async (t) => {
 //
 // The fixture below is pinned, not arbitrary. Verified against the OLD
 // ordering (population loop above the village loop, the code as of 7f25c73):
-// seed 991 with this 8x6 village puts 2 hostiles inside the footprint and
-// makes 10 of 16 creature rows move between the first and second apply, so
-// both assertions below genuinely fail there. A neighbouring seed (1234) does
-// NOT collide and passes either way -- which is exactly why the seed is fixed.
+// seed 991 with this village puts hostiles inside the footprint and makes 10
+// of 16 creature rows move between the first and second apply, so both
+// assertions below genuinely fail there. A neighbouring seed (1234) does NOT
+// collide and passes either way -- which is exactly why the seed is fixed.
 //
-// The village is deliberately the maximum size VILLAGE_LIMITS allows (8x6) to
-// widen the target, and `density` is deliberately NOT authored: the world
-// lands on the 'normal' default like every shipped spec does.
-const VILLAGE_BOX = { min_row: 20, min_col: 20, width: 8, height: 6 };
+// SOMET-282 RE-PIN. The box used to be 8x6 at (20,20), chosen as "the maximum
+// size VILLAGE_LIMITS allows" to widen the target. 8x6 is no longer legal:
+// VILLAGE_LIMITS.maxSum caps width + height at 10 tiles (the on-screen
+// budget), so applyMapSpec now rejects the whole spec before it seeds
+// anything. The replacement is 6x4 -- a legal sum-10 box -- MOVED to (24,20)
+// rather than left at (20,20), because a smaller box in the same place would
+// have covered fewer of the seed's hostiles and quietly weakened the fixture
+// into a vacuous pass. Re-pinned by replaying placeMapCreatures/
+// placeCreaturePacks for seed 991 with `villages: []` (exactly what the old
+// broken ordering fed them) and taking the 6x4 window covering the most
+// hostiles: 3 at (24,20), versus 1 for the old 8x6 box at (20,20). The
+// fixture is therefore STRONGER than the one it replaces, not weaker.
+//
+// `density` is still deliberately NOT authored: the world lands on the
+// 'normal' default like every shipped spec does.
+const VILLAGE_BOX = { min_row: 24, min_col: 20, width: 6, height: 4 };
 const villagePopulationSpec = () => ({
   name: 'zz-test-village-population-fixture',
   topology: 'spine',
@@ -470,13 +482,14 @@ const villagePopulationSpec = () => ({
       // matches allowed_creature_types below.
       chunk_size: 64, biomes: ['Meadow'], biome_cell: 32,
       allowed_creature_types: ['Slime'], is_entry: true, entry_spawn: { x: 3200, y: 3200 },
-      // Spawn is the interior tile just inside the S gate (gate col =
-      // 20 + floor(8/2) = 24; interior rows 21..24, cols 21..26), i.e. tile
-      // (row 24, col 24) -> pixel centre (2450,2450). It used to read
-      // (2350,2650) = tile (row 26, col 23), one row BELOW the box entirely --
-      // harmless to this fixture's assertions but not a legal village, and
-      // validateMapSpec now rejects it (SOMET-153).
-      village: { ...VILLAGE_BOX, gate_edge: 'S', spawn_x: 2450, spawn_y: 2450 } },
+      // Spawn is an interior tile of the box: rows 24..27, cols 20..25, so the
+      // interior is rows 25..26, cols 21..24 and the S gate is at (row 27, col
+      // 23). Tile (row 25, col 21) -> pixel centre (2150,2550), which is clear
+      // of the merchant post (row 25, col 23) and both gate-guard posts (row
+      // 26, cols 22 and 24). It used to read (2350,2650) = a tile outside the
+      // box entirely -- harmless to this fixture's assertions but not a legal
+      // village, and validateMapSpec now rejects it (SOMET-153).
+      village: { ...VILLAGE_BOX, gate_edge: 'S', spawn_x: 2150, spawn_y: 2550 } },
   ],
   links: [],
 });

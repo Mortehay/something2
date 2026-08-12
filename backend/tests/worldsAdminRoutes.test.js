@@ -23,6 +23,14 @@ function mockPool(handlers) {
     if (isUserLookup(sql)) return ADMIN_USER_ROW;
     if (/^(BEGIN|COMMIT|ROLLBACK)$/i.test(sql.trim())) return { rows: [] };
     calls.push({ sql, params });
+    // SOMET-279: the guard re-derivation these routes run (insertVillageGuards)
+    // now reads the world's level band and the Village Guard base stats so a
+    // guard scales to its world. Answered here rather than in every test's
+    // handler list because no test in this file cares which band it gets; the
+    // scaling itself is covered by village_guard_level_scaling.test.js.
+    // Checked BEFORE `handlers` so a broader per-test regex cannot shadow them.
+    if (/SELECT level_max FROM worlds WHERE id = \$1/i.test(sql)) return { rows: [{ level_max: 1 }] };
+    if (/SELECT hp, defense FROM entity_types WHERE name = \$1/i.test(sql)) return { rows: [{ hp: 300, defense: 10 }] };
     for (const [re, fn] of handlers) {
       if (re.test(sql)) return fn(params);
     }

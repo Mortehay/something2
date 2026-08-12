@@ -17,6 +17,14 @@ function mockPool(handlers) {
     if (isUserLookup(sql)) return ADMIN_USER_ROW;
     if (/^(BEGIN|COMMIT|ROLLBACK)$/i.test(sql.trim())) return { rows: [] };
     calls.push({ sql, params });
+    // SOMET-279: insertVillageGuards reads the world's level band and the
+    // Village Guard base stats so it can scale the guards it places. Answered
+    // here rather than in every test's handler list because no test in this
+    // file cares which band it gets; the scaling itself is covered by
+    // village_guard_level_scaling.test.js. Checked BEFORE `handlers` so a
+    // broader per-test regex cannot shadow them.
+    if (/SELECT level_max FROM worlds WHERE id = \$1/i.test(sql)) return { rows: [{ level_max: 1 }] };
+    if (/SELECT hp, defense FROM entity_types WHERE name = \$1/i.test(sql)) return { rows: [{ hp: 300, defense: 10 }] };
     for (const [re, fn] of handlers) if (re.test(sql)) return fn(params);
     throw new Error(`unexpected query: ${sql}`);
   };
@@ -37,15 +45,18 @@ test('POST village inserts a valid village and invalidates the world', async () 
   ]);
   __setPool(pool);
   const res = await request(app).post('/api/worlds/w1/villages').set(...AUTH)
-    .send({ min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });
+    // 6x4, not the 8x6 this used to send: SOMET-282 caps width + height at 10
+    // tiles (VILLAGE_LIMITS.maxSum), so 8x6 is now a 400 and would make this a
+    // test of the rejection path rather than of the happy path.
+    .send({ min_row: 5, min_col: 5, width: 6, height: 4, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });
   assert.equal(res.status, 200);
   assert.equal(res.body.id, 'v1');
   const villageInserts = pool.calls.filter((c) => /INSERT INTO villages/i.test(c.sql));
   assert.equal(villageInserts.length, 1);
-  // merchant post for this box/gate: S gate, minRow 5 minCol 5 width 8 height 6
-  // -> rMax 10, midCol 9, merchant row rMax-2=8, col midCol=9
-  assert.equal(villageInserts[0].params[8], 9 * 100 + 50, 'merchant_x stored from villageMerchantPost');
-  assert.equal(villageInserts[0].params[9], 8 * 100 + 50, 'merchant_y stored from villageMerchantPost');
+  // merchant post for this box/gate: S gate, minRow 5 minCol 5 width 6 height 4
+  // -> rMax 8, midCol 8, merchant row rMax-2=6, col midCol=8
+  assert.equal(villageInserts[0].params[8], 8 * 100 + 50, 'merchant_x stored from villageMerchantPost');
+  assert.equal(villageInserts[0].params[9], 6 * 100 + 50, 'merchant_y stored from villageMerchantPost');
   assert.equal(pool.calls.filter((c) => /DELETE FROM world_chunks/i.test(c.sql)).length, 1);
   const guardInserts = pool.calls.filter((c) => /INSERT INTO world_creatures/i.test(c.sql));
   assert.equal(guardInserts.length, 2, 'village creation spawns exactly two guards');
@@ -75,7 +86,8 @@ test('POST village warns when a player is connected so the new village cannot re
   __setPool(pool);
   __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
   const res = await request(app).post('/api/worlds/w1/villages').set(...AUTH)
-    .send({ min_row: 5, min_col: 5, width: 8, height: 6, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });
+    // 6x4 for the SOMET-282 reason noted above.
+    .send({ min_row: 5, min_col: 5, width: 6, height: 4, gate_edge: 'S', spawn_x: 650, spawn_y: 650 });
   assert.equal(res.status, 200);
   assert.equal(res.body.id, 'v1');
   assert.match(res.body.liveWarning, /connected/i,

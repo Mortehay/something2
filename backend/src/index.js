@@ -8,11 +8,11 @@ const path = require('path');
 const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const {
-  fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS, villageSpawnError,
+  fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS, villageGeometryError,
 } = require('./services/villages');
 const { fetchChests } = require('./services/chests.js');
 const { worldOverviewCache, clearOverviewCache } = require('./services/overviewCache.js');
-const { seedItemAcrossVillages } = require('./services/merchantStock');
+const { seedItemAcrossVillages, repriceBaseCatalog } = require('./services/merchantStock');
 const { populateWorld } = require('./services/worldPopulation');
 const { MAX_WORLD_CREATURES } = require('./services/densityTiers');
 const { loadDecorationDefs } = require('./services/decorationDefs');
@@ -771,11 +771,62 @@ app.delete('/api/entity-types/:id', adminGuard, async (req, res) => {
 const ITEM_ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
 const ITEM_SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
 
-// Mirror the DB CHECKs so the API returns 400 instead of a constraint error.
-function validateItemType(b) {
+// SOMET-278: `gold` is not an ordinary catalog row -- it is the game's
+// currency, and the engine finds it BY NAME at world load
+// (authority/items.js resolveGoldItemTypeId: `t.name === 'gold'`), caching the
+// id on the world entry. Deleting it cascades every world_items gold pile away
+// (world_items_item_type_id_fkey is ON DELETE CASCADE) and, after a restart,
+// resolveGoldItemTypeId returns null so loot.js silently stops dropping gold --
+// no error, no log, the economy is just off. Renaming it breaks the same
+// lookup just as permanently.
+//
+// The reservation is keyed on the STORED row, never on the request body (a
+// body-keyed check is bypassed by simply sending a different name), and it is
+// keyed on BOTH the name and the category:
+//   * `name` is the key the engine actually looks up, so the name is what must
+//     be protected -- and because the guard refuses to change it, the key can
+//     never drift out from under the guard. A category-only guard would let an
+//     admin rename gold -> 'coin' while keeping category 'currency', which
+//     leaves the row "protected" but the engine lookup dead.
+//   * `category = 'currency'` is carried as a second key so a currency row is
+//     still protected if the name were ever changed out of band (e.g. by SQL or
+//     a future migration). It costs nothing today: `currency` is not creatable
+//     through this API at all (see the category whitelist below), so the
+//     reserved set is exactly the seeded gold row.
+// The id (28 in this database) is deliberately NOT the key: it is per-database
+// and would not survive a reseed elsewhere.
+const RESERVED_ITEM_TYPE_NAMES = new Set(['gold']);
+const RESERVED_ITEM_CATEGORIES = new Set(['currency']);
+
+function isReservedItemType(row) {
+  return !!row && (RESERVED_ITEM_TYPE_NAMES.has(row.name) || RESERVED_ITEM_CATEGORIES.has(row.category));
+}
+
+// The name checks alone, split out because they must run BEFORE the route
+// touches the database -- catalogNameLength.test.js proves an over-length name
+// is rejected without a single query.
+function validateItemTypeName(b) {
   if (!b.name) return 'Name is required';
   if (catalogNameTooLong(b.name)) return `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer`;
-  if (!['weapon', 'armor', 'ammo'].includes(b.category)) return "category must be 'weapon', 'armor' or 'ammo'";
+  return null;
+}
+
+// Mirror the DB CHECKs so the API returns 400 instead of a constraint error.
+//
+// `existing` is the stored row on an update (null on create). It only ever
+// RELAXES the category rules, and only for a reserved row keeping its own
+// category: editing the gold row's icon or value used to 400 with
+// "category must be 'weapon', 'armor' or 'ammo'" -- a misleading message for a
+// row whose real category is `currency` and always has been (SOMET-278). A
+// reserved row still cannot become armor/weapon/ammo: that is a rename-class
+// change, refused with 409 by the route, not by this function.
+function validateItemType(b, existing = null) {
+  const nameBad = validateItemTypeName(b);
+  if (nameBad) return nameBad;
+  const keepsReservedCategory = !!existing
+    && RESERVED_ITEM_CATEGORIES.has(existing.category)
+    && b.category === existing.category;
+  if (!keepsReservedCategory && !['weapon', 'armor', 'ammo'].includes(b.category)) return "category must be 'weapon', 'armor' or 'ammo'";
   if (b.element != null && !ITEM_ELEMENTS.includes(b.element)) return `element must be one of ${ITEM_ELEMENTS.join(', ')}`;
   if (b.slot != null && !ITEM_SLOTS.includes(b.slot)) return `slot must be one of ${ITEM_SLOTS.join(', ')}`;
   if (b.resistances) {
@@ -789,17 +840,22 @@ function validateItemType(b) {
   if (b.kind != null && !['melee', 'projectile'].includes(b.kind)) {
     return "kind must be 'melee' or 'projectile' (or unset)";
   }
-  if (b.category === 'weapon') {
-    if (!['melee', 'projectile'].includes(b.kind)) return "weapon kind must be 'melee' or 'projectile'";
-    if (b.kind === 'melee' && (b.reach == null || b.arc_width == null)) return 'melee weapons need reach and arc_width';
-    if (b.kind === 'projectile' && (b.range == null || b.projectile_speed == null || b.projectile_radius == null)) {
-      return 'projectile weapons need range, projectile_speed and projectile_radius';
+  // A reserved (currency) row has none of these shapes -- it is neither a
+  // weapon nor ammo, and demanding `armor needs slot and defense` of it (the
+  // final `else`) is what made every edit of the gold row impossible.
+  if (!keepsReservedCategory) {
+    if (b.category === 'weapon') {
+      if (!['melee', 'projectile'].includes(b.kind)) return "weapon kind must be 'melee' or 'projectile'";
+      if (b.kind === 'melee' && (b.reach == null || b.arc_width == null)) return 'melee weapons need reach and arc_width';
+      if (b.kind === 'projectile' && (b.range == null || b.projectile_speed == null || b.projectile_radius == null)) {
+        return 'projectile weapons need range, projectile_speed and projectile_radius';
+      }
+    } else if (b.category === 'ammo') {
+      if (b.stackable !== true) return 'ammo must be stackable';
+      if (b.kind != null) return 'ammo must not have a kind';
+    } else {
+      if (b.slot == null || b.defense == null) return 'armor needs slot and defense';
     }
-  } else if (b.category === 'ammo') {
-    if (b.stackable !== true) return 'ammo must be stackable';
-    if (b.kind != null) return 'ammo must not have a kind';
-  } else {
-    if (b.slot == null || b.defense == null) return 'armor needs slot and defense';
   }
   if (b.stamina_cost != null) {
     if (typeof b.stamina_cost !== 'number' || !Number.isFinite(b.stamina_cost) || b.stamina_cost < 0) {
@@ -884,8 +940,28 @@ app.post('/api/item-types', adminGuard, async (req, res) => {
 app.put('/api/item-types/:id', adminGuard, async (req, res) => {
   try {
     const b = req.body;
-    const bad = validateItemType(b);
+    // Name checks first: they must not cost a query (catalogNameLength.test.js).
+    const nameBad = validateItemTypeName(b);
+    if (nameBad) return res.status(400).json({ error: nameBad });
+    // The stored row is needed for BOTH fixes: the reserved-row guard has to
+    // key off what is in the database (a body-keyed check is trivially
+    // bypassed), and the reprice below needs to know the old value.
+    const cur = await pool.query('SELECT id, name, category, value FROM item_types WHERE id = $1', [req.params.id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
+    const existing = cur.rows[0];
+    const bad = validateItemType(b, existing);
     if (bad) return res.status(400).json({ error: bad });
+    // SOMET-278: everything else about the gold row stays editable (icon,
+    // value, sprite); only the two fields the engine keys off are frozen.
+    // 409, same semantics as the entity-types rename/delete guard above:
+    // the request is well-formed, it just conflicts with the current state.
+    if (isReservedItemType(existing) && (b.name !== existing.name || b.category !== existing.category)) {
+      return res.status(409).json({
+        error: `Cannot rename or recategorize reserved item type '${existing.name}': the engine resolves it by name (currency lookup) and would silently stop working`,
+        reserved_item_type: existing.name,
+        reserved_category: existing.category,
+      });
+    }
     const result = await pool.query(
       `UPDATE item_types SET
         name=$1, category=$2, slot=$3, two_handed=$4, kind=$5, damage=$6, cooldown=$7,
@@ -909,16 +985,91 @@ app.put('/api/item-types/:id', adminGuard, async (req, res) => {
        req.params.id],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    // SOMET-281: merchant_stock.price snapshots item_types.value at seed time,
+    // so a value edit used to leave every village selling the item at its old
+    // price while trade.js paid out sellPriceFor(the new value) -- free gold.
+    // Base-catalog rows only; buyback rows keep the price their seller was
+    // paid (see repriceBaseCatalog).
+    //
+    // Deliberately NOT gated on `row.value !== existing.value`: running it on
+    // every PUT also repairs rows that already drifted (every village today
+    // predates this fix), and both statements are no-ops when nothing changed.
+    //
+    // Not in one transaction with the UPDATE above, for the same reason POST's
+    // seedItemAcrossVillages isn't: a failure here leaves exactly the staleness
+    // that already existed before this fix, and the next PUT repairs it.
+    const repricedStock = await repriceBaseCatalog(pool, row.id, row.value);
+    // The mirror image: an item that was worth 0 (so was never stocked, or was
+    // just un-stocked above) and now has a real value must appear in the shops.
+    // Idempotent and self-filtering on category/value, so it is safe to always
+    // call.
+    await seedItemAcrossVillages(pool, row.id);
+    if (repricedStock > 0) row.repricedStock = repricedStock;
+    res.json(row);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update item type' });
   }
 });
 
+// SOMET-278: this used to be a bare DELETE behind adminGuard only -- no
+// reserved check and no reference check, even though the entity-types DELETE
+// right above already refuses to orphan a reference. Every FK into item_types
+// is ON DELETE CASCADE (except item_types.ammo_type_id, which is RESTRICT and
+// would raw-500 the generic catch-all), so the database silently destroys
+// whatever pointed at the row: players' owned items, authored loot tables,
+// class loadouts, and -- for the reserved `gold` row -- every gold pile in
+// every world.
+//
+// Two tiers, deliberately:
+//   * BLOCKING references are authored or player-owned state that cannot be
+//     regenerated: player_items (someone owns it), creature_drops /
+//     behavior_drops / chest_loot / class_loadouts (hand-authored config), a
+//     merchant buyback row (one player's sale contract), and another item type
+//     naming this one as its ammo.
+//   * NON-blocking: base-catalog merchant_stock rows and world_items ground
+//     drops. Both are derived, regenerable (seedBaseCatalog) or expiring, and
+//     treating them as blockers would make every seeded weapon permanently
+//     undeletable -- a guard so strict nobody could use the route.
 app.delete('/api/item-types/:id', adminGuard, async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM item_types WHERE id = $1 RETURNING id', [req.params.id]);
+    const { id } = req.params;
+    const cur = await pool.query('SELECT id, name, category FROM item_types WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
+    const existing = cur.rows[0];
+    if (isReservedItemType(existing)) {
+      return res.status(409).json({
+        error: `Cannot delete reserved item type '${existing.name}': the engine resolves it by name (currency lookup) and deleting it cascades away every gold pile`,
+        reserved_item_type: existing.name,
+        reserved_category: existing.category,
+      });
+    }
+    const [owned, drops, behaviorDrops, chestLoot, loadouts, buyback, ammoOf] = await Promise.all([
+      pool.query('SELECT 1 FROM player_items WHERE item_type_id = $1 LIMIT 1', [id]),
+      pool.query('SELECT 1 FROM creature_drops WHERE item_type_id = $1 LIMIT 1', [id]),
+      pool.query('SELECT 1 FROM behavior_drops WHERE item_type_id = $1 LIMIT 1', [id]),
+      pool.query('SELECT 1 FROM chest_loot WHERE item_type_id = $1 LIMIT 1', [id]),
+      pool.query('SELECT 1 FROM class_loadouts WHERE item_type_id = $1 LIMIT 1', [id]),
+      pool.query('SELECT 1 FROM merchant_stock WHERE item_type_id = $1 AND seller_user_id IS NOT NULL LIMIT 1', [id]),
+      pool.query('SELECT id, name FROM item_types WHERE ammo_type_id = $1', [id]),
+    ]);
+    const references = {
+      player_items: owned.rows.length > 0,
+      creature_drops: drops.rows.length > 0,
+      behavior_drops: behaviorDrops.rows.length > 0,
+      chest_loot: chestLoot.rows.length > 0,
+      class_loadouts: loadouts.rows.length > 0,
+      merchant_buyback: buyback.rows.length > 0,
+    };
+    if (Object.values(references).some(Boolean) || ammoOf.rows.length > 0) {
+      return res.status(409).json({
+        error: `Cannot delete '${existing.name}': still referenced by owned items, a loot table, a class loadout, a merchant buyback row, or a weapon that fires it`,
+        references,
+        referencing_weapons: ammoOf.rows.map((w) => ({ id: w.id, name: w.name })),
+      });
+    }
+    const result = await pool.query('DELETE FROM item_types WHERE id = $1 RETURNING id', [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
     res.status(204).end();
   } catch (err) {
@@ -2566,7 +2717,7 @@ function validateVillageBody(body, worldRow, existing) {
   // byte-identical rule instead of a second, subtly different copy of it
   // (SOMET-153: the seed path had no copy at all and wrote three villages
   // whose spawn sat on the wall ring).
-  const spawnErr = villageSpawnError(body);
+  const spawnErr = villageGeometryError(body);
   if (spawnErr) return spawnErr;
   // no overlap with an existing village box
   for (const v of existing) {

@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { stampVillage } = require('../src/services/mapService');
-const { villageSpawnError } = require('../src/services/villages');
+const { villageGeometryError } = require('../src/services/villages');
 const { validateMapSpec } = require('../seeds/mapSpec');
 
 const TILE = 100;                       // MAP_TILE_SIZE (authority/collision.js)
@@ -77,15 +77,21 @@ test('every authored village spawns on a tile stampVillage leaves walkable', () 
   }
 });
 
+// SOMET-282 note for every fixture below: the shape that originally shipped
+// broken was 6x5, and villageGeometryError now ALSO enforces the on-screen size
+// budget (width + height <= 10 tiles) and reports that FIRST. A 6x5 fixture
+// would therefore be rejected for its size and never reach the spawn rule,
+// which would quietly stop testing the spawn rule at all. Every box here is
+// 6x4 — the size the three hubs were shrunk to — with the spawn moved onto the
+// corresponding ring/interior tile of that box. Box rows 28..31, cols 28..33;
+// gate S at (row 31, col 31); interior rows 29..30, cols 29..32.
 test('the seed-spec validator rejects a village spawning on the wall ring', () => {
-  // The exact shape that shipped: box rows 28..32, cols 28..33, gate S at
-  // col 31; spawn (3250,3250) = tile (row 32, col 32) = south wall.
   const spec = {
     worlds: [{
       key: 'hub', name: 'Hub', grid: [0, 0], width: 64, height: 64, is_entry: true,
       village: {
-        min_row: 28, min_col: 28, width: 6, height: 5, gate_edge: 'S',
-        spawn_x: 3250, spawn_y: 3250,
+        min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S',
+        spawn_x: 3250, spawn_y: 3150,   // tile (row 31, col 32) = south wall
       },
     }],
     links: [],
@@ -94,8 +100,8 @@ test('the seed-spec validator rejects a village spawning on the wall ring', () =
   const spawnErrors = errors.filter((e) => e.includes('village interior'));
   assert.equal(spawnErrors.length, 1, `expected one spawn error, got ${JSON.stringify(errors)}`);
   assert.match(spawnErrors[0], /world "hub"/);
-  assert.match(spawnErrors[0], /3250,3250/);
-  assert.match(spawnErrors[0], /row 32, col 32/);
+  assert.match(spawnErrors[0], /3250,3150/);
+  assert.match(spawnErrors[0], /row 31, col 32/);
 });
 
 test('the seed-spec validator accepts the corrected interior spawn', () => {
@@ -103,8 +109,8 @@ test('the seed-spec validator accepts the corrected interior spawn', () => {
     worlds: [{
       key: 'hub', name: 'Hub', grid: [0, 0], width: 64, height: 64, is_entry: true,
       village: {
-        min_row: 28, min_col: 28, width: 6, height: 5, gate_edge: 'S',
-        spawn_x: 3150, spawn_y: 3150,
+        min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S',
+        spawn_x: 3050, spawn_y: 2950,
       },
     }],
     links: [],
@@ -112,34 +118,34 @@ test('the seed-spec validator accepts the corrected interior spawn', () => {
   assert.deepEqual(validateMapSpec(spec), []);
 });
 
-test('villageSpawnError flags each wall ring edge and the tile outside the box', () => {
-  const box = { min_row: 28, min_col: 28, width: 6, height: 5, gate_edge: 'S' };
+test('villageGeometryError flags each wall ring edge and the tile outside the box', () => {
+  const box = { min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S' };
   const onRing = [
     ['north wall', 2850, 2850],   // row 28
-    ['south wall', 3250, 3250],   // row 32
+    ['south wall', 3250, 3150],   // row 31
     ['west wall', 2850, 3050],    // col 28
     ['east wall', 3350, 3050],    // col 33
     ['outside the box', 100, 100],
   ];
   for (const [label, x, y] of onRing) {
     assert.ok(
-      villageSpawnError({ ...box, spawn_x: x, spawn_y: y }),
+      villageGeometryError({ ...box, spawn_x: x, spawn_y: y }),
       `${label} (${x},${y}) should be rejected`,
     );
   }
-  // Every interior tile is accepted: rows 29..31, cols 29..32.
-  for (let r = 29; r <= 31; r++) {
+  // Every interior tile is accepted: rows 29..30, cols 29..32.
+  for (let r = 29; r <= 30; r++) {
     for (let c = 29; c <= 32; c++) {
       assert.equal(
-        villageSpawnError({ ...box, spawn_x: c * TILE + 50, spawn_y: r * TILE + 50 }), null,
+        villageGeometryError({ ...box, spawn_x: c * TILE + 50, spawn_y: r * TILE + 50 }), null,
         `interior tile (row ${r}, col ${c}) should be accepted`,
       );
     }
   }
 });
 
-test('villageSpawnError requires finite spawn coordinates', () => {
-  const box = { min_row: 28, min_col: 28, width: 6, height: 5, gate_edge: 'S' };
-  assert.match(villageSpawnError({ ...box }), /required/);
-  assert.match(villageSpawnError({ ...box, spawn_x: '3150', spawn_y: 3150 }), /required/);
+test('villageGeometryError requires finite spawn coordinates', () => {
+  const box = { min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S' };
+  assert.match(villageGeometryError({ ...box }), /required/);
+  assert.match(villageGeometryError({ ...box, spawn_x: '3050', spawn_y: 2950 }), /required/);
 });

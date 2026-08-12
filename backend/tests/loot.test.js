@@ -131,6 +131,12 @@ test('dropping a stack carries the DELETEd quantity through to the INSERT via SQ
   // test's SQL-shape assertions on the CTE itself.
   const pool = { query: async (q) => {
     if (/FROM stone_instances/i.test(q)) return { rowCount: 0, rows: [] };
+    // SOMET-277: dropItem now also issues a preliminary read-only soulbound
+    // check ahead of the CTE (see loot.js) -- same fixture accommodation the
+    // stone_instances line above already makes, for the same reason. Must
+    // report "not soulbound" (rowCount 0) so the drop proceeds and this
+    // test's SQL-shape assertions still see the CTE.
+    if (/^\s*SELECT 1 FROM player_items WHERE id/i.test(q)) return { rowCount: 0, rows: [] };
     sql = q;
     return { rowCount: 1, rows: [{ id: 'g1', item_type_id: 7, x: 0, y: 0, quantity: 40 }] };
   } };
