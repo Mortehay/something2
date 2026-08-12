@@ -114,6 +114,13 @@ export class Game {
         this.merchants = [];
         this.shop = null;
         this.shopOpen = false;
+        // Which stock list the shop panel shows and which page of it. The
+        // panel's catalog/buyback lists are longer than one panel-height (a
+        // village carries 24 catalog rows), so the tab/page selection has to
+        // live somewhere across frames — RenderSystem re-derives the layout
+        // every frame and owns no state. Clamped at render time; clicks only
+        // ever set a page the last rendered frame offered.
+        this.shopView = { tab: 'catalog', page: 0 };
 
         // Transient on-screen toast (Slice 3b fast-follow F3): the server's
         // rejection frames (equip/drop/etc "error" replies) previously only
@@ -302,6 +309,7 @@ export class Game {
         this.merchants = [];
         this.shop = null;
         this.shopOpen = false;
+        this.shopView = { tab: 'catalog', page: 0 };
         this.blasts = [];
         this.vfx = [];
         this.noAmmoUntil = 0;
@@ -351,7 +359,15 @@ export class Game {
                 // Interacting near a merchant opens the panel with its
                 // current stock; the server is the sole source of truth for
                 // catalog/buyback/prices, so this simply mirrors the frame.
-                onShop: (msg) => { this.shop = { villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [] }; this.shopOpen = true; },
+                // A `shop` frame also arrives after every buy/sell to refresh
+                // the stock, so the tab/page selection is reset only on a real
+                // open (panel currently closed) — otherwise buying row 3 of
+                // buyback page 2 would bounce the player back to catalog p1.
+                onShop: (msg) => {
+                    this.shop = { villageId: msg.villageId, catalog: msg.catalog || [], buyback: msg.buyback || [] };
+                    if (!this.shopOpen) this.shopView = { tab: 'catalog', page: 0 };
+                    this.shopOpen = true;
+                },
                 // Kill XP / level-up / death pushes. Always the server's raw
                 // row; CharacterSheet.jsx decides what changed and whether
                 // that's worth a re-render (a zero-XP kill still pushes a
@@ -707,6 +723,7 @@ export class Game {
                 merchants: this.merchants,
                 shop: this.shop,
                 shopOpen: this.shopOpen,
+                shopView: this.shopView,
                 decoTypes: this.decoTypes,
                 toast: this.toast,
                 blasts: this.blasts,
@@ -791,6 +808,11 @@ export class Game {
         if (hit.kind === 'close') { this.shopOpen = false; return; }
         if (hit.kind === 'buy') { if (this.authorityClient) this.authorityClient.sendBuy(hit.id); return; }
         if (hit.kind === 'sell') { if (this.authorityClient) this.authorityClient.sendSell(hit.id); return; }
+        // Pure view state — no server round-trip. `shoppage` carries the
+        // absolute target page the rendered strip offered (never a delta), so
+        // the selection cannot walk out of range.
+        if (hit.kind === 'shoptab') { this.shopView = { tab: hit.id, page: 0 }; return; }
+        if (hit.kind === 'shoppage') { this.shopView = { tab: this.shopView.tab, page: hit.id }; return; }
     }
 
     setupInput(){

@@ -135,7 +135,7 @@ export class RenderSystem {
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
     groundItems = [], autoLoot = false, gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
-    merchants = [], shop = null, shopOpen = false, decoTypes = null,
+    merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
     // Slice D: the effect LIBRARY, needed by the projectile trail. Effects in
     // `vfx` already carry their own resolved `def`; a projectile is a
     // persistent object that only carries a NAME, so the lookup happens here.
@@ -275,7 +275,7 @@ export class RenderSystem {
       // `joined` frame's itemTypes — see applyJoined in core/inventory.js);
       // there is no separate itemTypes state to thread through.
       const itemTypes = inventory ? inventory.types : new Map();
-      this.renderShop(this.ctx, shop, inventory, itemTypes, gold, this._shopHitAreas);
+      this.renderShop(this.ctx, shop, inventory, itemTypes, gold, this._shopHitAreas, shopView);
     }
   }
 
@@ -1044,7 +1044,23 @@ export class RenderSystem {
   //     resolved the same way renderInventory's owned-item list does; the
   //     server, not this panel, is what actually blocks selling an equipped
   //     item.
-  renderShop(ctx, shop, inventory, itemTypes, gold, hitAreas) {
+  //
+  // Catalog and Buyback share ONE tabbed, paginated column (SOMET-156). They
+  // used to be stacked vertically in that column, which was unshippable at the
+  // live stock size: a village carries 24 catalog rows, only ~10 of which fit,
+  // so the Buyback heading was pushed past the panel's bottom edge and NOT ONE
+  // buyback row was ever drawn or hit-tested — the buy-back-what-you-sold
+  // feature was unreachable. Page size is derived from the measured row band
+  // (`perPage` below) rather than a hand-tuned constant, so every row on the
+  // active page fits by construction and needs no "stop when we run out of
+  // room" break: a break is what silently swallowed rows before.
+  //
+  // `view` is the caller-owned {tab, page} selection (Game.shopView). It is
+  // clamped here, so a stale page left over after stock shrinks (buying the
+  // last buyback row on the last page) still renders a real page instead of a
+  // blank one. Paging hit areas carry an ABSOLUTE target page, not a delta,
+  // so a click can never walk the state outside the clamped range.
+  renderShop(ctx, shop, inventory, itemTypes, gold, hitAreas, view = null) {
     const panelW = 760;
     const panelH = 560;
     const px = (GAME_WIDTH - panelW) / 2;
@@ -1097,69 +1113,64 @@ export class RenderSystem {
       return type ? type.name : `#${typeId}`;
     };
 
-    // Catalog rows.
-    ctx.font = "13px monospace";
-    ctx.fillStyle = "#9ca3af";
-    ctx.fillText("Catalog", leftX, listTop);
-    let y = listTop + 20;
+    // Stock column (left): [Catalog][Buyback] tabs, one paginated row list.
     const catalog = (shop && shop.catalog) || [];
-    for (const row of catalog) {
-      if (y + rowH > listBottom) break;
-      ctx.fillStyle = "rgba(40,40,60,0.85)";
-      ctx.fillRect(leftX, y, colW, rowH);
-      ctx.strokeStyle = "#3a3a4e";
-      ctx.strokeRect(leftX, y, colW, rowH);
-      ctx.fillStyle = "#e5e7eb";
-      ctx.font = "12px monospace";
-      ctx.fillText(resolveName(row.itemTypeId), leftX + 8, y + 6);
-      ctx.fillStyle = "#9ca3af";
-      ctx.fillText(`${row.price} g`, leftX + 8, y + 22);
-
-      const buyX = leftX + colW - 8 - buyW;
-      const buyY = y + (rowH - buyH) / 2;
-      ctx.fillStyle = "rgba(74,158,255,0.28)";
-      ctx.fillRect(buyX, buyY, buyW, buyH);
-      ctx.strokeStyle = "#4a9eff";
-      ctx.strokeRect(buyX, buyY, buyW, buyH);
-      ctx.fillStyle = "#e5e7eb";
-      ctx.fillText("Buy", buyX + 16, buyY + 7);
-      hitAreas.push({ x: buyX, y: buyY, w: buyW, h: buyH, kind: "buy", id: row.id });
-
-      y += rowH + rowGap;
-    }
-    if (catalog.length === 0) {
-      ctx.fillStyle = "#6b7280";
-      ctx.font = "12px monospace";
-      ctx.fillText("Nothing for sale.", leftX + 8, y + 6);
-      y += rowH;
-    }
-
-    // Buyback rows — visually distinguished (amber) from the base catalog
-    // above: these are OTHER players' sold items, finite (the row is
-    // deleted on buy, unlike the base catalog's infinite stock).
-    y += 16;
-    ctx.fillStyle = "#9ca3af";
-    ctx.font = "13px monospace";
-    ctx.fillText("Buyback", leftX, y);
-    y += 20;
     const buyback = (shop && shop.buyback) || [];
-    for (const row of buyback) {
-      if (y + rowH > listBottom) break;
-      ctx.fillStyle = "rgba(80,60,20,0.55)";
+
+    const tabH = 26, tabW = 150, tabGap = 8;
+    const pageH = 24;
+    const pageY = listBottom - pageH;      // paging strip, panel-bottom anchored
+    const rowsTop = listTop + tabH + 10;
+    const rowsBottom = pageY - 8;
+    // How many whole rows fit the band between the tabs and the paging strip.
+    // n rows span n*rowH + (n-1)*rowGap, hence the +rowGap on both sides.
+    const perPage = Math.max(1, Math.floor((rowsBottom - rowsTop + rowGap) / (rowH + rowGap)));
+
+    const isBuyback = !!(view && view.tab === "buyback");
+    const rows = isBuyback ? buyback : catalog;
+    const pageCount = Math.max(1, Math.ceil(rows.length / perPage));
+    const rawPage = view && Number.isFinite(view.page) ? Math.floor(view.page) : 0;
+    const page = Math.min(Math.max(rawPage, 0), pageCount - 1);
+    const pageRows = rows.slice(page * perPage, page * perPage + perPage);
+
+    // Tabs. Counts live in the labels so a player who just sold something can
+    // see there is buyback stock without having to click the tab to find out.
+    const tabs = [
+      { id: "catalog", label: `Catalog (${catalog.length})`, accent: "#4a9eff", on: "rgba(74,158,255,0.28)" },
+      { id: "buyback", label: `Buyback (${buyback.length})`, accent: "#caa24a", on: "rgba(202,162,74,0.28)" },
+    ];
+    ctx.font = "12px monospace";
+    tabs.forEach((t, i) => {
+      const tx = leftX + i * (tabW + tabGap);
+      const active = (t.id === "buyback") === isBuyback;
+      ctx.fillStyle = active ? t.on : "rgba(40,40,60,0.85)";
+      ctx.fillRect(tx, listTop, tabW, tabH);
+      ctx.strokeStyle = active ? t.accent : "#3a3a4e";
+      ctx.strokeRect(tx, listTop, tabW, tabH);
+      ctx.fillStyle = active ? "#e5e7eb" : "#9ca3af";
+      ctx.fillText(t.label, tx + 10, listTop + 7);
+      hitAreas.push({ x: tx, y: listTop, w: tabW, h: tabH, kind: "shoptab", id: t.id });
+    });
+
+    // Rows of the active tab. Buyback keeps its amber treatment (finite stock:
+    // the row is deleted on buy, unlike the catalog's infinite stock).
+    let y = rowsTop;
+    for (const row of pageRows) {
+      ctx.fillStyle = isBuyback ? "rgba(80,60,20,0.55)" : "rgba(40,40,60,0.85)";
       ctx.fillRect(leftX, y, colW, rowH);
-      ctx.strokeStyle = "#caa24a";
+      ctx.strokeStyle = isBuyback ? "#caa24a" : "#3a3a4e";
       ctx.strokeRect(leftX, y, colW, rowH);
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
       ctx.fillText(resolveName(row.itemTypeId), leftX + 8, y + 6);
-      ctx.fillStyle = "#caa24a";
+      ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
       ctx.fillText(`${row.price} g`, leftX + 8, y + 22);
 
       const buyX = leftX + colW - 8 - buyW;
       const buyY = y + (rowH - buyH) / 2;
-      ctx.fillStyle = "rgba(202,162,74,0.28)";
+      ctx.fillStyle = isBuyback ? "rgba(202,162,74,0.28)" : "rgba(74,158,255,0.28)";
       ctx.fillRect(buyX, buyY, buyW, buyH);
-      ctx.strokeStyle = "#caa24a";
+      ctx.strokeStyle = isBuyback ? "#caa24a" : "#4a9eff";
       ctx.strokeRect(buyX, buyY, buyW, buyH);
       ctx.fillStyle = "#e5e7eb";
       ctx.fillText("Buy", buyX + 16, buyY + 7);
@@ -1167,10 +1178,32 @@ export class RenderSystem {
 
       y += rowH + rowGap;
     }
-    if (buyback.length === 0) {
+    if (rows.length === 0) {
       ctx.fillStyle = "#6b7280";
       ctx.font = "12px monospace";
-      ctx.fillText("No buyback stock.", leftX + 8, y + 6);
+      ctx.fillText(isBuyback ? "No buyback stock." : "Nothing for sale.", leftX + 8, rowsTop + 6);
+    }
+
+    // Paging strip. Prev/Next are drawn only when they lead somewhere, so
+    // there is never an inert-looking button, and never a page beyond range.
+    if (pageCount > 1) {
+      const pgW = 70;
+      ctx.font = "12px monospace";
+      const pageBtn = (bx, label, target) => {
+        ctx.fillStyle = "rgba(74,158,255,0.28)";
+        ctx.fillRect(bx, pageY, pgW, pageH);
+        ctx.strokeStyle = "#4a9eff";
+        ctx.strokeRect(bx, pageY, pgW, pageH);
+        ctx.fillStyle = "#e5e7eb";
+        ctx.fillText(label, bx + 10, pageY + 6);
+        hitAreas.push({ x: bx, y: pageY, w: pgW, h: pageH, kind: "shoppage", id: target });
+      };
+      if (page > 0) pageBtn(leftX, "< Prev", page - 1);
+      if (page < pageCount - 1) pageBtn(leftX + colW - pgW, "Next >", page + 1);
+      ctx.fillStyle = "#9ca3af";
+      ctx.textAlign = "center";
+      ctx.fillText(`Page ${page + 1}/${pageCount}`, leftX + colW / 2, pageY + 6);
+      ctx.textAlign = "left";
     }
 
     // Your items (right column) — sell action only.
