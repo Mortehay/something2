@@ -276,6 +276,9 @@ test('PUT /api/worlds/:id changing the biome set wipes that world\'s cached chun
   const pool = mockPool([
     [/SELECT id, width, height, biomes, biome_cell FROM worlds WHERE id/i,
       () => ({ rows: [{ id: 'w1', width: 30, height: 30, biomes: [], biome_cell: null }] })],
+    // SOMET-237: PUT /api/worlds/:id now validates incoming biome names
+    // against the catalog before anything else.
+    [/SELECT name FROM biomes WHERE name = ANY/i, () => ({ rows: [{ name: 'Meadow' }] })],
     [/DELETE FROM world_chunks/i, () => ({ rows: [] })],
     [/UPDATE worlds SET/i, () => ({ rows: [{ id: 'w1', name: 'Entry', biomes: ['Meadow'] }] })],
   ]);
@@ -286,6 +289,47 @@ test('PUT /api/worlds/:id changing the biome set wipes that world\'s cached chun
   assert.equal(res.status, 200);
   assert.ok(pool.calls.some((c) => /DELETE FROM world_chunks/i.test(c.sql)),
     'changing the biome set changes terrain, so cached chunks must be invalidated');
+});
+
+// SOMET-237: worlds.biomes is a jsonb array of NAMES with no FK, and this
+// route used to only filter for non-empty strings -- a typo'd or
+// never-created name was accepted silently and then dropped at generation
+// time by loadBiomes()'s .filter(Boolean), with no error and no signal to the
+// admin. No /UPDATE worlds SET/i or /DELETE FROM world_chunks/i handler is
+// registered below on purpose: if the route regressed to accepting an
+// unknown name, either query firing would hit the mock's
+// throw-on-unexpected-query guard, and the request must 400 before either is
+// ever reached.
+test('PUT /api/worlds/:id rejects an unknown biome name instead of silently accepting it', async () => {
+  const pool = mockPool([
+    [/SELECT id, width, height, biomes, biome_cell FROM worlds WHERE id/i,
+      () => ({ rows: [{ id: 'w1', width: 30, height: 30, biomes: [], biome_cell: null }] })],
+    [/SELECT name FROM biomes WHERE name = ANY/i, () => ({ rows: [{ name: 'Meadow' }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).put('/api/worlds/w1').set(ADMIN_HEADERS).send({
+    name: 'Entry', biomes: ['Meadow', 'Meadwo'],
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /Meadwo/, 'the error must name the specific unknown biome name');
+  assert.ok(!res.body.error.includes('Meadow'),
+    'the error must not accuse the VALID name ("Meadow") of being unknown too');
+});
+
+test('PUT /api/worlds/:id still saves a real, valid biome name (no regression)', async () => {
+  const pool = mockPool([
+    [/SELECT id, width, height, biomes, biome_cell FROM worlds WHERE id/i,
+      () => ({ rows: [{ id: 'w1', width: 30, height: 30, biomes: [], biome_cell: null }] })],
+    [/SELECT name FROM biomes WHERE name = ANY/i, () => ({ rows: [{ name: 'Meadow' }] })],
+    [/DELETE FROM world_chunks/i, () => ({ rows: [] })],
+    [/UPDATE worlds SET/i, (p) => ({ rows: [{ id: 'w1', name: p[0], biomes: JSON.parse(p[7]) }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).put('/api/worlds/w1').set(ADMIN_HEADERS).send({
+    name: 'Entry', biomes: ['Meadow'],
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.biomes, ['Meadow']);
 });
 
 test('PUT /api/worlds/:id changing the biome set surfaces a liveWarning for a connected world', async () => {
@@ -304,6 +348,9 @@ test('PUT /api/worlds/:id changing the biome set surfaces a liveWarning for a co
   const pool = mockPool([
     [/SELECT id, width, height, biomes, biome_cell FROM worlds WHERE id/i,
       () => ({ rows: [{ id: 'w1', width: 30, height: 30, biomes: [], biome_cell: null }] })],
+    // SOMET-237: PUT /api/worlds/:id now validates incoming biome names
+    // against the catalog before anything else.
+    [/SELECT name FROM biomes WHERE name = ANY/i, () => ({ rows: [{ name: 'Meadow' }] })],
     [/UPDATE worlds SET/i, () => ({ rows: [{ id: 'w1', name: 'Entry', biomes: ['Meadow'] }] })],
   ]);
   __setPool(pool);
@@ -323,6 +370,9 @@ test('PUT /api/worlds/:id with an unchanged biome set does NOT wipe chunks', asy
   const pool = mockPool([
     [/SELECT id, width, height, biomes, biome_cell FROM worlds WHERE id/i,
       () => ({ rows: [{ id: 'w1', width: 30, height: 30, biomes: ['Meadow'], biome_cell: null }] })],
+    // SOMET-237: still validated even though the set is unchanged -- biomes
+    // is provided in the body, so it goes through the same check.
+    [/SELECT name FROM biomes WHERE name = ANY/i, () => ({ rows: [{ name: 'Meadow' }] })],
     [/UPDATE worlds SET/i, () => ({ rows: [{ id: 'w1', name: 'Entry' }] })],
   ]);
   __setPool(pool);
@@ -380,6 +430,9 @@ test("PUT /api/worlds/:id changing the biome set busts the preview cache too", a
   const pool = mockPool([
     [/SELECT id, width, height, biomes, biome_cell FROM worlds WHERE id/i,
       () => ({ rows: [{ id: 'wPrev', width: 30, height: 30, biomes: [], biome_cell: null }] })],
+    // SOMET-237: PUT /api/worlds/:id now validates incoming biome names
+    // against the catalog before anything else.
+    [/SELECT name FROM biomes WHERE name = ANY/i, () => ({ rows: [{ name: 'Meadow' }] })],
     [/DELETE FROM world_chunks/i, () => ({ rows: [] })],
     [/UPDATE worlds SET/i, () => ({ rows: [{ id: 'wPrev', name: 'Entry', biomes: ['Meadow'] }] })],
     // GET /preview's own pipeline (mirrors tests/worldPreviewRoute.test.js).

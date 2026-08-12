@@ -1834,6 +1834,26 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     const nextBiomes = biomesProvided
       ? (Array.isArray(biomes) ? biomes.filter((b) => typeof b === 'string' && b.trim()).map((b) => b.trim()) : [])
       : (before.biomes || []);
+    // SOMET-237: worlds.biomes is a jsonb array of biome NAMES with no FK --
+    // this used to only filter for non-empty strings, so a typo'd or
+    // never-created name was accepted silently. loadBiomes() (services/
+    // biomes.js) resolves names via a Map and ends with .filter(Boolean), so
+    // an unknown name was then silently DROPPED at generation time: the world
+    // just generated as if it weren't listed, with no error and no signal to
+    // the admin that their biome assignment was doing nothing. Worse, it left
+    // a dangling reference that a LATER biome creation matching that name
+    // would silently activate for every world that "listed" it, with no
+    // invalidation or warning. Validating here, on the only write path that
+    // can put a name into worlds.biomes, closes both: a dangling reference
+    // can no longer be created in the first place.
+    if (biomesProvided && nextBiomes.length > 0) {
+      const known = await pool.query('SELECT name FROM biomes WHERE name = ANY($1::text[])', [nextBiomes]);
+      const knownNames = new Set(known.rows.map((r) => r.name));
+      const unknown = nextBiomes.filter((n) => !knownNames.has(n));
+      if (unknown.length > 0) {
+        return res.status(400).json({ error: `unknown biome name(s): ${unknown.join(', ')}` });
+      }
+    }
     const cellProvided = biome_cell !== undefined;
     const nextCell = cellProvided
       ? (Number.isFinite(biome_cell) && biome_cell > 0 ? Math.floor(biome_cell) : null)
