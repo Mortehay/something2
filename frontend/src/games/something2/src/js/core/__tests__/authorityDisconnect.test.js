@@ -19,7 +19,11 @@ describe('Game authority disconnect handling', () => {
     g.state = 'playing';
     g._onAuthorityClose(false);
     expect(g.state).toBe('disconnected');
-    expect(g.authorityJoined).toBe(false);
+    // The `authorityJoined` assertion that stood here was dropped with the
+    // flag itself (SOMET-96): it was written on join and close and read
+    // NOWHERE, so asserting it only pinned bookkeeping. `state` is the signal
+    // that actually gates rendering and input, and it is already asserted
+    // above.
   });
 
   it('an intentional close (our own disconnect(), e.g. a doorway transition or destroy()) does not overwrite state', () => {

@@ -192,7 +192,6 @@ export class Game {
     // dropping every send against a dead socket (F-028) unless we surface
     // it. Mirrors the existing 'kicked' state transition/render branch.
     _onAuthorityClose(wasIntentional) {
-        this.authorityJoined = false;
         if (!wasIntentional && this.state === 'playing') {
             console.warn('[authority] connection lost — no reconnect attempted, reload to resume');
             this.setState('disconnected');
@@ -318,11 +317,16 @@ export class Game {
         this.localUserId = String(claims.user_id);
         const wsUrl = API_URL.replace(/^http/, 'ws') + '/authority';
         const spawn = await new Promise((resolve, reject) => {
-            // Scoped to THIS join attempt, deliberately not this.authorityJoined:
-            // that flag is set once and never cleared, so on a second
-            // initChunked (map travel while already playing) it is still true
-            // from the previous world and an "is this a refused join" test
-            // written against it would answer no.
+            // Scoped to THIS join attempt. There used to be an
+            // `authorityJoined` field here; it was set on join and cleared on
+            // close and NEVER READ (SOMET-96), and it could not have served
+            // this purpose anyway -- on a second initChunked (map travel while
+            // already playing) it was still true from the previous world, so
+            // an "is this a refused join" test written against it would answer
+            // no. It has been removed rather than wired in: the consequence it
+            // was filed for (the loop running on after a silent disconnect) is
+            // handled by the 'disconnected' state, and a maintained-but-unread
+            // flag is something a later reader will eventually trust.
             let settled = false;
             this.authorityClient = new WorldAuthorityClient({
                 url: wsUrl,
@@ -407,7 +411,6 @@ export class Game {
             this.authorityClient.connect(worldId, characterId);
             setTimeout(() => reject(new Error('authority join timeout')), 5000);
         });
-        this.authorityJoined = true;
         this.player.x = spawn.x;
         this.player.y = spawn.y;
         await this.imageManager.loadAll();

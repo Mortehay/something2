@@ -244,6 +244,19 @@ function fakeLootPool({ typeRows, behaviorDropRows = [], creatureDropRows = [] }
       // entry.world.groundItems.add() (and this test's own assertions) see
       // the row rather than silently adding nothing.
       if (/INSERT INTO world_items/i.test(sql)) {
+        // SOMET-96: item drops became ONE multi-row INSERT keyed off an
+        // unnest'd id array, [worldId, x, y, ttlMs, itemTypeId[]]. The GOLD
+        // pile is still a single row in the old positional shape, so the two
+        // are told apart by the statement itself rather than by guessing from
+        // the parameter count.
+        if (/unnest/i.test(sql)) {
+          const [, x, y, , itemTypeIds] = params;
+          return {
+            rows: itemTypeIds.map((itemTypeId) => ({
+              id: `zz-${++n}`, item_type_id: itemTypeId, x, y, expires_at: null, quantity: 1,
+            })),
+          };
+        }
         const [, itemTypeId, x, y, , quantity] = params;
         return { rows: [{ id: `zz-${++n}`, item_type_id: itemTypeId, x, y, expires_at: null, quantity }] };
       }

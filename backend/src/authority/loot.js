@@ -159,16 +159,27 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
   const dropX = dead.x + CREATURE_SIZE / 2;
   const dropY = dead.y + CREATURE_SIZE / 2;
   const droppedItemTypeIds = [...rollDrops(dr.rows, rng), ...rollDrops(br.rows, rng)];
-  for (const itemTypeId of droppedItemTypeIds) {
-    // quantity named explicitly (not left to the column default): creature
-    // drops stay one-per-unit this slice, and being explicit here stops a
-    // future edit from silently inheriting whatever the default happens to
-    // be instead of deliberately choosing 1.
+  if (droppedItemTypeIds.length) {
+    // SOMET-96: ONE multi-row INSERT, not an awaited INSERT per dropped unit.
+    // Bounded by MAX_DROP_QTY and off the tick path, so this was never urgent
+    // -- but a creature dropping its cap previously cost that many sequential
+    // round trips, each holding a pool connection, and every one of them could
+    // fail independently and leave a partial pile on the ground.
+    //
+    // UNNEST rather than building "($1,$2),($3,$4),..." by hand: the value
+    // list stays three bound parameters regardless of drop count, so there is
+    // no string-built SQL to get wrong and no parameter-count ceiling to trip
+    // over if MAX_DROP_QTY is ever raised.
+    //
+    // quantity is named explicitly (not left to the column default): creature
+    // drops stay one-per-unit this slice, and being explicit stops a future
+    // edit from silently inheriting whatever the default happens to be.
     const ins = await pool.query(
       `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
-       VALUES ($1, $2, $3, $4, now() + ($5::int * interval '1 millisecond'), $6)
+       SELECT $1, t.item_type_id, $2, $3, now() + ($4::int * interval '1 millisecond'), 1
+         FROM unnest($5::int[]) AS t(item_type_id)
        RETURNING id, item_type_id, x, y, expires_at, quantity`,
-      [entry.worldId, itemTypeId, dropX, dropY, ttlMs, 1],
+      [entry.worldId, dropX, dropY, ttlMs, droppedItemTypeIds],
     );
     // Straight into the sim so it appears in the next AOI broadcast rather than
     // waiting for a chunk reload.
@@ -213,7 +224,27 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
 // NOTE: the query is not wrapped in a try/catch, so a DB-level failure (e.g.
 // a dropped connection) rejects out of this function. server.js's `pickup`
 // handler catches it; any future auto-loot caller must too.
-async function claimItem(pool, entry, userId, characterId, groundItemId) {
+// SOMET-96: how long a ground item is left alone after a claim threw. Auto-loot
+// re-attempts every tick (20Hz) for as long as the item is in range and still
+// in the sim, so a DB outage turned a bounded N-query batch into ~20N queries
+// AND ~20N log lines per second, per looting player -- load amplified onto a
+// database that is by definition already struggling. One second is long enough
+// to stop the storm and short enough that a blip costs the player nothing they
+// would notice.
+const CLAIM_BACKOFF_MS = 1000;
+
+// `now` is injectable so the backoff is testable without timers or sleeping.
+async function claimItem(pool, entry, userId, characterId, groundItemId, { now = Date.now } = {}) {
+  // Lazily created so every existing hand-built `entry` fixture keeps working
+  // -- there are many, in tests and in server.js's own world entries.
+  if (!entry.claimRetryAt) entry.claimRetryAt = new Map();
+  const retryAt = entry.claimRetryAt.get(groundItemId);
+  if (retryAt != null) {
+    if (now() < retryAt) return null;
+    // Cooldown served: drop both marks and let this attempt through.
+    entry.claimRetryAt.delete(groundItemId);
+    entry.claiming.delete(groundItemId);
+  }
   if (entry.claiming.has(groundItemId)) return null;
   entry.claiming.add(groundItemId);
   try {
@@ -226,6 +257,11 @@ async function claimItem(pool, entry, userId, characterId, groundItemId) {
     );
     if (r.rowCount !== 1) {
       entry.world.groundItems.remove(groundItemId); // stale row, evict
+      // Released explicitly. This used to ride a `finally`, which the backoff
+      // replaced -- a success or a lost race must still clear the mark, and
+      // only a THROWN failure keeps it (with a deadline). Without this the id
+      // would stay marked for the life of the world entry.
+      entry.claiming.delete(groundItemId);
       return null;
     }
     const { id: instanceId, item_type_id: typeId, quantity } = r.rows[0];
@@ -240,9 +276,16 @@ async function claimItem(pool, entry, userId, characterId, groundItemId) {
     entry.world.groundItems.remove(groundItemId);
     const p = entry.world.getPlayer(userId);
     if (p && p.inv) p.inv.items.push({ id: instanceId, typeId, quantity: qty }); // so a later equip validates without a reload
-    return { id: instanceId, typeId, quantity: qty };
-  } finally {
     entry.claiming.delete(groundItemId);
+    return { id: instanceId, typeId, quantity: qty };
+  } catch (err) {
+    // Deliberately NOT released here. Leaving the id marked, with a deadline,
+    // is the whole backoff: the guard above refuses every further attempt
+    // until it expires, so one failure costs one query per second instead of
+    // twenty. The error still propagates -- callers (server.js's pickup
+    // handler, the auto-loot sweep) decide what the player sees.
+    entry.claimRetryAt.set(groundItemId, now() + CLAIM_BACKOFF_MS);
+    throw err;
   }
 }
 

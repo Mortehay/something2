@@ -84,17 +84,26 @@ test('a death whose DELETE affects one row drops loot at the corpse CENTRE, not 
   const pool = scriptedPool([
     [/DELETE FROM world_creatures/i, { rows: [{ type: 'Wolf', x: 500, y: 600 }], rowCount: 1 }],
     [/FROM creature_drops/i, { rows: [DROP_ROW], rowCount: 1 }],
+    // SOMET-96 changed the drop INSERT from one statement per unit to a
+    // single multi-row INSERT, so the params are now
+    // [worldId, x, y, ttlMs, itemTypeId[]] rather than one item per call.
     [/INSERT INTO world_items/i, (p) => ({
-      rows: [{ id: 'g1', item_type_id: p[1], x: p[2], y: p[3], expires_at: '2999-01-01T00:00:00Z' }],
-      rowCount: 1,
+      rows: p[4].map((typeId, i) => ({
+        id: i === 0 ? 'g1' : `g${i + 1}`, item_type_id: typeId, x: p[1], y: p[2],
+        expires_at: '2999-01-01T00:00:00Z',
+      })),
+      rowCount: p[4].length,
     })],
   ]);
 
   await commitCreatureDeath(pool, entry, 'c1', { rng: always, ttlMs: 1000 });
 
   const inserts = pool.matching(/INSERT INTO world_items/i);
-  assert.strictEqual(inserts.length, 1);
-  assert.deepStrictEqual(inserts[0].params.slice(0, 4), ['w1', 7, 524, 624]);
+  assert.strictEqual(inserts.length, 1, 'ONE statement, not one per dropped unit');
+  // The point of this test is unchanged: the corpse's CENTRE (500+24, 600+24),
+  // not its stored top-left. Only the parameter positions moved.
+  assert.deepStrictEqual(inserts[0].params.slice(0, 3), ['w1', 524, 624]);
+  assert.deepStrictEqual(inserts[0].params[4], [7], 'the rolled item type rides in the array');
   assert.strictEqual(entry.world.groundItems.count(), 1, 'lands in the sim for the next broadcast');
   assert.deepStrictEqual(entry.world.groundItems.get('g1').x, 524);
   assert.deepStrictEqual(entry.world.groundItems.get('g1').y, 624);
@@ -209,15 +218,48 @@ test('a claim loses when the DB row is already gone even though the sim still ho
   assert.strictEqual(entry.world.groundItems.get('g1'), null, 'evicted from the sim as a stale row');
 });
 
-test('a rejected claim query still drains the claiming set (not stuck unclaimable forever)', async () => {
+// SOMET-96: this test used to assert that a REJECTED claim drained `claiming`
+// immediately. That property is exactly what produced the retry storm: the
+// item stays in the sim, so auto-loot re-attempted it on the very next tick
+// and a DB outage became ~20 queries + 20 log lines per second per looting
+// player, aimed at a database already in trouble.
+//
+// The contract it was really protecting -- "never stuck unclaimable FOREVER"
+// -- is kept, and now has a deadline attached rather than being immediate.
+test('a rejected claim holds the id for a backoff instead of retrying every tick', async () => {
   const entry = armClaimEntry();
   const pool = scriptedPool([
     [CLAIM_RE, () => { throw new Error('db down'); }],
   ]);
+  let clock = 1000;
+  const now = () => clock;
 
-  await assert.rejects(claimItem(pool, entry, 'u1', 31, 'g1'), /db down/);
+  await assert.rejects(claimItem(pool, entry, 'u1', 31, 'g1', { now }), /db down/);
 
-  assert.strictEqual(entry.claiming.size, 0, 'the id must not be stuck in `claiming` forever');
+  // The very next tick must not reach the database at all.
+  clock += 50;
+  assert.strictEqual(await claimItem(pool, entry, 'u1', 31, 'g1', { now }), null,
+    'a retry inside the backoff window is refused before any query');
+  assert.strictEqual(pool.matching(CLAIM_RE).length, 1,
+    'exactly ONE query for the whole backoff window -- this is the storm being prevented');
+});
+
+test('a rejected claim becomes claimable again once the backoff expires', async () => {
+  const entry = armClaimEntry();
+  const pool = scriptedPool([
+    [CLAIM_RE, () => { throw new Error('db down'); }],
+  ]);
+  let clock = 1000;
+  const now = () => clock;
+
+  await assert.rejects(claimItem(pool, entry, 'u1', 31, 'g1', { now }), /db down/);
+
+  // Past the deadline the id must be genuinely free again -- the original
+  // "not stuck forever" guarantee, delayed rather than removed.
+  clock += 5000;
+  await assert.rejects(claimItem(pool, entry, 'u1', 31, 'g1', { now }), /db down/);
+  assert.strictEqual(pool.matching(CLAIM_RE).length, 2,
+    'the retry after the window really did reach the database');
 });
 
 test('concurrent claims of the same item: the second is blocked by the claiming set before any query', async () => {
