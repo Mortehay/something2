@@ -14,5 +14,5 @@ def no_real_work(monkeypatch):
     then time out. Nothing here weakens those assertions: the response body,
     including the resolved recipe, is unchanged.
     """
-    monkeypatch.setattr(job_manager, "submit", lambda work: "test-job-not-run")
+    monkeypatch.setattr(job_manager, "submit", lambda work, job_id=None: "test-job-not-run")
     return job_manager

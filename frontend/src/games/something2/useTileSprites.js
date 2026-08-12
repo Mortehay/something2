@@ -9,11 +9,12 @@ export function assetUrl(key) {
   return key ? `${API}/api/assets/${key}` : null;
 }
 
-// Same, with a cache-busting version. Asset keys are stable across regenerations
-// (sprites/objects/Tree/static.png is overwritten in place) and /api/assets sends
-// `max-age=300`, so without this the browser keeps serving the PREVIOUS art for
-// five minutes after an approval. Callers pass the row's updated_at, which the
-// approval bumps.
+// Same, with a cache-busting version. SOMET-235: asset keys are now job-id-scoped
+// and never reused across regenerations (e.g. sprites/objects/Tree/<job_id>/static.png
+// -- a new generation never overwrites a previous one), so this `?v=` is now
+// redundant-but-harmless rather than load-bearing: a fresh key is already a
+// fresh URL. Kept as cheap insurance since /api/assets sends `max-age=300`.
+// Callers pass the row's updated_at, which the approval bumps.
 export function assetUrlVersioned(key, version) {
   const url = assetUrl(key);
   if (!url) return null;

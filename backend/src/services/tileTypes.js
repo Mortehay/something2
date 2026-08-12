@@ -18,10 +18,11 @@ async function loadTileTypes(db) {
       sprite: row.sprite || null,
       render_mode: row.render_mode || 'color',
       validNeighbors: row.valid_neighbors || [],
-      // Cache-busting key for the client's asset URLs. Generated keys are
-      // stable (approving overwrites static.png in place) and /api/assets sends
-      // max-age=300, so without this an approved regeneration keeps rendering
-      // the previous texture for five minutes.
+      // Cache-busting key for the client's asset URLs. SOMET-235: generated
+      // keys are now job-id-scoped and never reused across regenerations, so
+      // an approval already points at a brand-new key/URL; this updated_at
+      // is now redundant-but-harmless insurance against /api/assets's
+      // max-age=300, not the thing that makes a fresh texture render.
       updated_at: row.updated_at,
       wall_height: row.wall_height ?? 0,
       place_order: row.place_order ?? 0

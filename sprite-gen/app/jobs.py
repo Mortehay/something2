@@ -8,8 +8,12 @@ class JobManager:
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
 
-    def submit(self, fn) -> str:
-        job_id = uuid.uuid4().hex
+    def submit(self, fn, job_id=None) -> str:
+        # SOMET-235: callers that need to know their own job_id before the
+        # work closure runs (e.g. to bake it into a storage key) can pass one
+        # in; otherwise we mint one exactly as before.
+        if job_id is None:
+            job_id = uuid.uuid4().hex
         with self._lock:
             self._jobs[job_id] = {"id": job_id, "status": "queued",
                                   "progress": {"done": 0, "total": 0},

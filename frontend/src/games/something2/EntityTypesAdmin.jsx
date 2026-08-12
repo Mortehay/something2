@@ -770,9 +770,10 @@ function EntityTexturePanel({ entity, prompt }) {
   const status = job?.status;
   const result = job?.result;
   const previewKey = mode === 'animated' ? result?.atlas_key : result?.image_key;
-  // Asset keys are stable (e.g. sprites/objects/Tree/static.png), so the browser
-  // caches them across regenerations. Bust the cache with the job id so a fresh
-  // image actually shows instead of the previous one.
+  // SOMET-235: asset keys are now job-id-scoped and never reused across
+  // regenerations (e.g. sprites/objects/Tree/<job_id>/static.png), so a fresh
+  // generation is already a fresh URL. Busting with the job id is now
+  // redundant-but-harmless insurance, not what makes the fresh image show.
   const previewUrl = assetUrlVersioned(previewKey, jobId);
 
   // Whatever is currently saved on the entity (from an earlier Approve).

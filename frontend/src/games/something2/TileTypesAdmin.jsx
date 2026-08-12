@@ -83,8 +83,10 @@ const TextureBadge = styled.img`
 `;
 
 // URL of a tile's rendered texture (static image or animation atlas), or null
-// when the tile is plain color. Asset keys are stable, so a `?v=updated_at`
-// cache-buster ensures a freshly-approved texture replaces the cached one.
+// when the tile is plain color. SOMET-235: asset keys are now job-id-scoped
+// and never reused across regenerations, so a fresh approval is already a
+// fresh key/URL; the `?v=updated_at` cache-buster is now redundant-but-harmless
+// insurance rather than the thing making the swap visible.
 function tileTextureUrl(tile) {
   const key = tile.render_mode === 'animated'
     ? tile.sprite?.atlas_key
@@ -312,9 +314,10 @@ function TileSpritePanel({ tile }) {
   const status = job?.status;
   const result = job?.result;
   const previewKey = mode === 'animated' ? result?.atlas_key : result?.image_key;
-  // Asset keys are stable (e.g. sprites/tiles/grass/static.png), so the browser
-  // caches them across regenerations. Bust the cache with a per-generation /
-  // per-save version so a fresh texture actually shows instead of the stale one.
+  // SOMET-235: asset keys are now job-id-scoped (e.g. sprites/tiles/grass/<job_id>/static.png),
+  // so previewKey is already unique per generation and the browser can't be
+  // serving a stale cached texture under it. The `?v=` here is now
+  // redundant-but-harmless insurance, not what makes a fresh texture show.
   const previewUrl = previewKey ? `${assetUrl(previewKey)}?v=${jobId}` : null;
 
   // The tile's currently-saved texture (persisted via a previous Approve), shown

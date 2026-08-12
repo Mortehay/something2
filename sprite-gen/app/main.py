@@ -1,4 +1,5 @@
 import hmac
+import uuid
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -122,6 +123,14 @@ def generate(req: GenerateRequest):
     caps = backends.capabilities_for(backend_name)
     reported_steps = steps if caps["max_steps"] is None else min(steps, caps["max_steps"])
 
+    # SOMET-235: mint the job_id here, before `work` closes over it, so the id
+    # returned to the caller, the id keying job_manager._jobs, and the id
+    # baked into the storage path are all the same value. Without this the
+    # storage layer would key generated assets by name alone, and a second
+    # generation for the same tile/object/creature would silently overwrite
+    # a previous (possibly already-approved, live) one before anyone reviews it.
+    job_id = uuid.uuid4().hex
+
     def work(progress):
         if req.kind == "tile":
             out = generate_tile(
@@ -130,7 +139,7 @@ def generate(req: GenerateRequest):
             )
             if _STORE_ENABLED:
                 from .storage import default_store
-                return default_store().put_tile(req.creature, out)
+                return default_store().put_tile(req.creature, job_id, out)
             return {"frames": len(out["frames"]), "manifest": out["manifest"]}
         if req.kind == "object":
             out = generate_object(
@@ -139,7 +148,7 @@ def generate(req: GenerateRequest):
             )
             if _STORE_ENABLED:
                 from .storage import default_store
-                return default_store().put_object(req.creature, out)
+                return default_store().put_object(req.creature, job_id, out)
             return {"frames": len(out["frames"]), "manifest": out["manifest"]}
         out = generate_creature(
             creature=req.creature, base_prompt=req.base_prompt, backend_name=backend_name,
@@ -149,11 +158,11 @@ def generate(req: GenerateRequest):
         # in the job error. In tests the store call is skipped (STORE disabled).
         if _STORE_ENABLED:
             from .storage import default_store
-            return default_store().put_creature(req.creature, out)
+            return default_store().put_creature(req.creature, job_id, out)
         return {"frames": len(out["frames"]), "manifest": out["manifest"]}
 
     return {
-        "job_id": job_manager.submit(work),
+        "job_id": job_manager.submit(work, job_id=job_id),
         "recipe": {
             "tier": recipe.tier,
             "backend": backend_name,
