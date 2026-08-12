@@ -28,6 +28,8 @@
 //   gold_min/max    -- the formula 1714440031000_gold_economy.js:29-30 would
 //                      have applied to a hostile creature with hp 12:
 //                      GREATEST(1, floor(12/10))=1 and floor(12/4)=3.
+//                      SUPERSEDED (SOMET-155): now 0/0 so Wolf inherits its
+//                      rung's range -- see the note on the field itself.
 //   strength etc.   -- left at the column defaults (0). Wolf predates
 //                      1714440005000_add_entity_stats.js, so it genuinely
 //                      carried the defaults. Nothing reads them for
@@ -60,8 +62,17 @@ const HOSTILE_CREATURES = [
     defense: 3,
     resistances: {},
     prompt: 'a grey meadow wolf',
-    gold_min: 1,
-    gold_max: 3,
+    // SOMET-155: zeroed so this creature INHERITS its rung's gold range.
+    // The old value was derived from its pre-SOMET-250 hp (the
+    // 1714440031000_gold_economy.js formula on hp 12/18/14/8); the P4 remap
+    // above raised it to the Line rung (hp 30, defense 3) but left the gold
+    // behind. loot.js's spawnDrops picks the TYPE range whenever its max > 0,
+    // so a stale non-zero range here permanently outranks the rung and this
+    // creature is paid less than the 288 identically-statted P4 rows that
+    // (correctly) carry 0 and fall through to Line's 1-5. 0/0 is the same
+    // "no range of my own" posture BESTIARY_P4_CREATURES uses.
+    gold_min: 0,
+    gold_max: 0,
     behavior_name: 'Line',
   },
   // Retuned 2026-08-08 for P4 (SOMET-250): folded into the Desert line (Arid Dunes, fire) at
@@ -84,8 +95,17 @@ const HOSTILE_CREATURES = [
     defense: 3,
     resistances: { fire: 0.55 },
     prompt: 'a translucent orange slime blob, baked by the desert sun',
-    gold_min: 1,
-    gold_max: 4,
+    // SOMET-155: zeroed so this creature INHERITS its rung's gold range.
+    // The old value was derived from its pre-SOMET-250 hp (the
+    // 1714440031000_gold_economy.js formula on hp 12/18/14/8); the P4 remap
+    // above raised it to the Line rung (hp 30, defense 3) but left the gold
+    // behind. loot.js's spawnDrops picks the TYPE range whenever its max > 0,
+    // so a stale non-zero range here permanently outranks the rung and this
+    // creature is paid less than the 288 identically-statted P4 rows that
+    // (correctly) carry 0 and fall through to Line's 1-5. 0/0 is the same
+    // "no range of my own" posture BESTIARY_P4_CREATURES uses.
+    gold_min: 0,
+    gold_max: 0,
     behavior_name: 'Line',
   },
   // Retuned 2026-08-08 for P4 (SOMET-250): folded into the Undead line (Catacombs, ice) at
@@ -109,8 +129,17 @@ const HOSTILE_CREATURES = [
     defense: 3,
     resistances: { ice: 0.55 },
     prompt: 'an undead skeleton warrior, risen from the catacombs',
-    gold_min: 1,
-    gold_max: 3,
+    // SOMET-155: zeroed so this creature INHERITS its rung's gold range.
+    // The old value was derived from its pre-SOMET-250 hp (the
+    // 1714440031000_gold_economy.js formula on hp 12/18/14/8); the P4 remap
+    // above raised it to the Line rung (hp 30, defense 3) but left the gold
+    // behind. loot.js's spawnDrops picks the TYPE range whenever its max > 0,
+    // so a stale non-zero range here permanently outranks the rung and this
+    // creature is paid less than the 288 identically-statted P4 rows that
+    // (correctly) carry 0 and fall through to Line's 1-5. 0/0 is the same
+    // "no range of my own" posture BESTIARY_P4_CREATURES uses.
+    gold_min: 0,
+    gold_max: 0,
     behavior_name: 'Line',
   },
   // Retuned 2026-08-08 for P4 (SOMET-250): folded into the Fungal line (Fungal Deep,
@@ -133,8 +162,17 @@ const HOSTILE_CREATURES = [
     defense: 3,
     resistances: { lightning: 0.55 },
     prompt: 'a small bat roosting in the fungal deep, crackling with static',
-    gold_min: 1,
-    gold_max: 2,
+    // SOMET-155: zeroed so this creature INHERITS its rung's gold range.
+    // The old value was derived from its pre-SOMET-250 hp (the
+    // 1714440031000_gold_economy.js formula on hp 12/18/14/8); the P4 remap
+    // above raised it to the Line rung (hp 30, defense 3) but left the gold
+    // behind. loot.js's spawnDrops picks the TYPE range whenever its max > 0,
+    // so a stale non-zero range here permanently outranks the rung and this
+    // creature is paid less than the 288 identically-statted P4 rows that
+    // (correctly) carry 0 and fall through to Line's 1-5. 0/0 is the same
+    // "no range of my own" posture BESTIARY_P4_CREATURES uses.
+    gold_min: 0,
+    gold_max: 0,
     behavior_name: 'Line',
   },
 ];

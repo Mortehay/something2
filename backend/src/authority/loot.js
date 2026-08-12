@@ -295,7 +295,28 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
 // removed the row and credited it; 0 means it lost the race (already claimed or
 // swept) and nothing was credited. Returns the NEW balance so the caller can
 // push a wallet update to the owner.
-async function claimGold(pool, entry, userId, groundItemId) {
+//
+// SOMET-155: carries the SAME CLAIM_BACKOFF_MS discipline as claimItem, and
+// shares its `entry.claimRetryAt` map (ground-item ids are unique across both
+// paths — one id is either a coin pile or an item, never both). This used to be
+// a bare try/finally that always released `claiming`, so the backoff SOMET-96
+// added never applied to the currency path at all: a player standing on a coin
+// pile with auto-loot on while the DB is unreachable re-issued claimGold on
+// every 20Hz tick — ~20 failing queries and ~20 `auto-loot failed:` lines per
+// second, per player, aimed at a database already in trouble. `now` is
+// injectable for the same reason it is on claimItem: the backoff is testable
+// without timers.
+async function claimGold(pool, entry, userId, groundItemId, { now = Date.now } = {}) {
+  // Lazily created, exactly as in claimItem — hand-built `entry` fixtures
+  // (tests, and server.js's own world entries) predate the map.
+  if (!entry.claimRetryAt) entry.claimRetryAt = new Map();
+  const retryAt = entry.claimRetryAt.get(groundItemId);
+  if (retryAt != null) {
+    if (now() < retryAt) return null;
+    // Cooldown served: drop both marks and let this attempt through.
+    entry.claimRetryAt.delete(groundItemId);
+    entry.claiming.delete(groundItemId);
+  }
   if (entry.claiming.has(groundItemId)) return null;
   entry.claiming.add(groundItemId);
   try {
@@ -307,13 +328,23 @@ async function claimGold(pool, entry, userId, groundItemId) {
       [groundItemId, userId],
     );
     entry.world.groundItems.remove(groundItemId);
+    // Released explicitly, mirroring claimItem: the `finally` this replaced
+    // released the mark on EVERY exit including a thrown one, which is what
+    // defeated the backoff. A success or a lost race must still clear it; only
+    // a thrown failure keeps it, with a deadline.
+    entry.claiming.delete(groundItemId);
     if (r.rowCount !== 1) return null;
     const gold = Number(r.rows[0].gold) || 0;
     const p = entry.world.getPlayer(userId);
     if (p) p.gold = gold;
     return { gold };
-  } finally {
-    entry.claiming.delete(groundItemId);
+  } catch (err) {
+    // Deliberately NOT released here — leaving the id marked, with a deadline,
+    // IS the backoff: the guard above refuses every further attempt until it
+    // expires, so one failure costs one query per second instead of twenty. The
+    // error still propagates; callers decide what the player sees.
+    entry.claimRetryAt.set(groundItemId, now() + CLAIM_BACKOFF_MS);
+    throw err;
   }
 }
 

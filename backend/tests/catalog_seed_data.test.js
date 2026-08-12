@@ -4,6 +4,7 @@ const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { NEW_DECORATIONS } = require('../seeds/data/decorationTypes.js');
 const { HOSTILE_CREATURES, CREATURE_DROPS } = require('../seeds/data/entityTypes.js');
+const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
 
 // Tile names inserted by the three migrations that seed tile_types:
 //   1714440002000_create_tile_types.js  (the defaultTileTypes object)
@@ -91,8 +92,21 @@ test('every creature seed row is fully formed', () => {
       assert.ok(v > 0 && v <= 1, `${c.name} resistance ${el}=${v} must be in (0, 1]`);
     }
     // gold_max >= gold_min or the [min,max] roll inverts and yields nothing.
-    assert.ok(c.gold_max >= c.gold_min, `${c.name} gold_max must be >= gold_min`);
-    assert.ok(c.gold_min >= 1, `${c.name} is hostile, so it must carry at least 1 gold`);
+    assert.ok((c.gold_max ?? 0) >= (c.gold_min ?? 0), `${c.name} gold_max must be >= gold_min`);
+    // A hostile creature must be PAID -- but not necessarily from a range of
+    // its own. SOMET-155: gold scales by behaviour rung, and loot.js's
+    // spawnDrops prefers the type's own range whenever its max > 0, so a
+    // per-type range is an OVERRIDE of the rung, not a requirement. These four
+    // legacy rows carried stale ranges derived from their pre-SOMET-250 hp,
+    // which silently underpaid them versus identically-statted P4 peers; they
+    // now carry 0/0 and inherit their rung like the other 288 creatures. What
+    // still has to hold is that SOMETHING pays: either an own range, or a rung
+    // that has one.
+    const rung = CREATURE_BEHAVIORS.find((b) => b.name === c.behavior_name);
+    const paidByRung = !!rung && (rung.gold_max ?? 0) > 0;
+    assert.ok((c.gold_max ?? 0) > 0 || paidByRung,
+      `${c.name} is hostile but yields no gold: it has no range of its own and its rung `
+      + `(${c.behavior_name || 'none'}) has none either`);
   }
 });
 
