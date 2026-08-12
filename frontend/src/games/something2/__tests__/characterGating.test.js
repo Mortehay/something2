@@ -178,6 +178,38 @@ describe('auto-join waits for a character', () => {
   });
 });
 
+describe('unmount teardown disconnects the REAL authority client (SOMET-234)', () => {
+  // F-054: an earlier version of this component (Something2.jsx, since split
+  // into GameShell.jsx by the routing refactor) tore down via
+  // `engineRef.current?.disconnect()` -- but engineRef was never assigned, so
+  // the call was a permanent no-op and the real WorldAuthorityClient kept its
+  // socket open after sign-out. That dead ref is gone; these assertions pin
+  // the real chain so it cannot silently regress back to a phantom ref.
+  it('GameShell declares no engineRef -- the dead teardown target is gone', () => {
+    // The word survives in one explanatory code comment (history for the next
+    // reader); what must NOT survive is an actual ref: a declaration or a
+    // `.current` access.
+    expect(gameShellSource).not.toMatch(/(?:const|let)\s+engineRef/);
+    expect(gameShellSource).not.toMatch(/engineRef\.current/);
+  });
+
+  it('the mount-once unmount cleanup calls destroy() on the REAL gameRef', () => {
+    // This is the effect with an empty dependency array, so its cleanup only
+    // fires on true component unmount (sign-out via RequireAuth) -- not on
+    // every /game <-> admin-tab navigation, which stays inside GameShell.
+    expect(gameShellSource).toMatch(/useEffect\(\(\) => \{\s*return \(\) => \{\s*gameRef\.current\?\.destroy\(\);/);
+  });
+
+  it('Game.destroy() actually disconnects authorityClient, the object gameRef.current IS', () => {
+    const gameSource = read('../src/js/core/Game.js');
+    const destroyBody = gameSource.slice(
+      gameSource.indexOf('destroy() {'),
+      gameSource.indexOf('destroy() {') + gameSource.slice(gameSource.indexOf('destroy() {')).indexOf('\n    }'),
+    );
+    expect(destroyBody).toMatch(/if \(this\.authorityClient\) this\.authorityClient\.disconnect\(\);/);
+  });
+});
+
 describe('signing out clears the active character', () => {
   it('AuthContext.signOut calls clearActiveCharacterId', () => {
     // Without this, the next account to sign in on this browser inherits a
