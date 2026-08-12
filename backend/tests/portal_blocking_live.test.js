@@ -106,6 +106,30 @@ async function settleOnPortalTile(entry, playerId, x, y, chunkSize, timeoutMs = 
   }
 }
 
+// SOMET-275: polls the player's own tile position instead of sleeping a
+// fixed duration and reading wherever they ended up. This test's assertion
+// window had already been widened once before (250ms, up from whatever it
+// started at -- see the comment this replaces) "after an observed flake
+// under full-suite load", and still reproduced 1 of 6 runs in a later
+// session: a fixed sleep races the real tick/socket/scheduler latency of
+// this suite's full 218-file parallel run, and a generous-looking constant
+// is still just a bigger version of the same race, not a fix for it.
+// Polling removes the race outright -- it returns the instant the
+// knockback has actually landed, however long that takes, and only times
+// out (loudly) if it never does, which is the failure this test exists to
+// catch in the first place.
+async function waitForKnockback(p, tileX, tileY, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (Math.abs((p.x + p.width / 2) - tileX) > 1 || Math.abs((p.y + p.height / 2) - tileY) > 1) return;
+    if (Date.now() > deadline) {
+      throw new Error(`player was not knocked back off (${tileX},${tileY}) within ${timeoutMs}ms`
+        + ` (still at ${p.x + p.width / 2},${p.y + p.height / 2})`);
+    }
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 // One world (w1), a single guard at (1050,1050) blocking a portal that
 // starts right there too -- so a freshly-joined player standing at spawn
 // can walk one tile east to trigger it.
@@ -433,9 +457,7 @@ test('a guard-blocked portal refuses transfer and knocks the player back', async
   const blocked = await nextMsg(ws, 'portalBlocked');
   assert.equal(blocked.message, 'Guards block the way.');
 
-  await new Promise((r) => setTimeout(r, 250)); // let the same tick's knockback land (generous margin over one tick's worth of real socket/scheduler latency, widened again after an observed flake under full-suite load)
-  assert.ok(Math.abs((p.x + p.width / 2) - 1050) > 1 || Math.abs((p.y + p.height / 2) - 1050) > 1,
-    'the player must have been pushed off the exact portal tile');
+  await waitForKnockback(p, 1050, 1050); // poll instead of a fixed sleep -- see waitForKnockback's comment
 
   const transitions = await leakWatch;
   assert.deepStrictEqual(transitions, [], 'a blocked portal must never send a transition message');

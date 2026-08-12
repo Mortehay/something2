@@ -194,6 +194,32 @@ function nextMsg(ws, type) {
   });
 }
 
+// SOMET-275: polls `arr.length` up to `n` instead of sleeping a fixed
+// duration and reading whatever arrived. The token-bucket math this backs
+// (consumeRateToken, src/authority/server.js) is itself wall-clock-free when
+// RATE_LIMIT_PER_SEC is 0 -- capacity minus what `join` spent is a fixed,
+// deterministic admit count with no refill to race. What WAS racing wall
+// time was the OLD fixed `setTimeout(r, 150)` before reading `pongs.length`:
+// each admitted ping still has to travel client -> server -> JSON.parse ->
+// rate-check -> echo -> client, and under this suite's full parallel load
+// (218 files) that round trip can occasionally exceed 150ms, so the read
+// landed before every admitted pong had actually arrived and the assertion
+// undercounted -- observed 2 of 6 runs in a prior session. Polling removes
+// the race: it returns the instant `n` have arrived, and only times out
+// (loudly, not silently under-asserting) if `n` genuinely never arrive.
+function waitForCount(arr, n, timeoutMs = 4000) {
+  return new Promise((resolve, reject) => {
+    if (arr.length >= n) { resolve(); return; }
+    const iv = setInterval(() => {
+      if (arr.length >= n) { clearInterval(iv); clearTimeout(to); resolve(); }
+    }, 5);
+    const to = setTimeout(() => {
+      clearInterval(iv);
+      reject(new Error(`timed out waiting for ${n} messages, only ${arr.length} arrived`));
+    }, timeoutMs);
+  });
+}
+
 test('rejects an upgrade with no token', async () => {
   const { url, handle, server } = await boot();
   const bare = url; // no ?token
@@ -391,7 +417,12 @@ test('a burst beyond the token bucket capacity is dropped, not queued for later'
   const pongs = [];
   ws.on('message', (data) => { const m = JSON.parse(data); if (m.type === 'pong') pongs.push(m); });
   for (let i = 0; i < 20; i++) ws.send(JSON.stringify({ type: 'ping' }));
-  await new Promise((r) => setTimeout(r, 150));
+  // Wait for the 4 admits the bucket math guarantees, then a short settle
+  // window so a (buggy) 5th arriving late is still caught by the exact
+  // equality below -- see waitForCount's comment for why polling replaces a
+  // fixed sleep here.
+  await waitForCount(pongs, 4);
+  await new Promise((r) => setTimeout(r, 100));
   assert.equal(pongs.length, 4, 'only the tokens left after join are admitted; a flood does not queue behind them');
   ws.close(); handle.close(); server.close();
 });
@@ -406,7 +437,11 @@ test('frames sent well within the production rate limit are never dropped', asyn
   const pongs = [];
   ws.on('message', (data) => { const m = JSON.parse(data); if (m.type === 'pong') pongs.push(m); });
   for (let i = 0; i < 10; i++) ws.send(JSON.stringify({ type: 'ping' }));
-  await new Promise((r) => setTimeout(r, 150));
+  // Same shape as the burst test above: poll for all 10 to actually arrive
+  // (round trips can outlast a fixed sleep under full-suite load) rather
+  // than reading pongs.length after a guessed wait.
+  await waitForCount(pongs, 10);
+  await new Promise((r) => setTimeout(r, 100));
   assert.equal(pongs.length, 10, 'ordinary, well-under-capacity traffic must be completely unaffected');
   ws.close(); handle.close(); server.close();
 });

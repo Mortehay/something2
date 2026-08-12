@@ -5,6 +5,8 @@ const path = require('node:path');
 const { Pool } = require('pg');
 
 const { setEntryWorld, setEntryWorldByName } = require('../src/services/entryWorld.js');
+const { withAdvisoryLock } = require('./helpers/advisoryLock.js');
+const { ENTRY_LOCK_KEY } = require('./helpers/entryWorld.js');
 
 // The single writer for worlds.is_entry (SOMET-265). The dev database has lost
 // its entry world at least twice, and the loss is nearly invisible:
@@ -118,50 +120,71 @@ test('against the live database', { skip: !url ? 'no TEST_DATABASE_URL' : false 
     }
   });
 
-  const realEntry = (await pool.query('SELECT id, name FROM worlds WHERE is_entry')).rows[0];
-  assert.ok(realEntry, 'precondition: the database must have an entry world for this test to protect');
+  // SOMET-275: this test moves worlds.is_entry off the real entry world and
+  // back, live, exactly like withEntryPreserved's own save/restore does --
+  // but until now it did that WITHOUT taking withEntryPreserved's advisory
+  // lock. Every applyMapSpec-based test in the suite (seed_map_db.test.js,
+  // seed_map_portals.test.js, chests_integration_db.test.js, ...) wraps its
+  // own is_entry save/restore in that lock specifically so no other file can
+  // observe or clobber is_entry mid-window -- but "no other file" was never
+  // true, because THIS file's live-database test was never converted to take
+  // it. node --test runs files in parallel, so this test's window (real
+  // entry world OFF, `a` ON, for however long the 'moving the entry world'
+  // subtest takes to round-trip two queries) could and did interleave with
+  // e.g. seed_map_db.test.js's "applying a spec twice produces identical
+  // rows", which snapshots is_entry expecting to see either the real entry
+  // world or its own zzTestAlpha -- landing on `a` mid-window (or restoring
+  // to `a` after this test's own cleanup already deleted it) instead
+  // reproduced that test's flake. Wrapping this test's whole is_entry-moving
+  // section in the SAME ENTRY_LOCK_KEY closes the gap: it is now mutually
+  // exclusive with every other file's window, the same as they already are
+  // with each other.
+  await withAdvisoryLock(pool, ENTRY_LOCK_KEY, async () => {
+    const realEntry = (await pool.query('SELECT id, name FROM worlds WHERE is_entry')).rows[0];
+    assert.ok(realEntry, 'precondition: the database must have an entry world for this test to protect');
 
-  const a = (await pool.query(
-    'INSERT INTO worlds (name, seed) VALUES ($1, 1) RETURNING id', [`${tag}-a`])).rows[0].id;
+    const a = (await pool.query(
+      'INSERT INTO worlds (name, seed) VALUES ($1, 1) RETURNING id', [`${tag}-a`])).rows[0].id;
 
-  await t.test('an unknown id leaves the current entry world alone', async () => {
-    // THE regression. The old code cleared first and asked questions later, so
-    // a bad id was a guaranteed silent loss.
-    const changed = await setEntryWorld(pool, '00000000-0000-0000-0000-000000000000');
-    assert.equal(changed, 0);
-    const after = await pool.query('SELECT id FROM worlds WHERE is_entry');
-    assert.deepEqual(after.rows.map((r) => r.id), [realEntry.id],
-      'the entry world must survive a write aimed at a world that does not exist');
-  });
+    await t.test('an unknown id leaves the current entry world alone', async () => {
+      // THE regression. The old code cleared first and asked questions later, so
+      // a bad id was a guaranteed silent loss.
+      const changed = await setEntryWorld(pool, '00000000-0000-0000-0000-000000000000');
+      assert.equal(changed, 0);
+      const after = await pool.query('SELECT id FROM worlds WHERE is_entry');
+      assert.deepEqual(after.rows.map((r) => r.id), [realEntry.id],
+        'the entry world must survive a write aimed at a world that does not exist');
+    });
 
-  await t.test('an unknown NAME leaves the current entry world alone', async () => {
-    assert.equal(await setEntryWorldByName(pool, `${tag}-does-not-exist`), 0);
-    const after = await pool.query('SELECT id FROM worlds WHERE is_entry');
-    assert.deepEqual(after.rows.map((r) => r.id), [realEntry.id]);
-  });
+    await t.test('an unknown NAME leaves the current entry world alone', async () => {
+      assert.equal(await setEntryWorldByName(pool, `${tag}-does-not-exist`), 0);
+      const after = await pool.query('SELECT id FROM worlds WHERE is_entry');
+      assert.deepEqual(after.rows.map((r) => r.id), [realEntry.id]);
+    });
 
-  await t.test('moving the entry world leaves exactly one, then restores', async () => {
-    await setEntryWorld(pool, a);
-    const moved = await pool.query('SELECT id FROM worlds WHERE is_entry');
-    assert.deepEqual(moved.rows.map((r) => r.id), [a], 'exactly one, and it is the new one');
+    await t.test('moving the entry world leaves exactly one, then restores', async () => {
+      await setEntryWorld(pool, a);
+      const moved = await pool.query('SELECT id FROM worlds WHERE is_entry');
+      assert.deepEqual(moved.rows.map((r) => r.id), [a], 'exactly one, and it is the new one');
 
-    // Put it back through the same helper, which is also the real recovery path
-    // (scripts/dungeon/restore-entry.js).
-    assert.equal(await setEntryWorldByName(pool, realEntry.name), 2,
-      'two rows change: the old entry off, the real one back on');
-    const back = await pool.query('SELECT id FROM worlds WHERE is_entry');
-    assert.deepEqual(back.rows.map((r) => r.id), [realEntry.id]);
-  });
+      // Put it back through the same helper, which is also the real recovery path
+      // (scripts/dungeon/restore-entry.js).
+      assert.equal(await setEntryWorldByName(pool, realEntry.name), 2,
+        'two rows change: the old entry off, the real one back on');
+      const back = await pool.query('SELECT id FROM worlds WHERE is_entry');
+      assert.deepEqual(back.rows.map((r) => r.id), [realEntry.id]);
+    });
 
-  await t.test('the live database has exactly one entry world', async () => {
-    // Detection, not prevention: nothing stops an admin deliberately unsetting
-    // the last one, and the cause of the two observed losses is still unknown.
-    // A suite run that ends with zero should say so loudly instead of leaving
-    // auto-join quietly dead.
-    const r = await pool.query('SELECT name FROM worlds WHERE is_entry');
-    assert.equal(r.rows.length, 1,
-      `expected exactly one entry world, found ${r.rows.length} -- `
-      + 'auto-join is dead for every player with no last world when this is 0. '
-      + 'Recover with: node scripts/dungeon/restore-entry.js "Old Trailhead"');
+    await t.test('the live database has exactly one entry world', async () => {
+      // Detection, not prevention: nothing stops an admin deliberately unsetting
+      // the last one, and the cause of the two observed losses is still unknown.
+      // A suite run that ends with zero should say so loudly instead of leaving
+      // auto-join quietly dead.
+      const r = await pool.query('SELECT name FROM worlds WHERE is_entry');
+      assert.equal(r.rows.length, 1,
+        `expected exactly one entry world, found ${r.rows.length} -- `
+        + 'auto-join is dead for every player with no last world when this is 0. '
+        + 'Recover with: node scripts/dungeon/restore-entry.js "Old Trailhead"');
+    });
   });
 });
