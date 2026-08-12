@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import {
   ELEMENTS, SLOTS, WEAPON_DEFAULTS, ARMOR_DEFAULTS, AMMO_DEFAULTS,
   emptyForm, formFromType, validateClient, buildPayload, VFX_MOMENTS,
+  isReservedItemType,
 } from './itemTypeForm.js';
 
 const AdminContainer = styled.div`
@@ -102,6 +103,14 @@ const IconButton = styled.button`
   &:hover {
     color: ${props => props.$delete ? 'var(--s2-danger)' : 'var(--s2-selected)'};
     background: var(--s2-overlay);
+  }
+
+  /* A disabled action must not light up on hover as if it were live. */
+  &:disabled,
+  &:disabled:hover {
+    color: var(--s2-text-dim);
+    background: none;
+    cursor: not-allowed;
   }
 `;
 
@@ -284,6 +293,16 @@ const RemoveRowButton = styled.button`
   &:hover { color: var(--s2-danger-soft); }
 `;
 
+// The visible reason a control is frozen. Without it a disabled select reads as
+// a broken form; with it the admin knows the field is protected on purpose and
+// that the rest of the row is still theirs to edit.
+const FieldNote = styled.p`
+  font-size: 1.1rem;
+  color: var(--s2-text-muted);
+  margin: 0;
+  line-height: 1.4;
+`;
+
 const InlineCheck = styled.div`
   display: flex;
   align-items: center;
@@ -308,6 +327,11 @@ function ItemTypesAdmin() {
   // A weapon's ammo can only be an existing ammo-category type, so the select
   // is populated from the catalog we already loaded rather than free-typed.
   const ammoTypes = (itemTypes || []).filter(t => t.category === 'ammo');
+
+  // SOMET-284: `gold` (category `currency`) is reserved -- the API refuses to
+  // rename, recategorize or delete it, while leaving value/icon/sprite
+  // editable. Keyed on the STORED row, so it is only ever true while editing.
+  const isReservedEdit = isReservedItemType(editingType);
 
   useEffect(() => {
     if (editingType) {
@@ -371,13 +395,16 @@ function ItemTypesAdmin() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const problem = validateClient(formData);
+    // `editingType` (the STORED row, null on create) is what tells both helpers
+    // a reserved row is allowed to keep its own category -- same argument, same
+    // meaning, as `existing` in the backend's validateItemType().
+    const problem = validateClient(formData, editingType);
     if (problem) {
       toast.error(problem);
       return;
     }
 
-    const payload = buildPayload(formData);
+    const payload = buildPayload(formData, editingType);
 
     if (editingType) {
       updateMutation.mutate({ id: editingType.id, ...payload }, {
@@ -414,7 +441,7 @@ function ItemTypesAdmin() {
             <EntityHeader>
               <EntityInfo>
                 <CategoryBadge $category={type.category}>
-                  {type.category === 'weapon' ? 'W' : type.category === 'ammo' ? 'M' : 'A'}
+                  {type.category === 'weapon' ? 'W' : type.category === 'ammo' ? 'M' : type.category === 'currency' ? '¤' : 'A'}
                 </CategoryBadge>
                 <EntityName>{type.name}</EntityName>
               </EntityInfo>
@@ -422,13 +449,37 @@ function ItemTypesAdmin() {
                 <IconButton onClick={() => handleOpenEdit(type)} title="Edit">
                   <HiOutlinePencil />
                 </IconButton>
-                <IconButton $delete onClick={() => handleDelete(type.id)} title="Delete">
+                {/* DELETE /api/item-types/:id answers 409 for a reserved row
+                    (deleting it cascades away every gold pile), so an enabled
+                    bin here is a button that cannot work. */}
+                <IconButton
+                  $delete
+                  onClick={() => handleDelete(type.id)}
+                  disabled={isReservedItemType(type)}
+                  title={isReservedItemType(type)
+                    ? 'Reserved item type — cannot be deleted (the engine resolves it by name)'
+                    : 'Delete'}
+                >
                   <HiOutlineTrash />
                 </IconButton>
               </ActionButtons>
             </EntityHeader>
 
-            {type.category === 'weapon' ? (
+            {isReservedItemType(type) ? (
+              <>
+                <EntityStats>
+                  <StatItem><span>Category</span>{type.category}</StatItem>
+                  <StatItem><span>Value</span>{type.value ?? 0}</StatItem>
+                  <StatItem><span>Stackable</span>{type.stackable ? 'yes' : 'no'}</StatItem>
+                </EntityStats>
+                <SpawnList>
+                  <span>Traits</span>
+                  <TagCloud>
+                    <Tag>reserved — name &amp; category locked</Tag>
+                  </TagCloud>
+                </SpawnList>
+              </>
+            ) : type.category === 'weapon' ? (
               <>
                 <EntityStats>
                   <StatItem><span>Kind</span>{type.kind}</StatItem>
@@ -515,15 +566,44 @@ function ItemTypesAdmin() {
                   placeholder="e.g. shortsword"
                   disabled={!!editingType}
                 />
+                {/* The name has been frozen on every edit since long before
+                    SOMET-284, and for a reserved row that is exactly right:
+                    PUT /api/item-types/:id answers 409 to any name change on
+                    it, because the engine resolves gold BY NAME. Saying so is
+                    the difference between a protected field and a broken one. */}
+                {isReservedEdit && (
+                  <FieldNote>
+                    Locked: the engine looks this item up by name, so renaming it would
+                    silently break the currency.
+                  </FieldNote>
+                )}
               </FormGroup>
 
               <FormGroup>
                 <label>Category</label>
-                <select value={formData.category} onChange={e => handleCategoryChange(e.target.value)}>
-                  <option value="weapon">weapon</option>
-                  <option value="armor">armor</option>
-                  <option value="ammo">ammo</option>
-                </select>
+                {/* A reserved row's category (`currency`) is deliberately NOT
+                    added to the options for every item: the API accepts it on
+                    no other row, so offering it would invite an edit that can
+                    only 400. Instead the stored value is shown, frozen, and
+                    round-tripped by buildPayload untouched. */}
+                {isReservedEdit ? (
+                  <>
+                    <select value={formData.category} disabled>
+                      <option value={formData.category}>{formData.category}</option>
+                    </select>
+                    <FieldNote>
+                      Locked: <strong>{editingType?.name}</strong> is a reserved item type.
+                      Its category cannot change (the server rejects it with a 409).
+                      Value, element and effects below are still editable.
+                    </FieldNote>
+                  </>
+                ) : (
+                  <select value={formData.category} onChange={e => handleCategoryChange(e.target.value)}>
+                    <option value="weapon">weapon</option>
+                    <option value="armor">armor</option>
+                    <option value="ammo">ammo</option>
+                  </select>
+                )}
               </FormGroup>
 
               <FormGroup>
@@ -546,7 +626,11 @@ function ItemTypesAdmin() {
                 />
               </FormGroup>
 
-              {formData.category === 'weapon' ? (
+              {/* A reserved (currency) row is none of the three shapes. Without
+                  this gate it fell through to the armor branch and offered
+                  Slot / Defense / Resistances -- fields the payload does not
+                  send for it and the row has never had. */}
+              {isReservedEdit ? null : formData.category === 'weapon' ? (
                 <>
                   <FormGroup>
                     <label>Kind</label>
@@ -695,6 +779,10 @@ function ItemTypesAdmin() {
                   forever. Choosing from the live library is the agreed
                   mitigation for that, alongside the server refusing to rename
                   or delete an effect that is still bound. */}
+              {/* Hidden for a reserved currency row: it is never swung or
+                  fired, so an attack-effect binding on it is dead config.
+                  buildPayload still round-trips whatever is stored. */}
+              {!isReservedEdit && (
               <FormGroup>
                 <label>Attack effects</label>
                 {VFX_MOMENTS.map(({ key, label, appliesTo }) => (
@@ -719,6 +807,7 @@ function ItemTypesAdmin() {
                   ) : null
                 ))}
               </FormGroup>
+              )}
 
               <FormActions>
                 <SecondaryButton type="button" onClick={() => setIsModalOpen(false)}>Cancel</SecondaryButton>
