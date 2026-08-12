@@ -12,7 +12,7 @@ import { GroundItemManager } from "../entities/GroundItemManager.js";
 import { WorldAuthorityClient } from "../net/WorldAuthorityClient.js";
 import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
-import { inputVector } from "../entities/Player.js";
+import { inputVector, movementKeys } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { aimVector } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
@@ -144,11 +144,42 @@ export class Game {
 
     setState(newState) {
         if (this.state !== newState) {
+            // SOMET-79: snapshot the last live frame on the way into a frozen
+            // state. Both frozen states claim to "freeze on the last frame's
+            // background" and dim it, but they redrew a 0.75-alpha black over
+            // whatever was already on the canvas EVERY frame -- and since
+            // nothing clears in between, the alpha compounds: ~1-p^n toward
+            // opaque, i.e. solid black within a second or so. The scene the
+            // dimming exists to keep visible was destroyed by the dimming.
+            // Capturing once here means each frame can restore the frozen
+            // pixels and apply exactly one veil over them.
+            if ((newState === 'kicked' || newState === 'disconnected') && this.canvas) {
+                this._frozenFrame = this._captureFrame();
+            }
+            if (newState === 'playing') this._frozenFrame = null;
             this.state = newState;
             if (this.onStateChange) {
                 this.onStateChange(newState);
             }
         }
+    }
+
+    // Best-effort: a tainted or zero-sized canvas must not break the state
+    // transition, so a failure just means no frozen backdrop (the veil still
+    // draws, over black) rather than a throw on the way into an error state.
+    _captureFrame() {
+        try {
+            if (!this.ctx || !this.canvas.width || !this.canvas.height) return null;
+            return this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+        } catch { return null; }
+    }
+
+    // One veil over the frozen frame, not a fresh veil over the last veil.
+    _drawFrozenBackdrop() {
+        if (this._frozenFrame) this.ctx.putImageData(this._frozenFrame, 0, 0);
+        else { this.ctx.fillStyle = '#000'; this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height); }
+        this.ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
 
     // WorldAuthorityClient's onClose fires for every close, including ones
@@ -431,7 +462,10 @@ export class Game {
     // null unless we're actually in a playing chunked world.
     getMinimapSnapshot() {
         if (this.state !== 'playing' || !this.chunked || !this.player) return null;
-        const { dx, dy } = inputVector(this.keys || {});
+        // movementKeys, not this.keys: the minimap's heading arrow would
+        // otherwise keep pointing wherever a held key says while the player is
+        // standing still with a panel open.
+        const { dx, dy } = inputVector(movementKeys(this));
         if (dx !== 0 || dy !== 0) {
             const m = Math.hypot(dx, dy) || 1;
             this._minimapDir = { dx: dx / m, dy: dy / m };
@@ -513,10 +547,11 @@ export class Game {
             const cx = this.player.x + this.player.width / 2;
             const cy = this.player.y + this.player.height / 2;
             this.streamer.update(cx, cy); // fire-and-forget; wanted-guard makes it safe
-            this.player.update(dt, this.keys, this.chunkedMap); // local prediction
+            const keys = movementKeys(this);
+            this.player.update(dt, keys, this.chunkedMap); // local prediction
             // Send input to the authority; buffer actual sends for reconciliation.
             if (this.authorityClient) {
-                const { dx, dy } = inputVector(this.keys);
+                const { dx, dy } = inputVector(keys);
                 const s = this.authorityClient.sendInput(dx, dy, dt);
                 if (s.sent) this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt });
             }
@@ -604,8 +639,9 @@ export class Game {
         } else if (this.state === 'kicked') {
             // Freeze on the last frame's background and surface why input stopped
             // working; the authority socket is already gone (see onKicked).
-            this.ctx.fillStyle = 'rgba(0,0,0,0.75)';
-            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            // _drawFrozenBackdrop restores the captured frame before veiling it,
+            // so the veil is applied once rather than compounding per frame.
+            this._drawFrozenBackdrop();
             this.ctx.save();
             this.ctx.fillStyle = '#ef4444';
             this.ctx.font = '24px sans-serif';
@@ -618,8 +654,7 @@ export class Game {
             // other way the authority socket dies: it just closed on us
             // (server restart/crash/network), rather than the server
             // deliberately kicking this session (see _onAuthorityClose).
-            this.ctx.fillStyle = 'rgba(0,0,0,0.75)';
-            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            this._drawFrozenBackdrop();
             this.ctx.save();
             this.ctx.fillStyle = '#ef4444';
             this.ctx.font = '24px sans-serif';

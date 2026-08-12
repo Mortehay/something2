@@ -167,28 +167,52 @@ async function loadInventory(pool, characterId) {
 // entity_type_id. `character` is { id, entityTypeId } -- the shape
 // services/characters.js#ownedCharacter returns.
 async function grantStartingLoadout(pool, character, itemTypes) {
-  const claim = await pool.query(
-    `UPDATE characters SET starting_loadout_granted_at = now()
-      WHERE id = $1 AND starting_loadout_granted_at IS NULL
-      RETURNING id`,
-    [character.id],
-  );
-  if (claim.rowCount === 0) return false;
-  const rows = await pool.query(
-    'SELECT item_type_id, quantity FROM class_loadouts WHERE entity_type_id = $1 ORDER BY id ASC',
-    [character.entityTypeId],
-  );
-  for (const row of rows.rows) {
-    // The fk on class_loadouts already guarantees the item type exists in the
-    // database. This guard is about the in-memory catalog the world was built
-    // from, which can legitimately predate a catalog change.
-    if (!itemTypes.has(row.item_type_id)) continue;
-    await pool.query(
-      'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1, $2, $3)',
-      [character.id, row.item_type_id, row.quantity],
+  // SOMET-79: one transaction, as the spec always said.
+  //
+  // The DOUBLE-grant this was filed for is already impossible without it --
+  // the conditional claim below only matches while
+  // starting_loadout_granted_at IS NULL, so of two simultaneous joins exactly
+  // one gets rowCount 1 and the other returns false. That is not the risk
+  // that remains.
+  //
+  // What remains is a PARTIAL grant: the claim commits on its own, and if the
+  // process dies (or the pool drops) part-way through the insert loop, the
+  // character is permanently marked as having received a loadout it only
+  // half has -- and the claim is precisely what stops it ever being retried.
+  // Wrapping the claim and the inserts together makes the grant all-or-nothing,
+  // so a crash rolls the claim back too and the next join grants cleanly.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const claim = await client.query(
+      `UPDATE characters SET starting_loadout_granted_at = now()
+        WHERE id = $1 AND starting_loadout_granted_at IS NULL
+        RETURNING id`,
+      [character.id],
     );
+    if (claim.rowCount === 0) { await client.query('ROLLBACK'); return false; }
+    const rows = await client.query(
+      'SELECT item_type_id, quantity FROM class_loadouts WHERE entity_type_id = $1 ORDER BY id ASC',
+      [character.entityTypeId],
+    );
+    for (const row of rows.rows) {
+      // The fk on class_loadouts already guarantees the item type exists in the
+      // database. This guard is about the in-memory catalog the world was built
+      // from, which can legitimately predate a catalog change.
+      if (!itemTypes.has(row.item_type_id)) continue;
+      await client.query(
+        'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1, $2, $3)',
+        [character.id, row.item_type_id, row.quantity],
+      );
+    }
+    await client.query('COMMIT');
+    return true;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
-  return true;
 }
 
 const HAND_SLOTS = ['main_hand', 'off_hand'];

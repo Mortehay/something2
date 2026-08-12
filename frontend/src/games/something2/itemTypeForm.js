@@ -126,6 +126,18 @@ export function validateClient(f) {
   } else {
     if (f.slot === '' || f.slot == null || f.defense === '' || f.defense == null) return 'armor needs slot and defense';
   }
+
+  // SOMET-79: two resistance rows naming the same element used to be accepted,
+  // and buildPayload writes them into an object keyed by element -- so the
+  // later row silently overwrote the earlier one and the author's first value
+  // vanished on save with no indication. Refusing is the honest option: the
+  // form cannot know which of the two the author meant.
+  const seen = new Set();
+  for (const row of f.resistanceRows || []) {
+    if (!row.element) continue;
+    if (seen.has(row.element)) return `resistances list ${row.element} twice — remove one row`;
+    seen.add(row.element);
+  }
   return null;
 }
 

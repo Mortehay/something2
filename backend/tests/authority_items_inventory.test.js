@@ -5,13 +5,21 @@ const { loadInventory, grantStartingLoadout } = require('../src/authority/items.
 // Records queries so we can assert what was written.
 function recordingPool(handlers) {
   const calls = [];
+  const query = async (sql, params) => {
+    calls.push({ sql, params });
+    for (const [re, fn] of handlers) if (re.test(sql)) return fn(sql, params);
+    return { rows: [], rowCount: 0 };
+  };
   return {
     calls,
-    query: async (sql, params) => {
-      calls.push({ sql, params });
-      for (const [re, fn] of handlers) if (re.test(sql)) return fn(sql, params);
-      return { rows: [], rowCount: 0 };
-    },
+    query,
+    // SOMET-79: grantStartingLoadout runs its claim + inserts in ONE
+    // transaction, so it checks out a client rather than using pool.query.
+    // A fake pool without `connect` makes it throw before any assertion runs
+    // -- the same trap the authority join-path fixtures hit when a new query
+    // appeared there. BEGIN/COMMIT/ROLLBACK land in `calls` like any other
+    // statement, so a test can still assert on the statements issued.
+    connect: async () => ({ query, release: () => {} }),
   };
 }
 

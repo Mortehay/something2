@@ -5,6 +5,26 @@ import { resolveMove } from "../systems/movement.js";
 // Single source of the key → direction-vector mapping. Used by Player.update
 // (local prediction) AND by Game (input sent to the authority) so the two
 // never drift.
+// SOMET-79: which keys count as MOVEMENT right now. WASD kept walking the
+// character while the inventory or shop panel was open -- clicks were already
+// suppressed, so the player was typing into a modal and moving underneath it,
+// and because the authority is fed the same vector they really did move
+// server-side.
+//
+// A plain function taking the state object rather than a Game method, for two
+// reasons: it sits beside inputVector, which is the other half of the same
+// rule, and it stays callable on any state-shaped object -- getMinimapSnapshot
+// is exercised in tests against a hand-built `this` that has no class methods.
+//
+// Returns an empty key map rather than a zeroed vector because prediction
+// (Player.update) and the authority send read the keys SEPARATELY: zeroing one
+// and not the other would desync the client from the server, which is a worse
+// bug than the one being fixed.
+export function movementKeys(state) {
+    if (!state) return {};
+    return (state.inventoryOpen || state.shopOpen) ? {} : (state.keys || {});
+}
+
 export function inputVector(keys) {
     let dx = 0, dy = 0;
     if (keys['w'] || keys['arrowup']) dy -= 1;
