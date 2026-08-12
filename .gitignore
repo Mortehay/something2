@@ -54,4 +54,4 @@ frontend/.vite/
 # Docker/Compose Data (if volumes are mapped to local dirs)
 # postgres_data/
 # minio_data/
-.mcp.json
+.mcp.json.worktrees/
