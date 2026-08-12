@@ -12,16 +12,35 @@ const ADMIN_HEADERS = authHeaders();
 // this process, mirroring tests/worldsAdminRoutes.test.js.
 test.afterEach(() => { __setAuthorityHandle(null); });
 
+// PUT /api/entity-types/:id acquires a client (pool.connect()) rather than
+// using pool.query directly now, so a rename's cascade rewrite and the
+// entity_types UPDATE commit or roll back together (SOMET-228). `connect`
+// hands back a client whose `query` resolves against the same handler list
+// (with BEGIN/COMMIT/ROLLBACK auto-answered) and records into the same
+// `calls` array -- every other route in this file still goes through the
+// plain `query` path unaffected.
 function mockPool(handlers) {
   const calls = [];
+  const resolve = async (sql, params) => {
+    calls.push({ sql, params });
+    for (const [re, fn] of handlers) if (re.test(sql)) return fn(params);
+    throw new Error(`unexpected query: ${sql}`);
+  };
+  const client = {
+    query: async (sql, params) => {
+      const trimmed = sql.trim();
+      if (/^(BEGIN|COMMIT|ROLLBACK)$/i.test(trimmed)) return { rows: [] };
+      return resolve(sql, params);
+    },
+    release: () => {},
+  };
   return {
     calls,
     query: async (sql, params) => {
       if (isUserLookup(sql)) return ADMIN_USER_ROW;
-      calls.push({ sql, params });
-      for (const [re, fn] of handlers) if (re.test(sql)) return fn(params);
-      throw new Error(`unexpected query: ${sql}`);
+      return resolve(sql, params);
     },
+    connect: async () => client,
   };
 }
 
@@ -261,15 +280,24 @@ test('renaming a tile type succeeds when nothing references it', async () => {
   assert.equal(res.status, 200);
 });
 
-test('renaming an entity type is refused while a biome still lists it', async () => {
-  __setPool(mockPool([
+// SOMET-228: this used to 409 -- a rename could never land once a biome
+// referenced it. It now cascades the rename into the biome's flora_types/
+// creature_types instead of refusing it.
+test('renaming an entity type cascades into a biome that still lists it, instead of being refused', async () => {
+  const pool = mockPool([
     [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'bush' }] })],
     [/FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
     [/FROM world_creatures WHERE type/i, () => ({ rows: [] })],
-    [/FROM biomes WHERE/i, () => ({ rows: [{ id: 1, name: 'Meadow' }] })],
-  ]));
+    [/SELECT id, name FROM biomes WHERE flora_types/i, () => ({ rows: [{ id: 1, name: 'Meadow' }] })],
+    [/UPDATE biomes\b/i, () => ({ rowCount: 1, rows: [] })],
+    [/UPDATE entity_types SET/i, () => ({ rows: [{ id: 1, name: 'shrub' }] })],
+  ]);
+  __setPool(pool);
   const res = await request(app).put('/api/entity-types/1').set(ADMIN_HEADERS).send({ name: 'shrub' });
-  assert.equal(res.status, 409);
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.name, 'shrub');
+  assert.equal(res.body.renamedReferences.biomes, 1);
+  assert.ok(pool.calls.some((c) => /UPDATE biomes\b/i.test(c.sql)), 'expected the biomes cascade UPDATE to run');
 });
 
 test('PUT /api/worlds/:id changing the biome set wipes that world\'s cached chunks', async () => {

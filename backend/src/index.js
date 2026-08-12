@@ -537,75 +537,143 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
 });
 
 app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  const {
+    name, color, walkable, spawn_tiles, chance,
+    strength, dexterity, constitution, intelligence, wisdom, charisma,
+    hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
+    display_width, display_height, render_mode, is_creature, prompt, place_order,
+    behavior_id, attack_element
+  } = req.body;
+  if (catalogNameTooLong(name)) {
+    return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
+  }
+  const fieldErr = entityTypeFieldError(req.body);
+  if (fieldErr) return res.status(400).json({ error: fieldErr });
+
+  // SOMET-254 follow-up: `behavior_id ?? null` alone can't tell "field
+  // omitted from the request" (must COALESCE against the existing row,
+  // per the fix below) apart from "field explicitly sent as null" (must
+  // actually clear it) -- both normalize to the same JS value. But
+  // EntityTypesAdmin.jsx's "-- none (default Line behavior) --" option
+  // (line ~1258) legitimately submits behavior_id: null to clear an
+  // override back to none, and a `?? null` COALESCE silently discards
+  // that clear (200 OK, DB keeps the old value). `'in'` on the parsed
+  // JSON body is the reliable way to see a present-but-null key --
+  // JSON.parse never yields `undefined` for one, so this can't be
+  // spoofed by an absent key. attack_element does NOT get the same
+  // treatment: the column is NOT NULL with a CHECK constraint (migration
+  // 1714440081000) and the admin UI's Attack Element <select> has no
+  // "none" option -- it only ever submits one of ATTACK_ELEMENTS, so
+  // there is no legitimate clear-to-null action to preserve here, and an
+  // explicit null would just fail the NOT NULL constraint anyway.
+  const behaviorIdProvided = 'behavior_id' in req.body;
+
+  // SOMET-228: worlds.allowed_creature_types, world_creatures.type and
+  // biomes.flora_types/creature_types reference entity_types by NAME (no
+  // FK). SOMET-185 used to 409 a rename that would orphan any of these --
+  // safe, but it meant a typo'd name could never actually be fixed once
+  // referenced anywhere, short of hand-editing the DB. Instead: when a
+  // rename would orphan a reference, cascade-rewrite every referencing name
+  // in the SAME transaction as the entity_types row update, so the rename
+  // always succeeds and nothing is left inconsistent. Client acquired
+  // inside the try: pool.connect() can reject (DB restart, pool
+  // exhaustion) and Express 4.x does not catch async handler rejections,
+  // same hardening as every other route in this file that opens a
+  // transaction.
+  let client = null;
   try {
-    const { id } = req.params;
-    const {
-      name, color, walkable, spawn_tiles, chance,
-      strength, dexterity, constitution, intelligence, wisdom, charisma,
-      hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
-      display_width, display_height, render_mode, is_creature, prompt, place_order,
-      behavior_id, attack_element
-    } = req.body;
-    if (catalogNameTooLong(name)) {
-      return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
-    }
-    const fieldErr = entityTypeFieldError(req.body);
-    if (fieldErr) return res.status(400).json({ error: fieldErr });
+    client = await pool.connect();
+    await client.query('BEGIN');
 
-    // SOMET-254 follow-up: `behavior_id ?? null` alone can't tell "field
-    // omitted from the request" (must COALESCE against the existing row,
-    // per the fix below) apart from "field explicitly sent as null" (must
-    // actually clear it) -- both normalize to the same JS value. But
-    // EntityTypesAdmin.jsx's "-- none (default Line behavior) --" option
-    // (line ~1258) legitimately submits behavior_id: null to clear an
-    // override back to none, and a `?? null` COALESCE silently discards
-    // that clear (200 OK, DB keeps the old value). `'in'` on the parsed
-    // JSON body is the reliable way to see a present-but-null key --
-    // JSON.parse never yields `undefined` for one, so this can't be
-    // spoofed by an absent key. attack_element does NOT get the same
-    // treatment: the column is NOT NULL with a CHECK constraint (migration
-    // 1714440081000) and the admin UI's Attack Element <select> has no
-    // "none" option -- it only ever submits one of ATTACK_ELEMENTS, so
-    // there is no legitimate clear-to-null action to preserve here, and an
-    // explicit null would just fail the NOT NULL constraint anyway.
-    const behaviorIdProvided = 'behavior_id' in req.body;
-
-    // SOMET-185: worlds.allowed_creature_types and world_creatures.type
-    // reference entity_types by NAME (no FK), so a free rename here silently
-    // orphans them — a creature re-roll on an affected world then matches
-    // zero rows and reports {"placed": 0} with no error, and the GUARD_TYPE =
-    // 'Village Guard' guard-sparing clause (index.js's insertVillageGuards
-    // callers) stops matching, so a re-roll wipes every village guard.
-    // Block a rename that would break an outstanding reference rather than
-    // silently orphaning it.
+    let renamedReferences = null;
     if (name != null) {
-      const cur = await pool.query('SELECT name FROM entity_types WHERE id = $1', [id]);
-      if (cur.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
+      const cur = await client.query('SELECT name FROM entity_types WHERE id = $1', [id]);
+      if (cur.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Entity type not found' });
+      }
       const oldName = cur.rows[0].name;
       if (oldName !== name) {
-        const [worldsRef, creaturesRef, biomesRef] = await Promise.all([
-          pool.query('SELECT id, name FROM worlds WHERE allowed_creature_types @> $1::jsonb', [JSON.stringify([oldName])]),
-          pool.query('SELECT 1 FROM world_creatures WHERE type = $1 LIMIT 1', [oldName]),
-          // biomes.flora_types / creature_types reference entity_types by name
-          // with no FK, exactly like allowed_creature_types above. A rename
-          // that orphans them silently strips that biome's flora or fauna.
-          pool.query(
-            'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
-            [JSON.stringify([oldName])],
-          ),
-        ]);
+        // Sequential, not Promise.all: these three now run on the same
+        // transactional `client` (a single pg connection), not on `pool`
+        // (which hands each parallel query its own connection). A single pg
+        // Client can only run one query at a time -- concurrent client.query()
+        // calls are silently queued today but that queuing is deprecated as
+        // of pg 8.x and will be removed in pg 9, so this must be sequential.
+        const worldsRef = await client.query('SELECT id, name FROM worlds WHERE allowed_creature_types @> $1::jsonb', [JSON.stringify([oldName])]);
+        const creaturesRef = await client.query('SELECT 1 FROM world_creatures WHERE type = $1 LIMIT 1', [oldName]);
+        // biomes.flora_types / creature_types reference entity_types by name
+        // with no FK, exactly like allowed_creature_types above.
+        const biomesRef = await client.query(
+          'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
+          [JSON.stringify([oldName])],
+        );
         if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0) {
-          return res.status(409).json({
-            error: `Cannot rename '${oldName}': still referenced by allowed_creature_types, placed creatures, or a biome`,
-            referencing_worlds: worldsRef.rows.map((w) => ({ id: w.id, name: w.name })),
-            referencing_biomes: biomesRef.rows.map((b) => ({ id: b.id, name: b.name })),
-            has_placed_creatures: creaturesRef.rows.length > 0,
-          });
+          // Rewrite the ONE matching element inside each jsonb array, not the
+          // whole array -- WITH ORDINALITY + `ORDER BY` keeps element order
+          // stable, and jsonb_agg's per-element CASE leaves every other
+          // element (including duplicates of a name that isn't oldName)
+          // untouched. WHERE ... @> guarantees the source array actually
+          // contains oldName, so jsonb_agg is never aggregating over zero
+          // rows here (which would collapse to NULL and wipe the column).
+          // Each cascade UPDATE only runs when its own reference check found
+          // a match -- the three reference sites are independent, and a
+          // rename referenced in only one of them shouldn't touch the other
+          // two tables at all.
+          let worldsCount = 0;
+          let biomesCount = 0;
+          if (worldsRef.rows.length > 0) {
+            const worldsResult = await client.query(
+              `UPDATE worlds
+               SET allowed_creature_types = (
+                 SELECT jsonb_agg(CASE WHEN elem.value = $1 THEN $2 ELSE elem.value END ORDER BY elem.ordinality)
+                 FROM jsonb_array_elements_text(allowed_creature_types) WITH ORDINALITY AS elem(value, ordinality)
+               )
+               WHERE allowed_creature_types @> $3::jsonb`,
+              [oldName, name, JSON.stringify([oldName])],
+            );
+            worldsCount = worldsResult.rowCount || 0;
+          }
+          if (creaturesRef.rows.length > 0) {
+            await client.query(
+              'UPDATE world_creatures SET type = $2 WHERE type = $1',
+              [oldName, name],
+            );
+          }
+          if (biomesRef.rows.length > 0) {
+            // biomes has TWO reference arrays on the same row. Guard each
+            // column's rewrite with its own containment check so a biome
+            // that matches via flora_types but has an empty/absent
+            // creature_types (or vice versa) doesn't have the untouched
+            // column dragged through jsonb_agg over zero rows and collapsed
+            // to NULL.
+            const biomesResult = await client.query(
+              `UPDATE biomes
+               SET
+                 flora_types = CASE WHEN flora_types @> $3::jsonb THEN (
+                   SELECT jsonb_agg(CASE WHEN elem.value = $1 THEN $2 ELSE elem.value END ORDER BY elem.ordinality)
+                   FROM jsonb_array_elements_text(flora_types) WITH ORDINALITY AS elem(value, ordinality)
+                 ) ELSE flora_types END,
+                 creature_types = CASE WHEN creature_types @> $3::jsonb THEN (
+                   SELECT jsonb_agg(CASE WHEN elem.value = $1 THEN $2 ELSE elem.value END ORDER BY elem.ordinality)
+                   FROM jsonb_array_elements_text(creature_types) WITH ORDINALITY AS elem(value, ordinality)
+                 ) ELSE creature_types END
+               WHERE flora_types @> $3::jsonb OR creature_types @> $3::jsonb`,
+              [oldName, name, JSON.stringify([oldName])],
+            );
+            biomesCount = biomesResult.rowCount || 0;
+          }
+          renamedReferences = {
+            worlds: worldsCount,
+            biomes: biomesCount,
+            hadPlacedCreatures: creaturesRef.rows.length > 0,
+          };
         }
       }
     }
 
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE entity_types SET
         name = $1, color = $2, walkable = $3, spawn_tiles = $4, chance = $5,
         strength = $6, dexterity = $7, constitution = $8, intelligence = $9, wisdom = $10, charisma = $11,
@@ -639,11 +707,20 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         behaviorIdProvided, id
       ]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
-    res.json(result.rows[0]);
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Entity type not found' });
+    }
+    await client.query('COMMIT');
+    const body = result.rows[0];
+    if (renamedReferences) body.renamedReferences = renamedReferences;
+    res.json(body);
   } catch (err) {
+    await client?.query('ROLLBACK').catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Failed to update entity type' });
+  } finally {
+    client?.release();
   }
 });
 
