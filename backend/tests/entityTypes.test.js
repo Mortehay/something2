@@ -255,3 +255,74 @@ test('PUT /api/entity-types/:id 404s when the row does not exist', async () => {
 
   assert.equal(res.status, 404);
 });
+
+// SOMET-238: DELETE had no reference guard at all, though the PUT rename
+// guard right above (F-005/SOMET-185) already refuses exactly this. Same
+// three reference sites, same 409 shape, now on DELETE too. No
+// /DELETE FROM entity_types/i handler is registered in the refused cases
+// below on purpose: if the guard regressed away, that query would hit the
+// mock's throw-on-unexpected-query guard instead of silently deleting a
+// still-referenced row.
+test('DELETE /api/entity-types/:id 409s when still an allowed creature type on a world', async () => {
+  __setPool(mockPool([
+    [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'AuditFixtureBeast' }] })],
+    [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [{ id: 'w1', name: 'Test World' }] })],
+    [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [] })],
+    [/FROM biomes WHERE/i, () => ({ rows: [] })],
+  ]));
+  const res = await request(app).delete('/api/entity-types/5').set(...AUTH);
+
+  assert.equal(res.status, 409);
+  assert.equal(res.body.referencing_worlds[0].id, 'w1');
+});
+
+test('DELETE /api/entity-types/:id 409s when it still has placed creatures', async () => {
+  __setPool(mockPool([
+    [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'Village Guard' }] })],
+    [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
+    [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [{ '?column?': 1 }] })],
+    [/FROM biomes WHERE/i, () => ({ rows: [] })],
+  ]));
+  const res = await request(app).delete('/api/entity-types/5').set(...AUTH);
+
+  assert.equal(res.status, 409);
+  assert.equal(res.body.has_placed_creatures, true);
+});
+
+test('DELETE /api/entity-types/:id 409s when still referenced by a biome', async () => {
+  __setPool(mockPool([
+    [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'Bush' }] })],
+    [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
+    [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [] })],
+    [/FROM biomes WHERE/i, () => ({ rows: [{ id: 'b1', name: 'Meadow' }] })],
+  ]));
+  const res = await request(app).delete('/api/entity-types/5').set(...AUTH);
+
+  assert.equal(res.status, 409);
+  assert.equal(res.body.referencing_biomes[0].id, 'b1');
+});
+
+test('DELETE /api/entity-types/:id succeeds when nothing references it (no regression)', async () => {
+  const pool = mockPool([
+    [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [{ name: 'Unused' }] })],
+    [/SELECT id, name FROM worlds WHERE allowed_creature_types/i, () => ({ rows: [] })],
+    [/SELECT 1 FROM world_creatures WHERE type/i, () => ({ rows: [] })],
+    [/FROM biomes WHERE/i, () => ({ rows: [] })],
+    [/DELETE FROM entity_types WHERE id/i, () => ({ rows: [{ id: 5 }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).delete('/api/entity-types/5').set(...AUTH);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.id, 5);
+});
+
+test('DELETE /api/entity-types/:id 404s when the row does not exist', async () => {
+  __setPool(mockPool([
+    [/SELECT name FROM entity_types WHERE id/i, () => ({ rows: [] })],
+  ]));
+  const res = await request(app).delete('/api/entity-types/999').set(...AUTH);
+
+  assert.equal(res.status, 404);
+});

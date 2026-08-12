@@ -80,11 +80,18 @@ test('DELETE links removes the link (204)', async () => {
 // discarded, so a link edit against a world with a connected player silently
 // never reached that player's live session (its wall ring / doorway would
 // stay stale until the world emptied).
+//
+// SOMET-236: a single link edit calls invalidateWorld() on BOTH endpoint
+// worlds (see the ticket's own "map-link graph tab" example), and this test's
+// shared authority handle refuses eviction for both. No
+// /DELETE FROM world_chunks/i handler is registered below on purpose: chunks
+// must not be wiped for EITHER world when eviction is refused for it, so that
+// query hitting the mock's throw-on-unexpected-query guard would fail this
+// test loud if the ordering regressed back to delete-then-check.
 test('POST links warns when either world is live (JSON body can carry it)', async () => {
   const pool = mockPool([
     [/SELECT .* FROM worlds WHERE id = \$1/i, (p) => ({ rows: [{ id: p[0], width: 24, height: 24 }] })],
     [/INSERT INTO map_links/i, () => ({ rows: [] })],
-    [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
   ]);
   __setPool(pool);
   __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
@@ -92,17 +99,22 @@ test('POST links warns when either world is live (JSON body can carry it)', asyn
   assert.equal(res.status, 200);
   assert.equal(res.body.ok, true);
   assert.match(res.body.liveWarning, /connected/i);
+  assert.ok(!pool.calls.some(c => /DELETE FROM world_chunks/i.test(c.sql)),
+    'SOMET-236: neither endpoint world\'s chunks may be wiped while its eviction is refused');
 });
 
+// SOMET-236: same reasoning as the POST test above -- no chunk-delete handler
+// registered on purpose.
 test('DELETE links sets a header when a world is live (204 has no body to carry it)', async () => {
   const pool = mockPool([
     [/SELECT to_world_id FROM map_links/i, () => ({ rows: [{ to_world_id: 'B' }] })],
     [/DELETE FROM map_links/i, () => ({ rows: [] })],
-    [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
   ]);
   __setPool(pool);
   __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
   const res = await request(app).delete('/api/worlds/A/links/E').set(...AUTH);
   assert.equal(res.status, 204);
   assert.equal(res.headers['x-live-world-pending'], 'true');
+  assert.ok(!pool.calls.some(c => /DELETE FROM world_chunks/i.test(c.sql)),
+    'SOMET-236: neither endpoint world\'s chunks may be wiped while its eviction is refused');
 });

@@ -69,3 +69,55 @@ test('POST defaults prompt to empty string when omitted', async () => {
   const call = pool.calls.find((c) => /INSERT INTO tile_types/i.test(c.sql));
   assert.equal(call.params[6], '', 'missing prompt must default to empty string');
 });
+
+// SOMET-238: DELETE had no reference guard at all, though the PUT rename
+// guard right above already refuses exactly this (see also
+// biomesApi.test.js's "renaming a tile type is refused while a biome still
+// lists it"). Same two reference sites, same 409 shape, now on DELETE too. No
+// /DELETE FROM tile_types/i handler is registered in the refused cases below
+// on purpose: if the guard regressed away, that query would hit the mock's
+// throw-on-unexpected-query guard instead of silently deleting a
+// still-referenced row.
+test('DELETE /api/tile-types/:id 409s when still referenced by an entity type\'s spawn tiles', async () => {
+  __setPool(mockPool([
+    [/SELECT name FROM tile_types WHERE id/i, () => ({ rows: [{ name: 'grass' }] })],
+    [/FROM entity_types WHERE spawn_tiles/i, () => ({ rows: [{ id: 3, name: 'Bush' }] })],
+    [/FROM biomes WHERE terrain_tiles/i, () => ({ rows: [] })],
+  ]));
+  const res = await request(app).delete('/api/tile-types/1').set(...AUTH);
+  assert.equal(res.status, 409);
+  assert.deepEqual(res.body.referencing_entity_types, [{ id: 3, name: 'Bush' }]);
+});
+
+test('DELETE /api/tile-types/:id 409s when still referenced by a biome\'s terrain_tiles', async () => {
+  __setPool(mockPool([
+    [/SELECT name FROM tile_types WHERE id/i, () => ({ rows: [{ name: 'grass' }] })],
+    [/FROM entity_types WHERE spawn_tiles/i, () => ({ rows: [] })],
+    [/FROM biomes WHERE terrain_tiles/i, () => ({ rows: [{ id: 1, name: 'Meadow' }] })],
+  ]));
+  const res = await request(app).delete('/api/tile-types/1').set(...AUTH);
+  assert.equal(res.status, 409);
+  assert.deepEqual(res.body.referencing_biomes, [{ id: 1, name: 'Meadow' }]);
+});
+
+test('DELETE /api/tile-types/:id succeeds when nothing references it (no regression)', async () => {
+  const pool = mockPool([
+    [/SELECT name FROM tile_types WHERE id/i, () => ({ rows: [{ name: 'grass' }] })],
+    [/FROM entity_types WHERE spawn_tiles/i, () => ({ rows: [] })],
+    [/FROM biomes WHERE terrain_tiles/i, () => ({ rows: [] })],
+    [/DELETE FROM tile_types WHERE id/i, () => ({ rows: [{ id: 1 }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).delete('/api/tile-types/1').set(...AUTH);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.id, 1);
+});
+
+test('DELETE /api/tile-types/:id 404s when the row does not exist', async () => {
+  __setPool(mockPool([
+    [/SELECT name FROM tile_types WHERE id/i, () => ({ rows: [] })],
+  ]));
+  const res = await request(app).delete('/api/tile-types/999').set(...AUTH);
+  assert.equal(res.status, 404);
+});

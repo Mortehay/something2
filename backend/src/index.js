@@ -5,7 +5,7 @@ const { attachAuthority } = require('./authority/server');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
-const { generateWorld, placeEntities, detectPathTile, uniqueTileNames, generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
+const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const { fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS } = require('./services/villages');
 const { fetchChests } = require('./services/chests.js');
@@ -65,16 +65,10 @@ app.use(apiRateLimiter());
 // body) was fully buffered and parsed before the 404 was produced, and
 // backend RSS jumped from ~37MiB to ~181MiB for that one request.
 //
-// 256kb comfortably covers every route's legitimate payload except the
-// map-entities bulk upload, which needs headroom for a full map's obstacle
-// array. That route gets its own larger, path-scoped parser registered
-// FIRST: body-parser no-ops on a second parse attempt once req._body is set
-// (node_modules/body-parser/lib/types/json.js), so registering the tighter
-// global limit first would silently pre-empt any larger per-route override
-// declared later inside the route itself -- the ordering here, not just the
-// limit, is what makes the exception real.
-const ENTITY_UPLOAD_PATH = '/api/maps/:id/entities';
-app.use(ENTITY_UPLOAD_PATH, express.json({ limit: '10mb' }));
+// 256kb comfortably covers every route's legitimate payload. A path-scoped
+// override used to run ahead of this for the map-entities bulk upload route
+// (SOMET-233 removed that route as dead legacy-flat-map surface, so the
+// override went with it).
 app.use(express.json({ limit: '256kb' }));
 app.use(express.urlencoded({ limit: '256kb', extended: true }));
 
@@ -154,11 +148,6 @@ function invalidId(id) {
 // Two literal 2000s would let the API's advertised limit and the limit
 // actually enforced during placement drift apart.
 const MAX_CREATURE_COUNT = MAX_WORLD_CREATURES;
-// Upper bound for POST /api/maps/generate rows/cols. This route eagerly
-// builds an rows*cols in-memory array and JSON.stringifies the whole thing
-// into a single row, unlike chunked worlds -- an unvalidated 100000x100000
-// request exhausts the heap (SOMET-188 / F-008).
-const MAX_MAP_DIM = 500;
 
 // World preview memo
 const PREVIEW_DIM = 64;
@@ -452,23 +441,6 @@ app.get('/api/player/world-map', playerGuard, async (req, res) => {
 // any user_id with no credentials — a verified account-takeover primitive.
 // Use POST /api/auth/login instead.
 
-// List all maps
-app.get('/api/maps', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT 
-        m.id, m.name, m.description, m.created_at, m.updated_at,
-        EXISTS(SELECT 1 FROM map_entities me WHERE me.map_id = m.id) as has_entities
-      FROM maps m 
-      ORDER BY m.created_at DESC
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch maps' });
-  }
-});
-
 // List all map configuration (tiles + entities)
 app.get('/api/map/config', async (req, res) => {
   try {
@@ -675,9 +647,37 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
   }
 });
 
+// SOMET-238: this used to be a bare DELETE with no reference check, even
+// though the PUT rename route right above already refuses a rename that
+// would orphan a reference (F-018/SOMET-185+SOMET-207 pattern). References
+// are by NAME in jsonb arrays with no FK, so the database can't stop this
+// either -- an admin could delete an entity type a world still allowed, a
+// biome still listed, or that was actually placed in world_creatures, and
+// the name would just silently stop resolving downstream (dropped
+// creatures/flora, not an error). Same guard as the rename above, copied
+// verbatim: same three reference sites, same 409 shape.
 app.delete('/api/entity-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
+    const cur = await pool.query('SELECT name FROM entity_types WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
+    const name = cur.rows[0].name;
+    const [worldsRef, creaturesRef, biomesRef] = await Promise.all([
+      pool.query('SELECT id, name FROM worlds WHERE allowed_creature_types @> $1::jsonb', [JSON.stringify([name])]),
+      pool.query('SELECT 1 FROM world_creatures WHERE type = $1 LIMIT 1', [name]),
+      pool.query(
+        'SELECT id, name FROM biomes WHERE flora_types @> $1::jsonb OR creature_types @> $1::jsonb',
+        [JSON.stringify([name])],
+      ),
+    ]);
+    if (worldsRef.rows.length > 0 || creaturesRef.rows.length > 0 || biomesRef.rows.length > 0) {
+      return res.status(409).json({
+        error: `Cannot delete '${name}': still referenced by allowed_creature_types, placed creatures, or a biome`,
+        referencing_worlds: worldsRef.rows.map((w) => ({ id: w.id, name: w.name })),
+        referencing_biomes: biomesRef.rows.map((b) => ({ id: b.id, name: b.name })),
+        has_placed_creatures: creaturesRef.rows.length > 0,
+      });
+    }
     const result = await pool.query('DELETE FROM entity_types WHERE id = $1 RETURNING id', [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Entity type not found' });
     res.json({ success: true, id: result.rows[0].id });
@@ -963,9 +963,27 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
   }
 });
 
+// SOMET-238: same asymmetry as entity types -- rename is guarded (above),
+// delete was not, though the reference is by NAME with no FK either way.
+// Same two reference sites as the rename guard, same 409 shape.
 app.delete('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
+    const cur = await pool.query('SELECT name FROM tile_types WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Tile type not found' });
+    const name = cur.rows[0].name;
+    const [entityRef, biomeRef] = await Promise.all([
+      pool.query('SELECT id, name FROM entity_types WHERE spawn_tiles @> $1::jsonb', [JSON.stringify([name])]),
+      pool.query('SELECT id, name FROM biomes WHERE terrain_tiles @> $1::jsonb', [JSON.stringify([name])]),
+    ]);
+    if (entityRef.rows.length > 0 || biomeRef.rows.length > 0) {
+      return res.status(409).json({
+        error: `Cannot delete '${name}': still referenced by an entity type's spawn tiles or a biome`,
+        referencing_entity_types: entityRef.rows.map((e) => ({ id: e.id, name: e.name })),
+        referencing_biomes: biomeRef.rows.map((b) => ({ id: b.id, name: b.name })),
+      });
+    }
+
     const result = await pool.query('DELETE FROM tile_types WHERE id = $1 RETURNING id', [id]);
 
     if (result.rows.length === 0) {
@@ -1161,7 +1179,8 @@ app.post('/api/creature-behaviors', adminGuard, async (req, res) => {
   // Acquired inside the try: pool.connect() can reject (DB restart, pool
   // exhaustion) and Express 4.x does not catch async handler rejections, so
   // an unguarded await here would escape as an unhandledRejection and kill
-  // the process. Same hardening as /api/maps/:id/entities.
+  // the process. Same hardening as every other route below that acquires a
+  // client inside its try block.
   let client = null;
   try {
     client = await pool.connect();
@@ -1478,203 +1497,6 @@ app.delete('/api/biomes/:id', adminGuard, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete biome' });
-  }
-});
-
-// Get a specific map
-app.get('/api/maps/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query('SELECT * FROM maps WHERE id = $1', [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Map not found' });
-    }
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch map' });
-  }
-});
-
-// Generate a new map
-app.post('/api/maps/generate', adminGuard, async (req, res) => {
-  try {
-    const { name, description, rows = 100, cols = 100, seed } = req.body;
-    const r = Number.isFinite(rows) ? Math.floor(rows) : NaN;
-    const c = Number.isFinite(cols) ? Math.floor(cols) : NaN;
-    if (!Number.isInteger(r) || !Number.isInteger(c) || r < 1 || r > MAX_MAP_DIM || c < 1 || c > MAX_MAP_DIM) {
-      return res.status(400).json({ error: `rows and cols must be integers between 1 and ${MAX_MAP_DIM}` });
-    }
-
-    console.log(`Generating map: ${name} (${r}x${c})`);
-
-    // Fetch tile types from DB for generation
-    const tileTypes = await getTileTypesMap();
-    const worldSeed = Number.isFinite(seed) ? seed : Date.now();
-    const mapData = generateWorld(r, c, tileTypes, { seed: worldSeed });
-    
-    const result = await pool.query(
-      'INSERT INTO maps (name, data, description) VALUES ($1, $2, $3) RETURNING id, name, created_at',
-      [name || `Map ${new Date().toLocaleString()}`, JSON.stringify(mapData), description || 'Procedurally generated map']
-    );
-    
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to generate map' });
-  }
-});
-
-
-// Delete a map
-app.delete('/api/maps/:id', adminGuard, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query('DELETE FROM maps WHERE id = $1 RETURNING id', [id]);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Map not found' });
-    }
-    
-    res.json({ success: true, id: result.rows[0].id });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to delete map' });
-  }
-});
-
-// Save map entities. Frontend payload: [{ type: "Tree"|"Stone"|..., row, col, name }, ...].
-// Persisted as row-per-entity in map_entities (type='obstacle', entity_type_id resolved by name,
-// x = col + 0.5, y = row + 0.5 in tile coords).
-app.post('/api/maps/:id/entities', adminGuard, async (req, res) => {
-  // Acquired inside the try: pool.connect() can reject (DB restart, pool
-  // exhaustion) and Express 4.x does not catch async handler rejections, so
-  // an unguarded await here would escape as an unhandledRejection and kill
-  // the process (and every WS player co-hosted on it). Same hardening as
-  // auth/middleware.js.
-  let client = null;
-  try {
-    client = await pool.connect();
-    const { id } = req.params;
-    const { entities } = req.body;
-
-    const mapResult = await client.query('SELECT id FROM maps WHERE id = $1', [id]);
-    if (mapResult.rows.length === 0) return res.status(404).json({ error: 'Map not found' });
-
-    const typeResult = await client.query('SELECT id, name FROM entity_types');
-    const idByName = new Map(typeResult.rows.map((t) => [t.name, t.id]));
-
-    await client.query('BEGIN');
-    await client.query(`DELETE FROM map_entities WHERE map_id = $1 AND type = 'obstacle'`, [id]);
-
-    if (entities && entities.length > 0) {
-      for (const e of entities) {
-        const name = e.type || e.name;
-        const etId = idByName.get(name);
-        if (!etId) {
-          console.warn(`save-entities: skipping unknown entity_type "${name}"`);
-          continue;
-        }
-        const r = e.row ?? 0;
-        const c = e.col ?? 0;
-        await client.query(
-          `INSERT INTO map_entities (map_id, type, entity_type_id, x, y)
-           VALUES ($1, 'obstacle', $2, $3, $4)`,
-          [id, etId, c + 0.5, r + 0.5]
-        );
-      }
-    }
-    await client.query('COMMIT');
-    res.json({ success: true });
-  } catch (err) {
-    await client?.query('ROLLBACK').catch(() => {});
-    console.error(err);
-    res.status(500).json({ error: 'Failed to save entities' });
-  } finally {
-    client?.release();
-  }
-});
-
-// Load map entities. Returns the legacy frontend shape derived from row-per-entity rows:
-// { type: <entity_type.name>, name: <entity_type.name>, row, col, id }.
-app.get('/api/maps/:id/entities', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query(
-      `SELECT me.id, et.name, me.x, me.y
-       FROM map_entities me
-       JOIN entity_types et ON et.id = me.entity_type_id
-       WHERE me.map_id = $1 AND me.type = 'obstacle'
-       ORDER BY me.id`,
-      [id]
-    );
-    res.json(
-      result.rows.map((r) => ({
-        id: r.id,
-        type: r.name,
-        name: r.name,
-        row: Math.floor(r.y),
-        col: Math.floor(r.x),
-      }))
-    );
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch entities' });
-  }
-});
-
-// Generate static obstacles (type='obstacle') from entity_types.spawn_tiles + chance.
-app.post('/api/maps/:id/generate-entities', adminGuard, async (req, res) => {
-  const { id } = req.params;
-  // Acquired inside the try: see the /entities route above for why.
-  let client = null;
-  try {
-    client = await pool.connect();
-    const mapResult = await client.query('SELECT data FROM maps WHERE id = $1', [id]);
-    if (mapResult.rows.length === 0) return res.status(404).json({ error: 'Map not found' });
-    const tiles = mapResult.rows[0].data;
-
-    const typeResult = await client.query('SELECT * FROM entity_types');
-    const entityTypes = typeResult.rows.filter((t) => t.walkable === false);
-
-    // Density-driven clustered placement: objects clump (forest stands), while
-    // carved paths and clearings stay open. Deterministic per optional seed.
-    const pathTile = detectPathTile(uniqueTileNames(tiles));
-    const placeSeed = Number.isFinite(req.body?.seed) ? req.body.seed : Date.now();
-    const { placed } = placeEntities(tiles, entityTypes, {
-      seed: placeSeed,
-      pathTiles: pathTile ? [pathTile] : [],
-    });
-    const generated = placed.map((p) => ({
-      entity_type_id: p.def.id,
-      name: p.def.name,
-      row: p.row,
-      col: p.col,
-    }));
-
-    await client.query('BEGIN');
-    await client.query(`DELETE FROM map_entities WHERE map_id = $1 AND type = 'obstacle'`, [id]);
-    for (const g of generated) {
-      await client.query(
-        `INSERT INTO map_entities (map_id, type, entity_type_id, x, y)
-         VALUES ($1, 'obstacle', $2, $3, $4)`,
-        [id, g.entity_type_id, g.col + 0.5, g.row + 0.5]
-      );
-    }
-    await client.query('COMMIT');
-    await client.query('UPDATE maps SET updated_at = NOW() WHERE id = $1', [id]);
-
-    res.json({
-      success: true,
-      count: generated.length,
-      entities: generated.map((g) => ({ type: g.name, name: g.name, row: g.row, col: g.col })),
-    });
-  } catch (err) {
-    await client?.query('ROLLBACK').catch(() => {});
-    console.error(err);
-    res.status(500).json({ error: 'Generation failed: ' + err.message });
-  } finally {
-    client?.release();
   }
 });
 
@@ -2137,6 +1959,26 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     const nextBiomes = biomesProvided
       ? (Array.isArray(biomes) ? biomes.filter((b) => typeof b === 'string' && b.trim()).map((b) => b.trim()) : [])
       : (before.biomes || []);
+    // SOMET-237: worlds.biomes is a jsonb array of biome NAMES with no FK --
+    // this used to only filter for non-empty strings, so a typo'd or
+    // never-created name was accepted silently. loadBiomes() (services/
+    // biomes.js) resolves names via a Map and ends with .filter(Boolean), so
+    // an unknown name was then silently DROPPED at generation time: the world
+    // just generated as if it weren't listed, with no error and no signal to
+    // the admin that their biome assignment was doing nothing. Worse, it left
+    // a dangling reference that a LATER biome creation matching that name
+    // would silently activate for every world that "listed" it, with no
+    // invalidation or warning. Validating here, on the only write path that
+    // can put a name into worlds.biomes, closes both: a dangling reference
+    // can no longer be created in the first place.
+    if (biomesProvided && nextBiomes.length > 0) {
+      const known = await pool.query('SELECT name FROM biomes WHERE name = ANY($1::text[])', [nextBiomes]);
+      const knownNames = new Set(known.rows.map((r) => r.name));
+      const unknown = nextBiomes.filter((n) => !knownNames.has(n));
+      if (unknown.length > 0) {
+        return res.status(400).json({ error: `unknown biome name(s): ${unknown.join(', ')}` });
+      }
+    }
     const cellProvided = biome_cell !== undefined;
     const nextCell = cellProvided
       ? (Number.isFinite(biome_cell) && biome_cell > 0 ? Math.floor(biome_cell) : null)
@@ -2176,12 +2018,14 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     // so there is no window in which nothing is the entry.
     // A bounds change reshapes the wall ring, and a biome-set/biome_cell change
     // reshapes the terrain those bounds contain: either invalidates persisted +
-    // preview terrain the same way.
-    if (boundsChanged || biomesChanged) {
-      await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [id]);
-      worldPreviewCache.delete(id);
-      clearOverviewCache(id);
-    }
+    // preview terrain the same way. Reuse invalidateWorld() (SOMET-236) rather
+    // than a second ad hoc cache-clearing mechanism -- this used to inline its
+    // own copy of the exact same pre-fix bug (chunks deleted unconditionally,
+    // evictability checked only afterward at the bottom of this route); going
+    // through the shared, now-ordering-fixed helper closes that gap here too
+    // and means there is only one place implementing "check evictability
+    // before touching world_chunks" instead of two that can drift apart.
+    const liveWarning = (boundsChanged || biomesChanged) ? await invalidateWorld(id) : undefined;
     // Same symptom class as the entry_spawn check above (SOMET-184 / F-004),
     // but for players who already joined and persisted a position: a shrink
     // (or an unbounded->bounded transition) can leave a world_players row
@@ -2222,7 +2066,6 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     // (as this route used to) can leave zero, doing it last can at worst leave
     // two for the duration of one statement.
     if (entry) await setEntryWorld(pool, id);
-    const liveWarning = (boundsChanged || biomesChanged) ? evictOrWarn(id) : undefined;
     res.json(liveWarning ? { ...result.rows[0], liveWarning } : result.rows[0]);
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -2368,8 +2211,8 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
   // client acquired inside the try: pool.connect() can reject (DB restart,
   // pool exhaustion) and Express 4.x does not catch an async handler's
   // rejection, so an unguarded await here would escape as an
-  // unhandledRejection and kill the process (same hardening as
-  // POST /api/maps/:id/entities).
+  // unhandledRejection and kill the process (same hardening pattern used
+  // throughout this file wherever a route acquires a client).
   let client = null;
   try {
     const { id } = req.params;
@@ -2435,11 +2278,35 @@ app.get('/api/worlds/:id/links', async (req, res) => {
 // evictOrWarn() warning string (or undefined) so callers with a JSON body can
 // surface it (F-017 / SOMET-197) instead of discarding it like every caller
 // used to.
+//
+// SOMET-236: this used to delete world_chunks UNCONDITIONALLY and only check
+// evictability afterward. When eviction was refused (a player connected, so
+// evictWorld() returns false and isWorldLive() true), the chunk delete had
+// already run and was never rolled back: the live authority kept serving its
+// cached pre-edit map to that player while world_chunks now held nothing, so
+// the next GET /chunk for a chunk they wandered away from and back to would
+// regenerate from the NEW config -- the client would then be colliding
+// against one map while looking at another.
+//
+// Fix: check evictability FIRST, and skip the chunk delete (and both preview
+// caches) entirely when eviction is refused, so world_chunks stays exactly in
+// sync with whatever the live authority is still actually serving -- no
+// divergence, just a caller-visible warning that the edit hasn't reached the
+// live simulation yet (unchanged from before: every caller already surfaces
+// this string). The caller's own DB write (the worlds/biomes/links/villages
+// row) still lands either way, matching the warn-not-block precedent
+// established by evictOrWarn's own callers (F-017/SOMET-197) -- a single
+// biome PUT can affect dozens of worlds at once via worldsReferencingBiome,
+// so refusing the whole edit outright on any one connected world would be a
+// much bigger behavior change than this ticket's actual defect, which is
+// specifically the chunk-delete-before-check ordering.
 async function invalidateWorld(worldId) {
+  const liveWarning = evictOrWarn(worldId);
+  if (liveWarning) return liveWarning;
   await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [worldId]);
   worldPreviewCache.delete(worldId);
   clearOverviewCache(worldId);
-  return evictOrWarn(worldId);
+  return undefined;
 }
 
 function validateVillageBody(body, worldRow, existing) {
@@ -2483,7 +2350,7 @@ app.get('/api/worlds/:id/villages', async (req, res) => {
 
 app.post('/api/worlds/:id/villages', adminGuard, async (req, res) => {
   // client acquired inside the try: same pool.connect()-rejection hardening
-  // as POST /api/maps/:id/entities.
+  // used throughout this file wherever a route acquires a client.
   let client = null;
   try {
     const { id } = req.params;
