@@ -27,13 +27,37 @@ export function toastWorldsError(worldsError) {
   }
 }
 
-export function useWorlds() {
+// SOMET-276: GET /api/worlds now scopes its response by the caller's active
+// character (visited worlds get the full row; unvisited ones don't). Exported
+// standalone -- same reasoning as toastWorldsError above -- so the
+// query-string logic is unit-testable without a render harness (this repo has
+// none for hooks; see autoJoin.js's own note on why its decision functions
+// live in a plain module instead).
+export function worldsRequestUrl(apiUrl, characterId) {
+  const qs = characterId != null ? `?character_id=${encodeURIComponent(characterId)}` : "";
+  return `${apiUrl}/api/worlds${qs}`;
+}
+
+// characterId (optional): threaded through to the server as ?character_id=
+// so a player-role token gets the visited/unvisited projection scoped to the
+// right character (SOMET-276). Pass it wherever the active character is
+// actually known -- GameShell and GameView, the player-facing surfaces.
+// Admin-only surfaces (MapsAdmin) can omit it: an admin token gets the full
+// projection regardless of the parameter.
+export function useWorlds(characterId) {
   // TanStack Query v5 removed per-query `onError` from useQuery options, so
   // errors are surfaced via the returned `error`.
   const { data: worlds, isLoading: isLoadingWorlds, error: worldsError } = useQuery({
-    queryKey: ["worlds"],
+    // Normalized to null so "no character yet" and "character 5" are
+    // distinct cache entries, and two callers that both know the same
+    // character id still share one (GameShell + GameView, both mounted on
+    // /game -- see the comment on the fetch below).
+    queryKey: ["worlds", characterId ?? null],
     queryFn: async () => {
-      const res = await apiFetch(`${API_URL}/api/worlds`);
+      // SOMET-276: GET /api/worlds now requires auth -- this was the only
+      // fetch in this file that didn't send it (the mutations below always
+      // have). Omitting it here would 401 every player on load.
+      const res = await apiFetch(worldsRequestUrl(API_URL, characterId), { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to fetch worlds");
       return res.json();
     },

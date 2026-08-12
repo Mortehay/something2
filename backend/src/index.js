@@ -1968,10 +1968,80 @@ app.post('/api/worlds', adminGuard, async (req, res) => {
   }
 });
 
-app.get('/api/worlds', async (req, res) => {
+// Columns that reveal something about a world's CONTENT (name, seed, level
+// band, layout, ...) as opposed to the two purely mechanical fields the client
+// needs no matter what (id and chunk_size/is_entry, set directly in
+// projectWorldForPlayer below). Kept as an explicit allowlist -- not
+// `Object.keys(row).filter(...)` -- so a future migration
+// that adds a column defaults to WITHHELD from an unvisited world rather than
+// silently leaking until someone remembers to add it here.
+const WORLD_CONTENT_FIELDS = [
+  'name', 'seed', 'width', 'height', 'creature_count', 'allowed_creature_types',
+  'entry_spawn', 'biomes', 'biome_cell', 'graph_x', 'graph_y', 'level_min',
+  'level_max', 'density', 'allows_fast_travel', 'created_at', 'updated_at',
+];
+
+// id, chunk_size and is_entry carry no narrative/content information (SOMET-276)
+// and BOTH are load-bearing for a player-role caller regardless of visited
+// status:
+//   - chunk_size: GameShell.jsx's enterWorld() does `worlds?.find(w => w.id ===
+//     worldId)` to read it for whatever world it is about to join, including a
+//     world reached for the FIRST TIME via an in-game doorway/portal
+//     transition -- entirely client-side, no separate round-trip. Withholding
+//     it for an unvisited world would silently fall back to the wrong default
+//     (`|| 64`) and corrupt spawn position / chunk boundaries.
+//   - is_entry: autoJoin.js's pickEntryWorld() needs it visible on EVERY world
+//     to find the entry world on a brand-new character's very first login,
+//     before anything is "visited".
+// This is why these two are never hidden, rather than trying to thread a
+// "currently joining" exception through an extra query param.
+function projectWorldForPlayer(world, visitedIds) {
+  const base = { id: world.id, chunk_size: world.chunk_size, is_entry: world.is_entry };
+  if (!visitedIds.has(world.id)) return base;
+  for (const field of WORLD_CONTENT_FIELDS) base[field] = world[field];
+  return base;
+}
+
+// Player-role visited-set resolution shared by the list and single-world
+// routes below. Mirrors the ownedCharacter discipline GET /api/player/world-map
+// (SOMET-263) already uses: a character_id that is missing/blank degrades
+// safely to "treat every world as unvisited" (the frontend's active-character
+// id is not always known yet, e.g. before a character is selected) rather than
+// erroring, while a character_id that IS supplied but invalid or not owned by
+// this account is a 403 -- never a 404, which would make the endpoint an
+// existence oracle for character ids.
+//
+// Returns a Set of visited world ids, or null after already sending a 403 (the
+// caller must stop and not write any further response).
+async function resolvePlayerVisitedWorldIds(req, res) {
+  const requested = req.query.character_id;
+  if (requested === undefined || requested === '') return new Set();
+  const character = await ownedCharacter(pool, req.user.id, requested);
+  if (!character) {
+    res.status(403).json({ error: 'forbidden' });
+    return null;
+  }
+  const visited = await listVisited(pool, character.id);
+  return new Set(visited.map((v) => v.worldId));
+}
+
+// SOMET-276: this was completely unguarded -- SELECT * to anyone with no
+// token at all -- which defeats the fog-of-war design /api/player/world-map
+// deliberately builds (unvisited neighbours come back as bare { id,
+// unvisited: true } stubs specifically so a player can't learn what's behind
+// an unexplored door). playerGuard (requireAuth), NOT adminGuard: every player
+// hits this route on login/auto-join, and adminGuard would 403 all of them.
+// Admins keep the exact SELECT * shape they had before; players get a
+// per-world projection scoped by visited status.
+app.get('/api/worlds', playerGuard, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM worlds ORDER BY created_at DESC');
-    res.json(result.rows);
+    if (req.user.role === 'admin') {
+      return res.json(result.rows);
+    }
+    const visited = await resolvePlayerVisitedWorldIds(req, res);
+    if (visited === null) return; // 403 already sent
+    res.json(result.rows.map((w) => projectWorldForPlayer(w, visited)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to list worlds' });
@@ -1991,11 +2061,20 @@ app.delete('/api/worlds/:id', adminGuard, async (req, res) => {
   }
 });
 
-app.get('/api/worlds/:id', async (req, res) => {
+// Same guard + projection as the list route above (SOMET-276 AC #4). No
+// frontend caller uses this directly today (checked via grep for
+// `api/worlds/${` excluding the sibling sub-routes), but it must not be a
+// back door around the projection the list route enforces.
+app.get('/api/worlds/:id', playerGuard, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM worlds WHERE id = $1', [req.params.id]);
     if (!result.rows[0]) return res.status(404).json({ error: 'world not found' });
-    res.json(result.rows[0]);
+    if (req.user.role === 'admin') {
+      return res.json(result.rows[0]);
+    }
+    const visited = await resolvePlayerVisitedWorldIds(req, res);
+    if (visited === null) return; // 403 already sent
+    res.json(projectWorldForPlayer(result.rows[0], visited));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch world' });

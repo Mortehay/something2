@@ -186,10 +186,6 @@ export default function GameShell() {
   // Entity types keyed by name (same shape the legacy map path uses) — the
   // chunked renderer needs them to draw creatures with their approved sprite.
   const { mapConfig } = useMapConfig();
-  // worldsError is toasted inside useWorlds() itself (F-023), so every caller
-  // gets the signal without opting in. GameView calls useWorlds() too; TanStack
-  // dedupes them by query key, so this is one request, not two.
-  const { worlds } = useWorlds();
 
   // SOMET-262: the authority refuses a join with no character, so the canvas is
   // gated behind a choice. `characters` undefined means "still loading" -- a
@@ -198,6 +194,16 @@ export default function GameShell() {
   const { characters, maxCharacters, isLoadingCharacters } = useCharacters();
   const [activeCharacterId, setActiveCharacterId] = useState(() => readActiveCharacterId());
   const activeCharacter = resolveActiveCharacter(activeCharacterId, characters);
+
+  // worldsError is toasted inside useWorlds() itself (F-023), so every caller
+  // gets the signal without opting in. GameView calls useWorlds() with the
+  // same character id too; TanStack dedupes them by query key, so this is one
+  // request, not two. SOMET-276: threading activeCharacter's id is what lets
+  // a player-role token get the visited/unvisited projection instead of the
+  // minimal-only default -- read before activeCharacter is known (still
+  // undefined here on first render), so this naturally starts minimal-only
+  // and re-fetches once a character is resolved.
+  const { worlds } = useWorlds(activeCharacter?.id);
 
   // A stored id whose character no longer exists (deleted from another device)
   // resolves to null. Drop it rather than letting it reach a join the server
