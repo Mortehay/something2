@@ -15,7 +15,20 @@ const { Client } = require('pg');
 // catalog-touching section in withAdvisoryLock(pool, SAME_KEY, fn) makes those
 // two sections mutually exclusive across processes, without serializing the
 // whole suite -- unrelated files with no shared key still run fully parallel.
-const LOCK_WAIT_MS = 30000;
+// SOMET-275: was 30000. `npm test` runs every file with --test-timeout=20000,
+// so a single acquisition that used the full old budget already guaranteed
+// the file blew its own timeout -- the "give up and run unguarded, loudly"
+// fallback below could never actually fire; the test runner killed the file
+// first. seed_map_db.test.js alone calls withEntryPreserved (this lock) NINE
+// times in one run, sharing ENTRY_LOCK_KEY with entry_world.test.js,
+// chests_integration_db.test.js, seed_map_portals.test.js, and
+// seed_map_vault_chests_db.test.js -- under full-suite parallel load (218
+// files) that is enough serialized queueing on one global key to eat the
+// whole 20s budget well before any single wait reaches 30s. 6s keeps any one
+// acquisition from being able to consume the entire per-file timeout by
+// itself, so degrade-to-unguarded gets a real chance to run instead of the
+// file just dying.
+const LOCK_WAIT_MS = 6000;
 const POLL_INTERVAL_MS = 50;
 
 // Acquire a Postgres advisory lock keyed by `lockKey`, run fn(), then release.
