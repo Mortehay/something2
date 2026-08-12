@@ -366,23 +366,58 @@ async function equip(pool, characterId, inv, itemTypes, itemId, slot) {
   for (const s of SLOTS) if (inv.equipment[s] === itemId && s !== slot) toClear.push(s);
   if (slot === 'main_hand' && type.two_handed && inv.equipment.off_hand) toClear.push('off_hand');
 
-  for (const s of toClear) {
-    await pool.query('DELETE FROM player_equipment WHERE character_id = $1 AND slot = $2', [characterId, s]);
-    delete inv.equipment[s];
-  }
-  await pool.query(
-    `INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)
-     ON CONFLICT (character_id, slot) DO UPDATE SET item_id = $3`,
-    [characterId, slot, itemId],
-  );
+  // SOMET-77: mutate in memory FIRST, then write through, rolling back if the
+  // write fails. This used to run the other way round, and 3b-2a introduced
+  // the problem by making equip a DB write-through at all -- 3b-1's version
+  // was synchronous in memory and therefore atomic by construction.
+  //
+  // `ws.on('message', async ...)` does not await the previous handler, so an
+  // `attack` arriving while these queries are in flight read the OLD
+  // equipment and resolved with the previous weapon. The `toClear` loop was
+  // worse than the final assignment: it interleaved a DELETE with a delete
+  // per slot, so a concurrent read could see a partially-cleared paper doll
+  // -- neither the old loadout nor the new one.
+  //
+  // In-memory state is the single thing every concurrent reader consults, so
+  // it moves in ONE synchronous step with no await inside it. The snapshot is
+  // taken before that step and restored wholesale on failure, rather than
+  // trying to undo field by field.
+  const before = { ...inv.equipment };
+  for (const s of toClear) delete inv.equipment[s];
   inv.equipment[slot] = itemId;
+
+  try {
+    for (const s of toClear) {
+      await pool.query('DELETE FROM player_equipment WHERE character_id = $1 AND slot = $2', [characterId, s]);
+    }
+    await pool.query(
+      `INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)
+       ON CONFLICT (character_id, slot) DO UPDATE SET item_id = $3`,
+      [characterId, slot, itemId],
+    );
+  } catch (err) {
+    // Restore the whole map, not just `slot`: a DELETE may have already
+    // committed before the throw, so the in-memory copy can differ from the
+    // pre-call state in more than one place.
+    inv.equipment = before;
+    throw err;
+  }
   return { ok: true };
 }
 
 async function unequip(pool, characterId, inv, slot) {
   if (!SLOTS.includes(slot)) return { ok: false, reason: 'unknown slot' };
-  await pool.query('DELETE FROM player_equipment WHERE character_id = $1 AND slot = $2', [characterId, slot]);
+  // Same ordering as equip above, for the same reason (SOMET-77): a concurrent
+  // `attack` must never resolve against a weapon the player has already taken
+  // off. Restores only if the write fails.
+  const had = inv.equipment[slot];
   delete inv.equipment[slot];
+  try {
+    await pool.query('DELETE FROM player_equipment WHERE character_id = $1 AND slot = $2', [characterId, slot]);
+  } catch (err) {
+    if (had !== undefined) inv.equipment[slot] = had;
+    throw err;
+  }
   return { ok: true };
 }
 

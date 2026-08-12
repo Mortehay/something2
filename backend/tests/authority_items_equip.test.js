@@ -113,3 +113,94 @@ test('unequip clears the slot and deletes the row', async () => {
   assert.equal(i.equipment.chest, undefined);
   assert.ok(pool.calls.some((c) => /DELETE FROM player_equipment/i.test(c.sql)));
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-77: equipment must move in memory BEFORE the DB write, not after.
+//
+// The authority's ammo-free attack path (server.js's `attack` handler) is
+// FULLY SYNCHRONOUS and is not put on `ws._opChain` -- only the ammo path is.
+// equip/unequip ARE chained, and they used to await one DELETE per cleared
+// slot plus an INSERT before touching `inv.equipment`. An `attack` frame
+// arriving during those round trips therefore read the OLD equipment and
+// resolved with the previous weapon. The `toClear` loop was the worse half:
+// it interleaved a DELETE with a delete per slot, so a concurrent read could
+// observe a paper doll that was neither the old loadout nor the new one.
+//
+// These tests pin the ORDERING, which is the actual fix -- asserting the end
+// state alone passes just as happily with the mutation left at the end, which
+// is how the bug survived the existing tests in this file.
+// ---------------------------------------------------------------------------
+
+// A pool whose queries never settle: anything observable after calling equip
+// without awaiting it is, by construction, what a concurrent reader sees while
+// the DB round trip is still in flight.
+function pendingPool() {
+  const calls = [];
+  return { calls, query: (sql, params) => { calls.push({ sql, params }); return new Promise(() => {}); } };
+}
+
+test('equip updates memory before the DB write completes', () => {
+  const pool = pendingPool(); const i = inv();
+  i.equipment = { main_hand: 'i1' };
+  equip(pool, 'u1', i, TYPES, 'i2', 'main_hand'); // halberd, deliberately not awaited
+  assert.equal(i.equipment.main_hand, 'i2',
+    'a concurrent attack must see the NEW weapon while the write is in flight');
+});
+
+test('equip never exposes a half-cleared paper doll', () => {
+  const pool = pendingPool(); const i = inv();
+  // Two-handed into main_hand clears off_hand as well, which is the multi-slot
+  // case the old interleaved loop could be caught midway through.
+  i.equipment = { main_hand: 'i1', off_hand: 'i1' };
+  equip(pool, 'u1', i, TYPES, 'i2', 'main_hand');
+  assert.equal(i.equipment.main_hand, 'i2');
+  assert.equal(i.equipment.off_hand, undefined,
+    'every slot this equip touches moves in one synchronous step');
+});
+
+test('unequip clears memory before the DB write completes', () => {
+  const pool = pendingPool(); const i = inv();
+  i.equipment = { chest: 'i5' };
+  unequip(pool, 'u1', i, 'chest');
+  assert.equal(i.equipment.chest, undefined,
+    'a concurrent read must not see a weapon the player has already taken off');
+});
+
+// A failed write must not leave the optimistic mutation in place -- otherwise
+// the in-memory loadout silently disagrees with player_equipment until relog.
+function throwingPool(failOn = /.*/ ) {
+  const calls = [];
+  return {
+    calls,
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (failOn.test(sql)) throw new Error('db down');
+      return { rows: [], rowCount: 0 };
+    },
+  };
+}
+
+test('a failed equip write rolls the equipment back', async () => {
+  const pool = throwingPool(/INSERT INTO player_equipment/i); const i = inv();
+  i.equipment = { main_hand: 'i1' };
+  await assert.rejects(() => equip(pool, 'u1', i, TYPES, 'i2', 'main_hand'), /db down/);
+  assert.equal(i.equipment.main_hand, 'i1', 'the previous weapon is restored');
+});
+
+test('a failed equip rolls back EVERY slot it had already cleared', async () => {
+  // The INSERT fails after the off_hand DELETE has already committed, so
+  // restoring only `slot` would leave off_hand wrongly empty. This is why the
+  // rollback restores the whole map rather than one field.
+  const pool = throwingPool(/INSERT INTO player_equipment/i); const i = inv();
+  i.equipment = { main_hand: 'i1', off_hand: 'i1' };
+  await assert.rejects(() => equip(pool, 'u1', i, TYPES, 'i2', 'main_hand'), /db down/);
+  assert.equal(i.equipment.main_hand, 'i1');
+  assert.equal(i.equipment.off_hand, 'i1', 'a slot cleared before the failure is restored too');
+});
+
+test('a failed unequip write restores the slot', async () => {
+  const pool = throwingPool(/DELETE FROM player_equipment/i); const i = inv();
+  i.equipment = { chest: 'i5' };
+  await assert.rejects(() => unequip(pool, 'u1', i, 'chest'), /db down/);
+  assert.equal(i.equipment.chest, 'i5');
+});
