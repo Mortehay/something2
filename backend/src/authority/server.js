@@ -284,8 +284,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // without risking legitimate combat/movement, which this fix does not
   // have; a uniform, generous cap is the defensible bound given what is
   // known.
-  const RATE_LIMIT_CAPACITY = opts.rateLimitCapacity || 60;
-  const RATE_LIMIT_PER_SEC = opts.rateLimitPerSec || 40;
+  // `||` treats an explicit 0 the same as "not provided" -- the tests that
+  // pin capacity=0 or refill=0/sec (see authority_server.test.js) got the
+  // 60/40 production defaults instead, silently. That let the deterministic
+  // "zero refill" tests observe a real extra token trickle in under load
+  // (SOMET-275): elapsedSec * 40/sec crossed 1 whole token within the
+  // client round-trip between join's ack and the first ping being read,
+  // which is more likely, not less, the slower/busier the suite runs. `??`
+  // only falls back to the default when the option is actually omitted.
+  const RATE_LIMIT_CAPACITY = opts.rateLimitCapacity ?? 60;
+  const RATE_LIMIT_PER_SEC = opts.rateLimitPerSec ?? 40;
 
   // Refills `ws`'s bucket for elapsed time, then consumes one token if
   // available. Returns false (frame dropped, nothing else runs — no parse
