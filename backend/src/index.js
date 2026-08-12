@@ -890,14 +890,20 @@ app.put('/api/item-types/:id', adminGuard, async (req, res) => {
         reach=$8, arc_width=$9, range=$10, projectile_speed=$11, projectile_radius=$12,
         pierce=$13, mana_cost=$14, stamina_cost=$15, element=$16, defense=$17, resistances=$18, icon=$19,
         stackable=$20, ammo_type_id=$21, aoe_radius=$22, value=$23, knockback=$24,
+        -- Slice E (SOMET-162): the binding map the admin dropdowns write.
+        -- COALESCE so a caller that omits vfx entirely (any pre-slice-E
+        -- client, or a script) leaves the existing bindings alone instead of
+        -- silently unbinding every moment on an unrelated edit.
+        vfx=COALESCE($25, vfx),
         updated_at=now()
-       WHERE id=$25 RETURNING *`,
+       WHERE id=$26 RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
        b.mana_cost ?? 0, b.stamina_cost ?? 0, b.element ?? null, b.defense ?? null,
        JSON.stringify(b.resistances ?? {}), b.icon ?? null,
        b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0, b.knockback ?? 0,
+       b.vfx === undefined ? null : JSON.stringify(b.vfx),
        req.params.id],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
@@ -951,6 +957,161 @@ app.get('/api/vfx-effects', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch vfx effects' });
+  }
+});
+
+// --- VFX effects CRUD (Attack VFX slice E, SOMET-162) -----------------------
+//
+// Delivers the "fully data-driven, tunable without a deploy" half of the
+// epic's decision 2. Sequenced LAST deliberately: it is the most expensive
+// item in the epic and benefits most from a schema that DRAWING has already
+// validated -- built earlier it would have been an editor for columns nothing
+// consumed, reworked every time rendering revealed a missing field.
+//
+// Read stays unauthenticated (above) like the other catalogs; every WRITE is
+// behind adminGuard.
+
+const VFX_SHAPES = ['arc', 'line', 'ring', 'burst', 'bolt'];
+const VFX_EASES = ['linear', 'out', 'in'];
+// Mirrors the CHECK added in 1714440169000_vfx_particles.js. Duplicated here
+// deliberately so the API rejects with a readable message instead of leaking a
+// raw constraint violation -- the database stays the backstop, not the UX.
+const VFX_MAX_PARTICLES = 64;
+
+function validateVfxEffect(body) {
+  const { name, shape, ease } = body;
+  if (!name || !String(name).trim()) return 'name is required';
+  if (catalogNameTooLong(name)) return `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer`;
+  if (!VFX_SHAPES.includes(shape)) return `shape must be one of ${VFX_SHAPES.join(', ')}`;
+  if (ease != null && !VFX_EASES.includes(ease)) return `ease must be one of ${VFX_EASES.join(', ')}`;
+  const n = Number(body.particle_count ?? 0);
+  if (!Number.isInteger(n) || n < 0 || n > VFX_MAX_PARTICLES) {
+    return `particle_count must be a whole number between 0 and ${VFX_MAX_PARTICLES}`;
+  }
+  const life = Number(body.particle_lifetime_ms ?? 300);
+  if (!(life > 0)) return 'particle_lifetime_ms must be greater than 0';
+  const size = Number(body.particle_size ?? 2);
+  if (!(size >= 0)) return 'particle_size must be 0 or greater';
+  const dur = Number(body.duration_ms ?? 180);
+  if (!(dur > 0)) return 'duration_ms must be greater than 0';
+  return null;
+}
+
+// Who still points at this effect NAME. item_types.vfx and entity_types.vfx
+// are jsonb maps of moment -> name with NO foreign key, which the design
+// accepted explicitly: "there is no referential integrity, so renaming a row
+// in vfx_effects silently orphans every binding pointing at it." This is the
+// other half of the agreed mitigation (the first being the dropdown, below) --
+// a rename or delete that would orphan a binding must WARN, not silently
+// break it.
+async function vfxReferences(name) {
+  const [items, entities] = await Promise.all([
+    pool.query(
+      `SELECT id, name FROM item_types
+        WHERE vfx IS NOT NULL AND $1 IN (SELECT jsonb_each_text.value FROM jsonb_each_text(vfx))`,
+      [name],
+    ),
+    pool.query(
+      `SELECT id, name FROM entity_types
+        WHERE vfx IS NOT NULL AND $1 IN (SELECT jsonb_each_text.value FROM jsonb_each_text(vfx))`,
+      [name],
+    ),
+  ]);
+  return { items: items.rows, entities: entities.rows };
+}
+
+function orphanConflict(res, verb, name, refs) {
+  return res.status(409).json({
+    error: `Cannot ${verb} '${name}': still bound by ${refs.items.length} item type(s) and ${refs.entities.length} entity type(s)`,
+    referencing_item_types: refs.items.map((r) => ({ id: r.id, name: r.name })),
+    referencing_entity_types: refs.entities.map((r) => ({ id: r.id, name: r.name })),
+  });
+}
+
+app.post('/api/vfx-effects', adminGuard, async (req, res) => {
+  try {
+    const bad = validateVfxEffect(req.body);
+    if (bad) return res.status(400).json({ error: bad });
+    const b = req.body;
+    const result = await pool.query(
+      `INSERT INTO vfx_effects
+        (name, shape, color, width, duration_ms, ease, fade, follows_weapon,
+         particle_count, particle_spread, particle_speed, particle_gravity,
+         particle_lifetime_ms, particle_size)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [
+        String(b.name).trim(), b.shape, b.color || '#dddddd', Number(b.width) || 2,
+        Number(b.duration_ms) || 180, b.ease || 'out', b.fade !== false, b.follows_weapon === true,
+        Number(b.particle_count) || 0, Number(b.particle_spread ?? 6.283),
+        Number(b.particle_speed ?? 100), Number(b.particle_gravity ?? 0),
+        Number(b.particle_lifetime_ms ?? 300), Number(b.particle_size ?? 2),
+      ],
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'An effect with that name already exists' });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create vfx effect' });
+  }
+});
+
+app.put('/api/vfx-effects/:id', adminGuard, async (req, res) => {
+  try {
+    const bad = validateVfxEffect(req.body);
+    if (bad) return res.status(400).json({ error: bad });
+    const cur = await pool.query('SELECT name FROM vfx_effects WHERE id = $1', [req.params.id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Effect not found' });
+    const oldName = cur.rows[0].name;
+    const newName = String(req.body.name).trim();
+
+    // The rename guard. Every other field is free to change -- retuning
+    // duration or colour live is the entire point of this screen -- but the
+    // NAME is the only thing a binding holds.
+    if (oldName !== newName) {
+      const refs = await vfxReferences(oldName);
+      if (refs.items.length > 0 || refs.entities.length > 0) {
+        return orphanConflict(res, 'rename', oldName, refs);
+      }
+    }
+
+    const b = req.body;
+    const result = await pool.query(
+      `UPDATE vfx_effects SET name=$1, shape=$2, color=$3, width=$4, duration_ms=$5,
+              ease=$6, fade=$7, follows_weapon=$8, particle_count=$9, particle_spread=$10,
+              particle_speed=$11, particle_gravity=$12, particle_lifetime_ms=$13, particle_size=$14
+        WHERE id=$15 RETURNING *`,
+      [
+        newName, b.shape, b.color || '#dddddd', Number(b.width) || 2,
+        Number(b.duration_ms) || 180, b.ease || 'out', b.fade !== false, b.follows_weapon === true,
+        Number(b.particle_count) || 0, Number(b.particle_spread ?? 6.283),
+        Number(b.particle_speed ?? 100), Number(b.particle_gravity ?? 0),
+        Number(b.particle_lifetime_ms ?? 300), Number(b.particle_size ?? 2), req.params.id,
+      ],
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'An effect with that name already exists' });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update vfx effect' });
+  }
+});
+
+app.delete('/api/vfx-effects/:id', adminGuard, async (req, res) => {
+  try {
+    const cur = await pool.query('SELECT name FROM vfx_effects WHERE id = $1', [req.params.id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Effect not found' });
+    const name = cur.rows[0].name;
+    // Same guard as rename, and for the same reason: a deleted effect leaves
+    // every binding pointing at a name that resolves to nothing.
+    const refs = await vfxReferences(name);
+    if (refs.items.length > 0 || refs.entities.length > 0) {
+      return orphanConflict(res, 'delete', name, refs);
+    }
+    await pool.query('DELETE FROM vfx_effects WHERE id = $1', [req.params.id]);
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete vfx effect' });
   }
 });
 

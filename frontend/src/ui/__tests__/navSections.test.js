@@ -43,12 +43,12 @@ describe('visibleSections', () => {
     expect(items.every((i) => !i.adminType)).toBe(true);
   });
 
-  it('shows an admin the two player screens plus all seven admin screens', () => {
+  it('shows an admin the two player screens plus all eight admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(9);
+    expect(items).toHaveLength(10);
     expect(items.map((i) => i.path)).toEqual([
       '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
-      '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/world-map',
+      '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/world-map',
     ]);
   });
 

@@ -5,6 +5,20 @@
 
 // Mirrors backend/src/index.js's ITEM_ELEMENTS / ITEM_SLOTS exactly.
 export const ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
+
+// Attack VFX binding moments (slice E, SOMET-162), and which weapon kinds can
+// actually produce each one.
+//
+// `miss` is melee-only: a projectile cannot whiff at the moment of firing --
+// the shot leaves regardless and its hit is resolved later in flight -- so
+// offering the field would invite dead data. `trail` is the converse: it is
+// what a projectile draws in flight and a melee swing has no use for.
+export const VFX_MOMENTS = [
+  { key: 'attack', label: 'Attack', appliesTo: 'any' },
+  { key: 'impact', label: 'Impact', appliesTo: 'any' },
+  { key: 'miss', label: 'Miss', appliesTo: 'melee' },
+  { key: 'trail', label: 'Trail', appliesTo: 'projectile' },
+];
 export const SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
 
 export function num(v, fallback = null) {
@@ -57,6 +71,7 @@ export function emptyForm() {
     defense: '',
     value: 0,
     resistanceRows: [],
+    vfx: {},
   };
 }
 
@@ -90,6 +105,9 @@ export function formFromType(t) {
     // village base catalog's value > 0 filter).
     value: t.value ?? 0,
     resistanceRows: rows,
+    // Stored bindings, so opening the editor shows what is actually bound
+    // rather than an empty dropdown that would overwrite it on save.
+    vfx: t.vfx || {},
   };
 }
 
@@ -141,6 +159,17 @@ export function validateClient(f) {
   return null;
 }
 
+// Drops empty selections so an unbound moment is ABSENT from the jsonb rather
+// than stored as "", which would resolve to nothing and silently defeat the
+// kind-level fallback that exists to keep an unbound weapon visible.
+function cleanVfx(vfx) {
+  const out = {};
+  for (const [k, v] of Object.entries(vfx || {})) {
+    if (typeof v === 'string' && v.length > 0) out[k] = v;
+  }
+  return out;
+}
+
 // Builds the API payload from form state. Category-inapplicable fields are
 // always nulled/zeroed here (not just left over from whatever the form last
 // showed) so switching weapon -> armor never sends a stale `kind`, and
@@ -183,6 +212,7 @@ export function buildPayload(f) {
       slot: null,
       defense: null,
       resistances: {},
+      vfx: cleanVfx(f.vfx),
     };
   }
 
@@ -208,6 +238,7 @@ export function buildPayload(f) {
       slot: null,
       defense: null,
       resistances: {},
+      vfx: cleanVfx(f.vfx),
     };
   }
 
@@ -236,5 +267,6 @@ export function buildPayload(f) {
     slot: f.slot,
     defense: num(f.defense, 0),
     resistances,
+    vfx: cleanVfx(f.vfx),
   };
 }

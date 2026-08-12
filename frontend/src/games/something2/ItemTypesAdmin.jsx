@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { useItemTypes, useCreateItemType, useUpdateItemType, useDeleteItemType } from './useMaps.js';
+import { useItemTypes, useCreateItemType, useUpdateItemType, useDeleteItemType, useVfxEffects } from './useMaps.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import {
   ELEMENTS, SLOTS, WEAPON_DEFAULTS, ARMOR_DEFAULTS, AMMO_DEFAULTS,
-  emptyForm, formFromType, validateClient, buildPayload,
+  emptyForm, formFromType, validateClient, buildPayload, VFX_MOMENTS,
 } from './itemTypeForm.js';
 
 const AdminContainer = styled.div`
@@ -299,6 +299,8 @@ function ItemTypesAdmin() {
   const updateMutation = useUpdateItemType();
   const deleteMutation = useDeleteItemType();
 
+  // The live effect library, for the binding dropdowns in the editor.
+  const { vfxEffects = [] } = useVfxEffects();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingType, setEditingType] = useState(null);
   const [formData, setFormData] = useState(emptyForm());
@@ -685,6 +687,38 @@ function ItemTypesAdmin() {
                   </FormGroup>
                 </>
               )}
+
+              {/* Attack VFX bindings (slice E, SOMET-162). DROPDOWNS, never
+                  free text: item_types.vfx is jsonb with no foreign key to
+                  vfx_effects, so a typed name that does not exist resolves to
+                  nothing and the weapon silently draws the kind default
+                  forever. Choosing from the live library is the agreed
+                  mitigation for that, alongside the server refusing to rename
+                  or delete an effect that is still bound. */}
+              <FormGroup>
+                <label>Attack effects</label>
+                {VFX_MOMENTS.map(({ key, label, appliesTo }) => (
+                  (appliesTo === 'any' || appliesTo === formData.kind) ? (
+                    <ResistanceRow key={key}>
+                      <span style={{ minWidth: '80px', opacity: 0.8 }}>{label}</span>
+                      <select
+                        value={formData.vfx?.[key] || ''}
+                        onChange={e => setFormData(prev => ({
+                          ...prev,
+                          vfx: { ...(prev.vfx || {}), [key]: e.target.value },
+                        }))}
+                      >
+                        {/* An explicit "none" so a binding can be REMOVED.
+                            Without it the only way to unbind is raw SQL. */}
+                        <option value="">(kind default)</option>
+                        {vfxEffects.map(fx => (
+                          <option key={fx.name} value={fx.name}>{fx.name} · {fx.shape}</option>
+                        ))}
+                      </select>
+                    </ResistanceRow>
+                  ) : null
+                ))}
+              </FormGroup>
 
               <FormActions>
                 <SecondaryButton type="button" onClick={() => setIsModalOpen(false)}>Cancel</SecondaryButton>

@@ -59,9 +59,15 @@ describe('legacy flat-map subsystem removal', () => {
       // substring "useMaps" with word boundaries on both sides ('/' and '.'
       // are non-word chars) -- without stripping it, every such import would
       // false-positive as a reference to the removed useMaps() hook.
+      // ...and any other module-path literal, for the same reason: a test that
+      // reads a sibling file by path (`read('../useMaps.js')`) is naming a
+      // FILE, not calling the removed useMaps() hook. Stripping only the
+      // `from`/`require` forms caught the common case and left this one to
+      // false-positive.
       const text = fs.readFileSync(file, 'utf8')
         .replace(/from\s+['"][^'"]*['"]/g, '')
-        .replace(/require\(\s*['"][^'"]*['"]\s*\)/g, '');
+        .replace(/require\(\s*['"][^'"]*['"]\s*\)/g, '')
+        .replace(/['"][^'"]*\.jsx?['"]/g, '');
       if (/\bMapPreview\b/.test(text)) offenders.push(`${file}: MapPreview`);
       for (const name of LEGACY_SYMBOLS) {
         // word-boundary match so e.g. "useMaps" doesn't false-positive on
