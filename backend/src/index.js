@@ -1873,12 +1873,14 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     // so there is no window in which nothing is the entry.
     // A bounds change reshapes the wall ring, and a biome-set/biome_cell change
     // reshapes the terrain those bounds contain: either invalidates persisted +
-    // preview terrain the same way.
-    if (boundsChanged || biomesChanged) {
-      await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [id]);
-      worldPreviewCache.delete(id);
-      clearOverviewCache(id);
-    }
+    // preview terrain the same way. Reuse invalidateWorld() (SOMET-236) rather
+    // than a second ad hoc cache-clearing mechanism -- this used to inline its
+    // own copy of the exact same pre-fix bug (chunks deleted unconditionally,
+    // evictability checked only afterward at the bottom of this route); going
+    // through the shared, now-ordering-fixed helper closes that gap here too
+    // and means there is only one place implementing "check evictability
+    // before touching world_chunks" instead of two that can drift apart.
+    const liveWarning = (boundsChanged || biomesChanged) ? await invalidateWorld(id) : undefined;
     // Same symptom class as the entry_spawn check above (SOMET-184 / F-004),
     // but for players who already joined and persisted a position: a shrink
     // (or an unbounded->bounded transition) can leave a world_players row
@@ -1919,7 +1921,6 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     // (as this route used to) can leave zero, doing it last can at worst leave
     // two for the duration of one statement.
     if (entry) await setEntryWorld(pool, id);
-    const liveWarning = (boundsChanged || biomesChanged) ? evictOrWarn(id) : undefined;
     res.json(liveWarning ? { ...result.rows[0], liveWarning } : result.rows[0]);
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -2132,11 +2133,35 @@ app.get('/api/worlds/:id/links', async (req, res) => {
 // evictOrWarn() warning string (or undefined) so callers with a JSON body can
 // surface it (F-017 / SOMET-197) instead of discarding it like every caller
 // used to.
+//
+// SOMET-236: this used to delete world_chunks UNCONDITIONALLY and only check
+// evictability afterward. When eviction was refused (a player connected, so
+// evictWorld() returns false and isWorldLive() true), the chunk delete had
+// already run and was never rolled back: the live authority kept serving its
+// cached pre-edit map to that player while world_chunks now held nothing, so
+// the next GET /chunk for a chunk they wandered away from and back to would
+// regenerate from the NEW config -- the client would then be colliding
+// against one map while looking at another.
+//
+// Fix: check evictability FIRST, and skip the chunk delete (and both preview
+// caches) entirely when eviction is refused, so world_chunks stays exactly in
+// sync with whatever the live authority is still actually serving -- no
+// divergence, just a caller-visible warning that the edit hasn't reached the
+// live simulation yet (unchanged from before: every caller already surfaces
+// this string). The caller's own DB write (the worlds/biomes/links/villages
+// row) still lands either way, matching the warn-not-block precedent
+// established by evictOrWarn's own callers (F-017/SOMET-197) -- a single
+// biome PUT can affect dozens of worlds at once via worldsReferencingBiome,
+// so refusing the whole edit outright on any one connected world would be a
+// much bigger behavior change than this ticket's actual defect, which is
+// specifically the chunk-delete-before-check ordering.
 async function invalidateWorld(worldId) {
+  const liveWarning = evictOrWarn(worldId);
+  if (liveWarning) return liveWarning;
   await pool.query('DELETE FROM world_chunks WHERE world_id = $1', [worldId]);
   worldPreviewCache.delete(worldId);
   clearOverviewCache(worldId);
-  return evictOrWarn(worldId);
+  return undefined;
 }
 
 function validateVillageBody(body, worldRow, existing) {

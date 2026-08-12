@@ -58,6 +58,12 @@ test('POST village inserts a valid village and invalidates the world', async () 
 // a merchant) against a world with a connected player left entry.villages
 // empty in the live simulation, so interact() at the new merchant would
 // answer "no merchant nearby" indefinitely with nothing reporting why.
+//
+// SOMET-236: no /DELETE FROM world_chunks/i handler is registered below on
+// purpose -- a refused eviction must skip the chunk wipe entirely (it used
+// to delete unconditionally and only discover the refusal afterward), so
+// that query hitting the mock's throw-on-unexpected-query guard would fail
+// this test loud if the ordering regressed.
 test('POST village warns when a player is connected so the new village cannot reach the live world', async () => {
   const pool = mockPool([
     [/SELECT id, width, height FROM worlds WHERE id = \$1/i, (p) => ({ rows: [WORLD({ id: p[0] })] })],
@@ -65,7 +71,6 @@ test('POST village warns when a player is connected so the new village cannot re
     [/INSERT INTO villages/i, () => ({ rows: [{ id: 'v1' }] })],
     [/INSERT INTO world_creatures/i, () => ({ rows: [] })],
     [/INSERT INTO merchant_stock/i, () => ({ rows: [] })],
-    [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
   ]);
   __setPool(pool);
   __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
@@ -75,6 +80,9 @@ test('POST village warns when a player is connected so the new village cannot re
   assert.equal(res.body.id, 'v1');
   assert.match(res.body.liveWarning, /connected/i,
     'the response must say the new village did not reach the live world');
+  assert.ok(!pool.calls.some((c) => /DELETE FROM world_chunks/i.test(c.sql)),
+    'SOMET-236: a refused eviction must skip the chunk wipe, keeping world_chunks in sync with what the ' +
+    'live authority is still actually serving');
 });
 
 test('POST village rejects out-of-range dimensions', async () => {
@@ -132,18 +140,21 @@ test('DELETE village removes the row, re-derives guards, and invalidates the wor
   assert.equal(guardInserts.length, 2, 'guards are re-derived for the surviving village');
 });
 
+// SOMET-236: no /DELETE FROM world_chunks/i handler registered, same
+// reasoning as the POST village warn test above.
 test('DELETE village sets a header when a player is connected (204 has no body to carry it)', async () => {
   const pool = mockPool([
     [/DELETE FROM villages WHERE id = \$1/i, () => ({ rows: [], rowCount: 1 })],
     [/DELETE FROM world_creatures WHERE world_id = \$1 AND type = \$2/i, () => ({ rows: [], rowCount: 2 })],
     [/FROM villages WHERE world_id = \$1/i, () => ({ rows: [] })],
-    [/DELETE FROM world_chunks/i, () => ({ rows: [], rowCount: 0 })],
   ]);
   __setPool(pool);
   __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
   const res = await request(app).delete('/api/worlds/w1/villages/v1').set(...AUTH);
   assert.equal(res.status, 204);
   assert.equal(res.headers['x-live-world-pending'], 'true');
+  assert.ok(!pool.calls.some((c) => /DELETE FROM world_chunks/i.test(c.sql)),
+    'SOMET-236: a refused eviction must skip the chunk wipe');
 });
 
 test('DELETE the only village leaves zero guards (no surviving villages)', async () => {

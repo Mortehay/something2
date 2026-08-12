@@ -225,6 +225,32 @@ test('PUT /api/worlds/:id deletes chunks + clears cache when bounds change', asy
   assert.ok(deleted, 'chunks invalidated on bounds change');
 });
 
+// SOMET-236: invalidateWorld() (which this route now goes through instead of
+// inlining its own copy of the same bug) used to delete world_chunks
+// UNCONDITIONALLY and only discover afterward that eviction was refused. That
+// left a connected player colliding against the authority's frozen, cached
+// pre-edit map while world_chunks held nothing -- so a chunk they later
+// wandered away from and back to would regenerate from the NEW config via
+// GET /chunk, visibly diverging from what the authority was still simulating.
+// No /DELETE FROM world_chunks/i handler is registered below on purpose: if
+// the ordering regressed, that query would hit the mock's
+// throw-on-unexpected-query guard and fail loud.
+test('PUT /api/worlds/:id does NOT wipe chunks when a bounds change is refused by a connected player (SOMET-236)', async () => {
+  const pool = mockPool([
+    [/SELECT .* FROM worlds WHERE id/i, () => ({ rows: [{ id: 'w1', width: 24, height: 24 }] })],
+    [/UPDATE world_players SET/i, () => ({ rows: [], rowCount: 0 })],
+    [/UPDATE worlds SET/i, (p) => ({ rows: [{ id: 'w1', name: p[0] }] })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: () => false, isWorldLive: () => true });
+  const res = await request(app).put('/api/worlds/w1').set(...AUTH)
+    .send({ name: 'Bigger', width: 32, height: 32 });
+  assert.equal(res.status, 200, 'the DB write still succeeds -- only the live simulation is stale');
+  assert.match(res.body.liveWarning, /connected/i);
+  assert.ok(!pool.calls.some(c => /DELETE FROM world_chunks WHERE world_id/i.test(c.sql)),
+    'a refused eviction must skip the chunk wipe entirely, not delete then discover the refusal afterward');
+});
+
 // F-049 (SOMET-229): shrinking a bounded world's ring can strand an already-
 // persisted world_players row outside the new walkable interior -- same
 // symptom class as F-004/SOMET-184 (entry_spawn), but for existing players
