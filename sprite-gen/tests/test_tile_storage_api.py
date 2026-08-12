@@ -21,14 +21,29 @@ def _tile_result():
 def test_put_tile_uploads_static_atlas_and_manifest():
     fake = FakeMinio()
     store = SpriteStore(fake, "sprites")
-    out = store.put_tile("grass", _tile_result())
-    assert out["image_key"] == "sprites/tiles/grass/static.png"
-    assert out["atlas_key"] == "sprites/tiles/grass/atlas.png"
-    assert out["manifest_key"] == "sprites/tiles/grass/atlas.json"
+    out = store.put_tile("grass", "job1", _tile_result())
+    assert out["image_key"] == "sprites/tiles/grass/job1/static.png"
+    assert out["atlas_key"] == "sprites/tiles/grass/job1/atlas.png"
+    assert out["manifest_key"] == "sprites/tiles/grass/job1/atlas.json"
     assert out["frames"] == 1
-    assert "sprites/tiles/grass/static.png" in fake.objects
-    manifest = json.loads(fake.objects["sprites/tiles/grass/atlas.json"])
+    assert "sprites/tiles/grass/job1/static.png" in fake.objects
+    manifest = json.loads(fake.objects["sprites/tiles/grass/job1/atlas.json"])
     assert manifest["frames"]["0"] == [0, 0, 8, 8]
+
+def test_put_tile_two_generations_do_not_collide():
+    # SOMET-235: this is the exact shape that destroyed `sand` -- a second
+    # generation for the same tile name must not overwrite the first. Prove
+    # two different job_ids produce two disjoint key sets, both present.
+    fake = FakeMinio()
+    store = SpriteStore(fake, "sprites")
+    first = store.put_tile("sand", "job1", _tile_result())
+    second = store.put_tile("sand", "job2", _tile_result())
+    assert first["image_key"] != second["image_key"]
+    assert first["atlas_key"] != second["atlas_key"]
+    assert first["manifest_key"] != second["manifest_key"]
+    for key in [first["image_key"], first["atlas_key"], first["manifest_key"],
+                second["image_key"], second["atlas_key"], second["manifest_key"]]:
+        assert key in fake.objects
 
 def _wait(job_id, timeout=10):
     for _ in range(int(timeout * 20)):

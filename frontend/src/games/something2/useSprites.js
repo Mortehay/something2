@@ -105,11 +105,12 @@ export function useEntityJob(jobId) {
 // generated sprite. Needed to show a single FRAME of an animated entity — the
 // atlas is a sprite sheet, so drawing it whole shows every frame at once.
 //
-// Cached indefinitely, so `version` is not optional in practice: the manifest
-// KEY is stable across regenerations (atlas.json is overwritten in place), and
-// re-approving with a different frame count leaves both this cache and the
-// browser's own `max-age=300` copy pointing at the old grid — the badge would
-// then crop frames that no longer exist. Pass the row's updated_at.
+// Cached indefinitely by (manifestKey, version) in the query key, so a stale
+// `version` would keep this query cache pointing at an old grid. SOMET-235:
+// the manifest KEY itself is now job-id-scoped and never reused across
+// regenerations, so re-approving with a different frame count already comes
+// with a brand-new manifestKey — `version` is now redundant-but-harmless
+// insurance rather than what invalidates the cache. Pass the row's updated_at.
 export function useSpriteManifest(manifestKey, version = null) {
   return useQuery({
     queryKey: ["sprite-manifest", manifestKey, version],

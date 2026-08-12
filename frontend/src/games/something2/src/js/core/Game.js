@@ -403,8 +403,11 @@ export class Game {
         if (!tileTypes) return;
         for (const def of Object.values(tileTypes)) {
             const mode = def.render_mode || def.renderMode;
-            // Versioned for the same reason as preloadSprites: a re-approved
-            // tile texture overwrites its key in place.
+            // Versioned for the same reason as preloadSprites (imageManager
+            // caches by bare asset key). SOMET-235: a re-approved tile texture
+            // now lands under a brand-new job-id-scoped key rather than
+            // overwriting the old one in place, so this `v` is
+            // redundant-but-harmless insurance, not what makes the swap visible.
             const v = def.updated_at;
             if (def.image) {
                 this.imageManager.load(def.image, assetUrl(API_URL, def.image, v));

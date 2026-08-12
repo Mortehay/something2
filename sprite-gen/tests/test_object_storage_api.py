@@ -22,21 +22,38 @@ def _flat_result():
 def test_put_object_uploads_under_objects_prefix():
     fake = FakeMinio()
     store = SpriteStore(fake, "sprites")
-    out = store.put_object("Tree", _flat_result())
+    out = store.put_object("Tree", "job1", _flat_result())
     # Distinct prefix from tiles so an entity named like a tile can't clobber it.
-    assert out["image_key"] == "sprites/objects/Tree/static.png"
-    assert out["atlas_key"] == "sprites/objects/Tree/atlas.png"
-    assert out["manifest_key"] == "sprites/objects/Tree/atlas.json"
+    assert out["image_key"] == "sprites/objects/Tree/job1/static.png"
+    assert out["atlas_key"] == "sprites/objects/Tree/job1/atlas.png"
+    assert out["manifest_key"] == "sprites/objects/Tree/job1/atlas.json"
     assert out["frames"] == 1
-    manifest = json.loads(fake.objects["sprites/objects/Tree/atlas.json"])
+    manifest = json.loads(fake.objects["sprites/objects/Tree/job1/atlas.json"])
     assert manifest["frames"]["0"] == [0, 0, 8, 8]
 
 def test_put_tile_and_put_object_do_not_share_keys():
     fake = FakeMinio()
     store = SpriteStore(fake, "sprites")
-    tile = store.put_tile("grass", _flat_result())
-    obj = store.put_object("grass", _flat_result())
+    tile = store.put_tile("grass", "job1", _flat_result())
+    obj = store.put_object("grass", "job1", _flat_result())
     assert tile["image_key"] != obj["image_key"]
+
+def test_put_object_two_generations_do_not_collide():
+    # SOMET-235 regression: two generations for the SAME object name (two
+    # different job_ids) must produce two different key sets, and BOTH
+    # objects must be present afterward in the store -- proving the second
+    # generation did not clobber the first (which may already be
+    # approved/live).
+    fake = FakeMinio()
+    store = SpriteStore(fake, "sprites")
+    first = store.put_object("Tree", "job1", _flat_result())
+    second = store.put_object("Tree", "job2", _flat_result())
+    assert first["image_key"] != second["image_key"]
+    assert first["atlas_key"] != second["atlas_key"]
+    assert first["manifest_key"] != second["manifest_key"]
+    for key in [first["image_key"], first["atlas_key"], first["manifest_key"],
+                second["image_key"], second["atlas_key"], second["manifest_key"]]:
+        assert key in fake.objects
 
 def test_object_prompt_is_not_tileable():
     # A prop must not be asked for a seamless repeating texture — that is the
