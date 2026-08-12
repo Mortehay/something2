@@ -8,16 +8,28 @@ test('resolves the bound name for a moment', () => {
   assert.equal(resolveEffectName(w, 'impact'), 'spark_steel');
 });
 
-test('an unbound moment resolves to null', () => {
+// SLICE B (SOMET-159) made this edit, which slice A's own comment predicted:
+// "Slice B replaces this with a kind-level default. Asserted explicitly so
+// that change is a deliberate edit to a failing test, not a silent drift."
+// This is that deliberate edit. The contract did not weaken -- it gained a
+// second rung: binding -> kind default -> nothing.
+test('an unbound moment falls to the kind default for that moment', () => {
   const w = { name: 'halberd', kind: 'melee', vfx: { attack: 'sweep_arc' } };
-  assert.equal(resolveEffectName(w, 'miss'), null);
+  assert.equal(resolveEffectName(w, 'miss'), 'generic_whiff',
+    'the MISS default, never the bound attack effect -- a whiff must not draw a hit');
 });
 
-test('an unbound weapon resolves to null in slice A', () => {
-  // Slice B replaces this with a kind-level default. Asserted explicitly so
-  // that change is a deliberate edit to a failing test, not a silent drift.
-  assert.equal(resolveEffectName({ name: 'club', kind: 'melee', vfx: null }, 'attack'), null);
-  assert.equal(resolveEffectName({ name: 'club', kind: 'melee' }, 'attack'), null);
+test('an unbound weapon falls to its kind default rather than rendering nothing', () => {
+  assert.equal(resolveEffectName({ name: 'club', kind: 'melee', vfx: null }, 'attack'), 'generic_slash');
+  assert.equal(resolveEffectName({ name: 'club', kind: 'melee' }, 'attack'), 'generic_slash');
+  assert.equal(resolveEffectName({ name: 'bow', kind: 'projectile' }, 'attack'), 'generic_bolt');
+});
+
+test('a weapon with NO kind still resolves to null, not to a guessed default', () => {
+  // The fallback is keyed on item_types.kind. Without one there is nothing to
+  // key on, and inventing a default would draw a melee swing for something
+  // that may not be melee.
+  assert.equal(resolveEffectName({ name: 'mystery', vfx: null }, 'attack'), null);
 });
 
 test('junk in the jsonb never escapes as a name', () => {

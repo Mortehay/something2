@@ -297,14 +297,21 @@ export class RenderSystem {
   // EVENT (the weapon's real reach/arc_width), which is what makes a halberd
   // and a knife look different while sharing one effect row.
   //
-  // Anything that is not an arc is skipped rather than drawn wrong: the other
-  // four shapes are constrained in the schema now but implemented in slice B.
+  // Slice B: the full vocabulary — arc, line, ring, burst, bolt. An unknown
+  // shape is still skipped rather than drawn wrong.
+  //
+  // Every shape derives its screen geometry from the SAME two primitives the
+  // arc already used: worldToScreen for a point, and blastScreenRadiusX for a
+  // world radius. None of them re-derive the iso projection, so none of them
+  // can disagree with the arc (or with the blast ring) about where a given
+  // world offset lands.
   drawVfx(effects) {
     if (!effects || effects.length === 0) return;
     const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
     this.ctx.save();
     for (const fx of effects) {
-      if (!fx.def || fx.def.shape !== "arc") continue;
+      if (!fx.def) continue;
+      if (fx.def.shape !== "arc") { this._drawVfxShape(fx, now); continue; }
       const t = effectProgress(fx, now);
       // Same conversion as drawBlasts above — worldToScreen gives the tile
       // diamond's CENTRE, and the ISO_TILE_H/2 lift puts the swing at chest
@@ -340,6 +347,94 @@ export class RenderSystem {
       this.ctx.stroke();
     }
     this.ctx.restore();
+  }
+
+  // The four non-arc shapes (slice B). Split out so drawVfx's arc branch --
+  // which carries hard-won iso notes -- stays readable rather than growing a
+  // five-way switch inline.
+  //
+  // DEGENERATE INPUT IS THE POINT OF THE EARLY RETURNS: a weapon may legally
+  // have reach 0 (every projectile weapon does), and an author can save an
+  // effect with width 0. Canvas silently draws nothing for a zero-length path
+  // but THROWS on a negative radius, so anything feeding ellipse() is clamped
+  // rather than trusted.
+  _drawVfxShape(fx, now) {
+    const shape = fx.def.shape;
+    if (shape !== "line" && shape !== "ring" && shape !== "burst" && shape !== "bolt") return;
+
+    const t = effectProgress(fx, now);
+    const s = worldToScreen(fx.x, fx.y);
+    const cy = s.y - ISO_TILE_H / 2;         // chest height, as the arc uses
+    const reach = Number(fx.reach) || 0;
+
+    this.ctx.globalAlpha = effectAlpha(fx, now);
+    this.ctx.strokeStyle = fx.def.color || "#dddddd";
+    this.ctx.lineWidth = Number(fx.def.width) || 2;
+
+    // A point `d` world-units along the aim vector, projected. Going through
+    // worldToScreen rather than offsetting in screen space keeps a thrust
+    // pointing where the player actually aimed on the iso ground plane.
+    const along = (d) => {
+      const p = worldToScreen(fx.x + fx.nx * d, fx.y + fx.ny * d);
+      return { x: p.x, y: p.y - ISO_TILE_H / 2 };
+    };
+
+    if (shape === "line") {
+      // A thrust: centre outward to the full reach, extending over the
+      // lifetime. Zero reach would be a zero-length path (invisible), so it is
+      // skipped outright rather than left to the canvas.
+      if (reach <= 0) return;
+      const end = along(reach * t);
+      this.ctx.beginPath();
+      this.ctx.moveTo(s.x, cy);
+      this.ctx.lineTo(end.x, end.y);
+      this.ctx.stroke();
+      return;
+    }
+
+    if (shape === "ring") {
+      // An expanding ground-plane circle, same 2:1 projection as the blast
+      // ring. Radius grows with progress, so it reads as a shockwave.
+      const rx = blastScreenRadiusX(reach) * t;
+      if (!(rx > 0)) return;                 // also rejects NaN
+      this.ctx.beginPath();
+      this.ctx.ellipse(s.x, cy, rx, rx / 2, 0, 0, Math.PI * 2);
+      this.ctx.stroke();
+      return;
+    }
+
+    if (shape === "burst") {
+      // Radial spokes: an impact/detonation that reads as force leaving a
+      // point in every direction. Spoke COUNT is fixed rather than read from
+      // the effect row -- particle_count arrives in slice C and means
+      // something else (real particles); borrowing it here would collide.
+      const rx = blastScreenRadiusX(reach) * t;
+      if (!(rx > 0)) return;
+      const SPOKES = 8;
+      for (let i = 0; i < SPOKES; i++) {
+        const phi = (Math.PI * 2 * i) / SPOKES;
+        this.ctx.beginPath();
+        this.ctx.moveTo(s.x, cy);
+        this.ctx.lineTo(s.x + rx * Math.cos(phi), cy + (rx / 2) * Math.sin(phi));
+        this.ctx.stroke();
+      }
+      return;
+    }
+
+    // bolt: a short dash TRAVELLING outward along the aim, rather than growing
+    // from the centre. The trailing end lags the leading one by a fixed
+    // fraction of the lifetime, which is what makes it read as a moving object
+    // instead of a stretching line.
+    if (reach <= 0) return;
+    const TAIL = 0.25;
+    const head = reach * t;
+    const tail = reach * Math.max(0, t - TAIL);
+    const a = along(tail);
+    const b = along(head);
+    this.ctx.beginPath();
+    this.ctx.moveTo(a.x, a.y);
+    this.ctx.lineTo(b.x, b.y);
+    this.ctx.stroke();
   }
 
   // A small transient toast for server-rejected actions (e.g. "unequip it

@@ -2,7 +2,7 @@ const { resolveMove } = require('./collision');
 const { CreatureSim } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
 const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
-const { resolveEffectName } = require('./vfx.js');
+const { resolveEffectName, momentForAttack } = require('./vfx.js');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION } = require('./damage');
 const {
@@ -459,7 +459,12 @@ class World {
         kills: killed.map((id) => ({ id, killerUserId: userId })),
         attacks: [{
           a: `p:${userId}`,
-          v: resolveEffectName(w, 'attack'),
+          // Slice B: the moment depends on whether the swing connected. The
+          // server already knows (`landed`), so it resolves one name and the
+          // client never decides -- a whiff plays the weapon's `miss` effect
+          // instead of its `attack` one, which is what stops an empty swing
+          // reading as a dropped input.
+          v: resolveEffectName(w, momentForAttack(landed)),
           x: cx, y: cy,
           nx, ny,
           reach: w.reach, arc: w.arc_width,

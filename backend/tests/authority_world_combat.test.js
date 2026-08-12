@@ -483,7 +483,11 @@ test('a melee attack returns one descriptor carrying the real weapon geometry', 
   assert.equal(attacks.length, 1);
   const a = attacks[0];
   assert.equal(a.a, 'p:u1');
-  assert.equal(a.v, 'sweep_arc');
+  // SLICE B: this swing connects with nothing, so the descriptor now carries
+  // the MISS effect rather than the bound attack one -- that distinction is
+  // the whole point of miss feedback. The landed case is asserted in its own
+  // test below; the geometry assertions here are what this test is really for.
+  assert.equal(a.v, 'generic_whiff');
   assert.equal(a.x, 132);
   assert.equal(a.y, 132);
   assert.equal(a.nx, 1);
@@ -537,15 +541,29 @@ test('hit is true when only another player is caught in the arc', () => {
   assert.equal(w.attack('u1', 1, 0).attacks[0].hit, true);
 });
 
-test('an unbound weapon emits a descriptor with a null name', () => {
-  // The swing still happened; slice B gives it a kind-level default. It must
-  // NOT be swallowed here — a missing descriptor and a null name are
-  // different bugs and must stay distinguishable.
+// SLICE B (SOMET-159) delivered exactly what this test's own comment
+// anticipated: "slice B gives it a kind-level default". An unbound weapon is
+// no longer invisible -- which was the failure mode this whole epic exists to
+// remove -- and the descriptor is still emitted either way, so a missing
+// descriptor and an unresolved name stay distinguishable.
+test('an unbound weapon emits a descriptor carrying its kind-level default', () => {
   const w = armWorld();
   w.addPlayer('u1', { x: 100, y: 100 }, heavyInv());   // greatsword, no vfx binding
   const a = w.attack('u1', 1, 0).attacks[0];
-  assert.equal(a.v, null);
+  // Whiffs (nothing in range), so the MISS default rather than the attack one.
+  assert.equal(a.v, 'generic_whiff');
   assert.equal(a.reach, 90);
+});
+
+test('a swing that CONNECTS carries the attack effect, not the whiff', () => {
+  // The other half of miss feedback. Without this pair, a resolver that always
+  // returned the whiff would satisfy every other assertion in this file.
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, longReachInv());  // centre 132,132; halberd reach 190
+  w.creatures.addCreatures([{ id: 'hit-me', type: 'Wolf', x: 200, y: 120, hp: 50, facing: 'S', color: '#c00' }]);
+  const a = w.attack('u1', 1, 0).attacks[0];
+  assert.equal(a.hit, true, 'sanity: this swing really did land');
+  assert.equal(a.v, 'sweep_arc', 'the halberd\'s bound attack effect');
 });
 
 test('a projectile attack emits no descriptor in slice A', () => {
