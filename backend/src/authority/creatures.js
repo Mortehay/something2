@@ -2,7 +2,7 @@
 // logic (frontend/.../entities/CreatureManager.js), driven by the authority's
 // active chunk set. Positions are world-space; active/AOI/prune key on the
 // creature's CURRENT chunk (chunkOf), never its spawn chunk.
-const { resolveMove } = require('./collision');
+const { resolveMove, MAP_TILE_SIZE } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc, hasLineOfSight } = require('./weapons');
 const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
@@ -37,6 +37,30 @@ const GUARD_AGGRO_RADIUS = 400;   // px: a guard engages a hostile within this
 const GUARD_LEASH_RADIUS = 300;   // px from HOME: guards hold the gate, they do not roam
 const GUARD_DAMAGE = 25;
 const GUARD_HOME_EPSILON = 24;    // px: close enough to the post to stand still
+
+// SOMET-154 — walking home is not a straight line. A guard's post is INSIDE
+// the village's wall ring, so a guard displaced outside the ring has its own
+// wall between it and home: greedy "steer at the post" steering jams against
+// that wall and the guard never returns, leaving the gate permanently
+// unguarded (two live rows in Vale Crossing were stranded 1.6k and 3.7k px
+// from their posts). These four numbers bound the recovery:
+//
+//  - STALL_TICKS: consecutive return ticks with no progress toward the current
+//    goal before the guard stops steering blindly and asks for a real path.
+//    12 ticks is 0.6s at the authority's 50ms tick — long enough that ordinary
+//    wall-sliding (which DOES make progress) never triggers it.
+//  - WAYPOINT_EPSILON: how close counts as "reached" for a path node. Must
+//    comfortably exceed one tick's travel (2px at 50ms) so a guard cannot
+//    step over a waypoint and oscillate.
+//  - PATH_RANGE / PATH_BUDGET: the search box (in tiles, around the post) and
+//    the hard expansion cap. A guard further from home than the box, or walled
+//    into a sealed pocket, gets no path — and is put back on its post instead.
+const GUARD_RETURN_STALL_TICKS = 12;
+const GUARD_RETURN_PROGRESS_EPSILON = 2;  // px of closure that counts as progress
+const GUARD_PATH_WAYPOINT_EPSILON = 30;   // px
+const GUARD_PATH_RANGE = 64;              // tiles from home the search may reach
+const GUARD_PATH_BUDGET = 20000;          // max tiles expanded per search
+const GUARD_MAX_REPATHS = 3;              // failed path attempts before snapping home
 
 // Fallback behaviour for a guard-faction creature with no assigned profile --
 // every hand-built test fixture, and any real world_creatures row whose
@@ -235,6 +259,98 @@ function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * d
 function withinLeash(x, y, home, radius) {
   if (!home) return true;
   return dist2(x, y, home.x, home.y) <= radius * radius;
+}
+
+// SOMET-154 — tile-grid path from a guard's current tile to its post, as
+// world-space waypoints (tile centres). Breadth-first over 4-connected
+// walkable tiles, so the first path found is a shortest one and no heuristic
+// can send it the wrong way around a wall ring.
+//
+// 4-connected, not 8: a diagonal hop between two tile centres can cut a wall
+// corner that resolveMove's per-axis clamp would refuse, which would hand back
+// a path the guard cannot actually walk. Orthogonal hops are always walkable
+// when both tiles are, because a 48px creature centred in a 100px tile keeps
+// both of its leading-face corners inside the destination tile's row/column.
+//
+// Probing the tile CENTRE (rather than the guard's box) is the same reason:
+// every waypoint is a centre, so the box always fits.
+//
+// Bounded twice over — a box of GUARD_PATH_RANGE tiles around the post AND a
+// hard expansion budget — so a guard stranded in an unreachable pocket costs a
+// fixed amount of work and then falls through to the caller's snap-home path,
+// rather than flood-filling the world every time it stalls.
+// One place clears the whole walk-home episode, so the three sites that end an
+// episode (post reached, target acquired, guard repositioned) cannot each
+// forget a different field — a stale `_homeBestD` alone would silently deny a
+// guard its repath budget on its NEXT displacement.
+function resetHomeWalk(c) {
+  c._homePath = null;
+  c._homeStall = 0;
+  c._homeRepaths = 0;
+  c._homeGoalKey = null;
+  c._homeMarkD = Infinity;
+  c._homeBestD = Infinity;
+}
+
+function tileCenterWalkable(map, col, row) {
+  return map.isWalkable(col * MAP_TILE_SIZE + MAP_TILE_SIZE / 2,
+    row * MAP_TILE_SIZE + MAP_TILE_SIZE / 2);
+}
+
+function findHomePath(map, fromX, fromY, home) {
+  if (!home || typeof map.isWalkable !== 'function') return null;
+  const startCol = Math.floor(fromX / MAP_TILE_SIZE);
+  const startRow = Math.floor(fromY / MAP_TILE_SIZE);
+  const goalCol = Math.floor(home.x / MAP_TILE_SIZE);
+  const goalRow = Math.floor(home.y / MAP_TILE_SIZE);
+  // Already in the post's own tile: there is nothing a path can add that the
+  // direct step is not already doing.
+  if (startCol === goalCol && startRow === goalRow) return null;
+
+  const key = (col, row) => `${col},${row}`;
+  const startKey = key(startCol, startRow);
+  const prev = new Map();
+  const seen = new Set([startKey]);
+  let frontier = [[startCol, startRow]];
+  let expanded = 0;
+  let found = false;
+
+  while (frontier.length > 0 && expanded < GUARD_PATH_BUDGET && !found) {
+    const next = [];
+    for (const [col, row] of frontier) {
+      if (++expanded > GUARD_PATH_BUDGET) break;
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nc = col + dc, nr = row + dr;
+        if (Math.abs(nc - goalCol) > GUARD_PATH_RANGE) continue;
+        if (Math.abs(nr - goalRow) > GUARD_PATH_RANGE) continue;
+        const k = key(nc, nr);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        if (!tileCenterWalkable(map, nc, nr)) continue;
+        prev.set(k, key(col, row));
+        if (nc === goalCol && nr === goalRow) { found = true; break; }
+        next.push([nc, nr]);
+      }
+      if (found) break;
+    }
+    frontier = next;
+  }
+  if (!found) return null;
+
+  // Walk the parent chain back from the post and reverse it. The guard's OWN
+  // tile centre is kept as the first waypoint: re-centring costs at most half a
+  // tile and is what stops a guard whose box straddles a corner from clipping
+  // the wall on its first step.
+  const out = [];
+  let k = key(goalCol, goalRow);
+  while (k !== undefined) {
+    const [col, row] = k.split(',').map(Number);
+    out.push({ x: col * MAP_TILE_SIZE + MAP_TILE_SIZE / 2, y: row * MAP_TILE_SIZE + MAP_TILE_SIZE / 2 });
+    if (k === startKey) break;
+    k = prev.get(k);
+  }
+  out.reverse();
+  return out.length > 0 ? out : null;
 }
 
 // Nearest hostile-faction creature a guard may engage: within aggroRadius of
@@ -494,6 +610,17 @@ class CreatureSim {
         // is the raw column name server.js's SELECT aliases it as (et.attack_element).
         attackElement: c.attackElement || c.attack_element || 'physical',
         _target: null, _targetKind: null, mode: 'roam',
+        // SOMET-154 walk-home state, in the cleared shape resetHomeWalk gives
+        // it. Only ever written by the guard branch's return step; every
+        // non-guard creature keeps these defaults forever.
+        //   _homePath   remaining waypoints (tile centres) to the post
+        //   _homeStall  return ticks since the last meaningful closure
+        //   _homeRepaths path searches since the guard last closed on its post
+        //   _homeGoalKey which point _homeMarkD is measured against
+        //   _homeMarkD  distance to that goal when the stall window opened
+        //   _homeBestD  best distance to the POST reached this episode
+        _homePath: null, _homeStall: 0, _homeRepaths: 0,
+        _homeGoalKey: null, _homeMarkD: Infinity, _homeBestD: Infinity,
         // Per-slot cooldown, per INSTANCE. An absent key means "ready" (the
         // same thing the old scalar `_attackCd: 0` meant), so a creature that
         // has never attacked can attack on its first tick.
@@ -592,6 +719,12 @@ class CreatureSim {
 
         if (tgt) {
           c.mode = 'chase';
+          // SOMET-154: a chase invalidates any cached walk-home detour — the
+          // guard is about to move off it, so following its stale waypoints
+          // afterwards would steer it from wherever the fight ended. The
+          // recovery budget resets too: the walk home that follows this fight
+          // is a fresh episode, not a continuation of whatever preceded it.
+          resetHomeWalk(c);
           const tc = center(tgt);
           const vx = tc.x - cc.x, vy = tc.y - cc.y;
           const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult * c._buff.speedMult);
@@ -648,14 +781,112 @@ class CreatureSim {
           const dx = c.home.x - cc.x, dy = c.home.y - cc.y;
           if (Math.hypot(dx, dy) > GUARD_HOME_EPSILON) {
             c.mode = 'return';
-            const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult * c._buff.speedMult);
-            if (r.x !== c.x || r.y !== c.y) {
+            // SOMET-154. The step is aimed at the next PATH waypoint when the
+            // guard is following a detour, and straight at the post otherwise.
+            // Reached waypoints are dropped first, so `goal` is always
+            // somewhere the guard has not arrived at yet.
+            if (c._homePath) {
+              while (c._homePath.length > 0
+                     && Math.hypot(c._homePath[0].x - cc.x, c._homePath[0].y - cc.y) <= GUARD_PATH_WAYPOINT_EPSILON) {
+                c._homePath.shift();
+              }
+              if (c._homePath.length === 0) c._homePath = null;
+            }
+            const goal = (c._homePath && c._homePath.length > 0) ? c._homePath[0] : c.home;
+            const gx = goal.x - cc.x, gy = goal.y - cc.y;
+            const goalD = Math.hypot(gx, gy);
+            // The stall window restarts whenever the goal itself changes (a
+            // waypoint was reached, or a new path was adopted), since the
+            // distance being watched is a different distance from that tick on.
+            const goalKey = `${goal.x},${goal.y}`;
+            if (c._homeGoalKey !== goalKey) {
+              c._homeGoalKey = goalKey;
+              c._homeMarkD = goalD;
+              c._homeStall = 0;
+            }
+            const r = movedWith(this.map, c, gx, gy, dt, bh.moveSpeedMult * c._buff.speedMult);
+            // The step is committed only when it actually gets CLOSER to the
+            // goal. resolveMove clamps each axis independently, so a blocked
+            // step still slides along the wall — that slide is kept when it
+            // closes the gap (free corner-rounding) and refused when it does
+            // not.
+            //
+            // Aiming straight at the post was already self-bounding (each axis
+            // points AT the post and a 2px step cannot overshoot), so this gate
+            // changes nothing for a guard with no path. It exists for the
+            // path-following case introduced below, which is the first thing
+            // here that can legitimately steer a guard AWAY from its post: a
+            // detour must still only ever close on its own next waypoint.
+            if ((r.x !== c.x || r.y !== c.y)
+                && dist2(r.x + c.width / 2, r.y + c.height / 2, goal.x, goal.y) < goalD * goalD) {
               c.x = r.x; c.y = r.y;
-              const f = facingFor(dx, dy); if (f) c.facing = f;
+              const f = facingFor(gx, gy); if (f) c.facing = f;
               c.dirty = true;
+            }
+            const nowC = center(c);
+
+            // "Stuck" is MEANINGFUL closure over a window, not "did it move
+            // this tick". A guard pinned flat against a wall whose post is a
+            // fraction of a pixel off the wall's axis keeps shaving ~1e-9 px
+            // off its distance every tick forever: a plain moved/didn't-move
+            // test reads that as progress, the recovery below never runs, and
+            // the guard is stranded exactly as before. The first version of
+            // this fix had that bug, and the W-bearing test caught it.
+            const newGoalD = Math.hypot(nowC.x - goal.x, nowC.y - goal.y);
+            if (newGoalD <= c._homeMarkD - GUARD_RETURN_PROGRESS_EPSILON) {
+              c._homeMarkD = newGoalD;
+              c._homeStall = 0;
+            } else {
+              c._homeStall += 1;
+            }
+            // The repath budget is earned back by real net closure on the POST
+            // (not on a waypoint): a guard genuinely walking the long way round
+            // the ring keeps a full budget, while one that is merely thrashing
+            // burns through it and gets put back on its post below. Rounding a
+            // corner temporarily increases this distance, which simply leaves
+            // the best-so-far untouched rather than penalising the guard.
+            const newHomeD = Math.hypot(nowC.x - c.home.x, nowC.y - c.home.y);
+            if (newHomeD <= c._homeBestD - GUARD_RETURN_PROGRESS_EPSILON) {
+              c._homeBestD = newHomeD;
+              c._homeRepaths = 0;
+            }
+
+            if (c._homeStall >= GUARD_RETURN_STALL_TICKS) {
+              // Steering alone cannot get this guard home. Ask for a real path
+              // around whatever is in the way (in a village that is the guard's
+              // own wall ring, and the way through is the gate).
+              c._homeStall = 0;
+              c._homeRepaths += 1;
+              const path = c._homeRepaths <= GUARD_MAX_REPATHS
+                ? findHomePath(this.map, nowC.x, nowC.y, c.home)
+                : null;
+              if (path) {
+                c._homePath = path;
+                c._homeGoalKey = null; // force the stall window to restart on the new goal
+              } else {
+                // No route exists inside the search box, or the guard has
+                // burned its attempts and is still stuck. An unmanned gate
+                // defeats the whole feature, so the post wins over the
+                // simulation here and the guard is placed back on it.
+                //
+                // This can only fire for a guard that has been demonstrably
+                // immobile for GUARD_RETURN_STALL_TICKS with no walkable route
+                // home — never mid-fight (a guard with a target takes the
+                // chase branch above and never reaches this code) and never
+                // during ordinary knockback recovery on open ground (which
+                // makes progress every tick and so never stalls).
+                c.x = c.home.x - c.width / 2;
+                c.y = c.home.y - c.height / 2;
+                c.dirty = true;
+                c.mode = 'guard';
+                resetHomeWalk(c);
+              }
             }
           } else {
             c.mode = 'guard';
+            // Home reached: forget the detour and the attempt budget, so the
+            // NEXT displacement gets a full set of attempts of its own.
+            resetHomeWalk(c);
           }
         } else {
           c.mode = 'guard';
@@ -968,6 +1199,9 @@ module.exports = {
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
   GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE, GUARD_HOME_EPSILON,
   withinLeash, selectGuardTarget,
+  // SOMET-154: exported so the wall-ring tests can pin the path search itself
+  // (and its bounds) without having to infer it from 1500 ticks of movement.
+  findHomePath, GUARD_RETURN_STALL_TICKS, GUARD_MAX_REPATHS, GUARD_PATH_RANGE,
   // Exported so server.js's per-chunk world_creatures SELECT uses the SAME
   // join text as loadCreatureTypes above, rather than a second copy that can
   // drift.
