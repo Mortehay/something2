@@ -80,7 +80,8 @@ const spec = () => ({
 
 async function cleanup(pool) {
   await pool.query(
-    "DELETE FROM worlds WHERE name IN ('zzTestAlpha','zzTestBeta','zzTestPopA','zzTestPopB','zzTestVilA')",
+    "DELETE FROM worlds WHERE name IN "
+    + "('zzTestAlpha','zzTestBeta','zzTestPopA','zzTestPopB','zzTestVilA','zzTestMultiVillage')",
   ).catch(() => {});
 }
 
@@ -640,6 +641,119 @@ test('allows_fast_travel round-trips through a real seed, both directions', asyn
 
       assert.equal(await flagOf('zzTestAlpha'), false,
         're-seeding without the key must clear the flag (ON CONFLICT SET missing?)');
+    });
+  } finally {
+    await cleanup(pool);
+    await pool.end().catch(() => {});
+  }
+});
+
+// Review finding (Important 2): no DB-backed fixture in this file ever used a
+// plural `villages:` array with more than one entry, so
+// `for (const v of specVillages) { await createVillage(...) }` in
+// scripts/seed-map.js had never actually executed with 2+ elements -- only
+// read by inspection. This world declares two non-overlapping, legal boxes
+// (same shapes as map_spec_validate.test.js's VILLAGE_A/VILLAGE_B) so both
+// createVillage calls run for real.
+//
+// Also carries safe_road_radius/safe_rects (review finding Important 3,
+// folded in here per the reviewer's suggestion): no existing DB test proved
+// the ON CONFLICT SET actually re-asserts these two columns the way
+// "allows_fast_travel round-trips through a real seed" proves it for that
+// column.
+const MULTI_VILLAGE_A = { min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
+  spawn_x: 1150, spawn_y: 1150 };
+const MULTI_VILLAGE_B = { min_row: 30, min_col: 30, width: 6, height: 4, gate_edge: 'S',
+  spawn_x: 3150, spawn_y: 3150 };
+const multiVillageSpec = ({ safe = false } = {}) => ({
+  name: 'zz-test-multi-village-fixture',
+  topology: 'spine',
+  worlds: [
+    {
+      key: 'a', name: 'zzTestMultiVillage', grid: [15, -3], seed: 995, width: 64, height: 64,
+      chunk_size: 64, biomes: ['Meadow'], biome_cell: 32,
+      allowed_creature_types: [], is_entry: true,
+      // Tile (row 5, col 5): clear of both village boxes (rows 10-13/30-33),
+      // walkable Meadow terrain, off the wall ring.
+      entry_spawn: { x: 550, y: 550 },
+      villages: [MULTI_VILLAGE_A, MULTI_VILLAGE_B],
+      ...(safe ? {
+        safe_road_radius: 3,
+        safe_rects: [{ min_row: 0, min_col: 0, width: 2, height: 2 }],
+      } : {}),
+    },
+  ],
+  links: [],
+});
+
+test('a world with two villages creates both, idempotently, and safe-territory columns round-trip', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — multi-village seeding is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  const safeColsOf = async (name) => (await pool.query(
+    'SELECT safe_road_radius, safe_rects FROM worlds WHERE name = $1', [name])).rows[0];
+  try {
+    await cleanup(pool);
+    const s = multiVillageSpec({ safe: true });
+    await withEntryPreserved(pool, async () => {
+      const result = await applyMapSpec(pool, s);
+      assert.equal(result.villages, 2,
+        'applyMapSpec must report creating both villages, not just the first');
+
+      const villageRows = await pool.query(
+        `SELECT v.min_row, v.min_col, v.width, v.height FROM villages v
+           JOIN worlds w ON w.id = v.world_id
+          WHERE w.name = 'zzTestMultiVillage' ORDER BY v.min_row`);
+      assert.equal(villageRows.rowCount, 2,
+        'both villages must exist as real rows, not just be counted');
+      assert.equal(Number(villageRows.rows[0].min_row), MULTI_VILLAGE_A.min_row);
+      assert.equal(Number(villageRows.rows[1].min_row), MULTI_VILLAGE_B.min_row);
+
+      // Two gate guards per village -- an applier that silently dropped the
+      // second village would leave 2, not 4.
+      const guardRow = await pool.query(
+        `SELECT count(*)::int AS n FROM world_creatures wc
+           JOIN worlds w ON w.id = wc.world_id
+          WHERE w.name = 'zzTestMultiVillage' AND wc.type = 'Village Guard'`);
+      assert.equal(guardRow.rows[0].n, 4,
+        'two villages should each get two gate guards');
+
+      const safeAfterFirst = await safeColsOf('zzTestMultiVillage');
+      assert.equal(safeAfterFirst.safe_road_radius, 3);
+      assert.deepEqual(safeAfterFirst.safe_rects, [{ min_row: 0, min_col: 0, width: 2, height: 2 }]);
+
+      // Idempotent: the village-existence check is per-world, all-or-nothing
+      // -- re-applying must not create a third/fourth village or double the
+      // guard count.
+      const second = await applyMapSpec(pool, s);
+      assert.equal(second.villages, 0,
+        're-applying an unchanged spec must not report re-creating either village');
+      const villageRowsAfter = await pool.query(
+        `SELECT count(*)::int AS n FROM villages v
+           JOIN worlds w ON w.id = v.world_id WHERE w.name = 'zzTestMultiVillage'`);
+      assert.equal(villageRowsAfter.rows[0].n, 2, 'second apply duplicated a village');
+      const guardRowAfter = await pool.query(
+        `SELECT count(*)::int AS n FROM world_creatures wc
+           JOIN worlds w ON w.id = wc.world_id
+          WHERE w.name = 'zzTestMultiVillage' AND wc.type = 'Village Guard'`);
+      assert.equal(guardRowAfter.rows[0].n, 4, 'second apply duplicated a gate guard');
+
+      // Now remove the safe-territory keys entirely and re-seed. The spec is
+      // the source of truth (same rule allows_fast_travel follows): deleting
+      // the keys must take the world back to the column defaults, not leave
+      // it permanently safe because it once opted in. This is the assertion
+      // that fails if the ON CONFLICT SET for these two columns is missing.
+      const s2 = multiVillageSpec({ safe: false });
+      await applyMapSpec(pool, s2);
+      const safeAfterSecond = await safeColsOf('zzTestMultiVillage');
+      assert.equal(safeAfterSecond.safe_road_radius, 0,
+        're-seeding without safe_road_radius must clear it back to 0 (ON CONFLICT SET missing?)');
+      assert.deepEqual(safeAfterSecond.safe_rects, [],
+        're-seeding without safe_rects must clear it back to [] (ON CONFLICT SET missing?)');
     });
   } finally {
     await cleanup(pool);

@@ -164,6 +164,14 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     if (w.village && Array.isArray(w.villages)) {
       errors.push(`world "${w.key}" declares both "village" and "villages" — use one`);
     }
+    // Reject rather than coerce, same posture as safe_road_radius below: a
+    // typo'd `villages: {...}` (an easy mistake, since the sibling singular
+    // `village` key IS an object) must not silently fall through to
+    // villagesOf's `w.village` fallback and validate as "no villages here" --
+    // that is a village silently missing, the SOMET-153 failure class.
+    if (w.villages !== undefined && !Array.isArray(w.villages)) {
+      errors.push(`world "${w.key}" villages must be an array (got ${typeof w.villages})`);
+    }
     const villages = villagesOf(w);
     for (const v of villages) {
       if (!(v.width >= VILLAGE_LIMITS.minW && v.width <= VILLAGE_LIMITS.maxW)) {
@@ -212,7 +220,15 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
           + `between 0 and ${MAX_SAFE_ROAD_RADIUS} (got ${JSON.stringify(r)})`);
       }
     }
-    for (const s of w.safe_rects ?? []) {
+    // A non-array safe_rects (e.g. one accidental object instead of a list of
+    // them) must be REPORTED, not thrown -- `for...of` on a non-iterable
+    // aborts validateMapSpec entirely, hiding every other problem the rest of
+    // the spec has. Same reject-rather-than-coerce posture as the checks
+    // above it.
+    if (w.safe_rects !== undefined && !Array.isArray(w.safe_rects)) {
+      errors.push(`world "${w.key}" safe_rects must be an array (got ${typeof w.safe_rects})`);
+    }
+    for (const s of Array.isArray(w.safe_rects) ? w.safe_rects : []) {
       const bad = !Number.isInteger(s.min_row) || !Number.isInteger(s.min_col)
         || !Number.isInteger(s.width) || !Number.isInteger(s.height)
         || s.width < 1 || s.height < 1

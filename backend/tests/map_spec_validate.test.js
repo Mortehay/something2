@@ -417,6 +417,15 @@ test('declaring both village and villages is rejected', () => {
   assert.ok(errs.some((e) => /both "village" and "villages"/.test(e)), errs.join('\n'));
 });
 
+// Review finding (Important 1): a typo'd `villages: {...}` (an object, not a
+// list) used to fall through villagesOf's `w.village` fallback and validate
+// with ZERO errors -- the applier would then create ZERO villages for that
+// world, silently. This must be reported, not ignored.
+test('a non-array villages value is rejected, not silently ignored', () => {
+  const errs = errorsFor((s) => { s.worlds[0].villages = VILLAGE_A(); });
+  assert.ok(errs.some((e) => /villages must be an array/.test(e)), errs.join('\n'));
+});
+
 test('every village in the array passes the same geometry rules as a lone one', () => {
   // 6+5 = 11 breaks the SOMET-282 screen budget. The SECOND entry must be
   // checked, not just the first -- a rule applied to element 0 of a list is
@@ -456,4 +465,18 @@ test('a safe rectangle must be positive and inside the map bounds', () => {
   assert.deepEqual(errorsFor((s) => {
     s.worlds[0].safe_rects = [{ min_row: 10, min_col: 10, width: 4, height: 4 }];
   }), []);
+});
+
+// Review finding (Minor): `for (const s of w.safe_rects ?? [])` threw
+// TypeError on a non-array safe_rects and aborted validateMapSpec entirely,
+// hiding every other error the rest of the spec had. Must be reported
+// instead.
+test('a non-array safe_rects does not throw and is reported as invalid', () => {
+  let errs;
+  assert.doesNotThrow(() => {
+    errs = errorsFor((s) => {
+      s.worlds[0].safe_rects = { min_row: 0, min_col: 0, width: 2, height: 2 };
+    });
+  });
+  assert.ok(errs.some((e) => /safe_rects must be an array/.test(e)), errs.join('\n'));
 });
