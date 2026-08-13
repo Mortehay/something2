@@ -53,9 +53,45 @@ const SPEC_TILE_SIZE = 100;
 // level (they share a unique index on exact coordinates), whereas a waypoint
 // and a portal 1px apart are a conflict because a player cannot stand on one
 // without standing on the other.
+//
+// ROW FIRST, then column -- the order services/waypoints.js keys the tick loop's
+// lookup in, the order assertNavigable reports a tile in, and therefore the
+// order the rejection messages below print. The two helpers were transposed
+// relative to each other while each stayed internally consistent, which is the
+// kind of agreement that holds right up until someone compares one to the other.
 function tileSlot(worldKey, x, y) {
-  return `${worldKey}:${Math.floor(x / SPEC_TILE_SIZE)},${Math.floor(y / SPEC_TILE_SIZE)}`;
+  return `${worldKey}:${Math.floor(y / SPEC_TILE_SIZE)},${Math.floor(x / SPEC_TILE_SIZE)}`;
 }
+
+// Every key a world object may carry -- anything else is an error, not an
+// ignored extra.
+//
+// An unread key is indistinguishable from a consumed one from the author's
+// side: the spec validates, the seed exits 0, and the feature is simply not
+// there. That is the SOMET-153 failure class the singular/plural `village`
+// checks guard against, one level up.
+//
+// WORLDS ONLY, deliberately. This is the level authors actually extend (every
+// new authored feature so far -- density, level_band, allows_fast_travel,
+// safe_road_radius, and now waypoints -- landed here), and it is the level where
+// a typo'd or premature key costs the most. Links and villages are not covered:
+// their shapes are already pinned field-by-field, and widening the rule to them
+// buys little for the extra chance of rejecting a spec over a key that some
+// other branch legitimately added -- `is_waypoint`/`waypoint_name` are
+// link-level for exactly that reason.
+//
+// `creature_count` is listed even though it is RETIRED: it has its own,
+// far more useful error message a few lines below ("use density instead"), and
+// leaving it out here would bury that message under a generic one.
+const WORLD_KEYS = new Set([
+  'key', 'name', 'grid', 'seed', 'width', 'height', 'chunk_size',
+  'biomes', 'biome_cell', 'allowed_creature_types', 'is_entry', 'entry_spawn',
+  'level_band', 'density', 'allows_fast_travel',
+  'village', 'villages', 'chest',
+  'safe_road_radius', 'safe_rects',
+  'waypoints',
+  'creature_count',
+]);
 
 function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } = {}) {
   const errors = [];
@@ -147,7 +183,7 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     }
     if (waypointTiles.has(slot)) {
       errors.push(`world "${worldKey}" already has a waypoint on tile `
-        + `(${Math.floor(x / SPEC_TILE_SIZE)},${Math.floor(y / SPEC_TILE_SIZE)}) — only one of them `
+        + `(${Math.floor(y / SPEC_TILE_SIZE)},${Math.floor(x / SPEC_TILE_SIZE)}) — only one of them `
         + 'could ever be walked onto');
     }
     waypointTiles.add(slot);
@@ -158,6 +194,16 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     byKey.set(w.key, w);
     if (seenNames.has(w.name)) errors.push(`duplicate name "${w.name}"`);
     seenNames.add(w.name);
+
+    // Before every other per-world check, and NOT behind a `continue`: a world
+    // that also fails its grid check must still have its unknown keys named,
+    // or the author fixes the grid and gets a second surprise.
+    const unknown = Object.keys(w).filter((k) => !WORLD_KEYS.has(k));
+    if (unknown.length) {
+      errors.push(`world "${w.key}" has unknown key(s) ${unknown.join(', ')} -- `
+        + 'nothing reads them, so they would be silently ignored. Remove them, or '
+        + 'add them to WORLD_KEYS in seeds/mapSpec.js once a reader exists.');
+    }
 
     const gridRequired = !portalConnectedKeys.has(w.key);
     if (!hasValidGrid(w)) {
