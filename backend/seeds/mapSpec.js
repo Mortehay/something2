@@ -41,6 +41,29 @@ function hasValidGrid(w) {
       && Number.isInteger(w.grid[0]) && Number.isInteger(w.grid[1]);
 }
 
+// The singular `village` key and the plural `villages` array read as one list.
+// Both the validator and scripts/seed-map.js call THIS -- the same
+// cannot-drift-apart reason VILLAGE_LIMITS is shared rather than restated. 20+
+// checked-in specs use the singular form and none of them should have to change
+// for a world elsewhere to want three villages.
+function villagesOf(w) {
+  if (Array.isArray(w.villages)) return w.villages;
+  return w.village ? [w.village] : [];
+}
+
+function boxesOverlap(a, b) {
+  return a.min_row <= b.min_row + b.height - 1
+      && b.min_row <= a.min_row + a.height - 1
+      && a.min_col <= b.min_col + b.width - 1
+      && b.min_col <= a.min_col + a.width - 1;
+}
+
+// Widest safe corridor a spec may ask for. A radius wider than a village is
+// already generous, and at 8 a 64-tile world is mostly road; the DB carries the
+// same range as a CHECK constraint for anything that writes the column
+// directly.
+const MAX_SAFE_ROAD_RADIUS = 8;
+
 function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } = {}) {
   const errors = [];
   if (!spec || typeof spec !== 'object') return ['spec is not an object'];
@@ -138,8 +161,11 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
         `world "${w.key}" creature_count is no longer authored -- use "density" instead`);
     }
 
-    if (w.village) {
-      const v = w.village;
+    if (w.village && Array.isArray(w.villages)) {
+      errors.push(`world "${w.key}" declares both "village" and "villages" — use one`);
+    }
+    const villages = villagesOf(w);
+    for (const v of villages) {
       if (!(v.width >= VILLAGE_LIMITS.minW && v.width <= VILLAGE_LIMITS.maxW)) {
         errors.push(`world "${w.key}" village width must be between 3 and 8 tiles`);
       }
@@ -157,9 +183,45 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       // through that route: three seeded hubs shipped with a spawn on the
       // SOUTH wall ring, and respawn-at-village dropped the player inside the
       // wall. Same function object as index.js calls, so the two call sites
-      // cannot drift.
+      // cannot drift. Applied to EVERY entry, not just the first -- a rule
+      // that checks one element of a list is the same half-applied rule in a
+      // new costume.
       const geomErr = villageGeometryError(v);
       if (geomErr) errors.push(`world "${w.key}" village ${geomErr}`);
+    }
+    // Overlapping boxes would stamp two wall rings through each other, leaving
+    // a village with a hole in it and a gate that opens into another village's
+    // wall. Cheap O(n^2) -- a world has single-digit villages.
+    for (let i = 0; i < villages.length; i++) {
+      for (let j = i + 1; j < villages.length; j++) {
+        if (boxesOverlap(villages[i], villages[j])) {
+          errors.push(`world "${w.key}" villages overlap `
+            + `(rows ${villages[i].min_row} and ${villages[j].min_row})`);
+        }
+      }
+    }
+
+    // SOMET-288 safe territory. Rejected rather than coerced, for the reason
+    // allows_fast_travel states above: "3" and true are how a hand-edited spec
+    // gets this wrong, and coercing either would widen or silently disable a
+    // safe corridor on the strength of a typo.
+    if (w.safe_road_radius !== undefined) {
+      const r = w.safe_road_radius;
+      if (!Number.isInteger(r) || r < 0 || r > MAX_SAFE_ROAD_RADIUS) {
+        errors.push(`world "${w.key}" safe_road_radius must be an integer `
+          + `between 0 and ${MAX_SAFE_ROAD_RADIUS} (got ${JSON.stringify(r)})`);
+      }
+    }
+    for (const s of w.safe_rects ?? []) {
+      const bad = !Number.isInteger(s.min_row) || !Number.isInteger(s.min_col)
+        || !Number.isInteger(s.width) || !Number.isInteger(s.height)
+        || s.width < 1 || s.height < 1
+        || s.min_row < 0 || s.min_col < 0
+        || s.min_row + s.height > w.height || s.min_col + s.width > w.width;
+      if (bad) {
+        errors.push(`world "${w.key}" safe_rects entry must be a positive box `
+          + `inside the ${w.width}x${w.height} map (got ${JSON.stringify(s)})`);
+      }
     }
 
     if (biomeNames) {
@@ -294,4 +356,4 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
   return errors;
 }
 
-module.exports = { validateMapSpec, EDGE_DELTA };
+module.exports = { validateMapSpec, EDGE_DELTA, villagesOf };

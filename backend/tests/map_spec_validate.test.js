@@ -386,3 +386,74 @@ test('several worlds may allow fast travel at once', () => {
   spec.worlds[1].allows_fast_travel = true;
   assert.deepEqual(validateMapSpec(spec), []);
 });
+
+// SOMET-288: several villages per world, plus safe-territory fields.
+// A legal 6x4 village whose spawn is genuinely interior. Cloned per case so a
+// mutation in one test cannot leak into another.
+const VILLAGE_A = () => ({
+  min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
+  spawn_x: 1150, spawn_y: 1150,
+});
+const VILLAGE_B = () => ({
+  min_row: 30, min_col: 30, width: 6, height: 4, gate_edge: 'S',
+  spawn_x: 3150, spawn_y: 3150,
+});
+
+test('a world may declare several villages', () => {
+  assert.deepEqual(errorsFor((s) => { s.worlds[0].villages = [VILLAGE_A(), VILLAGE_B()]; }), []);
+});
+
+test('the singular village key still validates unchanged', () => {
+  // 20+ checked-in specs use it. This feature must not require touching any
+  // of them.
+  assert.deepEqual(errorsFor((s) => { s.worlds[0].village = VILLAGE_A(); }), []);
+});
+
+test('declaring both village and villages is rejected', () => {
+  const errs = errorsFor((s) => {
+    s.worlds[0].village = VILLAGE_A();
+    s.worlds[0].villages = [VILLAGE_B()];
+  });
+  assert.ok(errs.some((e) => /both "village" and "villages"/.test(e)), errs.join('\n'));
+});
+
+test('every village in the array passes the same geometry rules as a lone one', () => {
+  // 6+5 = 11 breaks the SOMET-282 screen budget. The SECOND entry must be
+  // checked, not just the first -- a rule applied to element 0 of a list is
+  // the same half-applied rule in a new costume.
+  const errs = errorsFor((s) => {
+    s.worlds[0].villages = [VILLAGE_A(), { ...VILLAGE_B(), height: 5 }];
+  });
+  assert.ok(errs.some((e) => /width \+ height must be at most/.test(e)), errs.join('\n'));
+});
+
+test('two villages in one world may not overlap', () => {
+  const errs = errorsFor((s) => {
+    s.worlds[0].villages = [
+      VILLAGE_A(),
+      { min_row: 12, min_col: 12, width: 6, height: 4, gate_edge: 'S',
+        spawn_x: 1350, spawn_y: 1350 },
+    ];
+  });
+  assert.ok(errs.some((e) => /villages overlap/.test(e)), errs.join('\n'));
+});
+
+test('safe_road_radius must be an integer in 0..8', () => {
+  for (const bad of [-1, 9, 2.5, '2', true]) {
+    const errs = errorsFor((s) => { s.worlds[0].safe_road_radius = bad; });
+    assert.ok(errs.some((e) => /safe_road_radius/.test(e)),
+      `radius ${JSON.stringify(bad)} was accepted`);
+  }
+  assert.deepEqual(errorsFor((s) => { s.worlds[0].safe_road_radius = 3; }), []);
+});
+
+test('a safe rectangle must be positive and inside the map bounds', () => {
+  const errs = errorsFor((s) => {
+    s.worlds[0].safe_rects = [{ min_row: 60, min_col: 60, width: 20, height: 20 }];
+  });
+  assert.ok(errs.some((e) => /safe_rects/.test(e)), errs.join('\n'));
+
+  assert.deepEqual(errorsFor((s) => {
+    s.worlds[0].safe_rects = [{ min_row: 10, min_col: 10, width: 4, height: 4 }];
+  }), []);
+});
