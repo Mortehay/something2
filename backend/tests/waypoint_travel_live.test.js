@@ -148,6 +148,11 @@ function fakeTravelPool({ activated = [HOME.id, AWAY.id], waypointsByWorld = nul
     // unlit-origin case is to hold the database's answer still while the player
     // stands there.
     if (/INSERT INTO character_waypoints/i.test(sql)) return { rows: [], rowCount: 1 };
+    // Fog of war. Routed explicitly rather than left to the fallthrough below,
+    // because a test asserting this write happened must not be able to pass
+    // against a pool that never understood the query -- an unrouted INSERT and
+    // a routed one are indistinguishable from `{rows: []}`.
+    if (/INSERT INTO character_visited_worlds/i.test(sql)) return { rows: [], rowCount: 1 };
     if (/FROM world_creatures wc/i.test(sql)) return { rows: [] };
     if (/FROM world_items/i.test(sql)) return { rows: [] };
     return { rows: [] };
@@ -215,6 +220,61 @@ test('the rejoin after a travel is authorized and lands on the arrival point', a
   assert.equal(joined.spawn.y, AWAY.y);
   // And it really is the other world's sim, not a second shard of the first.
   assert.ok(handle.worlds.has('w2'));
+});
+
+// Every recorded visit for `worldId`, matched on the INSERT and not on the
+// table name. joinPolicyFacts' own SELECT mentions character_visited_worlds
+// twice, so a regex over the table alone matches on EVERY travel attempt --
+// including the refused ones -- and would pass with the write deleted.
+function visitsTo(pool, worldId) {
+  return pool.matching(/INSERT INTO character_visited_worlds/i)
+    .filter((c) => c.params[1] === worldId);
+}
+
+test('a waypoint trip records the destination as visited', async () => {
+  // The write is fire-and-forget and nothing on the wire reflects it, which is
+  // the exact shape that has shipped inert in this repo before. It is also not
+  // covered by visited_worlds_db.test.js's source guard: that one asserts a
+  // `recordVisit(` appears within 600 characters of each `type: 'transition'`
+  // push, which a call inside an `if (false)` would satisfy just as well.
+  //
+  // Ordering is deterministic, not a race: the fake pool pushes onto `calls`
+  // synchronously in the first statement of `query`, and the handler calls
+  // recordVisit synchronously after `send`. So the call is recorded before the
+  // frame this test awaits has crossed the socket.
+  const pool = fakeTravelPool();
+  const { ws } = await joinAt(pool, { x: HOME.x, y: HOME.y });
+
+  // The join records w1 on its own. Only w2 can come from the travel handler --
+  // this character has no other way into that world (see joinPolicyFacts above).
+  assert.equal(visitsTo(pool, 'w2').length, 0, 'nothing may have visited w2 before the trip');
+
+  ws.send(JSON.stringify({ type: 'travel', waypointId: AWAY.id }));
+  await nextMsg(ws, 'transition');
+
+  const dest = visitsTo(pool, 'w2');
+  assert.equal(dest.length, 1, 'a committed waypoint trip must record the destination as visited');
+  assert.equal(dest[0].params[0], CHARACTER, 'the visit must be recorded for the travelling character');
+  // Paired positive: the join's own visit really is in `calls` too, so the
+  // filter above is discriminating between worlds rather than finding nothing.
+  assert.equal(visitsTo(pool, 'w1').length, 1);
+});
+
+test('a refused trip records nothing', async () => {
+  // The other half of the assertion above. A recordVisit hoisted above the
+  // verdict would still pass that test and would hand out fog-of-war for a
+  // world the player was just refused -- a read of the world graph earned by
+  // asking for it.
+  const pool = fakeTravelPool({ activated: [HOME.id] });
+  const { ws } = await joinAt(pool, { x: HOME.x, y: HOME.y });
+
+  ws.send(JSON.stringify({ type: 'travel', waypointId: AWAY.id }));
+  await nextMsg(ws, 'error');
+
+  assert.equal(visitsTo(pool, 'w2').length, 0);
+  // Paired positive: the refusal really did go down the travel path (the
+  // destination was looked up), so the zero above is not "nothing happened".
+  assert.equal(pool.matching(/FROM waypoints wp WHERE wp\.id/).length, 1);
 });
 
 test('travel is refused when the player is not standing on a waypoint', async () => {
