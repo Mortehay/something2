@@ -243,3 +243,51 @@ village box overlaps a doorway or arrival tile; `entry_spawn` read from the entr
 village; no hostile inside any village footprint; the DB test green; the full
 suite at baseline. **Browser verification is required for this slice and carries
 slices A and C as well** — the script is in the report.
+
+---
+
+## Deviations from the plan, and what implementation taught
+
+1. **The migration also RE-ROLLS the wild hostiles** in the three worlds. Not
+   planned, and without it the slice is inert on live data: `safe_road_radius`
+   is a spawn-time rule and these worlds were populated long before there was a
+   corridor to avoid. Measured with the columns set and before the step existed:
+   **12 of 15** hostiles in Old Trailhead, **9 of 15** in Windwatch Pass and
+   **6 of 15** in Thornbriar Reach were standing in what had just become safe
+   territory. A player would have walked out of the gate onto a road covered in
+   slimes.
+
+2. **Two pens moved, because village guards would have farmed them.** Guards
+   target `faction = 'hostile'`, and the skittish types ARE faction `'hostile'`
+   — non-aggressive by `chase_style`, not by faction. Guard aggro is 400 px from
+   the post, and SOMET-291 raises the Guard leash to 600 so that aggro is no
+   longer clipped. Old Trailhead's Beast Swarm pen sat 500 px from a post and
+   had **already lost two creatures** by the time this was noticed. Final
+   distances, measured from the posts: Old Trailhead 1700 px / 1237 px,
+   Windwatch Pass 1200 px, Thornbriar Reach 1421 px. Pinned by a test.
+
+3. **`loadWorld`'s SELECT needed the new column.** Slice A's guard test caught
+   it: the authority spells its columns out instead of `SELECT *`, so the client
+   would have drawn an authored road the server did not have.
+
+4. **Two live-position assertions were wrong and were rewritten.** Both made the
+   same mistake — asserting on where a creature *is* rather than on what this
+   slice controls:
+   - pen membership is counted by **home anchor**, because keeping a creature
+     near its anchor is the C follow-up's leash clamp, not this slice's;
+   - the no-hostile-on-the-road rule is asserted by a **fresh placement**
+     against each live row, because safety is spawn-time only and a hostile
+     roaming onto the road is correct behaviour (it is how one chasing a player
+     follows them to the gate).
+
+5. **`worlds.pens`, not a `world_pens` table.** `safe_rects` set the precedent
+   and the shape is the same; a table would have bought nothing a jsonb column
+   does not already give the validator, the applier and the DB test.
+
+6. **Containment is weaker than "inside the pen rectangle", and cannot be
+   authored.** The leash lives on the *behaviour* row (`Skittish.leash_radius` =
+   500 px = 5 tiles) and `world_creatures` has no per-creature leash column, so
+   a penned creature is held within 5 tiles of **its own spawn tile** — the pen
+   dilated by the leash, not the pen. Consistent with "no walls and no gates",
+   but if tighter pens are ever wanted, a per-creature leash column is the
+   change that would buy it.
