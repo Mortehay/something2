@@ -67,12 +67,38 @@ the home region. Everything beyond is untouched — hostile, banded, exactly as
 today.
 
 - **3–4 villages** across the three worlds, each obeying the existing box rules.
-- **Roads** — the carved lattice, with `safe_road_radius` authored per world,
-  connecting the villages and the two doorways.
+- **Roads** — the carved lattice, with `safe_road_radius` authored per world.
+
+  **Correction, from SOMET-288's implementation:** an earlier draft of this
+  section said the roads "connect the villages and the two doorways". Nothing
+  can author *where* a road goes. `collectPathCells` derives the lattice purely
+  from `seed` / `pathCell` / `pathJitter` on a coarse anchor grid, and
+  `safe_road_radius` only widens whatever it already drew. SOMET-289 must pick
+  one of three: place villages onto lattice cells found by inspection, add
+  authored road polylines to the map spec and union them into
+  `collectPathCells`, or accept that roads pass near villages by luck.
+  `safeRegion` takes `pathCells` as an input, so none of the three is blocked.
+
+  **Pick a radius of 1–3.** Measured against the real generator, the road leg
+  alone marks a 64×64 world 26% safe at r=1, 40% at r=2, 52% at r=3 and 92% at
+  r=8 — Chebyshev dilation saturates fast. The DB's `CHECK (0..8)` is a
+  backstop against an absurd value, not a range to explore. When the safe
+  region does eat the map, placement under-delivers; `populateWorld` warns when
+  scatter places fewer creatures than requested.
 - **Pens**: authored rectangles off-road holding skittish level 1–2 creatures.
   Deliberately **no walls and no gates on a pen**. The gate that matters is the
   village gate you flee toward; pen walls would be geometry with no mechanic
   behind it.
+
+  **Trap, from SOMET-288's implementation:** the placement chokepoint refuses a
+  safe tile for *any* creature type, not just hostiles — so a pen authored
+  inside the road corridor comes out **silently empty**. SOMET-289 must either
+  give pens their own placement pass that bypasses `isSafeTile`, or teach
+  `creatureTileCandidates` the faction distinction. Separately,
+  `populateWorld`'s opening DELETE spares only rows with `type = 'Village
+  Guard'`, a `blocks_portal_id`, or a non-null `home_x`; a penned creature
+  carrying none of those is deleted on the next populate — the bug that already
+  bit portal guards (SOMET-246) and vault chests (SOMET-244).
 
 Map spec changes: `villages: [...]` (plural, with `village` kept as a one-element
 alias so existing specs still validate), `safe_road_radius`, `pens: [...]`. Live

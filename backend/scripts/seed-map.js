@@ -22,7 +22,7 @@ const path = require('path');
 const fs = require('fs');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
-const { validateMapSpec } = require('../seeds/mapSpec.js');
+const { validateMapSpec, villagesOf } = require('../seeds/mapSpec.js');
 const { fetchLinks, setLink, setPortalLink } = require('../src/services/mapLinks.js');
 const { createVillage, fetchVillages } = require('../src/services/villages.js');
 const { insertPortalGuards } = require('../src/services/dungeonGuards.js');
@@ -169,8 +169,8 @@ async function applyMapSpec(pool, spec) {
         `INSERT INTO worlds (name, seed, chunk_size, width, height,
                              allowed_creature_types, entry_spawn, biomes, biome_cell,
                              graph_x, graph_y, level_min, level_max, density,
-                             allows_fast_travel)
-         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15)
+                             allows_fast_travel, safe_road_radius, safe_rects)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)
          ON CONFLICT (name) DO UPDATE
            SET seed = EXCLUDED.seed, chunk_size = EXCLUDED.chunk_size,
                width = EXCLUDED.width, height = EXCLUDED.height,
@@ -184,7 +184,13 @@ async function applyMapSpec(pool, spec) {
                -- The spec is the source of truth, so removing the key from a
                -- spec must take the flag back OFF rather than leave a world
                -- permanently travellable because it once was.
-               allows_fast_travel = EXCLUDED.allows_fast_travel
+               allows_fast_travel = EXCLUDED.allows_fast_travel,
+               -- Re-asserted on every seed, like allows_fast_travel above and
+               -- for the same reason: the spec is the source of truth, so
+               -- deleting the key from a spec must take the safety back OFF
+               -- rather than leave a world permanently safe because it once was.
+               safe_road_radius = EXCLUDED.safe_road_radius,
+               safe_rects = EXCLUDED.safe_rects
          RETURNING id`,
         [w.name, w.seed, w.chunk_size ?? 64, w.width, w.height,
          JSON.stringify(w.allowed_creature_types ?? []),
@@ -194,7 +200,9 @@ async function applyMapSpec(pool, spec) {
          w.level_band ? w.level_band[0] : 1,
          w.level_band ? w.level_band[1] : 1,
          w.density ?? 'normal',
-         w.allows_fast_travel === true],
+         w.allows_fast_travel === true,
+         w.safe_road_radius ?? 0,
+         JSON.stringify(w.safe_rects ?? [])],
       );
       idByKey.set(w.key, r.rows[0].id);
       worldsWritten += 1;
@@ -244,12 +252,45 @@ async function applyMapSpec(pool, spec) {
 
     let villages = 0;
     for (const w of spec.worlds) {
-      if (!w.village) continue;
+      const specVillages = villagesOf(w);
+      if (specVillages.length === 0) continue;
       const worldId = idByKey.get(w.key);
       const existing = await client.query('SELECT id FROM villages WHERE world_id = $1', [worldId]);
-      if (existing.rowCount === 0) {          // idempotent: one village per seeded world
-        await createVillage(client, worldId, w.village);
-        villages += 1;
+      // Idempotent, and all-or-nothing per world: a world that already has any
+      // village is left exactly as it is. Creating "the ones that are missing"
+      // would need an identity for a village beyond its box, which the spec
+      // does not carry -- and a partial re-create would double a village's
+      // guards and re-seed its merchant.
+      if (existing.rowCount === 0) {
+        for (const v of specVillages) {
+          await createVillage(client, worldId, v);
+          villages += 1;
+        }
+      } else if (existing.rowCount !== specVillages.length) {
+        // The spec and the live rows disagree and THIS SEED WILL NOT FIX IT.
+        //
+        // Every other authored column on `worlds` is re-asserted on every seed
+        // via ON CONFLICT SET (safe_road_radius and safe_rects included, a few
+        // dozen lines up), so an author reasonably concludes the spec is
+        // authoritative for everything -- and then adds a second village to an
+        // already-seeded world, gets a clean exit code, and finds no second
+        // village. SOMET-289 does exactly that. This is the only feedback loop
+        // there is, so it has to be loud rather than silent.
+        //
+        // A warning and not a fix: creating "the ones that are missing" needs
+        // an identity for a village beyond its box, which the spec does not
+        // carry (see the note above). `make reseed-map` clears every world
+        // first, so re-seeding from scratch is the supported way to converge.
+        //
+        // Only when rows already exist: on a FIRST seed the branch above
+        // creates every village, so the counts match by the time the loop
+        // ends and a warning there would be pure noise on every run.
+        console.warn(
+          `seed-map: world "${w.key}" (${w.name}) already has ${existing.rowCount} `
+          + `village(s) but its spec declares ${specVillages.length} -- villages are `
+          + 'seeded all-or-nothing per world, so the existing rows were left untouched '
+          + 'and the difference was NOT applied. Clear this world\'s villages (or run '
+          + 'make reseed-map) to re-seed them from the spec.');
       }
     }
 
