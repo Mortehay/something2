@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { RenderSystem } from '../RenderSystem.js';
 import { addEffects, BLOCK_EFFECT_DEF } from '../../core/vfx.js';
+import { worldToScreen } from '../../core/iso.js';
+import { ISO_TILE_H } from '../../core/constants.js';
 
 // Slice B (SOMET-159): the four shapes added beyond `arc`.
 //
@@ -10,15 +12,21 @@ import { addEffects, BLOCK_EFFECT_DEF } from '../../core/vfx.js';
 // path but THROWS on a negative radius, so an effect authored with width 0 --
 // or bound to a projectile weapon, every one of which has reach null -- must
 // not be able to take the render loop down with it.
+//
+// `pts` records the same path points WITH their coordinates. `ops` stays a
+// list of bare op names, so a test that only cares "did it draw" is not forced
+// to reason about geometry -- but a cue whose whole job is to point somewhere
+// cannot be proven by op names alone (a flipped sign draws the identical ops).
 function fakeCtx() {
   const ops = [];
+  const pts = [];
   const ctx = {
     globalAlpha: 1, strokeStyle: null, fillStyle: null, lineWidth: 1, font: null,
     textAlign: null, textBaseline: null,
     save: () => {}, restore: () => {},
     beginPath: () => ops.push('beginPath'),
-    moveTo: () => ops.push('moveTo'),
-    lineTo: () => ops.push('lineTo'),
+    moveTo: (x, y) => { ops.push('moveTo'); pts.push({ op: 'moveTo', x, y }); },
+    lineTo: (x, y) => { ops.push('lineTo'); pts.push({ op: 'lineTo', x, y }); },
     closePath: () => ops.push('closePath'),
     quadraticCurveTo: () => ops.push('quadraticCurveTo'),
     stroke: () => ops.push('stroke'),
@@ -29,7 +37,7 @@ function fakeCtx() {
       ops.push('ellipse');
     },
   };
-  return { ctx, ops };
+  return { ctx, ops, pts };
 }
 
 function renderer(ctx) {
@@ -135,13 +143,66 @@ describe('the guard block cue', () => {
     }
   });
 
+  // The four cardinal wire vectors the server actually sends. Each projects to
+  // a DIFFERENT screen quadrant under the iso transform, so a term dropped or
+  // negated in either axis has nowhere to hide: nx alone cannot fake ny.
+  const CARDINALS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+  // Where the guard itself lands on screen, and the screen-space direction the
+  // blow came in on. Both go through the SAME projection the renderer uses --
+  // what is under test is the SIGN the renderer applies to the wire vector, not
+  // the projection, so re-deriving the projection here would prove nothing.
+  const guardScreen = () => worldToScreen(BLOCK_EVENT.x, BLOCK_EVENT.y);
+  const screenDir = (nx, ny) => worldToScreen(nx, ny);   // linear, origin-anchored
+
+  // The shield's centre, read straight off the canvas: both sparks start there,
+  // so the second moveTo IS it, with none of the body's half-width to undo.
+  const shieldCentre = (pts) => pts.filter((p) => p.op === 'moveTo')[1];
+
+  it('offsets the shield toward the side the blow came from', () => {
+    // The failure this exists for: `fx.x + fx.nx * OFFSET` turned into a minus
+    // puts the shield on the guard's FAR side -- a cue that says the blow came
+    // from behind. Every op name is identical either way, so the drawn
+    // coordinates are the only thing that can tell the two apart.
+    for (const [nx, ny] of CARDINALS) {
+      const { ctx, pts } = fakeCtx();
+      drawBlock(ctx, { ...BLOCK_EVENT, nx, ny });
+      const c = shieldCentre(pts);
+      const g = guardScreen();
+      const dx = c.x - g.x;
+      const dy = c.y - (g.y - ISO_TILE_H / 2);     // chest height, as the shape uses
+      const dir = screenDir(nx, ny);
+      // Displacement must be a POSITIVE multiple of the projected wire vector.
+      // Parallel alone would accept the far side; a positive dot alone would
+      // accept a rotation. Together they pin the direction outright, without
+      // the test needing to know the offset's magnitude.
+      expect(Math.hypot(dx, dy)).toBeGreaterThan(0);
+      expect(dx * dir.x + dy * dir.y).toBeGreaterThan(0);
+      expect(dx * dir.y - dy * dir.x).toBeCloseTo(0, 6);
+    }
+  });
+
   it('throws the deflection sparks along the direction the blow came from', () => {
     // Two sparks skidding off the shield face, and only when the server said
     // where the blow came from. The count is what separates "the shield alone"
-    // from "the shield plus its clang", so it is asserted, not assumed.
-    const withDir = (() => { const { ctx, ops } = fakeCtx(); drawBlock(ctx); return ops; })();
-    // Sparks are moveTo/lineTo/stroke triples appended after the shield body.
-    expect(withDir.filter((o) => o === 'stroke').length).toBe(3);
+    // from "the shield plus its clang", so it is asserted, not assumed -- and
+    // the count survives a flipped offset, so their heading is asserted too.
+    for (const [nx, ny] of CARDINALS) {
+      const { ctx, ops, pts } = fakeCtx();
+      drawBlock(ctx, { ...BLOCK_EVENT, nx, ny });
+      // Sparks are moveTo/lineTo/stroke triples appended after the shield body.
+      expect(ops.filter((o) => o === 'stroke').length).toBe(3);
+      const starts = pts.map((p, i) => (p.op === 'moveTo' ? i : -1)).filter((i) => i >= 0);
+      expect(starts).toHaveLength(3);             // the body, then one per spark
+      const dir = screenDir(nx, ny);
+      for (const i of starts.slice(1)) {
+        const from = pts[i], to = pts[i + 1];
+        expect(to.op).toBe('lineTo');
+        // Both skid back toward the attacker (they fan +-0.7rad off that line),
+        // so both must lie on the incoming side, never behind the guard.
+        expect((to.x - from.x) * dir.x + (to.y - from.y) * dir.y).toBeGreaterThan(0);
+      }
+    }
   });
 
   it('still draws the shield when there is no direction to face', () => {
