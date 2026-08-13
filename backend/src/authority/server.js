@@ -17,6 +17,7 @@ const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageConta
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
 const { fetchWaypoints, activateWaypoint, waypointTileKey } = require('../services/waypoints');
+const { buildLandmarks } = require('../services/landmarks');
 const {
   fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests,
 } = require('../services/chests.js');
@@ -487,7 +488,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // doorway tiles.
         const portalLinks = new Map(portalRows.map((l) => [
           `${Math.floor(l.from_y / MAP_TILE_SIZE)},${Math.floor(l.from_x / MAP_TILE_SIZE)}`,
-          { id: l.id, toWorldId: l.to_world_id, toX: l.to_x, toY: l.to_y, fromX: l.from_x, fromY: l.from_y },
+          // toName (SOMET-297) is display-only -- buildLandmarks turns it into
+          // "To <world>" for the marker label. Nothing on the transition path
+          // reads it, so a null here degrades a label, never a warp.
+          {
+            id: l.id, toWorldId: l.to_world_id, toX: l.to_x, toY: l.to_y,
+            fromX: l.from_x, fromY: l.from_y, toName: l.to_name,
+          },
         ]));
         const villages = await fetchVillages(pool, canonicalId);
         // SOMET-292. Keyed by tile, exactly like portalLinks above, because the
@@ -1314,6 +1321,27 @@ function attachAuthority(httpServer, pool, opts = {}) {
             p._lastPortalTile = `${gRow},${gCol}`;
           }
         }
+        // Which waypoints THIS character has lit, for the landmark payload
+        // below. Once per join, never per tick: the tick loop's activation
+        // check writes through activateWaypoint and does not read this.
+        //
+        // Not scoped to this world -- the set is only ever membership-tested
+        // against ids that came out of `entry.waypoints`, which is already one
+        // world's worth. A world filter here would buy nothing and add a join.
+        //
+        // Failure is non-fatal, exactly like recordVisit below: a character who
+        // cannot read their activations should still join, seeing every
+        // waypoint as unlit rather than seeing a join error.
+        let activatedWaypointIds = new Set();
+        try {
+          const actRows = await pool.query(
+            'SELECT waypoint_id FROM character_waypoints WHERE character_id = $1',
+            [character.id],
+          );
+          activatedWaypointIds = new Set(actRows.rows.map((r) => r.waypoint_id));
+        } catch (e) {
+          console.error('landmarks: reading activations failed', e);
+        }
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
           itemTypes: [...entry.world.weapons.values()],
@@ -1329,6 +1357,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
           merchants: (entry.villages || [])
             .filter((v) => v.merchantX != null && v.merchantY != null)
             .map((v) => ({ villageId: v.id, x: v.merchantX, y: v.merchantY })),
+          // SOMET-297. Built from the Maps loadWorld already holds, plus one
+          // per-join read of this character's activations -- no second loader.
+          //
+          // ONLY on `joined`, deliberately not on `transition`: GameShell.jsx:342
+          // routes onTransition straight into enterWorld, which performs a fresh
+          // join. Every entry path -- first join, resume, transition, waypoint
+          // travel -- terminates in this frame, so a copy on `transition` would
+          // be payload nothing reads.
+          landmarks: buildLandmarks({
+            waypoints: entry.waypoints,
+            portalLinks: entry.portalLinks,
+            activatedIds: activatedWaypointIds,
+          }),
         });
         // Fog of war (SOMET-263). Fire-and-forget: a failed bookkeeping write
         // must never break a join. Call site 1 of 2 -- the other is the
