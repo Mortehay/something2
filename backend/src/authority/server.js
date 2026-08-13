@@ -403,7 +403,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
     let pending = loading.get(worldId);
     if (!pending) {
       pending = (async () => {
-        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max FROM worlds WHERE id = $1', [worldId]);
+        // EVERY column buildWorldGenConfig reads must be named here. This is
+        // the one caller of it that does NOT use `SELECT *` (index.js's chunk/
+        // preview/overview routes and worldPopulation's callers all do), so a
+        // column added to that builder and forgotten here comes out at its
+        // DEFAULT on the live authority and nowhere else -- green tests, dead
+        // feature. That is exactly what happened to safe_road_radius /
+        // safe_rects (SOMET-288): both live users of entry.mapGenConfig's
+        // placement path -- the loot-map `use` handler and the field-chest
+        // respawn sweep -- ran with the road and rectangle legs of isSafeTile
+        // permanently off, so a chest guard could seat itself on a village
+        // road and the sweep would re-seat it there forever.
+        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         // Postgres uuid input is case-insensitive and also accepts braced /

@@ -41,6 +41,64 @@ function hasValidGrid(w) {
       && Number.isInteger(w.grid[0]) && Number.isInteger(w.grid[1]);
 }
 
+// The singular `village` key and the plural `villages` array read as one list.
+// Both the validator and scripts/seed-map.js call THIS -- the same
+// cannot-drift-apart reason VILLAGE_LIMITS is shared rather than restated. 20+
+// checked-in specs use the singular form and none of them should have to change
+// for a world elsewhere to want three villages.
+function villagesOf(w) {
+  if (Array.isArray(w.villages)) return w.villages;
+  return w.village ? [w.village] : [];
+}
+
+function boxesOverlap(a, b) {
+  return a.min_row <= b.min_row + b.height - 1
+      && b.min_row <= a.min_row + a.height - 1
+      && a.min_col <= b.min_col + b.width - 1
+      && b.min_col <= a.min_col + a.width - 1;
+}
+
+// Widest safe corridor a spec is allowed to ask for -- a BACKSTOP against an
+// absurd value, matching the DB's CHECK constraint, not authoring guidance.
+// Chebyshev dilation saturates fast against the real generator (default
+// pathCell 24, pathJitter 6): a 64-tile world is already ~40% safe at r=2 and
+// 92% safe at r=8. See the measured table and recommended range (1-3) in the
+// comment above the CHECK constraint in
+// migrations/1714440180000_world_safe_region.js.
+const MAX_SAFE_ROAD_RADIUS = 8;
+
+// Every key a world object may carry -- anything else is an error, not an
+// ignored extra.
+//
+// An unread key is indistinguishable from a consumed one from the author's
+// side: the spec validates, the seed exits 0, and the feature is simply not
+// there. `pens:` is the live example -- SOMET-288 deliberately ships without a
+// pen reader (see the deferral note in
+// docs/superpowers/plans/2026-08-12-home-region-a-safe-region.md), so a spec
+// authoring pens today would be accepted and silently produce nothing. That is
+// the SOMET-153 failure class the singular/plural `village` checks above
+// already guard against, one level up.
+//
+// WORLDS ONLY, deliberately. This is the level authors actually extend (every
+// new authored feature so far -- density, level_band, allows_fast_travel,
+// safe_road_radius, and next pens -- landed here), and it is the level where a
+// typo'd or premature key costs the most. Links and villages are not covered:
+// their shapes are already pinned field-by-field above, and widening the rule
+// to them buys little for the extra chance of rejecting a spec over a key that
+// some other branch legitimately added.
+//
+// `creature_count` is listed even though it is RETIRED: it has its own,
+// far more useful error message a few lines below ("use density instead"), and
+// leaving it out here would bury that message under a generic one.
+const WORLD_KEYS = new Set([
+  'key', 'name', 'grid', 'seed', 'width', 'height', 'chunk_size',
+  'biomes', 'biome_cell', 'allowed_creature_types', 'is_entry', 'entry_spawn',
+  'level_band', 'density', 'allows_fast_travel',
+  'village', 'villages', 'chest',
+  'safe_road_radius', 'safe_rects',
+  'creature_count',
+]);
+
 function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } = {}) {
   const errors = [];
   if (!spec || typeof spec !== 'object') return ['spec is not an object'];
@@ -65,6 +123,16 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     byKey.set(w.key, w);
     if (seenNames.has(w.name)) errors.push(`duplicate name "${w.name}"`);
     seenNames.add(w.name);
+
+    // Before every other per-world check, and NOT behind a `continue`: a world
+    // that also fails its grid check must still have its unknown keys named,
+    // or the author fixes the grid and gets a second surprise.
+    const unknown = Object.keys(w).filter((k) => !WORLD_KEYS.has(k));
+    if (unknown.length) {
+      errors.push(`world "${w.key}" has unknown key(s) ${unknown.join(', ')} -- `
+        + 'nothing reads them, so they would be silently ignored. Remove them, or '
+        + 'add them to WORLD_KEYS in seeds/mapSpec.js once a reader exists.');
+    }
 
     const gridRequired = !portalConnectedKeys.has(w.key);
     if (!hasValidGrid(w)) {
@@ -138,8 +206,36 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
         `world "${w.key}" creature_count is no longer authored -- use "density" instead`);
     }
 
-    if (w.village) {
-      const v = w.village;
+    if (w.village && Array.isArray(w.villages)) {
+      errors.push(`world "${w.key}" declares both "village" and "villages" — use one`);
+    }
+    // Reject rather than coerce, same posture as safe_road_radius below: a
+    // typo'd `villages: {...}` (an easy mistake, since the sibling singular
+    // `village` key IS an object) must not silently fall through to
+    // villagesOf's `w.village` fallback and validate as "no villages here" --
+    // that is a village silently missing, the SOMET-153 failure class.
+    if (w.villages !== undefined && !Array.isArray(w.villages)) {
+      errors.push(`world "${w.key}" villages must be an array (got ${typeof w.villages})`);
+    }
+    // Same posture for the singular key: `village: null`, `village: false`,
+    // or a misspelled key must be REPORTED, not read by villagesOf's
+    // `w.village ? [w.village] : []` as "no village here" -- that is a
+    // village silently missing, the exact SOMET-153 failure class this
+    // branch already hardened the plural form against.
+    if (w.village !== undefined && (typeof w.village !== 'object' || w.village === null)) {
+      errors.push(`world "${w.key}" village must be an object (got ${JSON.stringify(w.village)})`);
+    }
+    const villages = villagesOf(w);
+    for (const v of villages) {
+      // A null/non-object entry inside an otherwise well-formed array (e.g.
+      // `villages: [null]`) must be REPORTED, not dereferenced -- `v.width`
+      // on null throws and aborts validateMapSpec entirely, hiding every
+      // other problem the rest of the spec has. Same posture as the
+      // container-level checks above.
+      if (!v || typeof v !== 'object') {
+        errors.push(`world "${w.key}" villages entry must be an object (got ${JSON.stringify(v)})`);
+        continue;
+      }
       if (!(v.width >= VILLAGE_LIMITS.minW && v.width <= VILLAGE_LIMITS.maxW)) {
         errors.push(`world "${w.key}" village width must be between 3 and 8 tiles`);
       }
@@ -157,9 +253,65 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       // through that route: three seeded hubs shipped with a spawn on the
       // SOUTH wall ring, and respawn-at-village dropped the player inside the
       // wall. Same function object as index.js calls, so the two call sites
-      // cannot drift.
+      // cannot drift. Applied to EVERY entry, not just the first -- a rule
+      // that checks one element of a list is the same half-applied rule in a
+      // new costume.
       const geomErr = villageGeometryError(v);
       if (geomErr) errors.push(`world "${w.key}" village ${geomErr}`);
+    }
+    // Overlapping boxes would stamp two wall rings through each other, leaving
+    // a village with a hole in it and a gate that opens into another village's
+    // wall. Cheap O(n^2) -- a world has single-digit villages.
+    for (let i = 0; i < villages.length; i++) {
+      for (let j = i + 1; j < villages.length; j++) {
+        // Already reported above as a malformed entry; skip rather than
+        // dereference a null/non-object village a second time here.
+        if (!villages[i] || typeof villages[i] !== 'object'
+          || !villages[j] || typeof villages[j] !== 'object') continue;
+        if (boxesOverlap(villages[i], villages[j])) {
+          errors.push(`world "${w.key}" villages overlap `
+            + `(rows ${villages[i].min_row} and ${villages[j].min_row})`);
+        }
+      }
+    }
+
+    // SOMET-288 safe territory. Rejected rather than coerced, for the reason
+    // allows_fast_travel states above: "3" and true are how a hand-edited spec
+    // gets this wrong, and coercing either would widen or silently disable a
+    // safe corridor on the strength of a typo.
+    if (w.safe_road_radius !== undefined) {
+      const r = w.safe_road_radius;
+      if (!Number.isInteger(r) || r < 0 || r > MAX_SAFE_ROAD_RADIUS) {
+        errors.push(`world "${w.key}" safe_road_radius must be an integer `
+          + `between 0 and ${MAX_SAFE_ROAD_RADIUS} (got ${JSON.stringify(r)})`);
+      }
+    }
+    // A non-array safe_rects (e.g. one accidental object instead of a list of
+    // them) must be REPORTED, not thrown -- `for...of` on a non-iterable
+    // aborts validateMapSpec entirely, hiding every other problem the rest of
+    // the spec has. Same reject-rather-than-coerce posture as the checks
+    // above it.
+    if (w.safe_rects !== undefined && !Array.isArray(w.safe_rects)) {
+      errors.push(`world "${w.key}" safe_rects must be an array (got ${typeof w.safe_rects})`);
+    }
+    for (const s of Array.isArray(w.safe_rects) ? w.safe_rects : []) {
+      // A null/non-object entry (e.g. `safe_rects: [null]`) must be REPORTED,
+      // not dereferenced -- `s.min_row` on null throws and aborts
+      // validateMapSpec entirely, hiding every other problem the rest of the
+      // spec has. Same posture as the container-level check above.
+      if (!s || typeof s !== 'object') {
+        errors.push(`world "${w.key}" safe_rects entry must be an object (got ${JSON.stringify(s)})`);
+        continue;
+      }
+      const bad = !Number.isInteger(s.min_row) || !Number.isInteger(s.min_col)
+        || !Number.isInteger(s.width) || !Number.isInteger(s.height)
+        || s.width < 1 || s.height < 1
+        || s.min_row < 0 || s.min_col < 0
+        || s.min_row + s.height > w.height || s.min_col + s.width > w.width;
+      if (bad) {
+        errors.push(`world "${w.key}" safe_rects entry must be a positive box `
+          + `inside the ${w.width}x${w.height} map (got ${JSON.stringify(s)})`);
+      }
     }
 
     if (biomeNames) {
@@ -294,4 +446,4 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
   return errors;
 }
 
-module.exports = { validateMapSpec, EDGE_DELTA };
+module.exports = { validateMapSpec, EDGE_DELTA, villagesOf };
