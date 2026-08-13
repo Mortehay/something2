@@ -447,6 +447,14 @@ needs **no** new handling: `GameShell` already routes it to `enterWorld`.
   Task 1's DB test, not by having been applied through the seeder. Whoever merges slice B should run
   `seed-map` on `spine-descent` and `hub-vale` once both are on `main` and confirm
   `waypointsRemoved: 0`.
+  - **Slice B is now merged INTO this branch** (SOMET-293 review, finding 8), and both specs carry
+    its `village`/`roads`/`pens` blocks alongside `waypoints`. The `waypointsRemoved: 0` prediction
+    is confirmed by query rather than by a run, because running the seeder against the shared dev
+    database is not this session's to do: `pruneWaypoints` deletes waypoints in the touched worlds
+    whose NAME is not authored, and all three live waypoints (Old Trailhead Commons, Windwatch
+    Waystone, Thornbriar Green) sit in worlds those two specs own and are authored in them by
+    exactly those names. A run would delete nothing. The run itself is still worth doing once, by
+    whoever holds the database.
 - **Travel has no cost, no cooldown and no cast time.** The spec asks for none. A player being chased
   can travel away from a fight instantly; the design's own answer to being chased is the village gate
   and its guards, so this is left as-is rather than invented here.
