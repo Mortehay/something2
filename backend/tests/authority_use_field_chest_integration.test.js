@@ -17,6 +17,30 @@ const { worldOverviewCache, clearOverviewCache } = require('../src/services/over
 
 const SECRET = 'test-secret';
 
+// Serve the world row through whatever column list the SELECT actually names.
+//
+// loadWorld is the ONE buildWorldGenConfig caller that spells its columns out
+// instead of using `SELECT *`, so "the config is missing a column because the
+// query never asked for it" is a live failure mode here and nowhere else -- it
+// is how safe_road_radius / safe_rects reached the field-chest placement path
+// as 0 / [] on the real authority while every non-DB test stayed green
+// (SOMET-288 review, finding 1). A fake that answered with a fixed object
+// regardless of the SQL would hand the code columns it never selected and make
+// that class of bug untestable, which is the "mock that ignores its input"
+// shape this repo has already shipped more than once.
+function projectWorldRow(sql, full) {
+  const m = /SELECT\s+([\s\S]+?)\s+FROM\s+worlds\b/i.exec(sql);
+  if (!m) throw new Error(`projectWorldRow: not a worlds SELECT: ${sql}`);
+  const cols = m[1].split(',').map((c) => c.trim());
+  if (cols.includes('*')) return full;
+  const row = {};
+  for (const c of cols) {
+    if (!(c in full)) throw new Error(`projectWorldRow: fixture has no column "${c}"`);
+    row[c] = full[c];
+  }
+  return row;
+}
+
 function token(u) { return jwt.sign({ user_id: u, tv: 1 }, SECRET, { algorithm: 'HS256' }); }
 function connect(url, uid) { return new WebSocket(`${url}?token=${encodeURIComponent(token(uid))}`); }
 function bootWith(pool, opts = {}) {
@@ -48,7 +72,12 @@ function nextMsg(ws, type) {
 // placeMapCreatures' own documented "nowhere legal" precondition (used by
 // the "no legal tile" case below), matching chests_service.test.js's own
 // unboundedWorld() fixture.
-function makePool({ bounded = true, userItems = [] } = {}) {
+//
+// `safeRoadRadius` / `safeRects` are the SOMET-288 safe-territory columns, in
+// their raw `worlds`-row spelling (snake_case jsonb, exactly what pg hands
+// back) -- see the projection note on worldRow() below for why this fixture
+// serves them that way rather than as a ready-made config.
+function makePool({ bounded = true, userItems = [], safeRoadRadius = 0, safeRects = [] } = {}) {
   const calls = [];
   const pool = {
     calls,
@@ -56,14 +85,13 @@ function makePool({ bounded = true, userItems = [] } = {}) {
     query: async (sql, params) => {
       calls.push({ sql, params });
       if (/FROM worlds WHERE id/i.test(sql)) {
-        return {
-          rows: [{
-            id: 'w1', seed: '1', chunk_size: 64,
-            width: bounded ? 10 : null, height: bounded ? 10 : null,
-            is_entry: null, entry_spawn: null, biomes: [], biome_cell: null,
-            level_min: 1, level_max: 5,
-          }],
-        };
+        return { rows: [projectWorldRow(sql, {
+          id: 'w1', seed: '1', chunk_size: 64,
+          width: bounded ? 10 : null, height: bounded ? 10 : null,
+          is_entry: null, entry_spawn: null, biomes: [], biome_cell: null,
+          level_min: 1, level_max: 5,
+          safe_road_radius: safeRoadRadius, safe_rects: safeRects,
+        })] };
       }
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
       // Two answers this fixture predates, both from the player-characters
@@ -280,6 +308,81 @@ test('use with the loot_map item injects the spawned guard into entry.world.crea
     entry.world.creatures.creatures.has('guard-x'), true,
     'the newly-spawned guard must be injected into the live sim, or it can never be killed to unlock the chest',
   );
+
+  ws.close(); handle.close(); server.close();
+});
+
+// ---------------------------------------------------------------------------
+// SOMET-288 review, finding 1: safe territory must be live on THIS path.
+//
+// A field chest's guard is placed by placeMapCreatures against
+// entry.mapGenConfig -- the config loadWorld builds once per world -- so if
+// loadWorld's SELECT omits safe_road_radius / safe_rects, the guard is free to
+// seat itself in the middle of a village road, and the respawn sweep (which
+// reads the same cached config) re-seats a fresh one there on every cycle.
+// Nothing else in the suite exercises that config: the placement unit tests
+// hand-build their own world objects, and the DB test drives populateWorld,
+// whose caller uses `SELECT *`.
+//
+// The whole 10x10 world is declared safe, so placement has nowhere legal to go
+// and the handler must report failure. The control below boots the identical
+// fixture with no rectangle and gets a chest -- without it, this assertion
+// would also pass on a world where placement was broken for some unrelated
+// reason.
+// ---------------------------------------------------------------------------
+test('use with a loot_map refuses to seat a chest guard inside authored safe territory', async () => {
+  const wholeMap = [{ min_row: 0, min_col: 0, width: 10, height: 10 }];
+  const pool = makePool({
+    bounded: true, safeRects: wholeMap,
+    userItems: [{ id: 'map-1', item_type_id: 2, quantity: 1 }],
+  });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = await joinAndGetPlayer(url);
+
+  ws.send(JSON.stringify({ type: 'use', itemId: 'map-1' }));
+  const err = await nextMsg(ws, 'error');
+  assert.match(err.message, /no legal spot/);
+  assert.equal(pool.matching(/INSERT INTO world_chests/i).length, 0);
+  assert.equal(pool.matching(/INSERT INTO world_creatures/i).length, 0,
+    'no guard may be written either -- the rectangle covers every interior tile');
+
+  ws.close(); handle.close(); server.close();
+
+  // Control, same fixture minus the rectangle: proves the refusal above came
+  // from the safe rectangle and not from a world nothing could ever be placed
+  // in. Booted here rather than leaning on the success test further up so the
+  // two halves cannot drift apart.
+  const openPool = makePool({
+    bounded: true, userItems: [{ id: 'map-1', item_type_id: 2, quantity: 1 }],
+  });
+  const open = await bootWith(openPool);
+  const ws2 = await joinAndGetPlayer(open.url);
+  ws2.send(JSON.stringify({ type: 'use', itemId: 'map-1' }));
+  await nextMsg(ws2, 'used');
+  assert.equal(openPool.matching(/INSERT INTO world_chests/i).length, 1,
+    'the same world with no safe rectangle must still be placeable');
+
+  ws2.close(); open.handle.close(); open.server.close();
+  clearOverviewCache('w1');
+});
+
+// The road leg of isSafeTile has no rectangle to stand in for it: a 10x10
+// window of the carved lattice may hold no path cell at all, so asserting on
+// placement here would prove nothing. Assert instead on the value both live
+// callers actually hand to placement -- entry.mapGenConfig, built by
+// loadWorld. This is 0 whenever the SELECT stops naming the column, which is
+// precisely the regression.
+test('loadWorld carries the authored safe-road radius onto the config field-chest placement reads', async () => {
+  const pool = makePool({ bounded: true, safeRoadRadius: 3, safeRects: [{ min_row: 2, min_col: 4, width: 3, height: 2 }] });
+  const { url, handle, server } = await bootWith(pool);
+  const ws = await joinAndGetPlayer(url);
+
+  const cfg = handle.worlds.get('w1').mapGenConfig;
+  assert.equal(cfg.safeRoadRadius, 3);
+  // camelCase, converted by buildWorldGenConfig from the jsonb row's
+  // snake_case -- a rect that reached placement still spelled min_row would
+  // compare against undefined and silently do nothing (finding 4).
+  assert.deepEqual(cfg.safeRects, [{ minRow: 2, minCol: 4, width: 3, height: 2 }]);
 
   ws.close(); handle.close(); server.close();
 });

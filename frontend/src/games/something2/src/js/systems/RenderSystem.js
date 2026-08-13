@@ -463,7 +463,8 @@ export class RenderSystem {
   // rather than trusted.
   _drawVfxShape(fx, now) {
     const shape = fx.def.shape;
-    if (shape !== "line" && shape !== "ring" && shape !== "burst" && shape !== "bolt") return;
+    if (shape !== "line" && shape !== "ring" && shape !== "burst"
+        && shape !== "bolt" && shape !== "block") return;
 
     const t = effectProgress(fx, now);
     const s = worldToScreen(fx.x, fx.y);
@@ -520,6 +521,62 @@ export class RenderSystem {
         this.ctx.moveTo(s.x, cy);
         this.ctx.lineTo(s.x + rx * Math.cos(phi), cy + (rx / 2) * Math.sin(phi));
         this.ctx.stroke();
+      }
+      return;
+    }
+
+    if (shape === "block") {
+      // SOMET-286: an attack a RULE refused (a village guard is immune to
+      // player damage). Deliberately unlike every other shape in this file --
+      // no ground-plane ellipse, no radial spray, no aim wedge: a billboarded
+      // SHIELD standing between the target and the blow, plus two sparks
+      // skidding off its face. Whatever weapon the player swings, a refusal
+      // looks like this and a miss looks like the weapon's whiff, so the two
+      // can no longer be confused, which is the entire ticket.
+      //
+      // Sized from a screen-space constant, NOT from `reach`: an impact
+      // descriptor is a point on a target, not a swing, and carries reach 0 --
+      // scaling by it would collapse the glyph to nothing (invisible, i.e. the
+      // bug, restored).
+      const BLOCK_PX = 15;
+      const OFFSET_WORLD = 20;
+      const dirOk = Number.isFinite(fx.nx) && Number.isFinite(fx.ny);
+      // Offset toward where the blow came from (the server sends that
+      // direction on every block), so the shield sits on the struck side
+      // rather than floating on the guard's head.
+      const o = dirOk
+        ? worldToScreen(fx.x + fx.nx * OFFSET_WORLD, fx.y + fx.ny * OFFSET_WORLD)
+        : s;
+      const ox = o.x, oy = o.y - ISO_TILE_H / 2;
+      // Flares to full size early, then holds while the alpha fades: a glint,
+      // not a growing bubble.
+      const k = BLOCK_PX * (0.55 + 0.45 * t);
+      this.ctx.beginPath();
+      this.ctx.moveTo(ox - k * 0.62, oy - k);
+      this.ctx.lineTo(ox + k * 0.62, oy - k);
+      this.ctx.lineTo(ox + k * 0.62, oy + k * 0.1);
+      this.ctx.quadraticCurveTo(ox + k * 0.62, oy + k * 0.95, ox, oy + k * 1.25);
+      this.ctx.quadraticCurveTo(ox - k * 0.62, oy + k * 0.95, ox - k * 0.62, oy + k * 0.1);
+      this.ctx.closePath();
+      this.ctx.stroke();
+
+      // The two deflection sparks, thrown back along the line the blow came
+      // in on. Derived from the SAME screen offset the shield used, so they
+      // always skid off its face and never off its back; when that offset is
+      // degenerate (no direction sent) there is no line to throw them along
+      // and the shield alone carries the cue.
+      const dx = ox - s.x, dy = oy - (s.y - ISO_TILE_H / 2);
+      const len = Math.hypot(dx, dy);
+      if (len > 0) {
+        const base = Math.atan2(dy, dx);
+        const spark = k * (0.5 + 0.9 * t);
+        for (const sgn of [-1, 1]) {
+          const a2 = base + sgn * 0.7;
+          this.ctx.beginPath();
+          this.ctx.moveTo(ox, oy);
+          this.ctx.lineTo(ox + spark * Math.cos(a2), oy + spark * Math.sin(a2));
+          this.ctx.stroke();
+        }
       }
       return;
     }

@@ -41,6 +41,88 @@ function hasValidGrid(w) {
       && Number.isInteger(w.grid[0]) && Number.isInteger(w.grid[1]);
 }
 
+// The singular `village` key and the plural `villages` array read as one list.
+// Both the validator and scripts/seed-map.js call THIS -- the same
+// cannot-drift-apart reason VILLAGE_LIMITS is shared rather than restated. 20+
+// checked-in specs use the singular form and none of them should have to change
+// for a world elsewhere to want three villages.
+function villagesOf(w) {
+  if (Array.isArray(w.villages)) return w.villages;
+  return w.village ? [w.village] : [];
+}
+
+function boxesOverlap(a, b) {
+  return a.min_row <= b.min_row + b.height - 1
+      && b.min_row <= a.min_row + a.height - 1
+      && a.min_col <= b.min_col + b.width - 1
+      && b.min_col <= a.min_col + a.width - 1;
+}
+
+// Widest safe corridor a spec is allowed to ask for -- a BACKSTOP against an
+// absurd value, matching the DB's CHECK constraint, not authoring guidance.
+// Chebyshev dilation saturates fast against the real generator (default
+// pathCell 24, pathJitter 6): a 64-tile world is already ~40% safe at r=2 and
+// 92% safe at r=8. See the measured table and recommended range (1-3) in the
+// comment above the CHECK constraint in
+// migrations/1714440180000_world_safe_region.js.
+const MAX_SAFE_ROAD_RADIUS = 8;
+
+// Pixels per map tile. Spec coordinates (portal from_x/from_y, waypoint x/y)
+// are pixels; the things they collide with are TILES, because that is the
+// granularity a player stands at and the granularity both the authority's tick
+// loop and waypoints_world_tile_unique work in.
+const SPEC_TILE_SIZE = 100;
+
+// A world-scoped tile identity, used to ask "do these two authored things want
+// the same tile?". Deliberately NOT the exact-pixel slot the portal-collision
+// check above uses: two portals 1px apart really are a conflict at the database
+// level (they share a unique index on exact coordinates), whereas a waypoint
+// and a portal 1px apart are a conflict because a player cannot stand on one
+// without standing on the other.
+//
+// ROW FIRST, then column -- the order services/waypoints.js keys the tick loop's
+// lookup in, the order assertNavigable reports a tile in, and therefore the
+// order the rejection messages below print. The two helpers were transposed
+// relative to each other while each stayed internally consistent, which is the
+// kind of agreement that holds right up until someone compares one to the other.
+function tileSlot(worldKey, x, y) {
+  return `${worldKey}:${Math.floor(y / SPEC_TILE_SIZE)},${Math.floor(x / SPEC_TILE_SIZE)}`;
+}
+
+// Every key a world object may carry -- anything else is an error, not an
+// ignored extra.
+//
+// An unread key is indistinguishable from a consumed one from the author's
+// side: the spec validates, the seed exits 0, and the feature is simply not
+// there. `pens:` was the live example -- SOMET-288 shipped the safe-region
+// model without a pen reader (see the deferral note in
+// docs/superpowers/plans/2026-08-12-home-region-a-safe-region.md), so until
+// SOMET-289 landed one, a spec authoring pens would be accepted and silently
+// produce nothing. That is the SOMET-153 failure class the singular/plural
+// `village` checks above already guard against, one level up.
+//
+// WORLDS ONLY, deliberately. This is the level authors actually extend (every
+// new authored feature so far -- density, level_band, allows_fast_travel,
+// safe_road_radius, pens and now waypoints -- landed here), and it is the level
+// where a typo'd or premature key costs the most. Links and villages are not
+// covered: their shapes are already pinned field-by-field above, and widening
+// the rule to them buys little for the extra chance of rejecting a spec over a
+// key that some other branch legitimately added -- `is_waypoint` and
+// `waypoint_name` are link-level for exactly that reason.
+//
+// `creature_count` is listed even though it is RETIRED: it has its own,
+// far more useful error message a few lines below ("use density instead"), and
+// leaving it out here would bury that message under a generic one.
+const WORLD_KEYS = new Set([
+  'key', 'name', 'grid', 'seed', 'width', 'height', 'chunk_size',
+  'biomes', 'biome_cell', 'allowed_creature_types', 'is_entry', 'entry_spawn',
+  'level_band', 'density', 'allows_fast_travel',
+  'village', 'villages', 'chest',
+  'safe_road_radius', 'safe_rects',
+  'waypoints',
+  'creature_count',
+]);
+
 function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } = {}) {
   const errors = [];
   if (!spec || typeof spec !== 'object') return ['spec is not an object'];
@@ -56,8 +138,85 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
   // overworld's 2D grid, so it must not be required to declare one. This
   // scan runs before the per-world loop so that loop can consult it.
   const portalConnectedKeys = new Set();
+  // THE LOAD-BEARING WAYPOINT RULE (SOMET-292, home-region spec §5): a portal a
+  // creature guards may never be a waypoint. Without it a guarded dungeon
+  // entrance is bypassable on the second visit and the level-band gating
+  // joinPolicy was written to protect stops holding.
+  //
+  // BOTH SIDES of a guarded link go in. setPortalLink writes two rows per
+  // staircase and insertPortalGuards only ever defends the DEPARTURE side, so
+  // making the arrival side a waypoint drops a traveller past the guard --
+  // the same bypass, spelled backwards. Recorded per tile so a standalone
+  // waypoint authored on the staircase's own tile is caught by the same set.
+  //
+  // Collected here, before the world loop, for the same reason
+  // portalConnectedKeys is: that loop has to consult it.
+  // Maps the tile to a description of WHAT guards it, not just to "guarded":
+  // the error has to name the guard, or an author faced with a rejection has no
+  // way to tell which of a spec's portals it means.
+  const guardedStaircaseTiles = new Map();
   for (const l of links) {
-    if (l.kind === 'portal') { portalConnectedKeys.add(l.from); portalConnectedKeys.add(l.to); }
+    if (l.kind !== 'portal') continue;
+    portalConnectedKeys.add(l.from); portalConnectedKeys.add(l.to);
+    if (!l.guard) continue;
+    const coords = ['from_x', 'from_y', 'to_x', 'to_y'];
+    // A malformed coordinate is reported by the link loop below; skipping it
+    // here keeps floor(undefined) out of the map (it would produce "NaN,NaN",
+    // a slot nothing can match, silently disarming the rule for that link).
+    if (coords.some((f) => !Number.isInteger(l[f]))) continue;
+    const who = `${l.guard.count ?? '?'}x ${l.guard.creature_type ?? 'unnamed guard'} `
+      + `on portal ${l.from}->${l.to}`;
+    guardedStaircaseTiles.set(tileSlot(l.from, l.from_x, l.from_y), who);
+    guardedStaircaseTiles.set(tileSlot(l.to, l.to_x, l.to_y), `${who} (arrival side)`);
+  }
+
+  // Every waypoint name the spec claims, and every tile one occupies. Both are
+  // spec-wide: names share one UNIQUE(name) column across every world, and a
+  // tile can hold one waypoint because that is all the tick loop can find.
+  const waypointNames = new Set();
+  const waypointTiles = new Set();
+
+  // Shared by the world loop (standalone waypoints) and the link loop
+  // (portal-backed ones) so the two authoring routes cannot enforce different
+  // rules -- which is exactly how one of them ends up being the loose one.
+  function checkWaypoint({ worldKey, x, y, name, label, world }) {
+    if (typeof name !== 'string' || name.trim() === '') {
+      errors.push(`${label} name must be a non-empty string`);
+    } else if (waypointNames.has(name)) {
+      errors.push(`duplicate waypoint name "${name}" — waypoint names are unique across the whole map, `
+        + 'because the travel list shows them side by side');
+    } else {
+      waypointNames.add(name);
+    }
+
+    if (!Number.isInteger(x) || !Number.isInteger(y)) {
+      errors.push(`${label} x and y must be integers (pixels)`);
+      return;
+    }
+    if (x < 0 || y < 0) { errors.push(`${label} x and y must not be negative`); return; }
+    // A waypoint outside the map is a tile no player can ever stand on, so it
+    // is a row that can never be activated rather than a feature. Only checked
+    // when the world's own dimensions validated -- otherwise the real error is
+    // the missing width/height, already reported.
+    if (world && Number.isInteger(world.width) && Number.isInteger(world.height)
+        && (x >= world.width * SPEC_TILE_SIZE || y >= world.height * SPEC_TILE_SIZE)) {
+      errors.push(`${label} at (${x},${y}) is outside world "${worldKey}" `
+        + `(${world.width}x${world.height} tiles)`);
+      return;
+    }
+
+    const slot = tileSlot(worldKey, x, y);
+    if (guardedStaircaseTiles.has(slot)) {
+      errors.push(`${label} sits on a guarded portal in world "${worldKey}" `
+        + `(guarded by ${guardedStaircaseTiles.get(slot)}) — a waypoint there is a guard the player `
+        + 'never has to meet, and the level band it defends stops holding');
+    }
+    if (waypointTiles.has(slot)) {
+      errors.push(`world "${worldKey}" already has a waypoint on tile `
+        + `(${Math.floor(y / SPEC_TILE_SIZE)},${Math.floor(x / SPEC_TILE_SIZE)}) — only one of them `
+        + 'could ever be walked onto');
+    }
+    waypointTiles.add(slot);
   }
 
   for (const w of worlds) {
@@ -65,6 +224,16 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     byKey.set(w.key, w);
     if (seenNames.has(w.name)) errors.push(`duplicate name "${w.name}"`);
     seenNames.add(w.name);
+
+    // Before every other per-world check, and NOT behind a `continue`: a world
+    // that also fails its grid check must still have its unknown keys named,
+    // or the author fixes the grid and gets a second surprise.
+    const unknown = Object.keys(w).filter((k) => !WORLD_KEYS.has(k));
+    if (unknown.length) {
+      errors.push(`world "${w.key}" has unknown key(s) ${unknown.join(', ')} -- `
+        + 'nothing reads them, so they would be silently ignored. Remove them, or '
+        + 'add them to WORLD_KEYS in seeds/mapSpec.js once a reader exists.');
+    }
 
     const gridRequired = !portalConnectedKeys.has(w.key);
     if (!hasValidGrid(w)) {
@@ -138,8 +307,36 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
         `world "${w.key}" creature_count is no longer authored -- use "density" instead`);
     }
 
-    if (w.village) {
-      const v = w.village;
+    if (w.village && Array.isArray(w.villages)) {
+      errors.push(`world "${w.key}" declares both "village" and "villages" — use one`);
+    }
+    // Reject rather than coerce, same posture as safe_road_radius below: a
+    // typo'd `villages: {...}` (an easy mistake, since the sibling singular
+    // `village` key IS an object) must not silently fall through to
+    // villagesOf's `w.village` fallback and validate as "no villages here" --
+    // that is a village silently missing, the SOMET-153 failure class.
+    if (w.villages !== undefined && !Array.isArray(w.villages)) {
+      errors.push(`world "${w.key}" villages must be an array (got ${typeof w.villages})`);
+    }
+    // Same posture for the singular key: `village: null`, `village: false`,
+    // or a misspelled key must be REPORTED, not read by villagesOf's
+    // `w.village ? [w.village] : []` as "no village here" -- that is a
+    // village silently missing, the exact SOMET-153 failure class this
+    // branch already hardened the plural form against.
+    if (w.village !== undefined && (typeof w.village !== 'object' || w.village === null)) {
+      errors.push(`world "${w.key}" village must be an object (got ${JSON.stringify(w.village)})`);
+    }
+    const villages = villagesOf(w);
+    for (const v of villages) {
+      // A null/non-object entry inside an otherwise well-formed array (e.g.
+      // `villages: [null]`) must be REPORTED, not dereferenced -- `v.width`
+      // on null throws and aborts validateMapSpec entirely, hiding every
+      // other problem the rest of the spec has. Same posture as the
+      // container-level checks above.
+      if (!v || typeof v !== 'object') {
+        errors.push(`world "${w.key}" villages entry must be an object (got ${JSON.stringify(v)})`);
+        continue;
+      }
       if (!(v.width >= VILLAGE_LIMITS.minW && v.width <= VILLAGE_LIMITS.maxW)) {
         errors.push(`world "${w.key}" village width must be between 3 and 8 tiles`);
       }
@@ -157,9 +354,82 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       // through that route: three seeded hubs shipped with a spawn on the
       // SOUTH wall ring, and respawn-at-village dropped the player inside the
       // wall. Same function object as index.js calls, so the two call sites
-      // cannot drift.
+      // cannot drift. Applied to EVERY entry, not just the first -- a rule
+      // that checks one element of a list is the same half-applied rule in a
+      // new costume.
       const geomErr = villageGeometryError(v);
       if (geomErr) errors.push(`world "${w.key}" village ${geomErr}`);
+    }
+    // Overlapping boxes would stamp two wall rings through each other, leaving
+    // a village with a hole in it and a gate that opens into another village's
+    // wall. Cheap O(n^2) -- a world has single-digit villages.
+    for (let i = 0; i < villages.length; i++) {
+      for (let j = i + 1; j < villages.length; j++) {
+        // Already reported above as a malformed entry; skip rather than
+        // dereference a null/non-object village a second time here.
+        if (!villages[i] || typeof villages[i] !== 'object'
+          || !villages[j] || typeof villages[j] !== 'object') continue;
+        if (boxesOverlap(villages[i], villages[j])) {
+          errors.push(`world "${w.key}" villages overlap `
+            + `(rows ${villages[i].min_row} and ${villages[j].min_row})`);
+        }
+      }
+    }
+
+    // SOMET-288 safe territory. Rejected rather than coerced, for the reason
+    // allows_fast_travel states above: "3" and true are how a hand-edited spec
+    // gets this wrong, and coercing either would widen or silently disable a
+    // safe corridor on the strength of a typo.
+    if (w.safe_road_radius !== undefined) {
+      const r = w.safe_road_radius;
+      if (!Number.isInteger(r) || r < 0 || r > MAX_SAFE_ROAD_RADIUS) {
+        errors.push(`world "${w.key}" safe_road_radius must be an integer `
+          + `between 0 and ${MAX_SAFE_ROAD_RADIUS} (got ${JSON.stringify(r)})`);
+      }
+    }
+    // A non-array safe_rects (e.g. one accidental object instead of a list of
+    // them) must be REPORTED, not thrown -- `for...of` on a non-iterable
+    // aborts validateMapSpec entirely, hiding every other problem the rest of
+    // the spec has. Same reject-rather-than-coerce posture as the checks
+    // above it.
+    if (w.safe_rects !== undefined && !Array.isArray(w.safe_rects)) {
+      errors.push(`world "${w.key}" safe_rects must be an array (got ${typeof w.safe_rects})`);
+    }
+    for (const s of Array.isArray(w.safe_rects) ? w.safe_rects : []) {
+      // A null/non-object entry (e.g. `safe_rects: [null]`) must be REPORTED,
+      // not dereferenced -- `s.min_row` on null throws and aborts
+      // validateMapSpec entirely, hiding every other problem the rest of the
+      // spec has. Same posture as the container-level check above.
+      if (!s || typeof s !== 'object') {
+        errors.push(`world "${w.key}" safe_rects entry must be an object (got ${JSON.stringify(s)})`);
+        continue;
+      }
+      const bad = !Number.isInteger(s.min_row) || !Number.isInteger(s.min_col)
+        || !Number.isInteger(s.width) || !Number.isInteger(s.height)
+        || s.width < 1 || s.height < 1
+        || s.min_row < 0 || s.min_col < 0
+        || s.min_row + s.height > w.height || s.min_col + s.width > w.width;
+      if (bad) {
+        errors.push(`world "${w.key}" safe_rects entry must be a positive box `
+          + `inside the ${w.width}x${w.height} map (got ${JSON.stringify(s)})`);
+      }
+    }
+
+    if (w.waypoints !== undefined) {
+      if (!Array.isArray(w.waypoints)) {
+        errors.push(`world "${w.key}" waypoints must be an array`);
+      } else {
+        for (const [i, wp] of w.waypoints.entries()) {
+          if (!wp || typeof wp !== 'object') {
+            errors.push(`world "${w.key}" waypoint ${i} must be an object`);
+            continue;
+          }
+          checkWaypoint({
+            worldKey: w.key, x: wp.x, y: wp.y, name: wp.name, world: w,
+            label: `world "${w.key}" waypoint ${i}`,
+          });
+        }
+      }
     }
 
     if (biomeNames) {
@@ -205,6 +475,15 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     if (!to) { errors.push(`link references unknown world "${l.to}"`); continue; }
 
     if (l.kind === 'portal') {
+      // Rejected rather than coerced, for exactly the reason allows_fast_travel
+      // is: "true" and 1 are how a hand-edited spec gets a boolean wrong, and
+      // coercing either would turn a staircase into a travel target on the
+      // strength of a typo -- which is the guarded-entrance bypass arriving by
+      // accident instead of on purpose.
+      if (l.is_waypoint !== undefined && typeof l.is_waypoint !== 'boolean') {
+        errors.push(`portal link ${l.from}->${l.to} is_waypoint must be true or false `
+          + `(got ${JSON.stringify(l.is_waypoint)})`);
+      }
       const coordFields = ['from_x', 'from_y', 'to_x', 'to_y'];
       const badField = coordFields.find((f) => !Number.isInteger(l[f]));
       if (badField) {
@@ -240,9 +519,30 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
         }
       }
 
+      // A flagged staircase is a waypoint on its OWN departure tile: that is
+      // the tile a player walks onto, and it is where the registry row lands.
+      // checkWaypoint carries the guarded-staircase rejection, so a link that
+      // guards itself is caught here without this branch restating the rule.
+      if (l.is_waypoint === true) {
+        checkWaypoint({
+          worldKey: l.from, x: l.from_x, y: l.from_y, name: l.waypoint_name, world: from,
+          label: `portal link ${l.from}->${l.to} waypoint`,
+        });
+      }
+
       adjacency.get(l.from).push(l.to);
       adjacency.get(l.to).push(l.from);
       continue;
+    }
+
+    // A compass doorway is a three-tile gap in a wall ring stamped by
+    // stampBounds, not an authored point -- there is no single tile to record
+    // as a waypoint, and a doorway you can walk through is not a shortcut worth
+    // recording anyway. Flagged here rather than ignored, so an author who
+    // tries it is told the flag did nothing instead of finding out later.
+    if (l.is_waypoint !== undefined) {
+      errors.push(`link ${l.from}->${l.to} is a compass doorway and cannot be a waypoint — `
+        + 'is_waypoint belongs on a portal link, which has a tile');
     }
 
     if (!EDGE_DELTA[l.edge]) { errors.push(`link ${l.from}->${l.to} has invalid edge "${l.edge}"`); continue; }
@@ -294,4 +594,4 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
   return errors;
 }
 
-module.exports = { validateMapSpec, EDGE_DELTA };
+module.exports = { validateMapSpec, EDGE_DELTA, villagesOf };

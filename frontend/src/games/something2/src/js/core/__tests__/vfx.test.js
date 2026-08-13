@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   indexEffects, addEffects, pruneEffects, effectProgress, effectAlpha, ease,
-  isoArcAngle, DEFAULT_DURATION_MS,
+  isoArcAngle, DEFAULT_DURATION_MS, BLOCK_EFFECT_DEF,
 } from "../vfx.js";
 
 const DEF = {
@@ -49,6 +49,34 @@ describe("addEffects", () => {
   it("tolerates a missing or non-array batch", () => {
     expect(addEffects([], null, 0, DEFS)).toEqual([]);
     expect(addEffects([], undefined, 0, DEFS)).toEqual([]);
+  });
+
+  // SOMET-286: the blocked-attack cue. The server sends these on the SAME
+  // impacts channel a landed hit uses (`{ t, x, y, nx, ny, b: true }`, no
+  // effect name), so they arrive through this one function.
+  it("resolves a blocked impact to the built-in def, with no library at all", () => {
+    // The whole point of the built-in: an empty or mis-migrated vfx_effects
+    // library must not be able to take this cue away, because losing it puts
+    // the player back in front of the bug -- an attack on a guard that looks
+    // exactly like a swing at empty ground.
+    const list = addEffects([], [{ t: "c:g", x: 5, y: 6, nx: -1, ny: 0, b: true }], 500, {});
+    expect(list).toHaveLength(1);
+    expect(list[0].def).toBe(BLOCK_EFFECT_DEF);
+    expect(list[0].def.shape).toBe("block");
+    expect(list[0].startedAt).toBe(500);
+    expect(list[0].nx).toBe(-1);
+  });
+
+  it("only `b === true` takes the built-in path", () => {
+    // A truthy-but-not-true value must not smuggle an unnamed event past the
+    // library lookup and onto the screen as a shield glint.
+    expect(addEffects([], [EV({ v: null, b: 1 })], 0, DEFS)).toHaveLength(0);
+    expect(addEffects([], [EV({ v: null, b: "yes" })], 0, DEFS)).toHaveLength(0);
+  });
+
+  it("an ordinary impact is unaffected: still resolved from the library", () => {
+    const list = addEffects([], [EV({ b: false })], 0, DEFS);
+    expect(list[0].def).toBe(DEF);
   });
 
   it("defaults a degenerate aim vector to due south rather than zero", () => {

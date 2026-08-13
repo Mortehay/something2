@@ -11,7 +11,9 @@ const {
   CreatureSim, selectGuardTarget, engagingAPlayer,
   GUARD_AGGRO_RADIUS,
 } = require('../src/authority/creatures.js');
-const { applyDamage } = require('../src/authority/damage.js');
+const {
+  applyDamage, provoke, isProvokedBy, playerKey,
+} = require('../src/authority/damage.js');
 
 // --- helper-level fixtures ---------------------------------------------------
 
@@ -32,6 +34,10 @@ function guard() {
 function players(...ids) { return new Map(ids.map((id) => [id, { userId: id }])); }
 
 const RANGE = { aggroRadius: GUARD_AGGRO_RADIUS, leashRadius: 600 };
+// SOMET-290 made provocation EXPIRE, so every predicate call needs the world
+// clock. A fixed non-zero stamp: `now` of 0 would make an expiry of 0 (the
+// shape a creature that has never been hit has) look live.
+const NOW = 5000;
 
 // --- 1. the rule ------------------------------------------------------------
 
@@ -109,10 +115,10 @@ test('a fleeing skittish creature holding a player target is not a rescue', () =
   const idle = hostile('idle', POST.x + 100 - 24, POST.y - 24);
   const deer = hostile('deer', POST.x + 350 - 24, POST.y - 24,
     { _target: 7, behavior: { chaseStyle: 'skittish' } });
-  assert.equal(engagingAPlayer(deer, players(7)), false,
+  assert.equal(engagingAPlayer(deer, players(7), NOW), false,
     'a fleeing skittish creature reads as engaging the player it is running from');
   const pick = selectGuardTarget({
-    guard: guard(), creatures: [idle, deer], ...RANGE, playersById: players(7),
+    guard: guard(), creatures: [idle, deer], ...RANGE, playersById: players(7), now: NOW,
   });
   assert.equal(pick && pick.id, 'idle', 'the guard abandoned its post to chase a fleeing deer');
 });
@@ -124,10 +130,15 @@ test('the SAME skittish creature is a rescue once it has been provoked', () => {
   // moment one is hit.
   const idle = hostile('idle', POST.x + 100 - 24, POST.y - 24);
   const angry = hostile('angry', POST.x + 350 - 24, POST.y - 24,
-    { _target: 7, _provoked: true, behavior: { chaseStyle: 'skittish' } });
-  assert.equal(engagingAPlayer(angry, players(7)), true);
+    { _target: 7, behavior: { chaseStyle: 'skittish' } });
+  // Stamped through provocation's own writer, and against THIS player: since
+  // SOMET-290 the record carries who and until when, so a hand-built
+  // `_provokedBy` here would pin a shape damage.js is free to change, and a
+  // grudge against somebody else would (correctly) not count as engaging.
+  provoke(angry, playerKey(7), NOW);
+  assert.equal(engagingAPlayer(angry, players(7), NOW), true);
   const pick = selectGuardTarget({
-    guard: guard(), creatures: [idle, angry], ...RANGE, playersById: players(7),
+    guard: guard(), creatures: [idle, angry], ...RANGE, playersById: players(7), now: NOW,
   });
   assert.equal(pick && pick.id, 'angry');
 });
@@ -362,8 +373,13 @@ test('the tick never sends the guard after a fleeing deer or a hostile fighting 
   // deer that never noticed the player, or a warden that never acquired
   // anything, would score 0 for the wrong reason.
   assert.equal(deer._target, 7, 'fixture: the deer must be holding the player it is watching');
-  assert.equal(deer._targetKind, null, 'fixture: a non-guard creature leaves _targetKind unset');
-  assert.ok(!deer._provoked, 'fixture: the deer must still be prey — nothing here hits it');
+  // Was `null` before SOMET-290's follow-ups, which made the hostile branch
+  // write the kind too. What this pins either way is the thing the case needs:
+  // the deer is NOT 'creature', so the guard's refusal below cannot be coming
+  // from the kind check — it has to be the flee rule doing the work.
+  assert.equal(deer._targetKind, 'player', 'fixture: the deer must hold a PLAYER, not a creature');
+  assert.ok(!isProvokedBy(deer, playerKey(7), 60 * 0.05),
+    'fixture: the deer must still be prey — nothing here hits it');
   assert.equal(deer.x, deerX, 'fixture: the deer must stand and watch, not drift out of range');
   assert.equal(deer.y, deerY, 'fixture: the deer must stand and watch, not drift out of range');
   const warden = s.creatures.get('warden');
@@ -390,10 +406,15 @@ test('the tick sends the guard after the SAME deer the moment it is provoked', (
   for (let i = 0; i < 20; i++) s.tick(0.05, KEYS, [player], i * 0.05);
   assert.equal(g._target, 'idle', 'precondition: the guard must start on the nearest wanderer');
 
-  // The real damage funnel, not a hand-set flag: applyDamage stamping
-  // `_provoked` is the only thing that converts a skittish creature, and a
-  // fixture that set the field itself could not tell the two apart.
-  applyDamage(deer, 10, 'physical', deer.mit);
+  // The real damage funnel, not a hand-set record: applyDamage stamping
+  // provocation is the only thing that converts a skittish creature, and a
+  // fixture that wrote `_provokedBy` itself could not tell the two apart.
+  //
+  // Attributed to player 7 and clocked, both load-bearing since SOMET-290: an
+  // unnamed hit provokes against NOBODY (so the deer would stay prey and this
+  // case would fail for the wrong reason), and an unclocked one is remembered
+  // forever, which would let the run below pass without the memory being live.
+  applyDamage(deer, 10, 'physical', deer.mit, 1, playerKey(7));
 
   // One tick is enough: the guard is ticked first, and the deer already holds
   // the player, so the upgrade has everything it needs on the very next pass.
@@ -401,7 +422,8 @@ test('the tick sends the guard after the SAME deer the moment it is provoked', (
   assert.equal(g._target, 'deer', 'a provoked deer mauling a player did not outrank a wandering slime');
   // ...and it stays there. 40 ticks = 2s, over which the deer closes at most
   // ~92px on the player and so stays well inside the 600px leash from the post:
-  // this measures retention, not the leash boundary.
+  // this measures retention, not the leash boundary. 2s is also far short of
+  // provocation's memory window, so this is retention and not an expiry.
   let stolen = 0;
   for (let i = 0; i < 40; i++) {
     s.tick(0.05, KEYS, [player], 1.05 + i * 0.05);

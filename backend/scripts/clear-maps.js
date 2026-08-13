@@ -14,6 +14,10 @@ const CASCADES = [
   'map_links', 'villages', 'merchant_stock', 'player_binds (every player\'s respawn point)',
   'character_visited_worlds (every character\'s explored map)',
   'world_chests (every chest, including vault chests authored in a map spec)',
+  // character_waypoints cascades off waypoints in turn, so clearing maps also
+  // un-lights every waypoint every character ever walked onto -- worth naming
+  // for the same reason player_binds is: it is player progress, not map data.
+  'waypoints (and with them every character\'s activated waypoints)',
 ];
 
 async function clearMaps(pool) {

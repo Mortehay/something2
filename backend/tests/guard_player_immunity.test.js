@@ -27,6 +27,14 @@
 //     projectileHitsCreature's own comment);
 //   * a PORTAL guard (services/dungeonGuards.js: an ordinary hostile entity
 //     type given a home anchor) is still killable, or its portal never opens.
+//
+// SOMET-286 added the other half of the story: the refusal is now LEGIBLE. The
+// immunity assertions above are untouched — a guard still takes nothing from
+// any player path — but a swing or a shot that reaches one now emits a blocked
+// impact (`b: true`, no effect name) that the client draws as a shield glint.
+// The tests for that live beside the immunity ones deliberately: they are two
+// halves of one rule, and a future change that quietly drops either should
+// fail here.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -168,29 +176,92 @@ test('a player\'s elemental swing applies no status rider to a guard', () => {
     'sanity: the same fire swing must still burn a hostile');
 });
 
-test('a swing at a guard reports hit:false and no impacts', () => {
-  // The client feedback fact, pinned so it is a decision rather than an
-  // accident: `hit` and `impacts` both derive from meleeArcTargets, so a swing
-  // at a guard is reported exactly like a swing at empty air (the weapon's
-  // `miss` effect). There is no distinct "blocked" signal — that would need a
-  // client change.
+// SOMET-286 replaced this test's original assertion (`impacts` deepEqual []),
+// which pinned the NO-feedback behaviour deliberately so whoever added the cue
+// would see it fail rather than discover the intent by archaeology. The refusal
+// is unchanged — no damage, no kill, hit:false — but it is no longer silent.
+test('a swing at a guard is refused, and says so: hit:false plus a BLOCKED impact', () => {
   const w = armedWorld([guardRow()]);
   const r = swingAt(w, 'g');
-  assert.equal(r.attacks[0].hit, false);
-  assert.deepEqual(r.impacts, []);
+  assert.equal(r.attacks[0].hit, false, 'the swing still did not land: no damage, so no hit');
   assert.deepEqual(r.kills, []);
+  assert.equal(r.impacts.length, 1, 'and it is no longer silent');
+  const b = r.impacts[0];
+  assert.equal(b.t, 'c:g');
+  assert.equal(b.b, true, 'the blocked marker the client draws its shield glint from');
+  assert.equal(b.v, undefined,
+    'no effect NAME: the cue is built into the client so no vfx_effects edit can delete it');
+  // On the GUARD, not on the attacker (the weapon's own miss flourish is drawn
+  // at the attacker's centre) -- that separation is what makes the two
+  // distinguishable on screen.
+  assert.equal(b.x, HOME.x);
+  assert.equal(b.y, HOME.y);
+  // Facing back down the aim vector, i.e. at the attacker, so the shield can
+  // be drawn on the struck side.
+  assert.equal(b.nx, -1);
+  assert.equal(b.ny, 0);
 
+  // THE comparison the ticket is about: swinging at empty ground produces
+  // nothing at all. If this ever matches the guard case again, the bug is back.
+  const air = armedWorld([]);
+  const rAir = air.attack('u1', 1, 0);
+  assert.equal(rAir.attacks[0].hit, false, 'a swing at air also reports hit:false...');
+  assert.deepEqual(rAir.impacts, [], '...but carries no impact, which is the difference');
+
+  // And a real hit is still a real hit: named effect, no blocked marker.
   const w2 = armedWorld([hostileRow()]);
   const r2 = swingAt(w2, 'h');
   assert.equal(r2.attacks[0].hit, true, 'sanity: a hostile in the same spot is a hit');
   assert.equal(r2.impacts.length, 1);
+  assert.equal(r2.impacts[0].b, undefined, 'an ordinary impact carries no blocked marker');
+  // The two descriptors are different SHAPES, not the same shape with a flag:
+  // an ordinary impact always carries the resolved-name and element keys (null
+  // here only because this fixture's knife binds no impact effect), a blocked
+  // one carries neither, because there is no library row behind it to name.
+  assert.ok(Object.hasOwn(r2.impacts[0], 'v') && Object.hasOwn(r2.impacts[0], 'el'));
+  assert.equal(Object.hasOwn(b, 'el'), false);
 });
 
-test('meleeArcTargets never reports a guard', () => {
+test('a swing that reaches a guard AND a hostile damages one and blocks the other', () => {
+  // The mixed case, which a per-swing boolean could not express: the arc
+  // resolves normally for the hostile and the guard still contributes only a
+  // cue. Both ride the ONE impacts list, told apart by `b`.
+  // Hostile centre 20px east of the guard's: 60px from the swing origin, so
+  // inside the knife's 70px reach and on the same aim axis.
+  const w = armedWorld([guardRow(), hostileRow({ x: HOME.x + 20 - CREATURE_SIZE / 2 })]);
+  const r = swingAt(w, 'g');
+  assert.equal(r.attacks[0].hit, true, 'the hostile in the same arc still makes this a landed swing');
+  const blocked = r.impacts.filter((i) => i.b === true).map((i) => i.t);
+  const landed = r.impacts.filter((i) => i.b !== true).map((i) => i.t);
+  assert.deepEqual(blocked, ['c:g']);
+  assert.deepEqual(landed, ['c:h']);
+  assert.equal(w.creatures.creatures.get('g').hp, 7005, 'the guard still took nothing');
+});
+
+test('meleeArcTargets never reports a guard, and meleeArcScan puts it in `blocked`', () => {
   const s = new CreatureSim(openMap(), noRedirect);
   s.addCreatures([guardRow(), hostileRow({ id: 'h', x: HOME.x + 10, y: HOME.y - CREATURE_SIZE / 2 })]);
   const ids = s.meleeArcTargets(HOME.x - 40, HOME.y, 1, 0, 200, 1.5);
   assert.deepEqual(ids, ['h'], `the arc must see the hostile and only the hostile, got ${ids}`);
+
+  // SOMET-286: the same call, split. `hit` must be byte-identical to the list
+  // above (it is what applyMeleeArc iterates), and the guard must appear ONLY
+  // on the other side.
+  const scan = s.meleeArcScan(HOME.x - 40, HOME.y, 1, 0, 200, 1.5);
+  assert.deepEqual(scan.hit, ['h']);
+  assert.deepEqual(scan.blocked, ['g']);
+});
+
+test('a guard OUT of the arc produces no block cue at all', () => {
+  // The cue must mean "your swing reached it and was refused", not "there is a
+  // guard somewhere in this world" -- otherwise it is noise and stops reading
+  // as feedback on the swing the player just made.
+  const s = new CreatureSim(openMap(), noRedirect);
+  s.addCreatures([guardRow()]);
+  // Same origin, aimed due WEST: the guard is behind the attacker.
+  assert.deepEqual(s.meleeArcScan(HOME.x - 40, HOME.y, -1, 0, 200, 1.5).blocked, []);
+  // And out of reach in the right direction.
+  assert.deepEqual(s.meleeArcScan(HOME.x - 400, HOME.y, 1, 0, 200, 1.5).blocked, []);
 });
 
 // --- 4/5: player projectiles ------------------------------------------------
@@ -237,6 +308,111 @@ test('a player AoE detonation leaves a guard untouched, damage and rider alike',
   });
   sim2.step(1, { creatures: s2, players: [], map: openMap(), now: 1000 });
   assert.ok(s2.creatures.get('h').hp < 7005, 'sanity: the same blast must hit a hostile');
+});
+
+// --- SOMET-286: the refusal is legible on the projectile path too ----------
+//
+// A cue on melee only would be half a fix: a bow is the weapon a player is
+// MOST likely to try a guard with, since nothing about an arrow suggests it
+// should be refused.
+
+test('a player\'s arrow through a guard reports ONE block, positioned on the guard', () => {
+  const sim = new ProjectileSim();
+  const s = new CreatureSim(openMap(), noRedirect);
+  s.addCreatures([guardRow({ x: 100 - CREATURE_SIZE / 2, y: 100 - CREATURE_SIZE / 2 })]);
+  sim.spawn({ ownerId: 'u1', x: 0, y: 100, nx: 1, ny: 0, weapon: BOW, damage: 40 });
+  const out = sim.step(0.2, { creatures: s, players: [], map: openMap(), now: 1000 });
+
+  assert.equal(s.creatures.get('g').hp, 7005, 'the immunity is unchanged: still no damage');
+  // Exactly one, not one per sub-step. A 900px/s bow crosses a guard's 32px
+  // capture radius in FOUR of step()'s 16px sub-steps, so an undeduplicated
+  // cue would stack four glints on one target for one arrow.
+  assert.equal(out.blocks.length, 1, `one cue per shot per guard, got ${out.blocks.length}`);
+  const b = out.blocks[0];
+  assert.equal(b.t, 'c:g');
+  assert.equal(b.b, true);
+  assert.equal(b.v, undefined);
+  assert.equal(b.x, 100, 'drawn on the guard, not at the arrow\'s sub-step position');
+  assert.equal(b.y, 100);
+  assert.equal(b.nx, -1, 'facing back along the arrow\'s flight, i.e. at the shooter');
+  assert.equal(b.ny, 0);
+});
+
+test('a player\'s arrow that MISSES a guard reports no block', () => {
+  // The cue has to mean "this shot would have hit"; a shot sailing past a
+  // guard must look exactly like a shot sailing past anything else.
+  const sim = new ProjectileSim();
+  const s = new CreatureSim(openMap(), noRedirect);
+  // 300px off the flight line: never inside the 32px capture radius.
+  s.addCreatures([guardRow({ x: 100 - CREATURE_SIZE / 2, y: 400 - CREATURE_SIZE / 2 })]);
+  sim.spawn({ ownerId: 'u1', x: 0, y: 100, nx: 1, ny: 0, weapon: BOW, damage: 40 });
+  assert.deepEqual(sim.step(0.2, { creatures: s, players: [], map: openMap(), now: 1000 }).blocks, []);
+});
+
+test('a player\'s blast reports a block for a guard caught in it', () => {
+  const sim = new ProjectileSim();
+  const s = new CreatureSim(openMap(), noRedirect);
+  // 40px off the flight line: outside the direct-hit radius, well inside the
+  // 150px blast. So this asserts the _detonate branch specifically, not the
+  // swept one the test above covers.
+  s.addCreatures([guardRow({ x: 200 - CREATURE_SIZE / 2, y: 140 - CREATURE_SIZE / 2 })]);
+  sim.spawn({
+    ownerId: 'u1', x: 0, y: 100, nx: 1, ny: 0,
+    weapon: { ...FIREBALL, range: 200 }, damage: 60,
+  });
+  const out = sim.step(1, { creatures: s, players: [], map: openMap(), now: 1000 });
+  assert.equal(out.detonations.length, 1, 'sanity: the blast must have gone off');
+  assert.equal(s.creatures.get('g').hp, 7005, 'the immunity is unchanged');
+  assert.equal(out.blocks.length, 1);
+  assert.equal(out.blocks[0].t, 'c:g');
+  assert.equal(out.blocks[0].x, 200);
+  assert.equal(out.blocks[0].y, 140);
+  // The shot flew along y=100 and the guard stands at y=140, so wherever along
+  // that line the blast actually went off, it is NORTH of the guard and the
+  // shield must face it. Unit length matters too -- the renderer offsets the
+  // glyph along this vector by a fixed world distance.
+  assert.ok(out.blocks[0].ny < -0.9, `must face the blast, got ny=${out.blocks[0].ny}`);
+  assert.ok(Math.abs(Math.hypot(out.blocks[0].nx, out.blocks[0].ny) - 1) < 1e-9,
+    'the direction must be normalized');
+});
+
+test('a guard both flown through AND caught in the blast still gets ONE block', () => {
+  const sim = new ProjectileSim();
+  const s = new CreatureSim(openMap(), noRedirect);
+  // Dead on the flight line and short of the range limit: the shot passes
+  // through the guard (no detonation -- a guard is not a valid target) and
+  // detonates at the end of its flight, with the guard still inside the blast.
+  s.addCreatures([guardRow({ x: 100 - CREATURE_SIZE / 2, y: 100 - CREATURE_SIZE / 2 })]);
+  sim.spawn({
+    ownerId: 'u1', x: 0, y: 100, nx: 1, ny: 0,
+    weapon: { ...FIREBALL, range: 200 }, damage: 60,
+  });
+  const out = sim.step(1, { creatures: s, players: [], map: openMap(), now: 1000 });
+  assert.equal(out.detonations.length, 1, 'sanity: it did reach the end of its range');
+  assert.equal(out.blocks.length, 1, `two moments, one cue, got ${out.blocks.length}`);
+});
+
+test('a player\'s shot at a HOSTILE reports no blocks', () => {
+  const sim = new ProjectileSim();
+  const s = new CreatureSim(openMap(), noRedirect);
+  s.addCreatures([hostileRow({ x: 100 - CREATURE_SIZE / 2, y: 100 - CREATURE_SIZE / 2 })]);
+  sim.spawn({ ownerId: 'u1', x: 0, y: 100, nx: 1, ny: 0, weapon: BOW, damage: 40 });
+  const out = sim.step(0.2, { creatures: s, players: [], map: openMap(), now: 1000 });
+  assert.ok(s.creatures.get('h').hp < 7005, 'sanity: it landed');
+  assert.deepEqual(out.blocks, []);
+});
+
+test('world.tickProjectiles hands the blocks out to the broadcast', () => {
+  // The boundary server.js actually consumes (it pushes these onto the same
+  // per-tick impacts stash a landed melee hit uses). Driven through World, not
+  // ProjectileSim, because a step() that produced blocks nobody forwarded
+  // would be exactly the inert-field failure this ticket exists to avoid.
+  const w = armedWorld([guardRow({ x: 100 - CREATURE_SIZE / 2, y: 100 - CREATURE_SIZE / 2 })], 3);
+  w.projectiles.spawn({ ownerId: 'u1', x: 0, y: 100, nx: 1, ny: 0, weapon: BOW, damage: 40 });
+  const out = w.tickProjectiles(0.2);
+  assert.equal(out.blocks.length, 1);
+  assert.equal(out.blocks[0].t, 'c:g');
+  assert.equal(out.blocks[0].b, true);
 });
 
 // --- 6: the unwired player-melee primitive ---------------------------------
@@ -306,7 +482,10 @@ test('a HOSTILE\'s projectile still damages a guard (the deliberate decision)', 
     ownerId: 'shooter', ownerKind: 'creature', ownerFaction: 'hostile',
     x: 0, y: 100, nx: 1, ny: 0, weapon: { ...BOW, damage: 29.5 }, damage: 29.5,
   });
-  sim.step(0.2, { creatures: s, players: [], map: openMap(), now: 1000 });
+  const out = sim.step(0.2, { creatures: s, players: [], map: openMap(), now: 1000 });
+  // SOMET-286: and it is a HIT, so it must carry no refusal cue — a shield
+  // glint on a shot that actually damaged the guard would be a lie.
+  assert.deepEqual(out.blocks, []);
   const g = s.creatures.get('g');
   assert.ok(g.hp < 7005, 'a hostile\'s shot must still reach a guard');
   // The strongest hostile in the game hits a level-150 guard for MIN_DAMAGE.

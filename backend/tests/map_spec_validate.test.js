@@ -386,3 +386,202 @@ test('several worlds may allow fast travel at once', () => {
   spec.worlds[1].allows_fast_travel = true;
   assert.deepEqual(validateMapSpec(spec), []);
 });
+
+// SOMET-288: several villages per world, plus safe-territory fields.
+// A legal 6x4 village whose spawn is genuinely interior. Cloned per case so a
+// mutation in one test cannot leak into another.
+const VILLAGE_A = () => ({
+  min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
+  spawn_x: 1150, spawn_y: 1150,
+});
+const VILLAGE_B = () => ({
+  min_row: 30, min_col: 30, width: 6, height: 4, gate_edge: 'S',
+  spawn_x: 3150, spawn_y: 3150,
+});
+
+test('a world may declare several villages', () => {
+  assert.deepEqual(errorsFor((s) => { s.worlds[0].villages = [VILLAGE_A(), VILLAGE_B()]; }), []);
+});
+
+test('the singular village key still validates unchanged', () => {
+  // 20+ checked-in specs use it. This feature must not require touching any
+  // of them.
+  assert.deepEqual(errorsFor((s) => { s.worlds[0].village = VILLAGE_A(); }), []);
+});
+
+test('declaring both village and villages is rejected', () => {
+  const errs = errorsFor((s) => {
+    s.worlds[0].village = VILLAGE_A();
+    s.worlds[0].villages = [VILLAGE_B()];
+  });
+  assert.ok(errs.some((e) => /both "village" and "villages"/.test(e)), errs.join('\n'));
+});
+
+// Review finding (Important 1): a typo'd `villages: {...}` (an object, not a
+// list) used to fall through villagesOf's `w.village` fallback and validate
+// with ZERO errors -- the applier would then create ZERO villages for that
+// world, silently. This must be reported, not ignored.
+test('a non-array villages value is rejected, not silently ignored', () => {
+  const errs = errorsFor((s) => { s.worlds[0].villages = VILLAGE_A(); });
+  assert.ok(errs.some((e) => /villages must be an array/.test(e)), errs.join('\n'));
+});
+
+test('every village in the array passes the same geometry rules as a lone one', () => {
+  // 6+5 = 11 breaks the SOMET-282 screen budget. The SECOND entry must be
+  // checked, not just the first -- a rule applied to element 0 of a list is
+  // the same half-applied rule in a new costume.
+  const errs = errorsFor((s) => {
+    s.worlds[0].villages = [VILLAGE_A(), { ...VILLAGE_B(), height: 5 }];
+  });
+  assert.ok(errs.some((e) => /width \+ height must be at most/.test(e)), errs.join('\n'));
+});
+
+test('two villages in one world may not overlap', () => {
+  const errs = errorsFor((s) => {
+    s.worlds[0].villages = [
+      VILLAGE_A(),
+      { min_row: 12, min_col: 12, width: 6, height: 4, gate_edge: 'S',
+        spawn_x: 1350, spawn_y: 1350 },
+    ];
+  });
+  assert.ok(errs.some((e) => /villages overlap/.test(e)), errs.join('\n'));
+});
+
+test('safe_road_radius must be an integer in 0..8', () => {
+  for (const bad of [-1, 9, 2.5, '2', true]) {
+    const errs = errorsFor((s) => { s.worlds[0].safe_road_radius = bad; });
+    assert.ok(errs.some((e) => /safe_road_radius/.test(e)),
+      `radius ${JSON.stringify(bad)} was accepted`);
+  }
+  assert.deepEqual(errorsFor((s) => { s.worlds[0].safe_road_radius = 3; }), []);
+});
+
+test('a safe rectangle must be positive and inside the map bounds', () => {
+  const errs = errorsFor((s) => {
+    s.worlds[0].safe_rects = [{ min_row: 60, min_col: 60, width: 20, height: 20 }];
+  });
+  assert.ok(errs.some((e) => /safe_rects/.test(e)), errs.join('\n'));
+
+  assert.deepEqual(errorsFor((s) => {
+    s.worlds[0].safe_rects = [{ min_row: 10, min_col: 10, width: 4, height: 4 }];
+  }), []);
+});
+
+// Review finding (Minor): `for (const s of w.safe_rects ?? [])` threw
+// TypeError on a non-array safe_rects and aborted validateMapSpec entirely,
+// hiding every other error the rest of the spec had. Must be reported
+// instead.
+test('a non-array safe_rects does not throw and is reported as invalid', () => {
+  let errs;
+  assert.doesNotThrow(() => {
+    errs = errorsFor((s) => {
+      s.worlds[0].safe_rects = { min_row: 0, min_col: 0, width: 2, height: 2 };
+    });
+  });
+  assert.ok(errs.some((e) => /safe_rects must be an array/.test(e)), errs.join('\n'));
+});
+
+// Fix wave finding (Minor 2): a null entry INSIDE an otherwise well-formed
+// villages array threw `Cannot read properties of null (reading 'width')`
+// and aborted validateMapSpec entirely, despite the file's own comment
+// claiming this class was handled -- only the container was hardened.
+test('a null entry inside villages does not throw and is reported as invalid', () => {
+  let errs;
+  assert.doesNotThrow(() => {
+    errs = errorsFor((s) => { s.worlds[0].villages = [null]; });
+  });
+  assert.ok(errs.some((e) => /villages entry must be an object/.test(e)), errs.join('\n'));
+});
+
+// Fix wave finding (Minor 2): same TypeError shape for safe_rects, on
+// `s.min_row`.
+test('a null entry inside safe_rects does not throw and is reported as invalid', () => {
+  let errs;
+  assert.doesNotThrow(() => {
+    errs = errorsFor((s) => { s.worlds[0].safe_rects = [null]; });
+  });
+  assert.ok(errs.some((e) => /safe_rects entry must be an object/.test(e)), errs.join('\n'));
+});
+
+// Fix wave finding (Minor 3): `w.village ? [w.village] : []` reads
+// `village: null` (or `false`) as "no village here" -- zero errors, zero
+// villages, silently. That is the SOMET-153 failure class (a village that
+// quietly does not exist), for exactly the reason the sibling `villages:
+// {...}` check above already exists.
+test('village: null is rejected, not silently read as "no village"', () => {
+  const errs = errorsFor((s) => { s.worlds[0].village = null; });
+  assert.ok(errs.some((e) => /village must be an object/.test(e)), errs.join('\n'));
+});
+
+test('village: false is rejected the same way', () => {
+  const errs = errorsFor((s) => { s.worlds[0].village = false; });
+  assert.ok(errs.some((e) => /village must be an object/.test(e)), errs.join('\n'));
+});
+
+// ---------------------------------------------------------------------------
+// Unknown world keys (SOMET-288 review, finding 2).
+//
+// An unread key is indistinguishable from a consumed one from the author's
+// side: the spec validates, the seed exits 0, and the feature is simply absent.
+// `pens:` is the live case -- SOMET-288 ships without a pen reader on purpose,
+// so an author who writes pens before slice B lands its reader gets no pens and
+// no complaint.
+// ---------------------------------------------------------------------------
+test('an unknown world key is rejected rather than silently ignored', () => {
+  const errs = errorsFor((s) => {
+    s.worlds[0].pens = [{ min_row: 20, min_col: 20, width: 4, height: 4 }];
+  });
+  assert.ok(errs.some((e) => /unknown key\(s\) pens/.test(e)), errs.join('\n'));
+});
+
+test('a typo\'d world key is named, and every offending key is listed at once', () => {
+  // `saferoad_radius` is the realistic shape of this mistake: near-miss on a
+  // real key, so the world reads as opted in and is not.
+  const errs = errorsFor((s) => {
+    s.worlds[0].saferoad_radius = 3;
+    s.worlds[0].villagse = [];
+  });
+  const hit = errs.filter((e) => /unknown key/.test(e));
+  assert.equal(hit.length, 1, 'one error per world, not one per key');
+  assert.match(hit[0], /saferoad_radius/);
+  assert.match(hit[0], /villagse/);
+  assert.match(hit[0], /world "a"/, 'the error must name the world');
+});
+
+test('every key the applier actually reads is accepted', () => {
+  // The allowlist is only as good as its completeness -- a missing entry here
+  // turns this check into a wall in front of a legitimate spec. Enumerated
+  // explicitly rather than derived from WORLD_KEYS, which would make the
+  // assertion true by construction whatever that set contained.
+  const errs = errorsFor((s) => {
+    Object.assign(s.worlds[0], {
+      chunk_size: 64, density: 'sparse', level_band: [1, 3],
+      allows_fast_travel: true,
+      safe_road_radius: 2,
+      safe_rects: [{ min_row: 10, min_col: 10, width: 4, height: 4 }],
+      village: { min_row: 20, min_col: 20, width: 6, height: 4, gate_edge: 'S',
+                 spawn_x: 2150, spawn_y: 2150 },
+      chest: { x: 500, y: 500, guard_creature_type: 'Wolf', level: 3 },
+    });
+  });
+  assert.deepEqual(errs, []);
+});
+
+test('the retired creature_count keeps its own error rather than a generic one', () => {
+  // It is on the allowlist deliberately: dropping it there would bury the
+  // "use density instead" message under "unknown key".
+  const errs = errorsFor((s) => { s.worlds[0].creature_count = 12; });
+  assert.ok(errs.some((e) => /no longer authored -- use "density"/.test(e)), errs.join('\n'));
+  assert.ok(!errs.some((e) => /unknown key/.test(e)), errs.join('\n'));
+});
+
+test('an unknown key on a world that also fails another check is still reported', () => {
+  // The grid check `continue`s, so an unknown key checked after it would stay
+  // invisible until the author fixed the grid and re-ran.
+  const errs = errorsFor((s) => {
+    s.worlds[0].grid = null;
+    s.worlds[0].pens = [];
+  });
+  assert.ok(errs.some((e) => /grid must be two integers/.test(e)), errs.join('\n'));
+  assert.ok(errs.some((e) => /unknown key\(s\) pens/.test(e)), errs.join('\n'));
+});
