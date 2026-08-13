@@ -94,15 +94,22 @@ const insideA = { x: 1118, y: 1118 };   // centre (1150,1150) -> tile row 11, co
 const insideB = { x: 2118, y: 2118 };   // centre (2150,2150) -> tile row 21, col 21
 
 // `bind` is the player_binds row this character holds, or null. `villages` maps
-// a world id to the rows fetchVillages will return for it.
-function fakePool({ bind = null, villages = {} } = {}) {
+// a world id to the rows fetchVillages will return for it. `links` maps a world
+// id to the map_links rows fetchLinks will return for it (compass rows AND
+// PORTAL rows, exactly as the real query returns them together). `bounded`
+// gives w1 a width/height, which is what makes its edge tiles map_doorway tiles
+// at all.
+function fakePool({ bind = null, villages = {}, links = {}, bounded = false } = {}) {
   const binds = [];      // every INSERT INTO player_binds, in order
   function route(sql, params) {
     if (/FROM worlds WHERE id/i.test(sql)) {
       // No width/height: an UNBOUNDED world, so chooseSpawn lands on the
       // chunk-centre default rather than a bounded world's middle tile.
-      return { rows: [{ id: params[0], seed: '1', chunk_size: 8, is_entry: params[0] === 'w1' }] };
+      const row = { id: params[0], seed: '1', chunk_size: 8, is_entry: params[0] === 'w1' };
+      if (bounded && params[0] === 'w1') { row.width = 8; row.height = 8; }
+      return { rows: [row] };
     }
+    if (/FROM map_links ml JOIN worlds w/i.test(sql)) return { rows: links[params[0]] || [] };
     if (/FROM tile_types/i.test(sql)) {
       return { rows: [
         { name: 'grass', walkable: true, speed: 1 },
@@ -110,6 +117,7 @@ function fakePool({ bind = null, villages = {} } = {}) {
         // generator has no wall/gate tile to stamp a footprint with.
         { name: 'wooden_wall', walkable: false, speed: 1 },
         { name: 'village_gate', walkable: true, speed: 1 },
+        { name: 'map_doorway', walkable: true, speed: 1 },
       ] };
     }
     if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
@@ -125,7 +133,14 @@ function fakePool({ bind = null, villages = {} } = {}) {
           projectile_radius: null, pierce: null, mana_cost: 0, element: null, defense: null, resistances: null },
       ] };
     }
-    if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+    if (/FROM characters/i.test(sql)) {
+      // Character 1 belongs to user 1 and nothing else exists. Echoing back
+      // whatever id was asked for would answer the ownership question with the
+      // question itself -- a join path that stopped scoping by user_id would
+      // still be green here.
+      const [id, userId] = params;
+      return { rows: Number(id) === 1 && String(userId) === '1' ? [{ id: 1, entity_type_id: 1 }] : [] };
+    }
     if (/FROM worlds w WHERE w\.id/i.test(sql)) {
       // w1 is the entry world with no history -- the first-join leg. w2 is
       // reachable by NOTHING except a server-issued arrival: not entry, not
@@ -397,4 +412,140 @@ test('a bind still pending when the socket closes is flushed, not lost', async (
   await sleep(200);
   assert.strictEqual(pool.binds.length, 2, 'disconnecting inside the floor must not lose the newer bind');
   assert.strictEqual(pool.binds[1][2], VILLAGE_B.spawn_x);
+});
+
+// ---------------------------------------------------------------------------
+// 6. Dying in the SAME TICK as a world crossing.
+//
+// World.tick applies burn damage to players and deliberately leaves a killed
+// one at hp<=0 for resolveDeaths() at the END of the tick -- and it still moves
+// them. Both crossing blocks (compass doorway, portal) run in between. A corpse
+// that opens a door enqueues a pendingArrivals entry and pushes a `transition`
+// that this slice's respawn then overwrites and contradicts: the client calls
+// enterWorld for BOTH, and whichever join lands last decides where the player
+// ends up -- the neighbouring world (the feature silently failing) or, if the
+// doorway's join loses the race against the respawn's pendingArrivals entry, a
+// refusal on a canvas that never receives `joined`.
+//
+// Reproducible without any of that machinery: take a burn DoT, flee to the map
+// edge, die on the doorway tile.
+//
+// The live-crossing test in each pair is not decoration. "Exactly one
+// transition, to the village" is also what a doorway that never fires at all
+// would produce, and the guard under test is one `continue` away from being
+// exactly that.
+// ---------------------------------------------------------------------------
+
+// w1 is 8x8 tiles when `bounded`, so its east doorway column is tile 7 and its
+// middle row is 4. to_width/to_height are the DESTINATION's bounds, which is
+// what arrivalPoint uses to place the arrival -- they say nothing about w1.
+const EAST_DOOR = { row: 4, col: 7 };
+const DOORWAY_LINK = {
+  id: 'l1', edge: 'E', to_world_id: 'wD', to_width: 8, to_height: 8,
+  from_x: null, from_y: null, to_x: null, to_y: null,
+};
+// An interior tile, well away from the (400,400) join spawn of an unbounded
+// world. portalLinks is keyed off from_x/from_y floored to tiles: (250,250) is
+// tile row 2, col 2.
+const PORTAL_TILE = { row: 2, col: 2 };
+const PORTAL_LINK = {
+  id: 'p1', edge: 'PORTAL', to_world_id: 'wP', to_width: null, to_height: null,
+  from_x: 250, from_y: 250, to_x: 300, to_y: 300,
+};
+
+// Put the player's CENTRE on a tile. The crossing blocks match on the centre
+// tile (top-left + half the 64px footprint), so a fixture built off the
+// top-left corner lands a tile early and silently proves nothing.
+function standOnTile(p, { row, col }) {
+  p.x = col * 100 + 50 - p.width / 2;
+  p.y = row * 100 + 50 - p.height / 2;
+}
+
+test('a LIVE player on a doorway tile crosses it', async () => {
+  const pool = fakePool({ bind: { world_id: 'w2', x: VILLAGE_B.spawn_x, y: VILLAGE_B.spawn_y },
+    villages: { w2: [VILLAGE_B] }, links: { w1: [DOORWAY_LINK] }, bounded: true });
+  const { handle, ws } = await joinedSession(pool, {});
+
+  const collected = collectMsgs(ws, 'transition', 300);
+  standOnTile(livePlayer(handle, 'w1'), EAST_DOOR);
+  const transitions = await collected;
+
+  assert.strictEqual(transitions.length, 1, 'the doorway fixture itself is inert');
+  assert.strictEqual(transitions[0].toWorldId, 'wD');
+});
+
+test('dying ON a doorway tile sends ONE transition, to the bound village', async () => {
+  const pool = fakePool({ bind: { world_id: 'w2', x: VILLAGE_B.spawn_x, y: VILLAGE_B.spawn_y },
+    villages: { w2: [VILLAGE_B] }, links: { w1: [DOORWAY_LINK] }, bounded: true });
+  const { handle, ws } = await joinedSession(pool, {});
+
+  const p = livePlayer(handle, 'w1');
+  const collected = collectMsgs(ws, 'transition', 400);
+  // Both in one synchronous step, so the next tick sees a corpse standing on
+  // the doorway -- exactly what a burn tick leaves behind.
+  standOnTile(p, EAST_DOOR);
+  p.hp = -5;
+  const transitions = await collected;
+
+  assert.deepStrictEqual(transitions.map((t) => t.toWorldId), ['w2'],
+    'a corpse must not open a door: two transitions in one tick race each other on the client, and the loser is either the wrong world or a refused join');
+  assert.strictEqual(transitions[0].arriveX, VILLAGE_B.spawn_x);
+  assert.strictEqual(transitions[0].arriveY, VILLAGE_B.spawn_y);
+});
+
+test('a death on a doorway tile does not wedge that doorway shut', async () => {
+  // No bind: the player respawns HERE, so they are still around to use the
+  // doorway afterwards. The skip must last exactly as long as hp<=0 does --
+  // which is the remainder of one tick, since resolveDeaths runs at the end of
+  // the same one.
+  const pool = fakePool({ bind: null, links: { w1: [DOORWAY_LINK] }, bounded: true });
+  const { handle, ws } = await joinedSession(pool, {});
+
+  const p = livePlayer(handle, 'w1');
+  const duringDeath = collectMsgs(ws, 'transition', 300);
+  standOnTile(p, EAST_DOOR);
+  p.hp = -5;
+  assert.deepStrictEqual(await duringDeath, [], 'no bind elsewhere and no doorway: dying on the tile must move nobody');
+  assert.strictEqual(p.hp, p.maxHp, 'and the death itself still resolved');
+
+  const afterDeath = collectMsgs(ws, 'transition', 300);
+  standOnTile(p, EAST_DOOR);   // walk back onto the same tile, now alive
+  const transitions = await afterDeath;
+
+  assert.strictEqual(transitions.length, 1, 'the doorway is shut for the corpse, not for the player');
+  assert.strictEqual(transitions[0].toWorldId, 'wD');
+});
+
+test('a LIVE player on a portal tile is warped by it', async () => {
+  const pool = fakePool({ bind: { world_id: 'w2', x: VILLAGE_B.spawn_x, y: VILLAGE_B.spawn_y },
+    villages: { w2: [VILLAGE_B] }, links: { w1: [PORTAL_LINK] } });
+  const { handle, ws } = await joinedSession(pool, {});
+  // planPortalTransition fails CLOSED until the player's chunk neighborhood has
+  // finished loading, so a portal test that steps on the tile immediately
+  // measures the load race, not the portal.
+  await sleep(100);
+
+  const collected = collectMsgs(ws, 'transition', 300);
+  standOnTile(livePlayer(handle, 'w1'), PORTAL_TILE);
+  const transitions = await collected;
+
+  assert.strictEqual(transitions.length, 1, 'the portal fixture itself is inert');
+  assert.strictEqual(transitions[0].toWorldId, 'wP');
+});
+
+test('dying ON a portal tile sends ONE transition, to the bound village', async () => {
+  const pool = fakePool({ bind: { world_id: 'w2', x: VILLAGE_B.spawn_x, y: VILLAGE_B.spawn_y },
+    villages: { w2: [VILLAGE_B] }, links: { w1: [PORTAL_LINK] } });
+  const { handle, ws } = await joinedSession(pool, {});
+  await sleep(100);
+
+  const p = livePlayer(handle, 'w1');
+  const collected = collectMsgs(ws, 'transition', 400);
+  standOnTile(p, PORTAL_TILE);
+  p.hp = -5;
+  const transitions = await collected;
+
+  assert.deepStrictEqual(transitions.map((t) => t.toWorldId), ['w2'],
+    'the portal path has the doorway path\'s bug plus a cooldown stamp and a knockback it would apply to a corpse');
+  assert.strictEqual(transitions[0].arriveX, VILLAGE_B.spawn_x);
 });

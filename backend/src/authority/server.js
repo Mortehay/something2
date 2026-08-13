@@ -1839,6 +1839,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (entry.links && entry.links.size > 0) {
         const now = Date.now();
         for (const p of entry.world.players.values()) {
+          // A corpse does not open doors. world.tick above applies burn damage
+          // and deliberately LEAVES a player it killed at hp<=0 for this tick's
+          // resolveDeaths() -- while still moving them -- so without this a
+          // player can cross an edge on the very tick they die. That emits two
+          // `transition` frames in one tick with different destinations: this
+          // one, then SOMET-294's respawn relocation, which overwrites the
+          // pendingArrivals entry the doorway just wrote. The client calls
+          // enterWorld for both and the joins race; the doorway's join is
+          // usually then REFUSED outright (pendingWorldId no longer matches, a
+          // compass neighbour is not fast-travel and is not the last world),
+          // leaving the player on a canvas that never receives `joined`.
+          //
+          // Cannot wedge: hp<=0 lasts at most the remainder of this tick, since
+          // resolveDeaths() runs at the end of it and heals in the same pass.
+          if (p.hp <= 0) continue;
           const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
           const tileName = entry.world.map.getTileAt(cx, cy);
           const gRow = Math.floor(cy / MAP_TILE_SIZE), gCol = Math.floor(cx / MAP_TILE_SIZE);
@@ -1868,6 +1883,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const now = Date.now();
         const liveCreatures = entry.world.creatures.all();
         for (const p of entry.world.players.values()) {
+          // Same reason as the doorway block above, plus two of its own: a
+          // corpse that steps on a portal also takes a cooldown stamp it will
+          // carry past its respawn, and a BLOCKED portal knocks it back --
+          // moving a position resolveDeaths() is about to overwrite anyway.
+          if (p.hp <= 0) continue;
           const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
           const gRow = Math.floor(cy / MAP_TILE_SIZE), gCol = Math.floor(cx / MAP_TILE_SIZE);
           const hereKey = `${gRow},${gCol}`;
