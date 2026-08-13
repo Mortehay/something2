@@ -1018,19 +1018,7 @@ class CreatureSim {
       // Target resolution: keep current target unless it left leash; else acquire nearest in aggro.
       if (c._target) {
         const tp = byId.get(c._target);
-        if (!tp || dist2(cc.x, cc.y, center(tp).x, center(tp).y) > bh.leashRadius * bh.leashRadius) {
-          c._target = null;
-          // SOMET-290: losing the target ends the grudge with it. `_provoked`
-          // is stamped by applyDamage on ANY hit and is what turns a skittish
-          // creature into a fighter, so without a clear it is a one-way
-          // switch: the first arrow anyone ever puts in a deer makes it a
-          // charger for the rest of the world's uptime, and the whole
-          // behaviour is only observable once per creature. Cleared here
-          // rather than on re-acquisition because this is the one place a
-          // creature is known to have disengaged -- and it costs nothing for
-          // every other chase style, none of which reads the field.
-          c._provoked = false;
-        }
+        if (!tp || dist2(cc.x, cc.y, center(tp).x, center(tp).y) > bh.leashRadius * bh.leashRadius) c._target = null;
       }
       if (!c._target) {
         let nearest = null, nd2 = bh.aggroRadius * bh.aggroRadius;
@@ -1042,6 +1030,30 @@ class CreatureSim {
         if (nearest) c._target = nearest.userId;
       }
       c.mode = c._target ? 'chase' : 'roam';
+      // SOMET-290: a creature with nobody to fight stops being angry. `_provoked`
+      // is stamped by applyDamage on ANY hit and is the only thing that turns a
+      // skittish creature into a fighter, so without a clear it is a one-way
+      // switch -- one arrow makes a deer a charger for the rest of the world's
+      // uptime, and the headline promise (you can walk past one) is silently
+      // off for that spawn forever.
+      //
+      // Placed AFTER target resolution, not inside the drop above, because the
+      // drop only fires for a creature that HAD a target -- and the arrow that
+      // provokes a deer is normally fired by someone the deer never targeted:
+      // skittish aggro is 300px and every ranged weapon in the catalog reaches
+      // further (darts 350 ... arbalest 850). Provocation from a sniper would
+      // otherwise persist until some unrelated later encounter happened to end
+      // beyond leash, and the next player to wander past -- who never touched
+      // it -- would be charged.
+      //
+      // Cannot fire mid-fight: a creature that is fighting has a target by
+      // definition. The boundary this DOES keep is that a creature holding a
+      // target stays angry, including at a second player who is merely nearby
+      // when the shooter leaves -- it is still in an encounter.
+      //
+      // Free for every other chase style: nothing but `fleeing` below reads
+      // this field.
+      if (!c._target) c._provoked = false;
 
       if (c.mode === 'chase') {
         const tp = byId.get(c._target);

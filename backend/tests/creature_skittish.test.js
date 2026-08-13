@@ -5,9 +5,11 @@ const { applyDamage } = require('../src/authority/damage.js');
 
 // Same harness the other behaviour suites use (authority_creature_styles.test.js,
 // authority_creatures.test.js): an all-walkable stub map unless a scenario needs
-// a wall, and an rng below REDIRECT_CHANCE so roaming never changes direction on
-// its own. `isWalkable` is a parameter here rather than a boolean flag because
-// the cornered case needs ONE blocked face, not a blocked world.
+// a wall, and an rng of 0.05 -- ABOVE the tick's REDIRECT_CHANCE of 0.02, and
+// the redirect fires on `rng() < REDIRECT_CHANCE`, so a roaming creature never
+// changes direction on its own. `isWalkable` is a parameter here rather than a
+// boolean flag because the cornered case needs ONE blocked face, not a blocked
+// world.
 function stubMap(isWalkable = () => true) {
   return { isWalkable, speedAt: () => 1, chunkSize: 8 };
 }
@@ -249,4 +251,30 @@ test('provocation clears when the target is lost, so the next encounter starts s
   assert.ok(apart(c, player) > before,
     `did not back off on the next encounter (${before.toFixed(2)} -> ${apart(c, player).toFixed(2)})`);
   assert.equal(player.hp, hp0, 'it attacked on the next encounter');
+});
+
+// --- 9. SNIPED FROM OUT OF RANGE ---------------------------------------------
+
+test('a creature shot from beyond its aggro radius does not stay angry at a stranger', () => {
+  // 400px: outside skittish aggro (300) and inside the reach of every ranged
+  // weapon in the catalog (darts 350 ... arbalest 850), so this is the ORDINARY
+  // way a deer gets hit, not an edge case. The creature never targets the
+  // shooter, so a clear that only runs when a target is DROPPED never runs.
+  const { s, player, active, c } = scenario(skittish(), CX + 400);
+  s.tick(0.05, active, [player], 0);
+  assert.equal(c._target, null, 'precondition: the shooter must be out of aggro range');
+
+  applyDamage(c, 10, 'physical', c.mit);
+  s.tick(0.05, active, [player], 0.05);
+  assert.equal(c._provoked, false, 'stayed angry at a shooter it never even targeted');
+
+  // A DIFFERENT player, who never touched it, walks up to it. They must be able
+  // to walk past -- being shot by someone else must not arm the creature
+  // against them.
+  const bystander = { userId: 'u2', x: c.x + 100, y: c.y, width: 48, height: 48, hp: 500, mit: null };
+  const before = apart(c, bystander);
+  for (let i = 0; i < 20; i++) s.tick(0.05, active, [bystander], 1 + i * 0.05);
+  assert.equal(bystander.hp, 500, 'charged a player who never touched it');
+  assert.ok(apart(c, bystander) > before,
+    `did not back off from the bystander (${before.toFixed(2)} -> ${apart(c, bystander).toFixed(2)})`);
 });
