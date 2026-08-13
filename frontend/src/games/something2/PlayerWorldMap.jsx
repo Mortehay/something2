@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import { useEffect, useMemo } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import styled from 'styled-components';
 import CytoscapeComponent from 'react-cytoscapejs';
 import { useQuery } from '@tanstack/react-query';
@@ -8,6 +8,17 @@ import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { toCytoscapeElements } from './playerWorldMap.js';
 
 // The player's read-only fog-of-war map (SOMET-263).
+//
+// IT IS A MAP, AND NOTHING ELSE (SOMET-293). It briefly also offered
+// click-to-travel to any visited world flagged `allows_fast_travel`; travel is
+// now the waypoint network, available only while standing on a waypoint you have
+// lit, and the leg that authorized the old click has been deleted from
+// services/joinPolicy.js. So this file registers no cytoscape event handler,
+// asks nothing of the shell to put the player in a world, and routes nowhere --
+// the capability is absent rather than disabled, for the same reason the editing
+// capability below is. playerWorldMap.test.js asserts those absences by literal
+// token against this file's source, which is why the names are spelled around
+// rather than quoted here.
 //
 // READ-ONLY BY CONSTRUCTION, not by a flag. The link-drawing plugin the admin
 // graph registers is not imported here, and there is no mutation hook and no
@@ -32,9 +43,9 @@ const Title = styled.h2`margin: 0 0 0.25rem 0;`;
 const Dim = styled.div`color: var(--s2-text-dim); font-size: 0.9em;`;
 // Names the colour the canvas actually draws, so the legend cannot drift into
 // describing a border the stylesheet stopped using.
-// s2-theme-exempt(#4ade80): matches the node border below, which is a canvas
-// literal for the reasons the CanvasCard comment gives.
-const TravelKey = styled.span`color: #4ade80; font-weight: 600;`;
+// s2-theme-exempt(#facc15): matches the `current` node border below, which is a
+// canvas literal for the reasons the CanvasCard comment gives.
+const HereKey = styled.span`color: #facc15; font-weight: 600;`;
 const CanvasCard = styled.div`
   height: 600px;
   /* s2-theme-exempt(#12121f): the graph surface stays dark in both modes, like
@@ -111,18 +122,9 @@ const STYLESHEET = [
       width: 40, height: 40,
     },
   },
-  // A world you can travel to. Visibly distinct from a visited world you
-  // cannot, which is an acceptance criterion in its own right: an inert click
-  // with no explanation reads as a broken map.
-  {
-    selector: 'node[travelable = "true"]',
-    style: { 'border-color': '#4ade80', 'border-width': 3 },
-  },
-  // AFTER the travelable rule. The two cannot both be true today -- the
-  // transform marks the current world un-travelable, since re-joining the world
-  // you are standing in tears down a live session for nothing -- but cytoscape
-  // resolves conflicts by declaration order, last one wins, and "you are here"
-  // is the marker that must survive if that ever changes.
+  // "You are here". The travel-offer border rule that used to sit above this one
+  // went with click-to-travel (SOMET-293); nothing on this map is clickable now,
+  // so there is no second border state to resolve against.
   {
     selector: 'node[current = "true"]',
     style: { 'border-color': '#facc15', 'border-width': 4 },
@@ -142,51 +144,9 @@ export default function PlayerWorldMap() {
   // The active character comes from GameShell, which owns it -- rather than
   // being re-read from localStorage here, which would be a second source of
   // truth free to disagree with the one the game canvas is using.
-  const { activeCharacterId, enterWorld } = useOutletContext() || {};
+  const { activeCharacterId } = useOutletContext() || {};
   const { data, isLoading } = usePlayerWorldMap(activeCharacterId);
   const elements = useMemo(() => toCytoscapeElements(data), [data]);
-  const navigate = useNavigate();
-
-  // Travel is NAVIGATION, not editing. The read-only guards this component is
-  // built on stay exactly as they are: no link-drawing plugin, no mutation
-  // hook, no drag-end persist. Clicking a node asks GameShell to enter a world,
-  // which is the same call the auto-join and the doorway transition already
-  // make -- a second entry path that opened its own socket here is the
-  // two-loader shape that has shipped inert features in this project before.
-  const travelRef = useRef(null);
-  const inFlight = useRef(false);
-  travelRef.current = async (worldId) => {
-    // Guarded by a ref, not by state: the cytoscape handler is registered once
-    // against the instance and would close over the state value from the render
-    // that registered it, so a `useState` flag would read stale forever.
-    if (!enterWorld || inFlight.current) return;
-    inFlight.current = true;
-    try {
-      // Only navigate on success. The authority's join policy can refuse
-      // (unreachable world, character not yours), in which case enterWorld
-      // returns false having already raised the server's message as a toast --
-      // navigating anyway would land the player on a canvas that never
-      // received `joined` and looks frozen.
-      if (await enterWorld(worldId)) navigate('/game');
-    } finally {
-      inFlight.current = false;
-    }
-  };
-
-  // Registered on the cy instance once. Delegated by selector, so it keeps
-  // working across data refetches: cytoscape matches the selector at event
-  // time, against whatever elements are present then.
-  const cyRef = useRef(null);
-  const registerCy = useCallback((cy) => {
-    if (!cy || cyRef.current === cy) return;
-    cyRef.current = cy;
-    // The selector IS the gate on the client side: an unflagged or unvisited
-    // world carries travelable:'false' and no handler ever fires for it. The
-    // real gate is the server's -- see services/joinPolicy.js.
-    cy.on('tap', 'node[travelable = "true"]', (evt) => {
-      travelRef.current?.(evt.target.id());
-    });
-  }, []);
 
   let body;
   if (activeCharacterId == null) {
@@ -202,7 +162,6 @@ export default function PlayerWorldMap() {
         stylesheet={STYLESHEET}
         style={{ width: '100%', height: '100%' }}
         layout={{ name: 'preset' }}
-        cy={registerCy}
         userZoomingEnabled={true}
         userPanningEnabled={true}
         boxSelectionEnabled={false}
@@ -225,8 +184,9 @@ export default function PlayerWorldMap() {
           way out you have not taken yet.
         </Dim>
         <Dim>
-          A <TravelKey>green</TravelKey> world is somewhere you can travel to —
-          click it. Anywhere else you have to walk.
+          The <HereKey>yellow</HereKey> world is where you are now. This map is a
+          record, not a way to move: walk, take a doorway, or travel between
+          waypoints you have lit (press <code>T</code> in the game).
         </Dim>
       </Header>
       <CanvasCard>{body}</CanvasCard>
