@@ -152,3 +152,25 @@ test('mana drain returns the amount ACTUALLY drained, not the amount requested',
   assert.equal(drainMana(full, 10), 10);
   assert.equal(full.mana, 40);
 });
+
+// --- Task 2: mark provocation ---
+
+test('any landed hit marks the target provoked', () => {
+  const t_obj = { hp: 100, maxHp: 100 };
+  applyDamage(t_obj, 10, 'physical', NO_MITIGATION);
+  assert.equal(t_obj._provoked, true);
+});
+
+test('a hit fully absorbed by mitigation still provokes', () => {
+  // MIN_DAMAGE floors every hit at 1, so a landed swing always deals damage.
+  // If that floor is ever removed, being hit for zero must STILL provoke — a
+  // creature that ignores an attack it survived unharmed reads as broken.
+  const t_obj = { hp: 100, maxHp: 100 };
+  applyDamage(t_obj, 1, 'physical', { defense: 9999, resistances: {} });
+  assert.equal(t_obj._provoked, true);
+});
+
+test('a target nobody has hit is not provoked', () => {
+  const t_obj = { hp: 100, maxHp: 100 };
+  assert.notEqual(t_obj._provoked, true);
+});
