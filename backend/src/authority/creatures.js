@@ -1320,16 +1320,32 @@ class CreatureSim {
   // code — the tick's guard branch — does not go through this method, so a
   // guard's own strike on a hostile is untouched.
   meleeArcTargets(ox, oy, nx, ny, reach, arcWidth) {
-    const ids = [];
+    return this.meleeArcScan(ox, oy, nx, ny, reach, arcWidth).hit;
+  }
+
+  // SOMET-286: the same arc, split by whether the swing was allowed to land.
+  // `hit` is meleeArcTargets' list unchanged; `blocked` is what the swing
+  // physically reached but a rule refused it — today exactly the guards.
+  //
+  // ONE traversal and ONE geometry test produces both lists, so a swing can
+  // never report a block at a creature the arc did not actually reach, nor
+  // miss a block for one it did. A separate "which guards are in the arc"
+  // method would be a second copy of inArc + hasLineOfSight, free to drift
+  // from the copy that decides the damage.
+  //
+  // The immunity test moved AFTER the geometry (it used to short-circuit
+  // before it) purely so a blocked target is known to be in range; `hit` is
+  // unchanged either way, since both filters are conjunctive.
+  meleeArcScan(ox, oy, nx, ny, reach, arcWidth) {
+    const hit = [], blocked = [];
     for (const [id, c] of this.creatures) {
-      if (immuneToPlayerDamage(c)) continue;
       const cc = center(c);
       if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth)) continue;
       // Terrain blocks the swing, exactly as it blocks a projectile.
       if (!hasLineOfSight(this.map, ox, oy, cc.x, cc.y)) continue;
-      ids.push(id);
+      (immuneToPlayerDamage(c) ? blocked : hit).push(id);
     }
-    return ids;
+    return { hit, blocked };
   }
 
   // Melee arc: damage every creature whose center is within reach AND inside the

@@ -1788,8 +1788,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // drop roll stay authoritative.
       const { kills: killedByGuards } = entry.world.tickCreatures(dt, entry.activeChunks);
       for (const k of dedupeKillsById(killedByGuards)) onCreatureDeath(entry, k.id, k.killerUserId);
-      const { kills: killedByProjectiles, detonations, stoneHits } = entry.world.tickProjectiles(dt);
+      const {
+        kills: killedByProjectiles, detonations, stoneHits, blocks,
+      } = entry.world.tickProjectiles(dt);
       for (const k of dedupeKillsById(killedByProjectiles)) onCreatureDeath(entry, k.id, k.killerUserId);
+      // SOMET-286: a shot that passed through a guard. Blocks ARE impacts on
+      // the wire (see authority/vfx.js's blockedImpact), so they go onto the
+      // same stash a landed hit does and inherit its cap and its drain --
+      // there is no second frame key and no second lifetime.
+      pushImpacts(entry, blocks);
       // Magic Stones (SOMET-245) Task 7: a projectile's landed spell-stone
       // hit is only known HERE, at actual impact (see projectiles.js'
       // step()/`_detonate` -- world.js's attack() itself only spawns the

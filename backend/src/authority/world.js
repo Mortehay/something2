@@ -2,7 +2,7 @@ const { resolveMove } = require('./collision');
 const { CreatureSim, CREATURE_SIZE, shoveCreature } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
 const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
-const { resolveEffectName, momentForAttack } = require('./vfx.js');
+const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION } = require('./damage');
 const {
@@ -401,7 +401,14 @@ class World {
       if (staminaCost) p.stamina -= staminaCost;
       // Queried BEFORE applyMeleeArc, which deletes whatever it kills: after
       // the fact a one-shot kill would look like a miss.
-      const creatureTargets = this.creatures.meleeArcTargets(cx, cy, nx, ny, w.reach, w.arc_width);
+      // SOMET-286: one scan, two lists -- what the swing may damage, and what
+      // it physically reached but a rule refused (guards). `blocked` feeds the
+      // client's block cue ONLY; it deliberately touches neither the damage,
+      // the riders, the knockback nor `hit`, so the immunity itself is exactly
+      // as it was.
+      const {
+        hit: creatureTargets, blocked: blockedTargets,
+      } = this.creatures.meleeArcScan(cx, cy, nx, ny, w.reach, w.arc_width);
       // Slice C (SOMET-160): where each impact happened. Captured HERE, before
       // applyMeleeArc, for exactly the reason creatureTargets is -- a
       // one-shot kill removes the creature, and reading its position
@@ -412,6 +419,21 @@ class World {
       for (const id of creatureTargets) {
         const c = this.creatures.get(id);
         if (c) impactAt.push({ t: `c:${id}`, x: c.x + CREATURE_SIZE / 2, y: c.y + CREATURE_SIZE / 2 });
+      }
+      // SOMET-286: the refusal cue, one per guard the swing actually reached.
+      // Positioned on the GUARD, not the attacker, which is what separates it
+      // on screen from the weapon's `miss` flourish (drawn at the attacker's
+      // own centre, below) -- a swing at empty ground can never produce one of
+      // these, and that is precisely the distinction the player was missing.
+      // The aim vector rides along so the glint can face the attacker.
+      const blockedAt = [];
+      for (const id of blockedTargets) {
+        const c = this.creatures.get(id);
+        if (c) {
+          blockedAt.push(blockedImpact(
+            id, c.x + CREATURE_SIZE / 2, c.y + CREATURE_SIZE / 2, -nx, -ny,
+          ));
+        }
       }
       const killed = this.creatures.applyMeleeArc(
         cx, cy, nx, ny, w.reach, w.arc_width, weaponDamage(p, w), w.element, this.now, userId,
@@ -505,11 +527,18 @@ class World {
         // empty swing carries an EMPTY list, and server.js omits the key from
         // the frame entirely -- the same treatment detonations already get,
         // so a quiet tick costs no bytes.
-        impacts: impactAt.map((i) => ({
-          ...i,
-          v: resolveEffectName(w, 'impact'),
-          el: w.element || null,
-        })),
+        // SOMET-286: blocks are appended to the SAME list rather than given
+        // their own frame key -- see vfx.js's blockedImpact. They carry no
+        // `v`/`el`: the client draws them from a built-in def, so a missing or
+        // renamed vfx_effects row cannot silently take the cue away again.
+        impacts: [
+          ...impactAt.map((i) => ({
+            ...i,
+            v: resolveEffectName(w, 'impact'),
+            el: w.element || null,
+          })),
+          ...blockedAt,
+        ],
         stoneHit,
       };
     }
@@ -536,8 +565,9 @@ class World {
     return { kills: [], attacks: [], impacts: [], stoneHit: null };
   }
 
-  // Returns the whole step result — { kills, detonations } — so AoE blasts
-  // reach the broadcast. Returning only the kills (as this used to for ids)
+  // Returns the whole step result — { kills, detonations, stoneHits, blocks }
+  // — so AoE blasts (and SOMET-286's guard block cues) reach the broadcast.
+  // Returning only the kills (as this used to for ids)
   // would silently drop every detonation. ProjectileSim.step() already
   // builds `kills` as { id, killerUserId } objects, crediting each one to
   // the projectile's OWN `ownerId` (captured at spawn, in `world.js`'s
