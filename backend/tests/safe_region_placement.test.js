@@ -88,13 +88,25 @@ test('no packed creature lands within the safe road corridor either', () => {
   // placeCreaturePacks is the SECOND caller of creatureTileCandidates. A fix
   // applied to the scatter path alone would leave packs spawning on roads --
   // the two-write-paths failure this repo has shipped before (SOMET-153).
+  //
+  // Checks the same radius-2 neighbourhood the scatter test above checks, not
+  // merely the exact cell -- a weaker assertion here would let a pack member
+  // land one or two tiles off a road while the scatter test's stronger check
+  // caught the identical placement. Tightened for symmetry (fix wave, Minor
+  // 5): the stronger assertion already passed (12 packs, 0 violations), so
+  // this is not a bug fix, just closing the gap between the two tests.
   const world = { ...WORLD, safeRoadRadius: 2 };
   const roads = roadCells(world);
   const placed = placeCreaturePacks(world, [{ size: 6 }, { size: 6 }], TYPES, 4242);
   assert.ok(placed.length > 0, 'fixture placed nothing — this test would assert nothing');
   for (const c of placed) {
     const [row, col] = tileOf(c);
-    assert.ok(!roads.has(`${row},${col}`), `packed creature on road cell (${row},${col})`);
+    for (let dr = -2; dr <= 2; dr++) {
+      for (let dc = -2; dc <= 2; dc++) {
+        assert.ok(!roads.has(`${row + dr},${col + dc}`),
+          `packed creature at (${row},${col}) is within 2 tiles of road cell (${row + dr},${col + dc})`);
+      }
+    }
   }
 });
 

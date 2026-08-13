@@ -176,6 +176,19 @@ async function populateWorld(client, worldRow, { rngSeed }) {
   await client.query('UPDATE worlds SET creature_count = $1 WHERE id = $2',
     [scatter.length, worldRow.id]);
 
+  // creature_count never lies (it is written from what actually landed,
+  // above), but nothing previously said so out loud. A wide safe_road_radius
+  // or safe_rects can exhaust rejection sampling and ship a world well short
+  // of its tier -- see the measured table in
+  // migrations/1714440180000_world_safe_region.js -- and SOMET-289 will be
+  // tuning that radius with no other feedback loop. One line, matching the
+  // `join refused:` / `spawn: relocated character` style already used in
+  // authority/server.js.
+  if (scatter.length < density.scatterCount) {
+    console.warn('populateWorld: scatter under-delivered for world', worldRow.name,
+      `(requested ${density.scatterCount}, placed ${scatter.length})`);
+  }
+
   await insertCreatures(client, worldRow.id, [...scatter, ...packed]);
 
   return { scattered: scatter.length, packed: packed.length, total: scatter.length + packed.length };

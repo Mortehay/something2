@@ -24,6 +24,13 @@
 // rectangles because they are the same shape and the same question; a village's
 // WALL RING counts as inside, which is what we want -- a hostile spawned on a
 // wall tile would be stuck inside geometry.
+//
+// Exported (not just used internally) because mapService.js's
+// pointInVillageBox was a byte-for-byte duplicate of this same box test --
+// this repo already carries one duplicated geometry routine (resolveMove) as
+// a standing hazard, and a second copy is the same trap in a new costume.
+// mapService.js re-exports this under its existing name so no call site
+// (stampVillage, villageContaining, their tests) has to change.
 function inBox(gRow, gCol, b) {
   return gRow >= b.minRow && gRow <= b.minRow + b.height - 1
       && gCol >= b.minCol && gCol <= b.minCol + b.width - 1;
@@ -72,4 +79,4 @@ function isSafeTile(ctx, gRow, gCol) {
   return nearPathCell(ctx, gRow, gCol);
 }
 
-module.exports = { buildSafeContext, isSafeTile };
+module.exports = { buildSafeContext, isSafeTile, inBox };

@@ -58,10 +58,13 @@ function boxesOverlap(a, b) {
       && b.min_col <= a.min_col + a.width - 1;
 }
 
-// Widest safe corridor a spec may ask for. A radius wider than a village is
-// already generous, and at 8 a 64-tile world is mostly road; the DB carries the
-// same range as a CHECK constraint for anything that writes the column
-// directly.
+// Widest safe corridor a spec is allowed to ask for -- a BACKSTOP against an
+// absurd value, matching the DB's CHECK constraint, not authoring guidance.
+// Chebyshev dilation saturates fast against the real generator (default
+// pathCell 24, pathJitter 6): a 64-tile world is already ~40% safe at r=2 and
+// 92% safe at r=8. See the measured table and recommended range (1-3) in the
+// comment above the CHECK constraint in
+// migrations/1714440180000_world_safe_region.js.
 const MAX_SAFE_ROAD_RADIUS = 8;
 
 function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } = {}) {
@@ -172,8 +175,25 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     if (w.villages !== undefined && !Array.isArray(w.villages)) {
       errors.push(`world "${w.key}" villages must be an array (got ${typeof w.villages})`);
     }
+    // Same posture for the singular key: `village: null`, `village: false`,
+    // or a misspelled key must be REPORTED, not read by villagesOf's
+    // `w.village ? [w.village] : []` as "no village here" -- that is a
+    // village silently missing, the exact SOMET-153 failure class this
+    // branch already hardened the plural form against.
+    if (w.village !== undefined && (typeof w.village !== 'object' || w.village === null)) {
+      errors.push(`world "${w.key}" village must be an object (got ${JSON.stringify(w.village)})`);
+    }
     const villages = villagesOf(w);
     for (const v of villages) {
+      // A null/non-object entry inside an otherwise well-formed array (e.g.
+      // `villages: [null]`) must be REPORTED, not dereferenced -- `v.width`
+      // on null throws and aborts validateMapSpec entirely, hiding every
+      // other problem the rest of the spec has. Same posture as the
+      // container-level checks above.
+      if (!v || typeof v !== 'object') {
+        errors.push(`world "${w.key}" villages entry must be an object (got ${JSON.stringify(v)})`);
+        continue;
+      }
       if (!(v.width >= VILLAGE_LIMITS.minW && v.width <= VILLAGE_LIMITS.maxW)) {
         errors.push(`world "${w.key}" village width must be between 3 and 8 tiles`);
       }
@@ -202,6 +222,10 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     // wall. Cheap O(n^2) -- a world has single-digit villages.
     for (let i = 0; i < villages.length; i++) {
       for (let j = i + 1; j < villages.length; j++) {
+        // Already reported above as a malformed entry; skip rather than
+        // dereference a null/non-object village a second time here.
+        if (!villages[i] || typeof villages[i] !== 'object'
+          || !villages[j] || typeof villages[j] !== 'object') continue;
         if (boxesOverlap(villages[i], villages[j])) {
           errors.push(`world "${w.key}" villages overlap `
             + `(rows ${villages[i].min_row} and ${villages[j].min_row})`);
@@ -229,6 +253,14 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       errors.push(`world "${w.key}" safe_rects must be an array (got ${typeof w.safe_rects})`);
     }
     for (const s of Array.isArray(w.safe_rects) ? w.safe_rects : []) {
+      // A null/non-object entry (e.g. `safe_rects: [null]`) must be REPORTED,
+      // not dereferenced -- `s.min_row` on null throws and aborts
+      // validateMapSpec entirely, hiding every other problem the rest of the
+      // spec has. Same posture as the container-level check above.
+      if (!s || typeof s !== 'object') {
+        errors.push(`world "${w.key}" safe_rects entry must be an object (got ${JSON.stringify(s)})`);
+        continue;
+      }
       const bad = !Number.isInteger(s.min_row) || !Number.isInteger(s.min_col)
         || !Number.isInteger(s.width) || !Number.isInteger(s.height)
         || s.width < 1 || s.height < 1

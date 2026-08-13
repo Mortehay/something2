@@ -1,5 +1,11 @@
 const { rollCreatureLevel, scaleCreature } = require('./creatureLevel');
-const { buildSafeContext, isSafeTile } = require('./safeRegion');
+// inBox is re-exported below as pointInVillageBox: it used to be a
+// byte-for-byte duplicate of safeRegion.js's own box test, the same
+// duplicated-geometry trap this repo already carries once (resolveMove).
+// safeRegion.js imports nothing (see its header -- a require back into this
+// module would be a cycle), so the box test lives there and this module is
+// the one that imports it, never the reverse.
+const { buildSafeContext, isSafeTile, inBox: pointInVillageBox } = require('./safeRegion');
 
 // generateWFC() (a wave-function-collapse generator driven by
 // tile_types.valid_neighbors) was removed here as dead code (F-010 /
@@ -778,11 +784,6 @@ function isBoundedWorld(row) {
 // A village is a small walled rectangle stamped INSIDE a region (unlike
 // stampBounds, which walls the outer edge of the whole map). One edge carries
 // a centered single-tile gate gap. Pure overlay applied after bounds.
-
-function pointInVillageBox(gRow, gCol, v) {
-  return gRow >= v.minRow && gRow <= v.minRow + v.height - 1 &&
-         gCol >= v.minCol && gCol <= v.minCol + v.width - 1;
-}
 
 function villageContaining(gRow, gCol, villages) {
   if (!villages) return null;

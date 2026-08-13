@@ -480,3 +480,40 @@ test('a non-array safe_rects does not throw and is reported as invalid', () => {
   });
   assert.ok(errs.some((e) => /safe_rects must be an array/.test(e)), errs.join('\n'));
 });
+
+// Fix wave finding (Minor 2): a null entry INSIDE an otherwise well-formed
+// villages array threw `Cannot read properties of null (reading 'width')`
+// and aborted validateMapSpec entirely, despite the file's own comment
+// claiming this class was handled -- only the container was hardened.
+test('a null entry inside villages does not throw and is reported as invalid', () => {
+  let errs;
+  assert.doesNotThrow(() => {
+    errs = errorsFor((s) => { s.worlds[0].villages = [null]; });
+  });
+  assert.ok(errs.some((e) => /villages entry must be an object/.test(e)), errs.join('\n'));
+});
+
+// Fix wave finding (Minor 2): same TypeError shape for safe_rects, on
+// `s.min_row`.
+test('a null entry inside safe_rects does not throw and is reported as invalid', () => {
+  let errs;
+  assert.doesNotThrow(() => {
+    errs = errorsFor((s) => { s.worlds[0].safe_rects = [null]; });
+  });
+  assert.ok(errs.some((e) => /safe_rects entry must be an object/.test(e)), errs.join('\n'));
+});
+
+// Fix wave finding (Minor 3): `w.village ? [w.village] : []` reads
+// `village: null` (or `false`) as "no village here" -- zero errors, zero
+// villages, silently. That is the SOMET-153 failure class (a village that
+// quietly does not exist), for exactly the reason the sibling `villages:
+// {...}` check above already exists.
+test('village: null is rejected, not silently read as "no village"', () => {
+  const errs = errorsFor((s) => { s.worlds[0].village = null; });
+  assert.ok(errs.some((e) => /village must be an object/.test(e)), errs.join('\n'));
+});
+
+test('village: false is rejected the same way', () => {
+  const errs = errorsFor((s) => { s.worlds[0].village = false; });
+  assert.ok(errs.some((e) => /village must be an object/.test(e)), errs.join('\n'));
+});
