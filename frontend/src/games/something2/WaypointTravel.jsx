@@ -122,7 +122,9 @@ const Empty = styled.div`
 const WHY_TEXT = {
   [REASON.YOU_ARE_HERE]: 'you are here',
   [REASON.NOT_DISCOVERED]: 'not discovered',
-  [REASON.NOT_ON_A_WAYPOINT]: 'stand on a waypoint',
+  // The KEY keeps its name (SOMET-300 renames what a player reads, not the
+  // code); only the sentence changes.
+  [REASON.NOT_ON_A_WAYPOINT]: 'stand on a portal',
 };
 
 export const WAYPOINTS_ERROR_TOAST_ID = 'waypoint-travel-error';
@@ -138,7 +140,7 @@ function useWaypoints(characterId) {
         `${API_URL}/api/player/waypoints?character_id=${encodeURIComponent(characterId)}`,
         { headers: authHeaders() },
       );
-      if (!res.ok) throw new Error('Failed to load your waypoints');
+      if (!res.ok) throw new Error('Failed to load your portals');
       return res.json();
     },
   });
@@ -246,7 +248,7 @@ export default function WaypointTravel({ gameRef, characterId }) {
       // INSERT's rowCount) rather than on anything this client remembers -- a
       // relog would otherwise re-announce every waypoint walked over.
       if (msg && msg.firstTime && msg.waypoint) {
-        toast.success(`Waypoint discovered: ${msg.waypoint.name}`);
+        toast.success(`Portal discovered: ${msg.waypoint.name}`);
       }
     });
     return () => g.setOnWaypointActivated(null);
@@ -276,14 +278,14 @@ export default function WaypointTravel({ gameRef, characterId }) {
     <Backdrop onClick={() => setOpen(false)}>
       <Card onClick={(e) => e.stopPropagation()}>
         <CloseButton aria-label="Close travel" onClick={() => setOpen(false)}>×</CloseButton>
-        <h2>Travel</h2>
+        <h2>Portals</h2>
         <p className="sub">
           {standingOnActivated
-            ? 'Choose a waypoint you have lit.'
-            : 'Stand on a waypoint you have lit to travel from it.'}
+            ? 'Choose a portal you have lit.'
+            : 'Stand on a portal you have lit to travel from it.'}
         </p>
         {groups.length === 0 && (
-          <Empty>You have not found any waypoints yet. Walk onto one to light it.</Empty>
+          <Empty>You have not found any portals yet. Walk onto one to light it.</Empty>
         )}
         {groups.map((g) => (
           <div key={g.worldId}>
