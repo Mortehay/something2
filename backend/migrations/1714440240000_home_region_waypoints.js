@@ -1,13 +1,24 @@
 // SOMET-293 — the home region's three waypoints, moved into the live database.
 //
 // WHY A MIGRATION AND NOT A SEED RUN. `seed-map` is the normal way authored map
-// content reaches the database, and it is exactly what must NOT run here: it
-// converges a whole spec, and slice B's villages for Windwatch Pass and
-// Thornbriar Reach are in the live database but not yet in this branch's spec
-// files. A seed run from here would prune them. So the specs gain their
-// `waypoints` blocks (that is the canonical source, and what a later seed run
-// will reproduce) and the live rows are moved here, the same split
-// 1714440175000 used for the entry village.
+// content reaches a database, but it is a MANUAL operator command
+// (`make seed-map SPEC=<name>`), one spec at a time, that nothing in the deploy
+// path runs. A live database converges through migrations or it does not
+// converge at all. So the specs gain their `waypoints` blocks -- that is the
+// canonical source, and what a later seed run will reproduce -- and the live
+// rows are moved here. The same split 1714440175000 used for the entry village
+// and 1714440201000 used for slice B's villages, roads and pens.
+//
+// The hazard that made a seed run from THIS branch actively wrong before it was
+// merged with slice B: applyMapSpec re-asserts a world's authored columns
+// wholesale on every run (`authored_roads = EXCLUDED.authored_roads`,
+// `pens = EXCLUDED.pens`, from `w.roads ?? []`), so a spec file that had not yet
+// grown slice B's `roads` and `pens` blocks would have written `[]` over the
+// live ones. Villages were never the risk -- applyMapSpec creates them only when
+// a world has none and otherwise merely WARNS on a count mismatch; it has no
+// path that deletes one. Both specs now carry slice B's blocks, so that
+// particular regression is closed; the manual-command argument above is the one
+// that survives the merge and is the actual reason this file exists.
 //
 // WHY IT CALLS APPLICATION CODE. `upsertWaypoint` is the ONE writer for this
 // table -- it carries the per-tile and per-staircase clash pre-checks and the
