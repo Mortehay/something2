@@ -102,9 +102,15 @@ test('waypoint services', { skip: !url ? 'no database URL' : false }, async (t) 
   async function withFixture(tag, fn) {
     const worldA = `zzWpWorld${tag}A`;
     const worldB = `zzWpWorld${tag}B`;
+    // A THIRD world, because SOMET-300 caps a world at one waypoint
+    // (waypoints_world_unique). Cases that used to hold two rows in worldA now
+    // spread them across worlds -- the properties under test (pruning scope,
+    // activated vs unactivated in one list) are about SETS of waypoints, never
+    // about two sharing a map.
+    const worldC = `zzWpWorld${tag}C`;
     const username = `zzWpUser${tag}`;
     const cleanup = async () => {
-      await pool.query('DELETE FROM worlds WHERE name = ANY($1)', [[worldA, worldB]]);
+      await pool.query('DELETE FROM worlds WHERE name = ANY($1)', [[worldA, worldB, worldC]]);
       await pool.query('DELETE FROM users WHERE username = $1', [username]);
     };
     await cleanup();   // a previous crashed run must not wedge this one
@@ -114,12 +120,13 @@ test('waypoint services', { skip: !url ? 'no database URL' : false }, async (t) 
          VALUES ($1, '1', 8, 40, 40) RETURNING id`, [name])).rows[0].id;
       const a = await mk(worldA);
       const b = await mk(worldB);
+      const c = await mk(worldC);
       await pool.query(
         "INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'player')", [username]);
       const userId = (await pool.query(
         'SELECT id FROM users WHERE username = $1', [username])).rows[0].id;
       const character = await createCharacter(pool, userId, `zzWpChar${tag}`, warrior.id);
-      return await fn({ worldA: a, worldB: b, worldAName: worldA, worldBName: worldB, character });
+      return await fn({ worldA: a, worldB: b, worldC: c, worldAName: worldA, worldBName: worldB, worldCName: worldC, character });
     } finally {
       await cleanup();
     }
@@ -200,19 +207,20 @@ test('waypoint services', { skip: !url ? 'no database URL' : false }, async (t) 
   });
 
   await t.test('pruning removes what a spec no longer authors, and nothing else', async () => {
-    await withFixture('Prune', async ({ worldA, worldB }) => {
+    await withFixture('Prune', async ({ worldA, worldB, worldC }) => {
       const client = await pool.connect();
       try {
         await upsertWaypoint(client, { worldId: worldA, x: 150, y: 150, name: 'zzWpPrune Kept' });
-        await upsertWaypoint(client, { worldId: worldA, x: 550, y: 550, name: 'zzWpPrune Dropped' });
-        // Another spec's world: a prune scoped to worldA must not reach it.
-        await upsertWaypoint(client, { worldId: worldB, x: 150, y: 150, name: 'zzWpPrune Elsewhere' });
+        await upsertWaypoint(client, { worldId: worldB, x: 550, y: 550, name: 'zzWpPrune Dropped' });
+        // Another spec's world: a prune scoped to A and B must not reach it.
+        await upsertWaypoint(client, { worldId: worldC, x: 150, y: 150, name: 'zzWpPrune Elsewhere' });
 
-        const removed = await pruneWaypoints(client, [worldA], ['zzWpPrune Kept']);
+        const removed = await pruneWaypoints(client, [worldA, worldB], ['zzWpPrune Kept']);
         assert.deepEqual(removed, ['zzWpPrune Dropped']);
       } finally { client.release(); }
       assert.deepEqual((await fetchWaypoints(pool, worldA)).map((w) => w.name), ['zzWpPrune Kept']);
-      assert.deepEqual((await fetchWaypoints(pool, worldB)).map((w) => w.name), ['zzWpPrune Elsewhere']);
+      assert.deepEqual((await fetchWaypoints(pool, worldB)).map((w) => w.name), []);
+      assert.deepEqual((await fetchWaypoints(pool, worldC)).map((w) => w.name), ['zzWpPrune Elsewhere']);
     });
   });
 
@@ -238,14 +246,18 @@ test('waypoint services', { skip: !url ? 'no database URL' : false }, async (t) 
   });
 
   await t.test('the list carries activated AND visited-but-unactivated waypoints', async () => {
-    await withFixture('List', async ({ worldA, worldAName, character }) => {
+    await withFixture('List', async ({ worldA, worldB, worldAName, character }) => {
       const client = await pool.connect();
       let lit; let dark;
       try {
         ({ id: lit } = await upsertWaypoint(client, { worldId: worldA, x: 250, y: 250, name: 'zzWpList Lit' }));
-        ({ id: dark } = await upsertWaypoint(client, { worldId: worldA, x: 950, y: 950, name: 'zzWpList Dark' }));
+        // In a DIFFERENT world now (one per map). The property is that ONE call
+        // returns both states across the worlds a character has visited, which
+        // is what the popup needs -- not that two can share a map.
+        ({ id: dark } = await upsertWaypoint(client, { worldId: worldB, x: 950, y: 950, name: 'zzWpList Dark' }));
       } finally { client.release(); }
       await recordVisit(pool, character.id, worldA);
+      await recordVisit(pool, character.id, worldB);
       await activateWaypoint(pool, character.id, lit);
 
       const rows = await listWaypointsForCharacter(pool, character.id);

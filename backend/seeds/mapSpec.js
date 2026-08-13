@@ -187,6 +187,19 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
   const waypointNames = new Set();
   const waypointTiles = new Set();
 
+  // How many travel landmarks each world ends up with, across BOTH authoring
+  // routes -- the standalone `waypoints` array and an `is_waypoint: true` portal
+  // link departing from that world (SOMET-300). Reported after both loops,
+  // because a world's total is not known until the links have been walked.
+  //
+  // Backed by waypoints_world_unique in the database. Two enforcement points on
+  // purpose: this one names the offending world at seed time, the index binds
+  // every other writer.
+  const waypointsPerWorld = new Map();
+  function countWaypoint(worldKey, n = 1) {
+    if (n > 0) waypointsPerWorld.set(worldKey, (waypointsPerWorld.get(worldKey) || 0) + n);
+  }
+
   // Shared by the world loop (standalone waypoints) and the link loop
   // (portal-backed ones) so the two authoring routes cannot enforce different
   // rules -- which is exactly how one of them ends up being the loose one.
@@ -514,6 +527,16 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       if (!Array.isArray(w.waypoints)) {
         errors.push(`world "${w.key}" waypoints must be an array`);
       } else {
+        // AT MOST ONE PER WORLD (SOMET-300) -- counted in waypointsPerWorld and
+        // reported after the link loop, NOT here.
+        //
+        // A world can acquire a waypoint by TWO routes: this standalone array,
+        // and an `is_waypoint: true` portal link departing from it. Counting only
+        // this one would let a spec declare a stone here and flag a staircase in
+        // the same world, which is two landmarks on one map and exactly what the
+        // ticket removes. The database index caught that gap while this comment's
+        // first version was still counting one route.
+        countWaypoint(w.key, w.waypoints.length);
         for (const [i, wp] of w.waypoints.entries()) {
           if (!wp || typeof wp !== 'object') {
             errors.push(`world "${w.key}" waypoint ${i} must be an object`);
@@ -619,6 +642,8 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       // checkWaypoint carries the guarded-staircase rejection, so a link that
       // guards itself is caught here without this branch restating the rule.
       if (l.is_waypoint === true) {
+        // The SECOND authoring route into waypointsPerWorld (SOMET-300).
+        countWaypoint(l.from);
         checkWaypoint({
           worldKey: l.from, x: l.from_x, y: l.from_y, name: l.waypoint_name, world: from,
           label: `portal link ${l.from}->${l.to} waypoint`,
@@ -683,6 +708,17 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     }
     for (const w of worlds) {
       if (!seen.has(w.key)) errors.push(`world "${w.key}" is unreachable from the entry`);
+    }
+  }
+
+  // The one-per-world ceiling, after both routes have been counted. Sorted so
+  // the message order is a property of the spec rather than of Map insertion.
+  for (const [worldKey, n] of [...waypointsPerWorld.entries()].sort()) {
+    if (n > 1) {
+      errors.push(`world "${worldKey}" declares ${n} waypoints — a world may hold at most `
+        + 'one, since a portal is the single travel landmark of its map. Count includes '
+        + 'both a standalone `waypoints` entry and any portal link flagged is_waypoint '
+        + 'departing from this world.');
     }
   }
 
