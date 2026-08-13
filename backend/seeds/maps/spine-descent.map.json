@@ -6,138 +6,393 @@
       "key": "entry",
       "name": "Old Trailhead",
       "allows_fast_travel": true,
-      "grid": [0, 0],
+      "grid": [
+        0,
+        0
+      ],
       "seed": 1001,
-      "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Meadow"], "biome_cell": 16,
-      "allowed_creature_types": ["Slime"],
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Meadow"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Slime"
+      ],
       "is_entry": true,
-      "entry_spawn": { "x": 3150, "y": 3250 },
+      "entry_spawn": {
+        "x": 3150,
+        "y": 3250
+      },
       "village": {
-        "min_row": 31, "min_col": 30, "width": 6, "height": 4,
-        "gate_edge": "S", "spawn_x": 3150, "spawn_y": 3250
+        "min_row": 31,
+        "min_col": 30,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "S",
+        "spawn_x": 3150,
+        "spawn_y": 3250
       },
       "safe_road_radius": 2,
       "roads": [
-        [[32, 1], [32, 27], [37, 27], [37, 39], [32, 39], [32, 62]],
-        [[35, 33], [37, 33]]
+        [
+          [
+            32,
+            1
+          ],
+          [
+            32,
+            27
+          ],
+          [
+            37,
+            27
+          ],
+          [
+            37,
+            39
+          ],
+          [
+            32,
+            39
+          ],
+          [
+            32,
+            62
+          ]
+        ],
+        [
+          [
+            35,
+            33
+          ],
+          [
+            37,
+            33
+          ]
+        ]
       ],
       "pens": [
-        { "min_row": 12, "min_col": 33, "width": 6, "height": 5,
-          "creature_type": "Beast Swarm", "count": 5, "level": 1 },
-        { "min_row": 36, "min_col": 15, "width": 6, "height": 5,
-          "creature_type": "Woodland Swarm", "count": 5, "level": 1 }
+        {
+          "min_row": 12,
+          "min_col": 33,
+          "width": 6,
+          "height": 5,
+          "creature_type": "Beast Swarm",
+          "count": 5,
+          "level": 1
+        },
+        {
+          "min_row": 36,
+          "min_col": 15,
+          "width": 6,
+          "height": 5,
+          "creature_type": "Woodland Swarm",
+          "count": 5,
+          "level": 1
+        }
       ],
-      "level_band": [1, 2],
-      "waypoints": [{ "x": 3250, "y": 3250, "name": "Old Trailhead Commons" }]
+      "level_band": [
+        1,
+        2
+      ],
+      "waypoints": [
+        {
+          "x": 3250,
+          "y": 3250,
+          "name": "Old Trailhead Commons"
+        }
+      ]
     },
     {
       "key": "pass",
       "name": "Windwatch Pass",
       "allows_fast_travel": true,
-      "grid": [1, 0],
+      "grid": [
+        1,
+        0
+      ],
       "seed": 1002,
-      "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Meadow", "Highlands"], "biome_cell": 16,
-      "allowed_creature_types": ["Slime", "Bat"],
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Meadow",
+        "Highlands"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Slime",
+        "Bat"
+      ],
       "is_entry": false,
       "village": {
-        "min_row": 24, "min_col": 38, "width": 6, "height": 4,
-        "gate_edge": "S", "spawn_x": 3950, "spawn_y": 2550
+        "min_row": 24,
+        "min_col": 38,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "S",
+        "spawn_x": 3950,
+        "spawn_y": 2550
       },
       "safe_road_radius": 2,
       "roads": [
-        [[32, 1], [32, 62]],
-        [[1, 32], [62, 32]],
-        [[28, 41], [32, 41]]
+        [
+          [
+            32,
+            1
+          ],
+          [
+            32,
+            62
+          ]
+        ],
+        [
+          [
+            1,
+            32
+          ],
+          [
+            62,
+            32
+          ]
+        ],
+        [
+          [
+            28,
+            41
+          ],
+          [
+            32,
+            41
+          ]
+        ]
       ],
       "pens": [
-        { "min_row": 10, "min_col": 36, "width": 6, "height": 5,
-          "creature_type": "Beast Swarm", "count": 5, "level": 2 }
+        {
+          "min_row": 10,
+          "min_col": 36,
+          "width": 6,
+          "height": 5,
+          "creature_type": "Beast Swarm",
+          "count": 5,
+          "level": 2
+        }
       ],
-      "level_band": [2, 4],
-      "waypoints": [{ "x": 4050, "y": 2550, "name": "Windwatch Waystone" }]
+      "level_band": [
+        2,
+        4
+      ],
+      "waypoints": [
+        {
+          "x": 4050,
+          "y": 2550,
+          "name": "Windwatch Waystone"
+        }
+      ]
     },
     {
       "key": "cache",
       "name": "Hollow Cache",
       "allows_fast_travel": true,
-      "grid": [1, -1],
+      "grid": [
+        1,
+        -1
+      ],
       "seed": 1003,
-      "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Cavern"], "biome_cell": 16,
-      "allowed_creature_types": ["Bat"],
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Bat"
+      ],
       "is_entry": false,
-      "level_band": [3, 5]
+      "level_band": [
+        3,
+        5
+      ]
     },
     {
       "key": "elite",
       "name": "Ashfang Den",
       "allows_fast_travel": true,
-      "grid": [1, 1],
+      "grid": [
+        1,
+        1
+      ],
       "seed": 1004,
-      "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Emberdepths"], "biome_cell": 16,
-      "allowed_creature_types": ["Skeleton"],
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Skeleton"
+      ],
       "is_entry": false,
-      "level_band": [4, 6]
+      "level_band": [
+        4,
+        6
+      ]
     },
     {
       "key": "gorge",
       "name": "Shrikewind Gorge",
       "allows_fast_travel": true,
-      "grid": [2, 0],
+      "grid": [
+        2,
+        0
+      ],
       "seed": 1005,
-      "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Cavern", "Crystal Hollows"], "biome_cell": 16,
-      "allowed_creature_types": ["Bat", "Skeleton"],
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Crystal Hollows"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Bat",
+        "Skeleton"
+      ],
       "is_entry": false,
-      "level_band": [4, 6]
+      "level_band": [
+        4,
+        6
+      ]
     },
     {
       "key": "shrine",
       "name": "Frostbound Shrine",
       "allows_fast_travel": true,
-      "grid": [2, 1],
+      "grid": [
+        2,
+        1
+      ],
       "seed": 1006,
-      "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Frostvault"], "biome_cell": 16,
-      "allowed_creature_types": ["Skeleton"],
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Skeleton"
+      ],
       "is_entry": false,
-      "level_band": [6, 9]
+      "level_band": [
+        6,
+        9
+      ]
     },
     {
       "key": "deep",
       "name": "The Deep Cut",
       "allows_fast_travel": true,
-      "grid": [3, 0],
+      "grid": [
+        3,
+        0
+      ],
       "seed": 1007,
-      "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Umbral Warren", "Cavern"], "biome_cell": 16,
-      "allowed_creature_types": ["Bat", "Skeleton"],
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Umbral Warren",
+        "Cavern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Bat",
+        "Skeleton"
+      ],
       "is_entry": false,
-      "level_band": [6, 9]
+      "level_band": [
+        6,
+        9
+      ]
     },
     {
       "key": "end",
       "name": "Glacier's End",
       "allows_fast_travel": true,
-      "grid": [4, 0],
+      "grid": [
+        4,
+        0
+      ],
       "seed": 1008,
-      "width": 64, "height": 64, "chunk_size": 32,
-      "biomes": ["Frostvault", "Abyssal Rift"], "biome_cell": 16,
-      "allowed_creature_types": ["Skeleton"],
+      "width": 64,
+      "height": 64,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault",
+        "Abyssal Rift"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Skeleton"
+      ],
       "is_entry": false,
-      "level_band": [9, 12]
+      "level_band": [
+        9,
+        12
+      ]
     }
   ],
   "links": [
-    { "from": "entry", "edge": "E", "to": "pass" },
-    { "from": "pass", "edge": "N", "to": "cache" },
-    { "from": "pass", "edge": "S", "to": "elite" },
-    { "from": "pass", "edge": "E", "to": "gorge" },
-    { "from": "gorge", "edge": "S", "to": "shrine" },
-    { "from": "gorge", "edge": "E", "to": "deep" },
-    { "from": "deep", "edge": "E", "to": "end" }
+    {
+      "from": "entry",
+      "edge": "E",
+      "to": "pass"
+    },
+    {
+      "from": "pass",
+      "edge": "N",
+      "to": "cache"
+    },
+    {
+      "from": "pass",
+      "edge": "S",
+      "to": "elite"
+    },
+    {
+      "from": "pass",
+      "edge": "E",
+      "to": "gorge"
+    },
+    {
+      "from": "gorge",
+      "edge": "S",
+      "to": "shrine"
+    },
+    {
+      "from": "gorge",
+      "edge": "E",
+      "to": "deep"
+    },
+    {
+      "from": "deep",
+      "edge": "E",
+      "to": "end"
+    },
+    {
+      "kind": "portal",
+      "from": "entry",
+      "from_x": 3550,
+      "from_y": 3650,
+      "to": "pass",
+      "to_x": 3950,
+      "to_y": 2950
+    }
   ]
 }
