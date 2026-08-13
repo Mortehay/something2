@@ -23,7 +23,12 @@ describe('WaypointTravel', () => {
     // selectable" for itself would be a second copy of the rule, free to be
     // looser than the one waypointTravel.test.js pins -- and looser is exactly
     // the direction that matters, since the tested copy is the strict one.
-    expect(source).toMatch(/buildTravelList/);
+    // The CALL, with its result destructured -- not the bare name, which the
+    // import line at the top of the file satisfies on its own. That version of
+    // this assertion was green against a component that imported the module and
+    // then ignored it, which is the whole failure it was written to catch.
+    expect(source).toMatch(/=\s*buildTravelList\(\{/);
+    expect(source).toMatch(/\bstandingOnActivated\b[\s\S]{0,80}=\s*buildTravelList\(/);
     expect(source).not.toMatch(/activated &&|\.activated ===/);
   });
 
@@ -32,7 +37,12 @@ describe('WaypointTravel', () => {
     // `transition` frame a doorway sends and GameShell already routes that to
     // enterWorld; a second entry path here is the two-loader shape that has
     // shipped inert features in this project before.
-    expect(source).toMatch(/travelToWaypoint/);
+    // The invocation on the game object, not the bare name -- this file's own
+    // header comment above mentions `Game.travelToWaypoint`, so the loose
+    // version of this assertion passed on prose. The negatives below are the
+    // load-bearing half and were always sound; this makes the positive carry its
+    // own weight rather than borrowing theirs.
+    expect(source).toMatch(/\bg\.travelToWaypoint\(\s*waypointId\s*\)/);
     expect(source).not.toMatch(/WorldAuthorityClient|initChunked|new WebSocket|enterWorld/);
   });
 
