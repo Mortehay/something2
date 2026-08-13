@@ -3,7 +3,7 @@
 // players (never the owner). Ranged and magic share this one path; they differ
 // only by weapon data.
 
-const { resolveEffectName } = require('./vfx.js');
+const { resolveEffectName, blockedImpact } = require('./vfx.js');
 const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
 const { hasLineOfSight } = require('./weapons');
 const { applyElementEffect } = require('./effects');
@@ -53,6 +53,30 @@ function projectileHitsCreature(p, creature) {
   if (p.ownerId === creature.id) return false;        // never its own shooter
   const targetFaction = creature.faction || 'hostile';
   return p.ownerFaction !== targetFaction;            // never same faction
+}
+
+// SOMET-286: of everything projectileHitsCreature refuses, only ONE case is a
+// refusal the shooter deserves to see -- a PLAYER's shot passing through a
+// guard. The others (a shot meeting its own shooter, a hostile's shot meeting
+// another hostile) are ordinary targeting that no player is aiming at and that
+// would produce a shield glint on every creature a stray arrow flew past.
+//
+// Keyed on the same immuneToPlayerDamage predicate the refusal itself is, so
+// the cue and the rule cannot disagree about who is a guard.
+function projectileBlockedBy(p, creature) {
+  return p.ownerKind !== 'creature' && immuneToPlayerDamage(creature);
+}
+
+// One block cue per (projectile, guard), tracked in the SAME hitIds set a
+// landed hit uses -- under a distinct `b:` prefix so a guard can never
+// collide with a real hit's `c:` key. Without this a piercing shot, or an
+// AoE that both passes through a guard and detonates next to it, would stack
+// several glints on one target for one shot.
+function recordBlock(p, c, x, y, nx, ny, blocks) {
+  const key = `b:${c.id}`;
+  if (p.hitIds.has(key)) return;
+  p.hitIds.add(key);
+  blocks.push(blockedImpact(c.id, x, y, nx, ny));
 }
 
 function projectileHitsPlayer(p, player) {
@@ -163,15 +187,27 @@ class ProjectileSim {
   // target caught in the blast, matching the direct-hit branches in step()
   // below rather than a single flat award per detonation regardless of how
   // many targets it actually caught.
-  _detonate(p, bx, by, { creatureList, creatures, players, map, now }, kills, stoneHits) {
+  _detonate(p, bx, by, { creatureList, creatures, players, map, now }, kills, stoneHits, blocks) {
     const r = p.aoeRadius;
     for (const c of creatureList) {
-      if (!projectileHitsCreature(p, c)) continue;
+      const hits = projectileHitsCreature(p, c);
+      // SOMET-286: a guard runs the SAME falloff-radius and line-of-sight
+      // tests a damageable target does, so the block cue appears exactly where
+      // the blast would have hurt it -- one geometry, two outcomes. A guard
+      // outside the radius, or behind a wall from the blast point, produces
+      // nothing, same as it takes nothing.
+      if (!hits && !projectileBlockedBy(p, c)) continue;
       const half = c.width / 2;
       const cx = c.x + half, cy = c.y + c.height / 2;
       const d = Math.hypot(cx - bx, cy - by);
       if (d >= r) continue;
       if (!hasLineOfSight(map, bx, by, cx, cy)) continue;
+      if (!hits) {
+        // Facing the blast, the way the shove already radiates from it.
+        const len = d || 1;
+        recordBlock(p, c, cx, cy, (bx - cx) / len, (by - cy) / len, blocks);
+        continue;
+      }
       // Falloff scales the RAW damage; the creature's own defense and
       // resistances are applied on top, inside damageCreatureById.
       if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r), p.element, now)) {
@@ -246,6 +282,14 @@ class ProjectileSim {
     // (direct or via _detonate), returned from step() for the caller
     // (world.js's tickProjectiles -> server.js) to award XP against.
     const stoneHits = [];
+    // SOMET-286: one entry per (player's shot, guard it passed through) --
+    // impact-shaped descriptors the caller pushes onto the same frame stash
+    // player-melee blocks use. Accumulated here, next to `kills`, because this
+    // is the only place that knows a shot actually reached a guard: the shot
+    // is NOT stopped by one (a guard that body-blocked arrows aimed at the
+    // hostile behind it would be a new gameplay rule, not a legibility fix),
+    // so nothing downstream could reconstruct the moment.
+    const blocks = [];
     const creatureList = creatures.all(); // hoisted: creatures don't move during this step
     const ctx = { creatureList, creatures, players, map, now };
     for (const p of this.projectiles) {
@@ -262,13 +306,27 @@ class ProjectileSim {
 
         // Terrain: walls stop projectiles.
         if (!map.isWalkable(p.x, p.y)) {
-          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits));
+          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits, blocks));
           dead = true; break;
         }
 
         // Creatures.
         for (const c of creatureList) {
-          if (!projectileHitsCreature(p, c)) continue;
+          if (!projectileHitsCreature(p, c)) {
+            // SOMET-286: a guard the shot flew THROUGH. Tested with the same
+            // swept capture radius a real hit uses, on the same sub-step, so
+            // the cue fires exactly when the arrow would have connected --
+            // and never for a guard the shot merely passed near.
+            if (projectileBlockedBy(p, c)) {
+              const bhalf = c.width / 2;
+              const brr = p.radius + bhalf;
+              const bcx = c.x + bhalf, bcy = c.y + c.height / 2;
+              if (dist2(p.x, p.y, bcx, bcy) <= brr * brr) {
+                recordBlock(p, c, bcx, bcy, -ux, -uy, blocks);
+              }
+            }
+            continue;
+          }
           const key = `c:${c.id}`;
           if (p.hitIds.has(key)) continue;
           const half = c.width / 2;
@@ -276,7 +334,7 @@ class ProjectileSim {
           const rr = p.radius + half;
           if (dist2(p.x, p.y, cx, cy) <= rr * rr) {
             if (p.aoeRadius) {
-              detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits));
+              detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits, blocks));
               dead = true; break;
             }
             p.hitIds.add(key);
@@ -314,7 +372,7 @@ class ProjectileSim {
           const rr = p.radius + half;
           if (dist2(p.x, p.y, px, py) <= rr * rr) {
             if (p.aoeRadius) {
-              detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits));
+              detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits, blocks));
               dead = true; break;
             }
             p.hitIds.add(key);
@@ -333,7 +391,7 @@ class ProjectileSim {
         // Out of range counts as an impact: a fireball that reaches the end of
         // its flight without touching anything still explodes.
         if (p.remaining <= 0) {
-          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits));
+          if (p.aoeRadius) detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits, blocks));
           dead = true; break;
         }
       }
@@ -341,7 +399,7 @@ class ProjectileSim {
       if (!dead) survivors.push(p);
     }
     this.projectiles = survivors;
-    return { kills, detonations, stoneHits };
+    return { kills, detonations, stoneHits, blocks };
   }
 
   snapshot() {

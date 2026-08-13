@@ -27,6 +27,26 @@ function duration(def) {
   return Number.isFinite(d) && d > 0 ? d : DEFAULT_DURATION_MS;
 }
 
+// SOMET-286 — the cue for an attack a RULE refused (today: a village guard,
+// which no player damage can reach). A shield glint on the target, drawn by
+// RenderSystem's `block` shape.
+//
+// Built in, NOT a vfx_effects row, and that is the point. Every other effect
+// here is weapon or creature flavour, deliberately admin-authorable, and
+// deliberately degrades to nothing when the row it names is renamed or deleted
+// (see addEffects below). A refusal cannot afford that failure mode: dropping
+// it puts the player back in front of the exact bug this ticket fixes — an
+// attack on a guard that looks identical to a swing at empty ground. Nothing
+// an admin edits can take this cue away.
+//
+// `shape: "block"` is therefore a CLIENT-ONLY shape name, outside the
+// vfx_effects CHECK constraint's vocabulary on purpose: no authored row can
+// name it, and no authored row needs to.
+export const BLOCK_EFFECT_DEF = {
+  name: "guard_block", shape: "block", color: "#ffd67a", width: 3,
+  duration_ms: 380, ease: "out", fade: true,
+};
+
 // Append this tick's attacks. Each is stamped with its ARRIVAL time (not a
 // server timestamp): arrival is the only clock both ends agree on without
 // clock sync, the same reasoning addBlasts documents.
@@ -39,7 +59,10 @@ export function addEffects(list, events, nowMs, defs) {
   if (!Array.isArray(events)) return list;
   for (const e of events) {
     if (!e || !Number.isFinite(e.x) || !Number.isFinite(e.y)) continue;
-    const def = e.v && defs ? defs[e.v] : null;
+    // SOMET-286: `b` means "this attack was refused". It resolves to the
+    // built-in def above WITHOUT consulting the library, so the cue survives
+    // an empty or mis-migrated effect library — see BLOCK_EFFECT_DEF.
+    const def = e.b === true ? BLOCK_EFFECT_DEF : (e.v && defs ? defs[e.v] : null);
     if (!def) continue;
     let nx = Number.isFinite(e.nx) ? e.nx : 0;
     let ny = Number.isFinite(e.ny) ? e.ny : 0;
