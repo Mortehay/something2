@@ -1,4 +1,5 @@
 const { rollCreatureLevel, scaleCreature } = require('./creatureLevel');
+const { buildSafeContext, isSafeTile } = require('./safeRegion');
 
 // generateWFC() (a wave-function-collapse generator driven by
 // tile_types.valid_neighbors) was removed here as dead code (F-010 /
@@ -521,6 +522,36 @@ const CREATURE_BASE_DAMAGE = 5;
 // this repo already carries one byte-for-byte duplicated movement routine as
 // a standing hazard.
 //
+// One safe context per generation config (SOMET-288).
+//
+// Keyed on the cfg OBJECT, not on a world id: worldConfig() returns a fresh
+// object per call and both placers call it exactly once at the top of a run, so
+// this computes the whole map's road cells ONCE per placement run rather than
+// once per rejection-sampling attempt -- of which there are up to 40 per
+// creature. A WeakMap rather than a field on cfg so nothing observable is
+// mutated and the entry dies with the config.
+//
+// The pathCells sweep is skipped entirely at radius 0, which is every world
+// that has not opted in: an opted-out world must not pay for a feature it does
+// not use, and collectPathCells over a whole map is not free.
+const SAFE_CTX = new WeakMap();
+
+function safeContextFor(cfg) {
+  const hit = SAFE_CTX.get(cfg);
+  if (hit) return hit;
+  const radius = Number(cfg.safeRoadRadius) || 0;
+  const ctx = buildSafeContext({
+    villages: cfg.villages,
+    pathCells: radius > 0 && cfg.bounds
+      ? collectPathCells(cfg, 0, 0, cfg.bounds.height, cfg.bounds.width)
+      : new Set(),
+    safeRoadRadius: radius,
+    safeRects: cfg.safeRects,
+  });
+  SAFE_CTX.set(cfg, ctx);
+  return ctx;
+}
+
 // Returns the creature types the local biome admits here, or null if no
 // creature may stand on this tile at all. The world's allowlist stays
 // authoritative -- a biome can only REMOVE candidates from it, never add one.
@@ -530,7 +561,14 @@ function creatureTileCandidates(world, cfg, gRow, gCol, allowedTypes) {
   if (name === wallTile || name === doorwayTile) return null;
   const def = world.tileTypes && world.tileTypes[name];
   if (def && def.walkable === false) return null;
-  if (villageContaining(gRow, gCol, cfg.villages)) return null;
+  // SOMET-288. Subsumes the village check that used to stand here: a village
+  // box is one of the three things isSafeTile calls safe, alongside the road
+  // corridor and any authored rectangle. THIS is the single chokepoint --
+  // placeMapCreatures, placeCreaturePacks, seeding via applyMapSpec and the
+  // admin re-roll route all reach hostile placement through this function and
+  // nowhere else, so the rule cannot be half-applied the way SOMET-153's
+  // village geometry rule was.
+  if (isSafeTile(safeContextFor(cfg), gRow, gCol)) return null;
   const region = sampleBiomeRegion(cfg, gRow, gCol);
   const candidates = region
     ? allowedTypes.filter((t) => region.creatureTypes.includes(t.name))
