@@ -99,6 +99,7 @@ const progressionRoutes = require('./api/progressionRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const { ownedCharacter } = require('./services/characters.js');
 const { listVisited } = require('./services/visitedWorlds.js');
+const { listWaypointsForCharacter } = require('./services/waypoints.js');
 const { setEntryWorld } = require('./services/entryWorld.js');
 // Single admin guard applied to every mutating admin route below.
 const adminGuard = requireAdmin(guardPool);
@@ -436,6 +437,45 @@ app.get('/api/player/world-map', playerGuard, async (req, res) => {
   } catch (err) {
     console.error('player world map failed:', err);
     res.status(500).json({ error: 'failed to load world map' });
+  }
+});
+
+// The player's waypoint network (SOMET-292). Read-only, and the payload slice F
+// builds the travel popup from.
+//
+// BOTH STATES IN ONE LIST. Activated waypoints are travel targets; ones the
+// character knows about but has not stood on are rendered distinctly and are not
+// selectable. A list that only carried the activated half would make the second
+// half of that UI unbuildable, so `activated` is a field rather than a filter.
+//
+// Fog of war is applied IN THE QUERY (see listWaypointsForCharacter), not here
+// and not in the component, for the same reason /api/player/world-map withholds
+// an unvisited neighbour's name in SQL: a filter applied after the response is
+// built still ships the data to the browser.
+//
+// This endpoint does NOT authorize travel and must never grow into doing so.
+// Slice F's `waypoint-travel` leg belongs in joinPolicy.mayJoin, checked against
+// character_waypoints at join time -- a client that was told about a waypoint
+// here is not a client that may join its world.
+app.get('/api/player/waypoints', playerGuard, async (req, res) => {
+  try {
+    const requested = req.query.character_id;
+    // 400, not an empty list: waypoints are per character and a caller with no
+    // character has asked a question with no answer. Matches
+    // /api/player/world-map, whose payload is per character for the same reason.
+    if (requested === undefined || requested === '') {
+      return res.status(400).json({ error: 'character_id required' });
+    }
+    // Scoped by req.user.id inside the same statement. 403 for both "not yours"
+    // and "does not exist" -- a 404 for the second would make this an oracle for
+    // which character ids are real.
+    const character = await ownedCharacter(pool, req.user.id, requested);
+    if (!character) return res.status(403).json({ error: 'forbidden' });
+
+    res.json({ waypoints: await listWaypointsForCharacter(pool, character.id) });
+  } catch (err) {
+    console.error('player waypoints failed:', err);
+    res.status(500).json({ error: 'failed to load waypoints' });
   }
 });
 
