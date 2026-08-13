@@ -63,11 +63,14 @@ test('every table with an ON DELETE CASCADE FK to worlds is named in CASCADES', 
   // times, that CASCADES had not been told. The second time it caught it
   // across a MERGE: the chests branch added the table, this branch owns the
   // list, and the two never touch the same line so git merged them cleanly.
+  // Third time: `waypoints` in SOMET-292 -- and that one drags
+  // character_waypoints down with it in turn, which is player progress rather
+  // than map data.
   assert.deepEqual(
     [...found].sort(),
     ['character_visited_worlds', 'map_links', 'merchant_stock', 'player_binds',
-     'villages', 'world_chests', 'world_chunks', 'world_creatures', 'world_items',
-     'world_players'].sort(),
+     'villages', 'waypoints', 'world_chests', 'world_chunks', 'world_creatures',
+     'world_items', 'world_players'].sort(),
   );
 
   for (const table of found) {

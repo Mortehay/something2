@@ -111,7 +111,10 @@ test('applying a spec twice produces identical rows', async (t) => {
       // proves the non-empty path actually places rows.
       assert.deepEqual(
         result,
-        { worlds: 2, links: 1, villages: 1, portalGuards: 0, creatures: 0, vaultChests: 0 },
+        // waypoints is 0 for the same reason creatures is: this spec authors
+        // none, so the counter must report the applier ran the waypoint pass
+        // and found nothing -- not that the pass is missing (SOMET-292).
+        { worlds: 2, links: 1, villages: 1, portalGuards: 0, creatures: 0, vaultChests: 0, waypoints: 0 },
         'applyMapSpec must report exactly what it wrote, not just resolve');
 
       // Correctness rule 3: is_entry must actually be set on the spec's
