@@ -56,7 +56,7 @@ test('creature_behaviors seeding', { skip: !url ? 'no database URL' : false }, a
   await t.test('every chase style value has at least one profile using it', async () => {
     const r = await pool.query('SELECT DISTINCT chase_style FROM creature_behaviors');
     const styles = r.rows.map((x) => x.chase_style).sort();
-    assert.deepEqual(styles, ['ambush', 'charge', 'guard', 'hold', 'kite', 'skirmish']);
+    assert.deepEqual(styles, ['ambush', 'charge', 'guard', 'hold', 'kite', 'skirmish', 'skittish']);
   });
 
   await t.test('the chase_style CHECK rejects an unknown value', async () => {
