@@ -171,3 +171,49 @@ test('a non-array worlds.safe_rects is rejected at conversion, naming the column
     /worlds\.safe_rects must be a jsonb array/,
   );
 });
+
+// ---------------------------------------------------------------------------
+// The recurrence guard for SOMET-288 review finding 1.
+//
+// buildWorldGenConfig's header promises that adding a field HERE reaches both
+// consumers by construction. That promise holds for every caller that says
+// `SELECT *` -- index.js's chunk/preview/overview routes, worldPopulation's
+// callers -- and breaks for the ONE that spells its columns out: the
+// authority's loadWorld. safe_road_radius and safe_rects were added to this
+// builder and not to that query, so the live authority silently built every
+// world with `safeRoadRadius: 0` / `safeRects: []` -- `Number(undefined) || 0`
+// and `Array.isArray(undefined)`, defaults, no error, nothing in any log.
+//
+// The behavioural proof lives in authority_use_field_chest_integration.test.js
+// (a real loadWorld, a real `use`). This is the cheap structural one: it reads
+// the two files as TEXT and fails for the NEXT column too, which is what would
+// have caught the original defect at the moment it was introduced.
+// ---------------------------------------------------------------------------
+const fs = require('node:fs');
+const pathMod = require('node:path');
+
+test("the authority's world SELECT names every column buildWorldGenConfig reads", () => {
+  const src = (rel) => fs.readFileSync(pathMod.join(__dirname, '..', 'src', rel), 'utf8');
+
+  // Every `row.<column>` the builder dereferences.
+  const consumed = new Set(
+    [...src('services/worldGenConfig.js').matchAll(/\brow\.([a-z_]+)/g)].map((m) => m[1]));
+
+  // loadWorld's query, matched on its distinctive shape rather than a line
+  // number so this survives edits above it.
+  const q = /'SELECT ([^']*?) FROM worlds WHERE id = \$1'/.exec(src('authority/server.js'));
+  assert.ok(q, "could not find loadWorld's worlds SELECT — has the query been reshaped?");
+  const selected = new Set(q[1].split(',').map((c) => c.trim()));
+
+  // Non-vacuous: both sides must be real, and the two columns this guard was
+  // written for must actually be among the ones it is checking.
+  assert.ok(consumed.size >= 8, `only found ${consumed.size} consumed columns — the scan is broken`);
+  assert.ok(consumed.has('safe_road_radius') && consumed.has('safe_rects'),
+    'the scan did not see the safe-territory columns the builder reads');
+
+  const missing = [...consumed].filter((c) => !selected.has(c));
+  assert.deepEqual(missing, [],
+    `authority/server.js's loadWorld SELECT omits ${missing.join(', ')} -- `
+    + 'buildWorldGenConfig reads them, so the live authority would silently '
+    + 'build every world with those fields at their defaults');
+});
