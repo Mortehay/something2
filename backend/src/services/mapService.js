@@ -759,6 +759,31 @@ function villageGateCell(gRow, gCol, v) {
   return false;
 }
 
+// SOMET-291 — the gate tile's own pixel centre.
+//
+// villageGateCell above already knows which tile is the gate, but it answers a
+// yes/no question about a tile the caller supplies; nothing could ASK it where
+// the gate is. The mid-row/mid-col expressions are repeated rather than
+// factored out of it because that function is on the terrain stamper's hot
+// per-tile loop, and the two are pinned against each other by a test
+// (guard_rescue_leash.test.js) instead: villageGateCell must be true for
+// exactly the tile this returns, for every legal village.
+//
+// Used by villages.js's guardRescueLeashRadius to measure how far a guard's
+// post is from the doorway it defends.
+function villageGatePoint(v) {
+  const midCol = v.minCol + Math.floor(v.width / 2);
+  const midRow = v.minRow + Math.floor(v.height / 2);
+  const rMax = v.minRow + v.height - 1;
+  const cMax = v.minCol + v.width - 1;
+  let row, col;
+  if (v.gateEdge === 'N')      { row = v.minRow; col = midCol; }
+  else if (v.gateEdge === 'S') { row = rMax;     col = midCol; }
+  else if (v.gateEdge === 'W') { col = v.minCol; row = midRow; }
+  else                         { col = cMax;     row = midRow; } // 'E'
+  return { x: col * 100 + 50, y: row * 100 + 50 };
+}
+
 // Pixel centers of the two INTERIOR tiles flanking a village's gate — where the
 // gate guards stand. Clamped into the interior box, so a minimum-size village
 // (3x3, interior = one tile) yields two identical posts rather than posts on
@@ -1112,6 +1137,11 @@ module.exports = {
     pointInVillageBox,
     villageContaining,
     villageGatePosts,
+    // SOMET-291: the gate's own centre, plus the yes/no form it must agree
+    // with. villageGateCell was previously internal to the stamper; it is
+    // exported only so the two can be pinned against each other.
+    villageGatePoint,
+    villageGateCell,
     villageMerchantPost,
     DOORWAY_TILES,
     oppositeEdge,
