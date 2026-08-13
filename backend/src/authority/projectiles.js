@@ -4,7 +4,9 @@
 // only by weapon data.
 
 const { resolveEffectName } = require('./vfx.js');
-const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
+const {
+  applyDamageWithEffects, NO_MITIGATION, playerKey, creatureKey,
+} = require('./damage');
 const { hasLineOfSight } = require('./weapons');
 const { applyElementEffect } = require('./effects');
 const { shoveAwayFrom } = require('./knockback');
@@ -70,6 +72,18 @@ function projectileHitsPlayer(p, player) {
 // kills must come through as null here, not as p.ownerId.
 function killerUserIdFor(p) {
   return p.ownerKind === 'creature' ? null : (p.ownerId ?? null);
+}
+
+// SOMET-290 — who this shot's target should hold responsible.
+//
+// Deliberately NOT killerUserIdFor: that function exists to erase a creature
+// shooter (a uuid where loot.js needs a userId or null), and erasing it here
+// would tell a skittish creature it was hit by "nobody in particular", i.e.
+// that it may charge whichever player happens to be nearby. Provocation is
+// about identity, not about credit, so a creature-owned shot is tagged as the
+// creature it came from and simply matches no player.
+function provokerKeyFor(p) {
+  return p.ownerKind === 'creature' ? creatureKey(p.ownerId) : playerKey(p.ownerId);
 }
 
 // Projectile impacts shove a surviving target (player OR creature) away
@@ -174,7 +188,7 @@ class ProjectileSim {
       if (!hasLineOfSight(map, bx, by, cx, cy)) continue;
       // Falloff scales the RAW damage; the creature's own defense and
       // resistances are applied on top, inside damageCreatureById.
-      if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r), p.element, now)) {
+      if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r), p.element, now, provokerKeyFor(p))) {
         kills.push({ id: c.id, killerUserId: killerUserIdFor(p) });
       } else if (p.knockback > 0) {
         // Survivors only -- a creature the line above already deleted must
@@ -208,7 +222,8 @@ class ProjectileSim {
       if (!hasLineOfSight(map, bx, by, px, py)) continue;
       // Falloff scales the RAW damage; applyDamage still applies defense and
       // resistances on top. It floors at 1, so an edge hit still registers.
-      applyDamageWithEffects(pl, p.damage * (1 - d / r), p.element, pl.mit || NO_MITIGATION, now);
+      applyDamageWithEffects(pl, p.damage * (1 - d / r), p.element, pl.mit || NO_MITIGATION,
+        now, provokerKeyFor(p));
       applyElementEffect(pl, p.element, now, p.ownerId);
       // Survivors only -- a player never gets removed from `players` on
       // death (resolveDeaths respawns them separately), so the check here is
@@ -280,7 +295,7 @@ class ProjectileSim {
               dead = true; break;
             }
             p.hitIds.add(key);
-            if (creatures.damageCreatureById(c.id, p.damage, p.element, now)) {
+            if (creatures.damageCreatureById(c.id, p.damage, p.element, now, provokerKeyFor(p))) {
               kills.push({ id: c.id, killerUserId: killerUserIdFor(p) });
             } else if (p.knockback > 0) {
               // Survivors only. Origin is the projectile's own current
@@ -318,7 +333,8 @@ class ProjectileSim {
               dead = true; break;
             }
             p.hitIds.add(key);
-            applyDamageWithEffects(pl, p.damage, p.element, pl.mit || NO_MITIGATION, now);
+            applyDamageWithEffects(pl, p.damage, p.element, pl.mit || NO_MITIGATION,
+              now, provokerKeyFor(p));
             applyElementEffect(pl, p.element, now, p.ownerId);
             // Survivors only. Origin is the projectile's own current
             // position, matching the creature branch just above.

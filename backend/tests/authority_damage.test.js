@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const {
   applyDamage, applyDamageWithEffects, drainMana,
   MIN_DAMAGE, RESIST_CAP, ELEMENTS, NO_MITIGATION,
+  isProvokedBy, playerKey, creatureKey, PROVOKE_MEMORY_MS,
 } = require('../src/authority/damage.js');
 const { applyEffect, SHOCK, SHOCK_MAGNITUDE } = require('../src/authority/effects.js');
 
@@ -154,11 +155,60 @@ test('mana drain returns the amount ACTUALLY drained, not the amount requested',
 });
 
 // --- Task 2: mark provocation ---
+//
+// SOMET-290 follow-up: the mark is a RECORD now (who, and until when), not a
+// boolean, and these read it through isProvokedBy rather than by touching
+// `_provokedBy` -- the shape belongs to damage.js and every consumer goes
+// through the predicate.
 
-test('any landed hit marks the target provoked', () => {
+test('any landed hit marks the target provoked BY THE ACTOR THAT LANDED IT', () => {
+  const t_obj = { hp: 100, maxHp: 100 };
+  applyDamage(t_obj, 10, 'physical', NO_MITIGATION, 0, playerKey(7));
+  assert.equal(isProvokedBy(t_obj, playerKey(7), 0), true, 'the attacker was not remembered');
+  // The half a bare boolean could not express: a creature must not fight
+  // someone else's fight. Both alternatives are checked, because a key format
+  // that collapsed players and creatures together would pass the first alone.
+  assert.equal(isProvokedBy(t_obj, playerKey(8), 0), false,
+    'a bystanding player was blamed for a hit they never landed');
+  assert.equal(isProvokedBy(t_obj, creatureKey(7), 0), false,
+    'a creature with the same id as the attacking player was blamed');
+});
+
+test('provocation expires on the clock, and every fresh hit re-arms it', () => {
+  const t_obj = { hp: 1000, maxHp: 1000 };
+  applyDamage(t_obj, 10, 'physical', NO_MITIGATION, 1000, playerKey(7));
+  assert.equal(isProvokedBy(t_obj, playerKey(7), 1000 + PROVOKE_MEMORY_MS - 1), true,
+    'forgot its attacker before the memory ran out');
+  assert.equal(isProvokedBy(t_obj, playerKey(7), 1000 + PROVOKE_MEMORY_MS), false,
+    'stayed angry past the memory window -- provocation leaks permanently again');
+
+  // A second hit late in the window must extend it, or a long fight would go
+  // calm mid-fight.
+  applyDamage(t_obj, 10, 'physical', NO_MITIGATION, 1000 + PROVOKE_MEMORY_MS - 1, playerKey(7));
+  assert.equal(isProvokedBy(t_obj, playerKey(7), 1000 + PROVOKE_MEMORY_MS + 1), true,
+    'a fresh hit did not re-arm the memory');
+});
+
+test('an unattributed hit provokes against anyone, rather than against nobody', () => {
+  // A burn whose applier is gone, or any caller that cannot name a source. The
+  // safe direction is a creature that fights back too readily; the other
+  // direction is a creature that can be killed without ever answering, which is
+  // the silent-inertness class this project keeps re-shipping.
+  const t_obj = { hp: 100, maxHp: 100 };
+  applyDamage(t_obj, 10, 'physical', NO_MITIGATION, 0);
+  assert.equal(isProvokedBy(t_obj, playerKey(7), 0), true);
+  assert.equal(isProvokedBy(t_obj, creatureKey('abc'), 0), true);
+});
+
+test('a hit with no clock at all provokes indefinitely rather than not at all', () => {
+  // Every pre-SOMET-290 caller (and any future one that forgets `now`) lands
+  // here. `undefined + PROVOKE_MEMORY_MS` would be NaN, and `NaN > now` is
+  // false -- i.e. a target that is instantly calm again, which is exactly the
+  // failure this rewrite exists to remove.
   const t_obj = { hp: 100, maxHp: 100 };
   applyDamage(t_obj, 10, 'physical', NO_MITIGATION);
-  assert.equal(t_obj._provoked, true);
+  assert.equal(isProvokedBy(t_obj, playerKey(7), 0), true);
+  assert.equal(isProvokedBy(t_obj, playerKey(7), 1e12), true);
 });
 
 test('a hit against enormous defence still provokes', () => {
@@ -172,11 +222,12 @@ test('a hit against enormous defence still provokes', () => {
   // If the floor is ever removed, being hit for zero must STILL provoke — a
   // creature that ignores an attack it survived unharmed reads as broken.
   const t_obj = { hp: 100, maxHp: 100 };
-  applyDamage(t_obj, 1, 'physical', { defense: 9999, resistances: {} });
-  assert.equal(t_obj._provoked, true);
+  applyDamage(t_obj, 1, 'physical', { defense: 9999, resistances: {} }, 0, playerKey(7));
+  assert.equal(isProvokedBy(t_obj, playerKey(7), 0), true);
 });
 
 test('a target nobody has hit is not provoked', () => {
   const t_obj = { hp: 100, maxHp: 100 };
-  assert.notEqual(t_obj._provoked, true);
+  assert.equal(isProvokedBy(t_obj, playerKey(7), 0), false);
+  assert.equal(isProvokedBy(t_obj, null, 0), false);
 });

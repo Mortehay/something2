@@ -10,10 +10,81 @@ const RESIST_CAP = 0.8;  // resistance ceiling: nothing is ever immune
 const ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
 const NO_MITIGATION = { defense: 0, resistances: {} };
 
+// SOMET-290 — how long a creature remembers who hit it, in MILLISECONDS
+// (world.js's `this.now` is a millisecond clock; every `until`/`_interruptedUntil`
+// style field in this authority is stamped against it).
+//
+// This number replaces the previous "clear provocation on any tick with no
+// target" rule, which was coupled to target state and could therefore only be
+// too sticky or too eager: as a plain boolean it first leaked permanently (one
+// arrow made a deer a charger for the world's uptime), and the fix for that
+// made it evaporate on the very next tick whenever the shooter was outside
+// aggro range — which is every ranged weapon in the catalog (darts 350 …
+// arbalest 850) against a 300px skittish aggro radius.
+//
+// 10s is long enough for a creature to cross its own leash toward whoever shot
+// it (a skittish creature covers ~460px in that time) and short enough that a
+// player who leaves and comes back later meets prey again rather than a
+// grudge. Every fresh hit re-arms it, so a real fight never expires mid-fight.
+const PROVOKE_MEMORY_MS = 10000;
+
+// Actor tags, in the SAME `p:<userId>` / `c:<id>` form the frame descriptors
+// and projectiles.js's `hitIds` already use. A tag rather than a bare id
+// because both players and creatures deal damage and a creature id is a uuid
+// while a userId is an integer — comparing them untagged would be a type
+// coincidence away from a creature retaliating against the wrong actor.
+//
+// A null id yields null, i.e. "unattributed", which is treated below as
+// "provoked by whoever is around" — the pre-attribution behaviour. That is the
+// deliberate failure direction: an unthreaded damage source makes a creature
+// fight back too readily, never a creature that silently refuses to.
+function playerKey(userId) { return userId == null ? null : `p:${userId}`; }
+function creatureKey(id) { return id == null ? null : `c:${id}`; }
+
+// Is `target` currently retaliating against the actor tagged `key`?
+//
+// THE read side of provocation — creatures.js's skittish branch and its
+// target-acquisition both go through this rather than touching `_provokedBy`,
+// so the field's shape is owned by one module.
+//
+//  - no record, or an expired one -> false. `!(until > now)` rather than
+//    `until <= now` so a NaN `until` (a caller that passed a garbage clock)
+//    reads as calm rather than as angry forever.
+//  - a record with a null `by` (damage from an unattributed source: a burn
+//    whose applier is gone, a hand-rolled test hit) matches ANY key, which is
+//    exactly the pre-SOMET-290 behaviour and the safe direction.
+function isProvokedBy(target, key, now) {
+  const p = target && target._provokedBy;
+  if (!p) return false;
+  if (!(p.until > now)) return false;
+  return p.by === null || p.by === key;
+}
+
+// THE write side, so `_provokedBy`'s shape has exactly one author. Two callers:
+// applyDamage below (any landed hit) and creatures.js's cornered rule (a
+// retreat the terrain refused, which is provocation without damage).
+//
+// The most recent provoker wins — an engagement is with whoever is hitting you
+// now — and each hit re-arms the memory, so a real fight never expires
+// mid-fight.
+function provoke(target, source, now) {
+  target._provokedBy = {
+    by: source ?? null,
+    // A caller with no clock (a direct unit-test hit) gets an expiry that never
+    // arrives, which is the pre-expiry behaviour rather than a creature that is
+    // instantly calm again.
+    until: Number.isFinite(now) ? now + PROVOKE_MEMORY_MS : Infinity,
+  };
+}
+
 // Reduce `raw` by the target's mitigation, apply it to target.hp, return the
 // amount actually dealt. `element` defaults to 'physical'; an element with no
 // matching resistance takes full (post-defense) damage.
-function applyDamage(target, raw, element, mit = NO_MITIGATION) {
+//
+// `now` is the world clock and `source` the attacker's tag (playerKey/
+// creatureKey above) — both only feed the provocation stamp below, so a caller
+// that deals damage nobody can be blamed for may omit them.
+function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined, source = null) {
   const el = ELEMENTS.includes(element) ? element : 'physical';
   const defense = mit.defense || 0;
   const raw2 = raw - defense;
@@ -38,8 +109,13 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION) {
   // Set unconditionally rather than only when `final > 0`: a hit absorbed to
   // nothing is still an attack, and a creature that shrugs off being struck
   // reads as broken. Harmless on players and on every other chase style —
-  // nothing but the skittish branch reads it.
-  target._provoked = true;
+  // nothing but isProvokedBy above reads it.
+  //
+  // WHO and UNTIL WHEN, not a bare boolean. The boolean could not express the
+  // one thing the rule is about — a shot from beyond aggro range, which is how
+  // a deer is normally hit — without also blaming a bystander who happened to
+  // be standing nearby when it landed.
+  provoke(target, source, now);
   return final;
 }
 
@@ -66,8 +142,8 @@ function shockVulnerability(target, now) {
   return effectMagnitude(target, SHOCK, now) || 0;
 }
 
-function applyDamageWithEffects(target, raw, element, mit = NO_MITIGATION, now) {
-  return applyDamage(target, raw * (1 + shockVulnerability(target, now)), element, mit);
+function applyDamageWithEffects(target, raw, element, mit = NO_MITIGATION, now, source = null) {
+  return applyDamage(target, raw * (1 + shockVulnerability(target, now)), element, mit, now, source);
 }
 
 // Removes up to `amount` mana, clamped at 0, and returns how much was actually
@@ -88,4 +164,9 @@ function drainMana(target, amount) {
 module.exports = {
   applyDamage, applyDamageWithEffects, drainMana,
   MIN_DAMAGE, RESIST_CAP, ELEMENTS, NO_MITIGATION,
+  // SOMET-290: the provocation vocabulary lives with the funnel that stamps
+  // it, so the shape of `_provokedBy` has exactly one owner. creatures.js
+  // imports the reader; every damage site builds its tag with the two key
+  // helpers rather than formatting one by hand.
+  isProvokedBy, provoke, playerKey, creatureKey, PROVOKE_MEMORY_MS,
 };
