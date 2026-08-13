@@ -452,8 +452,11 @@ needs **no** new handling: `GameShell` already routes it to `enterWorld`.
   and its guards, so this is left as-is rather than invented here.
 - **The popup's "where am I" is a client-side offer.** It reads the player position from the Game
   snapshot, which lags the server by up to a tick. The consequence is a briefly stale enabled/disabled
-  state at the edge of a waypoint tile; the server refuses anyway, and the refusal is silent rather
-  than a toast, which is a deliberate choice not to hand a probe a signal.
+  state at the edge of a waypoint tile. The server refuses anyway, with the same generic
+  `you cannot travel there` frame the join refusal already uses — revised from this plan's first
+  draft, which said the refusal would be silent: a legitimate player hitting the stale-state case
+  deserves to know the click did something, and the message is generic precisely so it tells a probe
+  nothing about *which* condition failed.
 - **`allows_fast_travel` is now write-only data.** Nothing reads it for authorization except
   `first-join`. If it stays unread for another slice or two it should be reconsidered rather than
   quietly kept.
