@@ -35,8 +35,9 @@ const { DENSITY_NAMES } = require('../src/services/densityTiers.js');
 // VILLAGE_LIMITS/villageGeometryError are: the placer that seats pen creatures
 // and the validator that accepts a pen must agree about what fits, or a spec
 // validates and then seeds a pen that quietly holds fewer creatures than it
-// says. services/pens.js's own requires (mapService, creatureLevel) create no
-// pool at import time, so this stays a pure, database-free require.
+// says. services/pens.js's own requires (mapService, creatureLevel, and
+// villages.js for the one GUARD_TYPE literal -- already imported above) create
+// no pool at import time, so this stays a pure, database-free require.
 const { penGeometryError } = require('../src/services/pens.js');
 
 // True only when w.grid is a well-formed [int, int] pair. Shared by the
