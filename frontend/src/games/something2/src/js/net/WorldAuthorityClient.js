@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWallet, onShop, onBought, onSold, onProgression, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onProgression, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -24,6 +24,11 @@ export class WorldAuthorityClient {
     this.onNoAmmo = onNoAmmo || (() => {});
     this.onAmmo = onAmmo || (() => {});
     this.onTransition = onTransition || (() => {});
+    // SOMET-292 sends this frame; SOMET-293 is the first thing to listen. Without
+    // a case here it fell through to the `default` warn -- a lit waypoint that the
+    // travel popup never heard about, so the list kept saying "not discovered"
+    // until a reload.
+    this.onWaypointActivated = onWaypointActivated || (() => {});
     // Pushed on XP gain, level-up and death (SOMET-242); the join payload's
     // own `progression` field arrives on `onJoined` instead, same split as
     // `gold` (joined) vs `wallet` (onWallet) above.
@@ -110,6 +115,7 @@ export class WorldAuthorityClient {
       // locally-derived count or decrement on send, see core/ammo.js.
       case 'ammo': this.onAmmo(msg); break;
       case 'transition': this.onTransition(msg); break;
+      case 'waypointActivated': this.onWaypointActivated(msg); break;
       case 'progression': this.onProgression(msg); break;
       case 'error': {
         // Tag so callers can tell a server-issued protocol rejection (e.g.
@@ -154,6 +160,13 @@ export class WorldAuthorityClient {
   sendInteract() { this._send({ type: 'interact' }); }
   sendBuy(stockId) { this._send({ type: 'buy', stockId }); }
   sendSell(itemId) { this._send({ type: 'sell', itemId }); }
+
+  // Waypoint travel (SOMET-293). A destination id and nothing else: the server
+  // works out where the player is standing from its own copy of the position,
+  // so there is deliberately no origin on this frame for a forged one to set.
+  // The reply is either an `error` or a `transition`, both of which already have
+  // handlers -- travel needs no arrival path of its own.
+  sendTravel(waypointId) { return this._send({ type: 'travel', waypointId }); }
 
   disconnect() {
     // Mark closed BEFORE close() so any frame still queued on the socket is

@@ -127,10 +127,11 @@ const HELP_SECTIONS = [
     ],
   },
   {
-    title: 'Merchants & map',
+    title: 'Merchants, map & travel',
     rows: [
       { k: [['E']], d: 'Trade with a village merchant — stand next to the merchant and press E to open the market' },
       { k: [['M']], d: 'Toggle the minimap (top-right corner); click the minimap to expand it' },
+      { k: [['T']], d: 'Travel — while standing on a waypoint you have lit, opens the list of other lit waypoints. Walk onto a waypoint once to light it; ones you have not found are shown but cannot be chosen' },
     ],
   },
   {

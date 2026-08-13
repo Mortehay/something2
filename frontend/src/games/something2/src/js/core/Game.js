@@ -149,6 +149,25 @@ export class Game {
         this.onTransition = cb;
     }
 
+    // SOMET-293. WaypointTravel.jsx registers this so it can refetch its list
+    // the moment a waypoint lights up. Without it the player walks onto a
+    // waypoint, the server writes the row, and the popup keeps calling that
+    // place undiscovered until the page is reloaded -- the feature would look
+    // broken at exactly the moment it worked.
+    setOnWaypointActivated(cb) {
+        this.onWaypointActivated = cb;
+    }
+
+    // Ask the authority to move this character to a waypoint. Returns whether
+    // the frame went out at all; the ANSWER arrives asynchronously as either an
+    // `error` toast or a `transition`, so a `true` here means "asked", never
+    // "arrived". The server re-derives where the player is standing from its own
+    // copy of the position, so nothing about the origin is sent.
+    travelToWaypoint(waypointId) {
+        if (!this.authorityClient) return false;
+        return this.authorityClient.sendTravel(waypointId) !== false;
+    }
+
     setState(newState) {
         if (this.state !== newState) {
             // SOMET-79: snapshot the last live frame on the way into a frozen
@@ -423,6 +442,7 @@ export class Game {
                     if (this.authorityClient) this.authorityClient.disconnect();
                 },
                 onTransition: (msg) => { if (this.onTransition) this.onTransition(msg); },
+                onWaypointActivated: (msg) => { if (this.onWaypointActivated) this.onWaypointActivated(msg); },
             });
             this.authorityClient.connect(worldId, characterId);
             setTimeout(() => reject(new Error('authority join timeout')), 5000);
@@ -498,6 +518,21 @@ export class Game {
                 dir: this._minimapDir || { dx: 0, dy: 1 },
             },
             creatures: (this.creatures ? this.creatures.all() : []).map((c) => ({ x: c.x, y: c.y, color: c.color })),
+        };
+    }
+
+    // Read-only live snapshot for the travel popup (SOMET-293), same convention
+    // as getMinimapSnapshot above. Its own method rather than a reuse of the
+    // minimap's: that one maps every visible creature on each call, and the
+    // popup needs exactly two facts. The player's CENTRE, because that is the
+    // point the authority derives the player's tile from -- a snapshot handing
+    // over the top-left corner would light the wrong tile near a boundary.
+    getWaypointSnapshot() {
+        if (this.state !== 'playing' || !this.chunked || !this.player) return null;
+        return {
+            worldId: this.worldId ?? null,
+            playerX: this.player.x + (this.player.width || 0) / 2,
+            playerY: this.player.y + (this.player.height || 0) / 2,
         };
     }
 
@@ -870,7 +905,21 @@ export class Game {
             }
 
             // Dev: toggle tile textures on/off (falls back to flat color).
-            if (key === 't' && this.renderSystem && this.chunked && !e.repeat) {
+            // Moved to Shift+T so plain T can open the waypoint travel popup
+            // (handled in WaypointTravel.jsx) — the second time a dev key has
+            // had to give up its unmodified letter to a player-facing panel,
+            // after Shift+M above.
+            //
+            // WHY THE DEV KEY MOVES AND NOT THE PLAYER ONE. These are two
+            // separate window keydown listeners in two files, so both fired:
+            // pressing T opened the panel AND turned tile textures off, with
+            // the "Tile textures off" toast hidden behind the panel's backdrop.
+            // Closing the panel the two ways it invites — Esc, or a backdrop
+            // click — left the whole map flat-coloured for the rest of the
+            // session with nothing on screen saying why. A player-facing key
+            // must be the plain letter the help panel names; a dev toggle
+            // nobody but us presses is the one that can afford a modifier.
+            if (key === 't' && e.shiftKey && this.renderSystem && this.chunked && !e.repeat) {
                 const on = this.renderSystem.toggleTileTextures();
                 this._showToast(`Tile textures ${on ? 'on' : 'off'}`);
             }

@@ -62,16 +62,15 @@ export function toCytoscapeElements(payload) {
         label: w.is_entry ? `★ ${w.name}` : w.name,
         unvisited: 'false',
         current: String(w.id === currentWorldId),
-        // Whether clicking this node offers travel. Both halves are required
-        // and both come from the server: `allows_fast_travel` on the row, and
-        // membership of `worlds` (which the endpoint builds from the visit
-        // table) for "you have been here". A world the character has never
-        // entered is never in this array in the first place.
+        // NO `travelable` (SOMET-293). This map used to carry a per-node travel
+        // offer, backed by `allows_fast_travel` and the visit table; travel is
+        // now the waypoint network, and the only way to move between worlds
+        // without walking is to stand on a waypoint you have lit. The column
+        // still exists and map authors still read it to decide where waypoints
+        // belong -- it just stops being a thing a player can act on here.
         //
-        // Not travelable when it is where the character already IS -- a join
-        // into the current world tears down a live session and re-runs spawn
-        // for no gain.
-        travelable: String(w.allows_fast_travel === true && w.id !== currentWorldId),
+        // Deliberately not "travelable: 'false' everywhere": a field that is
+        // always false is a field a later change can quietly make true again.
       },
       position: positionOf(w.id),
     })),
@@ -84,11 +83,6 @@ export function toCytoscapeElements(payload) {
         // where the character is. Set explicitly so every node carries the same
         // keys and the `data(current)` mappers have nothing to warn about.
         current: 'false',
-        // Hardcoded, NOT read from the stub: the payload deliberately carries
-        // no flag for an unvisited world, so `String(s.allows_fast_travel ===
-        // true)` would also produce 'false' here and look correct -- while
-        // quietly becoming a leak the day the endpoint starts sending it.
-        travelable: 'false',
       },
       position: positionOf(s.id),
     })),

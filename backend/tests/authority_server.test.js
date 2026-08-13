@@ -295,12 +295,34 @@ test('a forged join into an unreachable world is refused', async () => {
   handle.close(); server.close();
 });
 
-test('a visited, flagged world is joinable', async () => {
-  // The positive control. Without it the test above is satisfied by a server
-  // that refuses everything, which would "pass" while the game was unplayable.
+test('a visited, flagged world is NO LONGER joinable on the flag alone', async () => {
+  // SOMET-293's retirement, from the socket rather than from the pure rule.
+  // This exact fact set was a successful join until the `fast-travel` leg was
+  // deleted -- it is what the World Map's click-to-travel rode in on. The pure
+  // table is in join_policy.test.js; this is the assertion that the running
+  // server actually asks it.
   const { url, handle, server } = await bootWith(fakePoolWithFacts({
     is_entry: false, allows_fast_travel: true,
     visited: true, visited_any: true, last_world: 'somewhere-else',
+  }));
+  const ws = connect(url, 1);
+  await new Promise((res) => ws.on('open', res));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  const first = await nextMsg(ws);
+  assert.equal(first.type, 'error');
+  assert.equal(first.message, 'you cannot travel there');
+  ws.close();
+  handle.close(); server.close();
+});
+
+test('the world a character logged out of is still joinable', async () => {
+  // THE POSITIVE CONTROL, re-based onto `resume` now that the flag no longer
+  // authorizes anything. Without one, the two refusal tests above are satisfied
+  // by a server that refuses everything, which would "pass" while the game was
+  // unplayable -- and "unplayable" is the specific risk the retirement carries.
+  const { url, handle, server } = await bootWith(fakePoolWithFacts({
+    is_entry: false, allows_fast_travel: false,
+    visited: false, visited_any: true, last_world: 'w1',
   }));
   const ws = connect(url, 1);
   await new Promise((res) => ws.on('open', res));

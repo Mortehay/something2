@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Pool } = require('pg');
 
-const { joinPolicyFacts } = require('../src/services/joinPolicy.js');
+const { joinPolicyFacts, waypointTravelFacts } = require('../src/services/joinPolicy.js');
 
 // The loader half of the join authorization rule (Plan B slice 3).
 // join_policy.test.js covers the decision; this covers the facts it decides on,
@@ -130,5 +130,106 @@ test('joinPolicyFacts', { skip: !url ? 'no TEST_DATABASE_URL' : false }, async (
     const f = await joinPolicyFacts(pool, c2, flagged);
     assert.equal(f.visited, false);
     assert.equal(f.hasHistory, true);
+  });
+
+  // --- the travel loader (SOMET-293) --------------------------------------
+  //
+  // waypointTravelFacts is the one part of the travel path that the live
+  // authority test cannot exercise: that test drives a fake pool, so its SQL is
+  // never parsed by Postgres there. A wrong column name, or the `$3::uuid` cast
+  // throwing on a null origin, would be a runtime 500 on every travel attempt
+  // with a green suite behind it.
+  await t.test('waypointTravelFacts', async (t2) => {
+    const mkWp = async (worldId, name, x, y) => (await pool.query(
+      'INSERT INTO waypoints (world_id, x, y, name) VALUES ($1, $2, $3, $4) RETURNING id',
+      [worldId, x, y, `${tag}-${name}`])).rows[0].id;
+
+    const origin = await mkWp(plain, 'origin', 150, 150);
+    const dest = await mkWp(flagged, 'dest', 250, 250);
+    await pool.query(
+      'INSERT INTO character_waypoints (character_id, waypoint_id) VALUES ($1, $2)',
+      [charId, origin]);
+
+    await t2.test('a null origin is a legal input, not a cast error', async () => {
+      // The player is standing on open ground. This is the COMMON case -- most
+      // travel attempts a probe could make have no origin at all -- so the query
+      // has to answer it rather than throw, or the refusal becomes a 500.
+      const f = await waypointTravelFacts(pool, charId, null, dest);
+      assert.equal(f.standingOnActivatedWaypoint, false);
+      assert.equal(f.destination.worldId, flagged);
+    });
+
+    await t2.test('the destination row comes back whole, with its own tile', async () => {
+      // pendingArrivals is written from these coordinates, and landing on the
+      // destination TILE rather than at a world spawn is the whole difference
+      // between this and the fast travel it replaces.
+      const f = await waypointTravelFacts(pool, charId, origin, dest);
+      assert.equal(f.destination.worldId, flagged);
+      assert.equal(f.destination.x, 250);
+      assert.equal(f.destination.y, 250);
+      assert.equal(f.standingOnActivatedWaypoint, true, 'the origin is activated for this character');
+      assert.equal(f.destinationActivated, false, 'the destination is not');
+    });
+
+    await t2.test('activation is per character', async () => {
+      // The other character in this file has activated nothing. A loader keyed
+      // on the waypoint alone would report the first character's progress for
+      // everyone -- which is a free travel network.
+      const c3 = (await pool.query(
+        'INSERT INTO characters (user_id, slot, name, entity_type_id) VALUES ($1, 3, $2, $3) RETURNING id',
+        [userId, `${tag}-char3`, cls.id])).rows[0].id;
+      const f = await waypointTravelFacts(pool, c3, origin, dest);
+      assert.equal(f.standingOnActivatedWaypoint, false);
+      assert.equal(f.destinationActivated, false);
+    });
+
+    await t2.test('lighting the destination flips only that half', async () => {
+      await pool.query(
+        'INSERT INTO character_waypoints (character_id, waypoint_id) VALUES ($1, $2)',
+        [charId, dest]);
+      const f = await waypointTravelFacts(pool, charId, origin, dest);
+      assert.equal(f.standingOnActivatedWaypoint, true);
+      assert.equal(f.destinationActivated, true);
+    });
+
+    await t2.test('an unknown destination fails closed', async () => {
+      // No row means no destination AND no origin answer -- the origin fact is
+      // deliberately not carried over from a row that does not exist, so a
+      // de-authored destination cannot be travelled to on the strength of the
+      // origin alone.
+      const f = await waypointTravelFacts(
+        pool, charId, origin, '00000000-0000-0000-0000-000000000000');
+      assert.equal(f.destination, null);
+      assert.equal(f.destinationActivated, false);
+      assert.equal(f.standingOnActivatedWaypoint, false);
+    });
+
+    await t2.test('a destination that is not a uuid fails closed too', async () => {
+      // SOMET-293 review note. `waypoints.id` is a uuid and the query casts to
+      // it, so a frame carrying anything else used to raise 22P02 out of the
+      // loader; the authority's op chain caught that and sent
+      // `{type:'error', message:'travel failed'}` instead of the deliberately
+      // generic refusal, with a stack trace per attempt in the log.
+      for (const bad of ['not-a-uuid', '', '1', 'wp-does-not-exist']) {
+        const f = await waypointTravelFacts(pool, charId, origin, bad);
+        assert.equal(f.destination, null, `"${bad}" must be a plain refusal`);
+        assert.equal(f.destinationActivated, false);
+        assert.equal(f.standingOnActivatedWaypoint, false);
+      }
+      // Non-string frame fields reach here as whatever JSON.parse produced.
+      for (const bad of [null, undefined, 42, { id: origin }, [origin]]) {
+        const f = await waypointTravelFacts(pool, charId, origin, bad);
+        assert.equal(f.destination, null);
+      }
+
+      // THE PAIRED POSITIVE, and the only thing that keeps the loop above from
+      // being a test of Postgres's tolerance rather than of this guard: the very
+      // cast the loader uses really does reject that input against this database.
+      // Without the guard, every assertion above would be a rejected promise.
+      await assert.rejects(
+        pool.query('SELECT 1 FROM waypoints WHERE id = $1::uuid', ['not-a-uuid']),
+        /invalid input syntax/i,
+      );
+    });
   });
 });

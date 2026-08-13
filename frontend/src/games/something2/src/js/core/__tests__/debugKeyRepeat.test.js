@@ -42,13 +42,27 @@ describe('Game debug key repeat guard', () => {
     return g;
   }
 
-  it("does not re-toggle tile textures on OS auto-repeat while 't' is held", () => {
+  it('does not re-toggle tile textures on OS auto-repeat while Shift+T is held', () => {
+    const g = makeGame();
+    g._keydownHandler({ key: 't', shiftKey: true, repeat: false });
+    // OS auto-repeat: the same physical press, key still down.
+    g._keydownHandler({ key: 't', shiftKey: true, repeat: true });
+    g._keydownHandler({ key: 't', shiftKey: true, repeat: true });
+    expect(g.renderSystem.toggleTileTextures).toHaveBeenCalledTimes(1);
+  });
+
+  // SOMET-293. Plain T is the waypoint travel popup's key (WaypointTravel.jsx
+  // registers its own window keydown for it). Before this guard BOTH handlers
+  // fired: the panel opened and the tile textures went off behind its backdrop,
+  // and closing the panel left the map flat-coloured for the session. The two
+  // listeners live in different files and vitest runs in a node environment
+  // here, so nothing can observe them colliding at runtime -- this asserts the
+  // half that IS reachable, that Game no longer answers the unmodified letter.
+  it('leaves plain T to the waypoint travel popup', () => {
     const g = makeGame();
     g._keydownHandler({ key: 't', repeat: false });
-    // OS auto-repeat: the same physical press, key still down.
-    g._keydownHandler({ key: 't', repeat: true });
-    g._keydownHandler({ key: 't', repeat: true });
-    expect(g.renderSystem.toggleTileTextures).toHaveBeenCalledTimes(1);
+    g._keydownHandler({ key: 't', shiftKey: false, repeat: false });
+    expect(g.renderSystem.toggleTileTextures).not.toHaveBeenCalled();
   });
 
   it("does not re-cycle the render-mode override on OS auto-repeat while Shift+M is held", () => {
@@ -61,10 +75,10 @@ describe('Game debug key repeat guard', () => {
 
   it('still fires once on a fresh (non-repeat) press after release', () => {
     const g = makeGame();
-    g._keydownHandler({ key: 't', repeat: false });
-    g._keydownHandler({ key: 't', repeat: true });
+    g._keydownHandler({ key: 't', shiftKey: true, repeat: false });
+    g._keydownHandler({ key: 't', shiftKey: true, repeat: true });
     // Key released, then pressed again -- a genuinely new press.
-    g._keydownHandler({ key: 't', repeat: false });
+    g._keydownHandler({ key: 't', shiftKey: true, repeat: false });
     expect(g.renderSystem.toggleTileTextures).toHaveBeenCalledTimes(2);
   });
 });

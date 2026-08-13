@@ -9,7 +9,7 @@ const { loadProgression, applyDeath } = require('../services/progressionStore.js
 const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
 const { ownedCharacter } = require('../services/characters.js');
 const { recordVisit } = require('../services/visitedWorlds.js');
-const { mayJoin, joinPolicyFacts } = require('../services/joinPolicy.js');
+const { mayJoin, joinPolicyFacts, waypointTravelFacts } = require('../services/joinPolicy.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
 const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
@@ -1341,6 +1341,96 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (sessionsByUser.get(ws.userId) === ws) sessionsByUser.delete(ws.userId);
         send(ws, { type: 'error', message: 'join failed' });
       }
+    },
+
+    // Waypoint travel (SOMET-293). The frame is `{type:'travel', waypointId}`
+    // and that id is the ONLY thing on it -- there is deliberately no "I am
+    // standing on X" field, because a forged frame would simply set it. Where
+    // the player is standing comes from this process's own World object,
+    // matched against the waypoint Map loadWorld built with the same
+    // fetchWaypoints the activation block reads. One loader, so there is no
+    // second copy for travel and activation to disagree about.
+    //
+    // The trip is authorized by joinPolicy.mayJoin, exactly like a join: passing
+    // `travel` narrows it to the single leg that may answer a travel request.
+    // The ARRIVAL then reuses pendingArrivals + the `transition` frame, which is
+    // the same pair every portal and doorway crossing already uses -- so the
+    // rejoin is authorized by the untouched `transition` leg and there is one
+    // arrival mechanism in this server rather than one per way of setting off.
+    travel(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      // Serialized through the socket's op chain like every other DB-backed
+      // handler: two travel frames in flight at once would otherwise race to
+      // write pendingArrivals, and the loser's destination would silently win.
+      chainOp(ws, 'travel', async () => {
+        const characterId = ws.characterId;
+        // Re-read the player INSIDE the chain rather than before it. The chain
+        // may have been waiting on an earlier op, and "where you are standing"
+        // has to be true at the moment the trip is authorized, not when the
+        // frame arrived.
+        const p = entry.world.getPlayer(ws.userId);
+        if (characterId == null || !p) return;
+
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const origin = entry.waypoints ? entry.waypoints.get(waypointTileKey(cx, cy)) : null;
+
+        // A null origin (standing on open ground) is a legal input, not a
+        // shortcut: it reaches mayJoin as standingOnActivatedWaypoint === false,
+        // the same fact standing on an unlit waypoint produces. Refusing here
+        // instead would put half the rule outside joinPolicy.js.
+        const travel = await waypointTravelFacts(
+          pool, characterId, origin ? origin.id : null, msg.waypointId);
+        const dest = travel.destination;
+        // Generic on the wire, and identical to the join refusal below it on
+        // purpose: distinguishing "that is not a waypoint" from "you have not
+        // lit it" would let a client enumerate the network by probing ids.
+        const refuse = (why) => {
+          console.warn('travel refused:', why, 'character', characterId, 'waypoint', msg.waypointId);
+          send(ws, { type: 'error', message: 'you cannot travel there' });
+        };
+        if (!dest) { refuse('unknown-waypoint'); return; }
+
+        const facts = await joinPolicyFacts(pool, characterId, dest.worldId);
+        const verdict = mayJoin({
+          isAdmin: ws.role === 'admin',
+          // Deliberately null, not the character's real pending arrival. A
+          // pending entry left over from a doorway the player walked through
+          // would otherwise stand in for a waypoint they have never lit -- the
+          // trip would be allowed by `transition` rather than by the waypoint
+          // rule, which is not the same permission at all.
+          pendingWorldId: null,
+          worldId: dest.worldId, facts, travel,
+        });
+        if (!verdict.allowed) { refuse(verdict.reason); return; }
+
+        // The destination waypoint's own pixels, so the player lands on that
+        // TILE rather than at a world spawn -- the whole difference between this
+        // and the world-granularity fast travel it replaces. chooseSpawn takes
+        // `pending` ahead of the persisted position, so this wins even for a
+        // world the character has stood in before.
+        // NO COOLDOWN HERE, unlike the doorway (_doorwayCdUntil) and portal
+        // (_portalCdUntil) paths a few hundred lines down (SOMET-293 review).
+        // Those two are commented "suppress duplicate sends during reconnect"
+        // and they need to be: both are fired by the TICK LOOP off the tile the
+        // player is standing on, so without a timer the server re-sends the same
+        // transition every tick for as long as the client takes to reconnect.
+        // This handler has no such re-evaluation -- nothing fires it but an
+        // explicit `travel` frame, and the popup closes itself on the request.
+        // A timer here would only rate-limit a client asking twice, which every
+        // other frame in this file is equally free to do, and it would need a
+        // third answer on the wire (refused-for-cooldown) that the deliberately
+        // generic refusal above has no room for.
+        pendingArrivals.set(characterId, { worldId: dest.worldId, x: dest.x, y: dest.y });
+        send(ws, { type: 'transition', toWorldId: dest.worldId, arriveX: dest.x, arriveY: dest.y });
+        // Fog of war, like every other transition push: the server has committed
+        // the move, so the destination is visited whether or not the client
+        // completes its rejoin. Almost always a no-op here (you cannot light a
+        // waypoint without having stood in its world), but "almost always" is
+        // not the invariant visited_worlds_db.test.js pins.
+        recordVisit(pool, characterId, dest.worldId)
+          .catch((e) => console.error('recordVisit (waypoint travel)', e));
+      });
     },
 
     input(ws, msg) {

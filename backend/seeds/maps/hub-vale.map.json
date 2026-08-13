@@ -40,7 +40,8 @@
       "pens": [
         { "min_row": 36, "min_col": 14, "width": 6, "height": 5,
           "creature_type": "Woodland Swarm", "count": 5, "level": 1 }
-      ]
+      ],
+      "waypoints": [{ "x": 3050, "y": 2650, "name": "Thornbriar Green" }]
     },
     {
       "key": "dunes",
