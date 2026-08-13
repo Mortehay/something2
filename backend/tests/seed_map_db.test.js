@@ -866,7 +866,18 @@ const PEN_SPEC = () => ({
       // survival half of this test would be vacuous.
       allowed_creature_types: ['Slime'],
       is_entry: true,
-      entry_spawn: { x: 550, y: 550 },
+      // This fixture MUST carry a village, and entry_spawn MUST be that
+      // village's spawn. validateMapSpec requires exactly one is_entry world,
+      // so a fixture spec has to claim it -- and while it does, any test file
+      // running in parallel against this shared database sees zzTestPenWorld as
+      // THE entry world. villageScreenBudget_db.test.js asserts the entry world
+      // has a village whose spawn is entry_spawn (SOMET-153's criterion), and
+      // failed on exactly that when this fixture had neither. withEntryPreserved
+      // restores the real entry world afterwards, but it cannot close the window
+      // while the apply is running.
+      entry_spawn: { x: 1150, y: 1150 },
+      village: { min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
+                 spawn_x: 1150, spawn_y: 1150 },
       level_band: [1, 2],
       safe_road_radius: 3,
       pens: [{
