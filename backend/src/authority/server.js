@@ -1823,8 +1823,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (entry.waypoints && entry.waypoints.size) {
         for (const p of entry.world.players.values()) {
           const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
-          const wp = entry.waypoints.get(
-            `${Math.floor(cy / MAP_TILE_SIZE)},${Math.floor(cx / MAP_TILE_SIZE)}`);
+          // The SAME function loadWorld keyed the Map with, rather than the
+          // inline Math.floor pair the doorway and portal blocks use. Those two
+          // sites are one expression apart and still had to be reconciled by
+          // hand; here the lookup and the key cannot disagree by construction.
+          const wp = entry.waypoints.get(waypointTileKey(cx, cy));
           if (!wp) continue;
           if (!p._litWaypoints) p._litWaypoints = new Set();
           if (p._litWaypoints.has(wp.id)) continue;
