@@ -108,6 +108,39 @@ function mayJoin({ isAdmin, pendingWorldId, worldId, facts, travel = null }) {
   // out, and `first-join` covers one that has never been anywhere. Checked
   // against the live character table before the leg was deleted, and pinned by
   // join_policy.test.js's dungeon-resume case.
+  //
+  // ONE SHAPE THIS LEG DID COVER AND NOTHING ELSE DOES (SOMET-293 review,
+  // finding 3): hasHistory true, lastWorldId null. Such a character matches
+  // nothing at all -- `resume` needs the world_players row it does not have,
+  // `first-join` is closed by hasHistory, `transition` needs a pending arrival,
+  // and `waypoint-travel` only answers a travel frame. Every join is refused,
+  // which is a hard lockout rather than a degraded experience: the client has no
+  // last world to offer, the entry world is refused too, and the player sits on
+  // a canvas that never receives `joined`.
+  //
+  // It is REACHABLE, if narrowly. recordVisit runs when the server COMMITS a
+  // transition, before the rejoin -- so a client that never completes the rejoin
+  // owns a visit row for a world it holds no world_players row in. That alone is
+  // harmless (the origin world's row is still the newest one). It only becomes
+  // this shape if that origin world is later DELETED: both foreign keys are ON
+  // DELETE CASCADE, so the delete takes the world_players row and leaves the
+  // other visit standing. `make clear-maps` does exactly that.
+  //
+  // Left as a note and NOT as a new leg, deliberately:
+  //   - the state does not exist. A count over the live characters table
+  //     (visit row present, no world_players row anywhere) returns 0 of 20; the
+  //     5 characters with no world_players row have no visits either, which is
+  //     an ordinary new character and is what `first-join` is for.
+  //   - the authorization cascade was reviewed as sound across seven attack
+  //     shapes. Adding a leg for a state nobody is in trades a proved rule for
+  //     an unproved one on speculation.
+  // If it is ever hit, the fix is not to bring `fast-travel` back -- it turned a
+  // data flag into a reason to be somewhere, which is what this slice removed.
+  // It is to let `first-join` answer a character that has NO world_players row
+  // anywhere, since such a character is nowhere and the entry world is not a
+  // privilege. That needs a fact joinPolicyFacts does not currently load
+  // (world_players existence independent of world), so it is a change, not a
+  // one-liner, and it should be made against a real occurrence.
 
   // 5. First join ever. A character with no history has no last world and no
   //    visits, so rules 3 and 4 cannot fire and it would be locked out of the
