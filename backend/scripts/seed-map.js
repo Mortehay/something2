@@ -27,6 +27,7 @@ const { fetchLinks, setLink, setPortalLink } = require('../src/services/mapLinks
 const { createVillage, fetchVillages } = require('../src/services/villages.js');
 const { insertPortalGuards } = require('../src/services/dungeonGuards.js');
 const { insertVaultChest } = require('../src/services/chests.js');
+const { upsertWaypoint } = require('../src/services/waypoints.js');
 const { populateWorld } = require('../src/services/worldPopulation.js');
 const { assertNavigable } = require('../src/services/navigability.js');
 const { buildWorldGenConfig } = require('../src/services/worldGenConfig.js');
@@ -242,6 +243,43 @@ async function applyMapSpec(pool, spec) {
       }
     }
 
+    // Waypoints (SOMET-292). After the guard pass, so a guarded staircase
+    // already exists to be reasoned about, and long before populateWorld, which
+    // does not read them.
+    //
+    // The is_waypoint FLAG converges to the spec -- re-asserted false on every
+    // portal link the spec does not flag, exactly as allows_fast_travel is
+    // re-asserted on every world, so deleting the key from a spec takes the
+    // flag back off rather than leaving a staircase permanently travellable
+    // because it once was.
+    //
+    // The waypoint ROWS do not converge: they are only ever written, never
+    // deleted. character_waypoints hangs off them, so removing a waypoint from
+    // a spec would delete every player's activation of it -- a re-seed must not
+    // be able to erase progress. The asymmetry is deliberate and is recorded in
+    // this slice's plan doc as a known gap.
+    let waypointsWritten = 0;
+    for (const l of spec.links) {
+      if (l.kind !== 'portal') continue;
+      const linkId = portalLinkIds.get(`${l.from}:${l.from_x},${l.from_y}`);
+      await client.query('UPDATE map_links SET is_waypoint = $2 WHERE id = $1',
+        [linkId, l.is_waypoint === true]);
+      if (l.is_waypoint !== true) continue;
+      await upsertWaypoint(client, {
+        worldId: idByKey.get(l.from), x: l.from_x, y: l.from_y,
+        name: l.waypoint_name, mapLinkId: linkId,
+      });
+      waypointsWritten += 1;
+    }
+    for (const w of spec.worlds) {
+      for (const wp of w.waypoints ?? []) {
+        await upsertWaypoint(client, {
+          worldId: idByKey.get(w.key), x: wp.x, y: wp.y, name: wp.name, mapLinkId: null,
+        });
+        waypointsWritten += 1;
+      }
+    }
+
     let villages = 0;
     for (const w of spec.worlds) {
       if (!w.village) continue;
@@ -346,7 +384,7 @@ async function applyMapSpec(pool, spec) {
     return {
       worlds: worldsWritten, links: linksWritten, villages,
       portalGuards: portalGuardsWritten, creatures: creaturesWritten,
-      vaultChests: vaultChestsWritten,
+      vaultChests: vaultChestsWritten, waypoints: waypointsWritten,
     };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -371,7 +409,8 @@ if (require.main === module) {
     .then((n) => {
       console.log(
         `applied ${name}: ${n.worlds} worlds, ${n.links} links, ${n.villages} villages, `
-        + `${n.portalGuards} portal guards, ${n.creatures} creatures, ${n.vaultChests} vault chests`);
+        + `${n.portalGuards} portal guards, ${n.creatures} creatures, ${n.vaultChests} vault chests, `
+        + `${n.waypoints} waypoints`);
       // See this file's header: only the world_chunks cache is reachable from
       // here. Printed unconditionally rather than probed -- this process has no
       // way to tell whether a backend is up, and a note that only appears
