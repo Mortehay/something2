@@ -632,7 +632,11 @@ const WP_PORTAL = { from_x: 2550, from_y: 2550, to_x: 550, to_y: 550 };
 const WP_STONE = { x: 1250, y: 850, name: 'zzTestWp Old Well' };
 const WP_STAIR_NAME = 'zzTestWp Barrow Stair';
 
-const waypointSpec = ({ guard = false, flagged = true, stone = WP_STONE } = {}) => {
+// `stoneWorld` exists for the guarded-staircase case, which must drop its stone
+// on world A's staircase TILE to collide with it. Everything else keeps the
+// stone in B, so A's flagged staircase and B's stone are one landmark each and
+// the spec stays legal under the SOMET-300 ceiling.
+const waypointSpec = ({ guard = false, flagged = true, stone = WP_STONE, stoneWorld = 'b' } = {}) => {
   const portal = { kind: 'portal', from: 'a', to: 'b', ...WP_PORTAL };
   if (guard) portal.guard = { creature_type: 'Wolf', count: 2 };
   if (flagged) { portal.is_waypoint = true; portal.waypoint_name = WP_STAIR_NAME; }
@@ -641,17 +645,25 @@ const waypointSpec = ({ guard = false, flagged = true, stone = WP_STONE } = {}) 
     chunk_size: 64, biomes: ['Deep Forest'], biome_cell: 32,
     allowed_creature_types: [], is_entry: true, entry_spawn: { x: 3200, y: 3200 },
   };
-  if (stone) a.waypoints = [stone];
+  const b = {
+    // No grid: reachable only through the portal, which is exactly the shape
+    // a real dungeon has.
+    key: 'b', name: 'zzTestWpB', seed: 996, width: 20, height: 20,
+    chunk_size: 20, biomes: ['Deep Forest'], biome_cell: 10,
+    allowed_creature_types: [], is_entry: false,
+  };
+  // The standalone stone lives in world B, the flagged staircase in world A.
+  //
+  // It used to put BOTH in world A, which SOMET-300 made an illegal spec: a
+  // world may hold at most one travel landmark, counting the standalone
+  // `waypoints` array and any is_waypoint portal departing from it. Splitting
+  // them keeps this fixture covering BOTH authoring routes -- which is its whole
+  // job -- while staying legal. WP_STONE's tile (12,8) is inside B's 20x20.
+  if (stone) (stoneWorld === 'a' ? a : b).waypoints = [stone];
   return {
     name: 'zz-test-waypoint-fixture',
     topology: 'spine',
-    worlds: [a, {
-      // No grid: reachable only through the portal, which is exactly the shape
-      // a real dungeon has.
-      key: 'b', name: 'zzTestWpB', seed: 996, width: 20, height: 20,
-      chunk_size: 20, biomes: ['Deep Forest'], biome_cell: 10,
-      allowed_creature_types: [], is_entry: false,
-    }],
+    worlds: [a, b],
     links: [portal],
   };
 };
@@ -701,7 +713,7 @@ test('seeding writes the waypoints a spec authors', async (t) => {
           name: r.name, x: r.x, y: r.y, world: r.world, link: r.map_link_id })),
         [
           { name: WP_STAIR_NAME, x: 2550, y: 2550, world: 'zzTestWpA', link: forward.id },
-          { name: WP_STONE.name, x: 1250, y: 850, world: 'zzTestWpA', link: null },
+          { name: WP_STONE.name, x: 1250, y: 850, world: 'zzTestWpB', link: null },
         ]);
     });
   } finally { await cleanup(pool); await pool.end(); }
@@ -733,14 +745,14 @@ test('re-seeding a moved waypoint converges, keeps activations, and leaves no gh
 
       // Slice B's first edit: nudge the waypoint, keep its name.
       const moved = await applyMapSpec(pool, waypointSpec({
-        stone: { ...WP_STONE, x: 3350, y: 2750 } }));
+        stone: { ...WP_STONE, x: 1750, y: 1250 } }));   // tile (17,12): still inside B's 20x20
       assert.equal(moved.waypointsRemoved, 0, 'a rename-free move must not delete anything');
 
       const rows = await wpRows(pool);
       assert.equal(rows.length, 2, 'the old tile still carries a ghost waypoint');
       const after = rows.find((r) => r.name === WP_STONE.name);
       assert.equal(after.id, before.id, 'the move re-created the waypoint instead of moving it');
-      assert.deepEqual([after.x, after.y], [3350, 2750]);
+      assert.deepEqual([after.x, after.y], [1750, 1250]);
       const act = await pool.query(
         'SELECT count(*)::int AS n FROM character_waypoints WHERE waypoint_id = $1', [before.id]);
       assert.equal(act.rows[0].n, 1, 're-seeding erased a player\'s activation');
@@ -804,7 +816,8 @@ test('a guarded staircase cannot end up a waypoint, whatever the spec says', asy
     // the staircase's own tile is walked onto, lit, and travelled to.
     await assert.rejects(
       () => withEntryPreserved(pool, () => applyMapSpec(pool, waypointSpec({
-        flagged: false, stone: { x: 2599, y: 2599, name: 'zzTestWp Sneaky Stone' } }))),
+        flagged: false, stoneWorld: 'a',
+        stone: { x: 2599, y: 2599, name: 'zzTestWp Sneaky Stone' } }))),
       /Sneaky Stone.*guarded by Wolf/s);
     assert.deepEqual(await wpRows(pool), []);
   } finally { await cleanup(pool); await pool.end(); }

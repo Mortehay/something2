@@ -189,16 +189,22 @@ test('the list carries activated and known-but-unactivated waypoints, and withho
       const character = await createTestCharacter(dbPool, user);
 
       const home = await createTestWorld(dbPool, worlds, uniq('home'));
+      // A SECOND visited world for the unactivated waypoint. SOMET-300 caps a
+      // world at one (waypoints_world_unique), and the property here is about
+      // what the payload carries across the worlds a character has VISITED --
+      // lit, known-but-unlit, and withheld -- never about two sharing a map.
+      const home2 = await createTestWorld(dbPool, worlds, uniq('home2'));
       const unseen = await createTestWorld(dbPool, worlds, uniq('unseen'));
       const litName = uniq('lit');
       const darkName = uniq('dark');
       const hiddenName = uniq('hidden');
       const lit = await addWaypoint(dbPool, home, 250, 250, litName);
-      await addWaypoint(dbPool, home, 950, 950, darkName);
+      await addWaypoint(dbPool, home2, 950, 950, darkName);
       await addWaypoint(dbPool, unseen, 250, 250, hiddenName);
       await dbPool.query(
-        'INSERT INTO character_visited_worlds (character_id, world_id) VALUES ($1, $2)',
-        [character, home]);
+        `INSERT INTO character_visited_worlds (character_id, world_id)
+         VALUES ($1, $2), ($1, $3)`,
+        [character, home, home2]);
       await activateWaypoint(dbPool, character, lit.id);
 
       const res = await request(app).get('/api/player/waypoints')

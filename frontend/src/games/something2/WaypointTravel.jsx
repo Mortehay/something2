@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { buildTravelList, REASON } from './waypointTravel.js';
+import { shouldAutoOpen, portalTileOf } from './portalAutoOpen.js';
 
 // The waypoint travel popup (SOMET-293), opened with T while playing.
 //
@@ -27,6 +28,13 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
 // state has to follow. 200ms rather than a rAF loop: this is a list of DOM rows,
 // not a canvas, and re-rendering it 60 times a second would be waste.
 const POSITION_POLL_MS = 200;
+
+// How often the CLOSED popup checks whether the player has just arrived on the
+// portal (SOMET-300). Coarser than the poll above because a tile transition is a
+// coarse event and this one runs for the whole session rather than only while a
+// panel is up -- 4 checks a second is well inside the reaction time a player
+// experiences as "it opened when I stepped on it".
+const ARRIVAL_POLL_MS = 250;
 
 const Backdrop = styled.div`
   position: absolute;
@@ -114,7 +122,9 @@ const Empty = styled.div`
 const WHY_TEXT = {
   [REASON.YOU_ARE_HERE]: 'you are here',
   [REASON.NOT_DISCOVERED]: 'not discovered',
-  [REASON.NOT_ON_A_WAYPOINT]: 'stand on a waypoint',
+  // The KEY keeps its name (SOMET-300 renames what a player reads, not the
+  // code); only the sentence changes.
+  [REASON.NOT_ON_A_WAYPOINT]: 'stand on a portal',
 };
 
 export const WAYPOINTS_ERROR_TOAST_ID = 'waypoint-travel-error';
@@ -130,7 +140,7 @@ function useWaypoints(characterId) {
         `${API_URL}/api/player/waypoints?character_id=${encodeURIComponent(characterId)}`,
         { headers: authHeaders() },
       );
-      if (!res.ok) throw new Error('Failed to load your waypoints');
+      if (!res.ok) throw new Error('Failed to load your portals');
       return res.json();
     },
   });
@@ -188,6 +198,43 @@ export default function WaypointTravel({ gameRef, characterId }) {
     return () => clearInterval(id);
   }, [open, gameRef]);
 
+  // AUTO-OPEN ON ARRIVAL (SOMET-300). Stepping onto the portal opens the list
+  // without pressing anything -- the discoverability half of the ticket, since a
+  // landmark whose only affordance is an unlabelled key is one nobody finds.
+  //
+  // Runs while the popup is CLOSED, which the position poll above deliberately
+  // does not: that one exists to keep an OPEN panel's rows accurate. Slower than
+  // it (a tile transition is a coarse event) so the closed-state cost stays
+  // small.
+  //
+  // The latch lives in a ref, not in state: it changes on almost every reading
+  // and re-rendering the panel for it would be pure waste.
+  const prevTileRef = useRef(null);
+  useEffect(() => {
+    const read = () => {
+      const g = gameRef.current;
+      const snap = g && g.getWaypointSnapshot ? g.getWaypointSnapshot() : null;
+      const tile = portalTileOf(snap ? { x: snap.playerX, y: snap.playerY } : null);
+      // The portal of the world the player is standing in, from the list the
+      // popup already fetches -- not a second source of truth.
+      const portal = (data && Array.isArray(data.waypoints) && snap)
+        ? data.waypoints.find((w) => w.worldId === snap.worldId) || null
+        : null;
+
+      if (shouldAutoOpen({
+        portal, worldId: snap ? snap.worldId : null, prevTile: prevTileRef.current, tile,
+        isOpen: openRef.current,
+      })) {
+        setOpen(true);
+        setPos(snap);   // so the first render has a position and does not flash "stand on a portal"
+      }
+      prevTileRef.current = tile;
+    };
+    read();
+    const id = setInterval(read, ARRIVAL_POLL_MS);
+    return () => clearInterval(id);
+  }, [gameRef, data]);
+
   // A waypoint lighting up changes this list, and the server is the only thing
   // that knows it happened. Without this the player walks onto a waypoint and
   // the panel keeps calling it undiscovered until a reload -- the feature would
@@ -201,7 +248,7 @@ export default function WaypointTravel({ gameRef, characterId }) {
       // INSERT's rowCount) rather than on anything this client remembers -- a
       // relog would otherwise re-announce every waypoint walked over.
       if (msg && msg.firstTime && msg.waypoint) {
-        toast.success(`Waypoint discovered: ${msg.waypoint.name}`);
+        toast.success(`Portal discovered: ${msg.waypoint.name}`);
       }
     });
     return () => g.setOnWaypointActivated(null);
@@ -231,14 +278,14 @@ export default function WaypointTravel({ gameRef, characterId }) {
     <Backdrop onClick={() => setOpen(false)}>
       <Card onClick={(e) => e.stopPropagation()}>
         <CloseButton aria-label="Close travel" onClick={() => setOpen(false)}>×</CloseButton>
-        <h2>Travel</h2>
+        <h2>Portals</h2>
         <p className="sub">
           {standingOnActivated
-            ? 'Choose a waypoint you have lit.'
-            : 'Stand on a waypoint you have lit to travel from it.'}
+            ? 'Choose a portal you have lit.'
+            : 'Stand on a portal you have lit to travel from it.'}
         </p>
         {groups.length === 0 && (
-          <Empty>You have not found any waypoints yet. Walk onto one to light it.</Empty>
+          <Empty>You have not found any portals yet. Walk onto one to light it.</Empty>
         )}
         {groups.map((g) => (
           <div key={g.worldId}>

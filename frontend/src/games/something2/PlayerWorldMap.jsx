@@ -228,7 +228,7 @@ export default function PlayerWorldMap() {
         <Dim>
           The <HereKey>yellow</HereKey> world is where you are now. This map is a
           record, not a way to move: walk, take a doorway, or travel between
-          waypoints you have lit (press <code>T</code> in the game).
+          portals you have lit (step onto one, or press <code>T</code>).
         </Dim>
       </Header>
       <CanvasCard>{body}</CanvasCard>
