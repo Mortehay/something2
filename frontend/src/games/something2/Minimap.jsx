@@ -31,6 +31,12 @@ function renderFrame(ctx, dpr, box, cellW, { gameRef, overviewRef, tileColors })
     creatures: snap.creatures.map((c) => ({ col: c.x / MAP_TILE_SIZE, row: c.y / MAP_TILE_SIZE, color: c.color })),
     doorways: overview ? overview.doorways : [],
     villages: overview ? overview.villages : [],
+    // SOMET-298. From the join-frame snapshot, not the overview: a waypoint's
+    // lit/unlit state is per character, and the overview is a shared cached
+    // terrain window. `phase` is read HERE, in the component, because the
+    // renderer must stay a pure function of its arguments.
+    landmarks: snap.landmarks || [],
+    phase: performance.now(),
     view: { centerCol: pCol, centerRow: pRow, step: overview ? overview.step : FALLBACK_STEP, cellW, boxW: box, boxH: box },
   });
   return true;

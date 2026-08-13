@@ -542,6 +542,11 @@ export class Game {
         return {
             worldId: this.worldId ?? null,
             chunkSize: this.chunkedMap ? this.chunkedMap.chunkSize : null,
+            // SOMET-298. The same array the ground renderer draws, handed over
+            // by reference on purpose: when onWaypointActivated flips a marker
+            // to lit, the minimap changes on the very next frame with no
+            // refetch and no second copy to keep in step.
+            landmarks: this.landmarks || [],
             player: {
                 x: this.player.x + (this.player.width || 0) / 2,
                 y: this.player.y + (this.player.height || 0) / 2,
