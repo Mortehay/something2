@@ -189,15 +189,27 @@ test('provocation expires on the clock, and every fresh hit re-arms it', () => {
     'a fresh hit did not re-arm the memory');
 });
 
-test('an unattributed hit provokes against anyone, rather than against nobody', () => {
-  // A burn whose applier is gone, or any caller that cannot name a source. The
-  // safe direction is a creature that fights back too readily; the other
-  // direction is a creature that can be killed without ever answering, which is
-  // the silent-inertness class this project keeps re-shipping.
+test('an unattributed hit provokes against NOBODY, not against everybody', () => {
+  // SOMET-290 follow-up (finding 2), and this reversed during the follow-up.
+  //
+  // While provocation only re-banded a skittish creature's MOVEMENT, "an
+  // unnamed source provokes against whoever is around" was the mild direction:
+  // the worst case was a deer that stopped running. It stopped being mild once
+  // provocation also granted target acquisition out to the LEASH radius -- a
+  // hit nobody could be blamed for would make a creature acquire and chase an
+  // innocent player standing far outside its aggro radius.
+  //
+  // `damageCreatureById` and `applyDamage` both still default `source` to null,
+  // so this is the behaviour the next unthreaded caller inherits.
   const t_obj = { hp: 100, maxHp: 100 };
   applyDamage(t_obj, 10, 'physical', NO_MITIGATION, 0);
-  assert.equal(isProvokedBy(t_obj, playerKey(7), 0), true);
-  assert.equal(isProvokedBy(t_obj, creatureKey('abc'), 0), true);
+  assert.equal(isProvokedBy(t_obj, playerKey(7), 0), false,
+    'an unattributed hit blamed a player who landed nothing');
+  assert.equal(isProvokedBy(t_obj, creatureKey('abc'), 0), false,
+    'an unattributed hit blamed a creature that landed nothing');
+  // ...and asking "was it provoked by nobody?" is not a way back in either.
+  assert.equal(isProvokedBy(t_obj, null, 0), false,
+    'a null actor key matched a null provoker');
 });
 
 test('a hit with no clock at all provokes indefinitely rather than not at all', () => {
@@ -205,8 +217,12 @@ test('a hit with no clock at all provokes indefinitely rather than not at all', 
   // here. `undefined + PROVOKE_MEMORY_MS` would be NaN, and `NaN > now` is
   // false -- i.e. a target that is instantly calm again, which is exactly the
   // failure this rewrite exists to remove.
+  //
+  // The SOURCE is named here even though the clock is not: the two are
+  // independent, and after the finding-2 fix an unsourced hit provokes nobody
+  // at any clock, so omitting both would prove nothing about the clock.
   const t_obj = { hp: 100, maxHp: 100 };
-  applyDamage(t_obj, 10, 'physical', NO_MITIGATION);
+  applyDamage(t_obj, 10, 'physical', NO_MITIGATION, undefined, playerKey(7));
   assert.equal(isProvokedBy(t_obj, playerKey(7), 0), true);
   assert.equal(isProvokedBy(t_obj, playerKey(7), 1e12), true);
 });

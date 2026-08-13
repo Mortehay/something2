@@ -34,10 +34,9 @@ const PROVOKE_MEMORY_MS = 10000;
 // while a userId is an integer — comparing them untagged would be a type
 // coincidence away from a creature retaliating against the wrong actor.
 //
-// A null id yields null, i.e. "unattributed", which is treated below as
-// "provoked by whoever is around" — the pre-attribution behaviour. That is the
-// deliberate failure direction: an unthreaded damage source makes a creature
-// fight back too readily, never a creature that silently refuses to.
+// A null id yields null, i.e. "unattributed", which isProvokedBy below matches
+// against NOBODY. See the note there for why that is the safe direction now
+// that provocation grants acquisition reach rather than only a movement band.
 function playerKey(userId) { return userId == null ? null : `p:${userId}`; }
 function creatureKey(id) { return id == null ? null : `c:${id}`; }
 
@@ -51,13 +50,28 @@ function creatureKey(id) { return id == null ? null : `c:${id}`; }
 //    `until <= now` so a NaN `until` (a caller that passed a garbage clock)
 //    reads as calm rather than as angry forever.
 //  - a record with a null `by` (damage from an unattributed source: a burn
-//    whose applier is gone, a hand-rolled test hit) matches ANY key, which is
-//    exactly the pre-SOMET-290 behaviour and the safe direction.
+//    whose applier is gone, a hand-rolled test hit) matches NOBODY, and a null
+//    `key` (asking about "no actor") is never a match either.
+//
+// That last rule is the SOMET-290 follow-up (finding 2) and it reversed. While
+// provocation only re-banded a skittish creature's MOVEMENT, "an unattributed
+// hit provokes against everyone" was the mild direction: the worst case was a
+// deer that stopped running. It stopped being mild once provocation also
+// granted acquisition out to the leash radius — an unnamed source would make a
+// creature acquire and chase an innocent player standing well outside its aggro
+// radius, blamed for a hit nobody landed. Between "a creature that does not
+// answer a hit nobody can be blamed for" and "a creature that attacks a
+// bystander", the first is the one a player can make sense of.
+//
+// Both `damageCreatureById` and `applyDamage` still DEFAULT `source` to null,
+// so this is also what keeps the next unthreaded caller from silently shipping
+// bystander aggression: it ships a creature that ignores that one damage
+// source, which is visible and boring, instead of one that hunts strangers.
 function isProvokedBy(target, key, now) {
   const p = target && target._provokedBy;
   if (!p) return false;
   if (!(p.until > now)) return false;
-  return p.by === null || p.by === key;
+  return p.by != null && p.by === key;
 }
 
 // THE write side, so `_provokedBy`'s shape has exactly one author. Two callers:
@@ -83,7 +97,10 @@ function provoke(target, source, now) {
 //
 // `now` is the world clock and `source` the attacker's tag (playerKey/
 // creatureKey above) — both only feed the provocation stamp below, so a caller
-// that deals damage nobody can be blamed for may omit them.
+// that deals damage nobody can be blamed for may omit them. Omitting `source`
+// records a provocation that matches no actor, i.e. nobody is retaliated
+// against; see isProvokedBy for why that is the direction an unthreaded caller
+// should fail in.
 function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined, source = null) {
   const el = ELEMENTS.includes(element) ? element : 'physical';
   const defense = mit.defense || 0;

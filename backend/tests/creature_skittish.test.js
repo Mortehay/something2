@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { CreatureSim, shoveCreature, isEngagingPlayer } = require('../src/authority/creatures.js');
+const {
+  CreatureSim, shoveCreature, isEngagingPlayer, GUARD_LEASH_RADIUS,
+} = require('../src/authority/creatures.js');
 const {
   applyDamage, isProvokedBy, playerKey, PROVOKE_MEMORY_MS,
 } = require('../src/authority/damage.js');
@@ -577,4 +579,241 @@ test('a creature displaced outside its leash can still retreat toward home', () 
     `rooted at its leash: ${before.toFixed(2)}px from home before, ${fromHome(c).toFixed(2)}px after`);
   assert.ok(!angryAt(c, 'u1', 40 * MS),
     'a creature that simply gave ground was treated as cornered');
+});
+
+// --- 12. THE REACH EXTENSION IS SKITTISH-ONLY --------------------------------
+
+test('the provoker reach extension is a SKITTISH rule, not a game-wide one', () => {
+  // SOMET-290 follow-up (finding 1). The reach extension ("your provoker is
+  // acquirable out to the LEASH radius, not just the aggro radius") was written
+  // in the shared hostile acquisition loop, above the chase-style branch, so it
+  // applied to every hostile in the game.
+  //
+  // That is a game-wide change to how you break contact, shipped inside a
+  // skittish-scoped ticket. ~4,000 live hostile rows are charge/skirmish with
+  // aggro 400 against leash 800 (Apex is 600/1200), and a landed creature melee
+  // re-stamps provocation on every connect, so any enemy that had ever touched
+  // you would re-acquire you out to its leash on a rolling 10s timer: a wolf
+  // that used to drop you at 400px would follow to 800px and re-arm every time
+  // it connected, and every ranged weapon in the catalog would pull aggro from
+  // beyond the range the enemy can see you at. Spec §3 authorises retaliation
+  // for `skittish` and no other style.
+  //
+  // 500px: outside the shared aggro radius (400) and well inside the shared
+  // leash (800), i.e. exactly the band the extension opens up.
+  const ATTACKER_X = CX + 500;
+
+  function afterAHitFromOutOfRange(style) {
+    const { s, player: p, active, c } = scenario(behavior({ chaseStyle: style }), ATTACKER_X);
+    s.tick(DT, active, [p], 0);
+    assert.equal(c._target, null, `${style}: fixture -- the attacker must start out of aggro range`);
+
+    hit(c, 'u1', 0);
+
+    let acquired = false;
+    let closest = Infinity;
+    // Short run on purpose: acquisition happens on the FIRST tick after the
+    // hit, and a long one would let the roam walk drift into aggro range and
+    // acquire honestly, which would read as the defect.
+    for (let i = 1; i <= 30; i++) {
+      s.tick(DT, active, [p], i * MS);
+      acquired = acquired || c._target === 'u1';
+      closest = Math.min(closest, apart(c, p));
+    }
+    return { acquired, closest, playerHp: p.hp };
+  }
+
+  for (const style of ['charge', 'skirmish', 'kite']) {
+    const r = afterAHitFromOutOfRange(style);
+    // Fixture guard, not decoration: if the roam walk carried it inside 400px
+    // then an acquisition would be legitimate and this run would prove nothing.
+    assert.ok(r.closest > 400,
+      `${style}: it roamed to ${r.closest.toFixed(2)}px, inside its own aggro radius -- run proves nothing`);
+    assert.equal(r.acquired, false,
+      `${style}: a hit from beyond aggro range made it acquire the attacker -- backing out of aggro range is no longer a way to disengage`);
+    assert.equal(r.playerHp, 500, `${style}: it engaged a player it should never have acquired`);
+  }
+
+  // The control, and the reason the block above is not vacuously true of a
+  // feature that simply does not work: the SAME fixture with one field changed
+  // must still retaliate, or spec §3 has been broken instead of scoped.
+  assert.equal(afterAHitFromOutOfRange('skittish').acquired, true,
+    'the retaliation reach is gone for skittish too -- a bow now defeats spec §3 again');
+});
+
+// --- 13. AN UNNAMED SOURCE BLAMES NOBODY -------------------------------------
+
+test('a hit with no attributed source does not send a creature after a bystander', () => {
+  // SOMET-290 follow-up (finding 2). `_provokedBy.by === null` used to match
+  // ANY actor -- "provoked by whoever is around". That was the mild direction
+  // while provocation only re-banded movement; it stopped being mild once
+  // provocation also granted acquisition, and both `applyDamage` and
+  // `damageCreatureById` still DEFAULT `source` to null, so the next caller
+  // that forgets to thread one inherits whatever this does.
+  //
+  // Driven through the real funnel with the argument omitted, exactly as an
+  // unthreaded caller would call it -- not by hand-setting `_provokedBy`.
+  const { s, player: p, active, c } = scenario(skittish(), CX + 100);
+  applyDamage(c, 10, 'physical', c.mit, 0);
+  assert.ok(!angryAt(c, 'u1', 0), 'the player was blamed for a hit nobody landed');
+
+  const before = apart(c, p);
+  for (let i = 1; i < 60; i++) s.tick(DT, active, [p], i * MS);
+
+  assert.ok(apart(c, p) > before,
+    `it charged a bystander over a hit nobody landed (${before.toFixed(2)} -> ${apart(c, p).toFixed(2)})`);
+  assert.equal(p.hp, 500, 'it bit a player who never touched it');
+});
+
+// --- 14. THE PORTAL PACKS COME HOME ------------------------------------------
+
+// A portal pack member as dungeonGuards.js spawns one: an ORDINARY hostile
+// entity type (chase 'charge', not guard-style), placed in a ring around the
+// portal tile with home_x/home_y on that tile and blocks_portal_id set.
+//
+// These are the only non-guard rows in the live world that carry an anchor
+// besides SOMET-289's pens, and generalising the walk-home block from
+// guard-style to "any creature with a home" is a real behaviour change to
+// shipped content: they used to roam away from their portal and never come
+// back, contradicting dungeonGuards.js's own promise that a displaced one
+// "still recovers back to defending the portal". Pinned here so it is
+// deliberate rather than incidental.
+//
+// leashRadius 200 rather than the live 800 purely to keep the runs short.
+function portalGuard(over = {}) {
+  return behavior({
+    name: 'Portal Guard', chaseStyle: 'charge',
+    aggroRadius: 400, leashRadius: 200, ...over,
+  });
+}
+
+function portalPackSim(opts = {}) {
+  const s = new CreatureSim(stubMap(), opts.rng || noRedirect);
+  s.addCreatures([{
+    id: 'c', type: 'T', x: opts.x ?? BOX, y: BOX, hp: 300, damage: 5,
+    behavior: portalGuard(),
+    ...(opts.anchored === false ? {} : { home_x: CX, home_y: CY, blocks_portal_id: 'link-1' }),
+  }]);
+  return { s, c: s.all()[0], active: activeChunks() };
+}
+
+test('a portal-pack creature displaced off its post walks back to it', () => {
+  const { s, c, active } = portalPackSim({ x: BOX + 400 });
+  assert.equal(c.blocksPortalId, 'link-1', 'fixture: this must be a portal pack member');
+  const before = fromHome(c);
+  assert.ok(before > 200, `fixture: it must start outside its leash (${before.toFixed(2)}px)`);
+
+  let sawReturn = false;
+  for (let i = 0; i < 400; i++) {
+    s.tick(DT, active, [], i * MS);
+    sawReturn = sawReturn || c.mode === 'return';
+  }
+  assert.equal(sawReturn, true, 'it never entered the walk-home mode');
+  assert.ok(fromHome(c) <= 200 + 1e-6,
+    `it never recovered its post: ${fromHome(c).toFixed(2)}px away, leash is 200`);
+
+  // The control that makes "came home" mean something: the identical creature
+  // with the anchor removed, same rng, same start, same number of ticks. If it
+  // also ended up near the post then this run would be measuring a random walk
+  // that happened to go west, not a return.
+  const wild = portalPackSim({ x: BOX + 400, anchored: false });
+  assert.equal(wild.c.home, null, 'precondition: the control must have no anchor');
+  for (let i = 0; i < 400; i++) wild.s.tick(DT, wild.active, [], i * MS);
+  assert.ok(fromHome(wild.c) > 200,
+    `the unanchored control also ended ${fromHome(wild.c).toFixed(2)}px from the post -- this run does not discriminate`);
+});
+
+test('a portal-pack creature paces its post instead of roaming away from the portal', () => {
+  // The slower half, and the one a player actually sees: the roam block is a
+  // pure random walk, so before this an untouched portal guard drifted off its
+  // portal on its own and flushAndPrune persisted it there.
+  //
+  // A real (seeded) rng so redirects fire and the clamp is exercised on more
+  // than one bearing; the constant no-redirect rng would walk one fixed bearing
+  // forever.
+  let seed = 987654321;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+
+  const posted = portalPackSim({ rng });
+  let maxOut = 0, moved = 0;
+  const x0 = posted.c.x, y0 = posted.c.y;
+  for (let i = 0; i < 4000; i++) {
+    posted.s.tick(DT, posted.active, [], i * MS);
+    maxOut = Math.max(maxOut, fromHome(posted.c));
+    moved = Math.max(moved, Math.hypot(posted.c.x - x0, posted.c.y - y0));
+  }
+  assert.ok(maxOut <= 200 + 1e-6,
+    `it wandered ${maxOut.toFixed(2)}px off its portal, leash is 200`);
+  // Contained, not frozen -- a creature the clamp had rooted in place would
+  // satisfy the assertion above for entirely the wrong reason.
+  assert.ok(moved > 50,
+    `it did not pace at all (${moved.toFixed(2)}px): the clamp froze it instead of containing it`);
+
+  // Same seed, same everything, no anchor: a wild spawn must still roam free,
+  // or the clamp has leaked out of the anchored rows into the whole world.
+  seed = 987654321;
+  const wild = portalPackSim({ rng, anchored: false });
+  let wildOut = 0;
+  for (let i = 0; i < 4000; i++) {
+    wild.s.tick(DT, wild.active, [], i * MS);
+    wildOut = Math.max(wildOut, fromHome(wild.c));
+  }
+  assert.ok(wildOut > 200,
+    `a homeless creature only roamed ${wildOut.toFixed(2)}px: the clamp leaked into wild spawns`);
+});
+
+// --- 15. A MISSING LEASH RADIUS MUST NOT FREEZE A CREATURE -------------------
+
+test('a homed creature whose behaviour has no leash radius still moves', () => {
+  // SOMET-290 follow-up (finding 4). `leashAnchorOf` defends the radius
+  // (`Number.isFinite(bh.leashRadius) ? ... : GUARD_LEASH_RADIUS`); the tick's
+  // own leash reads did not. `Math.max(NaN, d2)` is NaN and every `<= NaN` is
+  // false, so an undefined radius refuses EVERY roam and flee step AND reads as
+  // "outside the leash" -- a creature permanently in `mode: 'return'`, frozen
+  // solid. resolveBehavior always supplies 800, so this was safe on the DB path
+  // and silently lethal for anything else.
+  //
+  // The key must be PRESENT and undefined: resolveInstanceBehavior spreads
+  // DEFAULT_BEHAVIOR first, so a merely absent key gets the default back.
+  const bh = skittish({ leashRadius: undefined });
+  assert.equal('leashRadius' in bh, true, 'fixture: the key must exist');
+  assert.equal(bh.leashRadius, undefined, 'fixture: ...and be undefined');
+
+  // Roam half. Seeded rng so redirects fire.
+  let seed = 24680;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  const roam = scenario(bh, CX + 5000, { creature: { home_x: CX, home_y: CY }, rng });
+  assert.equal(roam.c.behavior.leashRadius, undefined,
+    'fixture: the resolved behaviour must still be missing the radius');
+  const x0 = roam.c.x, y0 = roam.c.y;
+  let roamed = 0, sawReturn = false;
+  for (let i = 0; i < 600; i++) {
+    roam.s.tick(DT, roam.active, [], i * MS);
+    roamed = Math.max(roamed, Math.hypot(roam.c.x - x0, roam.c.y - y0));
+    sawReturn = sawReturn || roam.c.mode === 'return';
+  }
+  assert.ok(roamed > 50, `it never roamed (${roamed.toFixed(2)}px): a missing radius froze it`);
+  assert.equal(sawReturn, false, 'it thought it was outside a leash it does not have');
+  // The defended fallback is the guard leash, so it is contained rather than
+  // unconstrained -- "no radius" must not mean "no pen" either.
+  assert.ok(roamed <= GUARD_LEASH_RADIUS * 2,
+    `it roamed ${roamed.toFixed(2)}px: a missing radius removed the pen entirely`);
+
+  // Flee half: the same missing radius refused every retreat step, and a
+  // leash-refused step is not "cornered" either, so it stood rooted AND calm
+  // while a player walked onto it.
+  const flee = scenario(bh, CX + 100, { creature: { home_x: CX, home_y: CY } });
+  const fx0 = flee.c.x, fy0 = flee.c.y;
+  for (let i = 0; i < 100; i++) {
+    pursue(flee.player, flee.c);
+    flee.s.tick(DT, flee.active, [flee.player], i * MS);
+  }
+  assert.ok(Math.hypot(flee.c.x - fx0, flee.c.y - fy0) > 20,
+    'it never gave ground: a missing radius refused every flee step');
 });

@@ -923,8 +923,10 @@ class CreatureSim {
         attackElement: c.attackElement || c.attack_element || 'physical',
         _target: null, _targetKind: null, mode: 'roam',
         // SOMET-154 walk-home state, in the cleared shape resetHomeWalk gives
-        // it. Only ever written by the guard branch's return step; every
-        // non-guard creature keeps these defaults forever.
+        // it. Written by stepHome, which SOMET-290 made shared: the guard
+        // branch's return step and the hostile path's walk-home block both go
+        // through it. A creature with no `home` never reaches either, so an
+        // unanchored one does keep these defaults forever.
         //   _homePath   remaining waypoints (tile centres) to the post
         //   _homeStall  return ticks since the last meaningful closure
         //   _homeRepaths path searches since the guard last closed on its post
@@ -1114,15 +1116,30 @@ class CreatureSim {
       }
       // --- end guard branch; hostile path below is unchanged ---
 
+      // SOMET-290 follow-up (finding 4) — the post this creature is held to,
+      // resolved ONCE for the whole hostile path and read by all three of the
+      // flee clamp, the walk-home block and the roam clamp below.
+      //
+      // Through leashAnchorOf rather than by reading `c.home` and
+      // `bh.leashRadius` at each site, because the helper is the only place that
+      // defends the radius: a hand-built behaviour with no `leashRadius` (a
+      // test fixture, a future caller that does not go through resolveBehavior)
+      // gives `Math.max(NaN, d2)` -> NaN, which refuses EVERY roam and flee step
+      // AND reads as outside the leash, i.e. a creature permanently in
+      // `mode: 'return'` and frozen solid. The DB path always supplies 800, so
+      // the raw reads were safe today and silently lethal tomorrow.
+      const anchor = leashAnchorOf(c);
+
       // Target resolution: keep current target unless it left leash; else acquire nearest in aggro.
       if (c._target) {
         const tp = byId.get(c._target);
         if (!tp || dist2(cc.x, cc.y, center(tp).x, center(tp).y) > bh.leashRadius * bh.leashRadius) c._target = null;
       }
       if (!c._target) {
-        // SOMET-290 — the creature's PROVOKER is acquirable out to the leash
-        // radius and outranks a nearer stranger; everyone else is acquirable
-        // at aggro range as before.
+        // SOMET-290 — a SKITTISH creature's PROVOKER is acquirable out to the
+        // leash radius and outranks a nearer stranger. Every other chase style,
+        // and every non-provoker, acquires the nearest player inside the aggro
+        // radius exactly as before.
         //
         // Both halves matter and both are about the same missing fact. Aggro
         // is 300px for a skittish creature and every ranged weapon in the
@@ -1138,11 +1155,25 @@ class CreatureSim {
         // that is someone this creature was never going to reach. It stays
         // provoked until the memory expires, so walking back into leash range
         // within that window is answered.
+        //
+        // GATED ON `skittish`, which is the only style spec §3 speaks about,
+        // and the gate is the whole point rather than tidiness. Unscoped, this
+        // is a game-wide change to how you break contact: ~4,000 live hostile
+        // rows are charge/skirmish with aggro 400 against leash 800 (Apex is
+        // 600/1200), and a landed creature melee re-stamps provocation on every
+        // connect (see the attack branch below), so every enemy that had ever
+        // touched you would re-acquire you out to its leash on a rolling 10s
+        // timer — backing out of aggro range would stop being a way to
+        // disengage, and every ranged weapon in the game would pull aggro from
+        // beyond the range the enemy can see you at. Skittish creatures are the
+        // ones that need it, because they are the ones whose aggro radius is
+        // narrower than the weapons used on them.
+        const retaliates = bh.chaseStyle === 'skittish';
         let nearest = null, nd2 = Infinity, haveProvoker = false;
         for (const p of players) {
           const pc = center(p);
           const d2 = dist2(cc.x, cc.y, pc.x, pc.y);
-          const provoker = isProvokedBy(c, playerKey(p.userId), now);
+          const provoker = retaliates && isProvokedBy(c, playerKey(p.userId), now);
           const reach = provoker ? Math.max(bh.aggroRadius, bh.leashRadius) : bh.aggroRadius;
           if (d2 > reach * reach) continue;
           if (haveProvoker && !provoker) continue;
@@ -1237,12 +1268,17 @@ class CreatureSim {
           const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult * c._buff.speedMult);
           // SOMET-290 — a flee step is additionally clamped to the leash from
           // HOME, which is the difference between a creature you can scare off
-          // and a creature you can herd across the map. withinLeash returns
-          // true for a null home, and every wild spawn today has one (the
-          // column is only written for guards and, next, for SOMET-289's
-          // penned creatures), so this clamp is provably inert for everything
-          // currently in the world -- it exists so a penned creature cannot be
-          // walked out of its pen by a player who simply keeps advancing.
+          // and a creature you can herd across the map. It exists so a penned
+          // creature cannot be walked out of its pen by a player who simply
+          // keeps advancing.
+          //
+          // Reaches only creatures that BOTH have a home anchor and flee, which
+          // today is SOMET-289's penned skittish creatures and nothing else:
+          // `home_x` is otherwise written only for village guards (guard style,
+          // which returned above), the portal packs in dungeonGuards.js and the
+          // vault packs in chests.js -- all `charge`, so `fleeing` is false for
+          // them and this clamp is skipped. A creature with no anchor at all is
+          // unconstrained here, which is every wild spawn.
           //
           // Applied to the FLEE step only, not to a provoked chase: clamping
           // the chase too would freeze a provoked creature against its leash
@@ -1258,8 +1294,8 @@ class CreatureSim {
           // are refused, and it would stand still and CALM (a refused step is
           // still `moved`, so it is not cornered either) while a player stood on
           // top of it.
-          const inLeash = !fleeing
-            || withinLeashBudget(c, cc.x, cc.y, r.x + c.width / 2, r.y + c.height / 2, bh.leashRadius);
+          const inLeash = !fleeing || !anchor
+            || withinLeashBudget(c, cc.x, cc.y, r.x + c.width / 2, r.y + c.height / 2, anchor.radius);
           const moved = (r.x !== c.x || r.y !== c.y);
           if (moved && inLeash) {
             c.x = r.x; c.y = r.y;
@@ -1361,7 +1397,13 @@ class CreatureSim {
             // still in reach. Only a hit that CONNECTED re-arms it: a player
             // who breaks contact and outruns it is forgotten on schedule.
             //
-            // Free for every other chase style, which never reads the field.
+            // Free for every other chase style, which never reads the field:
+            // both readers (isFleeingFrom and the acquisition reach above) are
+            // gated on `skittish`, so a charger stamping this every time it
+            // connects changes nothing about a charger. That gate is what keeps
+            // it free — unscoped, this line is what would turn the reach
+            // extension into a permanent, self-renewing grudge for every enemy
+            // in the game.
             provoke(c, playerKey(c._target), now);
             // Second of the two contact sites -- same stamp, same shape.
             stampCreatureAttack(attacks, impacts, c, tp, center(c), center(tp));
@@ -1434,12 +1476,31 @@ class CreatureSim {
       //    random walk leaks a creature out of its pen on its own, just slower
       //    than a player can herd one.
       //
+      // NOT inert on today's data, and deliberately so. Besides the penned
+      // creatures this ticket adds, the live world holds the portal packs from
+      // dungeonGuards.js (Umbral/Crystal/Void/Ember/Bonelord/Rime/Fungal Line:
+      // hostile, `charge`, leash 800, home_x on the portal tile). They used to
+      // roam away from their portal and never come back, which contradicted
+      // dungeonGuards.js's own promise that a displaced one "still recovers
+      // back to defending the portal". From here they pace within their leash
+      // of the portal and walk back when displaced. That is the behaviour their
+      // module always described, but it IS a change to shipped content, so
+      // creature_skittish.test.js pins it rather than leaving it incidental. A
+      // creature with no anchor is untouched by all of this, which is every
+      // wild spawn -- `home_x` is written only by the guard, portal and vault
+      // spawners and by SOMET-289's pens.
+      //
       // Reached BEFORE the hold/ambush stand-still check on purpose: "stand
       // still rather than wander" is about roaming, and a creature displaced
-      // off its anchor is not roaming, it is lost. A creature with no anchor is
-      // untouched by all of this, which is every wild spawn in the world.
-      if (c.home) {
-        if (!withinLeash(cc.x, cc.y, c.home, bh.leashRadius)) {
+      // off its anchor is not roaming, it is lost. No `hold`/`ambush` row has a
+      // home today, so that ordering is currently theoretical -- but note the
+      // shape it would take if one were ever homed: a homed `hold` sentry with
+      // `moveSpeedMult: 0` cannot close ANY distance, so it would burn its 12
+      // stall ticks x 3 repaths and then be TELEPORTED to its post by
+      // stepHome's snap-home fallback. That is arguably the right answer for a
+      // sentry that cannot walk, but it should be a decision, not a surprise.
+      if (anchor) {
+        if (!withinLeash(cc.x, cc.y, anchor.home, anchor.radius)) {
           c.mode = stepHome(this.map, c, bh, dt, cc) === 'home' ? 'roam' : 'return';
           continue;
         }
@@ -1462,8 +1523,8 @@ class CreatureSim {
       // the flee step (monotone, so a creature that starts outside is not
       // frozen), and the same "blocked -> turn" answer, so a penned creature
       // paces its pen instead of standing in the corner it first reached.
-      const roamInLeash = withinLeashBudget(c, cc.x, cc.y,
-        r.x + c.width / 2, r.y + c.height / 2, bh.leashRadius);
+      const roamInLeash = !anchor || withinLeashBudget(c, cc.x, cc.y,
+        r.x + c.width / 2, r.y + c.height / 2, anchor.radius);
       if ((r.x !== c.x || r.y !== c.y) && roamInLeash) {
         c.x = r.x; c.y = r.y;
         c.facing = DIR_FACING[c._dir];
@@ -1572,8 +1633,12 @@ class CreatureSim {
   // next to their own hit detection — a rider belongs to a HIT, not to damage.
   // `source` (SOMET-290) is the attacker's tag from damage.js's playerKey/
   // creatureKey, threaded by the projectile paths and the burn tick. Optional
-  // and defaulting to null -- an unattributed hit still provokes, it just
-  // provokes against everyone, which is the pre-attribution behaviour.
+  // and defaulting to null -- an unattributed hit stamps a provocation that
+  // matches NO actor, so the creature answers nobody for it. Every one of
+  // today's callers names its source; the default exists so that the one that
+  // eventually forgets ships an enemy that ignores a damage source (visible,
+  // dull) rather than one that acquires and chases a bystander who never
+  // touched it. See isProvokedBy in damage.js.
   damageCreatureById(id, damage, element, now, source = null) {
     const c = this.creatures.get(id);
     if (!c) return false;

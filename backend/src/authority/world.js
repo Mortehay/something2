@@ -257,9 +257,21 @@ class World {
     for (const c of this.creatures.all()) {
       stepEffects(c, dtMs, this.now, (t, m, sourceId) => {
         // SOMET-290: `playerKey(sourceId)` is the provoker, the same actor the
-        // kill below is credited to. A creature-owned burn carries a null
-        // sourceId (killerUserIdFor normalizes a creature shooter away), which
-        // provokes unattributed — see isProvokedBy.
+        // kill below is credited to.
+        //
+        // `playerKey` unconditionally, and that is correct BY CONTRACT rather
+        // than by luck: a rider's sourceId is a userId or null, never a
+        // creature id — projectiles.js applies every rider with
+        // killerUserIdFor(p), which erases a creature shooter to null before it
+        // reaches the effect. So a creature-owned burn arrives here as null and
+        // provokes nobody (isProvokedBy: an unattributed record matches no
+        // actor), which is the intended reading — a creature that set you on
+        // fire is not a player you can retaliate against.
+        //
+        // If a future rider path ever DID carry a creature id, this would build
+        // `p:<uuid>` — a tag that matches no actor either, so the failure mode
+        // is the same "provokes nobody", not a bystander being blamed. The fix
+        // then is at the rider's source (tag it with creatureKey), not here.
         if (!this.creatures.damageCreatureById(t.id, m, BURN_ELEMENT, this.now, playerKey(sourceId))) return false;
         // Normalized at construction: an effect applied with no sourceId
         // (there is none today, but a future riderless path could) must
