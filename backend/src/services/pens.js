@@ -43,6 +43,22 @@
 //     and vault chests (SOMET-244). `home_x IS NOT NULL` is the structural
 //     marker, and a penned creature needs the anchor anyway.
 //
+// ---------------------------------------------------------------------------
+// KEEP A PEN AWAY FROM THE VILLAGE GUARDS. Village guards target
+// `faction = 'hostile'`, and every skittish creature type IS faction 'hostile'
+// -- they are non-aggressive by chase_style, not by faction. Guard aggro is
+// 400 px from the post, and SOMET-291 raises the Guard leash to 600 so that
+// aggro radius is no longer clipped by the leash filter. A pen inside that ring
+// is livestock the village's own guards will systematically farm, and a player
+// arrives at the starting village to find the practice pen being emptied.
+//
+// Not enforced in code: the guard posts are derived from a village box that a
+// pen's own validation has no handle on, and the numbers belong to the Guard
+// behaviour row rather than to a pen. It is an AUTHORING rule -- every pen in
+// the home region sits 1200 px or more from the nearest guard post, measured
+// from the posts (villageGatePosts) rather than from the village box edge.
+//
+// ---------------------------------------------------------------------------
 // The anchor is each creature's OWN spawn tile, not the pen centre: a shared
 // anchor would have every creature in the pen walk back to one tile and pile up
 // there. The honest consequence is that containment is "within the behaviour's
