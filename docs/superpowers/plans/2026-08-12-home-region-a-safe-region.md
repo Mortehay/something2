@@ -824,10 +824,13 @@ function boxesOverlap(a, b) {
       && b.min_col <= a.min_col + a.width - 1;
 }
 
-// Widest safe corridor a spec may ask for. A radius wider than a village is
-// already generous, and at 8 a 64-tile world is mostly road; the DB carries the
-// same range as a CHECK constraint for anything that writes the column
-// directly.
+// Widest safe corridor a spec is allowed to ask for -- a BACKSTOP against an
+// absurd value, matching the DB's CHECK constraint, not authoring guidance.
+// Chebyshev dilation saturates fast against the real generator (default
+// pathCell 24, pathJitter 6): a 64-tile world is already ~40% safe at r=2 and
+// 92% safe at r=8. See the measured table and recommended range (1-3) in the
+// comment above the CHECK constraint in
+// migrations/1714440180000_world_safe_region.js.
 const MAX_SAFE_ROAD_RADIUS = 8;
 ```
 
