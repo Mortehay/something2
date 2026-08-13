@@ -71,6 +71,13 @@ export function toCytoscapeElements(payload) {
         //
         // Deliberately not "travelable: 'false' everywhere": a field that is
         // always false is a field a later change can quietly make true again.
+        //
+        // SOMET-298: does this world hold a waypoint or a portal? Presence
+        // only -- this surface is per-world granularity and stays that way, so
+        // the badge says "there is one here", never where. A missing count is
+        // read as none rather than throwing, so an older client against a newer
+        // server degrades to an unbadged map instead of an error boundary.
+        landmarks: String((Number(w.waypointCount) || 0) + (Number(w.portalCount) || 0) > 0),
       },
       position: positionOf(w.id),
     })),
@@ -83,6 +90,12 @@ export function toCytoscapeElements(payload) {
         // where the character is. Set explicitly so every node carries the same
         // keys and the `data(current)` mappers have nothing to warn about.
         current: 'false',
+        // NO `landmarks` (SOMET-298), deliberately absent rather than 'false'.
+        // Same argument the retired `travelable` datum settled: a field that is
+        // permanently false is a field a later change can quietly make true, and
+        // here that would be a fog leak -- "this unexplored place has a
+        // waypoint". `node[landmarks = "true"]` cannot match a missing datum, so
+        // absence is also what makes the badge unreachable for a stub.
       },
       position: positionOf(s.id),
     })),

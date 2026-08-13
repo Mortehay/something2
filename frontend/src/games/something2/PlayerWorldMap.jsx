@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import styled from 'styled-components';
 import CytoscapeComponent from 'react-cytoscapejs';
@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { toCytoscapeElements } from './playerWorldMap.js';
+import { PULSE_PERIOD_MS } from './src/js/systems/landmarkRenderer.js';
 
 // The player's read-only fog-of-war map (SOMET-263).
 //
@@ -122,6 +123,27 @@ const STYLESHEET = [
       width: 40, height: 40,
     },
   },
+  // SOMET-298: this world holds a waypoint or a portal. Presence only -- the
+  // map is per-world granularity, so the badge says "there is one here", never
+  // where. Listed BEFORE the `current` rule so "you are here" still wins the
+  // border: knowing where you are outranks knowing a landmark is nearby, and
+  // cytoscape resolves later matching rules over earlier ones.
+  //
+  // The pink is landmarkRenderer's portal colour; the two surfaces sharing a
+  // hue is what makes the badge read as the same feature as the marker on the
+  // ground. It cannot be imported here -- this stylesheet is a plain literal
+  // and cytoscape draws to canvas -- so a drift between them is caught by the
+  // spec, not by a type.
+  {
+    selector: 'node[landmarks = "true"]',
+    style: { 'border-color': '#f472b6', 'border-width': 3 },
+  },
+  // The pulse. Cytoscape has no keyframes, so PlayerWorldMap toggles this class
+  // on an interval; `pulse-off` is the dim half of the same beat.
+  {
+    selector: 'node[landmarks = "true"].pulse-off',
+    style: { 'border-opacity': 0.3 },
+  },
   // "You are here". The travel-offer border rule that used to sit above this one
   // went with click-to-travel (SOMET-293); nothing on this map is clickable now,
   // so there is no second border state to resolve against.
@@ -148,6 +170,23 @@ export default function PlayerWorldMap() {
   const { data, isLoading } = usePlayerWorldMap(activeCharacterId);
   const elements = useMemo(() => toCytoscapeElements(data), [data]);
 
+  // SOMET-298. Cytoscape has no keyframe animation, so the badge pulses by
+  // toggling a class on a timer. Half of PULSE_PERIOD_MS, so this surface beats
+  // at the same rate as the ground marker and the minimap -- one interval for
+  // the whole graph, not one animation per node.
+  //
+  // Cleared on unmount: an interval holding a cy reference after the component
+  // is gone keeps the whole graph alive and throws on a destroyed instance.
+  const cyRef = useRef(null);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const cy = cyRef.current;
+      if (!cy || cy.destroyed()) return;
+      cy.nodes('[landmarks = "true"]').toggleClass('pulse-off');
+    }, PULSE_PERIOD_MS / 2);
+    return () => clearInterval(id);
+  }, []);
+
   let body;
   if (activeCharacterId == null) {
     body = <Empty>Choose a character to see the places it has been.</Empty>;
@@ -171,6 +210,9 @@ export default function PlayerWorldMap() {
         // keys it patches straight onto the cy instance.
         autoungrabify={true}
         autounselectify={true}
+        // The cy instance, for the badge pulse above. react-cytoscapejs calls
+        // this once with the instance on mount.
+        cy={(cy) => { cyRef.current = cy; }}
       />
     );
   }
