@@ -383,7 +383,26 @@ app.get('/api/player/world-map', playerGuard, async (req, res) => {
       // withholds its name, level band and coordinates; "this unseen place is a
       // travel hub" is a different shape of the same leak, and it would tell a
       // player which unexplored doors are worth taking.
-      `SELECT id, name, graph_x, graph_y, is_entry, level_min, level_max, allows_fast_travel
+      // waypointCount / portalCount (SOMET-298) badge a world that holds a
+      // landmark. Correlated subqueries rather than a second round trip, and --
+      // load-bearing -- they sit inside the SELECT that is ALREADY scoped to
+      // `visited`. The fog is therefore enforced by the same WHERE that
+      // withholds the name: there is no code path by which an unvisited world
+      // could acquire a count, because it never becomes a row here at all.
+      //
+      // The `unvisited` stubs built below carry { id, from, edge } and nothing
+      // else, for the reason the comment above gives. "That unexplored place
+      // has a waypoint" is a strictly stronger hint than the fast-travel flag
+      // this route already refuses to emit for them.
+      //
+      // COALESCE, not a bare count: the client compares > 0, and `undefined > 0`
+      // is false, so a null would silently badge nothing forever.
+      `SELECT id, name, graph_x, graph_y, is_entry, level_min, level_max, allows_fast_travel,
+              COALESCE((SELECT count(*) FROM waypoints wp WHERE wp.world_id = worlds.id), 0)
+                AS "waypointCount",
+              COALESCE((SELECT count(*) FROM map_links ml
+                         WHERE ml.from_world_id = worlds.id AND ml.edge = 'PORTAL'), 0)
+                AS "portalCount"
          FROM worlds WHERE id = ANY($1::uuid[]) ORDER BY name`,
       [visited])).rows;
 

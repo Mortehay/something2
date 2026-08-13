@@ -112,6 +112,9 @@ export class Game {
         // and `shopOpen` gates the panel render/input independently of
         // `shop` itself staying populated across a close/reopen.
         this.merchants = [];
+        // SOMET-297. Empty until a `joined` frame arrives, and reset here on
+        // the same line merchants is -- both are per-world join payload.
+        this.landmarks = [];
         this.shop = null;
         this.shopOpen = false;
         // Which stock list the shop panel shows and which page of it. The
@@ -326,6 +329,9 @@ export class Game {
         this.gold = 0;
         this.progression = null;
         this.merchants = [];
+        // SOMET-297. Empty until a `joined` frame arrives, and reset here on
+        // the same line merchants is -- both are per-world join payload.
+        this.landmarks = [];
         this.shop = null;
         this.shopOpen = false;
         this.shopView = { tab: 'catalog', page: 0 };
@@ -364,6 +370,12 @@ export class Game {
                     this.autoLoot = msg.autoLoot === true;
                     this.gold = Number(msg.gold) || 0;
                     this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
+                    // SOMET-297. Same shape as merchants above. Replaced whole
+                    // on every join, so a world change cannot leave the previous
+                    // world's markers on the ground -- transitions re-join
+                    // (GameShell routes onTransition into enterWorld), so this
+                    // assignment is the only thing that has to be right.
+                    this.landmarks = Array.isArray(msg.landmarks) ? msg.landmarks : [];
                     this.progression = msg.progression || null;
                     resolve(msg.spawn);
                 },
@@ -442,7 +454,25 @@ export class Game {
                     if (this.authorityClient) this.authorityClient.disconnect();
                 },
                 onTransition: (msg) => { if (this.onTransition) this.onTransition(msg); },
-                onWaypointActivated: (msg) => { if (this.onWaypointActivated) this.onWaypointActivated(msg); },
+                onWaypointActivated: (msg) => {
+                    // Light the marker on the ground the moment the server says
+                    // so (SOMET-297). Without this the outline only becomes a
+                    // filled diamond on the NEXT join, so the player walks onto
+                    // a waypoint, the popup gains an entry, and the tile they
+                    // are standing on still looks unvisited.
+                    //
+                    // Matched by tile, not by id: a landmark carries no id (the
+                    // wire shape is kind/x/y/name/activated) and only one
+                    // waypoint can occupy a tile -- waypoints_world_tile_unique
+                    // and the tick loop's single-entry Map both say so.
+                    const wp = msg && msg.waypoint;
+                    if (wp && Array.isArray(this.landmarks)) {
+                        for (const l of this.landmarks) {
+                            if (l.kind === 'waypoint' && l.x === wp.x && l.y === wp.y) l.activated = true;
+                        }
+                    }
+                    if (this.onWaypointActivated) this.onWaypointActivated(msg);
+                },
             });
             this.authorityClient.connect(worldId, characterId);
             setTimeout(() => reject(new Error('authority join timeout')), 5000);
@@ -512,6 +542,11 @@ export class Game {
         return {
             worldId: this.worldId ?? null,
             chunkSize: this.chunkedMap ? this.chunkedMap.chunkSize : null,
+            // SOMET-298. The same array the ground renderer draws, handed over
+            // by reference on purpose: when onWaypointActivated flips a marker
+            // to lit, the minimap changes on the very next frame with no
+            // refetch and no second copy to keep in step.
+            landmarks: this.landmarks || [],
             player: {
                 x: this.player.x + (this.player.width || 0) / 2,
                 y: this.player.y + (this.player.height || 0) / 2,
@@ -756,6 +791,7 @@ export class Game {
                 autoLoot: this.autoLoot,
                 gold: this.gold,
                 merchants: this.merchants,
+                landmarks: this.landmarks,
                 shop: this.shop,
                 shopOpen: this.shopOpen,
                 shopView: this.shopView,

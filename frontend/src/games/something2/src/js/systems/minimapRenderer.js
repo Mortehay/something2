@@ -1,3 +1,6 @@
+import { landmarkPulse, landmarkColor } from "./landmarkRenderer.js";
+import { MAP_TILE_SIZE } from "../core/constants.js";
+
 // Pure Canvas-2D drawing for the in-game minimap. Player-centered iso window:
 // the player's (fractional) global tile maps to the box center and everything
 // else offsets from it. Diamonds are 2:1 like the in-game world and the world
@@ -30,7 +33,16 @@ function isoAngle(dx, dy) {
   return Math.atan2((dx + dy) * 0.5, dx - dy);
 }
 
-export function drawMinimap(ctx, { overview, tileColors, player, creatures, doorways, villages, view }) {
+export function drawMinimap(ctx, {
+  overview, tileColors, player, creatures, doorways, villages, view,
+  // SOMET-298. World-pixel points from the join frame (Game's snapshot), NOT
+  // from the overview payload. The overview is a cached terrain window; a
+  // landmark is per-character state (a waypoint is lit or not) that already
+  // arrives on `joined`, so sourcing it here keeps one source of truth and
+  // leaves overviewCache alone. `phase` is the caller's rAF timestamp -- see
+  // landmarkRenderer for why a renderer must never read its own clock.
+  landmarks, phase,
+}) {
   const cellW = view.cellW, hw = cellW / 2, hh = cellW / 4;
 
   // 1) Terrain
@@ -61,6 +73,40 @@ export function drawMinimap(ctx, { overview, tileColors, player, creatures, door
     ctx.fillStyle = '#c084fc';
     diamond(ctx, x, y, 4, 4);
     ctx.fill();
+  }
+
+  // 3.5) Landmarks (pulsing diamond): waypoints and portals.
+  //
+  // Colour and pulse both come from landmarkRenderer, deliberately imported
+  // rather than reimplemented -- the ground marker and the minimap marker must
+  // be the same colour and beat together, or a player cannot tell they are the
+  // same thing. Two copies of "#7dd3fc" would drift the first time one changed.
+  //
+  // Wrapped in save/restore: the pulse writes globalAlpha, and the player dot
+  // is drawn after this. Leaking it would make the PLAYER fade in and out,
+  // which reads as a rendering glitch rather than as a landmark.
+  if (Array.isArray(landmarks) && landmarks.length) {
+    const alpha = landmarkPulse(phase);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    for (const l of landmarks) {
+      if (!l || !Number.isFinite(l.x) || !Number.isFinite(l.y)) continue;
+      const { x, y } = worldTileToView(l.x / MAP_TILE_SIZE, l.y / MAP_TILE_SIZE, view);
+      const color = landmarkColor(l.kind);
+      // Same rule as the ground marker: only an unactivated WAYPOINT is hollow.
+      // A portal is never "activated" -- walking into one uses it.
+      if (l.kind === 'waypoint' && l.activated !== true) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        diamond(ctx, x, y, 5, 5);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = color;
+        diamond(ctx, x, y, 5, 5);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
   }
 
   // 4) Creatures (colored dots)

@@ -1,6 +1,7 @@
 import { GAME_WIDTH, GAME_HEIGHT, ISO_TILE_H, ISO_TILE_W, MAP_TILE_SIZE } from "../core/constants.js";
 import { worldToScreen, depthKey } from "../core/iso.js";
 import { compareDrawables, wallRevealed, drawWall } from "./wallRenderer.js";
+import { drawLandmarks } from "./landmarkRenderer.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual } from "./spriteAtlas.js";
 import { TileDiamondCache } from "./tileTexture.js";
@@ -136,6 +137,10 @@ export class RenderSystem {
     groundItems = [], autoLoot = false, gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
+    // SOMET-297. Fixed world points from the join frame, exactly like
+    // `merchants` above -- not entities, so they carry no stored top-left
+    // corner and need no half-extent adjustment.
+    landmarks = [],
     // Slice D: the effect LIBRARY, needed by the projectile trail. Effects in
     // `vfx` already carry their own resolved `def`; a projectile is a
     // persistent object that only carries a NAME, so the lookup happens here.
@@ -189,6 +194,13 @@ export class RenderSystem {
         this.ctx.fill();
       }
     }
+
+    // Landmark markers (SOMET-297) sit between the two passes on purpose: after
+    // the flat floor so they are visible on it, before the depth-sorted pass so
+    // a player or creature standing on the tile draws OVER the marker and stays
+    // legible. The pulse phase is this frame's timestamp, set above -- the
+    // renderer never reads a clock itself.
+    drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH });
 
     // Players + creatures + ground items + walls, all depth-sorted together
     // (Pass B) — ground items must join the same sort rather than being

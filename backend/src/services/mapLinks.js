@@ -3,9 +3,20 @@ const { oppositeEdge } = require('./mapService');
 // This world's outgoing links, joined to each target's bounds (for compass
 // arrival geometry -- portal rows carry their own to_x/to_y and ignore
 // to_width/to_height entirely).
+//
+// `to_name` is here for SOMET-297: a map_links row has no name column, so the
+// only label a portal landmark can carry is where it goes. The join to `worlds`
+// was already present for the bounds, so this costs nothing extra.
+//
+// landmarks_joined_db.test.js guards this column list by source text. That guard
+// exists because SOMET-288 shipped a blocking defect of exactly this shape --
+// the authority's world SELECT omitted two new columns, `Number(undefined) || 0`
+// silently made the value 0, and every test passed because the seed path reads
+// the row with SELECT *.
 async function fetchLinks(pool, worldId) {
   const r = await pool.query(
     `SELECT ml.id, ml.edge, ml.to_world_id, w.width AS to_width, w.height AS to_height,
+            w.name AS to_name,
             ml.from_x, ml.from_y, ml.to_x, ml.to_y
      FROM map_links ml JOIN worlds w ON w.id = ml.to_world_id
      WHERE ml.from_world_id = $1`,
