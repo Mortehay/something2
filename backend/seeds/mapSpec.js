@@ -41,6 +41,22 @@ function hasValidGrid(w) {
       && Number.isInteger(w.grid[0]) && Number.isInteger(w.grid[1]);
 }
 
+// Pixels per map tile. Spec coordinates (portal from_x/from_y, waypoint x/y)
+// are pixels; the things they collide with are TILES, because that is the
+// granularity a player stands at and the granularity both the authority's tick
+// loop and waypoints_world_tile_unique work in.
+const SPEC_TILE_SIZE = 100;
+
+// A world-scoped tile identity, used to ask "do these two authored things want
+// the same tile?". Deliberately NOT the exact-pixel slot the portal-collision
+// check above uses: two portals 1px apart really are a conflict at the database
+// level (they share a unique index on exact coordinates), whereas a waypoint
+// and a portal 1px apart are a conflict because a player cannot stand on one
+// without standing on the other.
+function tileSlot(worldKey, x, y) {
+  return `${worldKey}:${Math.floor(x / SPEC_TILE_SIZE)},${Math.floor(y / SPEC_TILE_SIZE)}`;
+}
+
 function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } = {}) {
   const errors = [];
   if (!spec || typeof spec !== 'object') return ['spec is not an object'];
@@ -56,8 +72,79 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
   // overworld's 2D grid, so it must not be required to declare one. This
   // scan runs before the per-world loop so that loop can consult it.
   const portalConnectedKeys = new Set();
+  // THE LOAD-BEARING WAYPOINT RULE (SOMET-292, home-region spec §5): a portal a
+  // creature guards may never be a waypoint. Without it a guarded dungeon
+  // entrance is bypassable on the second visit and the level-band gating
+  // joinPolicy was written to protect stops holding.
+  //
+  // BOTH SIDES of a guarded link go in. setPortalLink writes two rows per
+  // staircase and insertPortalGuards only ever defends the DEPARTURE side, so
+  // making the arrival side a waypoint drops a traveller past the guard --
+  // the same bypass, spelled backwards. Recorded per tile so a standalone
+  // waypoint authored on the staircase's own tile is caught by the same set.
+  //
+  // Collected here, before the world loop, for the same reason
+  // portalConnectedKeys is: that loop has to consult it.
+  const guardedStaircaseTiles = new Set();
   for (const l of links) {
-    if (l.kind === 'portal') { portalConnectedKeys.add(l.from); portalConnectedKeys.add(l.to); }
+    if (l.kind !== 'portal') continue;
+    portalConnectedKeys.add(l.from); portalConnectedKeys.add(l.to);
+    if (!l.guard) continue;
+    const coords = ['from_x', 'from_y', 'to_x', 'to_y'];
+    // A malformed coordinate is reported by the link loop below; skipping it
+    // here keeps floor(undefined) out of the set (it would produce "NaN,NaN",
+    // a slot nothing can match, silently disarming the rule for that link).
+    if (coords.some((f) => !Number.isInteger(l[f]))) continue;
+    guardedStaircaseTiles.add(tileSlot(l.from, l.from_x, l.from_y));
+    guardedStaircaseTiles.add(tileSlot(l.to, l.to_x, l.to_y));
+  }
+
+  // Every waypoint name the spec claims, and every tile one occupies. Both are
+  // spec-wide: names share one UNIQUE(name) column across every world, and a
+  // tile can hold one waypoint because that is all the tick loop can find.
+  const waypointNames = new Set();
+  const waypointTiles = new Set();
+
+  // Shared by the world loop (standalone waypoints) and the link loop
+  // (portal-backed ones) so the two authoring routes cannot enforce different
+  // rules -- which is exactly how one of them ends up being the loose one.
+  function checkWaypoint({ worldKey, x, y, name, label, world }) {
+    if (typeof name !== 'string' || name.trim() === '') {
+      errors.push(`${label} name must be a non-empty string`);
+    } else if (waypointNames.has(name)) {
+      errors.push(`duplicate waypoint name "${name}" — waypoint names are unique across the whole map, `
+        + 'because the travel list shows them side by side');
+    } else {
+      waypointNames.add(name);
+    }
+
+    if (!Number.isInteger(x) || !Number.isInteger(y)) {
+      errors.push(`${label} x and y must be integers (pixels)`);
+      return;
+    }
+    if (x < 0 || y < 0) { errors.push(`${label} x and y must not be negative`); return; }
+    // A waypoint outside the map is a tile no player can ever stand on, so it
+    // is a row that can never be activated rather than a feature. Only checked
+    // when the world's own dimensions validated -- otherwise the real error is
+    // the missing width/height, already reported.
+    if (world && Number.isInteger(world.width) && Number.isInteger(world.height)
+        && (x >= world.width * SPEC_TILE_SIZE || y >= world.height * SPEC_TILE_SIZE)) {
+      errors.push(`${label} at (${x},${y}) is outside world "${worldKey}" `
+        + `(${world.width}x${world.height} tiles)`);
+      return;
+    }
+
+    const slot = tileSlot(worldKey, x, y);
+    if (guardedStaircaseTiles.has(slot)) {
+      errors.push(`${label} sits on a guarded portal in world "${worldKey}" — a waypoint there is a `
+        + 'guard the player never has to meet, and the level band it defends stops holding');
+    }
+    if (waypointTiles.has(slot)) {
+      errors.push(`world "${worldKey}" already has a waypoint on tile `
+        + `(${Math.floor(x / SPEC_TILE_SIZE)},${Math.floor(y / SPEC_TILE_SIZE)}) — only one of them `
+        + 'could ever be walked onto');
+    }
+    waypointTiles.add(slot);
   }
 
   for (const w of worlds) {
@@ -162,6 +249,23 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       if (geomErr) errors.push(`world "${w.key}" village ${geomErr}`);
     }
 
+    if (w.waypoints !== undefined) {
+      if (!Array.isArray(w.waypoints)) {
+        errors.push(`world "${w.key}" waypoints must be an array`);
+      } else {
+        for (const [i, wp] of w.waypoints.entries()) {
+          if (!wp || typeof wp !== 'object') {
+            errors.push(`world "${w.key}" waypoint ${i} must be an object`);
+            continue;
+          }
+          checkWaypoint({
+            worldKey: w.key, x: wp.x, y: wp.y, name: wp.name, world: w,
+            label: `world "${w.key}" waypoint ${i}`,
+          });
+        }
+      }
+    }
+
     if (biomeNames) {
       for (const b of w.biomes ?? []) {
         if (!biomeNames.has(b)) errors.push(`world "${w.key}" references unknown biome "${b}"`);
@@ -205,6 +309,15 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     if (!to) { errors.push(`link references unknown world "${l.to}"`); continue; }
 
     if (l.kind === 'portal') {
+      // Rejected rather than coerced, for exactly the reason allows_fast_travel
+      // is: "true" and 1 are how a hand-edited spec gets a boolean wrong, and
+      // coercing either would turn a staircase into a travel target on the
+      // strength of a typo -- which is the guarded-entrance bypass arriving by
+      // accident instead of on purpose.
+      if (l.is_waypoint !== undefined && typeof l.is_waypoint !== 'boolean') {
+        errors.push(`portal link ${l.from}->${l.to} is_waypoint must be true or false `
+          + `(got ${JSON.stringify(l.is_waypoint)})`);
+      }
       const coordFields = ['from_x', 'from_y', 'to_x', 'to_y'];
       const badField = coordFields.find((f) => !Number.isInteger(l[f]));
       if (badField) {
@@ -240,9 +353,30 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
         }
       }
 
+      // A flagged staircase is a waypoint on its OWN departure tile: that is
+      // the tile a player walks onto, and it is where the registry row lands.
+      // checkWaypoint carries the guarded-staircase rejection, so a link that
+      // guards itself is caught here without this branch restating the rule.
+      if (l.is_waypoint === true) {
+        checkWaypoint({
+          worldKey: l.from, x: l.from_x, y: l.from_y, name: l.waypoint_name, world: from,
+          label: `portal link ${l.from}->${l.to} waypoint`,
+        });
+      }
+
       adjacency.get(l.from).push(l.to);
       adjacency.get(l.to).push(l.from);
       continue;
+    }
+
+    // A compass doorway is a three-tile gap in a wall ring stamped by
+    // stampBounds, not an authored point -- there is no single tile to record
+    // as a waypoint, and a doorway you can walk through is not a shortcut worth
+    // recording anyway. Flagged here rather than ignored, so an author who
+    // tries it is told the flag did nothing instead of finding out later.
+    if (l.is_waypoint !== undefined) {
+      errors.push(`link ${l.from}->${l.to} is a compass doorway and cannot be a waypoint — `
+        + 'is_waypoint belongs on a portal link, which has a tile');
     }
 
     if (!EDGE_DELTA[l.edge]) { errors.push(`link ${l.from}->${l.to} has invalid edge "${l.edge}"`); continue; }
