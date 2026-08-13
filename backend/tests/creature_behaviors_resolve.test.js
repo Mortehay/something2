@@ -64,5 +64,5 @@ test('DEFAULT_BEHAVIOR is frozen so a caller cannot mutate every creature at onc
 
 test('the value sets match the database CHECK constraints', () => {
   assert.deepEqual(ATTACK_KINDS, ['melee', 'ranged', 'cast']);
-  assert.deepEqual(CHASE_STYLES, ['charge', 'kite', 'skirmish', 'hold', 'ambush', 'guard']);
+  assert.deepEqual(CHASE_STYLES, ['charge', 'kite', 'skirmish', 'hold', 'ambush', 'guard', 'skittish']);
 });

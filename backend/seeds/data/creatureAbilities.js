@@ -24,6 +24,12 @@ const CREATURE_ABILITIES = [
   { behavior_name: 'Guard',      slot: 1, name: 'Guard',      attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 1.0, projectile_speed: 0,   projectile_radius: 0,  element: null, damage_mult: 1, knockback: 0 },
   { behavior_name: 'Sentry',     slot: 1, name: 'Sentry',     attack_kind: 'ranged', attack_range: 380, attack_cooldown: 2.0, projectile_speed: 500, projectile_radius: 6,  element: null, damage_mult: 1, knockback: 0 },
   { behavior_name: 'Lurker',     slot: 1, name: 'Lurker',     attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 0.9, projectile_speed: 0,   projectile_radius: 0,  element: null, damage_mult: 1, knockback: 0 },
+  // Byte-for-byte the row migration 1714440190000_skittish_chase_style
+  // inserts into creature_abilities: without this, a freshly-seeded
+  // database (this file) and the migration-patched live one would disagree
+  // on Skittish's cooldown -- 1.2 here vs. the DEFAULT_ABILITY fallback's
+  // 1.0 for a database with no ability row at all.
+  { behavior_name: 'Skittish',   slot: 1, name: 'Nip',        attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 1.2, projectile_speed: 0,   projectile_radius: 0,  element: null, damage_mult: 1, knockback: 0 },
 ];
 
 module.exports = { CREATURE_ABILITIES };

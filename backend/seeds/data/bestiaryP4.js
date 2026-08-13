@@ -16,7 +16,7 @@ const BESTIARY_P4_CREATURES = [
     "prompt": "a tiny beast creature",
     "level_min": 1,
     "level_max": 2,
-    "behavior_name": "Swarm"
+    "behavior_name": "Skittish"
   },
   {
     "name": "Beast Skirmisher",
@@ -151,7 +151,7 @@ const BESTIARY_P4_CREATURES = [
     "prompt": "a tiny woodland creature",
     "level_min": 1,
     "level_max": 2,
-    "behavior_name": "Swarm"
+    "behavior_name": "Skittish"
   },
   {
     "name": "Woodland Skirmisher",
@@ -747,7 +747,7 @@ const BESTIARY_P4_CREATURES = [
     "prompt": "a tiny physical-touched highland creature",
     "level_min": 8,
     "level_max": 10,
-    "behavior_name": "Swarm"
+    "behavior_name": "Skittish"
   },
   {
     "name": "Highland Skirmisher",

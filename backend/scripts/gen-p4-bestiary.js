@@ -40,6 +40,18 @@ function promptFor(line, rung) {
   return `a ${sizeWord} ${elementWord}${line.name.toLowerCase()} creature`;
 }
 
+// SOMET-290. The rung normally decides behaviour (behavior_name below), but a
+// handful of lowest-rung wildlife lines are the game's first SKITTISH
+// creatures -- they flee rather than charge, and SOMET-289's starting-zone
+// pens are built from them. Keyed by full name rather than by line or rung
+// because it is these specific creatures, not every Swarm and not every
+// Woodland.
+const BEHAVIOR_OVERRIDES = {
+  'Woodland Swarm': 'Skittish',
+  'Beast Swarm': 'Skittish',
+  'Highland Swarm': 'Skittish',
+};
+
 function generateBestiary() {
   const creatures = [];
   const drops = [];
@@ -62,7 +74,7 @@ function generateBestiary() {
         prompt: promptFor(line, rung),
         level_min: band.min,
         level_max: band.max,
-        behavior_name: rung.name, // resolved to a real behavior_id at seed time (Task 6)
+        behavior_name: BEHAVIOR_OVERRIDES[name] ?? rung.name, // resolved to a real behavior_id at seed time (Task 6)
       });
       const drop = pickDropItem(line.element, line.tier);
       drops.push({
@@ -93,5 +105,5 @@ module.exports = { BESTIARY_P4_CREATURES, BESTIARY_P4_DROPS };
   console.log(`Wrote ${creatures.length} creatures, ${drops.length} drops.`);
 }
 
-module.exports = { generateBestiary };
+module.exports = { generateBestiary, BEHAVIOR_OVERRIDES };
 if (require.main === module) writeOutput();

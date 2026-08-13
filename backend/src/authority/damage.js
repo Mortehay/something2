@@ -29,6 +29,17 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION) {
   const candidate = raw2 * (1 - resist);
   const final = Math.max(MIN_DAMAGE, Number.isFinite(candidate) ? candidate : MIN_DAMAGE);
   target.hp -= final;
+  // SOMET-290. Being hit is what turns a skittish creature from prey into a
+  // fighter, and this is the ONE place a hit lands: the melee arc (world.js),
+  // a direct projectile, an AoE detonation (projectiles.js) and the burn tick
+  // all funnel through here. Stamping it at those call sites instead would be
+  // the same rule-on-one-of-several-write-paths failure that shipped SOMET-153.
+  //
+  // Set unconditionally rather than only when `final > 0`: a hit absorbed to
+  // nothing is still an attack, and a creature that shrugs off being struck
+  // reads as broken. Harmless on players and on every other chase style —
+  // nothing but the skittish branch reads it.
+  target._provoked = true;
   return final;
 }
 

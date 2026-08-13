@@ -1030,6 +1030,30 @@ class CreatureSim {
         if (nearest) c._target = nearest.userId;
       }
       c.mode = c._target ? 'chase' : 'roam';
+      // SOMET-290: a creature with nobody to fight stops being angry. `_provoked`
+      // is stamped by applyDamage on ANY hit and is the only thing that turns a
+      // skittish creature into a fighter, so without a clear it is a one-way
+      // switch -- one arrow makes a deer a charger for the rest of the world's
+      // uptime, and the headline promise (you can walk past one) is silently
+      // off for that spawn forever.
+      //
+      // Placed AFTER target resolution, not inside the drop above, because the
+      // drop only fires for a creature that HAD a target -- and the arrow that
+      // provokes a deer is normally fired by someone the deer never targeted:
+      // skittish aggro is 300px and every ranged weapon in the catalog reaches
+      // further (darts 350 ... arbalest 850). Provocation from a sniper would
+      // otherwise persist until some unrelated later encounter happened to end
+      // beyond leash, and the next player to wander past -- who never touched
+      // it -- would be charged.
+      //
+      // Cannot fire mid-fight: a creature that is fighting has a target by
+      // definition. The boundary this DOES keep is that a creature holding a
+      // target stays angry, including at a second player who is merely nearby
+      // when the shooter leaves -- it is still in an encounter.
+      //
+      // Free for every other chase style: nothing but `fleeing` below reads
+      // this field.
+      if (!c._target) c._provoked = false;
 
       if (c.mode === 'chase') {
         const tp = byId.get(c._target);
@@ -1037,6 +1061,16 @@ class CreatureSim {
         const dist = Math.hypot(tc.x - cc.x, tc.y - cc.y);
         let vx = tc.x - cc.x, vy = tc.y - cc.y;
         let move = true;
+
+        // SOMET-290 — the whole of "this creature is prey right now", derived
+        // ONCE per tick and read by all three of the movement band, the leash
+        // clamp and the attack gate below. One const rather than three
+        // `chaseStyle === 'skittish' && !c._provoked` tests, because the
+        // cornered rule WRITES `_provoked` mid-tick: three separate reads
+        // would have a creature flee, discover it is cornered, and attack in
+        // the same tick from the pre-flee distance. A creature that decides to
+        // run commits to running for that tick and fights from the next one.
+        const fleeing = bh.chaseStyle === 'skittish' && !c._provoked;
 
         if (bh.chaseStyle === 'hold') {
           // Never moves. It still attacks below if the target is in range.
@@ -1057,16 +1091,71 @@ class CreatureSim {
           // rather than a timer that ignores whether the strike landed; with
           // a single ability it is identical to the old `_attackCd > 0`.
           if (!anyAbilityReady(c, bh) && dist < bh.preferredRange) { vx = -vx; vy = -vy; }
+        } else if (fleeing) {
+          // Two bands, and no attack band at all: inside its flee radius it
+          // backs away, outside it it stands and watches you. The outer band
+          // is `move = false` rather than a slow drift because a creature that
+          // keeps retreating from someone 250px away is not skittish, it is
+          // simply unreachable -- you could never catch one to hunt it.
+          //
+          // Note this branch is reached only when NOT provoked. A provoked
+          // skittish creature falls through with the straight-at-target vector
+          // exactly as 'charge' does, deliberately without a band of its own:
+          // "hurt me and I fight you like anything else" is the promise, and a
+          // separate provoked band would be a second copy of charge's chase
+          // that could drift from it.
+          if (dist < bh.preferredRange) { vx = -vx; vy = -vy; }
+          else { move = false; }
         }
         // 'charge' and 'ambush' fall through with the straight-at-target
         // vector -- an aggroed ambusher IS a charger, it just started asleep.
 
         if (move) {
           const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult * c._buff.speedMult);
-          if (r.x !== c.x || r.y !== c.y) {
+          // SOMET-290 — a flee step is additionally clamped to the leash from
+          // HOME, which is the difference between a creature you can scare off
+          // and a creature you can herd across the map. withinLeash returns
+          // true for a null home, and every wild spawn today has one (the
+          // column is only written for guards and, next, for SOMET-289's
+          // penned creatures), so this clamp is provably inert for everything
+          // currently in the world -- it exists so a penned creature cannot be
+          // walked out of its pen by a player who simply keeps advancing.
+          //
+          // Applied to the FLEE step only, not to a provoked chase: clamping
+          // the chase too would freeze a provoked creature against its leash
+          // edge with the player one step outside it, re-creating exactly the
+          // stuck-guard failure the guard branch above documents at length.
+          const inLeash = !fleeing
+            || withinLeash(r.x + c.width / 2, r.y + c.height / 2, c.home, bh.leashRadius);
+          const moved = (r.x !== c.x || r.y !== c.y);
+          if (moved && inLeash) {
             c.x = r.x; c.y = r.y;
             const f = facingFor(vx, vy); if (f) c.facing = f;
             c.dirty = true;
+          } else if (fleeing && !moved) {
+            // Cornered by TERRAIN, and only by terrain: the step was refused
+            // because the world had nowhere to put it. A creature with nowhere
+            // left to go fights -- without this it would jitter silently
+            // against the wall while the player killed it for free, which reads
+            // as a broken enemy rather than a frightened one.
+            //
+            // The two refusals are deliberately NOT one case, which is the
+            // opposite of how it looks from inside the pen. A fence refusal
+            // keeps the creature where it is whatever it decides next. A leash
+            // refusal does not: provoking here would clear `fleeing` from the
+            // next tick, and the clamp above only applies to a flee step, so
+            // the very act of enforcing the leash would drop it -- the creature
+            // would convert and then chase the player straight out of the pen,
+            // unclamped and with no return-home path. flushAndPrune writes
+            // x/y back to world_creatures, so that displacement would outlive
+            // the session and drain the pen permanently, one creature per
+            // player who wandered in.
+            //
+            // So a creature pinned against its own leash simply stops
+            // retreating. It stands at the edge, still calm, and can be walked
+            // up to and killed -- which is the intended "you can hunt one"
+            // outcome, not a failure mode.
+            c._provoked = true;
           }
         }
         // Attack. Gated by canAct for the same reason the player attack paths
@@ -1095,7 +1184,16 @@ class CreatureSim {
         //
         // `dist` is the PRE-move distance computed above from `cc`, so the
         // range gate is the same measurement the movement bands used.
-        const ability = selectAbility(c, bh, dist);
+        //
+        // SOMET-290: an unprovoked skittish creature selects nothing at all.
+        // This is the headline promise of the behaviour -- you can walk past
+        // one -- and it is gated here rather than by giving the profile a
+        // zero-range ability, so the SAME creature swings with full reach the
+        // moment it is provoked. Refused the way canAct and a blocked shot are
+        // refused: no ability, therefore no cooldown stamped for the bite it
+        // never took, so a creature provoked mid-flee bites immediately
+        // instead of first serving 1.2s for a swing that never happened.
+        const ability = fleeing ? null : selectAbility(c, bh, dist);
         if (ability && canAct(c, now)) {
           // SOMET-254: see the guard block above -- `c.damage` is always
           // already a finite number by the time a creature reaches the tick
