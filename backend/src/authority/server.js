@@ -81,6 +81,35 @@ function planTransition({ tileName, gRow, gCol, worldRow, links, now, cdUntil })
   return { toWorldId: link.toWorldId, arriveX: x, arriveY: y };
 }
 
+// SOMET-294 -- the floor between two player_binds writes for one character.
+//
+// There are TWO throttles on the bind write and they answer different
+// questions. planBind below is the first: it returns null for the village you
+// are already bound to, which is what makes standing at a gate -- or walking a
+// whole village end to end -- exactly one write rather than one per tick.
+//
+// This constant is the second, and it exists because the identity gate has a
+// hole the home region (SOMET-287) makes reachable: several villages now sit in
+// one world, and a player walking the seam between two footprints changes
+// village id on nearly every step, which at 20 ticks/sec is a write per tick
+// again. Measured on the tick path, not hypothesised: without it, half a second
+// of alternating between two footprints issues 25 writes.
+//
+// Why 5000ms specifically: PLAYER_SPEED is 200 world px/s and MAP_TILE_SIZE is
+// 100, so a player covers 2 tiles per second, and VILLAGE_LIMITS.minW/minH is 3
+// -- the smallest legal village takes ~1.5s to cross. Five seconds is therefore
+// comfortably longer than any oscillation a player can produce at a shared
+// boundary, and short enough that somebody who genuinely relocates has a
+// durable checkpoint long before their next fight. It is a floor BETWEEN
+// writes, never a delay on the first one.
+//
+// Crucially it throttles only the DATABASE write. The in-memory bind (p.spawn
+// and p.bind) moves on the tick the footprint is crossed, so a suppressed write
+// can never put a death the player is about to have in the wrong place -- the
+// row it lags behind matters only to a LATER session, and the deferred write is
+// flushed on the next eligible tick, or on socket close if that comes first.
+const BIND_WRITE_MIN_MS = 5000;
+
 // Pure: given a player's current tile + this world's villages, decide whether
 // to (re)bind them to a village. Returns the village to bind to, or null when
 // already bound to the village covering this point or when outside every
@@ -320,6 +349,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // client round-trip between join's ack and the first ping being read,
   // which is more likely, not less, the slower/busier the suite runs. `??`
   // only falls back to the default when the option is actually omitted.
+  // `??`, not `||`: a test that pins this at 0 (isolating the identity gate
+  // from the time gate) must actually get 0, not the production default -- the
+  // exact trap SOMET-275 recorded for the rate-limit options just below.
+  const bindWriteMinMs = opts.bindWriteMinMs ?? BIND_WRITE_MIN_MS;
   const RATE_LIMIT_CAPACITY = opts.rateLimitCapacity ?? 60;
   const RATE_LIMIT_PER_SEC = opts.rateLimitPerSec ?? 40;
 
@@ -642,11 +675,54 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // caller passes the in-memory userId, so the character id is resolved off
   // the live player here.
   const onPlayerDeath = (entry, userId) => {
-    const characterId = (entry.world.getPlayer(userId) || {}).characterId;
+    const p = entry.world.getPlayer(userId);
+    const characterId = (p || {}).characterId;
     // No live player means the socket closed between the killing blow and
     // this call. There is no character to penalise and applyDeath(undefined)
     // would throw inside a fire-and-forget promise.
     if (characterId == null) return Promise.resolve();
+
+    // SOMET-294 -- death returns you to the last village you entered, even when
+    // that village is in another world.
+    //
+    // WHY IT IS HERE AND NOT IN resolveDeaths(). The double-fire guarantee this
+    // whole path rests on (see the comment above, and world.js:555-563) is that
+    // resolveDeaths() heals to full hp in the SAME synchronous pass it reports
+    // the death, so the next tick cannot report it again. It is not a lock. A
+    // cross-world respawn cannot happen on that pass -- changing worlds is a
+    // client reconnect and a DB-backed join -- so putting it there would mean
+    // either awaiting on the tick path or leaving the player un-healed until
+    // the reconnect landed, and the second option breaks the guarantee outright:
+    // every tick in between would re-report the same death. So resolveDeaths()
+    // is untouched, it still heals and still snaps the player to their LOCAL
+    // respawn point, and only the relocation defers to here. This code inherits
+    // the once-per-death property rather than competing with it.
+    //
+    // Synchronous, and BEFORE the applyDeath round trip below: nothing awaits
+    // between resolveDeaths() returning and this running, so there is no window
+    // in which another tick could observe the player still dead.
+    //
+    // pendingArrivals + `transition` is the exact pair the doorway and portal
+    // paths already use, which also means joinPolicy's `transition` leg is what
+    // authorizes the arrival -- server-side state, never the client's claim.
+    // No recordVisit alongside it, unlike those two: a character can only hold a
+    // bind in a world it has physically stood in a village in, so the visit row
+    // is already there. A doorway needs the defensive write because a doorway
+    // can lead somewhere genuinely new.
+    if (p.bind && p.bind.worldId !== entry.worldId) {
+      pendingArrivals.set(characterId, { worldId: p.bind.worldId, x: p.bind.x, y: p.bind.y });
+      // Best-effort, same as every other push in this file: the socket may
+      // already be gone. The arrival stays enqueued either way, so a player who
+      // reconnects later still lands at their village rather than where they
+      // died -- exactly how an un-consumed doorway arrival already behaves.
+      const sock = entry.sockets.get(userId);
+      if (sock) {
+        send(sock, {
+          type: 'transition', toWorldId: p.bind.worldId, arriveX: p.bind.x, arriveY: p.bind.y,
+        });
+      }
+    }
+
     return applyDeath(pool, characterId, { rng })
       .then(({ progression, lost }) => {
       if (lost <= 0) return; // at the level floor: nothing changed, nothing to push
@@ -693,6 +769,27 @@ function attachAuthority(httpServer, pool, opts = {}) {
        ON CONFLICT (character_id) DO UPDATE SET world_id = $2, x = $3, y = $4, updated_at = now()`,
       [characterId, worldId, x, y],
     );
+  }
+
+  // The ONE place the tick path (and socket close) turns an in-memory bind into
+  // a row. Every write goes through the BIND_WRITE_MIN_MS floor described at
+  // that constant, except the `force` on disconnect: a bind suppressed by the
+  // floor is DEFERRED, never dropped, so a player who crosses into a second
+  // village and immediately logs out must still take the newer village with
+  // them. `_bindDirty` is what makes that a deferral -- it survives every
+  // suppressed tick and clears only when the write is actually issued.
+  //
+  // Fire-and-forget with a mandatory .catch (this is a bare setInterval
+  // callback; an unhandled rejection would kill the process). The promise is
+  // returned so the close handler can await it best-effort -- it can never
+  // reject, having already been caught here.
+  function flushBind(p, now, force = false) {
+    if (!p._bindDirty || !p.bind) return null;
+    if (!force && p._bindWroteAt != null && now - p._bindWroteAt < bindWriteMinMs) return null;
+    p._bindDirty = false;
+    p._bindWroteAt = now;
+    return upsertBind(p.characterId, p.bind.worldId, p.bind.x, p.bind.y)
+      .catch((e) => console.error('upsertBind', e));
   }
 
   // Materialize + load a chunk's creatures into the sim. Creature placement
@@ -1694,7 +1791,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // player/world state.
       if (entry.sockets.get(ws.userId) !== ws) return;
       const p = entry.world.getPlayer(ws.userId);
-      if (p) { try { await persist(ws.worldId, ws.characterId, p); } catch { /* best-effort */ } }
+      if (p) {
+        try { await persist(ws.worldId, ws.characterId, p); } catch { /* best-effort */ }
+        // SOMET-294: a bind still sitting inside the write floor when the
+        // socket goes must not be lost -- forced, because "the player is
+        // leaving" is exactly the moment the floor stops being a saving and
+        // starts being a data loss. No-ops when nothing is pending.
+        try { await flushBind(p, Date.now(), true); } catch { /* best-effort */ }
+      }
       entry.world.removePlayer(ws.userId);
       entry.sockets.delete(ws.userId);
       if (entry.world.isEmpty()) {
@@ -1799,6 +1903,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }
       }
       if (entry.villages && entry.villages.length) {
+        const bindNow = Date.now();
         for (const p of entry.world.players.values()) {
           const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
           const gRow = Math.floor(cy / MAP_TILE_SIZE), gCol = Math.floor(cx / MAP_TILE_SIZE);
@@ -1808,14 +1913,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
             p.spawn = { x: v.spawnX, y: v.spawnY };
             // SOMET-294: p.spawn and p.bind move together here, because
             // entering a village in the world you are standing in is exactly
-            // what turns a bind elsewhere back into a bind here. Keeping the
-            // in-memory pair in step with the footprint crossing (rather than
-            // with the DB write below, which is throttled) is what guarantees a
-            // death one tick after walking through a gate lands in the village
-            // that was just entered.
+            // what turns a bind elsewhere back into a bind here. Deliberately
+            // NOT throttled -- the write below is. Keeping the in-memory pair in
+            // step with the footprint crossing is what guarantees a death one
+            // tick after walking through a gate lands in the village that was
+            // just entered, whatever the write floor is doing.
             p.bind = { worldId: entry.worldId, x: v.spawnX, y: v.spawnY };
-            upsertBind(p.characterId, entry.worldId, v.spawnX, v.spawnY).catch((e) => console.error('upsertBind', e));
+            p._bindDirty = true;
           }
+          // Outside the `if` on purpose: a write deferred by the floor on an
+          // earlier tick has to land on a LATER one, and that tick is by
+          // definition one where planBind returned null (the player is still in
+          // the same village).
+          flushBind(p, bindNow);
         }
       }
       // aggro/chase/contact damage + respawns (before state). Guard kills route
