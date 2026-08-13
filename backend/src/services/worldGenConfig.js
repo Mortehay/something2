@@ -64,6 +64,18 @@ function buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes }) {
     // header exists to prevent.
     safeRoadRadius: Number(row.safe_road_radius) || 0,
     safeRects: toSafeRects(row.safe_rects),
+    // Authored roads (SOMET-289). Passed through as-is: unlike safe_rects this
+    // is not an object shape needing a snake_case->camelCase conversion, it is
+    // an array of [row, col] integer pairs that reads identically in the jsonb
+    // column, the map spec and JS. mapService's normalizeAuthoredRoads is the
+    // single validator and THROWS -- deliberately not duplicated here, for the
+    // same reason toSafeRects leaves element shape to safeRegion.
+    //
+    // A row read before migration 1714440200000 ran (or a hand-built row in a
+    // test) must come out opted OUT, never undefined: worlds.pens is NOT mapped
+    // here at all because a pen is not terrain and the generator has no use for
+    // one -- services/pens.js reads it straight off the row.
+    authoredRoads: Array.isArray(row.authored_roads) ? row.authored_roads : [],
   };
 }
 

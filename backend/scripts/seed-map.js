@@ -25,6 +25,9 @@ const { Pool } = require('pg');
 const { validateMapSpec, villagesOf } = require('../seeds/mapSpec.js');
 const { fetchLinks, setLink, setPortalLink } = require('../src/services/mapLinks.js');
 const { createVillage, fetchVillages } = require('../src/services/villages.js');
+const {
+  pensOf, placePenCreatures, insertPenCreatures, worldHasPennedCreatures,
+} = require('../src/services/pens.js');
 const { insertPortalGuards } = require('../src/services/dungeonGuards.js');
 const { insertVaultChest } = require('../src/services/chests.js');
 const {
@@ -172,8 +175,10 @@ async function applyMapSpec(pool, spec) {
         `INSERT INTO worlds (name, seed, chunk_size, width, height,
                              allowed_creature_types, entry_spawn, biomes, biome_cell,
                              graph_x, graph_y, level_min, level_max, density,
-                             allows_fast_travel, safe_road_radius, safe_rects)
-         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)
+                             allows_fast_travel, safe_road_radius, safe_rects,
+                             authored_roads, pens)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,
+                 $18::jsonb,$19::jsonb)
          ON CONFLICT (name) DO UPDATE
            SET seed = EXCLUDED.seed, chunk_size = EXCLUDED.chunk_size,
                width = EXCLUDED.width, height = EXCLUDED.height,
@@ -193,7 +198,16 @@ async function applyMapSpec(pool, spec) {
                -- deleting the key from a spec must take the safety back OFF
                -- rather than leave a world permanently safe because it once was.
                safe_road_radius = EXCLUDED.safe_road_radius,
-               safe_rects = EXCLUDED.safe_rects
+               safe_rects = EXCLUDED.safe_rects,
+               -- Re-asserted on every seed for the same reason as the two
+               -- above. Note the asymmetry this creates and which the village
+               -- warning below already documents: an authored ROAD converges to
+               -- the spec on every seed, but the pen CREATURES a pen once
+               -- placed do not (they are inserted once, like village guards).
+               -- Editing a pen's box in a spec therefore moves the authored
+               -- rectangle without moving the creatures already standing in it.
+               authored_roads = EXCLUDED.authored_roads,
+               pens = EXCLUDED.pens
          RETURNING id`,
         [w.name, w.seed, w.chunk_size ?? 64, w.width, w.height,
          JSON.stringify(w.allowed_creature_types ?? []),
@@ -205,7 +219,9 @@ async function applyMapSpec(pool, spec) {
          w.density ?? 'normal',
          w.allows_fast_travel === true,
          w.safe_road_radius ?? 0,
-         JSON.stringify(w.safe_rects ?? [])],
+         JSON.stringify(w.safe_rects ?? []),
+         JSON.stringify(w.roads ?? []),
+         JSON.stringify(w.pens ?? [])],
       );
       idByKey.set(w.key, r.rows[0].id);
       worldsWritten += 1;
@@ -389,6 +405,75 @@ async function applyMapSpec(pool, spec) {
       }
     }
 
+    // Pens (SOMET-289). AFTER villages, because the pen placer refuses village
+    // tiles and needs the village rows to know where they are, and BEFORE
+    // populateWorld -- deliberately, even though the ordering is not forced.
+    //
+    // populateWorld opens with a DELETE that spares only `type = 'Village
+    // Guard'`, a non-null blocks_portal_id, or a non-null home_x. Every penned
+    // creature carries home_x, so running the pen pass first makes the very
+    // next statement in the same transaction PROVE that sparing works, instead
+    // of leaving it to be discovered on the second seed. That is the exact
+    // shape of the vault-chest pass above, and it is how SOMET-244 and
+    // SOMET-246 were both caught.
+    let penCreatures = 0;
+    for (const w of spec.worlds) {
+      const specPens = w.pens ?? [];
+      if (specPens.length === 0) continue;
+      const worldId = idByKey.get(w.key);
+      const wr = await client.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
+      const row = wr.rows[0];
+      const pens = pensOf(row);
+
+      // Idempotent per world, the same all-or-nothing shape villages use.
+      //
+      // Asked THROUGH pens.js, because "a homed, non-guard, non-portal row" is
+      // NOT unique to a pen: insertVaultChest and spawnFieldChest anchor their
+      // guard the same way, and the vault-chest pass a few lines above runs
+      // FIRST. A world declaring both a chest and pens would otherwise seed the
+      // chest, see its guard here, and skip its pen pass on the very first seed
+      // and every one after -- silently, which is the whole failure class
+      // services/pens.js was written to close. So the anchor is tested against
+      // this world's authored pen boxes as well; see pennedCreatureFilter.
+      if (await worldHasPennedCreatures(client, worldId, pens)) continue;
+
+      const worldLinks = await fetchLinks(client, worldId);
+      const world = buildWorldGenConfig({
+        row,
+        tileTypes: await loadTileTypes(client),
+        doorways: worldLinks.filter((l) => l.edge !== 'PORTAL').map((l) => l.edge),
+        villages: await fetchVillages(client, worldId),
+        biomes: await loadBiomes(client, row.biomes),
+      });
+
+      for (const [i, pen] of pens.entries()) {
+        const et = await client.query(
+          'SELECT name, hp, defense FROM entity_types WHERE name = $1 AND is_creature = true',
+          [pen.creatureType],
+        );
+        // The validator already rejects an unknown creature_type against the
+        // live catalog, so this is a belt-and-braces guard for a spec applied
+        // to a database whose catalog was seeded differently. Loud, because a
+        // pen that holds nothing is the failure this feature is built around.
+        if (et.rowCount === 0) {
+          throw new Error(
+            `world "${w.key}" pen ${i} references creature type "${pen.creatureType}", `
+            + 'which is not a creature in this database\'s entity_types');
+        }
+        // Salted off the world seed and the pen index so two pens in one world
+        // do not lay out identically, and a re-seed reproduces both.
+        const placed = placePenCreatures(world, pen, et.rows[0], (w.seed ^ (0x9e37 + i)) >>> 0);
+        if (placed.length < pen.count) {
+          console.warn(
+            `seed-map: world "${w.key}" pen ${i} (${pen.creatureType}) placed `
+            + `${placed.length} of ${pen.count} -- the box has fewer placeable tiles than `
+            + 'the count asks for (walls, water or a village inside it).');
+        }
+        await insertPenCreatures(client, worldId, placed);
+        penCreatures += placed.length;
+      }
+    }
+
     // MUST be after links (populateWorld reads them for doorway tiles), after
     // portal guards (its delete spares guards, but a guard must already exist
     // to be spared) and -- the non-obvious one -- after VILLAGES.
@@ -464,6 +549,7 @@ async function applyMapSpec(pool, spec) {
       // Reported, not just done: a prune cascades character_waypoints, so a
       // re-seed that quietly un-lights a waypoint for every player must say so.
       waypointsRemoved: waypointsRemoved.length,
+      penCreatures,
     };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -489,7 +575,8 @@ if (require.main === module) {
       console.log(
         `applied ${name}: ${n.worlds} worlds, ${n.links} links, ${n.villages} villages, `
         + `${n.portalGuards} portal guards, ${n.creatures} creatures, ${n.vaultChests} vault chests, `
-        + `${n.waypoints} waypoints (${n.waypointsRemoved} removed)`);
+        + `${n.waypoints} waypoints (${n.waypointsRemoved} removed), `
+        + `${n.penCreatures} pen creatures`);
       // See this file's header: only the world_chunks cache is reachable from
       // here. Printed unconditionally rather than probed -- this process has no
       // way to tell whether a backend is up, and a note that only appears

@@ -223,6 +223,12 @@ function worldConfig(world = {}) {
     // An authored rectangle that quietly does not exist is exactly the failure
     // safeRegion.normalizeSafeRects was written to make impossible.
     safeRects: world.safeRects,
+    // SOMET-289. Normalized (and THROWN on) here rather than passed through,
+    // because unlike safeRects there is no second validator downstream: nothing
+    // between this and collectPathCells' walker would notice a malformed
+    // polyline, and the walker itself would either loop forever on a
+    // non-axis-aligned segment or silently draw nothing on a malformed point.
+    authoredRoads: normalizeAuthoredRoads(world.authoredRoads),
   };
 }
 
@@ -477,12 +483,94 @@ function pathSegmentCells(cfg, pi, pj, dir) {
   return cells;
 }
 
+// Cells of one authored polyline (SOMET-289). Consecutive points must be
+// axis-aligned -- seeds/mapSpec.js rejects anything else, and normalizeAuthoredRoads
+// below throws on it, so this walker never has to decide how to rasterise a
+// diagonal. An author who cannot predict the cells cannot predict the safe
+// corridor either.
+//
+// A one-point polyline is a single cell, not an error: a lone waypost-sized
+// patch of road is a legitimate (if odd) thing to author, and silently dropping
+// it would be the class of failure this whole feature exists to avoid.
+function authoredLineCells(line, emit) {
+  if (line.length === 1) { emit(line[0][0], line[0][1]); return; }
+  for (let i = 0; i < line.length - 1; i++) {
+    const [r0, c0] = line[i];
+    const [r1, c1] = line[i + 1];
+    const dr = Math.sign(r1 - r0);
+    const dc = Math.sign(c1 - c0);
+    let r = r0;
+    let c = c0;
+    emit(r, c);
+    while (r !== r1 || c !== c1) {
+      r += dr;
+      c += dc;
+      emit(r, c);
+    }
+  }
+}
+
+// THE validator for authored roads, and the reason it throws rather than
+// coercing -- the same argument safeRegion.normalizeSafeRects makes. A
+// malformed polyline has no safe fallback: the only one available is "this road
+// does not exist", which is precisely the silent failure the column was added to
+// end. A non-axis-aligned segment additionally has no defined meaning at all,
+// and guessing one would put the drawn road somewhere the author did not choose.
+function normalizeAuthoredRoads(authoredRoads) {
+  if (authoredRoads === undefined || authoredRoads === null) return [];
+  if (!Array.isArray(authoredRoads)) {
+    throw new Error(`authoredRoads must be an array (got ${typeof authoredRoads})`);
+  }
+  for (let i = 0; i < authoredRoads.length; i++) {
+    const line = authoredRoads[i];
+    if (!Array.isArray(line) || line.length === 0) {
+      throw new Error(`authoredRoads[${i}] must be a non-empty array of [row, col] points`);
+    }
+    for (let j = 0; j < line.length; j++) {
+      const p = line[j];
+      if (!Array.isArray(p) || p.length !== 2
+          || !Number.isInteger(p[0]) || !Number.isInteger(p[1])) {
+        throw new Error(
+          `authoredRoads[${i}][${j}] must be a [row, col] pair of integers `
+          + `(got ${JSON.stringify(p)})`);
+      }
+      if (j > 0 && line[j - 1][0] !== p[0] && line[j - 1][1] !== p[1]) {
+        throw new Error(
+          `authoredRoads[${i}] segment ${j - 1}->${j} is not axis-aligned `
+          + `(${JSON.stringify(line[j - 1])} -> ${JSON.stringify(p)}) -- each pair of `
+          + 'consecutive points must share a row or a column');
+      }
+    }
+  }
+  return authoredRoads;
+}
+
 // Every path cell inside the window [rMin,rMin+rows) x [cMin,cMin+cols).
 // Iterate coarse nodes whose segments could reach the window (one extra ring),
 // union their segment cells, clipped to the window.
+//
+// SOMET-289: cfg.authoredRoads is unioned in as well, clipped to the same
+// window. THIS is the one place roads are derived, so an authored road is drawn
+// by generateRegion (which stamps cfg.pathTile on whatever this returns) AND
+// made safe by safeRegion (which is handed this same Set through
+// safeContextFor) without either of them naming the feature. An empty
+// authoredRoads adds nothing, so every world that has not opted in gets the
+// byte-identical Set it got before.
 function collectPathCells(cfg, rMin, cMin, rows, cols) {
   const set = new Set();
+  // Authored roads share the lattice's fate on a world with no path tile:
+  // generateRegion has nothing to draw them WITH, so a "safe road" that is
+  // invisible would be worse than none. Inside the guard, not before it.
   if (!cfg.pathTile) return set;
+  {
+    const rMaxA = rMin + rows;
+    const cMaxA = cMin + cols;
+    for (const line of cfg.authoredRoads || []) {
+      authoredLineCells(line, (r, c) => {
+        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) set.add(`${r},${c}`);
+      });
+    }
+  }
   const rMax = rMin + rows, cMax = cMin + cols;
   // Coarse-node index range covering the window, padded so trails entering
   // from outside are included. A node's segment can reach up to pathJitter
@@ -1180,6 +1268,7 @@ module.exports = {
     pathAnchor,
     pathSegmentCells,
     collectPathCells,
+    normalizeAuthoredRoads,
     placeMapCreatures,
     placeCreaturePacks,
     creatureTileCandidates,

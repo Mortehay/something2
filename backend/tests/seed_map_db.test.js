@@ -82,10 +82,10 @@ const spec = () => ({
 
 async function cleanup(pool) {
   await pool.query(
-    // Union of both slices' fixture worlds: leaving one out strands rows that
+    // Union of every slice's fixture worlds: leaving one out strands rows that
     // the next run's uniqueness checks then trip over.
     "DELETE FROM worlds WHERE name IN ('zzTestAlpha','zzTestBeta','zzTestPopA','zzTestPopB',"
-    + "'zzTestVilA','zzTestMultiVillage','zzTestWpA','zzTestWpB')",
+    + "'zzTestVilA','zzTestMultiVillage','zzTestWpA','zzTestWpB','zzTestPenWorld')",
   ).catch(() => {});
   await pool.query("DELETE FROM users WHERE username = 'zzTestWpUser'").catch(() => {});
 }
@@ -117,11 +117,14 @@ test('applying a spec twice produces identical rows', async (t) => {
       // proves the non-empty path actually places rows.
       assert.deepEqual(
         result,
-        // waypoints is 0 for the same reason creatures is: this spec authors
-        // none, so the counter must report the applier ran the waypoint pass
-        // and found nothing -- not that the pass is missing (SOMET-292).
+        // waypoints and penCreatures are 0 for the same reason creatures is:
+        // this spec authors none, so each counter must report that the applier
+        // RAN that pass and found nothing -- not that the pass is missing
+        // (SOMET-292, SOMET-289). An exact-shape assertion is the point: a
+        // counter silently dropped from the return value is a pass that wrote
+        // nothing.
         { worlds: 2, links: 1, villages: 1, portalGuards: 0, creatures: 0, vaultChests: 0,
-          waypoints: 0, waypointsRemoved: 0 },
+          waypoints: 0, waypointsRemoved: 0, penCreatures: 0 },
         'applyMapSpec must report exactly what it wrote, not just resolve');
 
       // Correctness rule 3: is_entry must actually be set on the spec's
@@ -1037,5 +1040,124 @@ test('adding a village to an already-seeded world warns instead of silently doin
   } finally {
     await cleanup(pool);
     await pool.end().catch(() => {});
+  }
+});
+
+// --- SOMET-289: the applier's own pen pass ---------------------------------
+//
+// home_region_db.test.js proves the LIVE rows, which migration 1714440201000
+// wrote. This proves the OTHER path that seats pen creatures -- applyMapSpec --
+// because the two are separate code and only one of them is exercised by a
+// re-seed. The same class of split worldPopulation.js was created to end.
+//
+// The pen is deliberately placed INSIDE the safe road corridor
+// (safe_road_radius 3, and the box straddles the map centre where the lattice
+// runs). creatureTileCandidates refuses a safe tile for ANY type, so if pens
+// ever get routed back through the ordinary placer this comes out empty.
+//
+// The fixture ALSO declares a vault chest, and that is not decoration. The
+// chest pass runs BEFORE the pen pass and insertVaultChest writes a homed,
+// non-guard, non-portal row -- byte-for-byte the shape the pen pass's first
+// idempotency guard treated as "this world is already penned". With that guard,
+// this spec seated 0 pen creatures on its very first apply and exited 0. The
+// chest tile (5,5) sits outside every pen box, so only a guard that tests the
+// ANCHOR against the authored boxes gets this right.
+const PEN_SPEC = () => ({
+  name: 'zz-test-pen-fixture',
+  topology: 'spine',
+  worlds: [
+    {
+      key: 'a', name: 'zzTestPenWorld', grid: [17, -3], seed: 993,
+      width: 64, height: 64, chunk_size: 64,
+      biomes: ['Meadow'], biome_cell: 32,
+      // Non-empty, so populateWorld really scatters hostiles and its opening
+      // DELETE really runs. With [] it early-returns before the delete and the
+      // survival half of this test would be vacuous.
+      allowed_creature_types: ['Slime'],
+      is_entry: true,
+      // This fixture MUST carry a village, and entry_spawn MUST be that
+      // village's spawn. validateMapSpec requires exactly one is_entry world,
+      // so a fixture spec has to claim it -- and while it does, any test file
+      // running in parallel against this shared database sees zzTestPenWorld as
+      // THE entry world. villageScreenBudget_db.test.js asserts the entry world
+      // has a village whose spawn is entry_spawn (SOMET-153's criterion), and
+      // failed on exactly that when this fixture had neither. withEntryPreserved
+      // restores the real entry world afterwards, but it cannot close the window
+      // while the apply is running.
+      entry_spawn: { x: 1150, y: 1150 },
+      village: { min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
+                 spawn_x: 1150, spawn_y: 1150 },
+      level_band: [1, 2],
+      safe_road_radius: 3,
+      chest: { x: 550, y: 550, guard_creature_type: 'Wolf', level: 3 },
+      pens: [{
+        min_row: 30, min_col: 30, width: 6, height: 5,
+        creature_type: 'Woodland Swarm', count: 5, level: 1,
+      }],
+    },
+  ],
+  links: [],
+});
+
+test('applyMapSpec seats pen creatures, and populateWorld does not eat them', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — pen seeding is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await cleanup(pool);
+    await withEntryPreserved(pool, async () => {
+      const result = await applyMapSpec(pool, PEN_SPEC());
+      assert.equal(result.penCreatures, 5, 'the pen pass did not seat the authored count');
+
+      // The chest guard really was written, and really does look like a penned
+      // creature everywhere except its anchor. Asserted rather than assumed: if
+      // the chest pass ever stopped writing a homed row, the pen assertion above
+      // would still pass and would silently stop covering this regression.
+      assert.equal(result.vaultChests, 1, 'the fixture chest was not seeded');
+      const chestGuard = (await pool.query(
+        `SELECT c.home_x, c.home_y, c.blocks_portal_id FROM world_creatures c
+           JOIN worlds w ON w.id = c.world_id
+          WHERE w.name = 'zzTestPenWorld' AND c.type = 'Wolf'`)).rows;
+      assert.equal(chestGuard.length, 1, 'expected exactly the chest guard');
+      assert.ok(chestGuard[0].home_x !== null && chestGuard[0].blocks_portal_id === null,
+        'the chest guard is not the homed non-guard non-portal row this test is about');
+      assert.ok(Math.floor(Number(chestGuard[0].home_y) / 100) < 30,
+        'the chest guard is anchored inside the pen box, so it no longer stands for '
+        + 'the row the old guard confused with a penned creature');
+      // populateWorld runs AFTER the pen pass inside the same transaction, and
+      // its opening DELETE spares only guards, portal guards and home_x rows.
+      assert.ok(result.creatures > 0,
+        'no hostiles were scattered, so the DELETE this test is about barely ran');
+
+      const penned = (await pool.query(
+        `SELECT c.x, c.y, c.home_x, c.home_y, c.level FROM world_creatures c
+           JOIN worlds w ON w.id = c.world_id
+          WHERE w.name = 'zzTestPenWorld' AND c.type = 'Woodland Swarm'`)).rows;
+      assert.equal(penned.length, 5,
+        'penned creatures did not survive populateWorld in the same transaction');
+      for (const c of penned) {
+        assert.ok(c.home_x !== null && c.home_y !== null, 'a penned creature has no home anchor');
+        const row = Math.floor(Number(c.home_y) / 100);
+        const col = Math.floor(Number(c.home_x) / 100);
+        assert.ok(row >= 30 && row <= 34 && col >= 30 && col <= 35,
+          `penned creature anchored at (${row},${col}), outside the authored pen`);
+        assert.equal(c.level, 1);
+      }
+
+      // Idempotent: a second apply must not stack a second set on top.
+      const second = await applyMapSpec(pool, PEN_SPEC());
+      assert.equal(second.penCreatures, 0, 're-seeding seated a duplicate set of pen creatures');
+      const after = (await pool.query(
+        `SELECT count(*)::int AS n FROM world_creatures c JOIN worlds w ON w.id = c.world_id
+          WHERE w.name = 'zzTestPenWorld' AND c.type = 'Woodland Swarm'`)).rows[0].n;
+      assert.equal(after, 5, 'a re-seed changed the pen population');
+    });
+  } finally {
+    await cleanup(pool);
+    await pool.end();
   }
 });

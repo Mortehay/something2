@@ -528,10 +528,14 @@ test('village: false is rejected the same way', () => {
 // no complaint.
 // ---------------------------------------------------------------------------
 test('an unknown world key is rejected rather than silently ignored', () => {
+  // `pens` was this test's example while SOMET-288 shipped without a pen
+  // reader. SOMET-289 added the reader and the allowlist entry in one change,
+  // which is exactly the rule WORLD_KEYS states, so the example moved to a key
+  // that genuinely has no reader.
   const errs = errorsFor((s) => {
-    s.worlds[0].pens = [{ min_row: 20, min_col: 20, width: 4, height: 4 }];
+    s.worlds[0].waypoint_network = [{ x: 20, y: 20 }];
   });
-  assert.ok(errs.some((e) => /unknown key\(s\) pens/.test(e)), errs.join('\n'));
+  assert.ok(errs.some((e) => /unknown key\(s\) waypoint_network/.test(e)), errs.join('\n'));
 });
 
 test('a typo\'d world key is named, and every offending key is listed at once', () => {
@@ -559,6 +563,9 @@ test('every key the applier actually reads is accepted', () => {
       allows_fast_travel: true,
       safe_road_radius: 2,
       safe_rects: [{ min_row: 10, min_col: 10, width: 4, height: 4 }],
+      roads: [[[32, 1], [32, 40]]],
+      pens: [{ min_row: 40, min_col: 40, width: 4, height: 4,
+               creature_type: 'Slime', count: 3, level: 1 }],
       village: { min_row: 20, min_col: 20, width: 6, height: 4, gate_edge: 'S',
                  spawn_x: 2150, spawn_y: 2150 },
       chest: { x: 500, y: 500, guard_creature_type: 'Wolf', level: 3 },
@@ -580,8 +587,100 @@ test('an unknown key on a world that also fails another check is still reported'
   // invisible until the author fixed the grid and re-ran.
   const errs = errorsFor((s) => {
     s.worlds[0].grid = null;
-    s.worlds[0].pens = [];
+    s.worlds[0].waypoint_network = [];
   });
   assert.ok(errs.some((e) => /grid must be two integers/.test(e)), errs.join('\n'));
-  assert.ok(errs.some((e) => /unknown key\(s\) pens/.test(e)), errs.join('\n'));
+  assert.ok(errs.some((e) => /unknown key\(s\) waypoint_network/.test(e)), errs.join('\n'));
+});
+
+// --- SOMET-289: authored roads and pens -----------------------------------
+
+// A legal village on world `a`, cloned per case. 6x4 at rows 10..13 / cols
+// 10..15, so its interior is rows 11..12 and cols 11..14 and spawn
+// (1150,1150) = tile (11,11) is genuinely interior.
+const B_VILLAGE = () => ({
+  min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
+  spawn_x: 1150, spawn_y: 1150,
+});
+const B_PEN = () => ({
+  min_row: 30, min_col: 30, width: 6, height: 5,
+  creature_type: 'Slime', count: 5, level: 1,
+});
+
+test('a world may author roads as axis-aligned polylines', () => {
+  assert.deepEqual(errorsFor((s) => {
+    s.worlds[0].roads = [[[32, 1], [32, 40], [40, 40]], [[5, 5]]];
+  }), []);
+});
+
+test('a diagonal road segment is rejected rather than guessed at', () => {
+  const errs = errorsFor((s) => { s.worlds[0].roads = [[[10, 10], [12, 12]]]; });
+  assert.ok(errs.some((e) => /not axis-aligned/.test(e)), errs.join('\n'));
+});
+
+test('a road point on or outside the wall ring is rejected', () => {
+  // stampBounds overwrites the ring, so such a cell would widen the safe
+  // corridor while never being drawn -- the two halves of the feature
+  // disagreeing.
+  for (const point of [[0, 10], [63, 10], [10, 0], [10, 63], [-1, 10], [10, 99]]) {
+    const errs = errorsFor((s) => { s.worlds[0].roads = [[point, [10, 10]]]; });
+    assert.ok(errs.some((e) => /strictly inside/.test(e)),
+      `point ${JSON.stringify(point)} was accepted: ${errs.join('\n')}`);
+  }
+});
+
+test('a malformed road point is reported, not thrown on', () => {
+  // A throw would abort validateMapSpec entirely and hide every other problem
+  // in the spec -- the posture every other check in this file takes.
+  for (const roads of [[[[10, '10'], [10, 12]]], [[[10]]], [[]], ['nope'], 'nope']) {
+    const errs = errorsFor((s) => { s.worlds[0].roads = roads; });
+    assert.ok(errs.length > 0, `${JSON.stringify(roads)} produced no error`);
+  }
+});
+
+test('a world may author pens', () => {
+  assert.deepEqual(errorsFor((s) => { s.worlds[0].pens = [B_PEN()]; }), []);
+});
+
+test('a pen is checked by the same geometry function the placer uses', () => {
+  const cases = [
+    [{ ...B_PEN(), count: 31 }, /exceeds the 6x5/],
+    [{ ...B_PEN(), width: 1 }, /width must be between/],
+    [{ ...B_PEN(), level: 0 }, /level must be at least 1/],
+    [{ ...B_PEN(), min_row: 0 }, /strictly inside/],
+    [{ ...B_PEN(), min_row: 60 }, /strictly inside/],
+    [null, /pens entry must be an object/],
+  ];
+  for (const [pen, re] of cases) {
+    const errs = errorsFor((s) => { s.worlds[0].pens = [pen]; });
+    assert.ok(errs.some((e) => re.test(e)), `accepted ${JSON.stringify(pen)}: ${errs.join('\n')}`);
+  }
+});
+
+test('a pen referencing an unknown creature type is rejected', () => {
+  const spec = valid();
+  spec.worlds[0].pens = [{ ...B_PEN(), creature_type: 'Nonexistent Swarm' }];
+  const errs = validateMapSpec(spec, { creatureTypeNames: new Set(['Slime', 'Wolf']) });
+  assert.ok(errs.some((e) => /unknown creature type "Nonexistent Swarm"/.test(e)), errs.join('\n'));
+});
+
+test('a pen overlapping a village is rejected', () => {
+  // The placer refuses village tiles, so such a pen silently under-delivers --
+  // and anything that did land inside would break the epic's invariant that
+  // only Village Guards stand in a village.
+  const errs = errorsFor((s) => {
+    s.worlds[0].village = B_VILLAGE();
+    s.worlds[0].pens = [{ ...B_PEN(), min_row: 12, min_col: 12 }];
+  });
+  assert.ok(errs.some((e) => /overlaps the village/.test(e)), errs.join('\n'));
+});
+
+test('the two new keys are in WORLD_KEYS, so authoring them is not "unknown key"', () => {
+  // WORLD_KEYS rejects any key with no reader. `pens` was deliberately held
+  // back from SOMET-288 for exactly that reason; both keys have readers now.
+  const errs = errorsFor((s) => {
+    s.worlds[0].roads = [[[10, 10], [10, 20]]];
+    s.worlds[0].pens = [B_PEN()];
+  });
+  assert.ok(!errs.some((e) => /unknown key/.test(e)), errs.join('\n'));
 });
