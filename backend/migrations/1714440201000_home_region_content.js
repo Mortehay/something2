@@ -50,7 +50,16 @@
 exports.shorthands = undefined;
 
 const { createVillage, fetchVillages, GUARD_TYPE } = require('../src/services/villages.js');
-const { pensOf, placePenCreatures, insertPenCreatures } = require('../src/services/pens.js');
+const {
+  pensOf, placePenCreatures, insertPenCreatures, worldHasPennedCreatures,
+  deletePennedCreatures,
+} = require('../src/services/pens.js');
+// `down` deletes the gate guards by their posts, and the posts are derived
+// geometry -- imported, never re-typed. A hand-copy is right for these two 6x4
+// gate-S boxes and silently wrong for any village small enough that
+// villageGatePosts' interior clamp bites, which is exactly how a second copy of
+// shared geometry goes wrong.
+const { villageGatePosts } = require('../src/services/mapService.js');
 const { buildWorldGenConfig } = require('../src/services/worldGenConfig.js');
 const { loadTileTypes } = require('../src/services/tileTypes.js');
 const { loadBiomes } = require('../src/services/biomes.js');
@@ -172,18 +181,19 @@ exports.up = async (pgm) => {
     }
 
     // --- the pens ---------------------------------------------------------
-    // Idempotent by the penned creature's own structural marker: a non-guard
-    // world_creatures row carrying a home anchor. Note this must run AFTER the
-    // village exists, both because the placer refuses village tiles and because
-    // a village guard would otherwise be the only homed row and this check
-    // excludes it by type.
-    const penned = await pgm.db.query(
-      `SELECT 1 FROM world_creatures
-        WHERE world_id = $1 AND type <> $2 AND blocks_portal_id IS NULL
-          AND home_x IS NOT NULL LIMIT 1`,
-      [row.id, GUARD_TYPE],
-    );
-    if (penned.rows.length === 0 && w.pens.length > 0) {
+    // Idempotent, asked through pens.js's pennedCreatureFilter: a non-guard,
+    // non-portal row whose ANCHOR lies inside one of this world's authored pen
+    // boxes. The box half matters -- "homed, non-guard, non-portal" alone is
+    // also what a vault- or field-chest guard looks like (SOMET-244), and a
+    // player using a `loot_map` consumable can drop one into any world, Old
+    // Trailhead included. Without the box test that single row would make this
+    // pass skip forever, silently, on the world it matters most in.
+    //
+    // Must still run AFTER the village exists, both because the placer refuses
+    // village tiles and because a gate guard is excluded by type here.
+    const penned = w.pens.length > 0
+      && await worldHasPennedCreatures(pgm.db, row.id, pensOf({ pens: w.pens }));
+    if (!penned && w.pens.length > 0) {
       const fresh = await worldByName(pgm, w.name);
       const links = await fetchLinks(pgm.db, row.id);
       const world = buildWorldGenConfig({
@@ -246,11 +256,19 @@ exports.up = async (pgm) => {
   // same value), and a no-op for an is_entry world with no village. Restated
   // here rather than assumed from 1714440175000 because a migration must be
   // correct when replayed against a database that ran neither.
+  //
+  // DISTINCT ON, not a bare join: spec §2 plans for a world with more than one
+  // village, and a bare `FROM villages v WHERE v.world_id = w.id` would then
+  // pick whichever row the planner happened to reach first -- a value that can
+  // change between two runs of the same migration on the same data. Ordered by
+  // the BOX rather than by id, because geometry is a property of the authored
+  // data while an id is a property of the insertion order that produced it.
   await pgm.db.query(
     `UPDATE worlds w
         SET entry_spawn = jsonb_build_object('x', v.spawn_x, 'y', v.spawn_y),
             updated_at = now()
-       FROM villages v
+       FROM (SELECT DISTINCT ON (world_id) world_id, spawn_x, spawn_y
+               FROM villages ORDER BY world_id, min_row, min_col, id) v
       WHERE v.world_id = w.id AND w.is_entry = true`,
   );
 
@@ -278,25 +296,24 @@ exports.up = async (pgm) => {
 // box -- and the next `up` sees those strays, decides the world is already
 // penned, and skips the pass. Always run `down` against the version of this
 // file that ran the matching `up`.
+//
+// THE PEN DELETE AND THE PEN GUARD ARE ONE PREDICATE, deliberately: both go
+// through pens.js's pennedCreatureFilter with the same three worlds' literals.
+// They used to differ -- `up` asked "any homed non-guard row?" while `down`
+// deleted "rows of this pen's TYPE anchored in this box" -- and every row the
+// narrower delete missed became a permanent, silent block on the next `up`.
+// If the two ever have to diverge again, the reason belongs here in writing.
 exports.down = async (pgm) => {
   for (const w of REGION) {
     const row = await worldByName(pgm, w.name);
     if (!row) continue;
 
-    // Pen creatures: matched by type AND by a home anchor inside the pen box
-    // this migration authored, so a creature an operator has since placed
-    // elsewhere survives. `home_x` rather than `x`: a creature roams, its
-    // anchor does not.
-    for (const pen of w.pens) {
-      await pgm.db.query(
-        `DELETE FROM world_creatures
-          WHERE world_id = $1 AND type = $2 AND home_x IS NOT NULL
-            AND home_x >= $3 AND home_x < $4 AND home_y >= $5 AND home_y < $6`,
-        [row.id, pen.creature_type,
-          pen.min_col * TILE, (pen.min_col + pen.width) * TILE,
-          pen.min_row * TILE, (pen.min_row + pen.height) * TILE],
-      );
-    }
+    // Exactly the rows `up`'s guard tests for: non-guard, non-portal, anchored
+    // inside one of THIS migration's authored pen boxes. `home_x` rather than
+    // `x`: a creature roams, its anchor does not -- and a creature an operator
+    // has since anchored outside every pen box survives, which is the same
+    // scoped-to-the-literals posture the village delete below takes.
+    await deletePennedCreatures(pgm.db, row.id, pensOf({ pens: w.pens }));
 
     // The two villages this migration created. Old Trailhead's `village` is
     // null, so its village -- created by 1714440175000 and left untouched
@@ -313,16 +330,23 @@ exports.down = async (pgm) => {
         [row.id, v.min_row, v.min_col, v.width, v.height],
       );
       if (del.rows.length > 0) {
-        // villageGatePosts for a gate-S box: the two interior tiles flanking
-        // the gate, at row (min_row + height - 2) and cols midCol-1 / midCol+1.
-        const postRow = (v.min_row + v.height - 2) * TILE + TILE / 2;
-        const midCol = v.min_col + Math.floor(v.width / 2);
-        await pgm.db.query(
-          `DELETE FROM world_creatures
-            WHERE world_id = $1 AND type = $2 AND home_y = $3 AND home_x = ANY($4::real[])`,
-          [row.id, GUARD_TYPE, postRow,
-            [(midCol - 1) * TILE + TILE / 2, (midCol + 1) * TILE + TILE / 2]],
-        );
+        // The posts come from villageGatePosts, the same function createVillage
+        // put the guards on in `up` -- see the import note at the top of this
+        // file for why they are not restated here.
+        const posts = villageGatePosts({
+          minRow: v.min_row, minCol: v.min_col, width: v.width, height: v.height,
+          gateEdge: v.gate_edge,
+        });
+        // One statement per post rather than the old "same row, either column"
+        // shorthand: that shorthand was only true because both boxes here gate
+        // S, and it silently deletes nothing for a W or E gate.
+        for (const p of posts) {
+          await pgm.db.query(
+            `DELETE FROM world_creatures
+              WHERE world_id = $1 AND type = $2 AND home_x = $3 AND home_y = $4`,
+            [row.id, GUARD_TYPE, p.x, p.y],
+          );
+        }
       }
     }
 

@@ -142,7 +142,8 @@ describeDb('the live home region matches the checked-in specs', async () => {
 
       // --- the creatures ----------------------------------------------------
       const creatures = (await pool.query(
-        'SELECT type, x, y, home_x, home_y, level FROM world_creatures WHERE world_id = $1',
+        `SELECT id, type, x, y, home_x, home_y, level, blocks_portal_id
+           FROM world_creatures WHERE world_id = $1`,
         [row.id])).rows;
       assert.ok(creatures.length > 0, `${name} holds no creatures at all`);
 
@@ -179,12 +180,26 @@ describeDb('the live home region matches the checked-in specs', async () => {
         }
       }
 
-      // Every creature carrying an anchor in this world belongs to a pen or is
-      // a gate guard. Without this, the per-pen counts above would still pass
-      // if a stray homed creature had been left somewhere unauthored -- and a
-      // homed creature is one that survives every future populate.
+      // Every creature carrying an anchor in this world belongs to a pen or to
+      // one of the three OTHER things that legitimately anchor a creature.
+      // Without this, the per-pen counts above would still pass if a stray
+      // homed creature had been left somewhere unauthored -- and a homed
+      // creature is one that survives every future populate.
+      //
+      // The exclusions are enumerated rather than assumed, because "homed,
+      // non-guard, non-portal" is NOT unique to a pen: a vault- or field-chest
+      // guard is anchored to its chest tile (SOMET-244), and a player using a
+      // `loot_map` consumable spawns one in whatever world they are standing
+      // in -- including this one. Excluded BY ID off world_chests rather than
+      // by type, so a chest guard of a penned creature's own type is still
+      // excluded exactly once and a genuine stray of that type still fails.
+      const chestGuardIds = new Set(
+        (await pool.query('SELECT guard_creature_ids FROM world_chests WHERE world_id = $1',
+          [row.id])).rows.flatMap((ch) => (ch.guard_creature_ids || []).map(Number)));
       for (const c of creatures) {
         if (c.type === GUARD_TYPE || c.home_x === null) continue;
+        if (c.blocks_portal_id !== null) continue;          // portal guard (SOMET-246)
+        if (chestGuardIds.has(Number(c.id))) continue;      // chest guard (SOMET-244)
         const [hr, hc] = [Math.floor(Number(c.home_y) / CREATURE_TILE_PX),
           Math.floor(Number(c.home_x) / CREATURE_TILE_PX)];
         assert.ok(spec.pens.some((pen) => inBox(hr, hc, pen)),
@@ -202,17 +217,40 @@ describeDb('the live home region matches the checked-in specs', async () => {
         width: spec.village.width, height: spec.village.height,
         gateEdge: spec.village.gate_edge,
       });
+      // Asked of the pen DILATED BY ITS LEASH, not of the authored box.
+      //
+      // The box is where creatures are seated; the leash is how far each one
+      // can then roam from its OWN anchor, so the region a penned creature can
+      // actually occupy is the box grown by the leash radius (see pens.js's
+      // closing note). Checking only the box would pass a pen whose creatures
+      // wander into the ring the next morning -- which is the failure this
+      // check is for, since a guard farms the pen over hours, not on arrival.
+      //
+      // The radius is READ from the live behaviour row rather than typed here:
+      // world_creatures has no per-creature leash column, so the number that
+      // governs these creatures is whatever creature_behaviors says today, and
+      // a test carrying its own copy would keep passing after a leash change
+      // that broke the margin.
       const GUARD_AGGRO_PX = 400;
       for (const pen of spec.pens) {
+        const leash = (await pool.query(
+          `SELECT b.leash_radius FROM entity_types e
+             JOIN creature_behaviors b ON b.id = e.behavior_id WHERE e.name = $1`,
+          [pen.creature_type])).rows[0];
+        assert.ok(leash && Number(leash.leash_radius) > 0,
+          `${name}: ${pen.creature_type} has no behaviour leash, so the dilation below `
+          + 'would be zero and this check would collapse back onto the authored box');
+        const grow = Number(leash.leash_radius);
         for (const g of posts) {
           for (let r = pen.min_row; r < pen.min_row + pen.height; r++) {
             for (let cc = pen.min_col; cc < pen.min_col + pen.width; cc++) {
               const d = Math.hypot(cc * CREATURE_TILE_PX + 50 - g.x,
                 r * CREATURE_TILE_PX + 50 - g.y);
-              assert.ok(d > GUARD_AGGRO_PX,
+              assert.ok(d - grow > GUARD_AGGRO_PX,
                 `${name}: pen tile (${r},${cc}) is ${Math.round(d)}px from a guard post at `
-                + `(${g.x},${g.y}) -- inside the ${GUARD_AGGRO_PX}px aggro ring, so the `
-                + 'village guards will farm the pen');
+                + `(${g.x},${g.y}); a ${pen.creature_type} roams ${grow}px from its anchor, so `
+                + `it reaches ${Math.round(d - grow)}px -- inside the ${GUARD_AGGRO_PX}px aggro `
+                + 'ring, and the village guards will farm the pen');
             }
           }
         }
