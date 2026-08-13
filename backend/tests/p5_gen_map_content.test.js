@@ -88,3 +88,54 @@ test('entryVillageBox stays centred as the world grows', () => {
     spawn_x: 6250, spawn_y: 6150,
   });
 });
+
+test('world size varies with depth instead of being uniformly 64', () => {
+  const spec = generateSpec();
+  const sizes = new Set(spec.worlds.map((w) => w.width));
+  assert.ok(sizes.size > 1, 'every world still has the same width');
+  for (const w of spec.worlds) {
+    assert.equal(w.width, w.height, `world "${w.key}" is not square`);
+    assert.equal(w.width % 32, 0, `world "${w.key}" is not a whole number of chunks`);
+    assert.ok(w.width >= 96 && w.width <= 224,
+      `world "${w.key}" has width ${w.width}, outside the ramp`);
+  }
+});
+
+test('the deepest dungeon room is larger than the entry room', () => {
+  const spec = generateSpec();
+  const entry = spec.worlds.find((w) => w.is_entry === true);
+  const deepest = spec.worlds.reduce((a, b) => (b.width > a.width ? b : a));
+  assert.ok(deepest.width > entry.width,
+    `entry is ${entry.width} and the largest world is ${deepest.width}`);
+});
+
+test('every portal coordinate sits inside the world it belongs to', () => {
+  const spec = generateSpec();
+  const byKey = new Map(spec.worlds.map((w) => [w.key, w]));
+  for (const l of spec.links.filter((x) => x.kind === 'portal')) {
+    const from = byKey.get(l.from);
+    const to = byKey.get(l.to);
+    assert.ok(l.from_x < from.width * 100 && l.from_y < from.height * 100,
+      `portal departure (${l.from_x},${l.from_y}) is outside ${l.from} (${from.width} tiles)`);
+    assert.ok(l.to_x < to.width * 100 && l.to_y < to.height * 100,
+      `portal arrival (${l.to_x},${l.to_y}) is outside ${l.to} (${to.width} tiles)`);
+  }
+});
+
+test('the entry spawn sits at the centre of the entry world, whatever its size', () => {
+  const spec = generateSpec();
+  const entry = spec.worlds.find((w) => w.is_entry === true);
+  assert.deepEqual(entry.entry_spawn,
+    { x: portalCenterPx(entry.width), y: portalCenterPx(entry.width) });
+});
+
+test('a stamped entry village stays inside its world and carries no marker field', () => {
+  const spec = generateSpec();
+  for (const w of spec.worlds.filter((x) => x.village)) {
+    assert.ok(w.village.min_row + w.village.height <= w.height,
+      `village in "${w.key}" overruns the world`);
+    assert.ok(w.village.min_col + w.village.width <= w.width,
+      `village in "${w.key}" overruns the world`);
+    assert.equal(w._needsVillage, undefined, `"${w.key}" leaked its marker field`);
+  }
+});

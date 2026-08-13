@@ -10,8 +10,8 @@
         0
       ],
       "seed": 5000,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Catacombs",
@@ -24,15 +24,15 @@
         "Undead Line"
       ],
       "is_entry": true,
-      "entry_spawn": {
-        "x": 3250,
-        "y": 3250
-      },
       "level_band": [
         1,
         5
       ],
-      "density": "sparse"
+      "density": "sparse",
+      "entry_spawn": {
+        "x": 4850,
+        "y": 4850
+      }
     },
     {
       "key": "d1_pass",
@@ -42,8 +42,8 @@
         0
       ],
       "seed": 5001,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Cavern",
@@ -70,8 +70,8 @@
         -1
       ],
       "seed": 5002,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Catacombs",
@@ -98,8 +98,8 @@
         1
       ],
       "seed": 5003,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Cavern",
@@ -126,8 +126,8 @@
         0
       ],
       "seed": 5004,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Catacombs",
@@ -154,8 +154,8 @@
         1
       ],
       "seed": 5005,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Cavern",
@@ -182,8 +182,8 @@
         0
       ],
       "seed": 5006,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Catacombs",
@@ -210,8 +210,8 @@
         0
       ],
       "seed": 5007,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Cavern",
@@ -238,8 +238,8 @@
         0
       ],
       "seed": 5100,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Fungal Deep",
@@ -252,20 +252,20 @@
         "Fungal Line"
       ],
       "is_entry": false,
-      "village": {
-        "min_row": 28,
-        "min_col": 28,
-        "width": 6,
-        "height": 4,
-        "gate_edge": "S",
-        "spawn_x": 3050,
-        "spawn_y": 2950
-      },
       "level_band": [
         8,
         14
       ],
-      "density": "sparse"
+      "density": "sparse",
+      "village": {
+        "min_row": 44,
+        "min_col": 44,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "S",
+        "spawn_x": 4650,
+        "spawn_y": 4550
+      }
     },
     {
       "key": "d2_spokeN",
@@ -275,8 +275,8 @@
         -1
       ],
       "seed": 5101,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Gloomfen",
@@ -303,8 +303,8 @@
         0
       ],
       "seed": 5102,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Fungal Deep",
@@ -331,8 +331,8 @@
         1
       ],
       "seed": 5103,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Gloomfen",
@@ -359,8 +359,8 @@
         0
       ],
       "seed": 5104,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Fungal Deep",
@@ -387,8 +387,8 @@
         -1
       ],
       "seed": 5105,
-      "width": 64,
-      "height": 64,
+      "width": 128,
+      "height": 128,
       "chunk_size": 32,
       "biomes": [
         "Gloomfen",
@@ -415,8 +415,8 @@
         0
       ],
       "seed": 5210,
-      "width": 64,
-      "height": 64,
+      "width": 128,
+      "height": 128,
       "chunk_size": 32,
       "biomes": [
         "Ossuary",
@@ -443,8 +443,8 @@
         0
       ],
       "seed": 5211,
-      "width": 64,
-      "height": 64,
+      "width": 128,
+      "height": 128,
       "chunk_size": 32,
       "biomes": [
         "Sunken Cistern",
@@ -470,9 +470,9 @@
         45,
         0
       ],
-      "seed": 5212,
-      "width": 64,
-      "height": 64,
+      "seed": 20000,
+      "width": 128,
+      "height": 128,
       "chunk_size": 32,
       "biomes": [
         "Ossuary",
@@ -499,8 +499,8 @@
         0
       ],
       "seed": 5203,
-      "width": 64,
-      "height": 64,
+      "width": 128,
+      "height": 128,
       "chunk_size": 32,
       "biomes": [
         "Sunken Cistern",
@@ -527,8 +527,8 @@
         1
       ],
       "seed": 5215,
-      "width": 64,
-      "height": 64,
+      "width": 128,
+      "height": 128,
       "chunk_size": 32,
       "biomes": [
         "Ossuary",
@@ -555,8 +555,8 @@
         1
       ],
       "seed": 5205,
-      "width": 64,
-      "height": 64,
+      "width": 128,
+      "height": 128,
       "chunk_size": 32,
       "biomes": [
         "Sunken Cistern",
@@ -583,8 +583,8 @@
         1
       ],
       "seed": 5206,
-      "width": 64,
-      "height": 64,
+      "width": 128,
+      "height": 128,
       "chunk_size": 32,
       "biomes": [
         "Ossuary",
@@ -611,8 +611,8 @@
         0
       ],
       "seed": 5300,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Emberdepths",
@@ -639,8 +639,8 @@
         0
       ],
       "seed": 5301,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Hive Warrens",
@@ -667,8 +667,8 @@
         -1
       ],
       "seed": 5302,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Emberdepths",
@@ -695,8 +695,8 @@
         1
       ],
       "seed": 5303,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Hive Warrens",
@@ -723,8 +723,8 @@
         0
       ],
       "seed": 5304,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Emberdepths",
@@ -751,8 +751,8 @@
         1
       ],
       "seed": 5305,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Hive Warrens",
@@ -779,8 +779,8 @@
         0
       ],
       "seed": 5306,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Emberdepths",
@@ -807,8 +807,8 @@
         0
       ],
       "seed": 5307,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Hive Warrens",
@@ -835,8 +835,8 @@
         0
       ],
       "seed": 5400,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Frostvault",
@@ -849,20 +849,20 @@
         "Rime Line"
       ],
       "is_entry": false,
-      "village": {
-        "min_row": 28,
-        "min_col": 28,
-        "width": 6,
-        "height": 4,
-        "gate_edge": "S",
-        "spawn_x": 3050,
-        "spawn_y": 2950
-      },
       "level_band": [
         19,
         29
       ],
-      "density": "dense"
+      "density": "dense",
+      "village": {
+        "min_row": 76,
+        "min_col": 76,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "S",
+        "spawn_x": 7850,
+        "spawn_y": 7750
+      }
     },
     {
       "key": "d5_spokeN",
@@ -872,8 +872,8 @@
         -1
       ],
       "seed": 5401,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Blightworks",
@@ -900,8 +900,8 @@
         0
       ],
       "seed": 5402,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Deepvault",
@@ -928,8 +928,8 @@
         1
       ],
       "seed": 5403,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Frostvault",
@@ -955,9 +955,9 @@
         67,
         0
       ],
-      "seed": 5404,
-      "width": 64,
-      "height": 64,
+      "seed": 20500,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Blightworks",
@@ -984,8 +984,8 @@
         -1
       ],
       "seed": 5405,
-      "width": 64,
-      "height": 64,
+      "width": 192,
+      "height": 192,
       "chunk_size": 32,
       "biomes": [
         "Deepvault",
@@ -1012,8 +1012,8 @@
         0
       ],
       "seed": 5500,
-      "width": 64,
-      "height": 64,
+      "width": 192,
+      "height": 192,
       "chunk_size": 32,
       "biomes": [
         "Crystal Hollows",
@@ -1040,8 +1040,8 @@
         0
       ],
       "seed": 5501,
-      "width": 64,
-      "height": 64,
+      "width": 192,
+      "height": 192,
       "chunk_size": 32,
       "biomes": [
         "Sunken Foundry",
@@ -1068,8 +1068,8 @@
         0
       ],
       "seed": 5502,
-      "width": 64,
-      "height": 64,
+      "width": 192,
+      "height": 192,
       "chunk_size": 32,
       "biomes": [
         "Crystal Hollows",
@@ -1096,8 +1096,8 @@
         0
       ],
       "seed": 5503,
-      "width": 64,
-      "height": 64,
+      "width": 192,
+      "height": 192,
       "chunk_size": 32,
       "biomes": [
         "Sunken Foundry",
@@ -1124,8 +1124,8 @@
         1
       ],
       "seed": 5504,
-      "width": 64,
-      "height": 64,
+      "width": 192,
+      "height": 192,
       "chunk_size": 32,
       "biomes": [
         "Crystal Hollows",
@@ -1152,8 +1152,8 @@
         1
       ],
       "seed": 5505,
-      "width": 64,
-      "height": 64,
+      "width": 192,
+      "height": 192,
       "chunk_size": 32,
       "biomes": [
         "Sunken Foundry",
@@ -1180,8 +1180,8 @@
         1
       ],
       "seed": 5506,
-      "width": 64,
-      "height": 64,
+      "width": 192,
+      "height": 192,
       "chunk_size": 32,
       "biomes": [
         "Crystal Hollows",
@@ -1208,8 +1208,8 @@
         0
       ],
       "seed": 5715,
-      "width": 64,
-      "height": 64,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Umbral Warren",
@@ -1235,9 +1235,9 @@
         93,
         0
       ],
-      "seed": 5721,
-      "width": 64,
-      "height": 64,
+      "seed": 21006,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Infernal Gate",
@@ -1264,8 +1264,8 @@
         -1
       ],
       "seed": 9001,
-      "width": 64,
-      "height": 64,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Pestilent Deep",
@@ -1292,8 +1292,8 @@
         1
       ],
       "seed": 5603,
-      "width": 64,
-      "height": 64,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Umbral Warren",
@@ -1320,8 +1320,8 @@
         0
       ],
       "seed": 9101,
-      "width": 64,
-      "height": 64,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Infernal Gate",
@@ -1348,8 +1348,8 @@
         1
       ],
       "seed": 5605,
-      "width": 64,
-      "height": 64,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Pestilent Deep",
@@ -1376,8 +1376,8 @@
         0
       ],
       "seed": 9200,
-      "width": 64,
-      "height": 64,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Umbral Warren",
@@ -1403,9 +1403,9 @@
         96,
         0
       ],
-      "seed": 9300,
-      "width": 64,
-      "height": 64,
+      "seed": 21500,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Infernal Gate",
@@ -1431,9 +1431,9 @@
         104,
         0
       ],
-      "seed": 9408,
-      "width": 64,
-      "height": 64,
+      "seed": 22004,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Abyssal Rift",
@@ -1446,20 +1446,20 @@
         "Void Line"
       ],
       "is_entry": false,
-      "village": {
-        "min_row": 28,
-        "min_col": 28,
-        "width": 6,
-        "height": 4,
-        "gate_edge": "S",
-        "spawn_x": 3050,
-        "spawn_y": 2950
-      },
       "level_band": [
         46,
         50
       ],
-      "density": "swarm"
+      "density": "swarm",
+      "village": {
+        "min_row": 108,
+        "min_col": 108,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "S",
+        "spawn_x": 11050,
+        "spawn_y": 10950
+      }
     },
     {
       "key": "d8_spokeN",
@@ -1469,8 +1469,8 @@
         -1
       ],
       "seed": 9500,
-      "width": 64,
-      "height": 64,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Shattered Vault",
@@ -1496,9 +1496,9 @@
         105,
         0
       ],
-      "seed": 5702,
-      "width": 64,
-      "height": 64,
+      "seed": 22502,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Fallen Sanctum",
@@ -1525,8 +1525,8 @@
         1
       ],
       "seed": 9600,
-      "width": 64,
-      "height": 64,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Dreaming Dark",
@@ -1553,8 +1553,8 @@
         0
       ],
       "seed": 5704,
-      "width": 64,
-      "height": 64,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Grave of Titans",
@@ -1580,9 +1580,9 @@
         105,
         -1
       ],
-      "seed": 5705,
-      "width": 64,
-      "height": 64,
+      "seed": 23000,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "The Maw",
@@ -1604,14 +1604,13 @@
     {
       "key": "surface_highlands_0",
       "name": "Highlands Reach",
-      "allows_fast_travel": true,
       "grid": [
         20,
         -1
       ],
       "seed": 6000,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Highlands"
@@ -1627,19 +1626,19 @@
         1,
         8
       ],
-      "density": "sparse"
+      "density": "sparse",
+      "allows_fast_travel": true
     },
     {
       "key": "surface_highlands_1",
       "name": "Highlands Frontier",
-      "allows_fast_travel": true,
       "grid": [
         32,
         -2
       ],
       "seed": 6011,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Highlands"
@@ -1655,19 +1654,19 @@
         4,
         12
       ],
-      "density": "normal"
+      "density": "normal",
+      "allows_fast_travel": true
     },
     {
       "key": "surface_verdant_jungle_0",
       "name": "Verdant Jungle Reach",
-      "allows_fast_travel": true,
       "grid": [
         34,
         0
       ],
       "seed": 6020,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Verdant Jungle"
@@ -1683,19 +1682,19 @@
         1,
         8
       ],
-      "density": "sparse"
+      "density": "sparse",
+      "allows_fast_travel": true
     },
     {
       "key": "surface_verdant_jungle_1",
       "name": "Verdant Jungle Frontier",
-      "allows_fast_travel": true,
       "grid": [
         21,
         -2
       ],
       "seed": 6031,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Verdant Jungle"
@@ -1711,19 +1710,19 @@
         4,
         12
       ],
-      "density": "normal"
+      "density": "normal",
+      "allows_fast_travel": true
     },
     {
       "key": "surface_storm_coast_0",
       "name": "Storm Coast Reach",
-      "allows_fast_travel": true,
       "grid": [
         21,
         2
       ],
-      "seed": 9700,
-      "width": 64,
-      "height": 64,
+      "seed": 23501,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Storm Coast"
@@ -1739,19 +1738,19 @@
         1,
         8
       ],
-      "density": "sparse"
+      "density": "sparse",
+      "allows_fast_travel": true
     },
     {
       "key": "surface_storm_coast_1",
       "name": "Storm Coast Frontier",
-      "allows_fast_travel": true,
       "grid": [
         33,
         1
       ],
-      "seed": 6051,
-      "width": 64,
-      "height": 64,
+      "seed": 24001,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Storm Coast"
@@ -1767,19 +1766,19 @@
         4,
         12
       ],
-      "density": "normal"
+      "density": "normal",
+      "allows_fast_travel": true
     },
     {
       "key": "surface_sunken_ruins_0",
       "name": "Sunken Ruins Reach",
-      "allows_fast_travel": true,
       "grid": [
         31,
         -1
       ],
       "seed": 6060,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Sunken Ruins"
@@ -1795,19 +1794,19 @@
         1,
         8
       ],
-      "density": "sparse"
+      "density": "sparse",
+      "allows_fast_travel": true
     },
     {
       "key": "surface_sunken_ruins_1",
       "name": "Sunken Ruins Frontier",
-      "allows_fast_travel": true,
       "grid": [
         22,
         -1
       ],
       "seed": 6071,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Sunken Ruins"
@@ -1823,19 +1822,19 @@
         4,
         12
       ],
-      "density": "normal"
+      "density": "normal",
+      "allows_fast_travel": true
     },
     {
       "key": "surface_ashfields_0",
       "name": "Ashfields Reach",
-      "allows_fast_travel": true,
       "grid": [
         23,
         1
       ],
       "seed": 6080,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Ashfields"
@@ -1851,19 +1850,19 @@
         1,
         8
       ],
-      "density": "sparse"
+      "density": "sparse",
+      "allows_fast_travel": true
     },
     {
       "key": "surface_ashfields_1",
       "name": "Ashfields Frontier",
-      "allows_fast_travel": true,
       "grid": [
         33,
         -2
       ],
       "seed": 6091,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Ashfields"
@@ -1879,7 +1878,8 @@
         4,
         12
       ],
-      "density": "normal"
+      "density": "normal",
+      "allows_fast_travel": true
     }
   ],
   "links": [
@@ -2186,11 +2186,11 @@
     {
       "kind": "portal",
       "from": "d1_end",
-      "from_x": 3250,
-      "from_y": 3250,
+      "from_x": 4850,
+      "from_y": 4850,
       "to": "d2_hub",
-      "to_x": 3150,
-      "to_y": 3250,
+      "to_x": 4750,
+      "to_y": 4750,
       "guard": {
         "creature_type": "Fungal Line",
         "count": 1
@@ -2199,11 +2199,11 @@
     {
       "kind": "portal",
       "from": "d2_subBranch",
-      "from_x": 3250,
-      "from_y": 3250,
+      "from_x": 6450,
+      "from_y": 6450,
       "to": "d3_entry",
-      "to_x": 3250,
-      "to_y": 3250,
+      "to_x": 6450,
+      "to_y": 6450,
       "guard": {
         "creature_type": "Bonelord Line",
         "count": 1
@@ -2212,11 +2212,11 @@
     {
       "kind": "portal",
       "from": "d3_heart",
-      "from_x": 3250,
-      "from_y": 3250,
+      "from_x": 6450,
+      "from_y": 6450,
       "to": "d4_entry",
-      "to_x": 3250,
-      "to_y": 3250,
+      "to_x": 8050,
+      "to_y": 8050,
       "guard": {
         "creature_type": "Ember Line",
         "count": 1
@@ -2225,11 +2225,11 @@
     {
       "kind": "portal",
       "from": "d4_end",
-      "from_x": 3250,
-      "from_y": 3250,
+      "from_x": 8050,
+      "from_y": 8050,
       "to": "d5_hub",
-      "to_x": 3150,
-      "to_y": 3250,
+      "to_x": 7950,
+      "to_y": 7950,
       "guard": {
         "creature_type": "Rime Line",
         "count": 1
@@ -2238,11 +2238,11 @@
     {
       "kind": "portal",
       "from": "d5_subBranch",
-      "from_x": 3250,
-      "from_y": 3250,
+      "from_x": 9650,
+      "from_y": 9650,
       "to": "d6_entry",
-      "to_x": 3250,
-      "to_y": 3250,
+      "to_x": 9650,
+      "to_y": 9650,
       "guard": {
         "creature_type": "Crystal Line",
         "count": 1
@@ -2251,11 +2251,11 @@
     {
       "kind": "portal",
       "from": "d6_heart",
-      "from_x": 3250,
-      "from_y": 3250,
+      "from_x": 9650,
+      "from_y": 9650,
       "to": "d7_entry",
-      "to_x": 3250,
-      "to_y": 3250,
+      "to_x": 11250,
+      "to_y": 11250,
       "guard": {
         "creature_type": "Umbral Line",
         "count": 1
@@ -2264,11 +2264,11 @@
     {
       "kind": "portal",
       "from": "d7_end",
-      "from_x": 3250,
-      "from_y": 3250,
+      "from_x": 11250,
+      "from_y": 11250,
       "to": "d8_hub",
-      "to_x": 3150,
-      "to_y": 3250,
+      "to_x": 11150,
+      "to_y": 11150,
       "guard": {
         "creature_type": "Void Line",
         "count": 1
