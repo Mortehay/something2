@@ -74,7 +74,7 @@ function generateBestiary() {
         prompt: promptFor(line, rung),
         level_min: band.min,
         level_max: band.max,
-        behavior_name: BEHAVIOR_OVERRIDES[name] || rung.name, // resolved to a real behavior_id at seed time (Task 6)
+        behavior_name: BEHAVIOR_OVERRIDES[name] ?? rung.name, // resolved to a real behavior_id at seed time (Task 6)
       });
       const drop = pickDropItem(line.element, line.tier);
       drops.push({

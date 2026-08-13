@@ -2121,6 +2121,13 @@ module.exports = {
   attachAuthority, planTransition, suppressArrivalDoorway, planBind,
   nearestMerchantVillage, INTERACT_RADIUS,
   planPortalTransition, isPortalBlocked, knockbackPosition,
+  // SOMET-290: exported so a DB test can query the EXACT text the live sim
+  // reads (activateChunk / injectGuardIntoSim both share this one constant)
+  // against a real world_creatures fixture, rather than retyping a third
+  // copy of it that could silently drift from what actually runs -- the same
+  // drift SOMET-249 already shipped once between this query and
+  // loadCreatureTypes's separate one in creatures.js.
+  CREATURE_JOINED_SELECT,
   // Stash internals, exported for unit test only. Not part of the module's API.
   __test: { pushAttacks, drainAttacks, MAX_PENDING_ATTACKS },
 };
