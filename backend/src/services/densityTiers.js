@@ -9,12 +9,12 @@
 // Keep the key set in sync with worlds_density_check (migration
 // 1714440070000). The duplication is deliberate and documented there.
 const DENSITY_TIERS = {
-  dead:   { perThousand: 0,   packCount: 0, packSizeMin: 0, packSizeMax: 0 },
-  sparse: { perThousand: 1.5, packCount: 0, packSizeMin: 0, packSizeMax: 0 },
-  normal: { perThousand: 3,   packCount: 1, packSizeMin: 3, packSizeMax: 4 },
-  dense:  { perThousand: 6,   packCount: 2, packSizeMin: 4, packSizeMax: 6 },
-  horde:  { perThousand: 12,  packCount: 4, packSizeMin: 5, packSizeMax: 8 },
-  swarm:  { perThousand: 24,  packCount: 6, packSizeMin: 8, packSizeMax: 12 },
+  dead:   { perThousand: 0,  packCount: 0, packSizeMin: 0, packSizeMax: 0 },
+  sparse: { perThousand: 3,  packCount: 0, packSizeMin: 0, packSizeMax: 0 },
+  normal: { perThousand: 6,  packCount: 1, packSizeMin: 3, packSizeMax: 4 },
+  dense:  { perThousand: 12, packCount: 2, packSizeMin: 4, packSizeMax: 6 },
+  horde:  { perThousand: 24, packCount: 4, packSizeMin: 5, packSizeMax: 8 },
+  swarm:  { perThousand: 48, packCount: 6, packSizeMin: 8, packSizeMax: 12 },
 };
 
 const DENSITY_NAMES = Object.keys(DENSITY_TIERS);
@@ -38,7 +38,11 @@ const DEFAULT_DENSITY = 'normal';
 // and POST /api/worlds/:id/creatures -- are bounded by construction: neither
 // can place more than this without first resolving a density, and there is
 // exactly one resolver.
-const MAX_WORLD_CREATURES = 2000;
+// Raised from 2000 to 4000 when the tier rates doubled (SOMET-302). The
+// deepest world on the size ramp -- 224x224 at swarm -- resolves to 2408,
+// so no world the game ships is near this; it still guards the case it was
+// written for, resolveDensity('normal', 4096, 4096).
+const MAX_WORLD_CREATURES = 4000;
 
 // Pure. Never reads a database -- populateWorld does the writing, including
 // persisting scatterCount back to worlds.creature_count.
@@ -51,18 +55,21 @@ function resolveDensity(tier, width, height) {
   // largest tier asks for 6 packs of at most 12, so the pack budget is 72 in
   // the worst case and a tier's pack shape is worth preserving intact. The
   // scatter takes whatever is left, so scatter + packs never exceeds the cap
-  // no matter how large the map is. Math.max(0, ...) is defensive only --
-  // MAX_WORLD_CREATURES is far above any tier's pack budget.
+  // no matter how large the map is.
   const packBudget = t.packCount * t.packSizeMax;
-  const scatterCount = Math.max(0, Math.min(
-    Math.round((t.perThousand * area) / 1000),
-    MAX_WORLD_CREATURES - packBudget,
-  ));
+  const ceiling = MAX_WORLD_CREATURES - packBudget;
+  const target = Math.round((t.perThousand * area) / 1000);
+  // `clamped` exists because truncation used to be invisible: a caller could
+  // not tell "this world was authored thin" from "this world was cut to fit".
+  // Math.max(0, ...) is defensive only -- MAX_WORLD_CREATURES is far above
+  // any tier's pack budget.
+  const scatterCount = Math.max(0, Math.min(target, ceiling));
   return {
     scatterCount,
     packCount: t.packCount,
     packSizeMin: t.packSizeMin,
     packSizeMax: t.packSizeMax,
+    clamped: target > ceiling,
   };
 }
 

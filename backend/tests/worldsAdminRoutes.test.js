@@ -362,12 +362,12 @@ test('POST /api/worlds/:id/creatures rejects an unbounded world', async () => {
 // width, height) rather than the old worlds.creature_count literal --
 // world.creature_count is no longer read for placement at all, only written
 // back from what actually lands. With no density set this world resolves to
-// the 'normal' tier on a 24x24 board: scatterCount = round(3 * 576 / 1000) =
-// 2 (fixed), plus ONE pack sized randomly in [3, 4] (packSizeMin/Max for
-// 'normal') -- so `placed` is 5 or 6 depending on the route's per-call
-// Math.random() seed, never a fixed number. Assert the deterministic part
-// (the range) and that placed/inserted/creature_count-write agree with each
-// other, instead of pinning one arbitrary sample.
+// the 'normal' tier on a 24x24 board: scatterCount = round(6 * 576 / 1000) =
+// 3 (fixed, SOMET-302 doubled rate), plus ONE pack sized randomly in [3, 4]
+// (packSizeMin/Max for 'normal') -- so `placed` is 6 or 7 depending on the
+// route's per-call Math.random() seed, never a fixed number. Assert the
+// deterministic part (the range) and that placed/inserted/creature_count-write
+// agree with each other, instead of pinning one arbitrary sample.
 test('POST /api/worlds/:id/creatures places creatures and reports the count', async () => {
   const world = { id: 'w1', seed: '42', chunk_size: 64, width: 24, height: 24,
     allowed_creature_types: ['goblin'] };
@@ -414,12 +414,12 @@ test('POST /api/worlds/:id/creatures places creatures and reports the count', as
   __setPool(pool);
   const res = await request(app).post('/api/worlds/w1/creatures').set(...AUTH).send({});
   assert.equal(res.status, 200);
-  assert.ok(res.body.placed === 5 || res.body.placed === 6,
-    `placed must be scatter(2) + one normal-tier pack(3-4), got ${res.body.placed}`);
+  assert.ok(res.body.placed === 6 || res.body.placed === 7,
+    `placed must be scatter(3) + one normal-tier pack(3-4), got ${res.body.placed}`);
   assert.equal(inserted.length, res.body.placed);
   // populateWorld writes creature_count from the SCATTER count only (not
   // scatter+packed) -- see worldPopulation.js's own comment on that split.
-  assert.equal(wroteCreatureCount, 2);
+  assert.equal(wroteCreatureCount, 3);
   assert.equal(res.body.liveWarning, undefined, 'no warning when the world was not live');
 });
 
@@ -433,7 +433,7 @@ test('POST /api/worlds/:id/creatures places creatures and reports the count', as
 // resolves biomes via loadBiomes -- on the SAME transaction client, not a
 // separate pool.query() -- whenever the world declares any.
 // SOMET-246 Task 7: same density-driven count as the test above (`placed` is
-// 5 or 6, not a fixed literal) -- see that test's comment for the full
+// 6 or 7, not a fixed literal) -- see that test's comment for the full
 // scatter/pack breakdown.
 test('POST /api/worlds/:id/creatures threads the world\'s declared biomes into placeMapCreatures', async () => {
   const world = { id: 'w1', seed: '42', chunk_size: 64, width: 24, height: 24,
@@ -474,7 +474,7 @@ test('POST /api/worlds/:id/creatures threads the world\'s declared biomes into p
   __setPool(pool);
   const res = await request(app).post('/api/worlds/w1/creatures').set(...AUTH).send({});
   assert.equal(res.status, 200);
-  assert.ok(res.body.placed === 5 || res.body.placed === 6,
+  assert.ok(res.body.placed === 6 || res.body.placed === 7,
     `placement still succeeds once biomes are threaded in, got ${res.body.placed}`);
   assert.ok(
     pool.calls.some((c) => /FROM biomes/i.test(c.sql) && c.params?.[0]?.includes('Meadow')),
@@ -536,7 +536,7 @@ test('POST /api/worlds/:id/creatures warns when a player is connected so the re-
   assert.equal(res.status, 200, 'the DB write still succeeds — only the live simulation is stale');
   // SOMET-246 Task 7: density-driven count, not the old creature_count
   // literal -- see the first creatures test's comment for the breakdown.
-  assert.ok(res.body.placed === 5 || res.body.placed === 6, `got ${res.body.placed}`);
+  assert.ok(res.body.placed === 6 || res.body.placed === 7, `got ${res.body.placed}`);
   assert.match(res.body.liveWarning, /connected/i,
     'the response must say the change did not reach the live world, not silently claim success');
 });
