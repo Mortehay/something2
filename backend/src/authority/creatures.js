@@ -5,7 +5,9 @@
 const { resolveMove, MAP_TILE_SIZE } = require('./collision');
 const { chunkOf, CHUNK_KEY } = require('./coords');
 const { inArc, hasLineOfSight } = require('./weapons');
-const { applyDamageWithEffects, NO_MITIGATION } = require('./damage');
+const {
+  applyDamageWithEffects, NO_MITIGATION, isProvokedBy, provoke, playerKey, creatureKey,
+} = require('./damage');
 const { resolveEffectName } = require('./vfx.js');
 const { applyElementEffect, activeEffectKeys, canAct } = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
@@ -261,6 +263,30 @@ function withinLeash(x, y, home, radius) {
   return dist2(x, y, home.x, home.y) <= radius * radius;
 }
 
+// SOMET-290 — the MONOTONE form of withinLeash, and the one every DISPLACEMENT
+// is measured against (a flee step, a shove). May this creature go from
+// (fromX,fromY) to (toX,toY)?
+//
+// Allowed when the destination is no further from home than the larger of
+//  (a) the leash radius -- the normal case: anywhere inside its own radius; and
+//  (b) where it already was -- what keeps a creature that is ALREADY outside
+//      its leash from being pushed further out while it walks back.
+//
+// (b) is not a nicety. A hard destination-only test refuses EVERY move for a
+// creature outside its leash, which reads as a creature frozen solid: the guard
+// clamp learned this in SOMET-283 (a stranded guard could never be shoved
+// homeward again) and the skittish flee clamp shipped with the same shape --
+// a knocked-out-of-its-pen creature stood rooted, and CALM, while a player
+// stood inside its flee radius.
+//
+// A creature with no home is unconstrained, exactly as withinLeash treats one.
+function withinLeashBudget(creature, fromX, fromY, toX, toY, radius) {
+  const home = creature && creature.home;
+  if (!home) return true;
+  const budget2 = Math.max(radius * radius, dist2(fromX, fromY, home.x, home.y));
+  return dist2(toX, toY, home.x, home.y) <= budget2;
+}
+
 // SOMET-283 — the post anchor a creature is held to, or null if it is free to
 // be displaced anywhere.
 //
@@ -315,12 +341,21 @@ function immuneToPlayerDamage(creature) {
   return isGuardCreature(creature);
 }
 
+// SOMET-290: keyed on the HOME ANCHOR alone now, not on guard-ness.
+//
+// The anchor was always the thing that mattered -- `isGuardCreature` was a
+// proxy for "has a post", true of every anchored creature at the time. It
+// stopped being one the moment a non-guard could be anchored: a penned skittish
+// creature (SOMET-289) and the portal/vault guards (dungeonGuards.js,
+// chests.js -- ordinary HOSTILE entity types with home_x/home_y) all belong
+// somewhere, and dungeonGuards.js's own comment already claims a displaced one
+// "still recovers back to defending the portal". A creature with no anchor is
+// still shoved exactly as before, which is every wild spawn in the world.
 function leashAnchorOf(creature) {
-  if (!isGuardCreature(creature)) return null;
-  const home = creature.home;
-  const bh = creature.behavior;
+  const home = creature && creature.home;
+  const bh = creature && creature.behavior;
   if (!home || !Number.isFinite(home.x) || !Number.isFinite(home.y)) return null;
-  const radius = Number.isFinite(bh.leashRadius) ? bh.leashRadius : GUARD_LEASH_RADIUS;
+  const radius = bh && Number.isFinite(bh.leashRadius) ? bh.leashRadius : GUARD_LEASH_RADIUS;
   return { home, radius };
 }
 
@@ -366,13 +401,15 @@ function shoveCreature(map, fromX, fromY, creature, distance) {
   const anchor = leashAnchorOf(creature);
   if (!anchor) { shoveAwayFrom(map, fromX, fromY, creature, distance); return; }
   const beforeX = creature.x, beforeY = creature.y;
-  const beforeD2 = dist2(beforeX + creature.width / 2, beforeY + creature.height / 2,
-    anchor.home.x, anchor.home.y);
+  const before = center(creature);
   shoveAwayFrom(map, fromX, fromY, creature, distance);
   const after = center(creature);
-  const afterD2 = dist2(after.x, after.y, anchor.home.x, anchor.home.y);
-  const budget2 = Math.max(anchor.radius * anchor.radius, beforeD2);
-  if (afterD2 > budget2) { creature.x = beforeX; creature.y = beforeY; }
+  // SOMET-290: the monotone rule described above, now the shared helper the
+  // flee clamp uses too -- the two were the same rule written twice, and the
+  // copy in the tick had lost the "no further than where it already was" half.
+  if (!withinLeashBudget(creature, before.x, before.y, after.x, after.y, anchor.radius)) {
+    creature.x = beforeX; creature.y = beforeY;
+  }
 }
 
 // SOMET-154 — tile-grid path from a guard's current tile to its post, as
@@ -465,6 +502,127 @@ function findHomePath(map, fromX, fromY, home) {
   }
   out.reverse();
   return out.length > 0 ? out : null;
+}
+
+// SOMET-154's walk home, one step. Extracted verbatim from the guard branch by
+// SOMET-290 so that a creature which is not guard-STYLE but does have a post
+// (a penned skittish creature, a portal guard, a vault-chest guard -- all
+// ordinary hostile entity types with home_x/home_y) recovers by the same rules
+// instead of by a second, simpler copy that would re-learn SOMET-154's lessons
+// the hard way: greedy steering alone strands a creature whose post is behind
+// its own wall ring, and "did it move this tick" is not a usable definition of
+// stuck.
+//
+// `cc` is the caller's PRE-move centre, passed in rather than recomputed for
+// the same reason the tick reuses it elsewhere -- one measurement per tick.
+//
+// Returns 'home' when the creature is already on its post (or was just placed
+// back on it) and 'walking' otherwise. The caller owns `c.mode`, because the
+// mode names differ per branch: only a guard "guards".
+function stepHome(map, c, bh, dt, cc) {
+  const dx = c.home.x - cc.x, dy = c.home.y - cc.y;
+  if (Math.hypot(dx, dy) <= GUARD_HOME_EPSILON) {
+    // Home reached: forget the detour and the attempt budget, so the NEXT
+    // displacement gets a full set of attempts of its own.
+    resetHomeWalk(c);
+    return 'home';
+  }
+  // SOMET-154. The step is aimed at the next PATH waypoint when the creature is
+  // following a detour, and straight at the post otherwise. Reached waypoints
+  // are dropped first, so `goal` is always somewhere it has not arrived at yet.
+  if (c._homePath) {
+    while (c._homePath.length > 0
+           && Math.hypot(c._homePath[0].x - cc.x, c._homePath[0].y - cc.y) <= GUARD_PATH_WAYPOINT_EPSILON) {
+      c._homePath.shift();
+    }
+    if (c._homePath.length === 0) c._homePath = null;
+  }
+  const goal = (c._homePath && c._homePath.length > 0) ? c._homePath[0] : c.home;
+  const gx = goal.x - cc.x, gy = goal.y - cc.y;
+  const goalD = Math.hypot(gx, gy);
+  // The stall window restarts whenever the goal itself changes (a waypoint was
+  // reached, or a new path was adopted), since the distance being watched is a
+  // different distance from that tick on.
+  const goalKey = `${goal.x},${goal.y}`;
+  if (c._homeGoalKey !== goalKey) {
+    c._homeGoalKey = goalKey;
+    c._homeMarkD = goalD;
+    c._homeStall = 0;
+  }
+  const r = movedWith(map, c, gx, gy, dt, bh.moveSpeedMult * c._buff.speedMult);
+  // The step is committed only when it actually gets CLOSER to the goal.
+  // resolveMove clamps each axis independently, so a blocked step still slides
+  // along the wall — that slide is kept when it closes the gap (free
+  // corner-rounding) and refused when it does not.
+  //
+  // Aiming straight at the post was already self-bounding (each axis points AT
+  // the post and a 2px step cannot overshoot), so this gate changes nothing
+  // without a path. It exists for the path-following case: a detour must still
+  // only ever close on its own next waypoint.
+  if ((r.x !== c.x || r.y !== c.y)
+      && dist2(r.x + c.width / 2, r.y + c.height / 2, goal.x, goal.y) < goalD * goalD) {
+    c.x = r.x; c.y = r.y;
+    const f = facingFor(gx, gy); if (f) c.facing = f;
+    c.dirty = true;
+  }
+  const nowC = center(c);
+
+  // "Stuck" is MEANINGFUL closure over a window, not "did it move this tick". A
+  // guard pinned flat against a wall whose post is a fraction of a pixel off
+  // the wall's axis keeps shaving ~1e-9 px off its distance every tick forever:
+  // a plain moved/didn't-move test reads that as progress, the recovery below
+  // never runs, and the guard is stranded exactly as before. The first version
+  // of this fix had that bug, and the W-bearing test caught it.
+  const newGoalD = Math.hypot(nowC.x - goal.x, nowC.y - goal.y);
+  if (newGoalD <= c._homeMarkD - GUARD_RETURN_PROGRESS_EPSILON) {
+    c._homeMarkD = newGoalD;
+    c._homeStall = 0;
+  } else {
+    c._homeStall += 1;
+  }
+  // The repath budget is earned back by real net closure on the POST (not on a
+  // waypoint): a creature genuinely walking the long way round the ring keeps a
+  // full budget, while one that is merely thrashing burns through it and gets
+  // put back on its post below. Rounding a corner temporarily increases this
+  // distance, which simply leaves the best-so-far untouched rather than
+  // penalising it.
+  const newHomeD = Math.hypot(nowC.x - c.home.x, nowC.y - c.home.y);
+  if (newHomeD <= c._homeBestD - GUARD_RETURN_PROGRESS_EPSILON) {
+    c._homeBestD = newHomeD;
+    c._homeRepaths = 0;
+  }
+
+  if (c._homeStall >= GUARD_RETURN_STALL_TICKS) {
+    // Steering alone cannot get this creature home. Ask for a real path around
+    // whatever is in the way (in a village that is the guard's own wall ring,
+    // and the way through is the gate; in a pen it is the fence).
+    c._homeStall = 0;
+    c._homeRepaths += 1;
+    const path = c._homeRepaths <= GUARD_MAX_REPATHS
+      ? findHomePath(map, nowC.x, nowC.y, c.home)
+      : null;
+    if (path) {
+      c._homePath = path;
+      c._homeGoalKey = null; // force the stall window to restart on the new goal
+    } else {
+      // No route exists inside the search box, or the creature has burned its
+      // attempts and is still stuck. An unmanned gate (or an empty pen) defeats
+      // the whole feature, so the post wins over the simulation here and the
+      // creature is placed back on it.
+      //
+      // This can only fire for a creature that has been demonstrably immobile
+      // for GUARD_RETURN_STALL_TICKS with no walkable route home — never
+      // mid-fight (a creature with a target never reaches this code) and never
+      // during ordinary knockback recovery on open ground (which makes progress
+      // every tick and so never stalls).
+      c.x = c.home.x - c.width / 2;
+      c.y = c.home.y - c.height / 2;
+      c.dirty = true;
+      resetHomeWalk(c);
+      return 'home';
+    }
+  }
+  return 'walking';
 }
 
 // Nearest hostile-faction creature a guard may engage: within aggroRadius of
@@ -672,6 +830,46 @@ function anyAbilityReady(c, bh) {
   return bh.abilities.some((a) => (c._abilityCd.get(a.slot) || 0) <= 0);
 }
 
+// SOMET-290 — the two states a skittish creature can be in, as ONE predicate.
+//
+// "Prey right now, with respect to THIS actor." A skittish creature that has
+// been hurt fights the actor that hurt it and nobody else: `isProvokedBy`
+// (damage.js, which owns the `_provokedBy` record) is what makes the
+// distinction, and routing every read through here is what stops the rule from
+// being re-derived — the tick needs it three times in one pass (the movement
+// band, the leash clamp, the attack gate) and the cornered rule writes
+// provocation mid-tick, so three independent reads would have a creature flee,
+// discover it is cornered, and bite in the same tick from its pre-flee
+// distance.
+//
+// Every other chase style is never fleeing, whatever it has been hit by.
+function isFleeingFrom(creature, bh, actorKey, now) {
+  return bh.chaseStyle === 'skittish' && !isProvokedBy(creature, actorKey, now);
+}
+
+// SOMET-290 — is this creature actually FIGHTING the player it holds, rather
+// than merely watching or backing away from one?
+//
+// Exported for slice D (SOMET-291): "a guard prefers a hostile that currently
+// holds a player target" must not count a deer that has a player in `_target`
+// only so it knows who to back away from — rescuing a player from a creature
+// that is running away from them would send guards chasing wildlife across the
+// map while the actual attacker is ignored.
+//
+// `_target` alone cannot answer this, which is the whole reason this exists:
+// the skittish branch acquires a target exactly like a charger does and only
+// then decides not to engage it.
+//
+// `now` is the tick's world clock and is deliberately NOT defaulted: a caller
+// that forgets it reads every provocation as expired, so a skittish creature
+// answers "not engaging" -- no rescue dispatched for wildlife, rather than
+// guards sent chasing a deer.
+function isEngagingPlayer(creature, now) {
+  if (!creature || creature._target == null || creature._targetKind !== 'player') return false;
+  const bh = creature.behavior || DEFAULT_BEHAVIOR;
+  return !isFleeingFrom(creature, bh, playerKey(creature._target), now);
+}
+
 // Nearest DIRS index for a movement vector's signs → facing.
 function facingFor(vx, vy) {
   const sx = Math.sign(vx), sy = Math.sign(vy);
@@ -725,8 +923,10 @@ class CreatureSim {
         attackElement: c.attackElement || c.attack_element || 'physical',
         _target: null, _targetKind: null, mode: 'roam',
         // SOMET-154 walk-home state, in the cleared shape resetHomeWalk gives
-        // it. Only ever written by the guard branch's return step; every
-        // non-guard creature keeps these defaults forever.
+        // it. Written by stepHome, which SOMET-290 made shared: the guard
+        // branch's return step and the hostile path's walk-home block both go
+        // through it. A creature with no `home` never reaches either, so an
+        // unanchored one does keep these defaults forever.
         //   _homePath   remaining waypoints (tile centres) to the post
         //   _homeStall  return ticks since the last meaningful closure
         //   _homeRepaths path searches since the guard last closed on its post
@@ -866,7 +1066,11 @@ class CreatureSim {
             // already has a real number here; the inner `?? CREATURE_DAMAGE`
             // could never fire.
             const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
-            applyDamageWithEffects(tgt, dmg, 'physical', effectiveMit(tgt), now);
+            // SOMET-290: the guard is named as the provoker. A hostile that
+            // reads provocation (a skittish creature caught by a guard) is
+            // then angry at the GUARD, which matches no player and so cannot
+            // arm it against a bystanding one.
+            applyDamageWithEffects(tgt, dmg, 'physical', effectiveMit(tgt), now, creatureKey(c.id));
             // Slice D (SOMET-161): the SAME descriptor shape a player swing
             // emits. This is what makes "every actor is visible" one code
             // path rather than two -- the client draws a wolf bite through
@@ -897,117 +1101,14 @@ class CreatureSim {
         }
 
         // No target: walk back to the post, then stand still.
+        //
+        // SOMET-290: the walk itself is stepHome() now, shared with the homed
+        // non-guard creatures below. Byte-identical steering, stall detection,
+        // repath budget and snap-home fallback -- only the mode assignment
+        // stays here, because 'guard' means something to a guard and nothing to
+        // a deer.
         if (c.home) {
-          const dx = c.home.x - cc.x, dy = c.home.y - cc.y;
-          if (Math.hypot(dx, dy) > GUARD_HOME_EPSILON) {
-            c.mode = 'return';
-            // SOMET-154. The step is aimed at the next PATH waypoint when the
-            // guard is following a detour, and straight at the post otherwise.
-            // Reached waypoints are dropped first, so `goal` is always
-            // somewhere the guard has not arrived at yet.
-            if (c._homePath) {
-              while (c._homePath.length > 0
-                     && Math.hypot(c._homePath[0].x - cc.x, c._homePath[0].y - cc.y) <= GUARD_PATH_WAYPOINT_EPSILON) {
-                c._homePath.shift();
-              }
-              if (c._homePath.length === 0) c._homePath = null;
-            }
-            const goal = (c._homePath && c._homePath.length > 0) ? c._homePath[0] : c.home;
-            const gx = goal.x - cc.x, gy = goal.y - cc.y;
-            const goalD = Math.hypot(gx, gy);
-            // The stall window restarts whenever the goal itself changes (a
-            // waypoint was reached, or a new path was adopted), since the
-            // distance being watched is a different distance from that tick on.
-            const goalKey = `${goal.x},${goal.y}`;
-            if (c._homeGoalKey !== goalKey) {
-              c._homeGoalKey = goalKey;
-              c._homeMarkD = goalD;
-              c._homeStall = 0;
-            }
-            const r = movedWith(this.map, c, gx, gy, dt, bh.moveSpeedMult * c._buff.speedMult);
-            // The step is committed only when it actually gets CLOSER to the
-            // goal. resolveMove clamps each axis independently, so a blocked
-            // step still slides along the wall — that slide is kept when it
-            // closes the gap (free corner-rounding) and refused when it does
-            // not.
-            //
-            // Aiming straight at the post was already self-bounding (each axis
-            // points AT the post and a 2px step cannot overshoot), so this gate
-            // changes nothing for a guard with no path. It exists for the
-            // path-following case introduced below, which is the first thing
-            // here that can legitimately steer a guard AWAY from its post: a
-            // detour must still only ever close on its own next waypoint.
-            if ((r.x !== c.x || r.y !== c.y)
-                && dist2(r.x + c.width / 2, r.y + c.height / 2, goal.x, goal.y) < goalD * goalD) {
-              c.x = r.x; c.y = r.y;
-              const f = facingFor(gx, gy); if (f) c.facing = f;
-              c.dirty = true;
-            }
-            const nowC = center(c);
-
-            // "Stuck" is MEANINGFUL closure over a window, not "did it move
-            // this tick". A guard pinned flat against a wall whose post is a
-            // fraction of a pixel off the wall's axis keeps shaving ~1e-9 px
-            // off its distance every tick forever: a plain moved/didn't-move
-            // test reads that as progress, the recovery below never runs, and
-            // the guard is stranded exactly as before. The first version of
-            // this fix had that bug, and the W-bearing test caught it.
-            const newGoalD = Math.hypot(nowC.x - goal.x, nowC.y - goal.y);
-            if (newGoalD <= c._homeMarkD - GUARD_RETURN_PROGRESS_EPSILON) {
-              c._homeMarkD = newGoalD;
-              c._homeStall = 0;
-            } else {
-              c._homeStall += 1;
-            }
-            // The repath budget is earned back by real net closure on the POST
-            // (not on a waypoint): a guard genuinely walking the long way round
-            // the ring keeps a full budget, while one that is merely thrashing
-            // burns through it and gets put back on its post below. Rounding a
-            // corner temporarily increases this distance, which simply leaves
-            // the best-so-far untouched rather than penalising the guard.
-            const newHomeD = Math.hypot(nowC.x - c.home.x, nowC.y - c.home.y);
-            if (newHomeD <= c._homeBestD - GUARD_RETURN_PROGRESS_EPSILON) {
-              c._homeBestD = newHomeD;
-              c._homeRepaths = 0;
-            }
-
-            if (c._homeStall >= GUARD_RETURN_STALL_TICKS) {
-              // Steering alone cannot get this guard home. Ask for a real path
-              // around whatever is in the way (in a village that is the guard's
-              // own wall ring, and the way through is the gate).
-              c._homeStall = 0;
-              c._homeRepaths += 1;
-              const path = c._homeRepaths <= GUARD_MAX_REPATHS
-                ? findHomePath(this.map, nowC.x, nowC.y, c.home)
-                : null;
-              if (path) {
-                c._homePath = path;
-                c._homeGoalKey = null; // force the stall window to restart on the new goal
-              } else {
-                // No route exists inside the search box, or the guard has
-                // burned its attempts and is still stuck. An unmanned gate
-                // defeats the whole feature, so the post wins over the
-                // simulation here and the guard is placed back on it.
-                //
-                // This can only fire for a guard that has been demonstrably
-                // immobile for GUARD_RETURN_STALL_TICKS with no walkable route
-                // home — never mid-fight (a guard with a target takes the
-                // chase branch above and never reaches this code) and never
-                // during ordinary knockback recovery on open ground (which
-                // makes progress every tick and so never stalls).
-                c.x = c.home.x - c.width / 2;
-                c.y = c.home.y - c.height / 2;
-                c.dirty = true;
-                c.mode = 'guard';
-                resetHomeWalk(c);
-              }
-            }
-          } else {
-            c.mode = 'guard';
-            // Home reached: forget the detour and the attempt budget, so the
-            // NEXT displacement gets a full set of attempts of its own.
-            resetHomeWalk(c);
-          }
+          c.mode = stepHome(this.map, c, bh, dt, cc) === 'home' ? 'guard' : 'return';
         } else {
           c.mode = 'guard';
         }
@@ -1015,45 +1116,95 @@ class CreatureSim {
       }
       // --- end guard branch; hostile path below is unchanged ---
 
+      // SOMET-290 follow-up (finding 4) — the post this creature is held to,
+      // resolved ONCE for the whole hostile path and read by all three of the
+      // flee clamp, the walk-home block and the roam clamp below.
+      //
+      // Through leashAnchorOf rather than by reading `c.home` and
+      // `bh.leashRadius` at each site, because the helper is the only place that
+      // defends the radius: a hand-built behaviour with no `leashRadius` (a
+      // test fixture, a future caller that does not go through resolveBehavior)
+      // gives `Math.max(NaN, d2)` -> NaN, which refuses EVERY roam and flee step
+      // AND reads as outside the leash, i.e. a creature permanently in
+      // `mode: 'return'` and frozen solid. The DB path always supplies 800, so
+      // the raw reads were safe today and silently lethal tomorrow.
+      const anchor = leashAnchorOf(c);
+
       // Target resolution: keep current target unless it left leash; else acquire nearest in aggro.
       if (c._target) {
         const tp = byId.get(c._target);
         if (!tp || dist2(cc.x, cc.y, center(tp).x, center(tp).y) > bh.leashRadius * bh.leashRadius) c._target = null;
       }
       if (!c._target) {
-        let nearest = null, nd2 = bh.aggroRadius * bh.aggroRadius;
+        // SOMET-290 — a SKITTISH creature's PROVOKER is acquirable out to the
+        // leash radius and outranks a nearer stranger. Every other chase style,
+        // and every non-provoker, acquires the nearest player inside the aggro
+        // radius exactly as before.
+        //
+        // Both halves matter and both are about the same missing fact. Aggro
+        // is 300px for a skittish creature and every ranged weapon in the
+        // catalog outreaches it (darts 350 … arbalest 850), so a creature that
+        // can only ever acquire inside aggro can be shot to death without ever
+        // being able to answer — the retaliation rule spec §3 promises would be
+        // defeated by a bow. And picking the NEAREST player rather than the one
+        // that actually hit it would have a wounded creature turn on a stranger
+        // standing closer than its attacker.
+        //
+        // Bounded by the leash rather than unbounded: the leash is already what
+        // ends an engagement (the drop above), so a provoker further away than
+        // that is someone this creature was never going to reach. It stays
+        // provoked until the memory expires, so walking back into leash range
+        // within that window is answered.
+        //
+        // GATED ON `skittish`, which is the only style spec §3 speaks about,
+        // and the gate is the whole point rather than tidiness. Unscoped, this
+        // is a game-wide change to how you break contact: ~4,000 live hostile
+        // rows are charge/skirmish with aggro 400 against leash 800 (Apex is
+        // 600/1200), and a landed creature melee re-stamps provocation on every
+        // connect (see the attack branch below), so every enemy that had ever
+        // touched you would re-acquire you out to its leash on a rolling 10s
+        // timer — backing out of aggro range would stop being a way to
+        // disengage, and every ranged weapon in the game would pull aggro from
+        // beyond the range the enemy can see you at. Skittish creatures are the
+        // ones that need it, because they are the ones whose aggro radius is
+        // narrower than the weapons used on them.
+        const retaliates = bh.chaseStyle === 'skittish';
+        let nearest = null, nd2 = Infinity, haveProvoker = false;
         for (const p of players) {
           const pc = center(p);
           const d2 = dist2(cc.x, cc.y, pc.x, pc.y);
+          const provoker = retaliates && isProvokedBy(c, playerKey(p.userId), now);
+          const reach = provoker ? Math.max(bh.aggroRadius, bh.leashRadius) : bh.aggroRadius;
+          if (d2 > reach * reach) continue;
+          if (haveProvoker && !provoker) continue;
+          // The first provoker displaces any stranger already picked; after
+          // that, provokers compete with each other on distance like anyone
+          // else. `<=` (not `<`) keeps the pre-SOMET-290 tie-break, where the
+          // LAST player at an equal distance wins.
+          if (provoker && !haveProvoker) { haveProvoker = true; nd2 = d2; nearest = p; continue; }
           if (d2 <= nd2) { nd2 = d2; nearest = p; }
         }
         if (nearest) c._target = nearest.userId;
       }
+      // `_targetKind` was only ever written by the guard branch, so a hostile
+      // holding a player read as `null` — fine while nothing outside the tick
+      // asked, but isEngagingPlayer (and slice D through it) needs to tell a
+      // player target from a creature one without re-deriving it from faction.
+      c._targetKind = c._target != null ? 'player' : null;
       c.mode = c._target ? 'chase' : 'roam';
-      // SOMET-290: a creature with nobody to fight stops being angry. `_provoked`
-      // is stamped by applyDamage on ANY hit and is the only thing that turns a
-      // skittish creature into a fighter, so without a clear it is a one-way
-      // switch -- one arrow makes a deer a charger for the rest of the world's
-      // uptime, and the headline promise (you can walk past one) is silently
-      // off for that spawn forever.
+      // SOMET-290: there is deliberately NO "clear provocation" step here any
+      // more. It used to read `if (!c._target) c._provoked = false;`, and the
+      // pair of bugs that produced is the argument for the record that replaced
+      // the boolean. Without a clear, one arrow made a deer a charger for the
+      // world's uptime; with it, a creature shot from beyond its 300px aggro
+      // radius — which is every ranged weapon in the catalog — was calm again on
+      // the very next tick and died without a fight. A flag coupled to target
+      // state can only be too sticky or too eager.
       //
-      // Placed AFTER target resolution, not inside the drop above, because the
-      // drop only fires for a creature that HAD a target -- and the arrow that
-      // provokes a deer is normally fired by someone the deer never targeted:
-      // skittish aggro is 300px and every ranged weapon in the catalog reaches
-      // further (darts 350 ... arbalest 850). Provocation from a sniper would
-      // otherwise persist until some unrelated later encounter happened to end
-      // beyond leash, and the next player to wander past -- who never touched
-      // it -- would be charged.
-      //
-      // Cannot fire mid-fight: a creature that is fighting has a target by
-      // definition. The boundary this DOES keep is that a creature holding a
-      // target stays angry, including at a second player who is merely nearby
-      // when the shooter leaves -- it is still in an encounter.
-      //
-      // Free for every other chase style: nothing but `fleeing` below reads
-      // this field.
-      if (!c._target) c._provoked = false;
+      // `_provokedBy` carries WHO and UNTIL WHEN instead (damage.js), so
+      // forgetting is a clock read rather than a side effect of target
+      // resolution: the shooter is remembered while they are out of range, and
+      // a bystander who walks up is not blamed for a hit they did not land.
 
       if (c.mode === 'chase') {
         const tp = byId.get(c._target);
@@ -1064,13 +1215,16 @@ class CreatureSim {
 
         // SOMET-290 — the whole of "this creature is prey right now", derived
         // ONCE per tick and read by all three of the movement band, the leash
-        // clamp and the attack gate below. One const rather than three
-        // `chaseStyle === 'skittish' && !c._provoked` tests, because the
-        // cornered rule WRITES `_provoked` mid-tick: three separate reads
-        // would have a creature flee, discover it is cornered, and attack in
-        // the same tick from the pre-flee distance. A creature that decides to
-        // run commits to running for that tick and fights from the next one.
-        const fleeing = bh.chaseStyle === 'skittish' && !c._provoked;
+        // clamp and the attack gate below. One const rather than three calls,
+        // because the cornered rule WRITES provocation mid-tick: three
+        // separate reads would have a creature flee, discover it is cornered,
+        // and attack in the same tick from the pre-flee distance. A creature
+        // that decides to run commits to running for that tick and fights from
+        // the next one.
+        //
+        // Per-TARGET, not per-creature: a deer shot by one player and then
+        // approached by another is still prey to the second one.
+        const fleeing = isFleeingFrom(c, bh, playerKey(c._target), now);
 
         if (bh.chaseStyle === 'hold') {
           // Never moves. It still attacks below if the target is in range.
@@ -1114,30 +1268,54 @@ class CreatureSim {
           const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult * c._buff.speedMult);
           // SOMET-290 — a flee step is additionally clamped to the leash from
           // HOME, which is the difference between a creature you can scare off
-          // and a creature you can herd across the map. withinLeash returns
-          // true for a null home, and every wild spawn today has one (the
-          // column is only written for guards and, next, for SOMET-289's
-          // penned creatures), so this clamp is provably inert for everything
-          // currently in the world -- it exists so a penned creature cannot be
-          // walked out of its pen by a player who simply keeps advancing.
+          // and a creature you can herd across the map. It exists so a penned
+          // creature cannot be walked out of its pen by a player who simply
+          // keeps advancing.
+          //
+          // Reaches only creatures that BOTH have a home anchor and flee, which
+          // today is SOMET-289's penned skittish creatures and nothing else:
+          // `home_x` is otherwise written only for village guards (guard style,
+          // which returned above), the portal packs in dungeonGuards.js and the
+          // vault packs in chests.js -- all `charge`, so `fleeing` is false for
+          // them and this clamp is skipped. A creature with no anchor at all is
+          // unconstrained here, which is every wild spawn.
           //
           // Applied to the FLEE step only, not to a provoked chase: clamping
           // the chase too would freeze a provoked creature against its leash
           // edge with the player one step outside it, re-creating exactly the
           // stuck-guard failure the guard branch above documents at length.
-          const inLeash = !fleeing
-            || withinLeash(r.x + c.width / 2, r.y + c.height / 2, c.home, bh.leashRadius);
+          //
+          // MONOTONE, like the guard's shove clamp and for the same reason: a
+          // step is allowed if it leaves the creature no further from home than
+          // the larger of its leash and where it already was. A destination-only
+          // test would root a creature that is ALREADY outside its leash (shoved
+          // there, spawned there, or dragged there by a provoked chase) — every
+          // flee destination from out there is outside the leash, so all of them
+          // are refused, and it would stand still and CALM (a refused step is
+          // still `moved`, so it is not cornered either) while a player stood on
+          // top of it.
+          const inLeash = !fleeing || !anchor
+            || withinLeashBudget(c, cc.x, cc.y, r.x + c.width / 2, r.y + c.height / 2, anchor.radius);
           const moved = (r.x !== c.x || r.y !== c.y);
           if (moved && inLeash) {
             c.x = r.x; c.y = r.y;
             const f = facingFor(vx, vy); if (f) c.facing = f;
             c.dirty = true;
-          } else if (fleeing && !moved) {
+          } else if (fleeing && !moved && (vx !== 0 || vy !== 0)) {
             // Cornered by TERRAIN, and only by terrain: the step was refused
             // because the world had nowhere to put it. A creature with nowhere
             // left to go fights -- without this it would jitter silently
             // against the wall while the player killed it for free, which reads
             // as a broken enemy rather than a frightened one.
+            //
+            // The `vx !== 0 || vy !== 0` guard is what makes "only by terrain"
+            // true rather than merely claimed. resolveMove short-circuits a
+            // zero vector to `moved: false` before it ever looks at the map
+            // (collision.js's first line), and the flee vector IS zero when a
+            // player's centre coincides exactly with the creature's -- so a
+            // player standing precisely on top of one used to provoke it with
+            // no damage and no wall involved. Rare (it needs exact float
+            // equality) but it is a non-terrain route into a terrain-only rule.
             //
             // The two refusals are deliberately NOT one case, which is the
             // opposite of how it looks from inside the pen. A fence refusal
@@ -1155,7 +1333,13 @@ class CreatureSim {
             // retreating. It stands at the edge, still calm, and can be walked
             // up to and killed -- which is the intended "you can hunt one"
             // outcome, not a failure mode.
-            c._provoked = true;
+            //
+            // Attributed to the player it is backing away from: this is the one
+            // provocation with no attacker to name, and the actor who cornered
+            // it is by definition the one it is retreating from. Stamped
+            // through damage.js's `provoke` rather than by writing the record
+            // here, so the field has one author and one expiry rule.
+            provoke(c, playerKey(c._target), now);
           }
         }
         // Attack. Gated by canAct for the same reason the player attack paths
@@ -1203,7 +1387,24 @@ class CreatureSim {
             // tp is a PLAYER, not a creature: no aura ever buffs a player's
             // defence, so tp.mit is read as-is here, unlike the three
             // creature-target sites below which read effectiveMit(target).
-            applyDamageWithEffects(tp, dmg, 'physical', tp.mit || NO_MITIGATION, now);
+            applyDamageWithEffects(tp, dmg, 'physical', tp.mit || NO_MITIGATION, now, creatureKey(c.id));
+            // SOMET-290 — a landed blow re-arms the creature's OWN memory, so
+            // provocation lasts "for that engagement" (spec §3) rather than for
+            // a fixed number of seconds from the first hit. Without it a
+            // provoked creature that is still in contact with the player it is
+            // fighting goes calm mid-fight the moment PROVOKE_MEMORY_MS elapses
+            // -- a deer that bites you, then suddenly starts backing away while
+            // still in reach. Only a hit that CONNECTED re-arms it: a player
+            // who breaks contact and outruns it is forgotten on schedule.
+            //
+            // Free for every other chase style, which never reads the field:
+            // both readers (isFleeingFrom and the acquisition reach above) are
+            // gated on `skittish`, so a charger stamping this every time it
+            // connects changes nothing about a charger. That gate is what keeps
+            // it free — unscoped, this line is what would turn the reach
+            // extension into a permanent, self-renewing grudge for every enemy
+            // in the game.
+            provoke(c, playerKey(c._target), now);
             // Second of the two contact sites -- same stamp, same shape.
             stampCreatureAttack(attacks, impacts, c, tp, center(c), center(tp));
             c._abilityCd.set(ability.slot, ability.attackCooldown);
@@ -1257,6 +1458,57 @@ class CreatureSim {
         continue;
       }
 
+      // SOMET-290 — a creature with a post comes back to it, and never wanders
+      // off it. Guard-STYLE creatures already did (the branch above); this is
+      // the same rule for every OTHER creature that has a home anchor: the
+      // penned creatures SOMET-289 is about, and the portal/vault guards, which
+      // are ordinary hostile entity types with home_x/home_y and whose own
+      // module comments already promise the recovery this provides.
+      //
+      // Two halves, and the pen needs both:
+      //  - outside the leash -> walk home. Without it the only return path for a
+      //    non-guard was "none": a creature that chased a player out of its pen
+      //    (a provoked chase is deliberately unclamped, see the flee clamp
+      //    above) simply roamed on from wherever the chase ended, and
+      //    flushAndPrune persists x/y, so the pen drained permanently -- one
+      //    creature per player who wandered in.
+      //  - inside it -> roam, but refuse any step that would leave. A pure
+      //    random walk leaks a creature out of its pen on its own, just slower
+      //    than a player can herd one.
+      //
+      // NOT inert on today's data, and deliberately so. Besides the penned
+      // creatures this ticket adds, the live world holds the portal packs from
+      // dungeonGuards.js (Umbral/Crystal/Void/Ember/Bonelord/Rime/Fungal Line:
+      // hostile, `charge`, leash 800, home_x on the portal tile). They used to
+      // roam away from their portal and never come back, which contradicted
+      // dungeonGuards.js's own promise that a displaced one "still recovers
+      // back to defending the portal". From here they pace within their leash
+      // of the portal and walk back when displaced. That is the behaviour their
+      // module always described, but it IS a change to shipped content, so
+      // creature_skittish.test.js pins it rather than leaving it incidental. A
+      // creature with no anchor is untouched by all of this, which is every
+      // wild spawn -- `home_x` is written only by the guard, portal and vault
+      // spawners and by SOMET-289's pens.
+      //
+      // Reached BEFORE the hold/ambush stand-still check on purpose: "stand
+      // still rather than wander" is about roaming, and a creature displaced
+      // off its anchor is not roaming, it is lost. No `hold`/`ambush` row has a
+      // home today, so that ordering is currently theoretical -- but note the
+      // shape it would take if one were ever homed: a homed `hold` sentry with
+      // `moveSpeedMult: 0` cannot close ANY distance, so it would burn its 12
+      // stall ticks x 3 repaths and then be TELEPORTED to its post by
+      // stepHome's snap-home fallback. That is arguably the right answer for a
+      // sentry that cannot walk, but it should be a decision, not a surprise.
+      if (anchor) {
+        if (!withinLeash(cc.x, cc.y, anchor.home, anchor.radius)) {
+          c.mode = stepHome(this.map, c, bh, dt, cc) === 'home' ? 'roam' : 'return';
+          continue;
+        }
+        // Back inside: whatever walk-home episode got it here is over, so the
+        // next displacement starts with a full stall/repath budget of its own.
+        resetHomeWalk(c);
+      }
+
       // Roam. `hold` never moves at all, and `ambush` lies dormant until
       // something enters its aggro radius -- for both, "no target" means
       // "stand still", not "wander".
@@ -1267,7 +1519,13 @@ class CreatureSim {
       }
       const [dx, dy] = DIRS[c._dir];
       const r = movedWith(this.map, c, dx, dy, dt, bh.moveSpeedMult * c._buff.speedMult);
-      if (r.x !== c.x || r.y !== c.y) {
+      // The leash refuses a roam step exactly as a wall does -- same clamp as
+      // the flee step (monotone, so a creature that starts outside is not
+      // frozen), and the same "blocked -> turn" answer, so a penned creature
+      // paces its pen instead of standing in the corner it first reached.
+      const roamInLeash = !anchor || withinLeashBudget(c, cc.x, cc.y,
+        r.x + c.width / 2, r.y + c.height / 2, anchor.radius);
+      if ((r.x !== c.x || r.y !== c.y) && roamInLeash) {
         c.x = r.x; c.y = r.y;
         c.facing = DIR_FACING[c._dir];
         c.dirty = true;
@@ -1287,14 +1545,18 @@ class CreatureSim {
   // this is by declaration a PLAYER melee primitive, and leaving one
   // unfiltered player-damage door open would be re-opened by the first caller
   // that ever reaches for it.
-  applyAttack(px, py, range, damage, element, now = 0) {
+  applyAttack(px, py, range, damage, element, now = 0, sourceUserId = null) {
     const killed = [];
     const r2 = range * range;
     for (const [id, c] of this.creatures) {
       if (immuneToPlayerDamage(c)) continue;
       const cc = center(c);
       if (dist2(cc.x, cc.y, px, py) > r2) continue;
-      applyDamageWithEffects(c, damage, element, effectiveMit(c), now);
+      // SOMET-290: `sourceUserId` names the swinger, like applyMeleeArc's
+      // `sourceId` does. Optional, since this primitive has no production
+      // caller, but a hit that provokes nobody in particular is the one shape
+      // that would let a creature charge a bystander.
+      applyDamageWithEffects(c, damage, element, effectiveMit(c), now, playerKey(sourceUserId));
       applyElementEffect(c, element, now);
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
@@ -1362,7 +1624,10 @@ class CreatureSim {
     for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth)) {
       const c = this.creatures.get(id);
       if (!c) continue;
-      applyDamageWithEffects(c, damage, element, effectiveMit(c), now);
+      // SOMET-290: `sourceId` is the swinging player, already threaded here for
+      // the element rider's kill attribution -- provocation names the same
+      // actor, so a creature retaliates against whoever actually swung.
+      applyDamageWithEffects(c, damage, element, effectiveMit(c), now, playerKey(sourceId));
       // The element's status rider is applied wherever the element already
       // deals damage — one call adjacent to each applyDamage, never a second
       // rider table.
@@ -1382,10 +1647,18 @@ class CreatureSim {
   // burn refresh itself from its own tick and never expire. The projectile
   // paths that DO carry a rider apply it at their call sites in projectiles.js,
   // next to their own hit detection — a rider belongs to a HIT, not to damage.
-  damageCreatureById(id, damage, element, now) {
+  // `source` (SOMET-290) is the attacker's tag from damage.js's playerKey/
+  // creatureKey, threaded by the projectile paths and the burn tick. Optional
+  // and defaulting to null -- an unattributed hit stamps a provocation that
+  // matches NO actor, so the creature answers nobody for it. Every one of
+  // today's callers names its source; the default exists so that the one that
+  // eventually forgets ships an enemy that ignores a damage source (visible,
+  // dull) rather than one that acquires and chases a bystander who never
+  // touched it. See isProvokedBy in damage.js.
+  damageCreatureById(id, damage, element, now, source = null) {
     const c = this.creatures.get(id);
     if (!c) return false;
-    applyDamageWithEffects(c, damage, element, effectiveMit(c), now);
+    applyDamageWithEffects(c, damage, element, effectiveMit(c), now, source);
     c.dirty = true;
     if (c.hp <= 0) { this.creatures.delete(id); return true; }
     return false;
@@ -1452,6 +1725,15 @@ module.exports = {
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
   GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE, GUARD_HOME_EPSILON,
   withinLeash, selectGuardTarget,
+  // SOMET-290: the two predicates that own "is this creature prey or a
+  // fighter". isFleeingFrom is the tick's own rule; isEngagingPlayer is the
+  // question slice D (SOMET-291) asks -- a skittish creature holds a player in
+  // `_target` even while running away from it, so a raw `_target` read cannot
+  // tell a rescue-worthy attack from wildlife fleeing the same player.
+  isFleeingFrom, isEngagingPlayer,
+  // SOMET-290: the monotone leash budget, shared by the flee clamp and
+  // shoveCreature and exported so it can be pinned without a full tick.
+  withinLeashBudget,
   // SOMET-283: the leash-aware shove every creature-targeting knockback site
   // goes through (world.js's melee, projectiles.js's direct hit and AoE, and
   // the guard branch's own strike below), exported so its clamp can be pinned
