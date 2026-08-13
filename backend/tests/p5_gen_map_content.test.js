@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { generateSpec } = require('../scripts/dungeon/gen-p5-map-content');
+const { generateSpec, portalCenterPx, entryVillageBox } = require('../scripts/dungeon/gen-p5-map-content');
 
 test('generates a spec with exactly one is_entry world', () => {
   const spec = generateSpec();
@@ -60,4 +60,31 @@ test('every world declares a level_band and a density', () => {
     assert.ok(Array.isArray(w.level_band) && w.level_band.length === 2, `${w.name} missing level_band`);
     assert.equal(typeof w.density, 'string', `${w.name} missing density`);
   }
+});
+
+// These two functions replace constants that were the same expressions
+// hand-evaluated at size 64. At 64 they must still produce exactly the old
+// literals, or this refactor silently moved every portal arrival in the spec.
+test('portalCenterPx(64) reproduces the old PORTAL_TILE_PX literal', () => {
+  assert.equal(portalCenterPx(64), 3250);
+});
+
+test('portalCenterPx scales to the centre tile of any world size', () => {
+  assert.equal(portalCenterPx(96), 4850);
+  assert.equal(portalCenterPx(128), 6450);
+  assert.equal(portalCenterPx(224), 11250);
+});
+
+test('entryVillageBox(64) reproduces the old hand-written village literal', () => {
+  assert.deepEqual(entryVillageBox(64), {
+    min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S',
+    spawn_x: 3050, spawn_y: 2950,
+  });
+});
+
+test('entryVillageBox stays centred as the world grows', () => {
+  assert.deepEqual(entryVillageBox(128), {
+    min_row: 60, min_col: 60, width: 6, height: 4, gate_edge: 'S',
+    spawn_x: 6250, spawn_y: 6150,
+  });
 });

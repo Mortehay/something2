@@ -18,7 +18,37 @@ const { SKELETONS } = require('./skeletons');
 const { EDGE_DELTA } = require('../../seeds/mapSpec.js');
 const WORLD_SIZE = 64;      // matches the 3 shipped examples
 const CHUNK_SIZE = 32;
-const PORTAL_TILE_PX = 3250; // world-pixel center of a 64x64 world, 100px/tile -- same convention the shipped specs use for entry_spawn
+
+// World-pixel centre of a SIZE x SIZE world at 100 px/tile: tile index
+// SIZE/2, whose centre is SIZE/2 * 100 + 50. This was the module constant
+// PORTAL_TILE_PX = 3250, which is this expression hand-evaluated at
+// WORLD_SIZE = 64. Once size varies per world (SOMET-304) it has to be
+// computed from that world's own size, or a deep world's portal arrival
+// lands in its top-left quadrant instead of its middle.
+//
+// Every size on the ramp is even, so SIZE/2 is always an integer.
+function portalCenterPx(size) {
+  return (size / 2) * 100 + 50;
+}
+
+// The entry village box, centred on a SIZE x SIZE world. 6x4, NOT 6x5:
+// SOMET-282 caps width + height at VILLAGE_LIMITS.maxSum (10 tiles), the
+// largest village whose on-screen bounding box fits in a quarter of the
+// 1280x720 viewport. See services/villages.js for the derivation.
+//
+// The spawn sits two tiles west and three tiles north of centre -- interior
+// for this box, and far enough in that the whole 64px player square lands
+// inside the interior. It also avoids the merchant post and both gate-guard
+// posts. At size 64 this reproduces the hand-written literal it replaces.
+function entryVillageBox(size) {
+  const c = size / 2;                       // centre tile index
+  return {
+    min_row: c - 4, min_col: c - 4, width: 6, height: 4, gate_edge: 'S',
+    spawn_x: (c - 2) * 100 + 50,
+    spawn_y: (c - 3) * 100 + 50,
+  };
+}
+
 const DUNGEON_GRID_SPACING = 12; // cells between each dungeon's local grid origin -- wider than any skeleton's own bounding box (max 5x3)
 
 const OPPOSITE_EDGE = { N: 'S', S: 'N', E: 'W', W: 'E' };
@@ -156,7 +186,7 @@ function buildDungeon(dungeon, dungeonIndex) {
       // old 6x5 box -- the exact SOMET-153 defect, still latent here because
       // the checked-in p5-descent.map.json was patched by hand and the
       // generator was not.
-      world.village = { min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S', spawn_x: 3050, spawn_y: 2950 };
+      world.village = entryVillageBox(WORLD_SIZE);
     }
     worlds.push(world);
   });
@@ -353,10 +383,10 @@ function generateSpec() {
       const destEntryWorld = built.worlds.find((w) => w.key === built.entryKey);
       const arrival = destEntryWorld && destEntryWorld.village
         ? villageGateArrival(destEntryWorld.village)
-        : { x: PORTAL_TILE_PX, y: PORTAL_TILE_PX };
+        : { x: portalCenterPx(WORLD_SIZE), y: portalCenterPx(WORLD_SIZE) };
       portalLinks.push({
         kind: 'portal',
-        from: prevExit, from_x: PORTAL_TILE_PX, from_y: PORTAL_TILE_PX,
+        from: prevExit, from_x: portalCenterPx(WORLD_SIZE), from_y: portalCenterPx(WORLD_SIZE),
         to: built.entryKey, to_x: arrival.x, to_y: arrival.y,
         guard: { creature_type: dungeon.guardCreature, count: 1 },
       });
@@ -366,7 +396,7 @@ function generateSpec() {
       // spawn here (see the design doc's "is_entry handling" section).
       const entryWorld = allWorlds.find((w) => w.key === built.entryKey);
       entryWorld.is_entry = true;
-      entryWorld.entry_spawn = { x: PORTAL_TILE_PX, y: PORTAL_TILE_PX };
+      entryWorld.entry_spawn = { x: portalCenterPx(WORLD_SIZE), y: portalCenterPx(WORLD_SIZE) };
       d1EntryKey = built.entryKey;
     }
     prevExit = built.exitKey;
@@ -461,5 +491,5 @@ function writeOutput() {
   console.log(`Wrote ${spec.worlds.length} worlds, ${spec.links.length} links to ${outPath}`);
 }
 
-module.exports = { generateSpec };
+module.exports = { generateSpec, portalCenterPx, entryVillageBox };
 if (require.main === module) writeOutput();
