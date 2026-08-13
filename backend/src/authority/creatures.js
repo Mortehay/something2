@@ -859,7 +859,12 @@ function isFleeingFrom(creature, bh, actorKey, now) {
 // `_target` alone cannot answer this, which is the whole reason this exists:
 // the skittish branch acquires a target exactly like a charger does and only
 // then decides not to engage it.
-function isEngagingPlayer(creature, now = 0) {
+//
+// `now` is the tick's world clock and is deliberately NOT defaulted: a caller
+// that forgets it reads every provocation as expired, so a skittish creature
+// answers "not engaging" -- no rescue dispatched for wildlife, rather than
+// guards sent chasing a deer.
+function isEngagingPlayer(creature, now) {
   if (!creature || creature._target == null || creature._targetKind !== 'player') return false;
   const bh = creature.behavior || DEFAULT_BEHAVIOR;
   return !isFleeingFrom(creature, bh, playerKey(creature._target), now);

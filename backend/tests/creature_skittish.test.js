@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { CreatureSim, shoveCreature } = require('../src/authority/creatures.js');
+const { CreatureSim, shoveCreature, isEngagingPlayer } = require('../src/authority/creatures.js');
 const {
   applyDamage, isProvokedBy, playerKey, PROVOKE_MEMORY_MS,
 } = require('../src/authority/damage.js');
@@ -419,6 +419,37 @@ test('a creature shot by one player still lets a different one walk past', () =>
   assert.equal(bystander.hp, 500, 'it bit a player who never touched it');
   assert.ok(apart(c, bystander) > before,
     `did not back off from the bystander (${before.toFixed(2)} -> ${apart(c, bystander).toFixed(2)})`);
+});
+
+// --- 9c. FLEEING IS NOT ENGAGING ---------------------------------------------
+
+test('isEngagingPlayer tells a creature fighting a player from one running from it', () => {
+  // The contract slice D (SOMET-291) reads: "a guard prefers a hostile that
+  // currently holds a player target". A skittish creature holds a player in
+  // `_target` the entire time it is backing away from them -- it needs to know
+  // who to back away from -- so a raw `_target` read would send guards chasing
+  // wildlife while the actual attacker went unrescued.
+  //
+  // Driven through the tick rather than by hand-building a creature, so this
+  // pins the state the sim actually produces.
+  const { s, player: p, active, c } = scenario(skittish(), CX + 100);
+  s.tick(DT, active, [p], 0);
+  assert.equal(c._target, 'u1', 'fixture: it must hold the player as a target');
+  assert.equal(isEngagingPlayer(c, MS), false,
+    'a creature running away from a player was reported as fighting them');
+
+  hit(c, 'u1', MS);
+  s.tick(DT, active, [p], 2 * MS);
+  assert.equal(isEngagingPlayer(c, 2 * MS), true,
+    'a provoked creature chasing the player who shot it was not reported as engaging');
+
+  // A charger is engaging whenever it holds a player, provoked or not -- the
+  // predicate must not be a skittish-only special case that reads false for
+  // everything else.
+  const charger = scenario(behavior({ aggroRadius: 400 }), CX + 100);
+  charger.s.tick(DT, charger.active, [charger.player], 0);
+  assert.equal(isEngagingPlayer(charger.c, MS), true,
+    'an ordinary charger holding a player target was not reported as engaging');
 });
 
 // --- 10. IT COMES HOME -------------------------------------------------------
