@@ -127,19 +127,6 @@ async function populateWorld(client, worldRow, { rngSeed }) {
     ? worldRow.allowed_creature_types : [];
   const density = resolveDensity(worldRow.density, worldRow.width, worldRow.height);
 
-  // A clamped world is a content problem, not a runtime error: the author
-  // asked for more creatures than one population pass may place, and got
-  // fewer. Silent truncation is what this replaces -- creature_count would
-  // simply come out lower than the tier implies, indistinguishable from a
-  // world deliberately authored thin.
-  if (density.clamped) {
-    console.warn(
-      `[worldPopulation] world ${worldRow.id} (${worldRow.width}x${worldRow.height}, `
-      + `density "${worldRow.density ?? 'normal'}") was clamped to `
-      + `${density.scatterCount} scattered creatures by MAX_WORLD_CREATURES`,
-    );
-  }
-
   // creature_count is written from what actually lands in world_creatures,
   // not the tier's target -- placeMapCreatures can under-deliver when
   // rejection sampling exhausts maxAttempts on a hostile map, and a world
@@ -169,6 +156,23 @@ async function populateWorld(client, worldRow, { rngSeed }) {
   if (hostileTypes.length === 0) {
     await client.query('UPDATE worlds SET creature_count = 0 WHERE id = $1', [worldRow.id]);
     return { scattered: 0, packed: 0, total: 0 };
+  }
+
+  // A clamped world is a content problem, not a runtime error: the author
+  // asked for more creatures than one population pass may place, and got
+  // fewer. Silent truncation is what this replaces -- creature_count would
+  // simply come out lower than the tier implies, indistinguishable from a
+  // world deliberately authored thin. This sits after both early returns
+  // above rather than right after resolveDensity: a world with no usable
+  // creature types places nothing regardless of the ceiling, so the clamp
+  // is not the story there, and warning about a scatter count that never
+  // happens would assert a placement that never occurs.
+  if (density.clamped) {
+    console.warn(
+      `[worldPopulation] world ${worldRow.id} (${worldRow.width}x${worldRow.height}, `
+      + `density "${worldRow.density ?? 'normal'}") was clamped to `
+      + `${density.scatterCount} scattered creatures by MAX_WORLD_CREATURES`,
+    );
   }
 
   const tileTypes = await loadTileTypes(client);
