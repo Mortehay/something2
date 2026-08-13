@@ -322,7 +322,7 @@ EOF
 
 **Interfaces consumed:** `chaseStyle: 'skittish'` (Task 1), `_provoked` (Task 2).
 
-**Read before editing:** the chase branch begins at the comment `// Target resolution: keep current target unless it left leash` and runs to the `continue` that ends it, followed by the roam block. The style bands (`hold` / `kite` / `skirmish`) are an `if/else if` chain; `charge` and `ambush` fall through with the straight-at-target vector. `withinLeash(c, x, y, radius)` already exists in this file and treats a null home as unconstrained.
+**Read before editing:** the chase branch begins at the comment `// Target resolution: keep current target unless it left leash` and runs to the `continue` that ends it, followed by the roam block. The style bands (`hold` / `kite` / `skirmish`) are an `if/else if` chain; `charge` and `ambush` fall through with the straight-at-target vector. `withinLeash(x, y, home, radius)` already exists in this file (position first, home anchor third) and treats a null home as unconstrained.
 
 **What to build:**
 
