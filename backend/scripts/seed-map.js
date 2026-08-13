@@ -266,6 +266,31 @@ async function applyMapSpec(pool, spec) {
           await createVillage(client, worldId, v);
           villages += 1;
         }
+      } else if (existing.rowCount !== specVillages.length) {
+        // The spec and the live rows disagree and THIS SEED WILL NOT FIX IT.
+        //
+        // Every other authored column on `worlds` is re-asserted on every seed
+        // via ON CONFLICT SET (safe_road_radius and safe_rects included, a few
+        // dozen lines up), so an author reasonably concludes the spec is
+        // authoritative for everything -- and then adds a second village to an
+        // already-seeded world, gets a clean exit code, and finds no second
+        // village. SOMET-289 does exactly that. This is the only feedback loop
+        // there is, so it has to be loud rather than silent.
+        //
+        // A warning and not a fix: creating "the ones that are missing" needs
+        // an identity for a village beyond its box, which the spec does not
+        // carry (see the note above). `make reseed-map` clears every world
+        // first, so re-seeding from scratch is the supported way to converge.
+        //
+        // Only when rows already exist: on a FIRST seed the branch above
+        // creates every village, so the counts match by the time the loop
+        // ends and a warning there would be pure noise on every run.
+        console.warn(
+          `seed-map: world "${w.key}" (${w.name}) already has ${existing.rowCount} `
+          + `village(s) but its spec declares ${specVillages.length} -- villages are `
+          + 'seeded all-or-nothing per world, so the existing rows were left untouched '
+          + 'and the difference was NOT applied. Clear this world\'s villages (or run '
+          + 'make reseed-map) to re-seed them from the spec.');
       }
     }
 

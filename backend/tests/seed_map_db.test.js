@@ -665,7 +665,7 @@ const MULTI_VILLAGE_A = { min_row: 10, min_col: 10, width: 6, height: 4, gate_ed
   spawn_x: 1150, spawn_y: 1150 };
 const MULTI_VILLAGE_B = { min_row: 30, min_col: 30, width: 6, height: 4, gate_edge: 'S',
   spawn_x: 3150, spawn_y: 3150 };
-const multiVillageSpec = ({ safe = false } = {}) => ({
+const multiVillageSpec = ({ safe = false, villages = [MULTI_VILLAGE_A, MULTI_VILLAGE_B] } = {}) => ({
   name: 'zz-test-multi-village-fixture',
   topology: 'spine',
   worlds: [
@@ -676,7 +676,7 @@ const multiVillageSpec = ({ safe = false } = {}) => ({
       // Tile (row 5, col 5): clear of both village boxes (rows 10-13/30-33),
       // walkable Meadow terrain, off the wall ring.
       entry_spawn: { x: 550, y: 550 },
-      villages: [MULTI_VILLAGE_A, MULTI_VILLAGE_B],
+      villages,
       ...(safe ? {
         safe_road_radius: 3,
         safe_rects: [{ min_row: 0, min_col: 0, width: 2, height: 2 }],
@@ -754,6 +754,81 @@ test('a world with two villages creates both, idempotently, and safe-territory c
         're-seeding without safe_road_radius must clear it back to 0 (ON CONFLICT SET missing?)');
       assert.deepEqual(safeAfterSecond.safe_rects, [],
         're-seeding without safe_rects must clear it back to [] (ON CONFLICT SET missing?)');
+    });
+  } finally {
+    await cleanup(pool);
+    await pool.end().catch(() => {});
+  }
+});
+
+// SOMET-288 review, finding 3. Villages are the ONE authored thing a re-seed
+// does not converge: every column on `worlds` is re-asserted via ON CONFLICT
+// SET (safe_road_radius and safe_rects included, proved just above), so an
+// author who adds a village to an already-seeded world gets a clean exit code
+// and no second village. SOMET-289 does exactly that.
+//
+// The no-op itself is deliberate and unchanged here -- a village has no
+// identity beyond its box, so "create the missing ones" cannot be written
+// safely. What changes is that it stops being silent.
+test('adding a village to an already-seeded world warns instead of silently doing nothing', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — the village-drift warning is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  // Only this applier's own warnings. populateWorld writes to the same stream
+  // (its scatter under-delivery line) and names the same world, so matching on
+  // the world name alone would let an unrelated warning satisfy this test.
+  const captureSeedWarnings = async (fn) => {
+    const lines = [];
+    const real = console.warn;
+    console.warn = (...args) => { lines.push(args.join(' ')); };
+    try { await fn(); } finally { console.warn = real; }
+    return lines.filter((l) => l.startsWith('seed-map:'));
+  };
+  const villageCount = async () => (await pool.query(
+    `SELECT count(*)::int AS n FROM villages v JOIN worlds w ON w.id = v.world_id
+      WHERE w.name = 'zzTestMultiVillage'`)).rows[0].n;
+
+  try {
+    await cleanup(pool);
+    await withEntryPreserved(pool, async () => {
+      const oneVillage = () => multiVillageSpec({ villages: [MULTI_VILLAGE_A] });
+
+      const firstRunWarnings = await captureSeedWarnings(async () => {
+        const first = await applyMapSpec(pool, oneVillage());
+        assert.equal(first.villages, 1, 'the first seed must create the village');
+      });
+      assert.deepEqual(firstRunWarnings, [],
+        'a first seed creates every village it declares — warning there is pure noise');
+
+      // Control: an UNCHANGED spec re-applied is a legitimate no-op and must
+      // stay quiet, or the warning means nothing when it does fire.
+      const unchangedWarnings = await captureSeedWarnings(() => applyMapSpec(pool, oneVillage()));
+      assert.deepEqual(unchangedWarnings, [],
+        're-applying an unchanged spec must not warn — the counts agree');
+
+      // The real case: the spec now declares two villages, the world has one.
+      const driftWarnings = await captureSeedWarnings(async () => {
+        const grown = await applyMapSpec(pool, multiVillageSpec());
+        assert.equal(grown.villages, 0,
+          'the all-or-nothing no-op must be unchanged — this task warns, it does not mutate');
+      });
+      assert.equal(driftWarnings.length, 1, `expected exactly one warning, got ${JSON.stringify(driftWarnings)}`);
+      assert.match(driftWarnings[0], /zzTestMultiVillage/, 'the warning must name the world');
+      assert.match(driftWarnings[0], /already has 1 village/, 'the warning must carry the live count');
+      assert.match(driftWarnings[0], /declares 2/, 'the warning must carry the spec count');
+
+      assert.equal(await villageCount(), 1,
+        'the live village rows must be left exactly as they were');
+      // The second village really is missing -- if the applier had created it
+      // the count above would be 2 and the warning would have been wrong.
+      const rows = await pool.query(
+        `SELECT v.min_row FROM villages v JOIN worlds w ON w.id = v.world_id
+          WHERE w.name = 'zzTestMultiVillage'`);
+      assert.equal(Number(rows.rows[0].min_row), MULTI_VILLAGE_A.min_row);
     });
   } finally {
     await cleanup(pool);
