@@ -1411,6 +1411,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // world the character has stood in before.
         pendingArrivals.set(characterId, { worldId: dest.worldId, x: dest.x, y: dest.y });
         send(ws, { type: 'transition', toWorldId: dest.worldId, arriveX: dest.x, arriveY: dest.y });
+        // Fog of war, like every other transition push: the server has committed
+        // the move, so the destination is visited whether or not the client
+        // completes its rejoin. Almost always a no-op here (you cannot light a
+        // waypoint without having stood in its world), but "almost always" is
+        // not the invariant visited_worlds_db.test.js pins.
+        recordVisit(pool, characterId, dest.worldId)
+          .catch((e) => console.error('recordVisit (waypoint travel)', e));
       });
     },
 
