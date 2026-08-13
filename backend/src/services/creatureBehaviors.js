@@ -12,7 +12,7 @@
 // value rejected only in SQL is a value that reaches the sim from a row
 // written before the constraint existed.
 const ATTACK_KINDS = ['melee', 'ranged', 'cast'];
-const CHASE_STYLES = ['charge', 'kite', 'skirmish', 'hold', 'ambush', 'guard'];
+const CHASE_STYLES = ['charge', 'kite', 'skirmish', 'hold', 'ambush', 'guard', 'skittish'];
 // Mirrors creature_abilities' element CHECK constraint (migration
 // 1714440083000), which additionally allows NULL -- see resolveAbility.
 const ELEMENTS = ['physical', 'fire', 'ice', 'lightning'];

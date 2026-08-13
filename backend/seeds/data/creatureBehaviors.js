@@ -56,6 +56,7 @@ const CREATURE_BEHAVIORS = [
   { name: 'Guard',      attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 1.0, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 400, leash_radius: 300,  chase_style: 'guard',    preferred_range: 0,   move_speed_mult: 1.0 },
   { name: 'Sentry',     attack_kind: 'ranged', attack_range: 380, attack_cooldown: 2.0, projectile_speed: 500, projectile_radius: 6,  aggro_radius: 400, leash_radius: 800,  chase_style: 'hold',     preferred_range: 0,   move_speed_mult: 1.0, gold_min: 2,  gold_max: 9 },
   { name: 'Lurker',     attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 0.9, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 180, leash_radius: 700,  chase_style: 'ambush',   preferred_range: 0,   move_speed_mult: 1.6, gold_min: 2,  gold_max: 7 },
+  { name: 'Skittish',   attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 1.2, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 300, leash_radius: 500,  chase_style: 'skittish', preferred_range: 150, move_speed_mult: 1.15, gold_min: 0,  gold_max: 2 },
 ];
 
 module.exports = { CREATURE_BEHAVIORS };

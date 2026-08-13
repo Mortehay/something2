@@ -3,11 +3,13 @@ const assert = require('node:assert');
 const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
 const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
 const { BEHAVIORS: MIGRATION_BEHAVIORS } = require('../migrations/1714440080000_creature_behaviors.js');
-const { DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../src/services/creatureBehaviors.js');
+const { DEFAULT_BEHAVIOR, DEFAULT_ABILITY, resolveBehavior } = require('../src/services/creatureBehaviors.js');
 const {
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_ATTACK_COOLDOWN,
   GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE,
 } = require('../src/authority/creatures.js');
+// Alias: the seed catalog under the name the Skittish tests below use.
+const SEED_BEHAVIORS = CREATURE_BEHAVIORS;
 
 // SOMET-249 fix-wave I1.
 //
@@ -220,4 +222,35 @@ test('the seed catalog and the migration\'s BEHAVIORS array cannot diverge, fiel
   // no longer needs exempting, hiding a real divergence there forever.
   assert.deepEqual([...exceptionsSeen].sort(), [...SUPERSEDED_BY_LATER_MIGRATION.keys()].sort(),
     'every declared exception must correspond to a real migration cell');
+});
+
+test('the Skittish profile is in the catalog and resolves to its own style', () => {
+  const skittish = SEED_BEHAVIORS.find((b) => b.name === 'Skittish');
+  assert.ok(skittish, 'no Skittish row in the seed catalog');
+  assert.equal(skittish.chase_style, 'skittish');
+  // The flee radius. Asserted as a real number rather than "is defined":
+  // preferred_range IS the flee radius for this style, so a 0 here would mean
+  // a creature that never backs away and the behaviour would be inert.
+  assert.ok(skittish.preferred_range > 0,
+    'preferred_range is the flee radius — a zero makes the behaviour inert');
+  assert.ok(skittish.aggro_radius > skittish.preferred_range,
+    'a skittish creature must notice you before you are close enough to scare it');
+});
+
+test('resolveBehavior accepts skittish rather than falling back to Line', () => {
+  const bh = resolveBehavior({
+    // behavior_name, not name: resolveBehavior reads the join-aliased column
+    // (see its own header comment), and every other fixture in this suite
+    // uses behavior_name for the same reason -- a bare `name` key here would
+    // silently resolve to DEFAULT_BEHAVIOR.name ('Line') regardless of the
+    // chase_style fix, and this assertion is what would have gone red.
+    behavior_name: 'Skittish', chase_style: 'skittish', aggro_radius: 300,
+    leash_radius: 500, preferred_range: 150, move_speed_mult: 1.1,
+  });
+  assert.equal(bh.chaseStyle, 'skittish');
+  assert.equal(bh.name, 'Skittish');
+  // The fallback is what this guards against: an unrecognised chase_style
+  // resolves to DEFAULT_BEHAVIOR (Line, chaseStyle 'charge'), which would make
+  // every skittish creature a normal aggressive one with nothing failing.
+  assert.notEqual(bh.chaseStyle, 'charge');
 });
