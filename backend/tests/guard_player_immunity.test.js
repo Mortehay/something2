@@ -74,10 +74,24 @@ const TYPES = new Map([[1, KNIFE], [2, FIREBRAND], [3, BOW], [4, FIREBALL]]);
 
 const HOME = { x: 3250, y: 2950 };
 
-// A guard exactly as server.js loads one: faction 'guard', a home post, and no
-// behaviour profile of its own — resolveInstanceBehavior resolves that to
-// GUARD_DEFAULT_BEHAVIOR (chaseStyle 'guard'), which is what the immunity
-// keys on. Stats are the live level-150 block.
+// A guard with NO behaviour profile of its own: faction 'guard' plus a home
+// post, which resolveInstanceBehavior resolves to GUARD_DEFAULT_BEHAVIOR
+// (chaseStyle 'guard'), which is what the immunity keys on. Stats are the live
+// level-150 block.
+//
+// This is NOT the shape server.js loads, despite what this comment used to
+// claim. The live `Village Guard` entity_type carries behavior_id ->
+// creature_behaviors 'Guard', so CREATURE_JOINED_SELECT hands
+// resolveInstanceBehavior a row with `behavior_name` set and it takes the
+// resolveBehavior branch instead — the opposite one from this fixture. Both
+// branches reach chaseStyle 'guard' today, so everything below is still true,
+// but nothing in THIS file would notice if the profiled branch stopped
+// producing a guard: dropping b.chase_style from CREATURE_JOINED_SELECT, or
+// clearing Village Guard's behavior_id, leaves all 26 tests here green while
+// every guard in the running game becomes killable and its cue disappears.
+// guard_block_cue_db.test.js closes that by loading a real row through the
+// real query; keep the no-profile fallback covered here, since portal/dungeon
+// spawns still reach it.
 function guardRow(over = {}) {
   return {
     id: 'g', type: 'Village Guard',
