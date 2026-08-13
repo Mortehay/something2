@@ -53,7 +53,15 @@ const CREATURE_BEHAVIORS = [
     aura_radius: 260, aura_damage_mult: 1.25, aura_defense_mult: 1.2, aura_speed_mult: 1.1, gold_min: 10, gold_max: 30 },
   { name: 'Apex',       attack_kind: 'cast',   attack_range: 260, attack_cooldown: 2.0, projectile_speed: 460, projectile_radius: 10, aggro_radius: 600, leash_radius: 1200, chase_style: 'charge',   preferred_range: 0,   move_speed_mult: 0.95, gold_min: 25, gold_max: 80 },
   // No damage_override -- deliberately. See the Guard note in the header.
-  { name: 'Guard',      attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 1.0, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 400, leash_radius: 300,  chase_style: 'guard',    preferred_range: 0,   move_speed_mult: 1.0 },
+  // leash_radius 600, not the 300 migration 1714440080000 inserted: SOMET-291
+  // raised it (migration 1714440210000) because 300 is shorter than the guard's
+  // OWN aggro radius and shorter than the largest legal village, so a guard
+  // could neither engage everything it could see nor cross its own village to
+  // reach a hostile chasing a player. 600 is derived, not picked -- see that
+  // migration's header and services/villages.js's guardRescueLeashRadius().
+  // Re-authoring 300 here would silently undo it on the next
+  // `npm run seed:catalogs`, exactly as re-authoring damage_override would.
+  { name: 'Guard',      attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 1.0, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 400, leash_radius: 600,  chase_style: 'guard',    preferred_range: 0,   move_speed_mult: 1.0 },
   { name: 'Sentry',     attack_kind: 'ranged', attack_range: 380, attack_cooldown: 2.0, projectile_speed: 500, projectile_radius: 6,  aggro_radius: 400, leash_radius: 800,  chase_style: 'hold',     preferred_range: 0,   move_speed_mult: 1.0, gold_min: 2,  gold_max: 9 },
   { name: 'Lurker',     attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 0.9, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 180, leash_radius: 700,  chase_style: 'ambush',   preferred_range: 0,   move_speed_mult: 1.6, gold_min: 2,  gold_max: 7 },
   { name: 'Skittish',   attack_kind: 'melee',  attack_range: 60,  attack_cooldown: 1.2, projectile_speed: 0,   projectile_radius: 0,  aggro_radius: 300, leash_radius: 500,  chase_style: 'skittish', preferred_range: 150, move_speed_mult: 1.15, gold_min: 0,  gold_max: 2 },

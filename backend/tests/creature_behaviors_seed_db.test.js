@@ -37,7 +37,17 @@ test('creature_behaviors seeding', { skip: !url ? 'no database URL' : false }, a
     assert.equal(r.rowCount, 1);
     const b = r.rows[0];
     assert.equal(b.aggro_radius, 400);
-    assert.equal(b.leash_radius, 300);
+    // SOMET-291: 600, not 300. Migration 1714440210000 raised it because a
+    // leash under the guard's own 400px aggro radius made that radius fiction
+    // (selectGuardTarget filters candidates on the leash FROM THE POST), and
+    // because 300 could not cross the largest legal village -- so a hostile
+    // that chased a player through the gate reached a corner the guard was
+    // forbidden to walk to. Derived, not picked: services/villages.js's
+    // guardRescueLeashTerms(). Asserted here as a literal on purpose -- this
+    // file's job is pinning what is actually IN the shared database, and a
+    // value computed from the same helper the code uses would pass even if the
+    // migration had never run.
+    assert.equal(b.leash_radius, 600);
     assert.equal(b.chase_style, 'guard');
     // SOMET-279: NULL, not 25. This assertion read `25` until now and had
     // been failing silently ever since migration 1714440173000 nulled the
