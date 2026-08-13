@@ -1173,6 +1173,33 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // since the dead-socket reaper needs one interval to notice.)
         const prev = sessionsByUser.get(ws.userId);
         if (prev && prev !== ws) {
+          // Flush the outgoing session's durable state HERE rather than leaving
+          // it to that socket's own 'close' handler. That handler is
+          // identity-checked against entry.sockets, and when the new session
+          // joins the SAME world it overwrites that key (a few lines below)
+          // before the terminated socket's close event can fire -- so the
+          // handler returns early and neither persist nor flushBind ever runs.
+          // Live shape: bind in one village, walk into a second inside the write
+          // floor, lose the network, reconnect to the same world; the durable
+          // bind stays at the first village.
+          //
+          // Read synchronously and written fire-and-forget: nothing is awaited
+          // between the lookup and the writes, so the player object is still the
+          // KICKED session's own (the new one is not added until after the
+          // inventory awaits below) and prev.characterId still names it. An
+          // await here would also open a window for a third join to see the same
+          // `prev` and kick it twice.
+          const prevEntry = worlds.get(prev.worldId);
+          const prevP = prevEntry && prevEntry.world.getPlayer(prev.userId);
+          if (prevP && prev.characterId != null) {
+            persist(prev.worldId, prev.characterId, prevP)
+              .catch((e) => console.error('persist (kicked session)', e));
+            // Forced, same as the close handler's: "the player is leaving" is
+            // exactly when the write floor stops saving writes and starts losing
+            // data. A cross-world kick reaches the close handler too, where this
+            // is then a no-op on an already-clean bind.
+            flushBind(prevP, Date.now(), true);
+          }
           try { send(prev, { type: 'kicked', reason: 'signed_in_elsewhere' }); } catch { /* best-effort */ }
           prev.terminate();
         }
@@ -2291,6 +2318,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Terminate any live client sockets before closing the server. wss.close()
       // alone only stops accepting new connections; open sockets would keep the
       // event loop alive (and hang a clean shutdown / test process).
+      //
+      // KNOWN GAP, deliberately not closed here (SOMET-294 review): terminate()
+      // does not await the 'close' handlers it triggers, and index.js installs
+      // no SIGTERM/SIGINT drain, so a restart drops whatever position and bind
+      // movement is still inside its write floor -- up to BIND_WRITE_MIN_MS of
+      // it. Pre-existing for `persist`; the bind checkpoint now rides the same
+      // path. Closing it properly means an async, awaited shutdown drain wired
+      // through index.js's signal handling, which is a session-lifecycle change
+      // rather than a fix to this slice.
       for (const client of wss.clients) client.terminate();
       wss.close();
       sessionsByUser.clear();

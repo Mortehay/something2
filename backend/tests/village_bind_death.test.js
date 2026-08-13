@@ -575,3 +575,36 @@ test('dying ON a portal tile sends ONE transition, to the bound village', async 
     'the portal path has the doorway path\'s bug plus a cooldown stamp and a knockback it would apply to a corpse');
   assert.strictEqual(transitions[0].arriveX, VILLAGE_B.spawn_x);
 });
+
+// ---------------------------------------------------------------------------
+// 7. The bind must survive a session being kicked.
+// ---------------------------------------------------------------------------
+
+test('a bind pending when a NEW session kicks this one is still flushed', async () => {
+  // The live shape: bind in A, walk into B inside the write floor, lose the
+  // network, reconnect. The reconnect's join kicks the old socket, and the old
+  // socket's close handler is identity-checked against entry.sockets -- which
+  // the new join has already overwritten when it rejoins the SAME world. So the
+  // close handler returns early and the newer village never reaches the DB.
+  const pool = fakePool({ villages: { w1: [VILLAGE_A, VILLAGE_B] } });
+  const { url, handle } = await joinedSession(pool, { bindWriteMinMs: 5000 });
+
+  const p = livePlayer(handle, 'w1');
+  p.x = insideA.x; p.y = insideA.y;
+  await sleep(60);
+  assert.strictEqual(pool.binds.length, 1, 'the first bind of a session is never delayed');
+
+  p.x = insideB.x; p.y = insideB.y;   // inside the 5s floor: suppressed
+  await sleep(60);
+  assert.strictEqual(pool.binds.length, 1, 'the second crossing is inside the floor');
+
+  const ws2 = connect(url, 1);
+  await new Promise((r) => ws2.on('open', r));
+  ws2.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(ws2, 'joined');
+  await sleep(100);
+
+  assert.strictEqual(pool.binds.length, 2, 'being kicked is a disconnect too: the newer bind must not be lost');
+  assert.strictEqual(pool.binds[1][2], VILLAGE_B.spawn_x);
+  ws2.close();
+});
