@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { buildWorldGenConfig } = require('../src/services/worldGenConfig');
 const { worldConfig, generateRegion } = require('../src/services/mapService');
+const { buildSafeContext } = require('../src/services/safeRegion');
 
 const ROW = {
   id: 'w1', seed: '777', chunk_size: 16, width: 30, height: 30,
@@ -139,5 +140,34 @@ test('worldConfig normalizes the safe-region fields it is handed', () => {
 
   const bare = worldConfig({ seed: 1, width: 20, height: 20, tileTypes: TILE_TYPES });
   assert.equal(bare.safeRoadRadius, 0);
-  assert.deepEqual(bare.safeRects, []);
+  // safeRects is deliberately NOT coerced here any more (SOMET-288 review,
+  // finding 4). safeRegion.buildSafeContext is the single validator and it
+  // throws on a malformed value; a `?? []` at this layer swallowed the bad
+  // value first and turned an authored-but-broken rectangle into no rectangle
+  // at all. An absent one is still the opt-out -- buildSafeContext maps
+  // undefined to [], covered in safe_region.test.js.
+  assert.equal(bare.safeRects, undefined);
+});
+
+// The bare `.map()` this replaced died as "Cannot read properties of null
+// (reading 'min_row')" -- a TypeError from one layer BELOW the validator that
+// was hardened against a null entry, naming neither the column nor the world.
+test('a null entry in worlds.safe_rects survives conversion so the validator can name it', () => {
+  const cfg = buildWorldGenConfig({
+    row: { ...ROW, safe_rects: [null] },
+    tileTypes: TILE_TYPES, doorways: [], villages: [], biomes: BIOMES,
+  });
+  assert.deepEqual(cfg.safeRects, [null]);
+  assert.throws(() => buildSafeContext({ safeRects: cfg.safeRects }),
+    /safeRects\[0\] must be an object/);
+});
+
+test('a non-array worlds.safe_rects is rejected at conversion, naming the column', () => {
+  assert.throws(
+    () => buildWorldGenConfig({
+      row: { ...ROW, safe_rects: { min_row: 1, min_col: 1, width: 2, height: 2 } },
+      tileTypes: TILE_TYPES, doorways: [], villages: [], biomes: BIOMES,
+    }),
+    /worlds\.safe_rects must be a jsonb array/,
+  );
 });

@@ -10,6 +10,27 @@
 //
 // `biomes` is the resolved record list from services/biomes.js (already in the
 // world's declared banding order), not the raw name array off the row.
+
+// snake_case in the `worlds` row (and in the map spec), camelCase from here on.
+//
+// Element-level SHAPE is deliberately not checked here -- safeRegion.js's
+// normalizeSafeRects is the single validator, because a config can reach
+// placement without ever passing through this function and a second copy of the
+// rules here would be free to drift from it. What this does do is hand that
+// validator something it can describe: mapping straight over the array used to
+// die on a `null` element as a bare "Cannot read properties of null" TypeError
+// thrown one layer BELOW the validator that was hardened against exactly that,
+// naming neither the world nor the column (SOMET-288 review, finding 4).
+function toSafeRects(raw) {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(`worlds.safe_rects must be a jsonb array (got ${typeof raw})`);
+  }
+  return raw.map((s) => (s && typeof s === 'object'
+    ? { minRow: s.min_row, minCol: s.min_col, width: s.width, height: s.height }
+    : s));
+}
+
 function buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes }) {
   return {
     seed: Number(row.seed),
@@ -42,11 +63,7 @@ function buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes }) {
     // a missing mapping here is precisely the silent divergence this module's
     // header exists to prevent.
     safeRoadRadius: Number(row.safe_road_radius) || 0,
-    safeRects: Array.isArray(row.safe_rects)
-      ? row.safe_rects.map((s) => ({
-          minRow: s.min_row, minCol: s.min_col, width: s.width, height: s.height,
-        }))
-      : [],
+    safeRects: toSafeRects(row.safe_rects),
   };
 }
 

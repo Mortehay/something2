@@ -123,6 +123,39 @@ test('no creature lands inside an authored safe rectangle', () => {
   }
 });
 
+// SOMET-288 review, finding 4. Regression, with the exact shape confirmed
+// live: a config whose safeRects came straight off the `worlds` jsonb column
+// (snake_case, never converted by buildWorldGenConfig) placed 80 of 80
+// creatures with the rectangle having zero effect, because inBox compared
+// every coordinate against `undefined`.
+//
+// Driven through placeMapCreatures rather than buildSafeContext directly:
+// worldConfig() sits between them and used to coerce a bad value away before
+// the validator saw it, so a unit test on the validator alone would have gone
+// green while this path stayed silent.
+test('a malformed safe rect makes placement throw instead of quietly placing everywhere', () => {
+  const world = { ...WORLD, safeRects: [{ min_row: 20, min_col: 20, width: 8, height: 8 }] };
+  assert.throws(() => placeMapCreatures(world, 80, TYPES, 4242),
+    /safeRects\[0\]\.minRow must be an integer/);
+  // The pack placer is the second caller of creatureTileCandidates and must
+  // not be the one path where a malformed rect still passes.
+  assert.throws(() => placeCreaturePacks(world, [{ size: 6 }], TYPES, 4242),
+    /safeRects\[0\]\.minRow must be an integer/);
+
+  // Non-vacuous: the SAME rectangle spelled correctly places creatures and
+  // keeps them out of the box, so the throw above is about the spelling and
+  // not about this fixture being unplaceable.
+  const fixed = { ...WORLD, safeRects: [{ minRow: 20, minCol: 20, width: 8, height: 8 }] };
+  assert.ok(placeMapCreatures(fixed, 80, TYPES, 4242).length > 0);
+});
+
+test('a non-array safeRects throws rather than being flattened to "no rectangles"', () => {
+  // The one-object-instead-of-a-list typo. worldConfig used to turn this into
+  // [], so the world came out with no safe territory and no complaint.
+  const world = { ...WORLD, safeRects: { minRow: 20, minCol: 20, width: 8, height: 8 } };
+  assert.throws(() => placeMapCreatures(world, 80, TYPES, 4242), /safeRects must be an array/);
+});
+
 test('the village exclusion that existed before still holds', () => {
   // isSafeTile subsumes villageContaining; this pins that the replacement did
   // not quietly drop the older rule.

@@ -211,12 +211,18 @@ function worldConfig(world = {}) {
         }))
       : null,
     // SOMET-288. safeRegion.buildSafeContext does the real normalization (a
-    // junk radius becomes 0, never NaN); these are coerced here as well so a
-    // hand-built test world and a world that came through buildWorldGenConfig
-    // present the same shape, and so `cfg.safeRoadRadius` is always a number
-    // for the `radius > 0` short-circuit in safeContextFor.
+    // junk radius becomes 0, never NaN); the radius is coerced here as well so
+    // a hand-built test world and a world that came through
+    // buildWorldGenConfig present the same shape, and so `cfg.safeRoadRadius`
+    // is always a number for the `radius > 0` short-circuit in safeContextFor.
     safeRoadRadius: Number(world.safeRoadRadius) || 0,
-    safeRects: Array.isArray(world.safeRects) ? world.safeRects : [],
+    // The rectangles are passed through UNTOUCHED on purpose. This line used to
+    // read `Array.isArray(world.safeRects) ? world.safeRects : []`, which
+    // swallowed a malformed value into "no rectangles at all" before
+    // buildSafeContext -- the single validator, which THROWS -- ever saw it.
+    // An authored rectangle that quietly does not exist is exactly the failure
+    // safeRegion.normalizeSafeRects was written to make impossible.
+    safeRects: world.safeRects,
   };
 }
 

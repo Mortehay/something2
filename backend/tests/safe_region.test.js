@@ -67,3 +67,68 @@ test('a non-Set pathCells degrades to empty rather than throwing', () => {
   const ctx = buildSafeContext({ pathCells: ['5,5'], safeRoadRadius: 2 });
   assert.equal(isSafeTile(ctx, 5, 5), false);
 });
+
+// ---------------------------------------------------------------------------
+// A malformed rectangle must be LOUD (SOMET-288 review, finding 4).
+//
+// Unlike the radius, a rectangle has no safe fallback: degrading it means the
+// authored rectangle silently does not exist, and a world advertised as safe
+// that is not safe tells nobody. Each case below is a way a rect actually
+// arrives wrong -- the snake_case one is not hypothetical, it was observed
+// placing 80 of 80 creatures with the rectangle having no effect at all.
+// ---------------------------------------------------------------------------
+test('a safe rect spelled snake_case throws instead of silently protecting nothing', () => {
+  const raw = { min_row: 20, min_col: 20, width: 8, height: 8 };
+  assert.throws(
+    () => buildSafeContext({ safeRects: [raw] }),
+    /safeRects\[0\]\.minRow must be an integer/,
+  );
+  // The message must point at the conversion the caller skipped, or the next
+  // person sees "must be an integer" about a field their JSON does not have.
+  assert.throws(() => buildSafeContext({ safeRects: [raw] }), /buildWorldGenConfig/);
+});
+
+test('a null or non-object safe rect entry throws', () => {
+  for (const junk of [null, undefined, 'rect', 7]) {
+    assert.throws(
+      () => buildSafeContext({ safeRects: [junk] }),
+      /safeRects\[0\] must be an object/,
+      `entry ${JSON.stringify(junk)} must be reported`,
+    );
+  }
+});
+
+test('a safe rect with a non-integer or non-positive dimension throws', () => {
+  const ok = { minRow: 4, minCol: 4, width: 3, height: 3 };
+  // Sanity first: the base rect is accepted, so the failures below are about
+  // the field each case mutates and not about the fixture.
+  assert.equal(isSafeTile(buildSafeContext({ safeRects: [ok] }), 5, 5), true);
+
+  assert.throws(() => buildSafeContext({ safeRects: [{ ...ok, minRow: 4.5 }] }),
+    /safeRects\[0\]\.minRow must be an integer/);
+  assert.throws(() => buildSafeContext({ safeRects: [{ ...ok, width: '3' }] }),
+    /safeRects\[0\]\.width must be an integer/);
+  assert.throws(() => buildSafeContext({ safeRects: [{ ...ok, height: NaN }] }),
+    /safeRects\[0\]\.height must be an integer/);
+  // Zero-area rectangles are integral and pass every field check, yet cover no
+  // tile -- the same "authored but inert" outcome, so they are refused too.
+  assert.throws(() => buildSafeContext({ safeRects: [{ ...ok, width: 0 }] }),
+    /positive width and height/);
+  assert.throws(() => buildSafeContext({ safeRects: [{ ...ok, height: -2 }] }),
+    /positive width and height/);
+});
+
+test('a non-array safeRects throws, but an absent one is still the opt-out', () => {
+  assert.throws(() => buildSafeContext({ safeRects: { minRow: 0, minCol: 0, width: 2, height: 2 } }),
+    /safeRects must be an array/);
+  // undefined/null are how EVERY world that never opted in arrives here, and
+  // they must stay free -- this is the compatibility guarantee, not laxness.
+  for (const absent of [undefined, null]) {
+    assert.deepEqual(buildSafeContext({ safeRects: absent }).safeRects, []);
+  }
+  // The index in the message names the offending element, not just the array.
+  assert.throws(
+    () => buildSafeContext({ safeRects: [{ minRow: 1, minCol: 1, width: 2, height: 2 }, null] }),
+    /safeRects\[1\] must be an object/,
+  );
+});
