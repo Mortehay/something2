@@ -9,6 +9,7 @@ import { useWorlds, useCreateWorld, useDeleteWorld } from "./useWorlds";
 import { useAuth } from "../../context/AuthContext";
 import WorldPreview from "./WorldPreview.jsx";
 import Minimap from "./Minimap.jsx";
+import WaypointTravel from "./WaypointTravel.jsx";
 import CharacterSheet from "./CharacterSheet.jsx";
 
 const UIOverlay = styled.div`
@@ -279,6 +280,10 @@ export default function GameView() {
       )}
       {isPlaying && <Minimap gameRef={gameRef} tileColors={tileColors} />}
       {isPlaying && <CharacterSheet gameRef={gameRef} />}
+      {/* SOMET-293. Mounted beside the other HUD panels rather than inside
+          the canvas: it is a list of rows, and the canvas cannot render one.
+          Keyed on the character, because activation is per character. */}
+      {isPlaying && <WaypointTravel gameRef={gameRef} characterId={activeCharacter?.id} />}
       {isPlaying && (
         <HowToButton
           type="button"
