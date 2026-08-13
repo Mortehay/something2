@@ -127,6 +127,19 @@ async function populateWorld(client, worldRow, { rngSeed }) {
     ? worldRow.allowed_creature_types : [];
   const density = resolveDensity(worldRow.density, worldRow.width, worldRow.height);
 
+  // A clamped world is a content problem, not a runtime error: the author
+  // asked for more creatures than one population pass may place, and got
+  // fewer. Silent truncation is what this replaces -- creature_count would
+  // simply come out lower than the tier implies, indistinguishable from a
+  // world deliberately authored thin.
+  if (density.clamped) {
+    console.warn(
+      `[worldPopulation] world ${worldRow.id} (${worldRow.width}x${worldRow.height}, `
+      + `density "${worldRow.density ?? 'normal'}") was clamped to `
+      + `${density.scatterCount} scattered creatures by MAX_WORLD_CREATURES`,
+    );
+  }
+
   // creature_count is written from what actually lands in world_creatures,
   // not the tier's target -- placeMapCreatures can under-deliver when
   // rejection sampling exhausts maxAttempts on a hostile map, and a world
