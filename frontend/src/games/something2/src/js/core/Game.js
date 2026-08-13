@@ -125,6 +125,25 @@ export class Game {
         // ever set a page the last rendered frame offered.
         this.shopView = { tab: 'catalog', page: 0 };
 
+        // Account chest (SOMET-310). Same three-field shape as the shop above,
+        // and for the same reasons: `banks` is the join-time marker list,
+        // `bank` is the last server snapshot, `bankOpen` gates render/input
+        // independently so the snapshot survives a close/reopen.
+        //
+        // The chest is ACCOUNT-scoped server-side, so this state is NOT reset
+        // per world join the way `shop` is -- but it is reset anyway (see the
+        // reset block below), because the panel must never show one world's
+        // stale snapshot after a transition; the server re-sends the whole
+        // chest on the next open regardless.
+        this.banks = [];
+        this.bank = null;
+        this.bankOpen = false;
+        // 'chest' lists what is stored, 'carry' lists this character's
+        // inventory so it can be deposited. Same clamped-at-render contract as
+        // shopView: clicks only ever set a page the last rendered frame
+        // offered.
+        this.bankView = { tab: 'chest', page: 0 };
+
         // Transient on-screen toast (Slice 3b fast-follow F3): the server's
         // rejection frames (equip/drop/etc "error" replies) previously only
         // hit console.error, so a rejected action produced no in-game
@@ -335,6 +354,15 @@ export class Game {
         this.shop = null;
         this.shopOpen = false;
         this.shopView = { tab: 'catalog', page: 0 };
+        // SOMET-310. Reset alongside the shop even though the chest's CONTENTS
+        // are account-scoped and survive the world change: what is being
+        // cleared is the client's snapshot and which bank it was read at, both
+        // of which belong to the world being left. The next `openbank` refills
+        // them from the server.
+        this.banks = [];
+        this.bank = null;
+        this.bankOpen = false;
+        this.bankView = { tab: 'chest', page: 0 };
         this.blasts = [];
         this.vfx = [];
         this.noAmmoUntil = 0;
@@ -376,6 +404,11 @@ export class Game {
                     // (GameShell routes onTransition into enterWorld), so this
                     // assignment is the only thing that has to be right.
                     this.landmarks = Array.isArray(msg.landmarks) ? msg.landmarks : [];
+                    // SOMET-310. Same whole-replacement rule as merchants and
+                    // landmarks: bank posts are static village geometry, so the
+                    // join frame is their only delivery and a stale list from
+                    // the previous world must not survive the transition.
+                    this.banks = Array.isArray(msg.banks) ? msg.banks : [];
                     this.progression = msg.progression || null;
                     resolve(msg.spawn);
                 },
@@ -403,6 +436,37 @@ export class Game {
                 // row; CharacterSheet.jsx decides what changed and whether
                 // that's worth a re-render (a zero-XP kill still pushes a
                 // frame with unchanged values -- see its progressionChanged).
+                // SOMET-310. The server sends the WHOLE chest on open and again
+                // after every deposit/withdraw, so this mirrors the frame and
+                // never reconciles a delta -- the same rule onShop follows, and
+                // for the same reason: capacity and slot occupancy are server
+                // facts the client has no business recomputing.
+                //
+                // The tab/page reset is gated on "panel currently closed" for
+                // exactly the reason onShop's is: a deposit made from page 2 of
+                // the carry tab must not bounce the player back to chest page 1
+                // on the refresh frame that follows it.
+                onBank: (msg) => {
+                    this.bank = {
+                        villageId: msg.villageId,
+                        items: Array.isArray(msg.items) ? msg.items : [],
+                        capacity: Number(msg.capacity) || 0,
+                    };
+                    if (!this.bankOpen) this.bankView = { tab: 'chest', page: 0 };
+                    this.bankOpen = true;
+                },
+                // The chest half of a move arrives as the `bank` frame above;
+                // these two carry the INVENTORY half. Deliberately not folded
+                // into onBank: the inventory mirror must be corrected whether
+                // or not the panel is open, and a withdrawn instance carries a
+                // NEW player_items id (the server deletes and re-creates it),
+                // so this must add the server's item rather than resurrect a
+                // remembered one.
+                onDeposited: (msg) => {
+                    removeItem(this.inventory, msg.itemId);
+                    if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
+                },
+                onWithdrawn: (msg) => { if (msg.item) addItem(this.inventory, msg.item); },
                 onProgression: (msg) => { if (msg && msg.progression) this.progression = msg.progression; },
                 // A trade lands its inventory/wallet effect via the existing
                 // item/gold plumbing (addItem/removeItem, wallet frame); what
@@ -795,6 +859,10 @@ export class Game {
                 shop: this.shop,
                 shopOpen: this.shopOpen,
                 shopView: this.shopView,
+                banks: this.banks,
+                bank: this.bank,
+                bankOpen: this.bankOpen,
+                bankView: this.bankView,
                 decoTypes: this.decoTypes,
                 toast: this.toast,
                 blasts: this.blasts,
@@ -886,6 +954,23 @@ export class Game {
         if (hit.kind === 'shoppage') { this.shopView = { tab: this.shopView.tab, page: hit.id }; return; }
     }
 
+    // SOMET-310 — the bank panel's counterpart to _handleShopClick, reading
+    // _bankHitAreas. Deposit/withdraw forward an id and nothing else: the
+    // server re-checks proximity, ownership and capacity, so this click
+    // expresses intent only. `store` carries a player_items id, `take` an
+    // account_items id -- different tables, hence two kinds rather than one
+    // with a direction flag.
+    _handleBankClick(cx, cy) {
+        const hitAreas = (this.renderSystem && this.renderSystem._bankHitAreas) || [];
+        const hit = hitAreas.find((a) => cx >= a.x && cx <= a.x + a.w && cy >= a.y && cy <= a.y + a.h);
+        if (!hit) return;
+        if (hit.kind === 'close') { this.bankOpen = false; return; }
+        if (hit.kind === 'store') { if (this.authorityClient) this.authorityClient.sendDeposit(hit.id); return; }
+        if (hit.kind === 'take') { if (this.authorityClient) this.authorityClient.sendWithdraw(hit.id); return; }
+        if (hit.kind === 'banktab') { this.bankView = { tab: hit.id, page: 0 }; return; }
+        if (hit.kind === 'bankpage') { this.bankView = { tab: this.bankView.tab, page: hit.id }; return; }
+    }
+
     setupInput(){
         if (this._inputAttached) return;
         this._inputAttached = true;
@@ -898,7 +983,7 @@ export class Game {
             // weapon switch — equipping now goes through the panel). Gated on
             // !shopOpen so the two centred panels can never stack (the shop is
             // closed with 'e' or Escape first).
-            if (key === 'i' && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen) {
+            if (key === 'i' && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen) {
                 this.inventoryOpen = !this.inventoryOpen;
                 if (!this.inventoryOpen) this.inventorySelectedItemId = null;
             }
@@ -907,6 +992,12 @@ export class Game {
                 console.log("Escape pressed, current state:", this.state);
                 if (this.shopOpen) {
                     this.shopOpen = false;
+                } else if (this.bankOpen) {
+                    // Ordered after the shop only because the two can never be
+                    // open at once (each key gates on the other); the chain is
+                    // written out rather than collapsed so adding a fourth
+                    // panel is an obvious edit rather than a subtle one.
+                    this.bankOpen = false;
                 } else if(this.state === 'playing'){
                     this.pause();
                 }else if(this.state === 'paused'){
@@ -920,17 +1011,34 @@ export class Game {
             // Gated on !inventoryOpen like 'g' pickup — the two panels don't
             // stack, and game-world intents don't fire while one consumes
             // input.
-            if (key === 'e' && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen) {
+            if (key === 'e' && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
                 if (this.shopOpen) { this.shopOpen = false; return; }
                 if (this.authorityClient) this.authorityClient.sendInteract();
                 return;
             }
 
+            // Account chest (SOMET-310): 'b' either closes an open bank panel
+            // or asks the server whether a bank post is in range (a 'bank'
+            // frame comes back only if one is), exactly mirroring 'e' above.
+            //
+            // A SEPARATE KEY, not a second meaning for 'e'. The bank post sits
+            // one tile from the merchant and both are normally inside
+            // INTERACT_RADIUS at once, so one key serving both would have to
+            // pick by distance -- and which panel opened would then depend on
+            // where the player's feet happened to be within a tile. Two keys
+            // makes the choice the player's.
+            if (key === 'b' && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen) {
+                if (this.bankOpen) { this.bankOpen = false; return; }
+                if (this.authorityClient) this.authorityClient.sendOpenBank();
+                return;
+            }
+
             if (key === 'g' && this.state === 'playing' && this.chunked) {
                 // Match the mouse handler's rule: no game-world intents
-                // fire while the inventory panel is open and consuming
-                // input.
-                if (!e.repeat && this.authorityClient && !this.inventoryOpen) this.authorityClient.sendPickup();
+                // fire while a panel is open and consuming input. (The shop
+                // is deliberately NOT in this test -- it never has been, and
+                // changing that is not this ticket's business.)
+                if (!e.repeat && this.authorityClient && !this.inventoryOpen && !this.bankOpen) this.authorityClient.sendPickup();
             }
 
             // Dev: cycle the global render-mode override (none -> rect -> static -> animated).
@@ -989,6 +1097,10 @@ export class Game {
             // did, an open shop should still consume the click.
             if (this.shopOpen) {
                 this._handleShopClick(this._cursorX ?? 0, this._cursorY ?? 0);
+                return;
+            }
+            if (this.bankOpen) {
+                this._handleBankClick(this._cursorX ?? 0, this._cursorY ?? 0);
                 return;
             }
             if (this.inventoryOpen) {

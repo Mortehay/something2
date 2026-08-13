@@ -1,4 +1,6 @@
-const { villageGatePosts, villageGatePoint, villageMerchantPost } = require('./mapService');
+const {
+  villageGatePosts, villageGatePoint, villageMerchantPost, villageBankPost,
+} = require('./mapService');
 const { seedBaseCatalog } = require('./merchantStock');
 const { MAP_TILE_SIZE } = require('../authority/coords');
 const { scaleCreature } = require('./creatureLevel');
@@ -280,15 +282,35 @@ async function fetchVillages(pool, worldId) {
        FROM villages WHERE world_id = $1 ORDER BY created_at ASC`,
     [worldId],
   );
-  return r.rows.map((v) => ({
-    id: v.id,
-    minRow: v.min_row, minCol: v.min_col,
-    width: v.width, height: v.height,
-    gateEdge: v.gate_edge,
-    spawnX: v.spawn_x, spawnY: v.spawn_y,
-    merchantX: v.merchant_x == null ? null : Number(v.merchant_x),
-    merchantY: v.merchant_y == null ? null : Number(v.merchant_y),
-  }));
+  return r.rows.map((v) => {
+    const geometry = {
+      minRow: v.min_row, minCol: v.min_col,
+      width: v.width, height: v.height,
+      gateEdge: v.gate_edge,
+    };
+    const merchantX = v.merchant_x == null ? null : Number(v.merchant_x);
+    const merchantY = v.merchant_y == null ? null : Number(v.merchant_y);
+    // SOMET-310: the bank post is DERIVED from the box, not stored alongside
+    // merchant_x/merchant_y. Every village -- already seeded, generated later,
+    // or hand-authored -- therefore has an account chest with no migration
+    // backfill and no second source of truth. See villageBankPost's header.
+    //
+    // Anchored to the STORED merchant position, so the chest sits beside the
+    // marker the client actually draws rather than beside a recomputed one that
+    // an authored village may not agree with.
+    const bank = villageBankPost(
+      geometry,
+      merchantX == null || merchantY == null ? null : { x: merchantX, y: merchantY },
+    );
+    return {
+      id: v.id,
+      ...geometry,
+      spawnX: v.spawn_x, spawnY: v.spawn_y,
+      merchantX,
+      merchantY,
+      bankX: bank.x, bankY: bank.y,
+    };
+  });
 }
 
 const GUARD_TYPE = 'Village Guard';
