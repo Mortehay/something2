@@ -1,8 +1,16 @@
 import { describe, it, expect } from "vitest";
+import { createRequire } from "node:module";
 import {
   behaviorToForm, behaviorFormToPayload, ATTACK_KINDS, CHASE_STYLES,
   formatReferencingEntityTypes, deleteBehaviorErrorMessage,
 } from "../behaviorForm.js";
+
+// The BACKEND's own lists, loaded from the module the API validator reads
+// (index.js's behaviorFieldError). node's require rather than an import
+// because that module is CommonJS and outside vite's root -- the test
+// environment is node, so this is the same file the server loads, not a copy.
+const backendRequire = createRequire(import.meta.url);
+const backend = backendRequire("../../../../../backend/src/services/creatureBehaviors.js");
 
 describe("behaviorForm", () => {
   it("round-trips a profile without drifting a value", () => {
@@ -35,9 +43,22 @@ describe("behaviorForm", () => {
     expect(p.move_speed_mult).toBe(1.25);
   });
 
+  // SOMET-290: this used to restate the literal the module restates, so it
+  // stayed green while `skittish` existed in the backend list, in the CHECK
+  // constraint and in the live catalog but not here -- and the admin form
+  // renders its Chase Style <select> from this array, so opening the Skittish
+  // profile showed a blank dropdown whose first touch rewrote the profile to
+  // `charge` for every creature using it. Asserting against the backend module
+  // itself is what makes the duplication safe: the next style added to one
+  // list and not the other fails here instead of in production.
   it("exposes the same value sets the backend enforces", () => {
-    expect(ATTACK_KINDS).toEqual(["melee", "ranged", "cast"]);
-    expect(CHASE_STYLES).toEqual(["charge", "kite", "skirmish", "hold", "ambush", "guard"]);
+    expect(ATTACK_KINDS).toEqual(backend.ATTACK_KINDS);
+    expect(CHASE_STYLES).toEqual(backend.CHASE_STYLES);
+    // Order matters (both drive <option> order) but is not the point of the
+    // check above; these two pin that the comparison is against a real,
+    // non-empty list rather than two undefineds comparing equal.
+    expect(backend.CHASE_STYLES.length).toBeGreaterThan(0);
+    expect(CHASE_STYLES).toContain("skittish");
   });
 
   // SOMET-249 fix-wave I4: a brand-new profile (no row, or the Add-Behavior

@@ -28,6 +28,9 @@ const { createVillage, fetchVillages, GUARD_TYPE } = require('../src/services/vi
 const { pensOf, placePenCreatures, insertPenCreatures } = require('../src/services/pens.js');
 const { insertPortalGuards } = require('../src/services/dungeonGuards.js');
 const { insertVaultChest } = require('../src/services/chests.js');
+const {
+  upsertWaypoint, pruneWaypoints, foreignWaypointNames, guardedWaypointViolations,
+} = require('../src/services/waypoints.js');
 const { populateWorld } = require('../src/services/worldPopulation.js');
 const { assertNavigable } = require('../src/services/navigability.js');
 const { buildWorldGenConfig } = require('../src/services/worldGenConfig.js');
@@ -264,6 +267,76 @@ async function applyMapSpec(pool, spec) {
       }
     }
 
+    // Waypoints (SOMET-292). After the guard pass, so every guarded staircase
+    // this spec declares already exists in the database to be checked against,
+    // and long before populateWorld, which does not read them.
+    //
+    // BOTH the flag and the rows converge to the spec. The is_waypoint FLAG is
+    // re-asserted false on every portal link the spec does not flag, exactly as
+    // allows_fast_travel is re-asserted on every world. The waypoint ROWS are
+    // pruned to the set of names the spec authors -- see pruneWaypoints for why
+    // that is worth cascading a character's activations, and why not converging
+    // them (the first shape of this pass) was a security hole rather than a
+    // tidiness gap: the runtime reads the registry, so a row nobody authors any
+    // more is still a live travel target.
+    //
+    // Prune BEFORE upserting, not after: it is what frees a tile (or a
+    // staircase) that a renamed waypoint used to hold, so the upserts below run
+    // against a registry that already contains only this spec's waypoints.
+    const authoredWaypoints = [];
+    for (const l of spec.links) {
+      if (l.kind !== 'portal') continue;
+      const linkId = portalLinkIds.get(`${l.from}:${l.from_x},${l.from_y}`);
+      await client.query('UPDATE map_links SET is_waypoint = $2 WHERE id = $1',
+        [linkId, l.is_waypoint === true]);
+      if (l.is_waypoint !== true) continue;
+      authoredWaypoints.push({
+        worldId: idByKey.get(l.from), x: l.from_x, y: l.from_y,
+        name: l.waypoint_name, mapLinkId: linkId,
+      });
+    }
+    for (const w of spec.worlds) {
+      for (const wp of w.waypoints ?? []) {
+        authoredWaypoints.push({
+          worldId: idByKey.get(w.key), x: wp.x, y: wp.y, name: wp.name, mapLinkId: null,
+        });
+      }
+    }
+
+    const touchedWorldIds = [...idByKey.values()];
+    const authoredNames = authoredWaypoints.map((wp) => wp.name);
+    const waypointsRemoved = await pruneWaypoints(client, touchedWorldIds, authoredNames);
+    const foreign = await foreignWaypointNames(client, touchedWorldIds, authoredNames);
+    if (foreign.length) {
+      throw new Error(
+        'waypoint names are unique across every map:\n  - '
+        + foreign.map((f) => `"${f.name}" already exists in world "${f.world_name}", which this spec `
+          + 'does not own -- seeding would move it').join('\n  - '));
+    }
+    let waypointsWritten = 0;
+    for (const wp of authoredWaypoints) {
+      await upsertWaypoint(client, wp);
+      waypointsWritten += 1;
+    }
+
+    // The rule this slice exists to enforce, asked of the DATABASE rather than
+    // of the spec text (SOMET-292 review, finding 1). validateMapSpec already
+    // refuses `guard` and `is_waypoint` on one link, but it only ever sees the
+    // spec: a spec that drops `guard:` while adding the flag validates clean and
+    // still lands a waypoint on a staircase whose guard creatures are alive in
+    // world_creatures (worldPopulation deliberately spares them). This is the
+    // last write to either table in the transaction -- populateWorld only
+    // deletes creatures with blocks_portal_id IS NULL, and nothing after it
+    // touches waypoints -- so a clean answer here is a clean answer at COMMIT.
+    const violations = await guardedWaypointViolations(client, touchedWorldIds);
+    if (violations.length) {
+      throw new Error(
+        'refusing to seed: a waypoint would let a player skip a guarded portal:\n  - '
+        + violations.map((v) => `waypoint "${v.waypoint}" in world "${v.world}" -- ${v.how}, and that `
+          + `staircase is guarded by ${v.guards}. The guards are live rows; a spec that stops `
+          + 'declaring `guard` does not remove them').join('\n  - '));
+    }
+
     let villages = 0;
     for (const w of spec.worlds) {
       const specVillages = villagesOf(w);
@@ -469,7 +542,10 @@ async function applyMapSpec(pool, spec) {
     return {
       worlds: worldsWritten, links: linksWritten, villages,
       portalGuards: portalGuardsWritten, creatures: creaturesWritten,
-      vaultChests: vaultChestsWritten,
+      vaultChests: vaultChestsWritten, waypoints: waypointsWritten,
+      // Reported, not just done: a prune cascades character_waypoints, so a
+      // re-seed that quietly un-lights a waypoint for every player must say so.
+      waypointsRemoved: waypointsRemoved.length,
       penCreatures,
     };
   } catch (err) {
@@ -496,6 +572,7 @@ if (require.main === module) {
       console.log(
         `applied ${name}: ${n.worlds} worlds, ${n.links} links, ${n.villages} villages, `
         + `${n.portalGuards} portal guards, ${n.creatures} creatures, ${n.vaultChests} vault chests, `
+        + `${n.waypoints} waypoints (${n.waypointsRemoved} removed), `
         + `${n.penCreatures} pen creatures`);
       // See this file's header: only the world_chunks cache is reachable from
       // here. Printed unconditionally rather than probed -- this process has no

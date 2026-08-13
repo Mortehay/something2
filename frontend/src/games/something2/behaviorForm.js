@@ -9,8 +9,19 @@
 // abilityForm.js because CHASE_STYLES does too and the two value sets are
 // consumed together by the same admin form; attack_kind itself is an
 // ability-level field as of SOMET-253 Task 3, not a behaviour-level one.
+//
+// SOMET-290: `skittish` was added to the backend list and the CHECK constraint
+// and NOT to this one, which is the failure mode a deliberate duplicate has to
+// be defended against by a test rather than by a comment. A style missing here
+// does not render as a missing option -- CreatureBehaviorsAdmin builds the
+// Chase Style <select> from this array, so the Skittish profile opened BLANK
+// (a controlled value matching no option), and the first touch of the dropdown
+// rewrote chase_style to a listed value. The PUT is accepted, because the API
+// validates against the backend list, and every skittish creature in the world
+// silently becomes a charger. behaviorForm.test.js now asserts this array
+// AGAINST the backend module's own, so the next style cannot drift silently.
 export const ATTACK_KINDS = ["melee", "ranged", "cast"];
-export const CHASE_STYLES = ["charge", "kite", "skirmish", "hold", "ambush", "guard"];
+export const CHASE_STYLES = ["charge", "kite", "skirmish", "hold", "ambush", "guard", "skittish"];
 
 // SOMET-253 Task 3: attack_range/attack_cooldown/projectile_speed/
 // projectile_radius and attack_kind moved to abilityForm.js -- the attack is

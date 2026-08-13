@@ -338,6 +338,122 @@ test('a creature killed BY A PROJECTILE routes through the shared kill funnel (D
   ws.close(); handle.close(); server.close();
 });
 
+// --- SOMET-286 review fix ----------------------------------------------
+//
+// The tick loop's BLOCK site (server.js's `pushImpacts(entry, blocks)` right
+// after tickProjectiles) had no test at all. projectiles.js's own tests prove
+// step() RETURNS the blocks, and guard_player_immunity.test.js pins the
+// descriptor's shape and its direction vector -- but between those two and the
+// player's screen sits one line of glue, and this project has shipped a
+// protocol field nothing ever read more than once. A destructure whose name
+// drifts from step()'s return yields `undefined`, pushImpacts ignores it, and
+// every existing test stays green while the cue silently never reaches a
+// frame.
+//
+// A BOW rather than a melee swing, deliberately: a melee block is pushed
+// synchronously from the attack handler (server.js's `pushImpacts(entry,
+// impacts)`), so a swing would pass this test through the wrong line. A bow's
+// attack returns no impacts at all -- the shot only meets the guard a tick or
+// more later, inside tickProjectiles -- so the block observed here can only
+// have come from the tick-loop site.
+//
+// A separate pool from fakePoolWithBow above rather than a guard added to it:
+// a guard standing next to that test's wolf would ENGAGE the wolf (guards take
+// hostiles), and could kill it, which would let its `DELETE issued for the
+// projectile kill` assertion pass without the projectile ever landing.
+function fakePoolWithGuardAndBow() {
+  const deletes = [];
+  return withConnect({
+    deletes,
+    query: async (sql, params) => {
+      if (/FROM characters/i.test(sql)) return { rows: [{ id: Number(params[0]), entity_type_id: 1 }] };
+      if (/FROM worlds w WHERE w\.id/i.test(sql)) return { rows: [{ is_entry: true, allows_fast_travel: false, visited: false, visited_any: false, last_world: null }] };
+      if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: 8 }] };
+      if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
+      if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
+      // No behaviour profile, exactly like the live Village Guard rows: the
+      // guard-ness comes from `faction` on the creature row below, which
+      // resolveInstanceBehavior turns into GUARD_DEFAULT_BEHAVIOR (chaseStyle
+      // 'guard') -- the one thing the immunity, and therefore the block, keys
+      // on. Handing it a profile here would let this test pass against a
+      // faction check that the live loader would never satisfy.
+      if (/FROM entity_types e[\s\S]*WHERE e\.is_creature/i.test(sql)) return { rows: [{
+        id: 43, name: 'Village Guard', color: '#88f', hp: 7005, attack_element: 'physical',
+        behavior_name: null, attack_kind: 'melee', attack_range: 60, attack_cooldown: 1,
+        projectile_speed: 0, projectile_radius: 0, aggro_radius: null, leash_radius: null,
+        chase_style: null, preferred_range: null, move_speed_mult: null, damage_override: null,
+      }] };
+      // Same bow as fakePoolWithBow: reaches the target within a single tick.
+      if (/FROM item_types/i.test(sql)) {
+        return { rows: [
+          { id: 3, name: 'bow', category: 'weapon', slot: 'main_hand', two_handed: false, kind: 'projectile',
+            damage: 10, cooldown: 0.05, range: 2000, projectile_speed: 4000, projectile_radius: 40, pierce: 1,
+            mana_cost: 0, element: null, defense: null, resistances: null, reach: null, arc_width: null },
+        ] };
+      }
+      if (/FROM player_items/i.test(sql)) return { rows: [] };
+      if (/FROM player_equipment/i.test(sql)) return { rows: [] };
+      if (/INSERT INTO player_items/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/INSERT INTO player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/DELETE FROM player_equipment/i.test(sql)) return { rows: [], rowCount: 1 };
+      if (/INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 };
+      if (/FROM world_players WHERE/i.test(sql)) return { rows: [] }; // spawn = center 400,400
+      // Recorded so the test can assert the shot did NOT kill what it bounced
+      // off: a block that arrived because the guard died would prove nothing.
+      if (/DELETE FROM world_creatures/i.test(sql)) { deletes.push(params[0]); return { rows: [], rowCount: 1 }; }
+      if (/FROM world_creatures/i.test(sql)) {
+        // Standing where fakePoolWithBow's wolf stands, so the same aim vector
+        // puts the arrow through it.
+        if (params[1] === 0) return { rows: [{
+          id: 'guard1', type: 'Village Guard', x: 410, y: 400, hp: 7005, level: 150,
+          defense: 84.5, facing: 'S', color: '#88f', faction: 'guard',
+          home_x: 434, home_y: 424,
+        }] };
+        return { rows: [] };
+      }
+      if (/UPDATE world_creatures/i.test(sql)) return { rows: [] };
+      if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
+      return { rows: [] };
+    },
+  });
+}
+
+test("a shot that passes through a guard reaches the client as a blocked impact (server.js's tick-loop pushImpacts, not just projectiles.js's return value)", async () => {
+  const pool = fakePoolWithGuardAndBow();
+  const { url, handle, server } = await bootWith(pool);
+  const ws = connect(url, 1);
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'join', character_id: 1, world_id: 'w1' }));
+  await nextMsg(ws, 'joined');
+  let loaded = false;
+  for (let i = 0; i < 20 && !loaded; i++) {
+    const m = await nextMsg(ws, 'creatures');
+    if (m.creatures.some((c) => c.id === 'guard1')) loaded = true;
+  }
+  assert.ok(loaded, 'guard loaded before the shot');
+  // Player centre (432,432) -> guard centre (434,424), same aim the projectile
+  // kill test above uses.
+  ws.send(JSON.stringify({ type: 'attack', ax: 434 - 432, ay: 424 - 432 }));
+
+  let blocked = null;
+  for (let i = 0; i < 40 && !blocked; i++) {
+    const s = await nextMsg(ws, 'state');
+    // The block must ride the EXISTING impacts key -- a second frame field
+    // would be a second lifetime for the client to keep in step with.
+    const imps = s.impacts;
+    if (Array.isArray(imps)) blocked = imps.find((im) => im && im.b === true) || null;
+  }
+  assert.ok(blocked, "a state frame must carry the refused shot's blocked impact");
+  assert.strictEqual(blocked.t, 'c:guard1', 'the cue must name the guard the shot passed through');
+  assert.ok(!('v' in blocked) || blocked.v == null,
+    'a block carries no effect NAME -- the client draws its built-in shield, which no renamed vfx_effects row can take away');
+  assert.ok(Number.isFinite(blocked.nx) && Number.isFinite(blocked.ny),
+    'the direction the blow came from must survive the trip to the frame');
+  assert.deepStrictEqual(pool.deletes, [],
+    'the guard must be unharmed: a block is the refusal being shown, not a kill');
+  ws.close(); handle.close(); server.close();
+});
+
 // --- SOMET-245 Task 7 review fix ---------------------------------------
 //
 // A WS-level end-to-end proof that server.js's glue actually fires an

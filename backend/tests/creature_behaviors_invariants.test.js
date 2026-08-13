@@ -8,6 +8,10 @@ const {
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_ATTACK_COOLDOWN,
   GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE,
 } = require('../src/authority/creatures.js');
+const { guardRescueLeashRadius } = require('../src/services/villages.js');
+const {
+  GUARD_LEASH_BEFORE, GUARD_LEASH_AFTER,
+} = require('../migrations/1714440210000_guard_rescue_leash.js');
 // Alias: the seed catalog under the name the Skittish tests below use.
 const SEED_BEHAVIORS = CREATURE_BEHAVIORS;
 
@@ -93,13 +97,41 @@ test('the seeded Guard ABILITY matches the unprofiled-guard fallback', () => {
   assert.equal(guard.damage_mult, 1);
 });
 
-test('the database Guard row equals today\'s GUARD_* constants', () => {
+// SOMET-291 split this pin in two, and the split is the point.
+//
+// aggro_radius still equals GUARD_AGGRO_RADIUS, for the reason the Line test
+// above gives: the constant and the row are two copies of one number and must
+// not drift.
+//
+// leash_radius deliberately does NOT equal GUARD_LEASH_RADIUS any more. That
+// constant builds GUARD_DEFAULT_BEHAVIOR, the fallback for a creature whose
+// entity_types.behavior_id is NULL, and its documented job is reproducing
+// PRE-CATALOG behaviour byte for byte. Every live guard is profiled (migration
+// 1714440081000 points Village Guard at this row), so the fallback is reached
+// only by hand-built test fixtures -- while the catalog row is what the running
+// game reads, and 300 there was shorter than the guard's own aggro radius AND
+// shorter than the largest legal village.
+//
+// Asserted as a deliberate INEQUALITY rather than deleted: a leash that ever
+// slipped back to or below the fallback would restore the defect with nothing
+// failing, which is precisely how the damage_override regression below shipped.
+test('the database Guard row still equals GUARD_AGGRO_RADIUS, and deliberately outgrows the unprofiled leash', () => {
   const guard = CREATURE_BEHAVIORS.find((b) => b.name === 'Guard');
   assert.ok(guard, 'Guard is missing from the seed catalog');
 
   assert.equal(guard.chase_style, 'guard');
   assert.equal(guard.aggro_radius, GUARD_AGGRO_RADIUS, 'Guard.aggro_radius must equal GUARD_AGGRO_RADIUS');
-  assert.equal(guard.leash_radius, GUARD_LEASH_RADIUS, 'Guard.leash_radius must equal GUARD_LEASH_RADIUS');
+
+  assert.equal(guard.leash_radius, guardRescueLeashRadius(),
+    'Guard.leash_radius must be the geometry-derived rescue leash — see migration 1714440210000 '
+    + 'and services/villages.js\'s guardRescueLeashTerms()');
+  assert.ok(guard.leash_radius > GUARD_LEASH_RADIUS,
+    'the catalog leash fell back to (or below) GUARD_DEFAULT_BEHAVIOR\'s unprofiled 300 — a guard '
+    + 'can no longer reach past its own gate and the rescue is silently inert');
+  assert.ok(guard.leash_radius >= guard.aggro_radius,
+    'a leash shorter than the aggro radius makes the aggro radius fiction: selectGuardTarget '
+    + 'filters candidates on the leash FROM THE POST, so the smaller number is the one that '
+    + 'decides what a guard will engage');
 });
 
 // SOMET-279. This assertion is the INVERSE of the one that stood here until
@@ -185,9 +217,23 @@ const MIGRATION_FIELD_ORDER = [
 // asserted below, rather than skipped: the exception cannot silently widen to
 // another row or another column, and it goes red if anyone "fixes" the
 // history by editing 1714440080000.
+//
+// SOMET-291 adds the second, of exactly the same shape: 1714440080000 inserted
+// Guard with leash_radius 300 and 1714440210000 UPDATEs it to 600, so the seed
+// file follows the later migration here too.
 const SUPERSEDED_BY_LATER_MIGRATION = new Map([
   ['Guard.damage_override', { migration: 25, seed: null, by: '1714440173000' }],
+  ['Guard.leash_radius', { migration: 300, seed: 600, by: '1714440210000' }],
 ]);
+
+// ...and the exception's two ends are the migration's own declared before/after,
+// imported rather than re-typed. A hand-typed 300/600 here would still be green
+// if the migration were edited to write some third number.
+test('the leash exception matches the migration that created it', () => {
+  const e = SUPERSEDED_BY_LATER_MIGRATION.get('Guard.leash_radius');
+  assert.equal(e.migration, GUARD_LEASH_BEFORE, 'the exception\'s "before" is not the migration\'s');
+  assert.equal(e.seed, GUARD_LEASH_AFTER, 'the exception\'s "after" is not the migration\'s');
+});
 
 test('the seed catalog and the migration\'s BEHAVIORS array cannot diverge, field for field', () => {
   assert.ok(MIGRATION_BEHAVIORS.length > 0, 'no migration rows — this test would assert nothing');

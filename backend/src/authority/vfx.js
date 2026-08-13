@@ -65,6 +65,31 @@ function momentForAttack(landed) {
   return landed ? 'attack' : 'miss';
 }
 
+// SOMET-286 — the descriptor for an attack a RULE refused, as distinct from one
+// that missed.
+//
+// It carries no effect NAME, and is deliberately NOT authorable in vfx_effects.
+// Every other effect on the wire is weapon or creature flavour, and an admin
+// renaming a row is expected to degrade to "draws nothing" (see
+// resolveEffectName's note above). A refusal is not flavour: it is the only
+// thing separating "guards cannot be hurt" from "I mistimed that swing", which
+// is the whole of this ticket, so it must not be deletable content. The client
+// keys on `b` and draws a built-in shield glint -- see frontend core/vfx.js's
+// BLOCK_EFFECT_DEF.
+//
+// It rides the existing `impacts` channel rather than a new frame key: an
+// impact already means "something happened AT this target", it is already
+// stashed, capped and drained by server.js, and the client already feeds
+// impacts through addEffects. A parallel array would be a second lifetime to
+// keep in step with the first.
+//
+// One shape, built HERE, for both the melee arc and the projectile paths --
+// two literals would be free to drift and only one of them would be under any
+// given test.
+function blockedImpact(targetId, x, y, nx, ny) {
+  return { t: `c:${targetId}`, x, y, nx, ny, b: true };
+}
+
 module.exports = {
-  resolveEffectName, momentForAttack, MOMENTS, KIND_DEFAULTS,
+  resolveEffectName, momentForAttack, MOMENTS, KIND_DEFAULTS, blockedImpact,
 };

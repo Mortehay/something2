@@ -67,7 +67,7 @@ function makePool({ chests = [] } = {}) {
       if (/^\s*INSERT INTO world_chunks/i.test(sql)) return { rows: [], rowCount: 0 };
       // Persisted spawn so the chest's proximity to the player is exact.
       if (/SELECT x, y FROM world_players WHERE world_id/i.test(sql)) return { rows: [{ x: SPAWN.x, y: SPAWN.y }] };
-      if (/SELECT x, y FROM player_binds/i.test(sql)) return { rows: [] };
+      if (/FROM player_binds WHERE/i.test(sql)) return { rows: [] };
       if (/^\s*INSERT INTO world_players/i.test(sql)) return { rows: [] };
       if (/FROM world_creatures/i.test(sql)) return { rows: [] };
       if (/^\s*DELETE FROM world_items WHERE expires_at/i.test(sql)) return { rows: [], rowCount: 0 };
