@@ -37,6 +37,8 @@ export class RenderSystem {
     this._invHitAreas = [];
     // Same contract as _invHitAreas, for the merchant shop panel.
     this._shopHitAreas = [];
+    // ...and for the account chest panel (SOMET-310).
+    this._bankHitAreas = [];
   }
 
   // Effective render mode for an entity: the global override wins, else the
@@ -137,6 +139,8 @@ export class RenderSystem {
     groundItems = [], autoLoot = false, gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
+    // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
+    banks = [], bank = null, bankOpen = false, bankView = null,
     // SOMET-297. Fixed world points from the join frame, exactly like
     // `merchants` above -- not entities, so they carry no stored top-left
     // corner and need no half-extent adjustment.
@@ -227,6 +231,12 @@ export class RenderSystem {
     for (const m of merchants) {
       drawables.push({ kind: "merchant", ref: m, order: 0, depth: depthKey(m.x, m.y) });
     }
+    // Bank posts are the same kind of fixed world point as merchants, and go
+    // through the same depth sort — a chest one tile behind the merchant must
+    // draw behind them, which a separate later pass would get wrong.
+    for (const b of banks) {
+      drawables.push({ kind: "bank", ref: b, order: 0, depth: depthKey(b.x, b.y) });
+    }
     for (const w of wallDrawables) drawables.push(w);
     for (const d of RenderSystem.collectDecorations(chunkedMap, camera, decoTypes)) drawables.push(d);
     drawables.sort(compareDrawables);
@@ -240,6 +250,7 @@ export class RenderSystem {
       else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
       else if (d.kind === "merchant") this.drawMerchant(d.ref);
+      else if (d.kind === "bank") this.drawBank(d.ref);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
       else this.drawEntity(d.ref);
     }
@@ -288,6 +299,15 @@ export class RenderSystem {
       // there is no separate itemTypes state to thread through.
       const itemTypes = inventory ? inventory.types : new Map();
       this.renderShop(this.ctx, shop, inventory, itemTypes, gold, this._shopHitAreas, shopView);
+    }
+
+    // Bank panel overlay (SOMET-310) — same convention again. Rebuilt every
+    // frame and only populated while open, so a click can never hit a stale
+    // rect from a panel that has since closed.
+    this._bankHitAreas = [];
+    if (bankOpen && bank) {
+      const itemTypes = inventory ? inventory.types : new Map();
+      this.renderBank(this.ctx, bank, inventory, itemTypes, this._bankHitAreas, bankView);
     }
   }
 
@@ -708,6 +728,39 @@ export class RenderSystem {
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
     this.ctx.fillText("Merchant", dx, dy - r - 6);
+    this.ctx.restore();
+  }
+
+  // SOMET-310 — the account chest's world marker, drawn beside the merchant it
+  // shares a village with. Same diamond footprint and label placement as
+  // drawMerchant above so the two read as a matched pair of village services;
+  // amber rather than violet, and squatter, so which one a player is walking
+  // toward is legible at a glance without reading the label.
+  drawBank(b) {
+    const s = worldToScreen(b.x, b.y);
+    const dx = s.x, dy = s.y;
+    const r = 11;
+    this.ctx.save();
+    this.ctx.fillStyle = "#caa24a";
+    this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(dx - r, dy - r * 0.55);
+    this.ctx.lineTo(dx + r, dy - r * 0.55);
+    this.ctx.lineTo(dx + r, dy + r * 0.55);
+    this.ctx.lineTo(dx - r, dy + r * 0.55);
+    this.ctx.closePath();
+    this.ctx.fill();
+    this.ctx.stroke();
+    // Lid seam, so the chest reads as a chest rather than a plain box.
+    this.ctx.beginPath();
+    this.ctx.moveTo(dx - r, dy - r * 0.1);
+    this.ctx.lineTo(dx + r, dy - r * 0.1);
+    this.ctx.stroke();
+    this.ctx.fillStyle = "#fff";
+    this.ctx.font = "12px sans-serif";
+    this.ctx.textAlign = "center";
+    this.ctx.fillText("Chest", dx, dy - r - 6);
     this.ctx.restore();
   }
 
@@ -1315,6 +1368,191 @@ export class RenderSystem {
       ctx.fillStyle = "#6b7280";
       ctx.font = "12px monospace";
       ctx.fillText("No items to sell.", rightX + 8, listTop + 20);
+    }
+
+    ctx.restore();
+  }
+
+  // SOMET-310 — the account chest panel. Same overlay/hit-area contract as
+  // renderShop above, and deliberately the same visual grammar (centred
+  // translucent panel, tab strip, row list, panel-bottom paging strip), because
+  // it is the same interaction with a different counterparty and a player
+  // should not have to learn a second one.
+  //
+  // ONE tabbed, paginated column rather than the shop's two:
+  //   - Chest: what this ACCOUNT has stored. `kind:'take'` keyed on the
+  //     account_items row id (the id `sendWithdraw` expects).
+  //   - Carry: this CHARACTER's inventory. `kind:'store'` keyed on the
+  //     player_items instance id (the id `sendDeposit` expects).
+  // The two ids come from different tables and must never be interchanged;
+  // that is why they are two `kind`s rather than one with a direction flag.
+  //
+  // BOTH LISTS ARE PAGED, unlike the shop's right-hand "Your items" column,
+  // which breaks out of its loop when it runs out of vertical room and silently
+  // drops the rest. That break is exactly the bug SOMET-156 fixed on the left
+  // column, and a chest whose 40th item cannot be reached is a chest that ate
+  // it -- so `perPage` is derived from the measured row band here too, and no
+  // list in this panel has a "stop when we run out of room" escape.
+  //
+  // The header carries `n/capacity` because "your chest is full" is a refusal
+  // the server can issue at any time, and a player who cannot see how close
+  // they are to the cap has no way to anticipate it.
+  renderBank(ctx, bank, inventory, itemTypes, hitAreas, view = null) {
+    const panelW = 560;
+    const panelH = 560;
+    const px = (GAME_WIDTH - panelW) / 2;
+    const py = (GAME_HEIGHT - panelH) / 2;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(px, py, panelW, panelH);
+    ctx.strokeStyle = "#3a3a4e";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, panelW, panelH);
+
+    ctx.fillStyle = "#e5e7eb";
+    ctx.font = "14px monospace";
+    ctx.textBaseline = "top";
+    ctx.fillText("Account Chest — [b] to close", px + 16, py + 14);
+
+    const closeW = 70, closeH = 26;
+    const closeX = px + panelW - 16 - closeW;
+    const closeY = py + 10;
+
+    const stored = (bank && bank.items) || [];
+    const capacity = Number(bank && bank.capacity) || 0;
+
+    // Occupancy readout, right-aligned just left of the close button (the shop
+    // puts its gold total in the same spot). Amber at the cap so a full chest
+    // is visible before a deposit is refused rather than only after.
+    ctx.font = "12px monospace";
+    ctx.textAlign = "right";
+    ctx.fillStyle = capacity > 0 && stored.length >= capacity ? "#caa24a" : "#e5e7eb";
+    ctx.fillText(`${stored.length}/${capacity}`, closeX - 12, closeY + 7);
+    ctx.textAlign = "left";
+
+    ctx.fillStyle = "rgba(40,40,60,0.85)";
+    ctx.fillRect(closeX, closeY, closeW, closeH);
+    ctx.strokeStyle = "#4a9eff";
+    ctx.strokeRect(closeX, closeY, closeW, closeH);
+    ctx.fillStyle = "#e5e7eb";
+    ctx.fillText("Close", closeX + 18, closeY + 7);
+    hitAreas.push({ x: closeX, y: closeY, w: closeW, h: closeH, kind: "close", id: null });
+
+    const leftX = px + 16;
+    const colW = panelW - 32;
+    const listTop = py + 50;
+    const listBottom = py + panelH - 16;
+    const rowH = 40;
+    const rowGap = 6;
+    const actW = 70, actH = 26;
+
+    const resolveName = (typeId) => {
+      const type = itemTypes && itemTypes.get ? itemTypes.get(typeId) : null;
+      return type ? type.name : `#${typeId}`;
+    };
+
+    // The carry list mirrors the shop's: real server instances only, resolved
+    // through inventory.types. An item whose type is unknown to this client is
+    // skipped rather than drawn as "#12" — the same rule renderShop's sell
+    // column follows.
+    const carried = ((inventory && inventory.items) || [])
+      .filter((it) => (inventory && inventory.types ? inventory.types.get(it.typeId) : null));
+
+    const tabH = 26, tabW = 170, tabGap = 8;
+    const pageH = 24;
+    const pageY = listBottom - pageH;
+    const rowsTop = listTop + tabH + 10;
+    const rowsBottom = pageY - 8;
+    const perPage = Math.max(1, Math.floor((rowsBottom - rowsTop + rowGap) / (rowH + rowGap)));
+
+    const isCarry = !!(view && view.tab === "carry");
+    const rows = isCarry ? carried : stored;
+    const pageCount = Math.max(1, Math.ceil(rows.length / perPage));
+    const rawPage = view && Number.isFinite(view.page) ? Math.floor(view.page) : 0;
+    const page = Math.min(Math.max(rawPage, 0), pageCount - 1);
+    const pageRows = rows.slice(page * perPage, page * perPage + perPage);
+
+    const tabs = [
+      { id: "chest", label: `Chest (${stored.length})`, accent: "#caa24a", on: "rgba(202,162,74,0.28)" },
+      { id: "carry", label: `Carrying (${carried.length})`, accent: "#4a9eff", on: "rgba(74,158,255,0.28)" },
+    ];
+    ctx.font = "12px monospace";
+    tabs.forEach((t, i) => {
+      const tx = leftX + i * (tabW + tabGap);
+      const active = (t.id === "carry") === isCarry;
+      ctx.fillStyle = active ? t.on : "rgba(40,40,60,0.85)";
+      ctx.fillRect(tx, listTop, tabW, tabH);
+      ctx.strokeStyle = active ? t.accent : "#3a3a4e";
+      ctx.strokeRect(tx, listTop, tabW, tabH);
+      ctx.fillStyle = active ? "#e5e7eb" : "#9ca3af";
+      ctx.fillText(t.label, tx + 10, listTop + 7);
+      hitAreas.push({ x: tx, y: listTop, w: tabW, h: tabH, kind: "banktab", id: t.id });
+    });
+
+    let y = rowsTop;
+    for (const row of pageRows) {
+      ctx.fillStyle = isCarry ? "rgba(40,40,60,0.85)" : "rgba(80,60,20,0.55)";
+      ctx.fillRect(leftX, y, colW, rowH);
+      ctx.strokeStyle = isCarry ? "#3a3a4e" : "#caa24a";
+      ctx.strokeRect(leftX, y, colW, rowH);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "12px monospace";
+      ctx.fillText(resolveName(row.typeId), leftX + 8, y + 6);
+
+      // Subline: quantity when a row is a real stack, and the bound marker.
+      // Bound items are storable on purpose (they can never become gold, so
+      // moving one between your own characters is not an exploit) — the label
+      // is there so a player is not surprised when the same item refuses to
+      // sell at the merchant one tile away.
+      const qty = Number(row.quantity) || 1;
+      const notes = [];
+      if (qty > 1) notes.push(`x${qty}`);
+      if (row.soulbound === true) notes.push("bound");
+      ctx.fillStyle = isCarry ? "#9ca3af" : "#caa24a";
+      if (notes.length) ctx.fillText(notes.join("  ·  "), leftX + 8, y + 22);
+
+      const actX = leftX + colW - 8 - actW;
+      const actY = y + (rowH - actH) / 2;
+      ctx.fillStyle = isCarry ? "rgba(74,158,255,0.28)" : "rgba(202,162,74,0.28)";
+      ctx.fillRect(actX, actY, actW, actH);
+      ctx.strokeStyle = isCarry ? "#4a9eff" : "#caa24a";
+      ctx.strokeRect(actX, actY, actW, actH);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.fillText(isCarry ? "Store" : "Take", actX + 16, actY + 7);
+      hitAreas.push({
+        x: actX, y: actY, w: actW, h: actH, kind: isCarry ? "store" : "take", id: row.id,
+      });
+
+      y += rowH + rowGap;
+    }
+    if (rows.length === 0) {
+      ctx.fillStyle = "#6b7280";
+      ctx.font = "12px monospace";
+      ctx.fillText(
+        isCarry ? "You are not carrying anything." : "Your chest is empty.",
+        leftX + 8, rowsTop + 6,
+      );
+    }
+
+    if (pageCount > 1) {
+      const pgW = 70;
+      ctx.font = "12px monospace";
+      const pageBtn = (bx, label, target) => {
+        ctx.fillStyle = "rgba(74,158,255,0.28)";
+        ctx.fillRect(bx, pageY, pgW, pageH);
+        ctx.strokeStyle = "#4a9eff";
+        ctx.strokeRect(bx, pageY, pgW, pageH);
+        ctx.fillStyle = "#e5e7eb";
+        ctx.fillText(label, bx + 10, pageY + 6);
+        hitAreas.push({ x: bx, y: pageY, w: pgW, h: pageH, kind: "bankpage", id: target });
+      };
+      if (page > 0) pageBtn(leftX, "< Prev", page - 1);
+      if (page < pageCount - 1) pageBtn(leftX + colW - pgW, "Next >", page + 1);
+      ctx.fillStyle = "#9ca3af";
+      ctx.textAlign = "center";
+      ctx.fillText(`Page ${page + 1}/${pageCount}`, leftX + colW / 2, pageY + 6);
+      ctx.textAlign = "left";
     }
 
     ctx.restore();

@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onProgression, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -21,6 +21,13 @@ export class WorldAuthorityClient {
     this.onShop = onShop || (() => {});
     this.onBought = onBought || (() => {});
     this.onSold = onSold || (() => {});
+    // SOMET-310 — the account chest. `onBank` is the whole chest (the server
+    // re-sends it after every move, so the panel never reconciles a delta);
+    // `onDeposited`/`onWithdrawn` update the INVENTORY mirror instead, and are
+    // separate frames because they must land whether or not the panel is open.
+    this.onBank = onBank || (() => {});
+    this.onDeposited = onDeposited || (() => {});
+    this.onWithdrawn = onWithdrawn || (() => {});
     this.onNoAmmo = onNoAmmo || (() => {});
     this.onAmmo = onAmmo || (() => {});
     this.onTransition = onTransition || (() => {});
@@ -106,6 +113,9 @@ export class WorldAuthorityClient {
       case 'shop': this.onShop(msg); break;
       case 'bought': this.onBought(msg); break;
       case 'sold': this.onSold(msg); break;
+      case 'bank': this.onBank(msg); break;
+      case 'deposited': this.onDeposited(msg); break;
+      case 'withdrawn': this.onWithdrawn(msg); break;
       // Sent to this socket alone when a shot was refused for an empty ammo
       // stack. The server consumed NO cooldown, so this is purely a cue to
       // the player — nothing local needs rolling back.
@@ -160,6 +170,16 @@ export class WorldAuthorityClient {
   sendInteract() { this._send({ type: 'interact' }); }
   sendBuy(stockId) { this._send({ type: 'buy', stockId }); }
   sendSell(itemId) { this._send({ type: 'sell', itemId }); }
+
+  // SOMET-310. No villageId on any of the three: the server re-resolves the
+  // bank post from its own copy of the player's position on every frame, so
+  // there is deliberately nothing here for a forged frame to point at a bank
+  // the player is not standing next to. `deposit` carries a player_items id,
+  // `withdraw` an account_items id -- different tables, and each is checked
+  // against its own ownership predicate server-side.
+  sendOpenBank() { return this._send({ type: 'openbank' }); }
+  sendDeposit(itemId) { return this._send({ type: 'deposit', itemId }); }
+  sendWithdraw(itemId) { return this._send({ type: 'withdraw', itemId }); }
 
   // Waypoint travel (SOMET-293). A destination id and nothing else: the server
   // works out where the player is standing from its own copy of the position,

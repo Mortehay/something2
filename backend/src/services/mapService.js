@@ -965,6 +965,64 @@ function villageMerchantPost(v) {
   return { x: col * 100 + 50, y: row * 100 + 50 };
 }
 
+// SOMET-310. Where the account chest's bank post stands: the interior tile
+// beside the merchant, offset PERPENDICULAR to the gate axis so the two never
+// stack along the approach a player actually walks in on.
+//
+// DERIVED, NOT STORED. villages.merchant_x/merchant_y are real columns, so the
+// obvious move was a matching pair of bank columns -- but every input here is
+// already on the row (minRow/minCol/width/height/gateEdge), which makes those
+// columns pure derived state plus a backfill for every village that already
+// exists. Computing it in fetchVillages instead means every village in every
+// world, authored or generated, past or future, has a bank the moment this
+// ships, and there is no second source of truth to drift.
+//
+// The offset flips to -1 when the merchant is already against the far interior
+// wall, so the post cannot land on the impassable wall ring.
+//
+// `merchant` IS AN INPUT, NOT RE-DERIVED HERE. villages.merchant_x/merchant_y
+// is a stored column: createVillage writes it from villageMerchantPost, but the
+// stored value is what the client actually draws the merchant marker at, and
+// the two can disagree -- a map spec that authors a merchant position, or a row
+// written before this derivation last changed. Deriving the bank from a
+// recomputed merchant post would then place the chest relative to a merchant
+// that is not where the player sees one. Callers pass the row's real position
+// and get a post beside THAT; the fallback only covers a village with no stored
+// merchant at all.
+//
+// THE 3x3 VILLAGE IS A REAL DEGENERATE CASE, not an oversight. VILLAGE_LIMITS
+// allows minW/minH of 3, whose interior is a single tile: loR === hiR and
+// loC === hiC, so both offsets clamp back and the bank returns the merchant's
+// exact tile. Both markers then draw on one tile. That is accepted rather than
+// worked around -- the alternatives are putting a post on an impassable wall
+// tile or raising the minimum village size, and a 3x3 village is already a
+// closet nobody authors. It stays legal and both interactions still work,
+// because each is picked by its own proximity radius, not by which marker the
+// player clicked.
+function villageBankPost(v, merchant = null) {
+  const rMax = v.minRow + v.height - 1;
+  const cMax = v.minCol + v.width - 1;
+  const loR = v.minRow + 1, hiR = rMax - 1;
+  const loC = v.minCol + 1, hiC = cMax - 1;
+  const clampR = (r) => Math.min(hiR, Math.max(loR, r));
+  const clampC = (c) => Math.min(hiC, Math.max(loC, c));
+  const m = (merchant && Number.isFinite(merchant.x) && Number.isFinite(merchant.y))
+    ? merchant
+    : villageMerchantPost(v);
+  // Clamped before the offset as well as after: a stored merchant position
+  // outside the interior (bad authored data) must not drag the bank onto the
+  // wall ring with it.
+  const mRow = clampR(Math.floor(m.y / 100));
+  const mCol = clampC(Math.floor(m.x / 100));
+  let row = mRow, col = mCol;
+  if (v.gateEdge === 'S' || v.gateEdge === 'N') {
+    col = clampC(mCol + 1 <= hiC ? mCol + 1 : mCol - 1);
+  } else {
+    row = clampR(mRow + 1 <= hiR ? mRow + 1 : mRow - 1);
+  }
+  return { x: col * 100 + 50, y: row * 100 + 50 };
+}
+
 function stampVillage(grid, rMin, cMin, rows, cols, village) {
   const { minRow, minCol, width, height, wallTile, gateTile } = village;
   const rMax = minRow + height - 1;
@@ -1284,6 +1342,7 @@ module.exports = {
     villageGatePoint,
     villageGateCell,
     villageMerchantPost,
+    villageBankPost,
     DOORWAY_TILES,
     oppositeEdge,
     edgeOfDoorwayTile,

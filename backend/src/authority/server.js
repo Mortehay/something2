@@ -24,6 +24,7 @@ const {
 const { openChest } = require('./chestLoot.js');
 const { clearOverviewCache } = require('../services/overviewCache.js');
 const { fetchShop } = require('../services/merchantStock');
+const { fetchChest, depositItem, withdrawItem } = require('../services/accountChest');
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
@@ -200,18 +201,37 @@ function planPortalTransition({
 
 const INTERACT_RADIUS = 120; // px: how close a player must stand to trade
 
-// The village whose merchant is nearest to (cx,cy) within `radius`, or null.
-// Villages without a merchant position are skipped.
-function nearestMerchantVillage(villages, cx, cy, radius) {
+// The village whose post named by (xKey,yKey) is nearest to (cx,cy) within
+// `radius`, or null. Villages without that post are skipped.
+//
+// Parameterized over the post rather than copied per interactable (SOMET-310
+// added the bank beside the merchant): the proximity rule is one rule, and two
+// hand-copied versions of this loop would be two places to fix the day it
+// changes.
+function nearestVillagePost(villages, cx, cy, radius, xKey, yKey) {
   if (!villages || !villages.length) return null;
   let best = null, bd2 = radius * radius;
   for (const v of villages) {
-    if (v.merchantX == null || v.merchantY == null) continue;
-    const dx = v.merchantX - cx, dy = v.merchantY - cy;
+    if (v[xKey] == null || v[yKey] == null) continue;
+    const dx = v[xKey] - cx, dy = v[yKey] - cy;
     const d2 = dx * dx + dy * dy;
     if (d2 <= bd2) { bd2 = d2; best = v; }
   }
   return best;
+}
+
+function nearestMerchantVillage(villages, cx, cy, radius) {
+  return nearestVillagePost(villages, cx, cy, radius, 'merchantX', 'merchantY');
+}
+
+// SOMET-310. Deliberately a SEPARATE proximity pick from the merchant's rather
+// than one "nearest interactable" resolver: the two posts sit one tile apart
+// and are both usually inside INTERACT_RADIUS at once, so a shared picker would
+// make which panel opens depend on sub-tile position. The client names the
+// interaction it wants (`interact` vs `openbank`, bound to different keys) and
+// each resolves only its own post.
+function nearestBankVillage(villages, cx, cy, radius) {
+  return nearestVillagePost(villages, cx, cy, radius, 'bankX', 'bankY');
 }
 
 // Guard-type allowlist for a field chest spawned via `use`ing a loot_map.
@@ -1357,6 +1377,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
           merchants: (entry.villages || [])
             .filter((v) => v.merchantX != null && v.merchantY != null)
             .map((v) => ({ villageId: v.id, x: v.merchantX, y: v.merchantY })),
+          // SOMET-310. Same shape and same join-time delivery as `merchants`
+          // above: a bank post is static village geometry, so it never needs a
+          // live update frame. fetchVillages derives bankX/bankY for every
+          // village, so unlike merchants this list is never partial -- the
+          // filter is kept anyway so a village row that somehow arrives
+          // without one is skipped rather than drawn at (undefined, undefined).
+          banks: (entry.villages || [])
+            .filter((v) => v.bankX != null && v.bankY != null)
+            .map((v) => ({ villageId: v.id, x: v.bankX, y: v.bankY })),
           // SOMET-297. Built from the Maps loadWorld already holds, plus one
           // per-join read of this character's activations -- no second loader.
           //
@@ -1927,6 +1956,81 @@ function attachAuthority(httpServer, pool, opts = {}) {
           send(ws, { type: 'sold', itemId: msg.itemId, price: r.price, gold: r.gold });
           send(ws, { type: 'wallet', gold: r.gold });
         } else send(ws, { type: 'error', message: r.reason });
+      });
+    },
+
+    // SOMET-310 — the account chest. Three handlers mirroring interact/buy/sell
+    // one for one, because the bank IS the merchant's shape with a different
+    // counterparty: a proximity-gated opener plus two movers, each re-sending
+    // the whole chest so the panel never has to reconcile a delta.
+    //
+    // Every one of them re-resolves the bank post from the player's CURRENT
+    // position rather than trusting a villageId the client sends. The opener
+    // proving proximity once is not enough -- a crafted `deposit` frame never
+    // goes near `openbank`, exactly the gap SOMET-199 closed on the merchant
+    // side by scoping buy/sell to the village the caller was gated against.
+    //
+    // ws.userId, not ws.characterId, for the chest itself: account_items is
+    // keyed on users.id and that is the whole point of the feature. The
+    // characterId alongside it is the OTHER end of the move -- which of the
+    // account's characters the item comes from or goes to.
+    openbank(ws) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      chainOp(ws, 'openbank', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const village = nearestBankVillage(entry.villages, cx, cy, INTERACT_RADIUS);
+        if (!village) { send(ws, { type: 'error', message: 'no bank nearby' }); return; }
+        const chest = await fetchChest(pool, ws.userId);
+        send(ws, {
+          type: 'bank', villageId: village.id, items: chest.items, capacity: chest.capacity,
+        });
+      });
+    },
+
+    deposit(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.itemId !== 'string') return;
+      chainOp(ws, 'deposit', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const village = nearestBankVillage(entry.villages, cx, cy, INTERACT_RADIUS);
+        if (!village) { send(ws, { type: 'error', message: 'no bank nearby' }); return; }
+        const r = await depositItem(pool, entry, ws.userId, ws.characterId, msg.itemId);
+        if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
+        // `deposited` carries the id the client must drop from its inventory
+        // mirror; the `bank` frame after it is the fresh chest. Two frames
+        // rather than one because they update two different client stores, and
+        // the inventory one must land even if the panel is already closed.
+        send(ws, { type: 'deposited', itemId: r.itemId });
+        const chest = await fetchChest(pool, ws.userId);
+        send(ws, {
+          type: 'bank', villageId: village.id, items: chest.items, capacity: chest.capacity,
+        });
+      });
+    },
+
+    withdraw(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.itemId !== 'string') return;
+      chainOp(ws, 'withdraw', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+        const village = nearestBankVillage(entry.villages, cx, cy, INTERACT_RADIUS);
+        if (!village) { send(ws, { type: 'error', message: 'no bank nearby' }); return; }
+        const r = await withdrawItem(pool, entry, ws.userId, ws.characterId, msg.itemId);
+        if (!r.ok) { send(ws, { type: 'error', message: r.reason }); return; }
+        send(ws, { type: 'withdrawn', item: r.item });
+        const chest = await fetchChest(pool, ws.userId);
+        send(ws, {
+          type: 'bank', villageId: village.id, items: chest.items, capacity: chest.capacity,
+        });
       });
     },
 
