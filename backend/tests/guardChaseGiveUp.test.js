@@ -19,7 +19,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   CreatureSim, GUARD_HOME_EPSILON,
-  GUARD_CHASE_STALL_TICKS, GUARD_UNREACHABLE_MOVE,
+  GUARD_CHASE_STALL_TICKS, GUARD_CHASE_BLOCKED_FRACTION,
 } = require('../src/authority/creatures.js');
 const { resolveBehavior } = require('../src/services/creatureBehaviors.js');
 const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
@@ -207,7 +207,206 @@ test('no placement around either post leaves a guard jammed off-station', () => 
   assert.deepEqual(jammed, [], `${jammed.length} placements still jam a guard: ${jammed.join(', ')}`);
 });
 
+// The case the first version of this fix shipped without and the running game
+// caught within minutes: the hostile ROAMS. Both Windwatch guards spent 15s
+// pinned at y=2500 sliding a few px/s along the inside of their own north wall,
+// following a slime that kept moving, and were dragged from 203px to 288px off
+// station. Every tick they "moved", so a give-up keyed on the guard's own
+// displacement never fired. A wall-slide is movement that gets the guard
+// nowhere, and only the delivered-fraction test can tell the two apart.
+test('a guard does not follow a MOVING unreachable hostile along its own wall', () => {
+  const { s, g, h } = scene({ hostile: { x: POST_N.x, y: POST_N.y - 350 } });
+  // Driven rather than left to roam: the hostile patrols east-west parallel to
+  // the wall, which is what keeps re-aiming the guard and regenerating the
+  // tangential component. Random roam would make this test's outcome depend on
+  // the rng seed.
+  let dir = 1;
+  const PATROL = 250;                     // px either side of where it started
+  const startX = h.x;
+  let maxOff = 0, gaveUpAt = -1;
+  for (let i = 0; i < 900; i++) {
+    h.x += dir * 40 * DT;
+    if (Math.abs(h.x - startX) > PATROL) dir = -dir;
+    s.tick(DT, KEYS, [], 1000 + i * 50);
+    maxOff = Math.max(maxOff, distTo(g, POST_N));
+    if (gaveUpAt < 0 && g._target === null) gaveUpAt = i;
+  }
+  assert.ok(gaveUpAt > 0, 'the guard followed a moving unreachable hostile for the whole run');
+  assert.ok(maxOff < 250,
+    `the guard was dragged ${maxOff.toFixed(0)}px off its post along the wall before giving up`);
+  assert.ok(distTo(g, POST_N) <= GUARD_HOME_EPSILON,
+    `guard ended ${distTo(g, POST_N).toFixed(0)}px from its post`);
+  // The hostile is still there, still moving, still in range: the guard did not
+  // recover because the problem walked away.
+  assert.ok(h.hp > 0 && distTo(h, POST_N) <= GUARD_BH.leashRadius,
+    'the hostile must still be alive and inside the leash, or this proves nothing');
+});
+
+// The scene that actually falsified the first version of this fix, reproduced
+// from the running game rather than from a fixture designed to be catchable.
+//
+// The grid, the posts and the coordinates below were read out of Windwatch Pass
+// (world 371454ed) in the browser on 2026-08-13: a 7x4 village whose gate is on
+// the SOUTH edge, with a Slime roaming due north of the gateless north wall.
+// The guard's step there was not refused outright -- it delivered 0.072px of
+// its 2px request, a 3.6% creep along the wall -- which is why a give-up keyed
+// on "did the guard move" never fired and both guards were dragged 200px+ off
+// station. A test whose guard comes to a DEAD stop cannot tell the two rules
+// apart; this one creeps, exactly as the live one did.
+const WINDWATCH = {
+  20: '...........#.', 21: '.............', 22: '.............',
+  23: '.#...........', 24: '.#######.....', 25: '.##....#.....',
+  26: '..#....#.....', 27: '..###.##.....', 28: '.............',
+};
+const WW_COL0 = 36;
+const WW_MAP = {
+  chunkSize: 32,
+  isWalkable: (x, y) => {
+    const row = WINDWATCH[Math.floor(y / TILE)];
+    if (row === undefined) return true;
+    const ch = row[Math.floor(x / TILE) - WW_COL0];
+    return ch === undefined ? true : ch === '.';
+  },
+  speedAt: () => 1,
+};
+const WW_KEYS = new Set(['0,0', '1,0', '0,1', '1,1']);
+const WW_POST = { x: 4050, y: 2650 };
+
+test('the live Windwatch scene: a creeping wall-slide is not progress', () => {
+  const s = new CreatureSim(WW_MAP, () => 0.5);
+  s.addCreatures([
+    { id: 'g', type: 'Village Guard', x: 4167.58, y: 2500.01, hp: 1e9,
+      faction: 'guard', home_x: WW_POST.x, home_y: WW_POST.y, behavior: GUARD_BH, damage: 0, level: 150 },
+    { id: 'h', type: 'Slime', x: 4158.23, y: 2242.41, hp: 1e9, behavior: STILL_BH, damage: 0, level: 4 },
+  ]);
+  const g = s.creatures.get('g');
+  const h = s.creatures.get('h');
+  assert.equal(WW_MAP.isWalkable(4150, 2450), false, 'fixture: the north wall must be solid');
+  assert.equal(WW_MAP.isWalkable(4150, 2350), true, 'fixture: the hostile must stand on open ground');
+
+  // The hostile drifts slowly, which is what keeps the guard's aim -- and so
+  // its tangential component -- alive. 0.4px/tick, a fifth of the guard's step.
+  const recent = [];        // per-tick delivered distance, most recent last
+  let gaveUpAt = -1, creepAtGiveUp = null;
+  for (let i = 0; i < 900; i++) {
+    h.x -= 0.4;
+    const bx = g.x, by = g.y;
+    s.tick(DT, WW_KEYS, [], 1000 + i * 50);
+    recent.push(Math.hypot(g.x - bx, g.y - by));
+    if (recent.length > GUARD_CHASE_STALL_TICKS) recent.shift();
+    if (gaveUpAt < 0 && g._target === null) {
+      gaveUpAt = i;
+      creepAtGiveUp = { min: Math.min(...recent), max: Math.max(...recent) };
+    }
+  }
+  assert.ok(gaveUpAt > 0, 'the guard crept along the live north wall forever');
+
+  // THE POINT OF THIS TEST. Every tick of the window that tripped the give-up
+  // delivered a non-zero step: the guard was moving the whole time. A rule that
+  // asks "did it move" therefore cannot produce this outcome, which is exactly
+  // what the running game demonstrated when the first version of this fix left
+  // both Windwatch guards sliding along this wall.
+  assert.ok(creepAtGiveUp.min > 0,
+    `the guard came to a dead stop before giving up (min step ${creepAtGiveUp.min}px over the `
+    + 'window) — this scene must CREEP, or it does not distinguish the two stall rules');
+  assert.ok(creepAtGiveUp.max < 2 * GUARD_CHASE_BLOCKED_FRACTION,
+    `the guard was delivering ${creepAtGiveUp.max.toFixed(2)}px of its 2px step — that is `
+    + 'walking, not creeping, and the fixture is not reproducing the live scene');
+
+  assert.ok(Math.hypot(g.x + 24 - WW_POST.x, g.y + 24 - WW_POST.y) <= GUARD_HOME_EPSILON,
+    `guard ended ${Math.hypot(g.x + 24 - WW_POST.x, g.y + 24 - WW_POST.y).toFixed(0)}px from its post`);
+  assert.ok(h.hp > 0, 'the hostile must still be alive, or the guard simply won');
+});
+
 // --- what the give-up must NOT do --------------------------------------------
+
+// A guard standing ON its target delivers nothing, every tick, for as long as
+// the fight lasts: creatures do not collide, so the step vector is ~0 and
+// resolveMove returns without moving it. That is a guard winning a fight, not a
+// guard stuck on a wall, and it must never be given up on -- let alone BANNED,
+// which would make it walk away from a hostile inside its own village.
+//
+// A long fight is the case that matters. Guard damage is 1 against 1e9 hp, so
+// this runs for 400 ticks, ten times the stall window.
+test('a guard standing on its target never gives up on it', () => {
+  const { s, g, h } = scene({
+    // Open floor inside the village, nothing to press against.
+    hostile: { x: POST_N.x - 100, y: POST_N.y }, guardDamage: 1,
+  });
+  // Let it close, then confirm it really is on top of the hostile and stuck
+  // there by its own arrival rather than by terrain.
+  run(s, 120);
+  const gap = Math.hypot(cen(g).x - cen(h).x, cen(g).y - cen(h).y);
+  assert.ok(gap <= REACH, `fixture: the guard must have reached its target (gap ${gap.toFixed(0)}px)`);
+  const hpBefore = h.hp;
+
+  run(s, 400);
+
+  assert.ok(h.hp < hpBefore, 'fixture: the guard must actually be hitting it');
+  assert.equal(g._target, 'h',
+    'the guard abandoned a hostile it was standing on and killing');
+  assert.equal(g._unreachable == null || g._unreachable.size === 0, true,
+    'the guard banned a hostile it was in contact with as "unreachable"');
+});
+
+// Each target gets its own window: a guard that has spent most of a stall
+// window on one hostile must not inherit that count and abandon the next one on
+// its first blocked tick.
+test('a new target starts a fresh stall window', () => {
+  const { s, g } = scene({ hostile: { x: POST_N.x, y: POST_N.y - 350 } });
+  // Stop just short of the give-up.
+  run(s, GUARD_CHASE_STALL_TICKS - 2);
+  assert.equal(g._target, 'h', 'precondition: still chasing the first hostile');
+  assert.ok(g._chaseStall > GUARD_CHASE_STALL_TICKS / 2,
+    `precondition: the window must be nearly full, was ${g._chaseStall}`);
+
+  // Swap it for a second hostile behind the SAME wall. Same wall on purpose:
+  // the guard is already pressed against it, so the new chase is blocked from
+  // its very first tick and an inherited counter would fire immediately. Put
+  // h2 on the far side of the village instead and the guard turns round and
+  // walks, which clears the counter incidentally and hides the defect.
+  s.creatures.delete('h');
+  s.addCreatures([{ id: 'h2', type: 'Slime', x: POST_N.x + 80 - 24, y: POST_N.y - 340 - 24,
+    hp: 1e9, behavior: STILL_BH, damage: 0 }]);
+  let acquired = -1, dropped = -1;
+  for (let i = 0; i < 400 && dropped < 0; i++) {
+    s.tick(DT, KEYS, [], 5000 + i * 50);
+    if (acquired < 0 && g._target === 'h2') acquired = i;
+    else if (acquired >= 0 && g._target === null) dropped = i;
+  }
+  assert.ok(acquired >= 0, 'the guard never acquired the second hostile at all');
+  assert.ok(dropped > 0, 'the guard never gave up on the second, also-unreachable hostile');
+  assert.ok(dropped - acquired >= GUARD_CHASE_STALL_TICKS,
+    `the second hostile was abandoned ${dropped - acquired} ticks after it was acquired, inside `
+    + `its own ${GUARD_CHASE_STALL_TICKS}-tick window — it inherited the first one's count`);
+});
+
+// The same rule on the way back in: a rescue that re-acquires a hostile the
+// guard had already banned must get a full window of its own. Without it the
+// guard drops the rescue on its first blocked tick, having inherited the very
+// counter that banned the hostile in the first place -- SOMET-291 undone by a
+// stale integer.
+test('a re-acquired hostile starts a fresh stall window too', () => {
+  const { s, g, h } = scene({ hostile: { x: POST_N.x, y: POST_N.y - 350 } });
+  run(s, 600);
+  assert.equal(g._target, null, 'precondition: the guard must have banned it first');
+
+  // A player joins it outside the wall, so the ban lifts as a rescue while the
+  // hostile is still exactly as unreachable as before.
+  const player = { userId: 7, x: POST_N.x - 32, y: POST_N.y - 320 - 32,
+    width: 64, height: 64, hp: 1e9, maxHp: 1e9 };
+  let acquired = -1, dropped = -1;
+  for (let i = 0; i < 400 && dropped < 0; i++) {
+    s.tick(DT, KEYS, [player], 100000 + i * 50);
+    if (acquired < 0 && g._target === 'h') acquired = i;
+    else if (acquired >= 0 && g._target === null) dropped = i;
+  }
+  assert.ok(h._target === player.userId, 'fixture: the hostile never engaged the player');
+  assert.ok(acquired >= 0, 'the guard never answered the rescue at all');
+  assert.ok(dropped - acquired >= GUARD_CHASE_STALL_TICKS,
+    `the guard abandoned the rescue ${dropped - acquired} ticks after answering it, inside its `
+    + `own ${GUARD_CHASE_STALL_TICKS}-tick window — the give-up did not clear its counter`);
+});
 
 // The regression this fix could most easily cause, and the reason the stall
 // window watches the guard's OWN displacement rather than its closure on the
@@ -249,24 +448,36 @@ test('a guard trailing a hostile it never closes on keeps chasing', () => {
   assert.equal(g.mode, 'chase');
 });
 
-// The ban must not outlive the situation that earned it. A hostile that walks
-// away from where the guard gave up is a different problem from the one that
-// was refused, and SOMET-291's rescue depends on this: a hostile chasing a
-// player is moving by construction, so it clears its own ban within a few ticks.
-test('a hostile that moves clears its own unreachable ban', () => {
+// The ban must not outrank a rescue. This is the SOMET-291 interaction, and it
+// is the ONLY thing that lifts a ban early: a banned hostile that starts
+// fighting a player is exactly what a guard exists for.
+//
+// The earlier version of this test asserted that any 48px of movement lifted
+// the ban. That rule shipped and the running game refuted it within a minute --
+// a roaming hostile clears 48px in about a second, so the guard re-acquired it
+// forever. What replaced it is narrower and is the rule that was meant all
+// along.
+test('a banned hostile that starts fighting a player is acquired again at once', () => {
   const { s, g, h } = scene({ hostile: { x: POST_N.x, y: POST_N.y - 350 } });
   run(s, 600);
   assert.equal(g._target, null, 'precondition: the guard must have given up first');
 
-  // Still banned while it sits there.
+  // Still banned while it is merely sitting there — and still banned after it
+  // has wandered, which is the specific rule the live game taught.
+  h.x += 120;
   run(s, 200);
-  assert.equal(g._target, null, 'the guard re-acquired a hostile it had just refused');
+  assert.equal(g._target, null,
+    'the guard re-acquired a banned hostile that had only moved, not attacked');
 
-  // Now walk it round to the gate side, further than the lift threshold.
-  h.x += GUARD_UNREACHABLE_MOVE + 2;
-  run(s, 20);
+  // Now it engages a player. The player is placed on the guard's own side of
+  // the wall so that the hostile fighting them is genuinely worth answering.
+  const player = { userId: 7, x: POST_N.x + 40, y: POST_N.y - 40, width: 64, height: 64, hp: 100, maxHp: 100 };
+  h.x = POST_N.x + 60; h.y = POST_N.y - 60;   // beside the player, inside the walls
+  for (let i = 0; i < 30; i++) s.tick(DT, KEYS, [player], 100000 + i * 50);
+  assert.ok(h._target === player.userId,
+    'fixture: the hostile never engaged the player, so no rescue was on offer');
   assert.equal(g._target, 'h',
-    'the guard is still refusing a hostile that has moved since it gave up');
+    'the guard ignored a banned hostile that had started fighting a player');
 });
 
 // A guard must still engage a DIFFERENT hostile while one is banned: the ban is

@@ -73,25 +73,30 @@ const GUARD_MAX_REPATHS = 3;              // failed path attempts before snappin
 // `mode: 'chase'`, out of its own strike range, and immobile for the last 500
 // of 4000 ticks.
 //
-//  - CHASE_STALL_TICKS: consecutive chase ticks with no meaningful displacement
-//    AND no target in strike range before the guard drops it. 40 ticks is 2s at
-//    the authority's 50ms tick — deliberately longer than the 0.6s return stall,
-//    because giving up on a chase too eagerly would undo SOMET-291's rescue,
-//    and a guard that is genuinely walking never accumulates a single tick of it.
-//  - The progress test is the guard's OWN displacement, NOT closure on the
-//    target. A guard trailing a hostile that is faster than it, or following one
-//    round a corner, closes nothing for seconds at a time while doing exactly
-//    what the rescue needs; only a guard that is not moving at all is stuck.
-//  - UNREACHABLE_MS / UNREACHABLE_MOVE: how long a dropped target stays refused,
-//    and how far it must move for that to lift early. Without the refusal the
-//    guard re-acquires the same hostile on its very next tick and oscillates
-//    between the wall and its post forever, which is a worse gate than the jam.
-//    The early lift is what keeps a rescue instant: a hostile chasing a player
-//    is by construction moving, so it clears its own ban within a few ticks,
-//    while one sitting behind a wall does not.
+//  - CHASE_STALL_TICKS: consecutive chase ticks whose step was refused by the
+//    terrain, with the target out of strike range, before the guard drops it.
+//    40 ticks is 2s at the authority's 50ms tick — deliberately longer than the
+//    0.6s return stall, because giving up on a chase too eagerly would undo
+//    SOMET-291's rescue, and a guard walking on open ground never accumulates a
+//    single tick of it.
+//  - BLOCKED_FRACTION: how much of the requested step must arrive for the tick
+//    to count as walking. resolveMove clamps per axis, so a step into a wall
+//    still delivers its tangential part — open ground delivers all of it, a
+//    45deg corner ~71%, a near-head-on wall a few percent. A quarter sits well
+//    clear of both. Measuring the DELIVERED FRACTION rather than the guard's
+//    displacement is what catches a wall-slide: chasing a roaming hostile along
+//    the inside of a wall moves the guard every tick while getting it nowhere,
+//    and the first version of this fix shipped with exactly that hole.
+//  - UNREACHABLE_MS: how long a dropped target stays refused. Without the
+//    refusal the guard re-acquires the same hostile on its very next tick and
+//    oscillates between the wall and its post forever, which is a worse gate
+//    than the jam. Five minutes rather than seconds because the excursion is
+//    the expensive part: one round trip costs ~12s of unmanned gate, so a short
+//    ban spends more time off station than on it. The ban lifts early only for
+//    a hostile that starts fighting a player -- see isUnreachableFor.
 const GUARD_CHASE_STALL_TICKS = 40;
+const GUARD_CHASE_BLOCKED_FRACTION = 0.25;  // of the requested step that must arrive
 const GUARD_UNREACHABLE_MS = 300000;      // ms a dropped target stays refused
-const GUARD_UNREACHABLE_MOVE = 48;        // px it must move to lift that early
 const GUARD_UNREACHABLE_MAX = 32;         // per-guard cap on remembered targets
 
 // Fallback behaviour for a guard-faction creature with no assigned profile --
@@ -477,15 +482,12 @@ function resetHomeWalk(c) {
 // chase-stall window, for the same reason: the three sites that end a chase
 // episode must not each forget a different field.
 //
-//   _chaseTargetId  which target `_chaseMarkX/Y` is a mark FOR. The window
-//                   restarts when the target changes, since a step that made no
-//                   progress toward one hostile says nothing about the next.
-//   _chaseMarkX/Y   where the guard was when the window opened
-//   _chaseStall     chase ticks since it last moved meaningfully or could strike
+//   _chaseTargetId  which target `_chaseStall` is counting FOR. The window
+//                   restarts when the target changes, since a step refused on
+//                   the way to one hostile says nothing about the next.
+//   _chaseStall     consecutive chase ticks whose step the terrain refused
 function resetChaseStall(c) {
   c._chaseTargetId = null;
-  c._chaseMarkX = 0;
-  c._chaseMarkY = 0;
   c._chaseStall = 0;
 }
 
@@ -505,27 +507,31 @@ function longestReach(bh) {
 //
 //  - it ages out after GUARD_UNREACHABLE_MS, so nothing here is permanent even
 //    if the geometry that caused it is;
-//  - it lifts the moment the hostile MOVES GUARD_UNREACHABLE_MOVE from where it
-//    was when the guard gave up. A hostile chasing a player is moving by
-//    construction, so a genuine rescue clears its own ban within a few ticks;
-//    one parked behind a gateless wall does not, which is exactly the case the
-//    ban exists for.
+//  - it lifts the instant the hostile starts FIGHTING A PLAYER. That is the
+//    only movement a guard should break station for, and asking SOMET-291's own
+//    rescue predicate is what keeps the two rules in step.
+//
+// It deliberately does NOT lift merely because the hostile moved. That was the
+// first rule here and the running game killed it inside a minute: a ROAMING
+// hostile clears any distance threshold within a second or two, so the guard
+// re-acquired it, walked back to the wall, stalled, gave up, and did it again
+// forever -- off station about half the time, which is a worse gate than the
+// jam this ticket is about. A hostile that wanders somewhere genuinely
+// reachable is therefore ignored until the ban ages out; the guard is standing
+// on its post the whole time, and anything that actually attacks a player is
+// answered immediately by the rescue lift above.
 //
 // `now` is treated as 0 when a caller does not supply it (selectGuardTarget is
 // called directly by tests): that makes the age-out inert rather than
-// accidentally clearing every ban, leaving the movement test in charge.
-function isUnreachableFor(guard, target, now) {
+// accidentally clearing every ban, leaving the rescue test in charge.
+function isUnreachableFor(guard, target, now, playersById) {
   const bans = guard._unreachable;
   if (!bans) return false;
   const rec = bans.get(target.id);
   if (!rec) return false;
   const t = Number.isFinite(now) ? now : 0;
   if (t >= rec.until) { bans.delete(target.id); return false; }
-  const tc = center(target);
-  if (Math.hypot(tc.x - rec.x, tc.y - rec.y) >= GUARD_UNREACHABLE_MOVE) {
-    bans.delete(target.id);
-    return false;
-  }
+  if (engagingAPlayer(target, playersById, now)) { bans.delete(target.id); return false; }
   return true;
 }
 
@@ -539,8 +545,7 @@ function banAsUnreachable(guard, target, now) {
   const t = Number.isFinite(now) ? now : 0;
   for (const [id, rec] of bans) if (t >= rec.until) bans.delete(id);
   if (bans.size >= GUARD_UNREACHABLE_MAX) bans.clear();
-  const tc = center(target);
-  bans.set(target.id, { until: t + GUARD_UNREACHABLE_MS, x: tc.x, y: tc.y });
+  bans.set(target.id, { until: t + GUARD_UNREACHABLE_MS });
 }
 
 function tileCenterWalkable(map, col, row) {
@@ -795,7 +800,7 @@ function selectGuardTarget({ guard, creatures, aggroRadius, leashRadius, players
     // SOMET-295: a hostile this guard has already proved it cannot reach is not
     // a candidate. Checked here rather than at the two call sites so that no
     // future third caller can acquire a banned target by forgetting to ask.
-    if (isUnreachableFor(guard, o, now)) continue;
+    if (isUnreachableFor(guard, o, now, playersById)) continue;
     const oc = center(o);
     if (!withinLeash(oc.x, oc.y, guard.home, leashRadius)) continue;
     const d2 = dist2(gc.x, gc.y, oc.x, oc.y);
@@ -1082,7 +1087,7 @@ class CreatureSim {
         // Only the guard branch writes any of it; the Map is created lazily on
         // the first ban so that the overwhelming majority of creatures (which
         // never jam, and which are not guards at all) do not each carry one.
-        _chaseTargetId: null, _chaseMarkX: 0, _chaseMarkY: 0, _chaseStall: 0,
+        _chaseTargetId: null, _chaseStall: 0,
         _unreachable: null,
         // Per-slot cooldown, per INSTANCE. An absent key means "ready" (the
         // same thing the old scalar `_attackCd: 0` meant), so a creature that
@@ -1290,33 +1295,49 @@ class CreatureSim {
           // guard strikes the moment it recovers rather than also serving a
           // cooldown for the swing it never took.
 
-          // SOMET-295 -- the give-up. Two things reset the window, and a guard
-          // doing its job trips at least one of them every tick:
+          // SOMET-295 -- the give-up. "Stuck" is how much of the step the
+          // terrain actually DELIVERED, not whether the guard ended up
+          // somewhere new and not whether it closed on its target. Both of
+          // those were tried and both are wrong:
           //
-          //  - it MOVED. Measured as its own displacement from the mark, not as
-          //    closure on the target: a guard trailing a faster hostile, or
-          //    following one round a corner, closes nothing for seconds while
-          //    doing exactly what SOMET-291's rescue needs. Only a guard that
-          //    is not moving at all is stuck. The mark is only advanced when the
-          //    guard clears the epsilon, so shaving a fraction of a pixel off it
-          //    every tick -- what a guard pinned flat against a wall does, and
-          //    the trap the return branch's own stall detection documents --
-          //    never accumulates into "progress".
-          //  - it can REACH its target. A guard in contact, hitting a hostile,
-          //    is motionless on purpose. Asked as a range question rather than
-          //    "did selectAbility return something", which would go null for
-          //    the whole of a long cooldown and read a fighting guard as stuck.
+          //  - closure on the target calls a guard trailing a hostile faster
+          //    than itself "stuck", which is precisely SOMET-291's rescue.
+          //  - the guard's own displacement calls a WALL-SLIDE progress. This
+          //    is the one that shipped and then failed in the running game:
+          //    both Windwatch guards spent 15s pinned at y=2500 sliding a few
+          //    px/s along the inside of their north wall, following a roaming
+          //    slime they could never reach, and were dragged 203px -> 288px
+          //    off station while every tick "moved". A roaming hostile keeps
+          //    re-aiming the guard, so the tangential component never dies.
+          //
+          // resolveMove clamps each axis independently, so a step into a wall
+          // still delivers its tangential part. Comparing what arrived against
+          // what was asked for is therefore the direct question: a guard on
+          // open ground delivers all of it, one rounding a corner at 45deg
+          // delivers ~71%, and one pushing into a wall nearly head-on delivers
+          // a few percent. Below a quarter it is not walking along anything, it
+          // is leaning on the wall.
+          //
+          // The reach test is the other exemption: a guard in contact, hitting
+          // a hostile, is motionless on purpose, and its step vector is ~0 so
+          // it would otherwise read as fully blocked. Asked as a range question
+          // rather than "did selectAbility return something", which goes null
+          // for the whole of a cooldown and would read a fighting guard as
+          // stuck.
           const pc = center(c);
+          const intended = c.speed * (bh.moveSpeedMult * c._buff.speedMult) * dt
+            * this.map.speedAt(cc.x, cc.y);
+          const delivered = Math.hypot(pc.x - cc.x, pc.y - cc.y);
+          const blocked = intended > 0
+            && delivered < intended * GUARD_CHASE_BLOCKED_FRACTION
+            && Math.hypot(tc.x - pc.x, tc.y - pc.y) > longestReach(bh);
           if (c._chaseTargetId !== tgt.id) {
             c._chaseTargetId = tgt.id;
-            c._chaseMarkX = pc.x; c._chaseMarkY = pc.y;
             c._chaseStall = 0;
-          } else if (Math.hypot(pc.x - c._chaseMarkX, pc.y - c._chaseMarkY) >= GUARD_RETURN_PROGRESS_EPSILON
-                     || Math.hypot(tc.x - pc.x, tc.y - pc.y) <= longestReach(bh)) {
-            c._chaseMarkX = pc.x; c._chaseMarkY = pc.y;
-            c._chaseStall = 0;
-          } else {
+          } else if (blocked) {
             c._chaseStall += 1;
+          } else {
+            c._chaseStall = 0;
           }
           if (c._chaseStall >= GUARD_CHASE_STALL_TICKS) {
             // Demonstrably immobile for 2s and unable to touch it: this guard
@@ -1984,7 +2005,7 @@ module.exports = {
   // pin the behaviour measure against the shipped values rather than restating
   // them (a test carrying its own copy of 40 keeps passing when the real one
   // is tuned to 4000).
-  GUARD_CHASE_STALL_TICKS, GUARD_UNREACHABLE_MS, GUARD_UNREACHABLE_MOVE,
+  GUARD_CHASE_STALL_TICKS, GUARD_CHASE_BLOCKED_FRACTION, GUARD_UNREACHABLE_MS,
   withinLeash, selectGuardTarget,
   // SOMET-290 / SOMET-291: the two predicates that own "is this creature prey
   // or a fighter". isFleeingFrom is the tick's own rule, per-target and
