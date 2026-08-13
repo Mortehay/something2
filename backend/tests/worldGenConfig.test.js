@@ -37,7 +37,8 @@ test('carries every field the generator reads', () => {
   const c = buildWorldGenConfig(cfgArgs());
   assert.deepEqual(Object.keys(c).sort(), [
     'biomeCell', 'biomes', 'chunkSize', 'doorways', 'entry_spawn',
-    'height', 'levelMax', 'levelMin', 'seed', 'tileTypes', 'villages', 'width',
+    'height', 'levelMax', 'levelMin', 'safeRects', 'safeRoadRadius',
+    'seed', 'tileTypes', 'villages', 'width',
   ]);
   assert.equal(c.chunkSize, 16);
   assert.equal(c.width, 30);
@@ -101,4 +102,42 @@ test('a world with no biomes builds an empty biome list, not undefined', () => {
   const c = buildWorldGenConfig(cfgArgs({ biomes: [] }));
   assert.deepEqual(c.biomes, []);
   assert.deepEqual(worldConfig(c).biomes, []);
+});
+
+test('safe-region columns reach the generator config, converted to camelCase', () => {
+  const cfg = buildWorldGenConfig({
+    row: {
+      ...ROW,
+      safe_road_radius: 2,
+      safe_rects: [{ min_row: 4, min_col: 5, width: 3, height: 2 }],
+    },
+    tileTypes: TILE_TYPES, doorways: [], villages: [], biomes: BIOMES,
+  });
+  assert.equal(cfg.safeRoadRadius, 2);
+  assert.deepEqual(cfg.safeRects, [{ minRow: 4, minCol: 5, width: 3, height: 2 }]);
+});
+
+test('a row with no safe-region columns yields the opted-out config', () => {
+  // Every world that existed before this feature. The generator must see 0 and
+  // [], not undefined -- worldConfig would normalize undefined the same way,
+  // but a missing mapping here is exactly the silent client/server divergence
+  // buildWorldGenConfig's header warns about.
+  const cfg = buildWorldGenConfig({
+    row: ROW, tileTypes: TILE_TYPES, doorways: [], villages: [], biomes: BIOMES,
+  });
+  assert.equal(cfg.safeRoadRadius, 0);
+  assert.deepEqual(cfg.safeRects, []);
+});
+
+test('worldConfig normalizes the safe-region fields it is handed', () => {
+  const cfg = worldConfig({
+    seed: 1, width: 20, height: 20, tileTypes: TILE_TYPES,
+    safeRoadRadius: 3, safeRects: [{ minRow: 1, minCol: 1, width: 2, height: 2 }],
+  });
+  assert.equal(cfg.safeRoadRadius, 3);
+  assert.deepEqual(cfg.safeRects, [{ minRow: 1, minCol: 1, width: 2, height: 2 }]);
+
+  const bare = worldConfig({ seed: 1, width: 20, height: 20, tileTypes: TILE_TYPES });
+  assert.equal(bare.safeRoadRadius, 0);
+  assert.deepEqual(bare.safeRects, []);
 });

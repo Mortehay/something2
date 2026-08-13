@@ -203,6 +203,13 @@ function worldConfig(world = {}) {
           wallTile: 'wooden_wall', gateTile: 'village_gate',
         }))
       : null,
+    // SOMET-288. safeRegion.buildSafeContext does the real normalization (a
+    // junk radius becomes 0, never NaN); these are coerced here as well so a
+    // hand-built test world and a world that came through buildWorldGenConfig
+    // present the same shape, and so `cfg.safeRoadRadius` is always a number
+    // for the `radius > 0` short-circuit in safeContextFor.
+    safeRoadRadius: Number(world.safeRoadRadius) || 0,
+    safeRects: Array.isArray(world.safeRects) ? world.safeRects : [],
   };
 }
 

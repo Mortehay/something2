@@ -31,6 +31,22 @@ function buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes }) {
     // module's header comment warns about.
     levelMin: row.level_min,
     levelMax: row.level_max,
+    // Safe territory (SOMET-288). Read by creatureTileCandidates via
+    // safeRegion.js, so a hostile is never generated on a road or in a
+    // village. snake_case in the DB and the map spec, camelCase from here on,
+    // converted in ONE place so no consumer has to know both spellings.
+    //
+    // Defaults matter: a row read before migration 1714440180000 ran (or a
+    // hand-built row in a test) must come out opted OUT, never undefined --
+    // undefined would reach worldConfig and normalize to the same thing, but
+    // a missing mapping here is precisely the silent divergence this module's
+    // header exists to prevent.
+    safeRoadRadius: Number(row.safe_road_radius) || 0,
+    safeRects: Array.isArray(row.safe_rects)
+      ? row.safe_rects.map((s) => ({
+          minRow: s.min_row, minCol: s.min_col, width: s.width, height: s.height,
+        }))
+      : [],
   };
 }
 
