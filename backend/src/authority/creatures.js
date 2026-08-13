@@ -928,6 +928,28 @@ class CreatureSim {
         c._target = tgt ? tgt.id : null;
         c._targetKind = tgt ? 'creature' : null;
 
+        // KNOWN, NOT FIXED (SOMET-291 review): a guard can lock onto a hostile
+        // on the far side of its OWN wall and stand there indefinitely.
+        //
+        // This branch has no stall detection, no repath and no give-up. All of
+        // that machinery lives in the no-target return branch below
+        // (_homeStall / findHomePath / the put-back-on-the-post fallback), and
+        // a guard holding a target never reaches it. So the chase step below
+        // jams against the inside of the wall, the leash clamp refuses the
+        // identical step forever, and nothing here notices.
+        //
+        // Reproduced on a live village shape (6x4, gate E) with a hostile 350px
+        // due north of the north post -- a wall with no gate. It is admitted
+        // (350 <= aggro 400, 350 <= leash 600 from the post), the guard walks
+        // 26px, and 2000 ticks later it is still mode 'chase' on that target.
+        //
+        // Pre-existing, and WIDENED by the SOMET-291 leash raise: at leash 300
+        // the same hostile was refused outright, so the reachable band beyond a
+        // gateless wall grew from roughly 200px to roughly 300px on the three
+        // walls that have no gate. It is recorded rather than fixed because the
+        // rescue still rescues -- the symptom is a distracted guard, not a
+        // broken one -- and give-up logic on a chase is a behaviour change, not
+        // a test gap.
         if (tgt) {
           c.mode = 'chase';
           // SOMET-154: a chase invalidates any cached walk-home detour — the

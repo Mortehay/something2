@@ -130,6 +130,21 @@ const VILLAGE_LIMITS = {
 // Rounded UP to a whole tile, because every other distance in this file is a
 // tile multiple and a leash of 541.42 would read as a measurement rather than
 // a decision.
+//
+// CONSEQUENCE, recorded here because it is not visible from the number: the
+// interior term is literally "fight anywhere inside its own village", and every
+// interior tile of every legal box is within the guard's 400px aggro of a post.
+// So at leash 600 NOTHING inside a village is leash-protected any more -- the
+// whole interior is a legal guard target, and the leash has stopped being what
+// decides which of them a guard will engage.
+//
+// That matters for penned livestock (SOMET-289): all three skittish types carry
+// faction 'hostile' like every other wild spawn, and selectGuardTarget admits
+// candidates by faction, so a pen placed within ~400px of a gate post gives the
+// village guards a herd to hunt. The constraint belongs to whoever places the
+// pen -- it has been relayed to that slice -- and is written down here so the
+// coupling is discoverable from the code that caused it rather than only from a
+// ticket.
 function eachLegalVillage(visit) {
   for (let width = VILLAGE_LIMITS.minW; width <= VILLAGE_LIMITS.maxW; width++) {
     for (let height = VILLAGE_LIMITS.minH; height <= VILLAGE_LIMITS.maxH; height++) {
