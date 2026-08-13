@@ -85,18 +85,23 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
   //
   // Collected here, before the world loop, for the same reason
   // portalConnectedKeys is: that loop has to consult it.
-  const guardedStaircaseTiles = new Set();
+  // Maps the tile to a description of WHAT guards it, not just to "guarded":
+  // the error has to name the guard, or an author faced with a rejection has no
+  // way to tell which of a spec's portals it means.
+  const guardedStaircaseTiles = new Map();
   for (const l of links) {
     if (l.kind !== 'portal') continue;
     portalConnectedKeys.add(l.from); portalConnectedKeys.add(l.to);
     if (!l.guard) continue;
     const coords = ['from_x', 'from_y', 'to_x', 'to_y'];
     // A malformed coordinate is reported by the link loop below; skipping it
-    // here keeps floor(undefined) out of the set (it would produce "NaN,NaN",
+    // here keeps floor(undefined) out of the map (it would produce "NaN,NaN",
     // a slot nothing can match, silently disarming the rule for that link).
     if (coords.some((f) => !Number.isInteger(l[f]))) continue;
-    guardedStaircaseTiles.add(tileSlot(l.from, l.from_x, l.from_y));
-    guardedStaircaseTiles.add(tileSlot(l.to, l.to_x, l.to_y));
+    const who = `${l.guard.count ?? '?'}x ${l.guard.creature_type ?? 'unnamed guard'} `
+      + `on portal ${l.from}->${l.to}`;
+    guardedStaircaseTiles.set(tileSlot(l.from, l.from_x, l.from_y), who);
+    guardedStaircaseTiles.set(tileSlot(l.to, l.to_x, l.to_y), `${who} (arrival side)`);
   }
 
   // Every waypoint name the spec claims, and every tile one occupies. Both are
@@ -136,8 +141,9 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
 
     const slot = tileSlot(worldKey, x, y);
     if (guardedStaircaseTiles.has(slot)) {
-      errors.push(`${label} sits on a guarded portal in world "${worldKey}" — a waypoint there is a `
-        + 'guard the player never has to meet, and the level band it defends stops holding');
+      errors.push(`${label} sits on a guarded portal in world "${worldKey}" `
+        + `(guarded by ${guardedStaircaseTiles.get(slot)}) — a waypoint there is a guard the player `
+        + 'never has to meet, and the level band it defends stops holding');
     }
     if (waypointTiles.has(slot)) {
       errors.push(`world "${worldKey}" already has a waypoint on tile `

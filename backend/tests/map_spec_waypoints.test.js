@@ -161,6 +161,9 @@ test('a GUARDED portal cannot be a waypoint', () => {
     guard: { creature_type: 'Wolf', count: 2 },
     is_waypoint: true, waypoint_name: 'Barrow Stair',
   }));
+  // The message must NAME the guard: an author facing a rejection otherwise has
+  // no way to tell which of a spec's portals it means.
+  assert.ok(has(errs, /guarded by 2x Wolf on portal surface->barrow/), errs.join('; '));
   assert.ok(has(errs, /sits on a guarded portal in world "surface"/), errs.join('; '));
 });
 
@@ -173,6 +176,7 @@ test('the MIRROR of a guarded portal cannot be a waypoint either', () => {
     reversed: true, is_waypoint: true, waypoint_name: 'Barrow Stair',
   }));
   assert.ok(has(errs, /sits on a guarded portal in world "barrow"/), errs.join('; '));
+  assert.ok(has(errs, /arrival side/), errs.join('; '));
 });
 
 test('a standalone waypoint on a guarded portal tile is the same bypass', () => {
