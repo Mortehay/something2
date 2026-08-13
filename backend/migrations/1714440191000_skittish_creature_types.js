@@ -26,6 +26,23 @@ exports.shorthands = undefined;
 // near-zero-footprint change: SOMET-289's pens will place them explicitly,
 // nothing shipped changes underneath a player today.
 //
+// RUNG IS NOT LEVEL BAND, and these three do NOT share one. bestiary/derive.js
+// deriveLevelBand(tier, rungIndex) places a rung inside its LINE's tier span,
+// so a Swarm on a tier-II line outranks a Swarm on a tier-I line. Read from
+// seeds/data/bestiaryP4.js:
+//
+//   Woodland Swarm  levels 1-2   (Deep Forest, tier I)
+//   Beast Swarm     levels 1-2   (Meadow,      tier I)
+//   Highland Swarm  levels 8-10  (Highlands,   tier II)
+//
+// Woodland Swarm and Beast Swarm are the starting-zone pair -- those are the
+// two that belong in a level-1 practice pen. Highland Swarm is a LATER-REGION
+// creature that happens to share the profile, and a level 8-10 skittish
+// creature is perfectly legitimate; it is simply not starting-zone content.
+// SOMET-289 picks its pen creatures from this set and must pick by level band,
+// not by "it has the Skittish profile" -- dropping a Highland Swarm into a
+// level-1 pen would put an 8-10 in front of a new player.
+//
 // behavior_id is set from a SUBSELECT on creature_behaviors.name, never a
 // hardcoded id: a literal id is only correct in the one database it was read
 // from, and this checkout points at the shared dev database, not a fixture

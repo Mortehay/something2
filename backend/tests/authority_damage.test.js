@@ -161,9 +161,15 @@ test('any landed hit marks the target provoked', () => {
   assert.equal(t_obj._provoked, true);
 });
 
-test('a hit fully absorbed by mitigation still provokes', () => {
-  // MIN_DAMAGE floors every hit at 1, so a landed swing always deals damage.
-  // If that floor is ever removed, being hit for zero must STILL provoke — a
+test('a hit against enormous defence still provokes', () => {
+  // Named for what it can actually prove. MIN_DAMAGE floors every hit at 1, so
+  // no amount of defence produces a zero-damage hit and this case cannot
+  // distinguish an unconditional provoke from one gated on `final > 0` — the
+  // sibling case above is what covers the mark itself. What this does pin is
+  // that mitigation is not a separate escape route: however much of the swing
+  // is absorbed, the target still knows it was hit.
+  //
+  // If the floor is ever removed, being hit for zero must STILL provoke — a
   // creature that ignores an attack it survived unharmed reads as broken.
   const t_obj = { hp: 100, maxHp: 100 };
   applyDamage(t_obj, 1, 'physical', { defense: 9999, resistances: {} });

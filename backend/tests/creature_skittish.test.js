@@ -174,32 +174,94 @@ test('a creature cornered against a wall turns and fights instead of jittering',
 
 // --- 6. NOT HERDED -----------------------------------------------------------
 
+// A player who never gives up: steps 1.5px (30px/s) toward the creature's
+// current centre every tick, forever. Deliberately PURSUING rather than walking
+// a fixed line west, because a player who walks past and keeps going leaves the
+// 300px aggro radius, the creature drops its target and falls through to the
+// ROAM block -- and roam is not leash-clamped for a hostile creature (only the
+// guard branch walks home). A run that ends in roam measures the wander, not
+// the clamp. Pursuing keeps `mode` at 'chase' for the whole run, so the leash
+// is provably the only thing limiting how far the creature gets from home.
+function pursue(player, c, step = 1.5) {
+  const px = player.x + player.width / 2;
+  const cx = c.x + c.width / 2;
+  if (px !== cx) player.x += Math.sign(cx - px) * step;
+}
+
 test('a creature with a home anchor cannot be herded past its leash', () => {
   // leashRadius 200 (rather than the profile's 500) purely to keep the run
   // short; the rule under test is the clamp, not the number.
   const bh = skittish({ leashRadius: 200 });
   const { s, player, active, c } = scenario(bh, CX + 200, { creature: { home_x: CX, home_y: CY } });
 
-  // A player who simply keeps walking at it, 30px/s, for 30 seconds -- faster
-  // than the creature can be provoked into giving ground voluntarily and long
-  // enough to walk it 900px off its anchor if nothing stopped it.
+  // 30 seconds of pursuit -- long enough to walk the creature 900px off its
+  // anchor if nothing stopped it.
   let herded = 0;
+  let everRoamed = false;
   for (let i = 0; i < 600; i++) {
-    player.x -= 1.5;
-    const calm = !c._provoked;
+    pursue(player, c);
     s.tick(0.05, active, [player], i * 0.05);
-    // Only FLEE steps are clamped, so only distance reached while still calm
-    // is evidence about the clamp.
-    if (calm) herded = Math.max(herded, fromHome(c));
+    herded = Math.max(herded, fromHome(c));
+    everRoamed = everRoamed || c.mode !== 'chase';
   }
 
+  assert.equal(everRoamed, false, 'fixture: it dropped its target, so this run measured roam');
   assert.ok(herded <= 200 + 1e-6, `herded ${herded.toFixed(2)}px from home, leash is 200`);
   // ...and it did reach the edge, so the clamp was actually exercised rather
   // than vacuously satisfied by a creature that never moved.
   assert.ok(herded > 150, `only reached ${herded.toFixed(2)}px from home: the clamp never bit`);
   // The map is entirely walkable here, so the ONLY thing that can refuse a
-  // retreat step is the leash. Being provoked proves the refusal happened.
-  assert.equal(c._provoked, true, 'pinned against its leash on open ground and never cornered');
+  // retreat step is the leash -- and a leash refusal must NOT provoke. See the
+  // next case for why that distinction is the whole point of the clamp.
+  // `!c._provoked` rather than `=== false`: a creature that was never provoked
+  // has never had the field written at all, and it is the absence of anger that
+  // is under test either way.
+  assert.ok(!c._provoked, 'the leash itself cornered it');
+});
+
+// --- 6b. THE LEASH MUST NOT PROVOKE ------------------------------------------
+
+test('a creature pinned against its own leash never converts and never leaves the leash', () => {
+  // The regression this exists for: while a leash refusal counted as "cornered"
+  // alongside a terrain refusal, enforcing the leash DESTROYED it. The refusal
+  // set _provoked, `fleeing` went false from the next tick, and the clamp only
+  // ever applies to a flee step -- so the creature converted at its own boundary
+  // and then chased the player straight out of the pen with nothing holding it.
+  // flushAndPrune persists x/y, so the escape outlived the process: a pen would
+  // drain permanently, one creature per player who wandered in.
+  //
+  // Same fixture as case 6, run three times as long and starting from the
+  // stand-and-watch band, so the run covers the approach, the retreat, the pin,
+  // and 80 further seconds of a player standing on top of a pinned creature --
+  // "however long the player keeps advancing".
+  const bh = skittish({ leashRadius: 200 });
+  const { s, player, active, c } = scenario(bh, CX + 250, { creature: { home_x: CX, home_y: CY } });
+
+  let maxFromHome = 0;
+  let everProvoked = false;
+  let everRoamed = false;
+  for (let i = 0; i < 1800; i++) {
+    pursue(player, c);
+    s.tick(0.05, active, [player], i * 0.05);
+    // Per-tick, not just at the end: a creature that escaped and was later
+    // dragged back would pass an end-state check.
+    maxFromHome = Math.max(maxFromHome, fromHome(c));
+    everProvoked = everProvoked || c._provoked === true;
+    everRoamed = everRoamed || c.mode !== 'chase';
+  }
+
+  assert.equal(everRoamed, false, 'fixture: it dropped its target, so this run measured roam');
+  assert.equal(everProvoked, false,
+    'the leash edge provoked it -- the clamp converted the creature it exists to contain');
+  assert.ok(maxFromHome <= 200 + 1e-6,
+    `left its leash: reached ${maxFromHome.toFixed(2)}px from home, leash is 200`);
+  // It really was pushed to the boundary, so the assertions above are not
+  // vacuously true of a creature that never had to give ground.
+  assert.ok(maxFromHome > 150,
+    `only reached ${maxFromHome.toFixed(2)}px from home: it was never pinned`);
+  // Still prey at the end of all that: pinned and calm is the intended
+  // "you can walk up to one and hunt it" outcome, not a fight.
+  assert.equal(player.hp, 500, 'a creature cornered only by its own leash bit the player');
 });
 
 // --- 7. UNANCHORED IS UNCONSTRAINED ------------------------------------------

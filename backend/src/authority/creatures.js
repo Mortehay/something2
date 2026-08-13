@@ -1125,20 +1125,36 @@ class CreatureSim {
           // the chase too would freeze a provoked creature against its leash
           // edge with the player one step outside it, re-creating exactly the
           // stuck-guard failure the guard branch above documents at length.
-          const stepped = (r.x !== c.x || r.y !== c.y)
-            && (!fleeing || withinLeash(r.x + c.width / 2, r.y + c.height / 2, c.home, bh.leashRadius));
-          if (stepped) {
+          const inLeash = !fleeing
+            || withinLeash(r.x + c.width / 2, r.y + c.height / 2, c.home, bh.leashRadius);
+          const moved = (r.x !== c.x || r.y !== c.y);
+          if (moved && inLeash) {
             c.x = r.x; c.y = r.y;
             const f = facingFor(vx, vy); if (f) c.facing = f;
             c.dirty = true;
-          } else if (fleeing) {
-            // Cornered: it tried to run and could not, either because terrain
-            // refused the step or because the clamp above did. A creature with
-            // nowhere left to go fights -- without this it would jitter
-            // silently against the wall while the player killed it for free,
-            // which reads as a broken enemy rather than a frightened one.
-            // Both refusals are one case on purpose: from inside the pen, a
-            // fence and a leash edge are the same wall.
+          } else if (fleeing && !moved) {
+            // Cornered by TERRAIN, and only by terrain: the step was refused
+            // because the world had nowhere to put it. A creature with nowhere
+            // left to go fights -- without this it would jitter silently
+            // against the wall while the player killed it for free, which reads
+            // as a broken enemy rather than a frightened one.
+            //
+            // The two refusals are deliberately NOT one case, which is the
+            // opposite of how it looks from inside the pen. A fence refusal
+            // keeps the creature where it is whatever it decides next. A leash
+            // refusal does not: provoking here would clear `fleeing` from the
+            // next tick, and the clamp above only applies to a flee step, so
+            // the very act of enforcing the leash would drop it -- the creature
+            // would convert and then chase the player straight out of the pen,
+            // unclamped and with no return-home path. flushAndPrune writes
+            // x/y back to world_creatures, so that displacement would outlive
+            // the session and drain the pen permanently, one creature per
+            // player who wandered in.
+            //
+            // So a creature pinned against its own leash simply stops
+            // retreating. It stands at the edge, still calm, and can be walked
+            // up to and killed -- which is the intended "you can hunt one"
+            // outcome, not a failure mode.
             c._provoked = true;
           }
         }

@@ -66,7 +66,32 @@ exports.up = (pgm) => {
 };
 
 exports.down = (pgm) => {
-  // The behaviour row goes first: the narrowed CHECK below would reject it
+  // Release this behaviour's referents BEFORE deleting it. entity_types
+  // .behavior_id references creature_behaviors with NO ACTION
+  // (1714440081000_entity_behavior.js), so a bare DELETE raises an FK
+  // violation the moment any entity_type still points at 'Skittish'.
+  //
+  // In the ordered rollback this is a no-op: 1714440191000's own down runs
+  // first and resets the three types it flagged. But that down knows exactly
+  // three hardcoded names, and this profile is meant to be adopted more
+  // widely -- SOMET-289's pens will pick from it. The first type flagged by
+  // anything other than that one migration would wedge the rollback HERE,
+  // after dropConstraint below has already run, leaving the schema
+  // half-reverted. Releasing by behavior_id rather than by name costs
+  // nothing in the ordered case and is the difference between a working and
+  // a wedged rollback in every other.
+  //
+  // 'Line' is the reset target because it is already this schema's fallback
+  // profile: 1714440081000's own comment states that a creature type with no
+  // behavior_id resolves to Line in services/creatureBehaviors.js. Pointing a
+  // released type at it therefore lands it exactly where an unflagged type
+  // sits -- a plain charger -- rather than at a dangling null or at whichever
+  // profile it happened to carry before.
+  pgm.sql(`
+    UPDATE entity_types SET behavior_id = (SELECT id FROM creature_behaviors WHERE name = 'Line')
+    WHERE behavior_id = (SELECT id FROM creature_behaviors WHERE name = 'Skittish')
+  `);
+  // The behaviour row goes next: the narrowed CHECK below would reject it
   // while it still carries chase_style 'skittish'. Its slot-1 ability row
   // does not need a matching DELETE -- creature_abilities.behavior_id is
   // ON DELETE CASCADE (1714440083000_creature_abilities.js), so deleting
