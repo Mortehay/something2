@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Pool } = require('pg');
 const {
-  worldConfig, collectPathCells, villageGatePosts, CREATURE_TILE_PX,
+  worldConfig, collectPathCells, villageGatePosts, placeMapCreatures, CREATURE_TILE_PX,
 } = require('../src/services/mapService.js');
 const { buildSafeContext, isSafeTile } = require('../src/services/safeRegion.js');
 const { buildWorldGenConfig } = require('../src/services/worldGenConfig.js');
@@ -218,16 +218,35 @@ describeDb('the live home region matches the checked-in specs', async () => {
         }
       }
 
-      // No WILD hostile stands in safe territory. This is the slice's headline
-      // promise, checked against live rows rather than against a fresh
-      // placement -- these three worlds were populated long before the corridor
-      // existed, and migration 1714440201000 had to re-roll them.
-      const wild = creatures.filter((c) => c.type !== GUARD_TYPE && c.home_x === null);
-      assert.ok(wild.length > 0, `${name} holds no wild hostiles -- this check would be vacuous`);
-      for (const c of wild) {
+      // No hostile is GENERATED in safe territory, asked of THIS world's real
+      // row rather than of a fixture.
+      //
+      // Deliberately a fresh placement and NOT a scan of live positions. Safety
+      // is a spawn-time rule and nothing on the movement path consults it -- a
+      // wild hostile is free to roam onto the road, and must be, because a
+      // hostile chasing a player has to be able to follow them to the gate
+      // (that is what the guards are for). Asserting live coordinates would
+      // therefore fail on correct behaviour a few minutes after any seed; it
+      // did exactly that during a full-suite run before this was rewritten.
+      //
+      // What IS worth pinning here is the composition slice A's own fixture
+      // tests cannot reach: that the authored roads and radius on this
+      // particular live row actually arrive at placement. If authored_roads
+      // stopped reaching the generation config, this world would place hostiles
+      // straight down the middle of its highway.
+      const hostileTypes = (await pool.query(
+        `SELECT name, hp, defense, resistances FROM entity_types
+          WHERE is_creature = true AND name = ANY($1::text[]) AND coalesce(faction,'hostile') <> 'guard'`,
+        [row.allowed_creature_types])).rows;
+      assert.ok(hostileTypes.length > 0, `${name} allows no hostile types -- check would be vacuous`);
+      const fresh = placeMapCreatures(world, 120, hostileTypes, Number(row.seed));
+      assert.ok(fresh.length > 20,
+        `${name}: placed only ${fresh.length} of 120 -- too few to prove anything, and a sign `
+        + 'the safe region has eaten the map');
+      for (const c of fresh) {
         const [r, cc] = tileOf(c);
         assert.ok(!isSafeTile(ctx, r, cc),
-          `${name}: a wild ${c.type} at tile (${r},${cc}) stands in safe territory`);
+          `${name}: a freshly placed ${c.type} landed on safe tile (${r},${cc})`);
       }
     }
 
