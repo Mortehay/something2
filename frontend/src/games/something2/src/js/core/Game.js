@@ -905,7 +905,21 @@ export class Game {
             }
 
             // Dev: toggle tile textures on/off (falls back to flat color).
-            if (key === 't' && this.renderSystem && this.chunked && !e.repeat) {
+            // Moved to Shift+T so plain T can open the waypoint travel popup
+            // (handled in WaypointTravel.jsx) — the second time a dev key has
+            // had to give up its unmodified letter to a player-facing panel,
+            // after Shift+M above.
+            //
+            // WHY THE DEV KEY MOVES AND NOT THE PLAYER ONE. These are two
+            // separate window keydown listeners in two files, so both fired:
+            // pressing T opened the panel AND turned tile textures off, with
+            // the "Tile textures off" toast hidden behind the panel's backdrop.
+            // Closing the panel the two ways it invites — Esc, or a backdrop
+            // click — left the whole map flat-coloured for the rest of the
+            // session with nothing on screen saying why. A player-facing key
+            // must be the plain letter the help panel names; a dev toggle
+            // nobody but us presses is the one that can afford a modifier.
+            if (key === 't' && e.shiftKey && this.renderSystem && this.chunked && !e.repeat) {
                 const on = this.renderSystem.toggleTileTextures();
                 this._showToast(`Tile textures ${on ? 'on' : 'off'}`);
             }
