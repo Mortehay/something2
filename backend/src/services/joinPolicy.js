@@ -212,7 +212,32 @@ async function joinPolicyFacts(pool, characterId, worldId) {
 // The destination row is returned whole because the caller needs its x/y for
 // pendingArrivals -- landing the player on the destination TILE is the whole
 // difference between this and a world-granularity teleport.
+// `waypoints.id` is a uuid column and both ids below are cast to it. A frame
+// carrying anything else -- 'x', a number, an object -- makes Postgres raise
+// 22P02 out of the query rather than return no rows, and the authority's op
+// chain turns that into `{type:'error', message:'travel failed'}` plus a stack
+// in the log. The player then sees a different toast for a malformed id than
+// for one that simply is not theirs, which is a distinction the refusal is
+// deliberately written not to draw, and every probe with a keyboard can produce
+// pages of ERROR lines for free.
+//
+// Not an enumeration oracle -- a client already knows whether its own string is
+// a uuid, so the distinction tells it nothing about the world graph. It is
+// wrong-looking output and log noise, and the shape below already has the right
+// answer for "that is not a waypoint".
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const NO_TRAVEL = Object.freeze({
+  destination: null, standingOnActivatedWaypoint: false, destinationActivated: false,
+});
+
 async function waypointTravelFacts(pool, characterId, originWaypointId, destinationWaypointId) {
+  // The DESTINATION only. `originWaypointId` comes from the authority's own
+  // waypoint Map, never off the wire, so it is a uuid or null by construction --
+  // guarding it here would be guarding against this server, and would hide a
+  // real bug in loadWorld behind a silent refusal if it ever stopped being true.
+  if (typeof destinationWaypointId !== 'string' || !UUID_RE.test(destinationWaypointId)) {
+    return NO_TRAVEL;
+  }
   const r = await pool.query(
     `SELECT wp.id, wp.world_id, wp.x, wp.y, wp.name,
             EXISTS (SELECT 1 FROM character_waypoints cw
@@ -226,9 +251,7 @@ async function waypointTravelFacts(pool, characterId, originWaypointId, destinat
   // de-authored between the popup rendering and the click. Both are refusals,
   // and the empty result also means the origin answer is unknown -- so it fails
   // closed rather than being carried over from a row that does not exist.
-  if (r.rows.length === 0) {
-    return { destination: null, standingOnActivatedWaypoint: false, destinationActivated: false };
-  }
+  if (r.rows.length === 0) return NO_TRAVEL;
   const row = r.rows[0];
   return {
     destination: {

@@ -1409,6 +1409,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // and the world-granularity fast travel it replaces. chooseSpawn takes
         // `pending` ahead of the persisted position, so this wins even for a
         // world the character has stood in before.
+        // NO COOLDOWN HERE, unlike the doorway (_doorwayCdUntil) and portal
+        // (_portalCdUntil) paths a few hundred lines down (SOMET-293 review).
+        // Those two are commented "suppress duplicate sends during reconnect"
+        // and they need to be: both are fired by the TICK LOOP off the tile the
+        // player is standing on, so without a timer the server re-sends the same
+        // transition every tick for as long as the client takes to reconnect.
+        // This handler has no such re-evaluation -- nothing fires it but an
+        // explicit `travel` frame, and the popup closes itself on the request.
+        // A timer here would only rate-limit a client asking twice, which every
+        // other frame in this file is equally free to do, and it would need a
+        // third answer on the wire (refused-for-cooldown) that the deliberately
+        // generic refusal above has no room for.
         pendingArrivals.set(characterId, { worldId: dest.worldId, x: dest.x, y: dest.y });
         send(ws, { type: 'transition', toWorldId: dest.worldId, arriveX: dest.x, arriveY: dest.y });
         // Fog of war, like every other transition push: the server has committed

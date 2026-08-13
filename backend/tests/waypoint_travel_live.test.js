@@ -71,8 +71,16 @@ async function noMsg(ws, type, ms = 300) {
 const CHARACTER = 7;
 // Two worlds, one waypoint each, both on tile (10,10) of their own world so the
 // arithmetic is easy to read. Travel between them is the feature.
-const HOME = { world: 'w1', id: 'wp-home', x: 1050, y: 1050 };
-const AWAY = { world: 'w2', id: 'wp-away', x: 2050, y: 3050 };
+// The ids are real uuids, not readable slugs: `waypoints.id` is a uuid column
+// and waypointTravelFacts refuses anything that is not one before it queries, so
+// a slug fixture would exercise the malformed-id path on every test in this file
+// while reading as if it exercised the happy one.
+const HOME = { world: 'w1', id: '11111111-1111-4111-8111-111111111111', x: 1050, y: 1050 };
+const AWAY = { world: 'w2', id: '22222222-2222-4222-8222-222222222222', x: 2050, y: 3050 };
+const SECOND = '33333333-3333-4333-8333-333333333333';
+// A syntactically valid uuid that names no waypoint -- the "unknown id" case is
+// about the row being absent, not about the string being malformed.
+const ABSENT = '99999999-9999-4999-8999-999999999999';
 
 // `activated` is the set of waypoint ids this character has lit, and it is what
 // the fake pool answers waypointTravelFacts from -- so a test can put the player
@@ -108,6 +116,20 @@ function fakeTravelPool({ activated = [HOME.id, AWAY.id], waypointsByWorld = nul
     // to either -- the two views of the table agree by construction.
     if (/FROM waypoints wp WHERE wp\.id/i.test(sql)) {
       const [characterId, destId, originId] = params;
+      // Postgres's behaviour, not this fake's politeness: the query casts both
+      // ids with `::uuid`, and the real server raises 22P02 on anything that is
+      // not one -- which the authority's op chain turns into
+      // `{type:'error', message:'travel failed'}` rather than the generic
+      // refusal. Reproduced so the malformed-id test below observes the guard in
+      // waypointTravelFacts rather than this fake's tolerance.
+      for (const p of [destId, originId]) {
+        if (p == null) continue;
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(p))) {
+          const e = new Error(`invalid input syntax for type uuid: "${p}"`);
+          e.code = '22P02';
+          throw e;
+        }
+      }
       const wp = allWaypoints().find((w) => w.id === destId);
       if (!wp) return { rows: [] };
       assert.equal(characterId, CHARACTER, 'the travel loader must be keyed on the joined character');
@@ -323,11 +345,36 @@ test('travel is refused to a waypoint this character has not lit', async () => {
   assert.equal(await noMsg(ws, 'transition'), null);
 });
 
+test('a malformed waypoint id gets the SAME refusal an unknown one gets', async () => {
+  // SOMET-293 review note. The loader casts `wp.id = $2::uuid`, so before the
+  // guard in waypointTravelFacts a non-uuid raised 22P02, the op chain caught
+  // it, and the player saw "travel failed" -- a different toast for a malformed
+  // id than for one that is simply not theirs, from a refusal written to be
+  // indistinguishable. The fake pool above reproduces the Postgres error, so
+  // deleting the guard fails this test rather than passing it.
+  const pool = fakeTravelPool();
+  const { ws } = await joinAt(pool, { x: HOME.x, y: HOME.y });
+
+  for (const bad of ['not-a-uuid', '', 42, null]) {
+    ws.send(JSON.stringify({ type: 'travel', waypointId: bad }));
+    const err = await nextMsg(ws, 'error');
+    assert.equal(err.message, 'you cannot travel there',
+      `"${bad}" must get the generic refusal, not the op chain's "travel failed"`);
+  }
+  assert.equal(await noMsg(ws, 'transition'), null);
+
+  // Paired positive: the socket is still usable and the SAME frame with a real
+  // id still travels, so the refusals above are about the id and not about a
+  // session this test wedged.
+  ws.send(JSON.stringify({ type: 'travel', waypointId: AWAY.id }));
+  assert.equal((await nextMsg(ws, 'transition')).toWorldId, 'w2');
+});
+
 test('an unknown waypoint id is refused without killing the session', async () => {
   const pool = fakeTravelPool();
   const { ws } = await joinAt(pool, { x: HOME.x, y: HOME.y });
 
-  ws.send(JSON.stringify({ type: 'travel', waypointId: 'wp-does-not-exist' }));
+  ws.send(JSON.stringify({ type: 'travel', waypointId: ABSENT }));
   await nextMsg(ws, 'error');
   assert.equal(await noMsg(ws, 'transition'), null);
 
@@ -347,17 +394,17 @@ test('same-world travel between two lit waypoints works', async () => {
   // authorize the trip regardless of activation. It goes down the same path as
   // any other trip.
   const pool = fakeTravelPool({
-    activated: [HOME.id, 'wp-second'],
+    activated: [HOME.id, SECOND],
     waypointsByWorld: {
       w1: [
         { id: HOME.id, world_id: 'w1', x: HOME.x, y: HOME.y, name: 'Home Waystone', map_link_id: null },
-        { id: 'wp-second', world_id: 'w1', x: 2050, y: 2050, name: 'Second Waystone', map_link_id: null },
+        { id: SECOND, world_id: 'w1', x: 2050, y: 2050, name: 'Second Waystone', map_link_id: null },
       ],
     },
   });
   const { ws } = await joinAt(pool, { x: HOME.x, y: HOME.y });
 
-  ws.send(JSON.stringify({ type: 'travel', waypointId: 'wp-second' }));
+  ws.send(JSON.stringify({ type: 'travel', waypointId: SECOND }));
   const t = await nextMsg(ws, 'transition');
   assert.equal(t.toWorldId, 'w1');
   assert.equal(t.arriveX, 2050);

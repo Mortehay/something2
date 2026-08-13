@@ -203,5 +203,33 @@ test('joinPolicyFacts', { skip: !url ? 'no TEST_DATABASE_URL' : false }, async (
       assert.equal(f.destinationActivated, false);
       assert.equal(f.standingOnActivatedWaypoint, false);
     });
+
+    await t2.test('a destination that is not a uuid fails closed too', async () => {
+      // SOMET-293 review note. `waypoints.id` is a uuid and the query casts to
+      // it, so a frame carrying anything else used to raise 22P02 out of the
+      // loader; the authority's op chain caught that and sent
+      // `{type:'error', message:'travel failed'}` instead of the deliberately
+      // generic refusal, with a stack trace per attempt in the log.
+      for (const bad of ['not-a-uuid', '', '1', 'wp-does-not-exist']) {
+        const f = await waypointTravelFacts(pool, charId, origin, bad);
+        assert.equal(f.destination, null, `"${bad}" must be a plain refusal`);
+        assert.equal(f.destinationActivated, false);
+        assert.equal(f.standingOnActivatedWaypoint, false);
+      }
+      // Non-string frame fields reach here as whatever JSON.parse produced.
+      for (const bad of [null, undefined, 42, { id: origin }, [origin]]) {
+        const f = await waypointTravelFacts(pool, charId, origin, bad);
+        assert.equal(f.destination, null);
+      }
+
+      // THE PAIRED POSITIVE, and the only thing that keeps the loop above from
+      // being a test of Postgres's tolerance rather than of this guard: the very
+      // cast the loader uses really does reject that input against this database.
+      // Without the guard, every assertion above would be a rejected promise.
+      await assert.rejects(
+        pool.query('SELECT 1 FROM waypoints WHERE id = $1::uuid', ['not-a-uuid']),
+        /invalid input syntax/i,
+      );
+    });
   });
 });
