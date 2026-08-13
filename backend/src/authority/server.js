@@ -414,7 +414,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // respawn sweep -- ran with the road and rectangle legs of isSafeTile
         // permanently off, so a chest guard could seat itself on a village
         // road and the sweep would re-seat it there forever.
-        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects FROM worlds WHERE id = $1', [worldId]);
+        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         // Postgres uuid input is case-insensitive and also accepts braced /

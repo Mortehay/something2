@@ -37,7 +37,7 @@ test('coerces the seed to a number (the column is bigint -> string)', () => {
 test('carries every field the generator reads', () => {
   const c = buildWorldGenConfig(cfgArgs());
   assert.deepEqual(Object.keys(c).sort(), [
-    'biomeCell', 'biomes', 'chunkSize', 'doorways', 'entry_spawn',
+    'authoredRoads', 'biomeCell', 'biomes', 'chunkSize', 'doorways', 'entry_spawn',
     'height', 'levelMax', 'levelMin', 'safeRects', 'safeRoadRadius',
     'seed', 'tileTypes', 'villages', 'width',
   ]);
