@@ -31,6 +31,15 @@ const { VILLAGE_LIMITS, villageGeometryError } = require('../src/services/villag
 
 const { DENSITY_NAMES } = require('../src/services/densityTiers.js');
 
+// Pen geometry, imported for the same cannot-drift-apart reason
+// VILLAGE_LIMITS/villageGeometryError are: the placer that seats pen creatures
+// and the validator that accepts a pen must agree about what fits, or a spec
+// validates and then seeds a pen that quietly holds fewer creatures than it
+// says. services/pens.js's own requires (mapService, creatureLevel, and
+// villages.js for the one GUARD_TYPE literal -- already imported above) create
+// no pool at import time, so this stays a pure, database-free require.
+const { penGeometryError } = require('../src/services/pens.js');
+
 // True only when w.grid is a well-formed [int, int] pair. Shared by the
 // world loop (which reports the error) and the link loop (which must not
 // dereference grid[0]/grid[1] on a world that failed this check -- a link
@@ -119,6 +128,8 @@ const WORLD_KEYS = new Set([
   'level_band', 'density', 'allows_fast_travel',
   'village', 'villages', 'chest',
   'safe_road_radius', 'safe_rects',
+  'roads',
+  'pens',
   'waypoints',
   'creature_count',
 ]);
@@ -412,6 +423,90 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       if (bad) {
         errors.push(`world "${w.key}" safe_rects entry must be a positive box `
           + `inside the ${w.width}x${w.height} map (got ${JSON.stringify(s)})`);
+      }
+    }
+
+    // SOMET-289 authored roads. Same reject-rather-than-coerce posture as
+    // safe_rects above, and for a sharper version of the same reason: nothing
+    // downstream would notice a malformed polyline until the generator's walker
+    // either looped on a diagonal or drew nothing at all, and a road that
+    // silently does not exist takes its safe corridor with it.
+    //
+    // The rules are re-stated here rather than delegated to mapService's
+    // normalizeAuthoredRoads because that function THROWS (correct for a
+    // generator that has no way to report), while validateMapSpec must collect
+    // every problem in a spec and name them all at once. The in-bounds check
+    // below is additionally something normalizeAuthoredRoads cannot make: it
+    // has no map dimensions.
+    if (w.roads !== undefined && !Array.isArray(w.roads)) {
+      errors.push(`world "${w.key}" roads must be an array (got ${typeof w.roads})`);
+    }
+    for (const [i, line] of (Array.isArray(w.roads) ? w.roads : []).entries()) {
+      if (!Array.isArray(line) || line.length === 0) {
+        errors.push(`world "${w.key}" roads[${i}] must be a non-empty array of [row, col] points`);
+        continue;
+      }
+      let prev = null;
+      for (const [j, p] of line.entries()) {
+        if (!Array.isArray(p) || p.length !== 2
+            || !Number.isInteger(p[0]) || !Number.isInteger(p[1])) {
+          errors.push(`world "${w.key}" roads[${i}][${j}] must be a [row, col] pair of `
+            + `integers (got ${JSON.stringify(p)})`);
+          prev = null;
+          continue;
+        }
+        // Strictly inside the wall ring. A road cell ON the ring is overwritten
+        // by stampBounds, so it would be an authored road tile that is never
+        // drawn -- while still widening the safe corridor, which is the two
+        // halves of this feature disagreeing.
+        if (Number.isInteger(w.height) && Number.isInteger(w.width)
+            && (p[0] < 1 || p[0] > w.height - 2 || p[1] < 1 || p[1] > w.width - 2)) {
+          errors.push(`world "${w.key}" roads[${i}][${j}] point ${JSON.stringify(p)} must lie `
+            + `strictly inside the ${w.width}x${w.height} map's wall ring`);
+        }
+        // Consecutive points share a row or a column. A diagonal has no defined
+        // rasterisation, and guessing one would put the drawn road somewhere
+        // the author did not choose.
+        if (prev && prev[0] !== p[0] && prev[1] !== p[1]) {
+          errors.push(`world "${w.key}" roads[${i}] segment ${j - 1}->${j} is not axis-aligned `
+            + `(${JSON.stringify(prev)} -> ${JSON.stringify(p)})`);
+        }
+        prev = p;
+      }
+    }
+
+    // SOMET-289 pens. Geometry comes from services/pens.js's penGeometryError,
+    // imported rather than restated for the same cannot-drift-apart reason
+    // villageGeometryError is: the placer and the validator must agree about
+    // what fits, or a spec validates and then seeds a pen that under-delivers.
+    if (w.pens !== undefined && !Array.isArray(w.pens)) {
+      errors.push(`world "${w.key}" pens must be an array (got ${typeof w.pens})`);
+    }
+    const pens = Array.isArray(w.pens) ? w.pens : [];
+    for (const p of pens) {
+      if (!p || typeof p !== 'object') {
+        errors.push(`world "${w.key}" pens entry must be an object (got ${JSON.stringify(p)})`);
+        continue;
+      }
+      const penErr = penGeometryError(p, { width: w.width, height: w.height });
+      if (penErr) errors.push(`world "${w.key}" pen ${penErr}`);
+      if (creatureTypeNames && !creatureTypeNames.has(p.creature_type)) {
+        errors.push(`world "${w.key}" pen references unknown creature type `
+          + `"${p.creature_type}"`);
+      }
+    }
+    // A pen overlapping a village would have its creatures placed around the
+    // village rather than in the pen (the placer refuses village tiles), so the
+    // pen silently under-delivers -- and any that did land inside would break
+    // the epic's invariant that only Village Guards stand in a village.
+    for (const p of pens) {
+      if (!p || typeof p !== 'object' || !Number.isInteger(p.min_row)) continue;
+      for (const v of villages) {
+        if (!v || typeof v !== 'object') continue;
+        if (boxesOverlap(p, v)) {
+          errors.push(`world "${w.key}" pen at rows ${p.min_row}..${p.min_row + p.height - 1} `
+            + `overlaps the village at rows ${v.min_row}..${v.min_row + v.height - 1}`);
+        }
       }
     }
 

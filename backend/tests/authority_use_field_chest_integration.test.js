@@ -91,6 +91,13 @@ function makePool({ bounded = true, userItems = [], safeRoadRadius = 0, safeRect
           is_entry: null, entry_spawn: null, biomes: [], biome_cell: null,
           level_min: 1, level_max: 5,
           safe_road_radius: safeRoadRadius, safe_rects: safeRects,
+          // SOMET-289. The fixture must answer every column loadWorld's SELECT
+          // names, or projectWorldRow throws and the join hangs on
+          // nextMsg('joined') rather than reporting the missing column. That is
+          // this fixture doing its job: a fake that answered with a fixed
+          // object regardless of the SQL would have let the new column reach
+          // the authority as a silent default.
+          authored_roads: [],
         })] };
       }
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
