@@ -19,7 +19,7 @@ choosing (`scratchpad/roadmap.js`, output recorded below):
 
 | option | result on the three home worlds |
 |---|---|
-| (a) place villages onto lattice cells | The lattice **cannot reach Old Trailhead's east doorway**. Its nearest road cell to the arrival tile (32,62) is (42,62), a Chebyshev distance of 10 — three times the largest defensible radius. A village could be moved onto a trunk, but the *doorways* cannot be moved, so "a road connecting the villages and the two doorways" stays unachievable. |
+| (a) place villages onto lattice cells | The lattice **cannot reach Old Trailhead's east doorway**. Its nearest road cells to the arrival tile (32,62) are the whole east end of the trunk in row 42 — (42,52) is the first the scan reports, (42,62) the one directly south of the arrival tile — a Chebyshev distance of 10 — three times the largest defensible radius. A village could be moved onto a trunk, but the *doorways* cannot be moved, so "a road connecting the villages and the two doorways" stays unachievable. |
 | (c) accept roads pass near by luck | Leaves the safe corridor a random blob unrelated to the villages: the player experiences "some arbitrary regions have no monsters", which is the feature failing to read. |
 | **(b) authored polylines, unioned into `collectPathCells`** | **Chosen.** |
 
@@ -113,9 +113,11 @@ lowest bands in the game.
   at the west arrival tile, detours south around the village box, and leaves at
   the east arrival tile. Gate spur `[[35,33],[37,33]]` joins the gate (34,33) to
   the detour.
-- **Pens.** Beast Swarm ×5 at rows 24–28 / cols 33–38 (three tiles north of the
-  village wall); Woodland Swarm ×5 at rows 36–40 / cols 15–20 (two tiles south of
-  the corridor edge, beside the westward road).
+- **Pens.** Beast Swarm ×5 at rows 12–16 / cols 33–38 (well north of the village,
+  off the highway); Woodland Swarm ×5 at rows 36–40 / cols 15–20 (two tiles south
+  of the corridor edge, beside the westward road). **Rows as shipped** — the
+  Beast Swarm pen moved north from the planned rows 24–28 during implementation,
+  to clear the village guards' aggro ring; see deviation 2 below.
 
 ### Windwatch Pass (seed 1002, doorways N/S/E/W, band [2,4])
 
@@ -124,8 +126,9 @@ lowest bands in the game.
   the merchant post (25,41) and both guard posts (26,40)/(26,42).
 - **Roads.** `[[32,1],[32,62]]` and `[[1,32],[62,32]]` — a full cross joining all
   four doorway arrival tiles. Gate spur `[[28,41],[32,41]]`.
-- **Pen.** Beast Swarm ×5 at rows 12–16 / cols 36–41, eight tiles north of the
-  village, just east of the N–S highway.
+- **Pen.** Beast Swarm ×5 at rows 10–14 / cols 36–41, ten tiles north of the
+  village, just east of the N–S highway. **Rows as shipped** — moved north from
+  the planned rows 12–16 for the same guard-ring reason; see deviation 2 below.
 
 ### Thornbriar Reach (seed 2002, doorways W/E, band [1,1])
 
@@ -264,7 +267,11 @@ slices A and C as well** — the script is in the report.
    longer clipped. Old Trailhead's Beast Swarm pen sat 500 px from a post and
    had **already lost two creatures** by the time this was noticed. Final
    distances, measured from the posts: Old Trailhead 1700 px / 1237 px,
-   Windwatch Pass 1200 px, Thornbriar Reach 1421 px. Pinned by a test.
+   Windwatch Pass 1200 px, Thornbriar Reach 1421 px. Pinned by a test — and the
+   test now measures the box **dilated by the live leash radius** rather than
+   the box, because a guard farms a pen over hours and it is the region a
+   creature can reach that matters. Margins past the 400 px aggro ring after
+   dilation: 800 / 337 / 300 / 521 px.
 
 3. **`loadWorld`'s SELECT needed the new column.** Slice A's guard test caught
    it: the authority spells its columns out instead of `SELECT *`, so the client
@@ -291,3 +298,28 @@ slices A and C as well** — the script is in the report.
    dilated by the leash, not the pen. Consistent with "no walls and no gates",
    but if tighter pens are ever wanted, a per-creature leash column is the
    change that would buy it.
+
+   **The dilated pen reaches the safe corridor, and that is accepted.** The
+   authored boxes hold **0** safe tiles, but each sits 2–3 tiles (Chebyshev)
+   from the radius-2 corridor — Old Trailhead 3 and 2, Windwatch 2, Thornbriar 2
+   — all under the 5-tile leash, so penned creatures will pace onto the "safe"
+   road. Accepted rather than moved: the corridor is a **spawn-time** rule and
+   always was (nothing on the movement path consults it, deliberately — a wild
+   hostile has to be able to chase a player to the gate), a skittish creature
+   never opens, and clearing the dilated pen needs 6 tiles of margin, which on
+   Windwatch Pass — a road cross through both midlines — leaves exactly one
+   pocket, in the far south-east corner ~28 tiles from its village. A practice
+   pen a new player never finds is a pen that does not exist. The full argument
+   and the measurements live in `services/pens.js`'s header, next to the code
+   that would have to change.
+
+7. **"Homed, non-guard, non-portal" is not a pen identity.** The idempotency
+   guard first shipped with exactly that predicate, and it is byte-for-byte the
+   shape SOMET-244's vault- and field-chest guards carry — the chest pass runs
+   *before* the pen pass, so a spec declaring both would have skipped its pens
+   on the first seed and every one after, silently. A player using a `loot_map`
+   consumable can produce the same row in any world by hand, Old Trailhead
+   included. The predicate now also tests the anchor against the world's
+   authored pen boxes, lives in one place (`pens.pennedCreatureFilter`), and the
+   migration's `down` deletes on **that same predicate** so the two halves
+   cannot drift.
