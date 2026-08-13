@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  PEN_LIMITS, penGeometryError, pensOf, placePenCreatures,
+  PEN_LIMITS, penGeometryError, pensOf, placePenCreatures, pennedCreatureFilter,
 } = require('../src/services/pens.js');
 const {
   placeMapCreatures, worldConfig, collectPathCells, CREATURE_TILE_PX,
@@ -155,4 +155,38 @@ test('pensOf converts the snake_case column into the camelCase the placer reads'
   for (const empty of [undefined, null, {}, { pens: null }, { pens: 'nope' }]) {
     assert.deepEqual(pensOf(empty), []);
   }
+});
+
+test('the penned-creature predicate tests the ANCHOR against the authored boxes', () => {
+  // The bug this pins (SOMET-289 review, F1): the first version of the guard
+  // asked only "homed, non-guard, non-portal", which is also exactly what
+  // insertVaultChest / spawnFieldChest write. A world declaring both a chest
+  // and pens then skipped its pen pass on the FIRST seed and every one after.
+  //
+  // Structural here -- that the box bounds actually reach the SQL, in world px.
+  // The behavioural proof, a chest-carrying spec that still seats its pen, is
+  // tests/seed_map_db.test.js's applyMapSpec pen test, which needs a database.
+  const { where, params } = pennedCreatureFilter(77, [
+    { minRow: 10, minCol: 30, width: 6, height: 5 },
+    { minRow: 36, minCol: 14, width: 6, height: 5 },
+  ]);
+  assert.deepEqual(params, [
+    77, 'Village Guard',
+    3000, 3600, 1000, 1500,     // cols 30..35, rows 10..14
+    1400, 2000, 3600, 4100,     // cols 14..19, rows 36..40
+  ]);
+  assert.match(where, /home_x IS NOT NULL/);
+  assert.match(where, /blocks_portal_id IS NULL/);
+  // Two boxes, OR'd -- a creature in either pen is penned, not only one of them.
+  assert.equal((where.match(/home_x >= \$/g) || []).length, 2);
+  assert.match(where, / OR /);
+});
+
+test('a world with no authored pen has no penned creature, whatever else is homed', () => {
+  // The empty case must match NOTHING rather than degenerate to "any homed
+  // non-guard row" -- that degenerate form is precisely the defect above, and
+  // it would make `down` delete a chest guard in a world that authors no pen.
+  const { where, params } = pennedCreatureFilter(5, []);
+  assert.match(where, /AND false/);
+  assert.deepEqual(params, [5, 'Village Guard']);
 });

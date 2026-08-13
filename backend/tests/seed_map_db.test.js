@@ -1054,7 +1054,14 @@ test('adding a village to an already-seeded world warns instead of silently doin
 // (safe_road_radius 3, and the box straddles the map centre where the lattice
 // runs). creatureTileCandidates refuses a safe tile for ANY type, so if pens
 // ever get routed back through the ordinary placer this comes out empty.
-
+//
+// The fixture ALSO declares a vault chest, and that is not decoration. The
+// chest pass runs BEFORE the pen pass and insertVaultChest writes a homed,
+// non-guard, non-portal row -- byte-for-byte the shape the pen pass's first
+// idempotency guard treated as "this world is already penned". With that guard,
+// this spec seated 0 pen creatures on its very first apply and exited 0. The
+// chest tile (5,5) sits outside every pen box, so only a guard that tests the
+// ANCHOR against the authored boxes gets this right.
 const PEN_SPEC = () => ({
   name: 'zz-test-pen-fixture',
   topology: 'spine',
@@ -1082,6 +1089,7 @@ const PEN_SPEC = () => ({
                  spawn_x: 1150, spawn_y: 1150 },
       level_band: [1, 2],
       safe_road_radius: 3,
+      chest: { x: 550, y: 550, guard_creature_type: 'Wolf', level: 3 },
       pens: [{
         min_row: 30, min_col: 30, width: 6, height: 5,
         creature_type: 'Woodland Swarm', count: 5, level: 1,
@@ -1104,6 +1112,22 @@ test('applyMapSpec seats pen creatures, and populateWorld does not eat them', as
     await withEntryPreserved(pool, async () => {
       const result = await applyMapSpec(pool, PEN_SPEC());
       assert.equal(result.penCreatures, 5, 'the pen pass did not seat the authored count');
+
+      // The chest guard really was written, and really does look like a penned
+      // creature everywhere except its anchor. Asserted rather than assumed: if
+      // the chest pass ever stopped writing a homed row, the pen assertion above
+      // would still pass and would silently stop covering this regression.
+      assert.equal(result.vaultChests, 1, 'the fixture chest was not seeded');
+      const chestGuard = (await pool.query(
+        `SELECT c.home_x, c.home_y, c.blocks_portal_id FROM world_creatures c
+           JOIN worlds w ON w.id = c.world_id
+          WHERE w.name = 'zzTestPenWorld' AND c.type = 'Wolf'`)).rows;
+      assert.equal(chestGuard.length, 1, 'expected exactly the chest guard');
+      assert.ok(chestGuard[0].home_x !== null && chestGuard[0].blocks_portal_id === null,
+        'the chest guard is not the homed non-guard non-portal row this test is about');
+      assert.ok(Math.floor(Number(chestGuard[0].home_y) / 100) < 30,
+        'the chest guard is anchored inside the pen box, so it no longer stands for '
+        + 'the row the old guard confused with a penned creature');
       // populateWorld runs AFTER the pen pass inside the same transaction, and
       // its opening DELETE spares only guards, portal guards and home_x rows.
       assert.ok(result.creatures > 0,

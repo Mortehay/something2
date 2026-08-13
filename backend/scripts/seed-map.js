@@ -24,8 +24,10 @@ const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const { validateMapSpec, villagesOf } = require('../seeds/mapSpec.js');
 const { fetchLinks, setLink, setPortalLink } = require('../src/services/mapLinks.js');
-const { createVillage, fetchVillages, GUARD_TYPE } = require('../src/services/villages.js');
-const { pensOf, placePenCreatures, insertPenCreatures } = require('../src/services/pens.js');
+const { createVillage, fetchVillages } = require('../src/services/villages.js');
+const {
+  pensOf, placePenCreatures, insertPenCreatures, worldHasPennedCreatures,
+} = require('../src/services/pens.js');
 const { insertPortalGuards } = require('../src/services/dungeonGuards.js');
 const { insertVaultChest } = require('../src/services/chests.js');
 const {
@@ -419,21 +421,22 @@ async function applyMapSpec(pool, spec) {
       const specPens = w.pens ?? [];
       if (specPens.length === 0) continue;
       const worldId = idByKey.get(w.key);
-      // Idempotent per world, the same all-or-nothing shape villages use: a
-      // penned creature is exactly a non-guard world_creatures row carrying a
-      // home anchor, so its own structural marker identifies the set. Without
-      // this, every re-seed would add another full set of pen creatures on top
-      // of the ones the DELETE just spared.
-      const existing = await client.query(
-        `SELECT 1 FROM world_creatures
-          WHERE world_id = $1 AND type <> $2 AND blocks_portal_id IS NULL
-            AND home_x IS NOT NULL LIMIT 1`,
-        [worldId, GUARD_TYPE],
-      );
-      if (existing.rowCount > 0) continue;
-
       const wr = await client.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
       const row = wr.rows[0];
+      const pens = pensOf(row);
+
+      // Idempotent per world, the same all-or-nothing shape villages use.
+      //
+      // Asked THROUGH pens.js, because "a homed, non-guard, non-portal row" is
+      // NOT unique to a pen: insertVaultChest and spawnFieldChest anchor their
+      // guard the same way, and the vault-chest pass a few lines above runs
+      // FIRST. A world declaring both a chest and pens would otherwise seed the
+      // chest, see its guard here, and skip its pen pass on the very first seed
+      // and every one after -- silently, which is the whole failure class
+      // services/pens.js was written to close. So the anchor is tested against
+      // this world's authored pen boxes as well; see pennedCreatureFilter.
+      if (await worldHasPennedCreatures(client, worldId, pens)) continue;
+
       const worldLinks = await fetchLinks(client, worldId);
       const world = buildWorldGenConfig({
         row,
@@ -443,7 +446,7 @@ async function applyMapSpec(pool, spec) {
         biomes: await loadBiomes(client, row.biomes),
       });
 
-      for (const [i, pen] of pensOf(row).entries()) {
+      for (const [i, pen] of pens.entries()) {
         const et = await client.query(
           'SELECT name, hp, defense FROM entity_types WHERE name = $1 AND is_creature = true',
           [pen.creatureType],

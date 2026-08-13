@@ -43,6 +43,14 @@
 //     and vault chests (SOMET-244). `home_x IS NOT NULL` is the structural
 //     marker, and a penned creature needs the anchor anyway.
 //
+// THAT MARKER IS SHARED, AND IS NOT AN IDENTITY. "Homed, non-guard,
+// non-portal" is exactly the shape SOMET-244's chest guards carry too --
+// insertVaultChest and spawnFieldChest both anchor their guard to the chest
+// tile -- and a player using a `loot_map` consumable inserts one into whatever
+// world they are standing in. So anything asking "is this world already
+// penned?" must ALSO test the anchor against the world's authored pen boxes;
+// see pennedCreatureFilter below, which is the one place that predicate lives.
+//
 // ---------------------------------------------------------------------------
 // KEEP A PEN AWAY FROM THE VILLAGE GUARDS. Village guards target
 // `faction = 'hostile'`, and every skittish creature type IS faction 'hostile'
@@ -65,8 +73,36 @@
 // leash radius of where this creature was placed", i.e. the pen dilated by that
 // radius -- world_creatures has no per-creature leash column, so the radius
 // comes from the creature's behaviour row and cannot be authored per pen.
+//
+// AND THAT DILATION REACHES THE ROAD. Measured on the four home-region pens:
+// the authored boxes hold 0 safe tiles, but every one of them sits 2 or 3 tiles
+// (Chebyshev) from the radius-2 safe corridor while Skittish leashes at 500 px
+// = 5 tiles, so a creature anchored on the pen's road-facing edge can and will
+// pace onto the "safe" road. ACCEPTED, not an oversight, for three reasons:
+//
+//  - The corridor is a SPAWN-time rule and always was (SOMET-288). Nothing on
+//    the movement path consults it, deliberately: a wild hostile chasing a
+//    player has to be able to follow them to the gate, which is what the guards
+//    are for. Wild hostiles already walk the road, and those actually attack.
+//  - A skittish creature never opens. Its promise to the player is "walking the
+//    road is not a fight", and that promise survives a swarm standing on it.
+//  - The alternative costs the feature. Clearing the DILATED pen of the
+//    corridor needs 6 tiles of margin, and Windwatch Pass -- a full road cross
+//    through both midlines -- has exactly one such pocket, in the far
+//    south-east corner some 28 tiles from its village. A practice pen a new
+//    player never finds is a pen that does not exist.
+//
+// What is NOT accepted is the same dilation reaching a guard post: that one
+// empties the pen over a few hours, and home_region_db.test.js checks the
+// authored boxes GROWN BY THE LIVE LEASH RADIUS against the 400 px aggro ring.
+// Today's margins past aggro: 800 / 337 / 300 / 521 px.
 const { generateRegion, worldConfig, villageContaining, makeRng, CREATURE_TILE_PX } = require('./mapService');
 const { scaleCreature } = require('./creatureLevel');
+// The one 'Village Guard' literal, not a fourth copy. villages.js does not
+// require this module, so this adds no cycle, and none of its own requires
+// opens a pool at import time -- mapSpec.js already imports both files for
+// exactly that reason.
+const { GUARD_TYPE } = require('./villages');
 
 // The baseline a creature's damage scales from -- the same CREATURE_BASE_DAMAGE
 // placeMapCreatures and placeCreaturePacks use, so a penned creature and a wild
@@ -133,6 +169,69 @@ function pensOf(row) {
     minRow: p.min_row, minCol: p.min_col, width: p.width, height: p.height,
     creatureType: p.creature_type, count: p.count, level: p.level,
   }));
+}
+
+// WHICH ROWS ARE THIS MODULE'S -- the only definition of it, in SQL, so that
+// every caller asks the identical question.
+//
+// `{ where, params }`: a complete WHERE body with positional parameters from
+// $1, for `world_creatures`. It selects exactly the rows insertPenCreatures
+// writes for `worldId`: a non-guard, non-portal row whose home ANCHOR lies
+// inside one of the world's AUTHORED pen boxes.
+//
+// THE BOX TEST IS THE WHOLE POINT. The first version of this predicate stopped
+// at "homed, non-guard, non-portal", which is also what a vault- or field-chest
+// guard looks like (see this module's header). A world declaring both a chest
+// and pens seeds its chest first and then skips its pen pass FOREVER, silently
+// -- the exact failure class this module exists to prevent -- and a player
+// using a `loot_map` consumable can do the same to any world by hand.
+//
+// The anchor, not the current position: a penned creature roams within its
+// leash, so `x`/`y` drift outside the box by design and only `home_x`/`home_y`
+// stay where the placer put them.
+//
+// `pens` is in pensOf's camelCase shape. With no pens the filter matches
+// nothing, which is the honest answer: a world that authors no pen has no
+// penned creature, whatever else is homed in it.
+//
+// The one case this still cannot separate is a chest authored INSIDE a pen
+// box, whose guard is then indistinguishable from a penned creature. Left
+// as-is: that is an authoring conflict rather than an accident of a shared
+// marker, the spec validator already refuses a pen overlapping a village for
+// the same class of reason, and `down` deletes exactly what `up` skipped on,
+// so the two halves still agree about it.
+function pennedCreatureFilter(worldId, pens) {
+  const params = [worldId, GUARD_TYPE];
+  const boxes = (pens || []).map((p) => {
+    const b = params.length;
+    params.push(
+      p.minCol * CREATURE_TILE_PX, (p.minCol + p.width) * CREATURE_TILE_PX,
+      p.minRow * CREATURE_TILE_PX, (p.minRow + p.height) * CREATURE_TILE_PX,
+    );
+    return `(home_x >= $${b + 1} AND home_x < $${b + 2}`
+      + ` AND home_y >= $${b + 3} AND home_y < $${b + 4})`;
+  });
+  const where = 'world_id = $1 AND type <> $2 AND blocks_portal_id IS NULL'
+    + ' AND home_x IS NOT NULL AND home_y IS NOT NULL'
+    + (boxes.length > 0 ? ` AND (${boxes.join(' OR ')})` : ' AND false');
+  return { where, params };
+}
+
+// Has this world's pen pass already run? The idempotency guard every seeding
+// path shares. `db` is any queryable, the same contract insertPenCreatures has.
+async function worldHasPennedCreatures(db, worldId, pens) {
+  const { where, params } = pennedCreatureFilter(worldId, pens);
+  const r = await db.query(`SELECT 1 FROM world_creatures WHERE ${where} LIMIT 1`, params);
+  return r.rows.length > 0;
+}
+
+// The exact inverse, by construction: it deletes precisely the rows
+// worldHasPennedCreatures would have found. A `down` that removed anything
+// narrower would leave a row that blocks the next `up` and says nothing.
+async function deletePennedCreatures(db, worldId, pens) {
+  const { where, params } = pennedCreatureFilter(worldId, pens);
+  const r = await db.query(`DELETE FROM world_creatures WHERE ${where}`, params);
+  return r.rowCount ?? 0;
 }
 
 // Can a creature stand here? Structure only -- see this module's header for why
@@ -225,5 +324,6 @@ async function insertPenCreatures(client, worldId, rows) {
 
 module.exports = {
   PEN_LIMITS, penGeometryError, pensOf, placePenCreatures, insertPenCreatures,
-  penTileIsPlaceable,
+  penTileIsPlaceable, pennedCreatureFilter, worldHasPennedCreatures,
+  deletePennedCreatures,
 };
