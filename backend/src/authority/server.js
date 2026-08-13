@@ -519,11 +519,35 @@ function attachAuthority(httpServer, pool, opts = {}) {
       console.log(`spawn: relocated character ${characterId} in world ${worldId} to nearest portal `
         + `(saved position ${persisted && persisted.x},${persisted && persisted.y} is no longer valid)`);
     }
+    // SOMET-294: deliberately NOT filtered by world_id any more. player_binds'
+    // primary key is character_id alone (re-keyed off user_id by migration
+    // 1714440092000), so a character holds at most one bind row and that row
+    // already names its own world -- there is nothing to pick between, hence no
+    // ORDER BY and no LIMIT. The old `AND world_id = $2` filter is the single
+    // reason "death returns you to the last village you entered" only ever
+    // worked inside one world: a bind elsewhere simply did not exist as far as
+    // this process was concerned.
     const b = await pool.query(
-      'SELECT x, y FROM player_binds WHERE character_id = $1 AND world_id = $2',
-      [characterId, worldId],
+      'SELECT world_id, x, y FROM player_binds WHERE character_id = $1',
+      [characterId],
     );
-    spawn.respawn = b.rows.length ? { x: b.rows[0].x, y: b.rows[0].y } : { x: spawn.x, y: spawn.y };
+    const bindRow = b.rows[0] || null;
+    // TWO facts, not one, and the split is the whole slice.
+    //
+    // `respawn` is where resolveDeaths() snaps this player WITHIN THIS WORLD.
+    // It is the bind when the bind is here, and otherwise the position they
+    // just joined at -- exactly today's behaviour for both the no-bind case and
+    // (previously) the bind-elsewhere case. A cross-world bind deliberately
+    // does NOT leave them where they died: the relocation is a reconnect, and a
+    // client that never completes it would otherwise be left alive in the
+    // middle of whatever just killed them.
+    //
+    // `bind` is the row itself, world id included. onPlayerDeath compares its
+    // worldId against the world the death happened in; when they agree it is
+    // the same point `respawn` already holds and nothing extra happens.
+    const bindHere = bindRow != null && bindRow.world_id === worldId;
+    spawn.respawn = bindHere ? { x: bindRow.x, y: bindRow.y } : { x: spawn.x, y: spawn.y };
+    spawn.bind = bindRow ? { worldId: bindRow.world_id, x: bindRow.x, y: bindRow.y } : null;
     return spawn;
   }
 
@@ -1087,7 +1111,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
         ws.worldId = entry.worldId; // canonical (F-014), not the client's raw spelling
         ws.characterId = character.id;
-        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id);
+        // spawn.bind (SOMET-294) is the player_binds row as loaded, world id and
+        // all -- distinct from spawn.respawn, which is always a point in THIS
+        // world. See loadSpawn for why the two are separate facts.
+        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id, spawn.bind);
 
         // Latch the tile this join landed on, for EVERY join -- not just a
         // doorway arrival. A resume or a map fast-travel spawns the character
@@ -1779,6 +1806,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
           if (v) {
             p._boundVillageId = v.id;
             p.spawn = { x: v.spawnX, y: v.spawnY };
+            // SOMET-294: p.spawn and p.bind move together here, because
+            // entering a village in the world you are standing in is exactly
+            // what turns a bind elsewhere back into a bind here. Keeping the
+            // in-memory pair in step with the footprint crossing (rather than
+            // with the DB write below, which is throttled) is what guarantees a
+            // death one tick after walking through a gate lands in the village
+            // that was just entered.
+            p.bind = { worldId: entry.worldId, x: v.spawnX, y: v.spawnY };
             upsertBind(p.characterId, entry.worldId, v.spawnX, v.spawnY).catch((e) => console.error('upsertBind', e));
           }
         }
