@@ -11,28 +11,22 @@
 //     day someone flags one, which is the only day it matters.
 const test = require('node:test');
 const assert = require('node:assert');
-const fs = require('node:fs');
-const path = require('node:path');
 const { Pool } = require('pg');
 const {
   fetchWaypoints, upsertWaypoint, activateWaypoint, listWaypointsForCharacter,
+  pruneWaypoints,
 } = require('../src/services/waypoints');
 const { recordVisit } = require('../src/services/visitedWorlds');
 const { createCharacter, listPlayableClasses } = require('../src/services/characters');
 
 const url = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
-test('seed-map is the authoring writer for waypoints', () => {
-  // A source-text guard, and the same trap visited_worlds_db.test.js guards
-  // against: a table with a reader and no writer (or a writer and no reader) is
-  // a feature that is green in every unit test and inert in the running game.
-  // fetchWaypoints' reader side is proved behaviourally by
-  // waypoint_activation_live.test.js, which drives the real authority; the
-  // writer side has no runtime path to drive, so it is pinned here.
-  const src = fs.readFileSync(path.join(__dirname, '../scripts/seed-map.js'), 'utf8');
-  assert.match(src, /upsertWaypoint/,
-    'seed-map.js must author waypoints through services/waypoints.js, or nothing ever writes one');
-});
+// The writer side used to be pinned here by a source grep for /upsertWaypoint/,
+// which the surviving `require` line alone satisfied: the reviewer no-op'd both
+// upsert calls AND the is_waypoint UPDATE and the whole DB suite stayed green.
+// It is now proved behaviourally, through the real applier, by
+// seed_map_db.test.js's "seeding writes the waypoints a spec authors" -- which
+// reads the rows back and checks positions, map_link_id and the flag.
 
 test('waypoint schema', { skip: !url ? 'no database URL' : false }, async (t) => {
   const pool = new Pool({ connectionString: url });
@@ -147,20 +141,78 @@ test('waypoint services', { skip: !url ? 'no database URL' : false }, async (t) 
     });
   });
 
-  await t.test('re-authoring the same tile updates rather than duplicating', async () => {
+  await t.test('re-authoring the same name updates rather than duplicating', async () => {
     await withFixture('Idem', async ({ worldA }) => {
       const client = await pool.connect();
       try {
-        // Same TILE (1250,850 and 1299,899 both floor to tile 8,12), a
-        // different name: re-applying an edited spec must converge, and two
-        // rows in one tile would leave one of them permanently unreachable
-        // because the tick loop only ever finds one.
-        await upsertWaypoint(client, { worldId: worldA, x: 1250, y: 850, name: 'zzWpIdem Old' });
-        await upsertWaypoint(client, { worldId: worldA, x: 1299, y: 899, name: 'zzWpIdem New' });
+        // Same tile, same name: re-applying an unchanged spec must rewrite the
+        // row it wrote last time, not accumulate rows.
+        await upsertWaypoint(client, { worldId: worldA, x: 1250, y: 850, name: 'zzWpIdem Well' });
+        await upsertWaypoint(client, { worldId: worldA, x: 1299, y: 899, name: 'zzWpIdem Well' });
       } finally { client.release(); }
       const got = await fetchWaypoints(pool, worldA);
       assert.equal(got.length, 1, 'two rows on one tile: one of them is unreachable');
-      assert.equal(got[0].name, 'zzWpIdem New');
+      assert.equal(got[0].x, 1299);
+    });
+  });
+
+  await t.test('moving a waypoint keeps its row, its id and its activations', async () => {
+    // The edit slice B makes constantly. Keying the upsert on the TILE (the
+    // first shape of this function) made it an INSERT that collided on
+    // waypoints_name_unique and rolled the whole applyMapSpec transaction back
+    // with a raw 23505; keying on the NAME makes it an UPDATE, which is the only
+    // way character_waypoints survives an author nudging a waypoint two tiles
+    // north.
+    await withFixture('Move', async ({ worldA, character }) => {
+      const client = await pool.connect();
+      let before; let after;
+      try {
+        ({ id: before } = await upsertWaypoint(
+          client, { worldId: worldA, x: 150, y: 150, name: 'zzWpMove Well' }));
+        await activateWaypoint(pool, character.id, before);
+        ({ id: after } = await upsertWaypoint(
+          client, { worldId: worldA, x: 550, y: 550, name: 'zzWpMove Well' }));
+      } finally { client.release(); }
+
+      assert.equal(after, before, 'the move re-created the waypoint instead of moving it');
+      const got = await fetchWaypoints(pool, worldA);
+      assert.equal(got.length, 1, 'the old tile still carries a ghost waypoint');
+      assert.deepEqual([got[0].x, got[0].y], [550, 550]);
+      const act = await pool.query(
+        'SELECT count(*)::int AS n FROM character_waypoints WHERE waypoint_id = $1', [before]);
+      assert.equal(act.rows[0].n, 1, 'moving a waypoint erased a player\'s activation of it');
+    });
+  });
+
+  await t.test('a second waypoint cannot take an occupied tile, and says whose', async () => {
+    // Two names on one tile is a real conflict now that identity is the name:
+    // only one of them could ever be walked onto. It must surface as a sentence
+    // an author can act on, not as a bare 23505 from the unique index.
+    await withFixture('Clash', async ({ worldA }) => {
+      const client = await pool.connect();
+      try {
+        await upsertWaypoint(client, { worldId: worldA, x: 1250, y: 850, name: 'zzWpClash First' });
+        await assert.rejects(
+          () => upsertWaypoint(client, { worldId: worldA, x: 1299, y: 899, name: 'zzWpClash Second' }),
+          /zzWpClash First.*already occupies it/s);
+      } finally { client.release(); }
+    });
+  });
+
+  await t.test('pruning removes what a spec no longer authors, and nothing else', async () => {
+    await withFixture('Prune', async ({ worldA, worldB }) => {
+      const client = await pool.connect();
+      try {
+        await upsertWaypoint(client, { worldId: worldA, x: 150, y: 150, name: 'zzWpPrune Kept' });
+        await upsertWaypoint(client, { worldId: worldA, x: 550, y: 550, name: 'zzWpPrune Dropped' });
+        // Another spec's world: a prune scoped to worldA must not reach it.
+        await upsertWaypoint(client, { worldId: worldB, x: 150, y: 150, name: 'zzWpPrune Elsewhere' });
+
+        const removed = await pruneWaypoints(client, [worldA], ['zzWpPrune Kept']);
+        assert.deepEqual(removed, ['zzWpPrune Dropped']);
+      } finally { client.release(); }
+      assert.deepEqual((await fetchWaypoints(pool, worldA)).map((w) => w.name), ['zzWpPrune Kept']);
+      assert.deepEqual((await fetchWaypoints(pool, worldB)).map((w) => w.name), ['zzWpPrune Elsewhere']);
     });
   });
 

@@ -273,15 +273,32 @@ After the portal-guard pass (so a guarded link is already known) and before `pop
 - re-assert `is_waypoint = false` on portal links the spec does not flag, so removing the key from a
   spec takes the flag back off (same convergence rule `allows_fast_travel` is written under).
 
-**Waypoint rows are never deleted by a re-seed.** `character_waypoints` hangs off them, so deleting a
-waypoint deletes every player's activation of it. A spec that stops declaring a waypoint leaves the
-row behind. This is a deliberate asymmetry with the `is_waypoint` flag above and is the one place
-this slice does not converge to its spec — recorded here rather than discovered later.
+**Waypoint rows converge to the spec, and identity is the NAME** (revised after review — the first
+shape of this pass never deleted a row, and that was a security hole rather than a tidiness gap).
 
-- [ ] **Step 1: Write the failing tests.** A source-text guard that `seed-map.js` calls
-      `upsertWaypoint` (the `visited_worlds_db.test.js` precedent — this repo's recorded trap is a
-      writer with no reader or a reader with no writer), plus a round trip: `upsertWaypoint` into a
-      fixture world, then `fetchWaypoints` — the same reader `loadWorld` calls — returns it.
+- `upsertWaypoint` conflicts on `name`, not on the tile. Moving a waypoint is then an UPDATE of the
+  row players already activated, so `character_waypoints` survives the move. Conflicting on the tile
+  made the same edit an INSERT that collided on `waypoints_name_unique` and rolled the whole
+  transaction back with a raw 23505.
+- `pruneWaypoints` drops every waypoint in the spec's own worlds whose name the spec no longer
+  authors. This *does* cascade `character_waypoints`. The migration's `ON DELETE SET NULL` exists so
+  an *incidental* event (relinking a staircase) cannot take activations down with it; de-authoring is
+  not incidental — the author removed the place, so an activation of it is a dangling reference. The
+  precedent is `populateWorld`, which already deletes and re-places a seeded world's creatures.
+- `guardedWaypointViolations` then asks the **database** whether any waypoint sits on a guarded
+  staircase, and aborts the transaction if one does. The validator only ever sees the spec text, and
+  two ordinary edits defeat it: adding `guard:` to a portal that was flagged in the previous spec
+  (the flag goes off, the registry row does not), and dropping `guard:` while adding the flag (the
+  guard creatures stay — `worldPopulation` spares `blocks_portal_id IS NOT NULL`). The runtime reads
+  the registry, so the registry is where the rule has to hold.
+
+- [ ] **Step 1: Write the failing tests.** A behavioural case in `seed_map_db.test.js` that applies a
+      spec authoring both a standalone and a portal-backed waypoint and reads the rows back
+      (positions, `map_link_id`, the converged flag), plus the two guarded-staircase edits above, plus
+      a round trip: `upsertWaypoint` into a fixture world, then `fetchWaypoints` — the same reader
+      `loadWorld` calls — returns it. **A source grep for `upsertWaypoint` is not one of these**: the
+      first version of this task shipped exactly that, and the surviving `require` line satisfied it
+      while both call sites were no-ops.
 - [ ] **Step 2: Implement. Step 3: Run. Step 4: Commit.**
 
 ---
@@ -397,8 +414,10 @@ one, matching `/api/player/world-map`); a character that exists but is not this 
 
 ## Known gaps, stated rather than discovered later
 
-- **Un-authoring a waypoint does not remove it** (Task 4). Deleting the row would delete every
-  character's activation of it.
+- **Un-authoring a waypoint removes it, and un-lights it for every character** (Task 4, revised after
+  review). The alternative left an orphan row on a staircase a later spec guarded, which is the
+  bypass this slice exists to prevent. A *rename* is un-authoring plus authoring, so it does cost the
+  activations; a move does not.
 - **The session latch is not primed from the database** (Task 5), so re-walking a lit waypoint after a
   relog costs one no-op INSERT. Deliberate; the alternative is a query on every join.
 - **The exclusion rule covers portals, not proximity.** A waypoint placed one tile *past* a guarded

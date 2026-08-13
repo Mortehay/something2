@@ -5,6 +5,8 @@ const path = require('node:path');
 const { Pool } = require('pg');
 const { applyMapSpec, GRID_SPACING } = require('../scripts/seed-map.js');
 const { withEntryPreserved } = require('./helpers/entryWorld.js');
+const { activateWaypoint } = require('../src/services/waypoints.js');
+const { createCharacter, listPlayableClasses } = require('../src/services/characters.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL
   || process.env.DATABASE_URL
@@ -80,8 +82,10 @@ const spec = () => ({
 
 async function cleanup(pool) {
   await pool.query(
-    "DELETE FROM worlds WHERE name IN ('zzTestAlpha','zzTestBeta','zzTestPopA','zzTestPopB','zzTestVilA')",
+    "DELETE FROM worlds WHERE name IN ('zzTestAlpha','zzTestBeta','zzTestPopA','zzTestPopB',"
+    + "'zzTestVilA','zzTestWpA','zzTestWpB')",
   ).catch(() => {});
+  await pool.query("DELETE FROM users WHERE username = 'zzTestWpUser'").catch(() => {});
 }
 
 // Snapshot whichever world is currently is_entry (0 or 1 of them, per the
@@ -114,7 +118,8 @@ test('applying a spec twice produces identical rows', async (t) => {
         // waypoints is 0 for the same reason creatures is: this spec authors
         // none, so the counter must report the applier ran the waypoint pass
         // and found nothing -- not that the pass is missing (SOMET-292).
-        { worlds: 2, links: 1, villages: 1, portalGuards: 0, creatures: 0, vaultChests: 0, waypoints: 0 },
+        { worlds: 2, links: 1, villages: 1, portalGuards: 0, creatures: 0, vaultChests: 0,
+          waypoints: 0, waypointsRemoved: 0 },
         'applyMapSpec must report exactly what it wrote, not just resolve');
 
       // Correctness rule 3: is_entry must actually be set on the spec's
@@ -603,6 +608,201 @@ test('seeding refuses a world sealed by its own terrain', async (t) => {
     await pool.query(`DELETE FROM biomes WHERE name = 'zzSealed'`);
     await pool.end();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Waypoints through the real applier (SOMET-292 review, findings 1-3).
+//
+// Everything below reads ROWS BACK. The first version of this coverage was a
+// source grep for /upsertWaypoint/ in seed-map.js, which the surviving `require`
+// line alone satisfied: the reviewer replaced both upsert calls and the
+// `UPDATE map_links SET is_waypoint` with no-ops and the DB suite stayed green.
+//
+// The portal is at pixel (2550,2550) -- tile (25,25) of a 64x64 world, well
+// inside the wall ring stampBounds stamps -- and lands at (550,550) in the
+// portal-only world "b". Deep Forest's terrain tiles are all walkable, so
+// navigability is a property of the fixture rather than of a lucky seed (see the
+// matching note on spec() above).
+const WP_PORTAL = { from_x: 2550, from_y: 2550, to_x: 550, to_y: 550 };
+const WP_STONE = { x: 1250, y: 850, name: 'zzTestWp Old Well' };
+const WP_STAIR_NAME = 'zzTestWp Barrow Stair';
+
+const waypointSpec = ({ guard = false, flagged = true, stone = WP_STONE } = {}) => {
+  const portal = { kind: 'portal', from: 'a', to: 'b', ...WP_PORTAL };
+  if (guard) portal.guard = { creature_type: 'Wolf', count: 2 };
+  if (flagged) { portal.is_waypoint = true; portal.waypoint_name = WP_STAIR_NAME; }
+  const a = {
+    key: 'a', name: 'zzTestWpA', grid: [14, -3], seed: 995, width: 64, height: 64,
+    chunk_size: 64, biomes: ['Deep Forest'], biome_cell: 32,
+    allowed_creature_types: [], is_entry: true, entry_spawn: { x: 3200, y: 3200 },
+  };
+  if (stone) a.waypoints = [stone];
+  return {
+    name: 'zz-test-waypoint-fixture',
+    topology: 'spine',
+    worlds: [a, {
+      // No grid: reachable only through the portal, which is exactly the shape
+      // a real dungeon has.
+      key: 'b', name: 'zzTestWpB', seed: 996, width: 20, height: 20,
+      chunk_size: 20, biomes: ['Deep Forest'], biome_cell: 10,
+      allowed_creature_types: [], is_entry: false,
+    }],
+    links: [portal],
+  };
+};
+
+// The forward portal row and its mirror, by the tile each departs from.
+async function wpLinks(pool) {
+  const r = await pool.query(
+    `SELECT ml.id, ml.is_waypoint, w.name AS world
+       FROM map_links ml JOIN worlds w ON w.id = ml.from_world_id
+      WHERE w.name LIKE 'zzTestWp%' AND ml.edge = 'PORTAL' ORDER BY w.name`);
+  return { forward: r.rows.find((x) => x.world === 'zzTestWpA'),
+           mirror: r.rows.find((x) => x.world === 'zzTestWpB') };
+}
+
+async function wpRows(pool) {
+  const r = await pool.query(
+    `SELECT wp.id, wp.name, wp.x, wp.y, wp.map_link_id, w.name AS world
+       FROM waypoints wp JOIN worlds w ON w.id = wp.world_id
+      WHERE w.name LIKE 'zzTestWp%' ORDER BY wp.name`);
+  return r.rows;
+}
+
+test('seeding writes the waypoints a spec authors', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — waypoint seeding is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await cleanup(pool);
+    await withEntryPreserved(pool, async () => {
+      const result = await applyMapSpec(pool, waypointSpec());
+      assert.equal(result.waypoints, 2, 'one standalone waypoint and one flagged staircase');
+
+      const { forward, mirror } = await wpLinks(pool);
+      assert.ok(forward && mirror, 'the portal and its mirror must both exist');
+      assert.equal(forward.is_waypoint, true, 'the flag never reached the link the spec flagged');
+      assert.equal(mirror.is_waypoint, false,
+        'only the departure side is authored — flagging the mirror drops a traveller past a guard');
+
+      // Positions, world, and the FORWARD link id: map_link_id pointing at the
+      // mirror (or at nothing) is the wiring mistake a count check cannot see.
+      assert.deepEqual(
+        (await wpRows(pool)).map((r) => ({
+          name: r.name, x: r.x, y: r.y, world: r.world, link: r.map_link_id })),
+        [
+          { name: WP_STAIR_NAME, x: 2550, y: 2550, world: 'zzTestWpA', link: forward.id },
+          { name: WP_STONE.name, x: 1250, y: 850, world: 'zzTestWpA', link: null },
+        ]);
+    });
+  } finally { await cleanup(pool); await pool.end(); }
+});
+
+test('re-seeding a moved waypoint converges, keeps activations, and leaves no ghost', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — waypoint convergence is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await cleanup(pool);
+    await withEntryPreserved(pool, async () => {
+      await applyMapSpec(pool, waypointSpec());
+      const before = (await wpRows(pool)).find((r) => r.name === WP_STONE.name);
+
+      // A player lights it, exactly as the tick loop would.
+      const classes = await listPlayableClasses(pool);
+      await pool.query(
+        "INSERT INTO users (username, password_hash, role) VALUES ('zzTestWpUser', 'x', 'player')");
+      const userId = (await pool.query(
+        "SELECT id FROM users WHERE username = 'zzTestWpUser'")).rows[0].id;
+      const character = await createCharacter(
+        pool, userId, 'zzTestWpChar', classes.find((c) => c.name === 'Warrior').id);
+      await activateWaypoint(pool, character.id, before.id);
+
+      // Slice B's first edit: nudge the waypoint, keep its name.
+      const moved = await applyMapSpec(pool, waypointSpec({
+        stone: { ...WP_STONE, x: 3350, y: 2750 } }));
+      assert.equal(moved.waypointsRemoved, 0, 'a rename-free move must not delete anything');
+
+      const rows = await wpRows(pool);
+      assert.equal(rows.length, 2, 'the old tile still carries a ghost waypoint');
+      const after = rows.find((r) => r.name === WP_STONE.name);
+      assert.equal(after.id, before.id, 'the move re-created the waypoint instead of moving it');
+      assert.deepEqual([after.x, after.y], [3350, 2750]);
+      const act = await pool.query(
+        'SELECT count(*)::int AS n FROM character_waypoints WHERE waypoint_id = $1', [before.id]);
+      assert.equal(act.rows[0].n, 1, 're-seeding erased a player\'s activation');
+
+      // Un-authoring both of them takes the flag AND the rows back off: the
+      // registry is what the runtime reads, so a row nobody authors any more is
+      // still a live travel target.
+      const dropped = await applyMapSpec(pool, waypointSpec({ flagged: false, stone: null }));
+      assert.equal(dropped.waypoints, 0);
+      assert.equal(dropped.waypointsRemoved, 2);
+      assert.deepEqual(await wpRows(pool), []);
+      assert.equal((await wpLinks(pool)).forward.is_waypoint, false,
+        'removing the key from a spec must take the flag back off');
+    });
+  } finally { await cleanup(pool); await pool.end(); }
+});
+
+test('a guarded staircase cannot end up a waypoint, whatever the spec says', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — the guarded-portal rule is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    await cleanup(pool);
+    await withEntryPreserved(pool, async () => {
+      // (a) The flag comes first, the guard second. Two edits, each clean to the
+      // validator: v1 flags an unguarded staircase, v2 guards it and drops the
+      // flag. The applier used to set is_waypoint = false and insert the guards
+      // while leaving the registry row -- and the registry row is what the
+      // authority reads.
+      await applyMapSpec(pool, waypointSpec({ stone: null }));
+      assert.equal((await wpRows(pool)).length, 1, 'v1 must have authored the staircase waypoint');
+
+      const guarded = await applyMapSpec(pool, waypointSpec({ guard: true, flagged: false, stone: null }));
+      assert.equal(guarded.portalGuards, 2, 'v2 must actually place the guard pack');
+      assert.deepEqual(await wpRows(pool), [],
+        'the guard landed on a staircase that still had a waypoint on it');
+
+      const guardRows = await pool.query(
+        `SELECT count(*)::int AS n FROM world_creatures wc JOIN worlds w ON w.id = wc.world_id
+          WHERE w.name = 'zzTestWpA' AND wc.blocks_portal_id IS NOT NULL`);
+      assert.equal(guardRows.rows[0].n, 2, 'the guards must be live rows for the cases below to mean anything');
+    });
+
+    // (b) The guard goes away in the SPEC and stays in the DATABASE.
+    // worldPopulation deliberately spares `blocks_portal_id IS NOT NULL`, so
+    // dropping `guard:` from a spec does not remove the creatures. The validator
+    // builds its guarded-tile set from the spec text and sees nothing to reject.
+    await assert.rejects(
+      () => withEntryPreserved(pool, () => applyMapSpec(pool, waypointSpec({ stone: null }))),
+      /guarded by Wolf/,
+      'a re-flagged staircase whose guards are still alive must abort the apply');
+    assert.deepEqual(await wpRows(pool), [], 'the aborted apply left a waypoint behind');
+    assert.equal((await wpLinks(pool)).forward.is_waypoint, false,
+      'the aborted apply committed the flag');
+
+    // The same bypass spelled without the flag: a standalone waypoint dropped on
+    // the staircase's own tile is walked onto, lit, and travelled to.
+    await assert.rejects(
+      () => withEntryPreserved(pool, () => applyMapSpec(pool, waypointSpec({
+        flagged: false, stone: { x: 2599, y: 2599, name: 'zzTestWp Sneaky Stone' } }))),
+      /Sneaky Stone.*guarded by Wolf/s);
+    assert.deepEqual(await wpRows(pool), []);
+  } finally { await cleanup(pool); await pool.end(); }
 });
 
 // allows_fast_travel, seeded for real rather than asserted from source text
