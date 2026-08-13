@@ -98,9 +98,10 @@ const insideB = { x: 2118, y: 2118 };   // centre (2150,2150) -> tile row 21, co
 // id to the map_links rows fetchLinks will return for it (compass rows AND
 // PORTAL rows, exactly as the real query returns them together). `bounded`
 // gives w1 a width/height, which is what makes its edge tiles map_doorway tiles
-// at all.
-function fakePool({ bind = null, villages = {}, links = {}, bounded = false } = {}) {
-  const binds = [];      // every INSERT INTO player_binds, in order
+// at all. `bindWriteFails` makes the first N player_binds writes reject.
+function fakePool({ bind = null, villages = {}, links = {}, bounded = false, bindWriteFails = 0 } = {}) {
+  const binds = [];      // every SUCCESSFUL INSERT INTO player_binds, in order
+  let bindFailsLeft = bindWriteFails;
   function route(sql, params) {
     if (/FROM worlds WHERE id/i.test(sql)) {
       // No width/height: an UNBOUNDED world, so chooseSpawn lands on the
@@ -124,7 +125,14 @@ function fakePool({ bind = null, villages = {}, links = {}, bounded = false } = 
     if (/FROM world_players WHERE/i.test(sql)) return { rows: [] };
     if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
     if (/FROM player_binds WHERE/i.test(sql)) return { rows: bind ? [bind] : [] };
-    if (/INSERT INTO player_binds/i.test(sql)) { binds.push(params); return { rows: [] }; }
+    if (/INSERT INTO player_binds/i.test(sql)) {
+      // Thrown BEFORE the push, so `binds` only ever holds writes that actually
+      // landed -- a retry test that counted attempts would pass on the failure
+      // alone.
+      if (bindFailsLeft > 0) { bindFailsLeft--; throw new Error('bind write failed'); }
+      binds.push(params);
+      return { rows: [] };
+    }
     if (/FROM villages WHERE world_id/i.test(sql)) return { rows: villages[params[0]] || [] };
     if (/FROM item_types/i.test(sql)) {
       return { rows: [
@@ -412,6 +420,24 @@ test('a bind still pending when the socket closes is flushed, not lost', async (
   await sleep(200);
   assert.strictEqual(pool.binds.length, 2, 'disconnecting inside the floor must not lose the newer bind');
   assert.strictEqual(pool.binds[1][2], VILLAGE_B.spawn_x);
+});
+
+test('a bind write that FAILS is retried, not silently swallowed', async () => {
+  // The flag is cleared optimistically, before the write resolves, so the tick
+  // path does not queue a second write for the same crossing. That is only safe
+  // if a rejected write puts it back: otherwise the very first DB hiccup ends
+  // the session's bind tracking, and the forced close-flush no-ops too (it sees
+  // a clean bind). bindWriteMinMs 0 so the retry is not also waiting on a floor.
+  const pool = fakePool({ villages: { w1: [VILLAGE_A] }, bindWriteFails: 1 });
+  const { handle } = await joinedSession(pool, { bindWriteMinMs: 0 });
+
+  const p = livePlayer(handle, 'w1');
+  p.x = insideA.x; p.y = insideA.y;
+  await sleep(200); // ~10 ticks: one failed write, then room for the retry
+
+  assert.strictEqual(pool.binds.length, 1,
+    'the bind was lost when its first write failed -- nothing retried it');
+  assert.strictEqual(pool.binds[0][2], VILLAGE_A.spawn_x, 'and the retry wrote the village, not a stale one');
 });
 
 // ---------------------------------------------------------------------------

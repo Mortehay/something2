@@ -794,10 +794,18 @@ function attachAuthority(httpServer, pool, opts = {}) {
   function flushBind(p, now, force = false) {
     if (!p._bindDirty || !p.bind) return null;
     if (!force && p._bindWroteAt != null && now - p._bindWroteAt < bindWriteMinMs) return null;
+    // Cleared BEFORE the write resolves, so the ticks that elapse while it is in
+    // flight do not queue a second write for the same crossing -- and therefore
+    // re-armed if it rejects, or "DEFERRED, never dropped" above would be a lie
+    // the first time the DB hiccups: the flag would stay clean for the rest of
+    // the session and the forced close-flush would no-op too. Same posture as
+    // flushAndPrune's creature writes (keep dirty -> retried). The retry re-reads
+    // p.bind rather than replaying these arguments, so a bind that moved on in
+    // the meantime wins instead of being overwritten by a stale one.
     p._bindDirty = false;
     p._bindWroteAt = now;
     return upsertBind(p.characterId, p.bind.worldId, p.bind.x, p.bind.y)
-      .catch((e) => console.error('upsertBind', e));
+      .catch((e) => { p._bindDirty = true; console.error('upsertBind', e); });
   }
 
   // Materialize + load a chunk's creatures into the sim. Creature placement
