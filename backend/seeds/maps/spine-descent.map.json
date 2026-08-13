@@ -17,7 +17,8 @@
         "min_row": 31, "min_col": 30, "width": 6, "height": 4,
         "gate_edge": "S", "spawn_x": 3150, "spawn_y": 3250
       },
-      "level_band": [1, 2]
+      "level_band": [1, 2],
+      "waypoints": [{ "x": 3250, "y": 3250, "name": "Old Trailhead Commons" }]
     },
     {
       "key": "pass",
@@ -29,7 +30,8 @@
       "biomes": ["Meadow", "Highlands"], "biome_cell": 16,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false,
-      "level_band": [2, 4]
+      "level_band": [2, 4],
+      "waypoints": [{ "x": 4050, "y": 2550, "name": "Windwatch Waystone" }]
     },
     {
       "key": "cache",

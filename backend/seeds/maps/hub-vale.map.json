@@ -27,7 +27,8 @@
       "width": 64, "height": 64, "chunk_size": 32,
       "biomes": ["Deep Forest", "Verdant Jungle"], "biome_cell": 16,
       "allowed_creature_types": ["Bat", "Skeleton"],
-      "is_entry": false
+      "is_entry": false,
+      "waypoints": [{ "x": 3050, "y": 2650, "name": "Thornbriar Green" }]
     },
     {
       "key": "dunes",
