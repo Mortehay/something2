@@ -104,7 +104,7 @@ function makePool({
       if (/SELECT x, y FROM world_players WHERE world_id/i.test(sql)) {
         return { rows: [{ x: SPAWN.x, y: SPAWN.y }] };
       }
-      if (/SELECT x, y FROM player_binds/i.test(sql)) return { rows: [] };
+      if (/FROM player_binds WHERE/i.test(sql)) return { rows: [] };
       if (/^\s*INSERT INTO world_players/i.test(sql)) return { rows: [] };
       // The guard-alive count query (openChest's own read) -- checked BEFORE
       // the generic "FROM world_creatures" bbox-load fallback below, since

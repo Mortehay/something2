@@ -145,7 +145,16 @@ class World {
   // user_id). The in-memory map stays keyed by userId -- one live session per
   // account -- so both ids live on the player object and are not
   // interchangeable: userId owns gold, characterId owns everything else.
-  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null) {
+  // `bind` (SOMET-294) is the player_binds row this character actually holds --
+  // { worldId, x, y } -- or null for a character that has never entered a
+  // village. It is NOT the same fact as `respawn`/`p.spawn`: p.spawn is where
+  // resolveDeaths() snaps them WITHIN THIS WORLD and is always a point in this
+  // world, while p.bind may name a different one. When they agree, the two are
+  // the same coordinates and nothing downstream can tell them apart; when they
+  // disagree, server.js's onPlayerDeath is what notices and relocates. Defaulted
+  // to null so every existing caller -- and every test that builds a player --
+  // keeps behaving exactly as before.
+  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null, bind = null) {
     this.players.set(userId, {
       userId,
       characterId,
@@ -171,6 +180,11 @@ class World {
       inv,
       mit: mitigation(inv, this.weapons),
       spawn: { x: respawn.x, y: respawn.y },
+      // Read only by server.js (the tick loop refreshes it on village entry,
+      // onPlayerDeath compares its worldId against the world the death happened
+      // in). Nothing on the synchronous death path in this file consults it --
+      // resolveDeaths() still knows only about p.spawn.
+      bind,
       gold: Number(gold) || 0,
       _attackCd: 0,
       _doorwayCdUntil: 0,
