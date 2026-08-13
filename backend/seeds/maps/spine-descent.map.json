@@ -384,15 +384,6 @@
       "from": "deep",
       "edge": "E",
       "to": "end"
-    },
-    {
-      "kind": "portal",
-      "from": "entry",
-      "from_x": 3550,
-      "from_y": 3650,
-      "to": "pass",
-      "to_x": 3950,
-      "to_y": 2950
     }
   ]
 }
