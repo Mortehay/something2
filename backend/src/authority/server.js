@@ -705,22 +705,30 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // pendingArrivals + `transition` is the exact pair the doorway and portal
     // paths already use, which also means joinPolicy's `transition` leg is what
     // authorizes the arrival -- server-side state, never the client's claim.
-    // No recordVisit alongside it, unlike those two: a character can only hold a
-    // bind in a world it has physically stood in a village in, so the visit row
-    // is already there. A doorway needs the defensive write because a doorway
-    // can lead somewhere genuinely new.
+    //
+    // recordVisit rides along, as it does at both of those call sites. The
+    // tempting argument against it here is that it is redundant: a bind can only
+    // be earned by physically standing in a village, so the visit row already
+    // exists. That argument is exactly what visited_worlds_db.test.js's
+    // source-text guard exists to refuse, and it is already fragile -- the
+    // waypoint slices (SOMET-292/293) add other ways to reach a world, and a
+    // live visit-row loss has happened before (SOMET-265). Holding the invariant
+    // by construction is cheaper than re-arguing it every slice.
+    //
+    // The socket send is best-effort, same as every other push in this file: it
+    // may already be gone. The arrival stays enqueued either way, so a player
+    // who reconnects later still lands at their village rather than where they
+    // died -- exactly how an un-consumed doorway arrival already behaves.
     if (p.bind && p.bind.worldId !== entry.worldId) {
       pendingArrivals.set(characterId, { worldId: p.bind.worldId, x: p.bind.x, y: p.bind.y });
-      // Best-effort, same as every other push in this file: the socket may
-      // already be gone. The arrival stays enqueued either way, so a player who
-      // reconnects later still lands at their village rather than where they
-      // died -- exactly how an un-consumed doorway arrival already behaves.
       const sock = entry.sockets.get(userId);
       if (sock) {
         send(sock, {
           type: 'transition', toWorldId: p.bind.worldId, arriveX: p.bind.x, arriveY: p.bind.y,
         });
       }
+      recordVisit(pool, characterId, p.bind.worldId)
+        .catch((e) => console.error('recordVisit (death respawn)', e));
     }
 
     return applyDeath(pool, characterId, { rng })

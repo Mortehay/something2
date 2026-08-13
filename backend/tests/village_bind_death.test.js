@@ -256,6 +256,14 @@ test('a bind in ANOTHER world heals you here and sends you there', async () => {
   assert.strictEqual(p.hp, p.maxHp, 'the heal is synchronous even when the relocation is not');
   assert.ok(p.hp > 0);
   assert.deepStrictEqual([...p.effects.keys()], [], 'effects cleared, as on any other death');
+
+  // visited_worlds_db.test.js pins "every transition push records its
+  // destination" as source text; this proves the call actually runs and names
+  // the right world, which a source-text guard cannot.
+  await sleep(50);
+  const visits = pool.matching(/INSERT INTO character_visited_worlds/i).map((c) => c.params[1]);
+  assert.deepStrictEqual(visits, ['w1', 'w2'],
+    'the join recorded w1; the death respawn must record w2, exactly once');
 });
 
 test('the cross-world arrival is authorized by the server, not by the client asking', async () => {
