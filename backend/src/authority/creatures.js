@@ -625,12 +625,67 @@ function stepHome(map, c, bh, dt, cc) {
   return 'walking';
 }
 
-// Nearest hostile-faction creature a guard may engage: within aggroRadius of
-// the guard AND within leashRadius of the guard's post, so a guard never locks
-// onto something it is not allowed to chase.
-function selectGuardTarget({ guard, creatures, aggroRadius, leashRadius }) {
+// SOMET-291 — is this creature actually fighting a live player right now?
+//
+// The rescue predicate. Three ways a `_target` can look like an engagement and
+// not be one, all of them refused here:
+//
+//  - a GUARD-styled creature's `_target` is a CREATURE id (`_targetKind ===
+//    'creature'`). Creature ids and player userIds come from different tables
+//    and can collide numerically, so the kind must be checked, not the value.
+//    Tested for 'creature' rather than for 'player' on purpose: a hostile that
+//    has not yet been through the acquisition path may still carry a null kind,
+//    and refusing THAT would silently drop rescues.
+//  - the target is stale: `_target` is only cleared on the creature's own next
+//    tick, so a creature whose player has disconnected still holds their id.
+//    Resolving it against the live player map is what makes this a fact rather
+//    than a leftover. Without it both village guards abandon the gate to
+//    intercept a hostile that is fighting nobody.
+//  - the creature is skittish and not provoked BY THIS PLAYER -- a deer holds a
+//    player in `_target` only so it knows who to back away from, and a guard
+//    that reads that as an attack chases wildlife across the map while the real
+//    attacker is ignored. SOMET-290's `isFleeingFrom` is that rule, and asking
+//    it here rather than re-deriving it is what keeps the two in step.
+//
+// `playersById` absent means "nobody is hunting anyone", which is what makes
+// every pre-SOMET-291 caller (and every test that omits it) byte-identical to
+// the old nearest-first selection.
+//
+// `now` is the tick's world clock, threaded from tick()'s 4th parameter, and is
+// deliberately NOT defaulted here beyond `undefined`: provocation now EXPIRES,
+// so a caller that forgets the clock reads every provocation as long gone and a
+// provoked skittish creature stops counting as a rescue. That failure direction
+// is the safe one (no guard dispatched for wildlife, rather than guards sent
+// chasing a deer), but it is still a bug, so every call site passes it.
+function engagingAPlayer(creature, playersById, now) {
+  if (!playersById || creature._target == null) return false;
+  if (creature._targetKind === 'creature') return false;
+  if (!playersById.has(creature._target)) return false;
+  const bh = creature.behavior || DEFAULT_BEHAVIOR;
+  return !isFleeingFrom(creature, bh, playerKey(creature._target), now);
+}
+
+// The hostile-faction creature a guard may engage: within aggroRadius of the
+// guard AND within leashRadius of the guard's post, so a guard never locks onto
+// something it is not allowed to chase.
+//
+// SOMET-291 — ordered by TWO keys, rescue first and distance second. A hostile
+// that is currently fighting a player outranks a nearer one that is not, however
+// much nearer: the whole point of a gate guard is that running to it works, and
+// a guard that swats the closest wandering slime instead is the version of this
+// feature that looks alive and rescues nobody.
+//
+// Distance still decides among equals, and the `<=` tie-break (a later
+// equidistant candidate wins) is kept exactly as it was, so a field with no
+// rescues in it resolves to precisely the target it resolved to before.
+//
+// The aggro cap is a separate constant rather than the running best, which the
+// single-key version could fold together: with two keys a further rescue must
+// still be admitted after a nearer non-rescue has been seen.
+function selectGuardTarget({ guard, creatures, aggroRadius, leashRadius, playersById = null, now = undefined }) {
   const gc = center(guard);
-  let best = null, bd2 = aggroRadius * aggroRadius;
+  const aggro2 = aggroRadius * aggroRadius;
+  let best = null, bestD2 = Infinity, bestRescue = false;
   for (const o of creatures) {
     // `creatures` may be a pre-loop snapshot: a candidate killed earlier this
     // same tick (by another guard) is still present in the array but its hp
@@ -640,7 +695,13 @@ function selectGuardTarget({ guard, creatures, aggroRadius, leashRadius }) {
     const oc = center(o);
     if (!withinLeash(oc.x, oc.y, guard.home, leashRadius)) continue;
     const d2 = dist2(gc.x, gc.y, oc.x, oc.y);
-    if (d2 <= bd2) { bd2 = d2; best = o; }
+    if (d2 > aggro2) continue;
+    const rescue = engagingAPlayer(o, playersById, now);
+    if (best === null
+        || (rescue && !bestRescue)
+        || (rescue === bestRescue && d2 <= bestD2)) {
+      best = o; bestD2 = d2; bestRescue = rescue;
+    }
   }
   return best;
 }
@@ -847,29 +908,6 @@ function isFleeingFrom(creature, bh, actorKey, now) {
   return bh.chaseStyle === 'skittish' && !isProvokedBy(creature, actorKey, now);
 }
 
-// SOMET-290 — is this creature actually FIGHTING the player it holds, rather
-// than merely watching or backing away from one?
-//
-// Exported for slice D (SOMET-291): "a guard prefers a hostile that currently
-// holds a player target" must not count a deer that has a player in `_target`
-// only so it knows who to back away from — rescuing a player from a creature
-// that is running away from them would send guards chasing wildlife across the
-// map while the actual attacker is ignored.
-//
-// `_target` alone cannot answer this, which is the whole reason this exists:
-// the skittish branch acquires a target exactly like a charger does and only
-// then decides not to engage it.
-//
-// `now` is the tick's world clock and is deliberately NOT defaulted: a caller
-// that forgets it reads every provocation as expired, so a skittish creature
-// answers "not engaging" -- no rescue dispatched for wildlife, rather than
-// guards sent chasing a deer.
-function isEngagingPlayer(creature, now) {
-  if (!creature || creature._target == null || creature._targetKind !== 'player') return false;
-  const bh = creature.behavior || DEFAULT_BEHAVIOR;
-  return !isFleeingFrom(creature, bh, playerKey(creature._target), now);
-}
-
 // Nearest DIRS index for a movement vector's signs → facing.
 function facingFor(vx, vy) {
   const sx = Math.sign(vx), sy = Math.sign(vy);
@@ -1018,6 +1056,29 @@ class CreatureSim {
             || !withinLeash(center(tgt).x, center(tgt).y, c.home, bh.leashRadius))) {
           tgt = null;
         }
+        // SOMET-291 — a rescue outranks whatever the guard is already doing.
+        //
+        // Without this the priority key inside selectGuardTarget would be
+        // half-inert: a held target is kept as long as it is alive and inside
+        // the leash, so a guard already busy with a wandering slime would never
+        // re-select, and "run to the guards" would work only for a player
+        // unlucky enough to arrive while the gate happened to be quiet -- the
+        // exact case the ticket is about.
+        //
+        // MONOTONE, and that is what makes it safe: the switch only ever goes
+        // not-a-rescue -> rescue, never the other way and never rescue ->
+        // nearer-rescue, so no pair of hostiles can make a guard oscillate
+        // between them. It costs one extra candidate scan per guard per tick,
+        // and only while the guard holds a non-rescue target; guards are two
+        // per village and MAX_WORLD_CREATURES bounds the scan.
+        if (tgt && !engagingAPlayer(tgt, byId, now)) {
+          const rescue = selectGuardTarget({
+            guard: c, creatures: all,
+            aggroRadius: bh.aggroRadius, leashRadius: bh.leashRadius,
+            playersById: byId, now,
+          });
+          if (rescue && engagingAPlayer(rescue, byId, now)) tgt = rescue;
+        }
         if (!displaced && !tgt) {
           // `all` is a pre-loop snapshot; selectGuardTarget skips any
           // candidate already killed earlier this tick (hp <= 0), so a
@@ -1026,11 +1087,34 @@ class CreatureSim {
           tgt = selectGuardTarget({
             guard: c, creatures: all,
             aggroRadius: bh.aggroRadius, leashRadius: bh.leashRadius,
+            playersById: byId, now,
           });
         }
         c._target = tgt ? tgt.id : null;
         c._targetKind = tgt ? 'creature' : null;
 
+        // KNOWN, NOT FIXED (SOMET-291 review): a guard can lock onto a hostile
+        // on the far side of its OWN wall and stand there indefinitely.
+        //
+        // This branch has no stall detection, no repath and no give-up. All of
+        // that machinery lives in the no-target return branch below
+        // (_homeStall / findHomePath / the put-back-on-the-post fallback), and
+        // a guard holding a target never reaches it. So the chase step below
+        // jams against the inside of the wall, the leash clamp refuses the
+        // identical step forever, and nothing here notices.
+        //
+        // Reproduced on a live village shape (6x4, gate E) with a hostile 350px
+        // due north of the north post -- a wall with no gate. It is admitted
+        // (350 <= aggro 400, 350 <= leash 600 from the post), the guard walks
+        // 26px, and 2000 ticks later it is still mode 'chase' on that target.
+        //
+        // Pre-existing, and WIDENED by the SOMET-291 leash raise: at leash 300
+        // the same hostile was refused outright, so the reachable band beyond a
+        // gateless wall grew from roughly 200px to roughly 300px on the three
+        // walls that have no gate. It is recorded rather than fixed because the
+        // rescue still rescues -- the symptom is a distracted guard, not a
+        // broken one -- and give-up logic on a chase is a behaviour change, not
+        // a test gap.
         if (tgt) {
           c.mode = 'chase';
           // SOMET-154: a chase invalidates any cached walk-home detour — the
@@ -1188,8 +1272,11 @@ class CreatureSim {
       }
       // `_targetKind` was only ever written by the guard branch, so a hostile
       // holding a player read as `null` — fine while nothing outside the tick
-      // asked, but isEngagingPlayer (and slice D through it) needs to tell a
-      // player target from a creature one without re-deriving it from faction.
+      // asked, but SOMET-291's engagingAPlayer needs to tell a player target
+      // from a creature one without re-deriving it from faction. It refuses on
+      // 'creature' rather than requiring 'player', so this write is a
+      // clarification and not a load-bearing precondition: a hostile that has
+      // not yet reached this line still reads correctly.
       c._targetKind = c._target != null ? 'player' : null;
       c.mode = c._target ? 'chase' : 'roam';
       // SOMET-290: there is deliberately NO "clear provocation" step here any
@@ -1224,6 +1311,11 @@ class CreatureSim {
         //
         // Per-TARGET, not per-creature: a deer shot by one player and then
         // approached by another is still prey to the second one.
+        //
+        // SOMET-291's guard branch above asks the SAME predicate (through
+        // engagingAPlayer), so the two cannot disagree about what "fleeing"
+        // means -- a creature backing away from a player must not read to a
+        // guard as that player being attacked.
         const fleeing = isFleeingFrom(c, bh, playerKey(c._target), now);
 
         if (bh.chaseStyle === 'hold') {
@@ -1725,12 +1817,14 @@ module.exports = {
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
   GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE, GUARD_HOME_EPSILON,
   withinLeash, selectGuardTarget,
-  // SOMET-290: the two predicates that own "is this creature prey or a
-  // fighter". isFleeingFrom is the tick's own rule; isEngagingPlayer is the
-  // question slice D (SOMET-291) asks -- a skittish creature holds a player in
-  // `_target` even while running away from it, so a raw `_target` read cannot
-  // tell a rescue-worthy attack from wildlife fleeing the same player.
-  isFleeingFrom, isEngagingPlayer,
+  // SOMET-290 / SOMET-291: the two predicates that own "is this creature prey
+  // or a fighter". isFleeingFrom is the tick's own rule, per-target and
+  // clock-aware; engagingAPlayer is the question the guard branch asks on top
+  // of it -- a skittish creature holds a player in `_target` even while running
+  // away from it, so a raw `_target` read cannot tell a rescue-worthy attack
+  // from wildlife fleeing the same player. Exported so both can be pinned
+  // directly rather than only through a full tick.
+  isFleeingFrom, engagingAPlayer,
   // SOMET-290: the monotone leash budget, shared by the flee clamp and
   // shoveCreature and exported so it can be pinned without a full tick.
   withinLeashBudget,

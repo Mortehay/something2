@@ -1,8 +1,8 @@
-const { villageGatePosts, villageMerchantPost } = require('./mapService');
+const { villageGatePosts, villageGatePoint, villageMerchantPost } = require('./mapService');
 const { seedBaseCatalog } = require('./merchantStock');
 const { MAP_TILE_SIZE } = require('../authority/coords');
 const { scaleCreature } = require('./creatureLevel');
-const { GUARD_DAMAGE } = require('../authority/creatures');
+const { GUARD_DAMAGE, GUARD_AGGRO_RADIUS } = require('../authority/creatures');
 
 // ---------------------------------------------------------------------------
 // SOMET-282 — the ON-SCREEN size budget.
@@ -98,6 +98,101 @@ const VILLAGE_LIMITS = {
   minW: 3, maxW: 8, minH: 3, maxH: 6,
   maxSum: largestTileSumWithinBudget(3 + 3),
 };
+
+// ---------------------------------------------------------------------------
+// SOMET-291 — how far a gate guard's leash has to reach.
+//
+// `creature_behaviors.Guard.leash_radius` is live data (raised by migration
+// 1714440210000) and nothing in the running game reads this function. It exists
+// so the number in that row is DERIVED and re-derivable: the same reason
+// largestTileSumWithinBudget above searches for the screen limit instead of
+// stating it. If VILLAGE_LIMITS, villageGatePosts or GUARD_AGGRO_RADIUS ever
+// move, guard_rescue_leash.test.js goes red and names the term that moved.
+//
+// Three things a guard must be able to do, measured over EVERY legal village
+// (both posts, all four gate edges), never over one hand-picked box:
+//
+//  - aggro:    engage everything it can see. GUARD_AGGRO_RADIUS is 400 and
+//              selectGuardTarget rejects any candidate outside the leash FROM
+//              THE POST, so a leash under 400 makes a quarter of the guard's
+//              own aggro area unreachable -- the 400 in the catalog was a lie
+//              while the leash was 300.
+//  - interior: fight anywhere inside its own village. A hostile that follows a
+//              fleeing player through the gate can run to any interior tile,
+//              and the held-target check is withinLeash(target, home, leash) --
+//              so a target past the leash is DROPPED mid-chase and the guard
+//              turns round and walks home while the player dies.
+//  - gate:     finish an interception at the doorway. A post is up to one
+//              diagonal tile from the gate, and a guard that has reached the
+//              gate should still be allowed to hold a hostile out to the edge
+//              of the aggro radius it had when it got there.
+//
+// Rounded UP to a whole tile, because every other distance in this file is a
+// tile multiple and a leash of 541.42 would read as a measurement rather than
+// a decision.
+//
+// CONSEQUENCE, recorded here because it is not visible from the number: the
+// interior term is literally "fight anywhere inside its own village", and every
+// interior tile of every legal box is within the guard's 400px aggro of a post.
+// So at leash 600 NOTHING inside a village is leash-protected any more -- the
+// whole interior is a legal guard target, and the leash has stopped being what
+// decides which of them a guard will engage.
+//
+// That matters for penned livestock (SOMET-289): all three skittish types carry
+// faction 'hostile' like every other wild spawn, and selectGuardTarget admits
+// candidates by faction, so a pen placed within ~400px of a gate post gives the
+// village guards a herd to hunt. The constraint belongs to whoever places the
+// pen -- it has been relayed to that slice -- and is written down here so the
+// coupling is discoverable from the code that caused it rather than only from a
+// ticket.
+function eachLegalVillage(visit) {
+  for (let width = VILLAGE_LIMITS.minW; width <= VILLAGE_LIMITS.maxW; width++) {
+    for (let height = VILLAGE_LIMITS.minH; height <= VILLAGE_LIMITS.maxH; height++) {
+      if (width + height > VILLAGE_LIMITS.maxSum) continue;
+      for (const gateEdge of ['N', 'S', 'E', 'W']) {
+        // minRow/minCol 0: every distance below is a difference, so where the
+        // box sits on the world grid cannot change any of them.
+        visit({ minRow: 0, minCol: 0, width, height, gateEdge });
+      }
+    }
+  }
+}
+
+// The three terms and the leash they imply, each kept separately so a test (and
+// a reader) can see WHICH one is binding rather than being handed one number.
+// `worstInterior`/`worstGate` name the box that produced them, so a failure
+// message can point at a real village shape.
+function guardRescueLeashTerms() {
+  let interior = { d: 0, village: null };
+  let gate = { d: 0, village: null };
+  eachLegalVillage((v) => {
+    const gatePoint = villageGatePoint(v);
+    for (const post of villageGatePosts(v)) {
+      const dg = Math.hypot(post.x - gatePoint.x, post.y - gatePoint.y);
+      if (dg > gate.d) gate = { d: dg, village: v };
+      // Interior tiles only: the wall ring is not walkable, so a hostile can
+      // never stand on it and a leash that reached it would be measuring
+      // ground nothing can occupy.
+      for (let row = v.minRow + 1; row <= v.minRow + v.height - 2; row++) {
+        for (let col = v.minCol + 1; col <= v.minCol + v.width - 2; col++) {
+          const d = Math.hypot(post.x - (col * MAP_TILE_SIZE + MAP_TILE_SIZE / 2),
+            post.y - (row * MAP_TILE_SIZE + MAP_TILE_SIZE / 2));
+          if (d > interior.d) interior = { d, village: v };
+        }
+      }
+    }
+  });
+  const required = Math.max(GUARD_AGGRO_RADIUS, interior.d, gate.d + GUARD_AGGRO_RADIUS);
+  return {
+    aggro: GUARD_AGGRO_RADIUS,
+    worstInterior: interior,
+    worstGate: gate,
+    required,
+    radius: Math.ceil(required / MAP_TILE_SIZE) * MAP_TILE_SIZE,
+  };
+}
+
+function guardRescueLeashRadius() { return guardRescueLeashTerms().radius; }
 
 // SOMET-282. Null when the village fits the on-screen budget, otherwise a
 // message naming the numbers. Integer width/height are NOT this function's
@@ -324,4 +419,8 @@ module.exports = {
   // Screen-budget internals, so a test can re-derive the limit instead of
   // restating it.
   villageScreenBox, VILLAGE_SCREEN_BUDGET_PX2, ISO_K,
+  // SOMET-291: the executable form of the derivation behind
+  // creature_behaviors.Guard.leash_radius. Terms exported alongside the result
+  // so a failure names the geometry that moved, not just the total.
+  guardRescueLeashRadius, guardRescueLeashTerms, eachLegalVillage,
 };

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  CreatureSim, shoveCreature, isEngagingPlayer, GUARD_LEASH_RADIUS,
+  CreatureSim, shoveCreature, engagingAPlayer, GUARD_LEASH_RADIUS,
 } = require('../src/authority/creatures.js');
 const {
   applyDamage, isProvokedBy, playerKey, PROVOKE_MEMORY_MS,
@@ -425,7 +425,7 @@ test('a creature shot by one player still lets a different one walk past', () =>
 
 // --- 9c. FLEEING IS NOT ENGAGING ---------------------------------------------
 
-test('isEngagingPlayer tells a creature fighting a player from one running from it', () => {
+test('engagingAPlayer tells a creature fighting a player from one running from it', () => {
   // The contract slice D (SOMET-291) reads: "a guard prefers a hostile that
   // currently holds a player target". A skittish creature holds a player in
   // `_target` the entire time it is backing away from them -- it needs to know
@@ -434,15 +434,20 @@ test('isEngagingPlayer tells a creature fighting a player from one running from 
   //
   // Driven through the tick rather than by hand-building a creature, so this
   // pins the state the sim actually produces.
+  //
+  // The live-player map is the second argument because slice D's predicate also
+  // resolves `_target` against it: `_target` outlives a disconnect by a tick.
+  // Here the player is always present, so this case isolates the flee rule.
   const { s, player: p, active, c } = scenario(skittish(), CX + 100);
+  const byId = new Map([[p.userId, p]]);
   s.tick(DT, active, [p], 0);
   assert.equal(c._target, 'u1', 'fixture: it must hold the player as a target');
-  assert.equal(isEngagingPlayer(c, MS), false,
+  assert.equal(engagingAPlayer(c, byId, MS), false,
     'a creature running away from a player was reported as fighting them');
 
   hit(c, 'u1', MS);
   s.tick(DT, active, [p], 2 * MS);
-  assert.equal(isEngagingPlayer(c, 2 * MS), true,
+  assert.equal(engagingAPlayer(c, byId, 2 * MS), true,
     'a provoked creature chasing the player who shot it was not reported as engaging');
 
   // A charger is engaging whenever it holds a player, provoked or not -- the
@@ -450,7 +455,7 @@ test('isEngagingPlayer tells a creature fighting a player from one running from 
   // everything else.
   const charger = scenario(behavior({ aggroRadius: 400 }), CX + 100);
   charger.s.tick(DT, charger.active, [charger.player], 0);
-  assert.equal(isEngagingPlayer(charger.c, MS), true,
+  assert.equal(engagingAPlayer(charger.c, new Map([[charger.player.userId, charger.player]]), MS), true,
     'an ordinary charger holding a player target was not reported as engaging');
 });
 
