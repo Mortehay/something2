@@ -67,6 +67,38 @@ function boxesOverlap(a, b) {
 // migrations/1714440180000_world_safe_region.js.
 const MAX_SAFE_ROAD_RADIUS = 8;
 
+// Every key a world object may carry -- anything else is an error, not an
+// ignored extra.
+//
+// An unread key is indistinguishable from a consumed one from the author's
+// side: the spec validates, the seed exits 0, and the feature is simply not
+// there. `pens:` is the live example -- SOMET-288 deliberately ships without a
+// pen reader (see the deferral note in
+// docs/superpowers/plans/2026-08-12-home-region-a-safe-region.md), so a spec
+// authoring pens today would be accepted and silently produce nothing. That is
+// the SOMET-153 failure class the singular/plural `village` checks above
+// already guard against, one level up.
+//
+// WORLDS ONLY, deliberately. This is the level authors actually extend (every
+// new authored feature so far -- density, level_band, allows_fast_travel,
+// safe_road_radius, and next pens -- landed here), and it is the level where a
+// typo'd or premature key costs the most. Links and villages are not covered:
+// their shapes are already pinned field-by-field above, and widening the rule
+// to them buys little for the extra chance of rejecting a spec over a key that
+// some other branch legitimately added.
+//
+// `creature_count` is listed even though it is RETIRED: it has its own,
+// far more useful error message a few lines below ("use density instead"), and
+// leaving it out here would bury that message under a generic one.
+const WORLD_KEYS = new Set([
+  'key', 'name', 'grid', 'seed', 'width', 'height', 'chunk_size',
+  'biomes', 'biome_cell', 'allowed_creature_types', 'is_entry', 'entry_spawn',
+  'level_band', 'density', 'allows_fast_travel',
+  'village', 'villages', 'chest',
+  'safe_road_radius', 'safe_rects',
+  'creature_count',
+]);
+
 function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } = {}) {
   const errors = [];
   if (!spec || typeof spec !== 'object') return ['spec is not an object'];
@@ -91,6 +123,16 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     byKey.set(w.key, w);
     if (seenNames.has(w.name)) errors.push(`duplicate name "${w.name}"`);
     seenNames.add(w.name);
+
+    // Before every other per-world check, and NOT behind a `continue`: a world
+    // that also fails its grid check must still have its unknown keys named,
+    // or the author fixes the grid and gets a second surprise.
+    const unknown = Object.keys(w).filter((k) => !WORLD_KEYS.has(k));
+    if (unknown.length) {
+      errors.push(`world "${w.key}" has unknown key(s) ${unknown.join(', ')} -- `
+        + 'nothing reads them, so they would be silently ignored. Remove them, or '
+        + 'add them to WORLD_KEYS in seeds/mapSpec.js once a reader exists.');
+    }
 
     const gridRequired = !portalConnectedKeys.has(w.key);
     if (!hasValidGrid(w)) {

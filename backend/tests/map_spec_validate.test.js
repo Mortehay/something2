@@ -517,3 +517,71 @@ test('village: false is rejected the same way', () => {
   const errs = errorsFor((s) => { s.worlds[0].village = false; });
   assert.ok(errs.some((e) => /village must be an object/.test(e)), errs.join('\n'));
 });
+
+// ---------------------------------------------------------------------------
+// Unknown world keys (SOMET-288 review, finding 2).
+//
+// An unread key is indistinguishable from a consumed one from the author's
+// side: the spec validates, the seed exits 0, and the feature is simply absent.
+// `pens:` is the live case -- SOMET-288 ships without a pen reader on purpose,
+// so an author who writes pens before slice B lands its reader gets no pens and
+// no complaint.
+// ---------------------------------------------------------------------------
+test('an unknown world key is rejected rather than silently ignored', () => {
+  const errs = errorsFor((s) => {
+    s.worlds[0].pens = [{ min_row: 20, min_col: 20, width: 4, height: 4 }];
+  });
+  assert.ok(errs.some((e) => /unknown key\(s\) pens/.test(e)), errs.join('\n'));
+});
+
+test('a typo\'d world key is named, and every offending key is listed at once', () => {
+  // `saferoad_radius` is the realistic shape of this mistake: near-miss on a
+  // real key, so the world reads as opted in and is not.
+  const errs = errorsFor((s) => {
+    s.worlds[0].saferoad_radius = 3;
+    s.worlds[0].villagse = [];
+  });
+  const hit = errs.filter((e) => /unknown key/.test(e));
+  assert.equal(hit.length, 1, 'one error per world, not one per key');
+  assert.match(hit[0], /saferoad_radius/);
+  assert.match(hit[0], /villagse/);
+  assert.match(hit[0], /world "a"/, 'the error must name the world');
+});
+
+test('every key the applier actually reads is accepted', () => {
+  // The allowlist is only as good as its completeness -- a missing entry here
+  // turns this check into a wall in front of a legitimate spec. Enumerated
+  // explicitly rather than derived from WORLD_KEYS, which would make the
+  // assertion true by construction whatever that set contained.
+  const errs = errorsFor((s) => {
+    Object.assign(s.worlds[0], {
+      chunk_size: 64, density: 'sparse', level_band: [1, 3],
+      allows_fast_travel: true,
+      safe_road_radius: 2,
+      safe_rects: [{ min_row: 10, min_col: 10, width: 4, height: 4 }],
+      village: { min_row: 20, min_col: 20, width: 6, height: 4, gate_edge: 'S',
+                 spawn_x: 2150, spawn_y: 2150 },
+      chest: { x: 500, y: 500, guard_creature_type: 'Wolf', level: 3 },
+    });
+  });
+  assert.deepEqual(errs, []);
+});
+
+test('the retired creature_count keeps its own error rather than a generic one', () => {
+  // It is on the allowlist deliberately: dropping it there would bury the
+  // "use density instead" message under "unknown key".
+  const errs = errorsFor((s) => { s.worlds[0].creature_count = 12; });
+  assert.ok(errs.some((e) => /no longer authored -- use "density"/.test(e)), errs.join('\n'));
+  assert.ok(!errs.some((e) => /unknown key/.test(e)), errs.join('\n'));
+});
+
+test('an unknown key on a world that also fails another check is still reported', () => {
+  // The grid check `continue`s, so an unknown key checked after it would stay
+  // invisible until the author fixed the grid and re-ran.
+  const errs = errorsFor((s) => {
+    s.worlds[0].grid = null;
+    s.worlds[0].pens = [];
+  });
+  assert.ok(errs.some((e) => /grid must be two integers/.test(e)), errs.join('\n'));
+  assert.ok(errs.some((e) => /unknown key\(s\) pens/.test(e)), errs.join('\n'));
+});
