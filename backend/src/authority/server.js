@@ -16,6 +16,7 @@ const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
 const { fetchVillages } = require('../services/villages');
+const { fetchWaypoints, activateWaypoint, waypointTileKey } = require('../services/waypoints');
 const {
   fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests,
 } = require('../services/chests.js');
@@ -489,6 +490,19 @@ function attachAuthority(httpServer, pool, opts = {}) {
           { id: l.id, toWorldId: l.to_world_id, toX: l.to_x, toY: l.to_y, fromX: l.from_x, fromY: l.from_y },
         ]));
         const villages = await fetchVillages(pool, canonicalId);
+        // SOMET-292. Keyed by tile, exactly like portalLinks above, because the
+        // tick loop asks the same question of both ("is this player standing on
+        // one?") and an O(1) Map is what keeps that question free per player
+        // per tick. waypointTileKey derives the key with the same
+        // Math.floor(centre / 100) arithmetic the tick loop uses on the player,
+        // so the two cannot disagree about which tile a waypoint is on.
+        //
+        // THIS IS THE ONLY RUNTIME READ of the waypoints table. Nothing else
+        // loads them for the sim, so there is no second loader to fall out of
+        // step with -- the shape that made a whole creature-behaviour catalog
+        // inert in SOMET-249.
+        const waypointRows = await fetchWaypoints(pool, canonicalId);
+        const waypoints = new Map(waypointRows.map((w) => [waypointTileKey(w.x, w.y), w]));
         const decorationDefs = await loadDecorationDefs(pool);
         const biomes = await loadBiomes(pool, row.biomes);
         const chests = await fetchChests(pool, canonicalId);
@@ -510,7 +524,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const entry = {
           worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
           tileTypes, creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
-          goldItemTypeId, links, portalLinks, villages, chests, mapGenConfig,
+          goldItemTypeId, links, portalLinks, villages, waypoints, chests, mapGenConfig,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -2000,6 +2014,67 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // definition one where planBind returned null (the player is still in
           // the same village).
           flushBind(p, bindNow);
+        }
+      }
+      // Waypoint activation (SOMET-292). Modelled on the village-bind block
+      // directly above, and throttled the same way it is.
+      //
+      // ACTIVATION IS PHYSICAL. There is deliberately no socket message that
+      // lights a waypoint: a client-claimed activation would be a free travel
+      // target, which is the same shape of hole joinPolicy exists to close.
+      // Walking onto the tile is the only way, and this is the only place that
+      // decides it happened.
+      //
+      // WRITE THROTTLING, on a hot path. planBind's answer is an in-memory
+      // latch (_boundVillageId) so a player loitering by the gate costs one
+      // write rather than one per tick; a waypoint's latch is a Set, because
+      // activation is permanent and per-waypoint rather than a single current
+      // value. The id goes into the Set BEFORE the query is issued -- the tick
+      // does not await, so a latch set afterwards would let the next tick fire
+      // a second INSERT while the first is still in flight, which is the
+      // realistic duplicate here rather than the theoretical one.
+      //
+      // The latch is NOT primed from the database on join, matching
+      // _boundVillageId, which is not either. Cost: one no-op INSERT per
+      // session per waypoint re-walked. That is cheaper than the query priming
+      // would need, and character_waypoints' composite primary key -- not this
+      // latch -- is what actually makes a repeat harmless.
+      if (entry.waypoints && entry.waypoints.size) {
+        for (const p of entry.world.players.values()) {
+          const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+          // The SAME function loadWorld keyed the Map with, rather than the
+          // inline Math.floor pair the doorway and portal blocks use. Those two
+          // sites are one expression apart and still had to be reconciled by
+          // hand; here the lookup and the key cannot disagree by construction.
+          const wp = entry.waypoints.get(waypointTileKey(cx, cy));
+          if (!wp) continue;
+          if (!p._litWaypoints) p._litWaypoints = new Set();
+          if (p._litWaypoints.has(wp.id)) continue;
+          p._litWaypoints.add(wp.id);
+          const characterId = p.characterId;
+          const userId = p.userId;
+          activateWaypoint(pool, characterId, wp.id)
+            .then(({ firstTime }) => {
+              // Socket looked up AFTER the round trip, never captured before
+              // it: a reconnect mid-write would otherwise send this to the dead
+              // socket and the new session would never hear about it. Same
+              // discipline the auto-loot notify below already follows.
+              const ws = entry.sockets.get(userId);
+              if (!ws) return;
+              // firstTime is the INSERT's own rowCount, i.e. a database fact.
+              // A server that merely REMEMBERS having seen this waypoint would
+              // get it wrong after a restart, which is exactly when a player
+              // would notice a "waypoint discovered" banner for one they lit
+              // last week.
+              send(ws, { type: 'waypointActivated', waypoint: wp, firstTime });
+            })
+            .catch((e) => {
+              // Drop the latch so the next tick retries: a failed write must
+              // not leave the player standing on a waypoint the server has
+              // decided it already handled.
+              if (p._litWaypoints) p._litWaypoints.delete(wp.id);
+              console.error('activateWaypoint', e);
+            });
         }
       }
       // aggro/chase/contact damage + respawns (before state). Guard kills route
