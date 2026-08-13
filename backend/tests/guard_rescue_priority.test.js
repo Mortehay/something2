@@ -11,6 +11,7 @@ const {
   CreatureSim, selectGuardTarget, engagingAPlayer,
   GUARD_AGGRO_RADIUS,
 } = require('../src/authority/creatures.js');
+const { applyDamage } = require('../src/authority/damage.js');
 
 // --- helper-level fixtures ---------------------------------------------------
 
@@ -257,6 +258,191 @@ test('a guard on a rescue is not stolen back by a nearer wanderer', () => {
     if (g._target !== 'chaser') stolen++;
   }
   assert.equal(stolen, 0, `the guard was pulled off the rescue on ${stolen} ticks`);
+});
+
+// --- the live tick: the three exclusions ------------------------------------
+//
+// The half above proves a rescue is ORDERED first. This half proves the three
+// things that are NOT rescues, through the same tick.
+//
+// It exists because the helper cases (5, 5b, 5c) are exactly the kind that can
+// go inert: each one calls engagingAPlayer and selectGuardTarget directly, so a
+// tick that stopped passing `playersById` at all, or a `_target` the tick never
+// actually writes in the shape the fixture assumes, would leave every one of
+// them green. Only a run of tick() can say the exclusions hold against the
+// fields the tick really writes -- and against target RETENTION, which turns a
+// single wrong pick into a guard that is off its post for good.
+
+// The Skittish profile as SOMET-290's migration authored it, plus its Nip
+// ability. Spelled out rather than read from the catalog for the reason
+// creature_skittish.test.js spells it out: this is the INPUT to the behaviour
+// under test, and a fixture that read the same row the tick reads could not
+// tell a correct tick from one that ignores the profile entirely.
+function skittishBehavior() {
+  return {
+    name: 'Skittish', chaseStyle: 'skittish', aggroRadius: 300, leashRadius: 500,
+    preferredRange: 150, moveSpeedMult: 1.15, damageOverride: null,
+    abilities: [{
+      slot: 1, name: 'Nip', attackKind: 'melee', attackRange: 60,
+      attackCooldown: 1.2, projectileSpeed: 0, projectileRadius: 0,
+      element: null, damageMult: 1, knockback: 0,
+    }],
+  };
+}
+
+// Everything in this field is a live hostile inside BOTH the guard's 400px
+// aggro and its 600px leash for the whole run, so the only thing that can
+// decide the guard's target is the rescue predicate:
+//
+//   idle    120px E of the post. Nearest, and the player is 480px away -- out
+//           of its 400px aggro -- so it holds nobody and is never a rescue.
+//   deer    350px E, Skittish, with a player 250px further east: inside its
+//           300px aggro (so the tick really does write _target = 7) and outside
+//           its 150px preferred range (so it stands and watches, which is what
+//           keeps the geometry frozen for the whole run).
+//   warden  300px N, guard-STYLED but carrying faction 'hostile', locked onto
+//           creature 7 -- whose id is the same integer as the player's userId.
+//   c7      200px N, that creature.
+//
+// The warden is the one shape here the shipped catalog does not produce (every
+// Guard row is faction 'guard'). It is in the fixture because selectGuardTarget
+// admits candidates by FACTION while the tick routes branches by BEHAVIOUR, so
+// nothing but data discipline keeps the two aligned -- and because a candidate
+// carrying `_targetKind: 'creature'` is only reachable through the guard branch,
+// which is the only writer of that field.
+//
+// hp 1e9 and damage 0 everywhere, for the same reason the field above uses
+// them: these cases are about who the guard picks over many ticks, and a fight
+// that resolved would end the run early.
+function exclusionField() {
+  const s = new CreatureSim(MAP, () => 0.5);
+  const home = { x: 1000, y: 1000 };
+  s.addCreatures([
+    {
+      id: 'g', type: 'Village Guard', x: home.x - 24, y: home.y - 24, hp: 1e9,
+      faction: 'guard', home_x: home.x, home_y: home.y,
+      behavior: guardBehavior(), damage: 0,
+    },
+    { id: 'idle', type: 'Slime', x: home.x + 120 - 24, y: home.y - 24, hp: 1e9, damage: 0, behavior: holdBehavior() },
+    { id: 'deer', type: 'Deer', x: home.x + 350 - 24, y: home.y - 24, hp: 1e9, damage: 0, behavior: skittishBehavior() },
+    {
+      id: 'warden', type: 'Rogue Guard', x: home.x - 24, y: home.y - 300 - 24, hp: 1e9, damage: 0,
+      faction: 'hostile', home_x: home.x, home_y: home.y - 300, behavior: guardBehavior(),
+    },
+    // Numeric id, and the SAME integer as the player's userId below: creature
+    // ids and userIds come from different tables, so this collision is a fact
+    // about the data and not a contrivance.
+    { id: 7, type: 'Slime', x: home.x - 24, y: home.y - 200 - 24, hp: 1e9, damage: 0, behavior: holdBehavior() },
+  ]);
+  const player = {
+    userId: 7, x: home.x + 600 - 32, y: home.y - 32,
+    width: 64, height: 64, hp: 1e9, mit: null,
+  };
+  return { s, player, home };
+}
+
+test('the tick never sends the guard after a fleeing deer or a hostile fighting a creature', () => {
+  const { s, player } = exclusionField();
+  const g = s.creatures.get('g');
+  const deer = s.creatures.get('deer');
+  const deerX = deer.x, deerY = deer.y;
+
+  // Per-tick counters rather than an end state: a guard that was pulled off its
+  // post for twenty ticks and drifted back would pass a final-value check, and
+  // twenty ticks is a dead player.
+  let ticksOnDeer = 0, ticksOnWarden = 0;
+  for (let i = 0; i < 60; i++) {
+    s.tick(0.05, KEYS, [player], i * 0.05);
+    if (g._target === 'deer') ticksOnDeer++;
+    if (g._target === 'warden') ticksOnWarden++;
+  }
+
+  // The fixture really did put both refused shapes in front of the guard. Each
+  // of these is what makes the counters above mean something: without them a
+  // deer that never noticed the player, or a warden that never acquired
+  // anything, would score 0 for the wrong reason.
+  assert.equal(deer._target, 7, 'fixture: the deer must be holding the player it is watching');
+  assert.equal(deer._targetKind, null, 'fixture: a non-guard creature leaves _targetKind unset');
+  assert.ok(!deer._provoked, 'fixture: the deer must still be prey — nothing here hits it');
+  assert.equal(deer.x, deerX, 'fixture: the deer must stand and watch, not drift out of range');
+  assert.equal(deer.y, deerY, 'fixture: the deer must stand and watch, not drift out of range');
+  const warden = s.creatures.get('warden');
+  assert.equal(warden._target, 7, 'fixture: the warden must be locked onto creature 7');
+  assert.equal(warden._targetKind, 'creature', 'fixture: the warden must be on a CREATURE');
+  assert.equal(s.creatures.get('idle')._target, null, 'fixture: idle must hold nobody');
+
+  assert.equal(ticksOnDeer, 0,
+    `the guard abandoned its post to chase a fleeing deer on ${ticksOnDeer} of 60 ticks`);
+  assert.equal(ticksOnWarden, 0,
+    `the guard treated a hostile fighting a CREATURE as a rescue on ${ticksOnWarden} of 60 ticks`);
+  assert.equal(g._target, 'idle', 'the guard ended the run on something other than the nearest hostile');
+});
+
+test('the tick sends the guard after the SAME deer the moment it is provoked', () => {
+  // The other half, and the reason the case above is not simply "guards ignore
+  // skittish creatures": a provoked deer fights like anything else, so the
+  // exclusion has to lift the instant it does. Without this pair, deleting the
+  // provocation term would leave a guard that never rescues anyone from an
+  // angry animal.
+  const { s, player } = exclusionField();
+  const g = s.creatures.get('g');
+  const deer = s.creatures.get('deer');
+  for (let i = 0; i < 20; i++) s.tick(0.05, KEYS, [player], i * 0.05);
+  assert.equal(g._target, 'idle', 'precondition: the guard must start on the nearest wanderer');
+
+  // The real damage funnel, not a hand-set flag: applyDamage stamping
+  // `_provoked` is the only thing that converts a skittish creature, and a
+  // fixture that set the field itself could not tell the two apart.
+  applyDamage(deer, 10, 'physical', deer.mit);
+
+  // One tick is enough: the guard is ticked first, and the deer already holds
+  // the player, so the upgrade has everything it needs on the very next pass.
+  s.tick(0.05, KEYS, [player], 1);
+  assert.equal(g._target, 'deer', 'a provoked deer mauling a player did not outrank a wandering slime');
+  // ...and it stays there. 40 ticks = 2s, over which the deer closes at most
+  // ~92px on the player and so stays well inside the 600px leash from the post:
+  // this measures retention, not the leash boundary.
+  let stolen = 0;
+  for (let i = 0; i < 40; i++) {
+    s.tick(0.05, KEYS, [player], 1.05 + i * 0.05);
+    if (g._target !== 'deer') stolen++;
+  }
+  assert.equal(stolen, 0, `the guard was pulled off the provoked deer on ${stolen} ticks`);
+});
+
+test('a hostile still holding a departed player id does not pull the guard off its post', () => {
+  // The stale-target exclusion, on the live path. The window is real and it is
+  // exactly one tick wide: `_target` is only cleared by the holder's OWN tick,
+  // and the guard is ticked before it.
+  const { s, player, home } = field();
+  const g = s.creatures.get('g');
+  const chaser = s.creatures.get('chaser');
+  // A second, live player, far west of everything: 1100px from the chaser and
+  // 820px from `idle`, so nothing in the field can acquire them. Their only job
+  // is to make the players map non-empty, so what refuses the stale rescue is
+  // the IDENTITY of the held target rather than an empty world.
+  const bystander = {
+    userId: 8, x: home.x - 700 - 32, y: home.y - 32,
+    width: 64, height: 64, hp: 1e9, mit: null,
+  };
+
+  for (let i = 0; i < 10; i++) s.tick(0.05, KEYS, [bystander], i * 0.05);
+  assert.equal(g._target, 'idle', 'precondition: the guard must start on the nearest wanderer');
+  assert.equal(chaser._target, null, 'precondition: nobody is being hunted yet');
+
+  // Player 7 arrives for a single tick. The guard is ticked FIRST, so on this
+  // tick it still reads a chaser that has acquired nobody -- the acquisition
+  // happens later in this same loop.
+  s.tick(0.05, KEYS, [bystander, player], 0.5);
+  assert.equal(chaser._target, 7, 'fixture: the chaser must have acquired the arriving player');
+
+  // ...and logs out. Entering this tick the chaser looks exactly like a rescue:
+  // hostile, alive, inside the leash, holding a player id. The only thing that
+  // says otherwise is that the id resolves to nobody.
+  s.tick(0.05, KEYS, [bystander], 0.55);
+  assert.equal(g._target, 'idle',
+    'the guard left its post for a hostile whose player had already logged out');
+  assert.equal(chaser._target, null, 'fixture: the stale window is exactly one tick wide');
 });
 
 test('through all of it the guard never targets or strikes the player', () => {
