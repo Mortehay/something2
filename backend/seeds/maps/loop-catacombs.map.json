@@ -8,11 +8,11 @@
       "allows_fast_travel": true,
       "grid": [0, 0],
       "seed": 3001,
-      "width": 64, "height": 64, "chunk_size": 32,
+      "width": 128, "height": 128, "chunk_size": 32,
       "biomes": ["Catacombs"], "biome_cell": 16,
       "allowed_creature_types": ["Slime"],
       "is_entry": true,
-      "entry_spawn": { "x": 3250, "y": 3250 }
+      "entry_spawn": { "x": 6450, "y": 6450 }
     },
     {
       "key": "crypt",
@@ -20,7 +20,7 @@
       "allows_fast_travel": true,
       "grid": [-1, 0],
       "seed": 3002,
-      "width": 64, "height": 64, "chunk_size": 32,
+      "width": 128, "height": 128, "chunk_size": 32,
       "biomes": ["Catacombs", "Ossuary"], "biome_cell": 16,
       "allowed_creature_types": ["Slime"],
       "is_entry": false
@@ -30,8 +30,8 @@
       "name": "Sunken Eastwing",
       "allows_fast_travel": true,
       "grid": [1, 0],
-      "seed": 3003,
-      "width": 64, "height": 64, "chunk_size": 32,
+      "seed": 3008,
+      "width": 160, "height": 160, "chunk_size": 32,
       "biomes": ["Sunken Cistern"], "biome_cell": 16,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
@@ -42,7 +42,7 @@
       "allows_fast_travel": true,
       "grid": [0, 1],
       "seed": 3004,
-      "width": 64, "height": 64, "chunk_size": 32,
+      "width": 160, "height": 160, "chunk_size": 32,
       "biomes": ["Blightworks", "Sunken Cistern"], "biome_cell": 16,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
@@ -53,7 +53,7 @@
       "allows_fast_travel": true,
       "grid": [2, 0],
       "seed": 3005,
-      "width": 64, "height": 64, "chunk_size": 32,
+      "width": 192, "height": 192, "chunk_size": 32,
       "biomes": ["Hive Warrens"], "biome_cell": 16,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
@@ -63,8 +63,8 @@
       "name": "Deepvault Row",
       "allows_fast_travel": true,
       "grid": [1, 1],
-      "seed": 3006,
-      "width": 64, "height": 64, "chunk_size": 32,
+      "seed": 3009,
+      "width": 192, "height": 192, "chunk_size": 32,
       "biomes": ["Deepvault"], "biome_cell": 16,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false
@@ -75,7 +75,7 @@
       "allows_fast_travel": true,
       "grid": [2, 1],
       "seed": 3007,
-      "width": 64, "height": 64, "chunk_size": 32,
+      "width": 224, "height": 224, "chunk_size": 32,
       "biomes": ["Ossuary", "Frostvault"], "biome_cell": 16,
       "allowed_creature_types": ["Bat", "Skeleton"],
       "is_entry": false

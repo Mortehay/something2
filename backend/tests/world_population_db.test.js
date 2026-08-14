@@ -58,10 +58,11 @@ describeDb('populateWorld fills an empty world from its density tier', async () 
     } finally {
       client.release();
     }
-    // horde on 64x64: 49 scattered + 4 packs of 5-8. Packs may ship short on
-    // a map with unwalkable terrain, so assert a floor, not an exact total --
-    // but assert the SCATTER exactly, which is not subject to short packs.
-    assert.equal(result.scattered, 49);
+    // horde on 64x64: 98 scattered (round(24 * 4096 / 1000), SOMET-302's
+    // doubled rate) + 4 packs of 5-8. Packs may ship short on a map with
+    // unwalkable terrain, so assert a floor, not an exact total -- but
+    // assert the SCATTER exactly, which is not subject to short packs.
+    assert.equal(result.scattered, 98);
     assert.ok(result.packed >= 20, `packed ${result.packed} >= 20`);
     assert.equal(result.total, result.scattered + result.packed);
 
@@ -88,7 +89,7 @@ describeDb('populateWorld persists the resolved scatter count to creature_count'
       client.release();
     }
     const r = await pool.query('SELECT creature_count FROM worlds WHERE id = $1', [world.id]);
-    assert.equal(r.rows[0].creature_count, 49);
+    assert.equal(r.rows[0].creature_count, 98);
   } finally {
     await cleanup(pool);
     await pool.end();
@@ -177,7 +178,7 @@ describeDb('populateWorld excludes guard-faction types from the wild-spawn pool'
 
     // Positive side first: a world that placed nothing would satisfy "no
     // guards appear" vacuously. horde's scatterCount is nonzero on a 64x64
-    // world (49 elsewhere in this file with an unrestricted biome; still
+    // world (98 elsewhere in this file with an unrestricted biome; still
     // must be > 0 here since 'Skeleton' is the only non-guard candidate).
     assert.ok(result.total > 0, 'fixture placed nothing -- the negative assertion below would be vacuous');
 
@@ -325,10 +326,10 @@ describeDb('the dead tier leaves a world genuinely empty', async () => {
 // Covers the gap the Task 4 review found: allowed_creature_types = [] (the
 // column's own default -- migration 1714440027000_bounded_worlds.js:16) with
 // a non-dead density used to still write creature_count = density.scatterCount
-// (49 for horde) before the empty-allowlist early return, leaving the admin
+// (98 for horde) before the empty-allowlist early return, leaving the admin
 // UI showing a nonzero count over a genuinely empty map. Density is 'horde'
 // specifically so scatterCount is nonzero -- against the old write-before-
-// checking ordering this assertion would see 49, not 0.
+// checking ordering this assertion would see 98, not 0.
 describeDb('an empty allowlist zeroes creature_count rather than leaving a stale value', async () => {
   const pool = new Pool({ connectionString: URL });
   try {

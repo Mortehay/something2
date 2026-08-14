@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { generateSpec } = require('../scripts/dungeon/gen-p5-map-content');
+const { generateSpec, portalCenterPx, entryVillageBox } = require('../scripts/dungeon/gen-p5-map-content');
 
 test('generates a spec with exactly one is_entry world', () => {
   const spec = generateSpec();
@@ -59,5 +59,83 @@ test('every world declares a level_band and a density', () => {
   for (const w of spec.worlds) {
     assert.ok(Array.isArray(w.level_band) && w.level_band.length === 2, `${w.name} missing level_band`);
     assert.equal(typeof w.density, 'string', `${w.name} missing density`);
+  }
+});
+
+// These two functions replace constants that were the same expressions
+// hand-evaluated at size 64. At 64 they must still produce exactly the old
+// literals, or this refactor silently moved every portal arrival in the spec.
+test('portalCenterPx(64) reproduces the old PORTAL_TILE_PX literal', () => {
+  assert.equal(portalCenterPx(64), 3250);
+});
+
+test('portalCenterPx scales to the centre tile of any world size', () => {
+  assert.equal(portalCenterPx(96), 4850);
+  assert.equal(portalCenterPx(128), 6450);
+  assert.equal(portalCenterPx(224), 11250);
+});
+
+test('entryVillageBox(64) reproduces the old hand-written village literal', () => {
+  assert.deepEqual(entryVillageBox(64), {
+    min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S',
+    spawn_x: 3050, spawn_y: 2950,
+  });
+});
+
+test('entryVillageBox stays centred as the world grows', () => {
+  assert.deepEqual(entryVillageBox(128), {
+    min_row: 60, min_col: 60, width: 6, height: 4, gate_edge: 'S',
+    spawn_x: 6250, spawn_y: 6150,
+  });
+});
+
+test('world size varies with depth instead of being uniformly 64', () => {
+  const spec = generateSpec();
+  const sizes = new Set(spec.worlds.map((w) => w.width));
+  assert.ok(sizes.size > 1, 'every world still has the same width');
+  for (const w of spec.worlds) {
+    assert.equal(w.width, w.height, `world "${w.key}" is not square`);
+    assert.equal(w.width % 32, 0, `world "${w.key}" is not a whole number of chunks`);
+    assert.ok(w.width >= 96 && w.width <= 224,
+      `world "${w.key}" has width ${w.width}, outside the ramp`);
+  }
+});
+
+test('the deepest dungeon room is larger than the entry room', () => {
+  const spec = generateSpec();
+  const entry = spec.worlds.find((w) => w.is_entry === true);
+  const deepest = spec.worlds.reduce((a, b) => (b.width > a.width ? b : a));
+  assert.ok(deepest.width > entry.width,
+    `entry is ${entry.width} and the largest world is ${deepest.width}`);
+});
+
+test('every portal coordinate sits inside the world it belongs to', () => {
+  const spec = generateSpec();
+  const byKey = new Map(spec.worlds.map((w) => [w.key, w]));
+  for (const l of spec.links.filter((x) => x.kind === 'portal')) {
+    const from = byKey.get(l.from);
+    const to = byKey.get(l.to);
+    assert.ok(l.from_x >= 0 && l.from_y >= 0 && l.from_x < from.width * 100 && l.from_y < from.height * 100,
+      `portal departure (${l.from_x},${l.from_y}) is outside ${l.from} (${from.width} tiles)`);
+    assert.ok(l.to_x >= 0 && l.to_y >= 0 && l.to_x < to.width * 100 && l.to_y < to.height * 100,
+      `portal arrival (${l.to_x},${l.to_y}) is outside ${l.to} (${to.width} tiles)`);
+  }
+});
+
+test('the entry spawn sits at the centre of the entry world, whatever its size', () => {
+  const spec = generateSpec();
+  const entry = spec.worlds.find((w) => w.is_entry === true);
+  assert.deepEqual(entry.entry_spawn,
+    { x: portalCenterPx(entry.width), y: portalCenterPx(entry.width) });
+});
+
+test('a stamped entry village stays inside its world and carries no marker field', () => {
+  const spec = generateSpec();
+  for (const w of spec.worlds.filter((x) => x.village)) {
+    assert.ok(w.village.min_row + w.village.height <= w.height,
+      `village in "${w.key}" overruns the world`);
+    assert.ok(w.village.min_col + w.village.width <= w.width,
+      `village in "${w.key}" overruns the world`);
+    assert.equal(w._needsVillage, undefined, `"${w.key}" leaked its marker field`);
   }
 });

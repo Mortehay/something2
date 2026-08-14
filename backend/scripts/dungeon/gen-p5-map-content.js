@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { DUNGEONS, SURFACE_BIOMES } = require('./content');
-const { deriveLevelBand, deriveDensity } = require('./escalation');
+const { deriveLevelBand, deriveDensity, deriveSize } = require('./escalation');
 const { SKELETONS } = require('./skeletons');
 // EDGE_DELTA is the same compass-grid convention validateMapSpec enforces --
 // imported (not duplicated) so a surface-world graft point computed here can
@@ -16,9 +16,39 @@ const { SKELETONS } = require('./skeletons');
 // villages.js/densityTiers.js, neither of which creates a DB pool at import
 // time.
 const { EDGE_DELTA } = require('../../seeds/mapSpec.js');
-const WORLD_SIZE = 64;      // matches the 3 shipped examples
 const CHUNK_SIZE = 32;
-const PORTAL_TILE_PX = 3250; // world-pixel center of a 64x64 world, 100px/tile -- same convention the shipped specs use for entry_spawn
+const SURFACE_SIZE = 96;    // the size ramp's shallowest step
+
+// World-pixel centre of a SIZE x SIZE world at 100 px/tile: tile index
+// SIZE/2, whose centre is SIZE/2 * 100 + 50. This was the module constant
+// PORTAL_TILE_PX = 3250, which is this expression hand-evaluated at
+// WORLD_SIZE = 64. Once size varies per world (SOMET-304) it has to be
+// computed from that world's own size, or a deep world's portal arrival
+// lands in its top-left quadrant instead of its middle.
+//
+// Every size on the ramp is even, so SIZE/2 is always an integer.
+function portalCenterPx(size) {
+  return (size / 2) * 100 + 50;
+}
+
+// The entry village box, centred on a SIZE x SIZE world. 6x4, NOT 6x5:
+// SOMET-282 caps width + height at VILLAGE_LIMITS.maxSum (10 tiles), the
+// largest village whose on-screen bounding box fits in a quarter of the
+// 1280x720 viewport. See services/villages.js for the derivation.
+//
+// The spawn sits two tiles west and three tiles north of centre -- interior
+// for this box, and far enough in that the whole 64px player square lands
+// inside the interior. It also avoids the merchant post and both gate-guard
+// posts. At size 64 this reproduces the hand-written literal it replaces.
+function entryVillageBox(size) {
+  const c = size / 2;                       // centre tile index
+  return {
+    min_row: c - 4, min_col: c - 4, width: 6, height: 4, gate_edge: 'S',
+    spawn_x: (c - 2) * 100 + 50,
+    spawn_y: (c - 3) * 100 + 50,
+  };
+}
+
 const DUNGEON_GRID_SPACING = 12; // cells between each dungeon's local grid origin -- wider than any skeleton's own bounding box (max 5x3)
 
 const OPPOSITE_EDGE = { N: 'S', S: 'N', E: 'W', W: 'E' };
@@ -77,10 +107,6 @@ const SEED_OVERRIDES = {
   // surfaced only once d3_entry's own failure above stopped masking it
   // (seed-map.js's navigability loop throws on the first bad world).
   d3_spur: 5211,
-  // Default 5202 blocked d3_eastwing's E doorway -- the link
-  // eastwing --E--> farhall (LOOP skeleton) -- with impassable terrain at
-  // (32,63)/(32,62). Same terrain-luck class as d3_entry/d3_spur above.
-  d3_eastwing: 5212,
   // Default 5204 blocked d3_heart's W doorway (link heart --W--> deepvault),
   // N doorway (arrival for farhall --S--> heart) and the D3->D4 portal
   // source tile at world-center (32,32) -- interior almost entirely sealed
@@ -93,14 +119,9 @@ const SEED_OVERRIDES = {
   // d3 rooms above. 5715 chosen (not 5601-5607, already the other d7 rooms'
   // default seeds) to avoid giving two distinct rooms byte-identical terrain.
   d7_entry: 5715,
-  // Default 5601 blocked d7_pass's doorways -- it has all FOUR compass edges
-  // consumed (W from d7_entry --E--> d7_pass, plus its own N/S/E links to
-  // cache/elite/gorge), the most constrained room in the whole chain, so it
-  // is the most seed-sensitive. Same terrain-luck class as the rooms above.
-  d7_pass: 5721,
-  // The rest of D7 (default seeds 5602-5607) and all of D8 plus one surface
+  // The rest of D7 (default seeds 5601-5607) and all of D8 plus one surface
   // world turned out to have the same terrain-luck problem once the
-  // navigability check reached past d7_entry/d7_pass -- seed-map.js's loop
+  // navigability check reached past d7_entry -- seed-map.js's loop
   // throws on the first bad world, so these were masked behind the earlier
   // failures above until those were fixed. Found via a read-only offline
   // scan against the real navigability checker (assertNavigable +
@@ -108,11 +129,64 @@ const SEED_OVERRIDES = {
   d7_cache: 9001,
   d7_gorge: 9101,
   d7_deep: 9200,
-  d7_end: 9300,
-  d8_hub: 9408,
   d8_spokeN: 9500,
   d8_spokeS: 9600,
-  surface_storm_coast_0: 9700,
+
+  // --- SOMET-306 retune -- deriveSize gave these 9 worlds a size other than
+  // the 64 every seed above was screened at. The terrain generator's output
+  // for a given seed depends on the world's dimensions, not just the seed
+  // itself -- so a seed that was fine (or simply never checked) at 64 can
+  // reopen the exact terrain-luck problem the block above exists to fix, once
+  // the world grows. Found the same way as the block above: an offline scan
+  // against the real navigability checker (assertNavigable +
+  // buildWorldGenConfig + requiredTilesFor, no DB, no live-apply guessing),
+  // this time re-run after deriveSize resized each affected world.
+
+  // d3_eastwing grew to 128 (was 64). At 128, seed 5212 -- this room's own
+  // pre-SOMET-306 override, picked for the size-64 terrain -- blocked its E
+  // doorway and the arrival tiles one step in from its W and E doorways, and
+  // left only 3/15876 interior cells reachable from the W doorway --
+  // effectively sealed.
+  d3_eastwing: 20000,
+  // d5_spokeW grew to 160 (was 64, and never previously needed an override --
+  // its default seed 5404 was only ever screened at 64). At 160 it blocked
+  // the arrival tile one step in from its E doorway and left only 3/24964
+  // interior cells reachable -- effectively sealed.
+  d5_spokeW: 20500,
+  // d7_pass grew to 224 (was 64; its pre-SOMET-306 override 5721 was picked
+  // for the size-64 terrain; this room, with all four compass edges
+  // consumed, is the most seed-sensitive in the chain). At 224 it blocked
+  // its S doorway and the arrival tile one step in.
+  d7_pass: 21006,
+  // d7_end grew to 224 (was 64; pre-SOMET-306 override 9300). At 224 it
+  // blocked the arrival tile one step in from its W doorway, its D7->D8
+  // portal source tile, and left only 3/49284 interior cells reachable --
+  // effectively sealed.
+  d7_end: 21500,
+  // d8_hub grew to 224 (was 64; pre-SOMET-306 override 9408). At 224 it
+  // blocked the arrival tile one step in from its W doorway (the D7->D8
+  // portal's arrival room).
+  d8_hub: 22004,
+  // d8_spokeE grew to 224 (was 64, and never previously needed an override --
+  // its default seed 5702 was only ever screened at 64). At 224 it blocked
+  // its N doorway, the arrival tiles one step in from both its W and N
+  // doorways, and left only 3/49284 interior cells reachable -- effectively
+  // sealed.
+  d8_spokeE: 22502,
+  // d8_subBranch grew to 224 (was 64, never previously needed an override --
+  // default seed 5705, only ever screened at 64). At 224 it blocked the
+  // arrival tile one step in from its S doorway.
+  d8_subBranch: 23000,
+  // surface_storm_coast_0 grew to 96 (was 64; pre-SOMET-306 override 9700 --
+  // this world's own default seed already needed an unrelated size-64
+  // terrain-luck fix once). At 96 it blocked the arrival tile one step in
+  // from its N doorway and left only 3/8836 interior cells reachable --
+  // effectively sealed.
+  surface_storm_coast_0: 23501,
+  // surface_storm_coast_1 grew to 96 (was 64, never previously needed an
+  // override -- default seed 6051, only ever screened at 64). At 96 it
+  // blocked the arrival tile one step in from its W doorway.
+  surface_storm_coast_1: 24001,
 };
 
 function buildDungeon(dungeon, dungeonIndex) {
@@ -135,28 +209,18 @@ function buildDungeon(dungeon, dungeonIndex) {
       name: `${dungeon.name}: ${room.key[0].toUpperCase()}${room.key.slice(1)}`,
       grid: [originX + room.grid[0], originY + room.grid[1]],
       seed: SEED_OVERRIDES[globalKey] ?? (5000 + dungeonIndex * 100 + i),
-      width: WORLD_SIZE, height: WORLD_SIZE, chunk_size: CHUNK_SIZE,
+      width: null, height: null, chunk_size: CHUNK_SIZE,   // set by the size pass in generateSpec
       biomes: secondBiome && secondBiome !== biome ? [biome, secondBiome] : [biome],
       biome_cell: 16,
       allowed_creature_types: [creatureName(line, 'Swarm'), creatureName(line, 'Skirmisher'), creatureName(line, 'Line')],
       is_entry: false,
     };
     if (skeleton.needsVillageAtEntry && room.role === 'entry') {
-      // 6x4, NOT 6x5: SOMET-282 caps width + height at VILLAGE_LIMITS.maxSum
-      // (10 tiles), the largest village whose on-screen bounding box fits in a
-      // quarter of the 1280x720 viewport. See services/villages.js for the
-      // derivation.
-      //
-      // The spawn is tile (row 29, col 30) -- interior for this box (rows
-      // 29..30, cols 29..32), and the whole 64px player square lands inside
-      // the interior from there, which the just-inside-the-gate tile (row 30,
-      // col 31) would not do. It also avoids the merchant post (row 29, col
-      // 31) and both gate-guard posts (row 30, cols 30 and 32). This used to
-      // read PORTAL_TILE_PX (3250,3250), which is the SOUTH WALL RING of the
-      // old 6x5 box -- the exact SOMET-153 defect, still latent here because
-      // the checked-in p5-descent.map.json was patched by hand and the
-      // generator was not.
-      world.village = { min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S', spawn_x: 3050, spawn_y: 2950 };
+      // The village box is centred on the world, so it cannot be stamped
+      // until deriveSize has run. Mark the room and let generateSpec's
+      // finalisation pass stamp it; the marker is deleted there so it never
+      // reaches the JSON.
+      world._needsVillage = true;
     }
     worlds.push(world);
   });
@@ -314,13 +378,20 @@ function buildSurfaceWorlds(dungeonBuilds) {
       name: `${s.biome} ${variant === 0 ? 'Reach' : 'Frontier'}`,
       grid: [graft.grid[0] + dx, graft.grid[1] + dy],
       seed: SEED_OVERRIDES[key] ?? (6000 + row * 10 + variant),
-      width: WORLD_SIZE, height: WORLD_SIZE, chunk_size: CHUNK_SIZE,
+      // Surface worlds graft onto D1/D2, the two shallowest dungeons, and
+      // carry hand-set shallow bands -- so they take the ramp's first step
+      // rather than going through deriveSize.
+      width: SURFACE_SIZE, height: SURFACE_SIZE, chunk_size: CHUNK_SIZE,
       biomes: [s.biome],
       biome_cell: 16,
       allowed_creature_types: [creatureName(s.line, 'Swarm'), creatureName(s.line, 'Skirmisher'), creatureName(s.line, 'Line')],
       is_entry: false,
       level_band: variant === 0 ? [1, 8] : [4, 12],
       density: variant === 0 ? 'sparse' : 'normal',
+      // The 10 surface worlds are fast-travel destinations. This was a hand
+      // patch on the checked-in spec that the generator did not know about,
+      // so any regeneration silently dropped it (SOMET-306).
+      allows_fast_travel: true,
     });
     links.push({ from: graft.worldKey, edge: graft.edge, to: key });
   });
@@ -344,20 +415,14 @@ function generateSpec() {
     allLinks.push(...built.links);
     for (const [k, v] of built.attachMap) attachMap.set(k, v);
     if (prevExit) {
-      // Hub-topology destinations have a village stamped at their entry room
-      // (skeleton.needsVillageAtEntry) -- arrive at the village's gate cell,
-      // not the fixed world-center tile, or the arrival lands on the
-      // village's south wall (see villageGateArrival above, SOMET-251).
-      // Spine/loop destinations have no village at their entry room, so they
-      // keep the existing fixed-center convention.
-      const destEntryWorld = built.worlds.find((w) => w.key === built.entryKey);
-      const arrival = destEntryWorld && destEntryWorld.village
-        ? villageGateArrival(destEntryWorld.village)
-        : { x: PORTAL_TILE_PX, y: PORTAL_TILE_PX };
+      // Structure only. The BFS below needs from/to to compute hop distance,
+      // and hop distance is what decides each world's size -- so coordinates,
+      // which depend on size, cannot be filled until after that. The
+      // finalisation pass at the end of this function fills them.
       portalLinks.push({
         kind: 'portal',
-        from: prevExit, from_x: PORTAL_TILE_PX, from_y: PORTAL_TILE_PX,
-        to: built.entryKey, to_x: arrival.x, to_y: arrival.y,
+        from: prevExit, from_x: null, from_y: null,
+        to: built.entryKey, to_x: null, to_y: null,
         guard: { creature_type: dungeon.guardCreature, count: 1 },
       });
     } else {
@@ -366,7 +431,6 @@ function generateSpec() {
       // spawn here (see the design doc's "is_entry handling" section).
       const entryWorld = allWorlds.find((w) => w.key === built.entryKey);
       entryWorld.is_entry = true;
-      entryWorld.entry_spawn = { x: PORTAL_TILE_PX, y: PORTAL_TILE_PX };
       d1EntryKey = built.entryKey;
     }
     prevExit = built.exitKey;
@@ -425,6 +489,46 @@ function generateSpec() {
     const hopFraction = Math.min(1, Math.max(0, rawFraction));
     w.level_band = deriveLevelBand(hopFraction, dungeon.tierClamp);
     w.density = deriveDensity(hopFraction);
+    // Third progression-scaled property from the same hopFraction. Assigned
+    // here rather than in buildDungeon because hop distance is only known
+    // once the whole graph is assembled.
+    w.width = deriveSize(hopFraction);
+    w.height = w.width;
+  }
+
+  // Everything below depends on a world's final size, so it runs after the
+  // size assignment above and nowhere earlier.
+  const sizedByKey = new Map([...allWorlds, ...surfaceWorlds].map((w) => [w.key, w]));
+
+  // Stamp the deferred entry villages now that sizes are known.
+  for (const w of allWorlds) {
+    if (!w._needsVillage) continue;
+    delete w._needsVillage;
+    w.village = entryVillageBox(w.width);
+  }
+
+  // The sole is_entry world spawns new characters at its centre.
+  const d1Entry = sizedByKey.get(d1EntryKey);
+  d1Entry.entry_spawn = {
+    x: portalCenterPx(d1Entry.width),
+    y: portalCenterPx(d1Entry.width),
+  };
+
+  // Portal coordinates. Hub-topology destinations have a village stamped at
+  // their entry room -- arrive at the village's gate cell, not the fixed
+  // world-centre tile, or the arrival lands on the village's south wall
+  // (SOMET-251). Spine/loop destinations have no village at their entry room,
+  // so they keep the centre-tile convention.
+  for (const l of portalLinks) {
+    const from = sizedByKey.get(l.from);
+    const to = sizedByKey.get(l.to);
+    l.from_x = portalCenterPx(from.width);
+    l.from_y = portalCenterPx(from.width);
+    const arrival = to.village
+      ? villageGateArrival(to.village)
+      : { x: portalCenterPx(to.width), y: portalCenterPx(to.width) };
+    l.to_x = arrival.x;
+    l.to_y = arrival.y;
   }
 
   // Minor #6 (SOMET-251 final review): SEED_OVERRIDES[globalKey] ?? default
@@ -461,5 +565,5 @@ function writeOutput() {
   console.log(`Wrote ${spec.worlds.length} worlds, ${spec.links.length} links to ${outPath}`);
 }
 
-module.exports = { generateSpec };
+module.exports = { generateSpec, portalCenterPx, entryVillageBox };
 if (require.main === module) writeOutput();

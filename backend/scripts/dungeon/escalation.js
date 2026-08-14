@@ -39,4 +39,21 @@ function deriveDensity(hopFraction) {
   return DENSITY_ORDER[idx];
 }
 
-module.exports = { deriveLevelBand, deriveDensity, DENSITY_ORDER };
+// Progression-scaled world size in tiles (worlds are square). Same input and
+// same bucket shape as deriveDensity, so all three progression properties --
+// level band, density, size -- come from one hopFraction in one module.
+//
+// Every step is a multiple of the 32-tile chunk size, so a world always
+// divides into whole chunks. The steps are chosen against a viewport that
+// shows ~225 tiles at once (1280x720 with a translate-only camera and an
+// isometric area scale of K^2 = 0.4096): 96x96 is ~41 screens and 224x224 is
+// ~223. The old uniform 64x64 was ~18. See the design doc for the derivation.
+const SIZE_STEPS = [96, 128, 160, 192, 224];
+function deriveSize(hopFraction) {
+  const idx = Math.min(SIZE_STEPS.length - 1, Math.floor(hopFraction * SIZE_STEPS.length));
+  return SIZE_STEPS[idx];
+}
+
+module.exports = {
+  deriveLevelBand, deriveDensity, deriveSize, DENSITY_ORDER, SIZE_STEPS,
+};

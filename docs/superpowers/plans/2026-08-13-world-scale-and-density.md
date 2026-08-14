@@ -15,8 +15,9 @@
 - **World sizes must be multiples of 32** (`chunk_size`), so every world divides into whole chunks. The permitted ladder is exactly `[96, 128, 160, 192, 224]`.
 - **Density tier keywords do not change.** `dead|sparse|normal|dense|horde|swarm` are pinned by the `worlds_density_check` DB constraint (migration `1714440070000`). Only the `perThousand` rates change, so **no migration is required anywhere in this plan.**
 - **Expected counts in tests are written as literals**, never recomputed from `DENSITY_TIERS` or `SIZE_STEPS`. A test that imports the table and recomputes the formula asserts that arithmetic works, not that the table holds the intended numbers. The existing `tests/densityTiers.test.js` header comment states this rule; follow it.
-- **Never run destructive DB experiments against the shared dev database.** Re-seeding deletes and re-places non-guard creatures. Task 8 is the only task that touches the database, and it is a deliberate, announced operation.
-- **Commit convention:** branch `feat/world-scale-density`, commit subject `type(scope): summary (SOMET-NNN)`, message ends with the `Co-Authored-By` trailer. Replace `SOMET-NNN` with the real ticket id once filed.
+- **Never run destructive DB experiments against the shared dev database.** Re-seeding deletes and re-places non-guard creatures. Task 7 is the only task that touches the database, and it is a deliberate, announced operation.
+- **Commit convention:** branch `feat/world-scale-density`, commit subject `type(scope): summary (SOMET-3NN)` referencing that task's own item. Message ends with the `Co-Authored-By` trailer.
+- **Plane items:** epic SOMET-301; Task 1 → SOMET-302, Task 2 → SOMET-303, Task 3 → SOMET-304, Task 4 → SOMET-305, Task 5 → SOMET-306, Task 6 → SOMET-307, Task 7 → SOMET-308. Respawn follow-up: SOMET-309.
 - **Definition of done** (`AGENTS.md`): backend `npm test` from `backend/`, frontend `npx vitest run` from `frontend/`, plus browser verification for anything with a UI surface.
 
 ---
@@ -135,7 +136,7 @@ test('the cap leaves every world on the size ramp untouched', () => {
   assert.equal(resolveDensity('swarm', 287, 287).scatterCount, 3928);   // one tile wider: clamped
 });
 
-// The flag is the whole point of SOMET-NNN's ceiling work: before it, a
+// The flag is the whole point of SOMET-302's ceiling work: before it, a
 // truncated world was indistinguishable from a world authored thin.
 test('clamped is true only when the ceiling actually cut the target', () => {
   assert.equal(resolveDensity('swarm', 286, 286).clamped, false);
@@ -176,7 +177,7 @@ const MAX_WORLD_CREATURES = 4000;
 Add to the block comment above `MAX_WORLD_CREATURES`, after the existing text:
 
 ```javascript
-// Raised from 2000 to 4000 when the tier rates doubled (SOMET-NNN). The
+// Raised from 2000 to 4000 when the tier rates doubled (SOMET-302). The
 // deepest world on the size ramp -- 224x224 at swarm -- resolves to 2408,
 // so no world the game ships is near this; it still guards the case it was
 // written for, resolveDensity('normal', 4096, 4096).
@@ -224,7 +225,7 @@ Expected: PASS, all tests.
 
 ```bash
 git add backend/src/services/densityTiers.js backend/tests/densityTiers.test.js
-git commit -m "feat(worlds): double creature density rates and raise the ceiling (SOMET-NNN)"
+git commit -m "feat(worlds): double creature density rates and raise the ceiling (SOMET-302)"
 ```
 
 ---
@@ -267,7 +268,7 @@ Expected: PASS. No world in any shipped spec trips the ceiling, so no test shoul
 
 ```bash
 git add backend/src/services/worldPopulation.js
-git commit -m "feat(worlds): log when the creature ceiling truncates a population (SOMET-NNN)"
+git commit -m "feat(worlds): log when the creature ceiling truncates a population (SOMET-303)"
 ```
 
 ---
@@ -334,7 +335,7 @@ In `backend/scripts/dungeon/gen-p5-map-content.js`, delete the `PORTAL_TILE_PX` 
 // World-pixel centre of a SIZE x SIZE world at 100 px/tile: tile index
 // SIZE/2, whose centre is SIZE/2 * 100 + 50. This was the module constant
 // PORTAL_TILE_PX = 3250, which is this expression hand-evaluated at
-// WORLD_SIZE = 64. Once size varies per world (SOMET-NNN) it has to be
+// WORLD_SIZE = 64. Once size varies per world (SOMET-304) it has to be
 // computed from that world's own size, or a deep world's portal arrival
 // lands in its top-left quadrant instead of its middle.
 //
@@ -419,7 +420,7 @@ Expected: `REFACTOR-CLEAN` with no diff output. Any diff means a coordinate move
 
 ```bash
 git add backend/scripts/dungeon/gen-p5-map-content.js backend/tests/p5_gen_map_content.test.js
-git commit -m "refactor(mapgen): derive portal and village coords from world size (SOMET-NNN)"
+git commit -m "refactor(mapgen): derive portal and village coords from world size (SOMET-304)"
 ```
 
 ---
@@ -525,7 +526,7 @@ Expected: PASS.
 
 ```bash
 git add backend/scripts/dungeon/escalation.js backend/tests/p5_derive_size.test.js
-git commit -m "feat(mapgen): add deriveSize, the progression world-size ramp (SOMET-NNN)"
+git commit -m "feat(mapgen): add deriveSize, the progression world-size ramp (SOMET-305)"
 ```
 
 ---
@@ -746,7 +747,7 @@ The generator does not emit `allows_fast_travel`, and 10 surface worlds in the c
 ```javascript
       // The 10 surface worlds are fast-travel destinations. This was a hand
       // patch on the checked-in spec that the generator did not know about,
-      // so any regeneration silently dropped it (SOMET-NNN).
+      // so any regeneration silently dropped it (SOMET-306).
       allows_fast_travel: true,
 ```
 
@@ -777,7 +778,7 @@ Expected: PASS. This is the gate that catches any feature now sitting outside it
 
 ```bash
 git add backend/scripts/dungeon/gen-p5-map-content.js backend/tests/p5_gen_map_content.test.js backend/seeds/maps/p5-descent.map.json
-git commit -m "feat(mapgen): scale world size with progression depth (SOMET-NNN)"
+git commit -m "feat(mapgen): scale world size with progression depth (SOMET-306)"
 ```
 
 ---
@@ -884,7 +885,7 @@ Expected: PASS. Note that database-backed tests are skipped unless `TEST_DATABAS
 
 ```bash
 git add backend/seeds/maps/hub-vale.map.json backend/seeds/maps/spine-descent.map.json backend/seeds/maps/loop-catacombs.map.json
-git commit -m "feat(maps): resize the hand-authored worlds onto the size ramp (SOMET-NNN)"
+git commit -m "feat(maps): resize the hand-authored worlds onto the size ramp (SOMET-307)"
 ```
 
 ---
@@ -978,14 +979,14 @@ Expected: PASS.
 
 ```bash
 git add -A
-git commit -m "chore(maps): re-seed all worlds onto the size ramp (SOMET-NNN)"
+git commit -m "chore(maps): re-seed all worlds onto the size ramp (SOMET-308)"
 ```
 
 ---
 
-## Follow-up ticket to file before this epic closes
+## Follow-up ticket (filed: SOMET-309)
 
-**Creature respawn.** Killed creatures are deleted permanently (`backend/src/authority/loot.js:75`) and `populateWorld` is only ever called by `seed-map.js` and the admin re-roll route. There is no timer, cron, or on-join repopulation anywhere. This plan raises the starting pool roughly tenfold but does not change its shape: the pool still only drains, and a world emptied by a group stays empty until an operator re-rolls it. File this as its own ticket — the spec's "Out of scope" section has the detail.
+**Creature respawn.** Killed creatures are deleted permanently (`backend/src/authority/loot.js:75`) and `populateWorld` is only ever called by `seed-map.js` and the admin re-roll route. There is no timer, cron, or on-join repopulation anywhere. This plan raises the starting pool roughly tenfold but does not change its shape: the pool still only drains, and a world emptied by a group stays empty until an operator re-rolls it. Filed as **SOMET-309** — the spec's "Out of scope" section has the detail.
 
 ## Known risks carried into implementation
 

@@ -11,8 +11,8 @@
         0
       ],
       "seed": 1001,
-      "width": 64,
-      "height": 64,
+      "width": 96,
+      "height": 96,
       "chunk_size": 32,
       "biomes": [
         "Meadow"
@@ -23,61 +23,61 @@
       ],
       "is_entry": true,
       "entry_spawn": {
-        "x": 3150,
-        "y": 3250
+        "x": 4750,
+        "y": 4850
       },
       "village": {
-        "min_row": 31,
-        "min_col": 30,
+        "min_row": 47,
+        "min_col": 46,
         "width": 6,
         "height": 4,
         "gate_edge": "S",
-        "spawn_x": 3150,
-        "spawn_y": 3250
+        "spawn_x": 4750,
+        "spawn_y": 4850
       },
       "safe_road_radius": 2,
       "roads": [
         [
           [
-            32,
+            48,
             1
           ],
           [
-            32,
-            27
+            48,
+            43
           ],
           [
-            37,
-            27
+            53,
+            43
           ],
           [
-            37,
-            39
+            53,
+            55
           ],
           [
-            32,
-            39
+            48,
+            55
           ],
           [
-            32,
-            62
+            48,
+            94
           ]
         ],
         [
           [
-            35,
-            33
+            51,
+            49
           ],
           [
-            37,
-            33
+            53,
+            49
           ]
         ]
       ],
       "pens": [
         {
-          "min_row": 12,
-          "min_col": 33,
+          "min_row": 28,
+          "min_col": 49,
           "width": 6,
           "height": 5,
           "creature_type": "Beast Swarm",
@@ -85,8 +85,8 @@
           "level": 1
         },
         {
-          "min_row": 36,
-          "min_col": 15,
+          "min_row": 52,
+          "min_col": 31,
           "width": 6,
           "height": 5,
           "creature_type": "Woodland Swarm",
@@ -100,8 +100,8 @@
       ],
       "waypoints": [
         {
-          "x": 3250,
-          "y": 3250,
+          "x": 4850,
+          "y": 4850,
           "name": "Old Trailhead Commons"
         }
       ]
@@ -115,8 +115,8 @@
         0
       ],
       "seed": 1002,
-      "width": 64,
-      "height": 64,
+      "width": 128,
+      "height": 128,
       "chunk_size": 32,
       "biomes": [
         "Meadow",
@@ -129,51 +129,51 @@
       ],
       "is_entry": false,
       "village": {
-        "min_row": 24,
-        "min_col": 38,
+        "min_row": 56,
+        "min_col": 70,
         "width": 6,
         "height": 4,
         "gate_edge": "S",
-        "spawn_x": 3950,
-        "spawn_y": 2550
+        "spawn_x": 7150,
+        "spawn_y": 5750
       },
       "safe_road_radius": 2,
       "roads": [
         [
           [
-            32,
+            64,
             1
           ],
           [
-            32,
-            62
+            64,
+            126
           ]
         ],
         [
           [
             1,
-            32
+            64
           ],
           [
-            62,
-            32
+            126,
+            64
           ]
         ],
         [
           [
-            28,
-            41
+            60,
+            73
           ],
           [
-            32,
-            41
+            64,
+            73
           ]
         ]
       ],
       "pens": [
         {
-          "min_row": 10,
-          "min_col": 36,
+          "min_row": 42,
+          "min_col": 68,
           "width": 6,
           "height": 5,
           "creature_type": "Beast Swarm",
@@ -187,8 +187,8 @@
       ],
       "waypoints": [
         {
-          "x": 4050,
-          "y": 2550,
+          "x": 7250,
+          "y": 5750,
           "name": "Windwatch Waystone"
         }
       ]
@@ -202,8 +202,8 @@
         -1
       ],
       "seed": 1003,
-      "width": 64,
-      "height": 64,
+      "width": 128,
+      "height": 128,
       "chunk_size": 32,
       "biomes": [
         "Cavern"
@@ -227,8 +227,8 @@
         1
       ],
       "seed": 1004,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Emberdepths"
@@ -252,8 +252,8 @@
         0
       ],
       "seed": 1005,
-      "width": 64,
-      "height": 64,
+      "width": 160,
+      "height": 160,
       "chunk_size": 32,
       "biomes": [
         "Cavern",
@@ -279,8 +279,8 @@
         1
       ],
       "seed": 1006,
-      "width": 64,
-      "height": 64,
+      "width": 192,
+      "height": 192,
       "chunk_size": 32,
       "biomes": [
         "Frostvault"
@@ -304,8 +304,8 @@
         0
       ],
       "seed": 1007,
-      "width": 64,
-      "height": 64,
+      "width": 192,
+      "height": 192,
       "chunk_size": 32,
       "biomes": [
         "Umbral Warren",
@@ -331,8 +331,8 @@
         0
       ],
       "seed": 1008,
-      "width": 64,
-      "height": 64,
+      "width": 224,
+      "height": 224,
       "chunk_size": 32,
       "biomes": [
         "Frostvault",

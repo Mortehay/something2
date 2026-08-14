@@ -8,14 +8,14 @@
       "allows_fast_travel": true,
       "grid": [0, 0],
       "seed": 2001,
-      "width": 96, "height": 96, "chunk_size": 32,
+      "width": 128, "height": 128, "chunk_size": 32,
       "biomes": ["Meadow", "Highlands"], "biome_cell": 32,
       "allowed_creature_types": ["Slime"],
       "is_entry": true,
-      "entry_spawn": { "x": 4850, "y": 4850 },
+      "entry_spawn": { "x": 6450, "y": 6450 },
       "village": {
-        "min_row": 28, "min_col": 28, "width": 6, "height": 4,
-        "gate_edge": "E", "spawn_x": 3050, "spawn_y": 2950
+        "min_row": 44, "min_col": 44, "width": 6, "height": 4,
+        "gate_edge": "E", "spawn_x": 4650, "spawn_y": 4550
       }
     },
     {
@@ -24,24 +24,24 @@
       "allows_fast_travel": true,
       "grid": [1, 0],
       "seed": 2002,
-      "width": 64, "height": 64, "chunk_size": 32,
+      "width": 96, "height": 96, "chunk_size": 32,
       "biomes": ["Deep Forest", "Verdant Jungle"], "biome_cell": 16,
       "allowed_creature_types": ["Bat", "Skeleton"],
       "is_entry": false,
       "village": {
-        "min_row": 25, "min_col": 28, "width": 6, "height": 4,
-        "gate_edge": "S", "spawn_x": 2950, "spawn_y": 2650
+        "min_row": 41, "min_col": 44, "width": 6, "height": 4,
+        "gate_edge": "S", "spawn_x": 4550, "spawn_y": 4250
       },
       "safe_road_radius": 2,
       "roads": [
-        [[32, 1], [32, 62]],
-        [[29, 31], [32, 31]]
+        [[48, 1], [48, 94]],
+        [[45, 47], [48, 47]]
       ],
       "pens": [
-        { "min_row": 36, "min_col": 14, "width": 6, "height": 5,
+        { "min_row": 52, "min_col": 30, "width": 6, "height": 5,
           "creature_type": "Woodland Swarm", "count": 5, "level": 1 }
       ],
-      "waypoints": [{ "x": 3050, "y": 2650, "name": "Thornbriar Green" }]
+      "waypoints": [{ "x": 4650, "y": 4250, "name": "Thornbriar Green" }]
     },
     {
       "key": "dunes",
@@ -49,7 +49,7 @@
       "allows_fast_travel": true,
       "grid": [-1, 0],
       "seed": 2003,
-      "width": 64, "height": 64, "chunk_size": 32,
+      "width": 96, "height": 96, "chunk_size": 32,
       "biomes": ["Arid Dunes", "Ashfields"], "biome_cell": 16,
       "allowed_creature_types": ["Skeleton"],
       "is_entry": false
@@ -60,7 +60,7 @@
       "allows_fast_travel": true,
       "grid": [0, -1],
       "seed": 2004,
-      "width": 64, "height": 64, "chunk_size": 32,
+      "width": 96, "height": 96, "chunk_size": 32,
       "biomes": ["Frozen Waste", "Sunken Ruins"], "biome_cell": 16,
       "allowed_creature_types": ["Bat", "Skeleton"],
       "is_entry": false
@@ -70,8 +70,8 @@
       "name": "Blackfen Sinks",
       "allows_fast_travel": true,
       "grid": [0, 1],
-      "seed": 2005,
-      "width": 64, "height": 64, "chunk_size": 32,
+      "seed": 2006,
+      "width": 96, "height": 96, "chunk_size": 32,
       "biomes": ["Storm Coast", "Mire"], "biome_cell": 16,
       "allowed_creature_types": ["Slime", "Bat"],
       "is_entry": false

@@ -2376,10 +2376,11 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     // this column with what it actually scattered. Nothing reads the value
     // written here for placement, and MapsAdmin now renders the field
     // read-only, echoing back whatever it was sent. The bound that does the
-    // real work moved to resolveDensity (MAX_WORLD_CREATURES, same 2000);
-    // this check remains so the column can never be poked past what a
-    // population pass could legitimately write, and so the API keeps
-    // rejecting nonsense with a clear message rather than storing it.
+    // real work moved to resolveDensity (MAX_WORLD_CREATURES, raised to 4000
+    // when the tier rates doubled -- SOMET-302); this check remains so the
+    // column can never be poked past what a population pass could
+    // legitimately write, and so the API keeps rejecting nonsense with a
+    // clear message rather than storing it.
     const countRaw = Number.isFinite(creature_count) ? Math.floor(creature_count) : 0;
     if (countRaw > MAX_CREATURE_COUNT) {
       return res.status(400).json({ error: `creature_count must be between 0 and ${MAX_CREATURE_COUNT}` });
