@@ -22,6 +22,10 @@ export function addBlasts(blasts, detonations, nowMs) {
       y: d.y,
       radius: Number.isFinite(d.radius) ? d.radius : 0,
       element: d.element || null,
+      // SOMET-326: the launch anchor this blast inherited from its projectile,
+      // so a detonation goes off at the height the shot was flying at rather
+      // than flat on the ground. Validation lives in attackAnchor.js.
+      o: d.o,
       startedAt: nowMs,
     });
   }

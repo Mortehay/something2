@@ -76,6 +76,11 @@ export function addEffects(list, events, nowMs, defs) {
       reach: Number.isFinite(e.reach) ? e.reach : 0,
       arc: Number.isFinite(e.arc) ? e.arc : 0,
       hit: e.hit === true,
+      // SOMET-326: the vertical render anchor the server resolved for this
+      // event. Copied raw -- attackAnchor.js's attackLift owns the validation
+      // and the legacy fallback, so there is exactly one place that decides
+      // what a missing or junk anchor means.
+      o: e.o,
       // Slice C: the weapon's element, carried on impact descriptors so the
       // burst can be tinted. Copied through here rather than looked up at
       // draw time -- the client has no weapon catalog, by design.

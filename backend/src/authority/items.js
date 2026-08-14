@@ -16,7 +16,7 @@ async function loadItemTypes(pool) {
     `SELECT id, name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
             range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element,
             defense, resistances, stackable, ammo_type_id, aoe_radius, vfx, knockback,
-            stat_bonus_stat, stat_bonus_amount
+            stat_bonus_stat, stat_bonus_amount, attack_origin
      FROM item_types ORDER BY id ASC`,
   );
   const m = new Map();
@@ -67,6 +67,12 @@ async function loadItemTypes(pool) {
       // would make every stone look like a buff stone.
       stat_bonus_stat: row.stat_bonus_stat ?? null,
       stat_bonus_amount: row.stat_bonus_amount == null ? null : Number(row.stat_bonus_amount),
+      // SOMET-326: the THIRD instance of the trap the two comments above
+      // document. Null passthrough, never defaulted to a string --
+      // attackOrigin.js's resolveAttackOrigin distinguishes "unauthored"
+      // (fall to the kind default) from an authored name, and a coerced ''
+      // would take the same branch as junk rather than the default branch.
+      attack_origin: row.attack_origin ?? null,
     });
   }
   return m;
