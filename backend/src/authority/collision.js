@@ -10,6 +10,18 @@ const MAP_TILE_SIZE = 100; // must match frontend core/constants.js
 const MAX_CHUNKS = 512; // per-ServerMap LRU cap on memoized chunk grids
 const WALL_EPS = 0.01; // clamp/inset margin so a clamped face stays inside the walkable tile
 
+// SOMET-337. Fraction of the actor's box used as its ground FOOTPRINT — the
+// feet, not the whole body. The box is the SPRITE's extent (player 64x64,
+// creature 48x48); using all of it against a 100px tile stopped an actor half
+// a box-width from the obstacle (32px for a player), a gap that became visible
+// once SOMET-319 put the feet on the real anchor. At 0.5 the standoff halves:
+// 16px for a player, 12px for a creature.
+//
+// Scale, not a fixed size, so one rule covers every actor and 1.0 reproduces
+// the old full-box behaviour exactly. The anchor is unchanged — the footprint
+// is centred on the same box centre movement already resolved against.
+const FOOTPRINT_SCALE = 0.5;
+
 function resolveMove(map, actor, dirX, dirY, dt) {
   if (dirX === 0 && dirY === 0) return { x: actor.x, y: actor.y, moved: false };
 
@@ -21,6 +33,13 @@ function resolveMove(map, actor, dirX, dirY, dt) {
   const hh = actor.height / 2;
   const cx = actor.x + hw;
   const cy = actor.y + hh;
+
+  // Footprint half-extents — what the walkability samples and the swept clamp
+  // read. hw/hh stay the SPRITE box (still the anchor's basis); fhw/fhh are the
+  // feet. With FOOTPRINT_SCALE = 1 these are equal and the maths is identical
+  // to the pre-SOMET-337 full-box test.
+  const fhw = hw * FOOTPRINT_SCALE;
+  const fhh = hh * FOOTPRINT_SCALE;
 
   const tileSpeed = map.speedAt(cx, cy);
   const stepX = nx * actor.speed * dt * tileSpeed;
@@ -39,10 +58,10 @@ function resolveMove(map, actor, dirX, dirY, dt) {
   // exactly on a tile line is not read as inside the next tile.
   if (stepX !== 0) {
     const dir = stepX > 0 ? 1 : -1;
-    const face = dir > 0 ? actor.x + actor.width : actor.x;
+    const face = cx + dir * fhw;
     const destFace = face + stepX;
-    const top = cy - hh + WALL_EPS;
-    const bot = cy + hh - WALL_EPS;
+    const top = cy - fhh + WALL_EPS;
+    const bot = cy + fhh - WALL_EPS;
     if (map.isWalkable(destFace, top) && map.isWalkable(destFace, bot)) {
       x += stepX;
       moved = true;
@@ -59,10 +78,10 @@ function resolveMove(map, actor, dirX, dirY, dt) {
   }
   if (stepY !== 0) {
     const dir = stepY > 0 ? 1 : -1;
-    const face = dir > 0 ? actor.y + actor.height : actor.y;
+    const face = cy + dir * fhh;
     const destFace = face + stepY;
-    const left = cx - hw + WALL_EPS;
-    const right = cx + hw - WALL_EPS;
+    const left = cx - fhw + WALL_EPS;
+    const right = cx + fhw - WALL_EPS;
     if (map.isWalkable(left, destFace) && map.isWalkable(right, destFace)) {
       y += stepY;
       moved = true;
