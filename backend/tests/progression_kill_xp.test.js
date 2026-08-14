@@ -536,8 +536,29 @@ test('a player mid-death (hp <= 0, awaiting resolveDeaths) is not revived by the
   assert.strictEqual(player.hp, -5, 'a player mid-death must not be revived by their own kill leveling them up');
   assert.strictEqual(player.maxHp, 100, 'applyDerivedStats must not run at all while hp <= 0 -- maxHp must not move either');
 
-  assert.strictEqual(pool.clients.length, 1);
-  assert.strictEqual(pool.clients[0].released, 1, 'the client must still be released');
+  // SOMET-321. Assert on the transaction that performed THE KILL, found by the
+  // statement that makes it the kill, rather than on how many transactions the
+  // pool has handed out in total.
+  //
+  // This used to be `pool.clients.length === 1` + `clients[0].released === 1`,
+  // and it broke for a reason that has nothing to do with death or XP: unlike
+  // the Part 1 unit tests, this test JOINS a real server, and join runs
+  // grantStartingLoadout, which is transactional by design (SOMET-79). So the
+  // pool legitimately hands out two clients -- the loadout grant, then the kill
+  // -- and a global count reported 2, failing a test whose own subject
+  // (hp/maxHp above) was passing the whole time.
+  //
+  // Re-pinning the count to 2 would have been the easy fix and the wrong one:
+  // it would break again the next time anything opens a transaction on join,
+  // in a test about dying. What this actually cares about is stated in the
+  // message below -- the kill's connection is not leaked when the mid-death
+  // guard short-circuits -- so it now asks exactly that, and is indifferent to
+  // unrelated transactions.
+  const killClients = pool.clients.filter(
+    (c) => c.calls.some((q) => /DELETE FROM world_creatures/i.test(q.sql)),
+  );
+  assert.strictEqual(killClients.length, 1, 'exactly one transaction performed the kill');
+  assert.strictEqual(killClients[0].released, 1, 'the kill client must still be released');
 
   ws.close(); handle.close(); server.close();
 });
