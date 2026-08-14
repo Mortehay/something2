@@ -263,6 +263,10 @@ test('rejects a village gate_edge outside N/E/S/W', () => {
   const errs = errorsFor((s) => {
     s.worlds[0].village = { min_row: 4, min_col: 4, width: 5, height: 4,
       gate_edge: 'UP', spawn_x: 500, spawn_y: 600 };
+    // World `a` is the entry world, so SOMET-335 also requires entry_spawn to
+    // BE this village's spawn. Aligned here so gate_edge stays the only broken
+    // field and the errs.length === 1 assertion below keeps its meaning.
+    s.worlds[0].entry_spawn = { x: 500, y: 600 };
   });
   assert.equal(errs.length, 1, errs.join('; '));
   assert.match(errs[0], /gate_edge must be one of N,E,S,W/i);
@@ -399,14 +403,30 @@ const VILLAGE_B = () => ({
   spawn_x: 3150, spawn_y: 3150,
 });
 
+// SOMET-335. `valid()`'s world `a` is the ENTRY world, and an entry world that
+// declares a village must carry that village's spawn as its entry_spawn. The
+// tests below are about village VALIDITY, not about entry semantics, but they
+// hang their village on world `a` -- so each aligns entry_spawn with the
+// village it declares. Without this they would all fail on a second, unrelated
+// error and stop covering what they are named for.
+const alignEntrySpawn = (world, village) => {
+  world.entry_spawn = { x: village.spawn_x, y: village.spawn_y };
+};
+
 test('a world may declare several villages', () => {
-  assert.deepEqual(errorsFor((s) => { s.worlds[0].villages = [VILLAGE_A(), VILLAGE_B()]; }), []);
+  assert.deepEqual(errorsFor((s) => {
+    s.worlds[0].villages = [VILLAGE_A(), VILLAGE_B()];
+    alignEntrySpawn(s.worlds[0], VILLAGE_A());
+  }), []);
 });
 
 test('the singular village key still validates unchanged', () => {
   // 20+ checked-in specs use it. This feature must not require touching any
   // of them.
-  assert.deepEqual(errorsFor((s) => { s.worlds[0].village = VILLAGE_A(); }), []);
+  assert.deepEqual(errorsFor((s) => {
+    s.worlds[0].village = VILLAGE_A();
+    alignEntrySpawn(s.worlds[0], VILLAGE_A());
+  }), []);
 });
 
 test('declaring both village and villages is rejected', () => {
@@ -568,6 +588,11 @@ test('every key the applier actually reads is accepted', () => {
                creature_type: 'Slime', count: 3, level: 1 }],
       village: { min_row: 20, min_col: 20, width: 6, height: 4, gate_edge: 'S',
                  spawn_x: 2150, spawn_y: 2150 },
+      // World `a` is the entry world; SOMET-335 requires entry_spawn to be the
+      // spawn of the village it declares. `entry_spawn` is on the allowlist
+      // this test enumerates, so setting it is in scope here rather than a
+      // workaround.
+      entry_spawn: { x: 2150, y: 2150 },
       chest: { x: 500, y: 500, guard_creature_type: 'Wolf', level: 3 },
     });
   });
@@ -683,4 +708,94 @@ test('the two new keys are in WORLD_KEYS, so authoring them is not "unknown key"
     s.worlds[0].pens = [B_PEN()];
   });
   assert.ok(!errs.some((e) => /unknown key/.test(e)), errs.join('\n'));
+});
+
+// --- SOMET-335: the entry world's entry_spawn IS its village's spawn -------
+//
+// `valid()`'s world `a` is the entry world and carries entry_spawn (32,32)
+// with no village, so the whole block below turns on what B_VILLAGE() is
+// attached to and what entry_spawn is set alongside it. B_VILLAGE()'s spawn is
+// (1150,1150), deliberately NOT (32,32), so simply adding the village is
+// already the violating case.
+//
+// Each case asserts on the SPECIFIC message rather than on `errs.length`:
+// several of these mutations also trip village geometry or grid checks, and an
+// error-count assertion would pass on the wrong error.
+
+const ENTRY_SPAWN_MISMATCH = /entry_spawn \(.*\) is not the spawn of any village/;
+const ENTRY_SPAWN_MISSING = /declares a village but no integer entry_spawn/;
+
+test('the entry world may declare a village whose spawn IS its entry_spawn', () => {
+  // The shape every hand-authored spec with a starting village must have.
+  // deepEqual against [] rather than a negative match: this is also the guard
+  // that the new check does not reject the legal case for some other reason.
+  assert.deepEqual(errorsFor((s) => {
+    s.worlds[0].village = B_VILLAGE();
+    s.worlds[0].entry_spawn = { x: 1150, y: 1150 };
+  }), []);
+});
+
+test("an entry world whose entry_spawn is not its village's spawn is rejected", () => {
+  // The defect this check exists for: hub-vale/hub shipped with entry_spawn on
+  // the map centre and its village 20 tiles away, and every gate passed. A new
+  // character's first join and every respawn landed outside the starting
+  // village -- no guards, no merchant, open terrain.
+  const errs = errorsFor((s) => { s.worlds[0].village = B_VILLAGE(); });
+  assert.ok(errs.some((e) => ENTRY_SPAWN_MISMATCH.test(e)), errs.join('\n'));
+});
+
+test('an entry world with a village and no entry_spawn at all is rejected', () => {
+  // Absent is the same failure as wrong -- the player still does not start in
+  // the village -- so this must not fall through the equality check as a
+  // silent pass.
+  const errs = errorsFor((s) => {
+    s.worlds[0].village = B_VILLAGE();
+    delete s.worlds[0].entry_spawn;
+  });
+  assert.ok(errs.some((e) => ENTRY_SPAWN_MISSING.test(e)), errs.join('\n'));
+});
+
+test('a non-integer entry_spawn beside a village is rejected, not silently compared', () => {
+  // `{ x: '1150', y: '1150' }` would compare unequal by string interpolation
+  // anyway, so it would be caught either way -- but by the WRONG message, which
+  // would send the next reader looking for a coordinate mistake instead of a
+  // type one. The pixel-string comparison is an implementation detail; the
+  // shape check is the contract.
+  const errs = errorsFor((s) => {
+    s.worlds[0].village = B_VILLAGE();
+    s.worlds[0].entry_spawn = { x: '1150', y: '1150' };
+  });
+  assert.ok(errs.some((e) => ENTRY_SPAWN_MISSING.test(e)), errs.join('\n'));
+});
+
+test('the entry world may match ANY of several villages it declares', () => {
+  // villagesOf reads the plural `villages` array as well as the singular
+  // `village`, and a world is allowed more than one. Requiring the FIRST one
+  // would be an invented constraint: the starting village is whichever one the
+  // player starts in.
+  assert.deepEqual(errorsFor((s) => {
+    s.worlds[0].villages = [
+      B_VILLAGE(),
+      { min_row: 20, min_col: 20, width: 6, height: 4, gate_edge: 'S', spawn_x: 2150, spawn_y: 2150 },
+    ];
+    s.worlds[0].entry_spawn = { x: 2150, y: 2150 };
+  }), []);
+});
+
+test('a NON-entry world may hold a village unrelated to any entry_spawn', () => {
+  // The check is scoped to the entry world on purpose. Every other village in
+  // the game -- four of the five live ones -- has no relationship to
+  // entry_spawn whatsoever, and this must not start demanding one.
+  assert.deepEqual(errorsFor((s) => { s.worlds[1].village = B_VILLAGE(); }), []);
+});
+
+test('an entry world with NO village keeps its entry_spawn unconstrained', () => {
+  // loop-catacombs/entry is exactly this shape: is_entry, an entry_spawn on the
+  // map centre, and no village anywhere in the spec. The check must not
+  // retroactively require a village that was never part of that design.
+  // (3250,3250) is this 64x64 fixture's own centre tile -- kept in bounds so
+  // this stays a statement about the village rule and not an accidental bet on
+  // entry_spawn never being range-checked.
+  assert.deepEqual(errorsFor((s) => { s.worlds[0].entry_spawn = { x: 3250, y: 3250 }; }), []);
+  assert.deepEqual(errorsFor((s) => { delete s.worlds[0].entry_spawn; }), []);
 });
