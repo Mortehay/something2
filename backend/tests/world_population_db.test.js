@@ -58,10 +58,11 @@ describeDb('populateWorld fills an empty world from its density tier', async () 
     } finally {
       client.release();
     }
-    // horde on 64x64: 49 scattered + 4 packs of 5-8. Packs may ship short on
-    // a map with unwalkable terrain, so assert a floor, not an exact total --
-    // but assert the SCATTER exactly, which is not subject to short packs.
-    assert.equal(result.scattered, 49);
+    // horde on 64x64: 98 scattered (round(24 * 4096 / 1000), SOMET-302's
+    // doubled rate) + 4 packs of 5-8. Packs may ship short on a map with
+    // unwalkable terrain, so assert a floor, not an exact total -- but
+    // assert the SCATTER exactly, which is not subject to short packs.
+    assert.equal(result.scattered, 98);
     assert.ok(result.packed >= 20, `packed ${result.packed} >= 20`);
     assert.equal(result.total, result.scattered + result.packed);
 
@@ -88,7 +89,7 @@ describeDb('populateWorld persists the resolved scatter count to creature_count'
       client.release();
     }
     const r = await pool.query('SELECT creature_count FROM worlds WHERE id = $1', [world.id]);
-    assert.equal(r.rows[0].creature_count, 49);
+    assert.equal(r.rows[0].creature_count, 98);
   } finally {
     await cleanup(pool);
     await pool.end();
