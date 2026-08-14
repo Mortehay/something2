@@ -70,6 +70,11 @@ function makePool({
   const pool = {
     calls,
     matching(re) { return calls.filter((c) => re.test(c.sql)); },
+    // SOMET-318: how many times the inventory-load branch below actually fired.
+    // A dead fixture branch is invisible to a passing suite, so this is the
+    // only thing that can tell "answered by the branch" from "fell through to
+    // the default, which returns the same value".
+    inventoryLoads: 0,
     query: async (sql, params) => {
       calls.push({ sql, params });
       if (/FROM worlds WHERE id/i.test(sql)) {
@@ -215,8 +220,25 @@ function makePool({
           rowCount: 1,
         };
       }
-      if (/^\s*SELECT id, item_type_id, quantity FROM player_items WHERE user_id/i.test(sql)) return { rows: [] };
-      if (/FROM player_equipment WHERE user_id/i.test(sql)) return { rows: [] };
+      // SOMET-318. These two answer loadInventory's reads, and until now BOTH
+      // were dead: they matched `WHERE user_id`, which SOMET-257 retired when
+      // it re-keyed inventory onto character_id. They looked like the fixture's
+      // inventory answer and were in fact never reached — every join fell
+      // through to the empty default below, which happens to return the same
+      // thing, which is exactly why nobody noticed.
+      //
+      // Matched on the TABLE and the OWNERSHIP PREDICATE, never the column
+      // list: pinning loadInventory's exact SELECT is what made the same
+      // branch in two OTHER files silently stop matching when SOMET-316 added
+      // a column, producing ten bogus "you do not own that item" failures.
+      // `pool.inventoryLoads` exists so a test can prove this branch actually
+      // fires — "the file still passes" proved nothing here, since it passed
+      // throughout the years the branch was dead.
+      if (/^\s*SELECT\b[^;]*\bFROM player_items WHERE character_id/i.test(sql)) {
+        pool.inventoryLoads += 1;
+        return { rows: [] };
+      }
+      if (/FROM player_equipment WHERE character_id/i.test(sql)) return { rows: [] };
       if (/SELECT gold FROM users WHERE id/i.test(sql)) return { rows: [{ gold: 0 }] };
       return { rows: [] };
     },
@@ -246,6 +268,14 @@ test('openchest with no chest in range sends an error frame', async () => {
   const err = await nextMsg(ws, 'error');
   assert.match(err.message, /no chest nearby/);
   assert.equal(handle.worlds.get('w1').chests[0].state, 'locked');
+
+  // SOMET-318: the fixture's inventory-load branch must actually ANSWER the
+  // join, not be bypassed. This assertion is the whole point of that ticket —
+  // the branch sat dead behind a retired `WHERE user_id` predicate and every
+  // test in this file passed anyway, because falling through to the default
+  // produced an identical empty result. Without a check that the branch FIRES,
+  // the same rot is undetectable by construction.
+  assert.ok(pool.inventoryLoads > 0, 'loadInventory was never answered by the fixture branch');
 
   ws.close(); handle.close(); server.close();
 });

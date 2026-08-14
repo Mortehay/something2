@@ -65,6 +65,43 @@ async function applyMigration(client, migModule, direction) {
   }
 }
 
+// SOMET-320. Apply a SETUP migration only if its schema is not already there.
+//
+// The two migrations below are this file's PREREQUISITE, not its subject: the
+// subject is 1714440167000's conversion, applied inside the test bodies and
+// left completely untouched by this guard. Applying the prerequisites
+// unconditionally works on a virgin database and is impossible on a migrated
+// one -- against the dev database every test here died on
+//   column "stat_bonus_stat" of relation "item_types" already exists  (42701)
+// which, with the sibling stones file, was 12 of the suite's 16 failures.
+//
+// KEYED ON AN EXPLICIT PRESENCE CHECK, NEVER ON CATCHING THE ERROR -- and in
+// THIS file that distinction has teeth, because a duplicate-object error raised
+// by the migration under test is a real defect these tests exist to catch.
+// Swallowing 42701 here would silently disarm them.
+//
+// Still correct on a virgin database: the probe reports absent and the
+// migration runs as before.
+async function applyMigrationIfAbsent(client, migModule, presenceSql) {
+  const present = await client.query(presenceSql);
+  if (present.rowCount > 0) return false;
+  await applyMigration(client, migModule, 'up');
+  return true;
+}
+
+const HAS_STAT_BONUS_COLUMN = `SELECT 1 FROM information_schema.columns
+   WHERE table_name = 'item_types' AND column_name = 'stat_bonus_stat'`;
+const HAS_STONE_INSTANCES = `SELECT 1 FROM information_schema.tables
+   WHERE table_name = 'stone_instances'`;
+
+// SOMET-320. Serialize with the other files that write item_types' stone rows.
+// `node --test` runs files in parallel and three of them touch these rows; two
+// doing so in different orders produced an observed "deadlock detected" in a
+// full-suite run that passed in isolation. Transaction-scoped, so the ROLLBACK
+// in `finally` releases it. See the full rationale in
+// migration_stone_item_type_down_guard_db.test.js.
+const STONE_CATALOG_LOCK = "SELECT pg_advisory_xact_lock(hashtext('somet320:item_types_stone'))";
+
 async function openTxClient(t) {
   const client = new Client({ connectionString: DB_URL, connectionTimeoutMillis: 3000 });
   try {
@@ -76,12 +113,16 @@ async function openTxClient(t) {
     return null;
   }
   await client.query('BEGIN');
+  await client.query(STONE_CATALOG_LOCK);
   // Bring this transaction's view of the schema up to Task 1 before testing
   // Task 2's conversion migration, which depends on both. Rolled back along
   // with everything else -- the real deploy of Task 1's migrations is a
   // separate, deliberate step, not something a test should do for real.
-  await applyMigration(client, migStoneType, 'up');
-  await applyMigration(client, migStoneInstances, 'up');
+  //
+  // ...or skip them where the database already carries that schema, which is
+  // now the normal case: see applyMigrationIfAbsent above.
+  await applyMigrationIfAbsent(client, migStoneType, HAS_STAT_BONUS_COLUMN);
+  await applyMigrationIfAbsent(client, migStoneInstances, HAS_STONE_INSTANCES);
   return client;
 }
 

@@ -112,6 +112,11 @@ test('the seed-spec validator accepts the corrected interior spawn', () => {
         min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S',
         spawn_x: 3050, spawn_y: 2950,
       },
+      // `hub` is the entry world, so SOMET-335 requires entry_spawn to BE the
+      // village spawn. This assertion is deepEqual-against-[], so an unrelated
+      // second error would break it -- and the corrected interior spawn is
+      // exactly what entry_spawn has to point at.
+      entry_spawn: { x: 3050, y: 2950 },
     }],
     links: [],
   };

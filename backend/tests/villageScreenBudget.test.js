@@ -201,9 +201,15 @@ test('POST /villages still accepts the same box at a legal size (control)', asyn
 
 // --- enforcement path 2: the seed-spec validator ---------------------------
 
+// entry_spawn is derived from the village rather than written as a literal:
+// `hub` is the entry world, and SOMET-335 requires an entry world's
+// entry_spawn to BE the spawn of the village it declares. Deriving it keeps
+// every case below -- legal and over-budget alike -- about the SIZE rule these
+// tests are named for, with no second unrelated error to filter out.
 const specWith = (village) => ({
   worlds: [{
     key: 'hub', name: 'Hub', grid: [0, 0], width: 64, height: 64, is_entry: true, village,
+    entry_spawn: { x: village.spawn_x, y: village.spawn_y },
   }],
   links: [],
 });
