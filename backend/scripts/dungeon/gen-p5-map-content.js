@@ -154,10 +154,9 @@ const SEED_OVERRIDES = {
   // interior cells reachable -- effectively sealed.
   d5_spokeW: 20500,
   // d7_pass grew to 224 (was 64; its pre-SOMET-306 override 5721 was picked
-  // for the size-64 terrain -- see the header comment above for why this
-  // room, with all four compass edges consumed, is the most seed-sensitive
-  // in the chain). At 224 it blocked its S doorway and the arrival tile one
-  // step in.
+  // for the size-64 terrain; this room, with all four compass edges
+  // consumed, is the most seed-sensitive in the chain). At 224 it blocked
+  // its S doorway and the arrival tile one step in.
   d7_pass: 21006,
   // d7_end grew to 224 (was 64; pre-SOMET-306 override 9300). At 224 it
   // blocked the arrival tile one step in from its W doorway, its D7->D8

@@ -115,9 +115,9 @@ test('every portal coordinate sits inside the world it belongs to', () => {
   for (const l of spec.links.filter((x) => x.kind === 'portal')) {
     const from = byKey.get(l.from);
     const to = byKey.get(l.to);
-    assert.ok(l.from_x < from.width * 100 && l.from_y < from.height * 100,
+    assert.ok(l.from_x >= 0 && l.from_y >= 0 && l.from_x < from.width * 100 && l.from_y < from.height * 100,
       `portal departure (${l.from_x},${l.from_y}) is outside ${l.from} (${from.width} tiles)`);
-    assert.ok(l.to_x < to.width * 100 && l.to_y < to.height * 100,
+    assert.ok(l.to_x >= 0 && l.to_y >= 0 && l.to_x < to.width * 100 && l.to_y < to.height * 100,
       `portal arrival (${l.to_x},${l.to_y}) is outside ${l.to} (${to.width} tiles)`);
   }
 });

@@ -177,7 +177,7 @@ describeDb('populateWorld excludes guard-faction types from the wild-spawn pool'
 
     // Positive side first: a world that placed nothing would satisfy "no
     // guards appear" vacuously. horde's scatterCount is nonzero on a 64x64
-    // world (49 elsewhere in this file with an unrestricted biome; still
+    // world (98 elsewhere in this file with an unrestricted biome; still
     // must be > 0 here since 'Skeleton' is the only non-guard candidate).
     assert.ok(result.total > 0, 'fixture placed nothing -- the negative assertion below would be vacuous');
 
@@ -325,10 +325,10 @@ describeDb('the dead tier leaves a world genuinely empty', async () => {
 // Covers the gap the Task 4 review found: allowed_creature_types = [] (the
 // column's own default -- migration 1714440027000_bounded_worlds.js:16) with
 // a non-dead density used to still write creature_count = density.scatterCount
-// (49 for horde) before the empty-allowlist early return, leaving the admin
+// (98 for horde) before the empty-allowlist early return, leaving the admin
 // UI showing a nonzero count over a genuinely empty map. Density is 'horde'
 // specifically so scatterCount is nonzero -- against the old write-before-
-// checking ordering this assertion would see 49, not 0.
+// checking ordering this assertion would see 98, not 0.
 describeDb('an empty allowlist zeroes creature_count rather than leaving a stale value', async () => {
   const pool = new Pool({ connectionString: URL });
   try {
