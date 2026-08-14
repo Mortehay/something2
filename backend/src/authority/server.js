@@ -31,6 +31,7 @@ const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive } = require('./loot');
 const { knockbackPosition } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
+const { respawnDueCreatures, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
 const { awardStoneXp, STONE_XP_PER_HIT } = require('./stoneXp.js');
@@ -326,6 +327,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const heartbeatMs = opts.heartbeatMs || 30000;
   const groundItemTtlMs = opts.groundItemTtlMs || 600000; // 10 min
   const itemSweepMs = opts.itemSweepMs || 60000;
+  // Its own interval, NOT itemSweepMs (60000): a 30-second respawn queue
+  // drained on a 60-second timer would take 30-90s per creature.
+  const creatureSweepMs = opts.creatureSweepMs || CREATURE_SWEEP_MS;
   const rng = opts.rng || Math.random;
 
   // Every inbound frame this protocol defines is a small flat JSON object
@@ -2508,6 +2512,46 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }
 
+  // SOMET-309. getWorld/getPlayers both read the live `worlds` Map and return
+  // null/[] for an unloaded world, so the sweep never causes a world to load
+  // -- nothing but a socket close handler evicts one, and a sweep-loaded world
+  // would stay in memory forever.
+  async function creatureRespawnSweep() {
+    try {
+      await respawnDueCreatures(pool, {
+        // The buildWorldGenConfig shape placeMapCreatures requires -- camelCase
+        // levelMin/levelMax plus tileTypes -- exactly as chestRespawnSweep
+        // passes it. Handing over entry.row instead would throw
+        // ('worldConfig: tileTypes is empty') before reaching a placement.
+        getWorld: (worldId) => {
+          const entry = worlds.get(worldId);
+          return entry ? { ...entry.mapGenConfig, id: worldId } : null;
+        },
+        // Positions come from the live sim, never the database: the persisted
+        // character position lags the sim by up to a sync interval, and a
+        // stale position is exactly the input that would let a creature spawn
+        // in someone's face.
+        getPlayers: (worldId) => {
+          const entry = worlds.get(worldId);
+          if (!entry) return [];
+          return [...entry.world.players.values()].map((p) => ({ x: p.x, y: p.y }));
+        },
+        onSpawn: async ({ worldId, creatureId }) => {
+          const entry = worlds.get(worldId);
+          if (!entry) return;
+          // Despite the name (it predates this feature), injectGuardIntoSim is
+          // generic: it re-reads the rows by id through CREATURE_JOINED_SELECT
+          // and hands them to creatures.addCreatures. Without it a respawned
+          // creature exists in the DB but not in the running sim until the
+          // world is reloaded -- present but unkillable.
+          await injectGuardIntoSim(entry, [creatureId]);
+        },
+      });
+    } catch (err) {
+      console.error('creature respawn sweep failed:', err);
+    }
+  }
+
   // Expired ground items: delete from the DB and evict from every live sim.
   // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
   // sweep by up to itemSweepMs; the two are complementary (DB delete is
@@ -2529,6 +2573,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
     chestRespawnSweep();
   }, itemSweepMs);
 
+  const creatureSweepTimer = setInterval(() => {
+    // Same guard the item sweep uses: with no world loaded there is nothing
+    // this pass could act on, so skip the query entirely.
+    if (worlds.size === 0) return;
+    creatureRespawnSweep();
+  }, creatureSweepMs);
+
   return {
     // Live world registry (worldId -> { world, sockets, row }). Exposed for
     // introspection/tests that need to assert on authoritative state the wire
@@ -2549,6 +2600,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // real itemSweepTimer's fire-and-forget call) instead of waiting for or
     // racing wall-clock itemSweepMs.
     _chestRespawnSweep: chestRespawnSweep,
+    // Test seam, same reasoning as _chestRespawnSweep: run one creature
+    // respawn pass synchronously (and await it, unlike the timer's
+    // fire-and-forget call) instead of racing wall-clock creatureSweepMs.
+    _creatureRespawnSweep: creatureRespawnSweep,
     // Evict an IDLE world from the in-memory cache so the next entry reloads it
     // from the DB (fresh seed + creatures). Refuses to evict a world with live
     // sockets to avoid tearing down active sessions.
@@ -2643,6 +2698,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       clearInterval(creatureFlushTimer);
       clearInterval(heartbeatTimer);
       clearInterval(itemSweepTimer);
+      clearInterval(creatureSweepTimer);
       // Terminate any live client sockets before closing the server. wss.close()
       // alone only stops accepting new connections; open sockets would keep the
       // event loop alive (and hang a clean shutdown / test process).
