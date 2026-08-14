@@ -28,8 +28,9 @@ function recordingCanvas() {
     textAlign: "",
     drawImage: (...args) => calls.push({ op: "drawImage", args }),
     fillRect: (...args) => calls.push({ op: "fillRect", args }),
+    ellipse: (...args) => calls.push({ op: "ellipse", args }),
     save() {}, restore() {}, beginPath() {}, closePath() {}, moveTo() {},
-    lineTo() {}, ellipse() {}, arc() {}, fill() {}, stroke() {},
+    lineTo() {}, arc() {}, fill() {}, stroke() {},
     fillText() {}, strokeText() {},
   };
   return { canvas: { getContext: () => ctx }, calls };
@@ -81,6 +82,25 @@ describe("sprite anchoring (SOMET-319)", () => {
     expect(h).toBe(140); // displayHeight still sizes the sprite
     expect(dy + h).toBeCloseTo(anchor.y, 10);
     expect(dx + w / 2).toBeCloseTo(anchor.x, 10);
+  });
+
+  it("keeps a status-effect ring on the same ground line as the feet", () => {
+    // The rings take their y from the caller's own `drawY + h` rather than
+    // re-deriving it, so moving the sprite's anchor must carry them along —
+    // the failure mode is an aura left hovering at the actor's old waist.
+    const { canvas, calls } = recordingCanvas();
+    const rs = new RenderSystem(canvas, { get: () => ({ width: 64, height: 64 }) });
+
+    const obj = { x: 300, y: 400, width: 64, height: 64, effects: ["burn"] };
+    rs.drawCreature(obj, "player");
+
+    const anchor = worldToScreen(obj.x + obj.width / 2, obj.y + obj.height / 2);
+    const rings = calls.filter((c) => c.op === "ellipse");
+    expect(rings.length).toBeGreaterThan(0);
+    for (const r of rings) {
+      expect(r.args[0]).toBeCloseTo(anchor.x, 10);
+      expect(r.args[1]).toBeCloseTo(anchor.y, 10);
+    }
   });
 
   it("puts a creature and a decoration on the same tile on one ground line", () => {
