@@ -31,7 +31,7 @@ const { buildWorldGenConfig } = require('../services/worldGenConfig');
 const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive } = require('./loot');
 const { knockbackPosition } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
-const { respawnDueCreatures, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
+const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
 const { awardStoneXp, STONE_XP_PER_HIT } = require('./stoneXp.js');
@@ -473,7 +473,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // respawn sweep -- ran with the road and rectangle legs of isSafeTile
         // permanently off, so a chest guard could seat itself on a village
         // road and the sweep would re-seat it there forever.
-        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads FROM worlds WHERE id = $1', [worldId]);
+        // density, allowed_creature_types (SOMET-309): not read by
+        // buildWorldGenConfig, but enqueueDeficit's `row` further down IS this
+        // same `row` -- omitting them here would make the load-time backstop
+        // silently enqueue 0 for every real world, forever, with no error.
+        const wr = await pool.query('SELECT id, seed, chunk_size, width, height, is_entry, entry_spawn, biomes, biome_cell, level_min, level_max, safe_road_radius, safe_rects, authored_roads, density, allowed_creature_types FROM worlds WHERE id = $1', [worldId]);
         if (wr.rows.length === 0) return null;
         const row = wr.rows[0];
         // Postgres uuid input is case-insensitive and also accepts braced /
@@ -562,6 +566,23 @@ function attachAuthority(httpServer, pool, opts = {}) {
           claiming: new Set(),       // ground item ids with a claim in flight (avoids wasted queries)
         };
         worlds.set(canonicalId, entry);
+
+        // SOMET-309: a player entering a drained world should find it
+        // populated, not watch it fill in around them over the next minute.
+        // Backfill first (this is what recovers populations lost before the
+        // respawn queue existed), then drain everything now due for it.
+        //
+        // Deliberately awaited: the alternative is the first tick broadcast
+        // racing the spawn, so the player sees an empty world for a beat and
+        // then a burst of creatures appearing. Failure here must not prevent
+        // the join -- an unpopulated world is playable, a failed join is not.
+        try {
+          await enqueueDeficit(pool, { worldRow: row, world: entry.mapGenConfig });
+          await creatureRespawnSweep();
+        } catch (err) {
+          console.error('world load top-up failed:', canonicalId, err);
+        }
+
         return entry;
       })();
       loading.set(worldId, pending);

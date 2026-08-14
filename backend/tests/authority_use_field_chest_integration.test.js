@@ -98,6 +98,12 @@ function makePool({ bounded = true, userItems = [], safeRoadRadius = 0, safeRect
           // object regardless of the SQL would have let the new column reach
           // the authority as a silent default.
           authored_roads: [],
+          // SOMET-309: loadWorld's SELECT grew density/allowed_creature_types
+          // so the load-time respawn backstop (enqueueDeficit) can read them
+          // off the same `row` -- see the comment at that SELECT. No allowed
+          // types here means the backstop no-ops for this fixture's world,
+          // same as any world seeded without creature content.
+          density: 'normal', allowed_creature_types: [],
         })] };
       }
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };

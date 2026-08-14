@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
 const { commitCreatureDeath } = require('../src/authority/loot');
+const { enqueueDeficit } = require('../src/services/creatureRespawn');
 
 const url = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
@@ -112,6 +113,113 @@ test('a queued respawn is not due immediately', { skip: !url }, async () => {
     );
     // 30s in the future, so a sweep running right now must not pick it up.
     assert.equal(due.rowCount, 0);
+
+    await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]);
+  } finally {
+    await pool.end();
+  }
+});
+
+// The buildWorldGenConfig shape placeMapCreatures needs. A single grass tile
+// type makes every tile legal, so placement never fails for terrain reasons
+// and the test is about the arithmetic, not the sampler.
+function fakeWorldConfig() {
+  return {
+    width: 96, height: 96, levelMin: 1, levelMax: 5,
+    tileTypes: [{ name: 'grass', walkable: true }],
+    villages: [], doorways: [], biomes: [],
+  };
+}
+
+test('the backstop enqueues the gap between target and live population', { skip: !url }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const worldId = await makeWorld(pool);
+    await pool.query(
+      // allowed_creature_types is jsonb (migration 1714440027000), not
+      // text[] -- Postgres does not implicitly cast text[] to jsonb, so
+      // ARRAY['Wolf']::text[] fails with "column ... is of type jsonb but
+      // expression is of type text[]". A jsonb array literal is what every
+      // other writer in this codebase uses (worldPopulation.js, index.js).
+      `UPDATE worlds SET allowed_creature_types = '["Wolf"]'::jsonb WHERE id = $1`, [worldId],
+    );
+    const row = (await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId])).rows[0];
+
+    // 96x96 at 'normal' (6 per 1000 tiles) targets 55 scattered creatures.
+    // Hand-typed from the shipped tier table, NOT recomputed from
+    // resolveDensity -- deriving it from the code under test would make this
+    // assertion true for any tier values at all.
+    const enqueued = await enqueueDeficit(pool, { worldRow: row, world: fakeWorldConfig() });
+    assert.equal(enqueued, 55);
+
+    const q = await pool.query('SELECT count(*)::int AS n FROM creature_respawns WHERE world_id = $1', [worldId]);
+    assert.equal(q.rows[0].n, 55);
+
+    await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]);
+  } finally {
+    await pool.end();
+  }
+});
+
+test('the backstop enqueues nothing for a world already at target', { skip: !url }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const worldId = await makeWorld(pool);
+    await pool.query(
+      `UPDATE worlds SET allowed_creature_types = '["Wolf"]'::jsonb WHERE id = $1`, [worldId],
+    );
+    // 60 live wild creatures, comfortably over the 55 target.
+    for (let i = 0; i < 60; i += 1) {
+      await pool.query(
+        `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
+         VALUES ($1,'Wolf',$2,$2,20,'S',1,5,0)`, [worldId, 100 + i],
+      );
+    }
+    const row = (await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId])).rows[0];
+
+    assert.equal(await enqueueDeficit(pool, { worldRow: row, world: fakeWorldConfig() }), 0);
+
+    await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]);
+  } finally {
+    await pool.end();
+  }
+});
+
+test('already-pending respawns count against the deficit', { skip: !url }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const worldId = await makeWorld(pool);
+    await pool.query(
+      `UPDATE worlds SET allowed_creature_types = '["Wolf"]'::jsonb WHERE id = $1`, [worldId],
+    );
+    // 50 kills already in flight. Without subtracting these the world would
+    // be filled to 55 now and then again as each pending row comes due.
+    for (let i = 0; i < 50; i += 1) {
+      await pool.query(
+        `INSERT INTO creature_respawns (world_id, type, x, y, level, respawn_at)
+         VALUES ($1,'Wolf',$2,$2,1, now())`, [worldId, 100 + i],
+      );
+    }
+    const row = (await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId])).rows[0];
+
+    assert.equal(await enqueueDeficit(pool, { worldRow: row, world: fakeWorldConfig() }), 5);
+
+    await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]);
+  } finally {
+    await pool.end();
+  }
+});
+
+test('a world with no allowed creature types enqueues nothing', { skip: !url }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const worldId = await makeWorld(pool); // allowed_creature_types left empty
+    const row = (await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId])).rows[0];
+
+    // SOMET-315's empty worlds must stay empty: there is no legal creature to
+    // place, and enqueueing rows that can never resolve would build a queue
+    // that fails on every sweep forever.
+    assert.equal(await enqueueDeficit(pool, { worldRow: row, world: fakeWorldConfig() }), 0);
 
     await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]);
   } finally {

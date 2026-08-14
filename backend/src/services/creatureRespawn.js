@@ -7,8 +7,9 @@
 // and folding a hot per-death path into a seeding module would couple them for
 // no gain.
 
-const { placeMapCreatures, CREATURE_BASE_DAMAGE } = require('./mapService');
+const { placeMapCreatures, CREATURE_BASE_DAMAGE, isBoundedWorld } = require('./mapService');
 const { scaleCreature } = require('./creatureLevel');
+const { resolveDensity } = require('./densityTiers');
 
 // The delay between a creature dying and its replacement becoming due.
 const RESPAWN_DELAY_MS = 30000;
@@ -152,8 +153,81 @@ async function respawnDueCreatures(pool, {
   return spawned;
 }
 
+// The load-time backstop.
+//
+// A per-death queue only knows about deaths that happen after it ships. The
+// creatures alive when this feature landed have no queue rows, and a world
+// drained before that would stay drained forever. This closes that gap and
+// makes the system self-healing: a population lost to ANY cause, including
+// causes not yet known, comes back the next time a player enters.
+//
+// Enqueues immediately-due rows rather than inserting creatures directly, so
+// there is exactly one spawn path and the player-distance rule applies to
+// backfilled creatures too. The cost is that placement runs twice for these
+// rows (once here to pick a tile, once in the sweep) -- bounded, because this
+// runs at most once per world load.
+//
+// Packs are deliberately excluded from the target: resolveDensity's pack
+// counts are re-rolled per populate, worlds.creature_count records only the
+// scattered figure, and treating packs as a floor would make this oscillate.
+// The backstop restores the scatter baseline; packs are a seeding-time
+// flourish that does not regenerate.
+async function enqueueDeficit(pool, { worldRow, world }) {
+  if (!isBoundedWorld(worldRow)) return 0;
+
+  const allowedNames = Array.isArray(worldRow.allowed_creature_types)
+    ? worldRow.allowed_creature_types : [];
+  if (allowedNames.length === 0) return 0;
+
+  const et = await pool.query(
+    `SELECT name, hp, defense, resistances, faction FROM entity_types
+      WHERE is_creature = true AND name = ANY($1::text[])`,
+    [allowedNames],
+  );
+  // Same exclusion populateWorld applies: a guard-faction type rolled into the
+  // wild pool would have no home_x, so withinLeash would treat it as
+  // unconstrained -- a world-roaming, undroppable creature-hunter.
+  const hostileTypes = et.rows.filter((t) => (t.faction || 'hostile') !== 'guard');
+  if (hostileTypes.length === 0) return 0;
+
+  const target = resolveDensity(worldRow.density, worldRow.width, worldRow.height).scatterCount;
+
+  const live = await pool.query(
+    `SELECT count(*)::int AS n FROM world_creatures
+      WHERE world_id = $1 AND home_x IS NULL AND blocks_portal_id IS NULL`,
+    [worldRow.id],
+  );
+  const pending = await pool.query(
+    'SELECT count(*)::int AS n FROM creature_respawns WHERE world_id = $1', [worldRow.id],
+  );
+
+  const deficit = target - live.rows[0].n - pending.rows[0].n;
+  if (deficit <= 0) return 0;
+
+  const seed = Math.floor(Math.random() * 2 ** 31);
+  const placed = placeMapCreatures(world, deficit, hostileTypes, seed);
+  if (placed.length === 0) return 0;
+
+  // One multi-row INSERT: a 55-row backfill should not be 55 round trips on
+  // the path a player is waiting behind.
+  const params = [];
+  const tuples = placed.map((c) => {
+    const b = params.length;
+    params.push(worldRow.id, c.type, c.x, c.y, c.level);
+    return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5}, now())`;
+  });
+  await pool.query(
+    `INSERT INTO creature_respawns (world_id, type, x, y, level, respawn_at)
+     VALUES ${tuples.join(',')}`,
+    params,
+  );
+
+  return placed.length;
+}
+
 module.exports = {
   isClearOfPlayers,
   respawnDueCreatures,
+  enqueueDeficit,
   RESPAWN_DELAY_MS, CREATURE_SWEEP_MS, RESPAWN_MIN_PLAYER_DISTANCE,
 };
