@@ -18,6 +18,14 @@ const CASCADES = [
   // un-lights every waypoint every character ever walked onto -- worth naming
   // for the same reason player_binds is: it is player progress, not map data.
   'waypoints (and with them every character\'s activated waypoints)',
+  // SOMET-340. Unlike player_binds and the two above it, this one is genuinely
+  // map data and losing it costs nothing: the queue only holds creatures due
+  // to come back into a world that is itself being deleted, and a re-seed
+  // repopulates from the spec. Named anyway, because the value of this list is
+  // that it is EXHAUSTIVE -- a reader who spots one omission has to distrust
+  // the whole prompt, and the harmless entries are what make the alarming ones
+  // credible.
+  'creature_respawns (creatures queued to respawn into the worlds being deleted)',
 ];
 
 async function clearMaps(pool) {
