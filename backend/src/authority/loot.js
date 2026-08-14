@@ -4,6 +4,7 @@
 const { CREATURE_SIZE } = require('./creatures');
 const { awardXp, loadProgression } = require('../services/progressionStore.js');
 const { xpForKill } = require('../services/playerStats.js');
+const { RESPAWN_DELAY_MS } = require('../services/creatureRespawn');
 
 // Upper bound on a single row's rolled quantity. The DB only constrains
 // min_qty <= max_qty (CHECK (min_qty >= 1 AND max_qty >= min_qty)) — nothing
@@ -72,13 +73,35 @@ async function commitCreatureDeath(pool, entry, creatureId, {
   try {
     await client.query('BEGIN');
     const r = await client.query(
-      'DELETE FROM world_creatures WHERE id = $1 RETURNING type, x, y, level', [creatureId],
+      'DELETE FROM world_creatures WHERE id = $1 '
+      + 'RETURNING type, x, y, level, home_x, blocks_portal_id', [creatureId],
     );
     if (r.rowCount !== 1) {
       await client.query('ROLLBACK');
       return null;
     }
     const dead = r.rows[0];
+
+    // SOMET-309: schedule the replacement inside the SAME transaction that
+    // commits this death. The header comment above establishes that the
+    // delete, the XP award and the drop roll stand or fall together; the
+    // respawn belongs in that set for the same reason. A kill that paid XP
+    // and dropped loot but failed to queue its replacement would be a silent,
+    // permanent population leak -- precisely the bug this ticket exists to fix.
+    //
+    // Wild creatures only. home_x is the structural marker every guard kind
+    // shares (village, portal and vault guards all leash to a post via
+    // home_x/home_y, and populateWorld's own wipe spares them on exactly this
+    // column); blocks_portal_id catches a portal guard specifically. Guards
+    // have their own lifecycles -- a vault guard is respawned by the chest
+    // sweep -- and queueing them here would duplicate them.
+    if (dead.home_x === null && dead.blocks_portal_id === null) {
+      await client.query(
+        `INSERT INTO creature_respawns (world_id, type, x, y, level, respawn_at)
+         VALUES ($1,$2,$3,$4,$5, now() + ($6::int * interval '1 millisecond'))`,
+        [entry.worldId, dead.type, dead.x, dead.y, dead.level, RESPAWN_DELAY_MS],
+      );
+    }
 
     let progression = null;
     let leveledUp = false;
