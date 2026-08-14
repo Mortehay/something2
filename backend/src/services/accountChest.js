@@ -238,10 +238,16 @@ async function withdrawItem(pool, entry, userId, characterId, accountItemId) {
 
     await client.query('COMMIT');
 
+    // soulbound is echoed from the row this transaction just wrote, not from
+    // the INSERT's RETURNING, because it is the value that went IN. SOMET-316:
+    // without it the withdrawn item would lose its `bound` marker the moment it
+    // landed back in the inventory -- correct in the database, wrong on screen,
+    // and wrong in the one place a player is most likely to be looking.
     const item = {
       id: ins.rows[0].id,
       typeId: ins.rows[0].item_type_id,
       quantity: Number(ins.rows[0].quantity ?? 1),
+      soulbound: row.soulbound === true,
     };
     p.inv.items.push(item);
     return { ok: true, item };

@@ -19,6 +19,39 @@ it('applyJoined populates the catalog, items and equipment', () => {
   expect(typeOf(inv, 'i5').name).toBe('leather-vest');
 });
 
+// SOMET-316. The mirror has to carry soulbound or no panel can mark a carried
+// item bound — the gap that let the account chest label a stored item and not
+// the identical carried one.
+describe('soulbound on the client mirror', () => {
+  it('carries the flag per instance through applyJoined', () => {
+    const inv = createInventory();
+    applyJoined(inv, {
+      ...JOINED,
+      // Same typeId, different provenance — a mapper that hardcoded either
+      // value would pass a single-row fixture and still be wrong in game.
+      items: [{ id: 'granted', typeId: 5, soulbound: true }, { id: 'looted', typeId: 5, soulbound: false }],
+    });
+    expect(inv.items.map((i) => [i.id, i.soulbound])).toEqual([['granted', true], ['looted', false]]);
+  });
+
+  it('carries the flag through addItem, the path a withdrawn item arrives on', () => {
+    const inv = createInventory();
+    applyJoined(inv, { ...JOINED, items: [] });
+    addItem(inv, { id: 'w1', typeId: 5, quantity: 1, soulbound: true });
+    expect(inv.items[0].soulbound).toBe(true);
+  });
+
+  // A frame from a server that predates this change must read as "not bound",
+  // never undefined: a later `!== false` test would silently invert on it.
+  it('normalizes a missing flag to false rather than undefined', () => {
+    const inv = createInventory();
+    applyJoined(inv, JOINED);
+    expect(inv.items.every((i) => i.soulbound === false)).toBe(true);
+    addItem(inv, { id: 'noflag', typeId: 5, quantity: 1 });
+    expect(inv.items.find((i) => i.id === 'noflag').soulbound).toBe(false);
+  });
+});
+
 it('applyEquipment replaces the equipment map', () => {
   const inv = createInventory();
   applyJoined(inv, JOINED);

@@ -356,6 +356,10 @@ test('soulbound survives the round trip, so a bound item cannot be laundered int
   const { entry: entryB } = fakeEntry(USER, []);
   const wd = await withdrawItem(db, entryB, USER, CHAR_B, dep.stored.id);
   assert.equal(wd.ok, true);
+  // SOMET-316: the flag must survive on the WIRE too, not only in the row.
+  // Without this the withdrawn item loses its `bound` marker the instant it
+  // lands back in the panel it was just taken from.
+  assert.equal(wd.item.soulbound, true);
   // The flag is what trade.js's sellItem reads to refuse the sale. If the
   // round trip cleared it, SOMET-277's gold faucet would reopen through the
   // chest: deposit the starter kit, withdraw it, sell it, delete the
@@ -372,6 +376,9 @@ test('a stacked row keeps its quantity across the round trip', async () => {
   const dep = await depositItem(db, entry, USER, CHAR_A, 'p1');
   assert.equal(dep.ok, true);
   assert.equal(dep.stored.quantity, 24);
+  // An unbound item must come back unbound: the round trip preserves the flag,
+  // it does not invent one.
+  assert.equal(dep.stored.soulbound, false);
 
   const wd = await withdrawItem(db, entry, USER, CHAR_A, dep.stored.id);
   assert.equal(wd.ok, true);
