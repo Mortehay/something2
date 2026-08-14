@@ -65,12 +65,21 @@ test('every table with an ON DELETE CASCADE FK to worlds is named in CASCADES', 
   // list, and the two never touch the same line so git merged them cleanly.
   // Third time: `waypoints` in SOMET-292 -- and that one drags
   // character_waypoints down with it in turn, which is player progress rather
-  // than map data.
+  // than map data. Fourth: `creature_respawns` in SOMET-309 (SOMET-340), found
+  // on main rather than on the branch that added it -- the check does not care
+  // which branch introduces a cascading table, only that CASCADES was told.
+  //
+  // This stays an exact deepEqual rather than "CASCADES covers everything
+  // found". A subset check would go green for a new cascading table the moment
+  // someone added it to CASCADES without reading it, and green forever after
+  // if they never did -- while the whole point is that a NEW row in this set
+  // is a decision about what an irreversible delete destroys, and has to be
+  // looked at by a person once.
   assert.deepEqual(
     [...found].sort(),
-    ['character_visited_worlds', 'map_links', 'merchant_stock', 'player_binds',
-     'villages', 'waypoints', 'world_chests', 'world_chunks', 'world_creatures',
-     'world_items', 'world_players'].sort(),
+    ['character_visited_worlds', 'creature_respawns', 'map_links', 'merchant_stock',
+     'player_binds', 'villages', 'waypoints', 'world_chests', 'world_chunks',
+     'world_creatures', 'world_items', 'world_players'].sort(),
   );
 
   for (const table of found) {
