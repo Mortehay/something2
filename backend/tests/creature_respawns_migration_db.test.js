@@ -42,3 +42,19 @@ test('deleting a world removes its queued respawns', { skip: !url }, async () =>
     await pool.end();
   }
 });
+
+test('creature_respawns has the indexes the sweep and the load-time backstop need', { skip: !url }, async () => {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const r = await pool.query(
+      `SELECT indexname FROM pg_indexes WHERE tablename = 'creature_respawns'`,
+    );
+    const names = r.rows.map((row) => row.indexname);
+    // The sweep's only query is "everything due, oldest first".
+    assert.ok(names.includes('creature_respawns_due_index'));
+    // The load-time backstop counts pending rows for one world.
+    assert.ok(names.includes('creature_respawns_world_id_index'));
+  } finally {
+    await pool.end();
+  }
+});
