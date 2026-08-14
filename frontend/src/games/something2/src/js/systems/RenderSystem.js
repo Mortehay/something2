@@ -774,13 +774,12 @@ export class RenderSystem {
   // `drawY + h`, which is the expression drawCreature/drawEntity already use to
   // put an actor's feet on the diamond. Nothing is re-derived here.
   //
-  // The trap this avoids: worldToScreen returns the tile diamond's CENTRE, and
-  // an actor's feet sit ISO_TILE_H/2 BELOW that (drawY = s.y - h + ISO_TILE_H/2
-  // => drawY + h = s.y + ISO_TILE_H/2). Drawing the aura at s.y instead — the
-  // convention drawGroundItem uses, since a dropped item really does rest at
-  // the diamond centre — puts the ring around the actor's waist rather than
-  // under their feet. It was written that way first and the browser pass caught
-  // it; do not "simplify" it back.
+  // Since SOMET-319 an actor's feet sit ON the diamond centre (drawY = s.y - h
+  // => drawY + h = s.y), the same point drawGroundItem uses, so the ring and a
+  // dropped item now agree about where the ground is. Keep taking feetY from
+  // the caller's own `drawY + h` rather than reading s.y here: the sprite's
+  // vertical anchor has moved once already, and a ring that derives it
+  // independently is a ring that silently detaches the next time it moves.
   //
   // The 2:1 ellipse (rx, rx/2) is the same ground-plane projection blastScreen-
   // RadiusX documents. Rings are drawn OUTWARD (each successive effect larger)
@@ -855,10 +854,22 @@ export class RenderSystem {
   drawCreature(obj, imageKey, alpha = 1, tag = null) {
     const w = obj.width || 64;
     const h = obj.height || 64;
-    // Anchor: project the feet (bottom-center of the world box).
+    // Anchor: project the actor's world box CENTER — the exact point movement
+    // and collision resolve against (systems/movement.js resolveMove works on
+    // that box) — and stand the sprite's feet on it. worldToScreen returns the
+    // diamond's CENTRE, which is where a world point actually lands, so no
+    // lift belongs here: it is the same convention drawGroundItem, drawWall
+    // and the flat tile pass already use.
+    //
+    // SOMET-319: this used to add ISO_TILE_H/2. At ISO_TILE_W=128 /
+    // MAP_TILE_SIZE=100 the iso scale is 0.64, so those 32px are exactly the
+    // projection of a (+50,+50) world offset — half a tile toward the camera.
+    // The sprite was drawn half a tile in FRONT of the actor, which put the
+    // collision anchor at the sprite's waist: obstacles blocked mid-body and
+    // dropped items landed at the player's belt. Do not reintroduce the lift.
     const s = worldToScreen(obj.x + w / 2, obj.y + h / 2);
     const drawX = s.x - w / 2;
-    const drawY = s.y - h + ISO_TILE_H / 2; // lift so feet rest on the diamond
+    const drawY = s.y - h;
     // Effect rings go down FIRST, so the actor stands on top of its own aura
     // rather than being obscured by it. `drawY + h` is the feet line this same
     // method already computed — see _drawEffectRings on why not s.y.
@@ -868,8 +879,10 @@ export class RenderSystem {
     if (img) {
       this.ctx.drawImage(img, drawX, drawY, w, h);
     } else {
+      // Mid-body of the box the image path draws (drawY .. drawY + h), so the
+      // placeholder occupies the same footprint as a real sprite would.
       const cx = s.x;
-      const cy = s.y - h / 2 + ISO_TILE_H / 2;
+      const cy = s.y - h / 2;
       drawPlaceholder(this.ctx, cx, cy, w / 2, tag !== null ? "#f59e0b" : "#4a9eff", obj.facing);
     }
     this.ctx.globalAlpha = 1;
@@ -911,7 +924,12 @@ export class RenderSystem {
     const h = e.displayHeight || e.height || 40;
     const s = worldToScreen(e.x + (e.width || 40) / 2, e.y + (e.height || 40) / 2);
     const drawX = s.x - w / 2;
-    const drawY = s.y - h + ISO_TILE_H / 2;
+    // Feet/base on the projected anchor, exactly as drawCreature — see the
+    // SOMET-319 note there for why there is no ISO_TILE_H/2 lift. Creatures
+    // AND map decorations draw through here, so the two must share the
+    // anchor: a tree keeps its trunk on its own tile centre, and a creature
+    // stops against it where its feet are, not where its waist is.
+    const drawY = s.y - h;
 
     // Creatures render through this path in renderChunked (buildDrawables'
     // "entity" kind), so their status rings belong here too. Map decorations
