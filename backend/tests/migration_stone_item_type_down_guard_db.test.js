@@ -39,6 +39,55 @@ async function applyMigration(client, migModule, direction) {
   }
 }
 
+// SOMET-320. Apply the migration only if its schema is not already present.
+//
+// `up()` here is a PRECONDITION -- "put the schema in the state down() expects"
+// -- not the subject; every assertion in this file is about down(). Running it
+// unconditionally works on a virgin database and is impossible on a migrated
+// one, where it dies on
+//   column "stat_bonus_stat" of relation "item_types" already exists  (42701)
+// This was the third file sharing that one cause, alongside
+// stones_integration_db and migration_convert_magic_weapons_db.
+//
+// Keyed on an explicit presence check, never on catching the error: a
+// duplicate-object error raised by a migration is a real defect, and this file
+// exists precisely to police that migration's behaviour.
+async function applyMigrationIfAbsent(client, migModule, presenceSql) {
+  const present = await client.query(presenceSql);
+  if (present.rowCount > 0) return false;
+  await applyMigration(client, migModule, 'up');
+  return true;
+}
+
+const HAS_STAT_BONUS_COLUMN = `SELECT 1 FROM information_schema.columns
+   WHERE table_name = 'item_types' AND column_name = 'stat_bonus_stat'`;
+
+// SOMET-320. Serialize every test transaction that writes item_types' STONE
+// rows, across files.
+//
+// THIS IS NOT PRECAUTIONARY -- it fixes an observed deadlock. `node --test`
+// runs files in PARALLEL, and three files write these rows: this one (the
+// precondition DELETE below), migration_convert_magic_weapons_db (its
+// conversion INSERTs) and stones_integration_db (its fixtures). Two of them
+// touching the same rows in different orders produced a real
+// "deadlock detected" abort in a full-suite run while passing in isolation --
+// the worst kind of failure, because it is nondeterministic and can take an
+// innocent test down with it.
+//
+// pg_advisory_xact_lock is TRANSACTION-scoped, so it is released by the
+// ROLLBACK these files already perform in `finally`; there is nothing extra to
+// clean up and a crashed test cannot strand the lock. The key is a hash of a
+// fixed string so every file computes the same one. Same technique the
+// entry-world guard uses for its own cross-file coordination.
+//
+// Every file that writes stone item_types must take this lock -- a lock only
+// serializes those who ask for it.
+const STONE_CATALOG_LOCK = "SELECT pg_advisory_xact_lock(hashtext('somet320:item_types_stone'))";
+
+async function lockStoneCatalog(client) {
+  await client.query(STONE_CATALOG_LOCK);
+}
+
 async function openTxClient(t) {
   const client = new Client({ connectionString: DB_URL, connectionTimeoutMillis: 3000 });
   try {
@@ -50,6 +99,7 @@ async function openTxClient(t) {
     return null;
   }
   await client.query('BEGIN');
+  await lockStoneCatalog(client);
   return client;
 }
 
@@ -58,10 +108,25 @@ test('down() succeeds cleanly when zero category=stone rows remain', async (t) =
   if (!client) return;
 
   try {
-    await applyMigration(client, mig, 'up');
+    await applyMigrationIfAbsent(client, mig, HAS_STAT_BONUS_COLUMN);
 
-    // No stone rows at all (up() only adds columns/constraints, never rows)
-    // -- down() must run clean, not refuse.
+    // ESTABLISH THIS TEST'S PRECONDITION EXPLICITLY RATHER THAN ASSUMING IT.
+    //
+    // The name says "when zero category=stone rows remain", and on a virgin
+    // database that was free: up() only adds columns and constraints, never
+    // rows, so there were none. On a migrated database it is FALSE -- the
+    // conversion migration (1714440167000) really ran, and item_types carries
+    // its stone_of_% rows plus any hand-authored stone content. down() would
+    // then correctly REFUSE, and this test would fail while testing nothing it
+    // claims to test.
+    //
+    // Deleting them states the precondition the test was always relying on.
+    // Safe by the same discipline as every other write in this file: it runs
+    // inside the single transaction that `finally` always rolls back, so the
+    // shared catalog is never actually touched. (SOMET-320)
+    await client.query(`DELETE FROM item_types WHERE category = 'stone'`);
+
+    // No stone rows at all -- down() must run clean, not refuse.
     await assert.doesNotReject(() => applyMigration(client, mig, 'down'));
 
     const col = await client.query(
@@ -83,7 +148,13 @@ test('down() refuses loudly (does not silently corrupt or crash with a raw const
   const handAuthoredName = `zz-stones-handauthored-${tag}`;
 
   try {
-    await applyMigration(client, mig, 'up');
+    await applyMigrationIfAbsent(client, mig, HAS_STAT_BONUS_COLUMN);
+
+    // NO precondition delete here, deliberately, unlike the test above: this
+    // one asserts down() REFUSES while a non-stone_of_% stone row exists, and
+    // it inserts exactly such a row below. Pre-existing stone rows on a
+    // migrated database can only reinforce that refusal, never mask it, so the
+    // assertion stays honest either way.
 
     // Simulate real, hand-authored stone content added after this shipped --
     // by construction this can never be named 'stone_of_%' the way the

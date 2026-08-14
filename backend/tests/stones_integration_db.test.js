@@ -73,6 +73,45 @@ async function applyMigration(client, migModule, direction) {
   }
 }
 
+// SOMET-320. Apply a SETUP migration only if its schema is not already there.
+//
+// These two migrations are a PREREQUISITE for this file, not the thing under
+// test: the tests need `stat_bonus_stat` and `stone_instances` to EXIST, and do
+// not care who created them. Applying them unconditionally works on a virgin
+// database and is impossible on a migrated one -- against the dev database
+// every test in this file died on
+//   column "stat_bonus_stat" of relation "item_types" already exists  (42701)
+// which was 12 of the backend suite's 16 failures, in two files, for one
+// reason. A permanently-red suite cannot report a real regression, so this was
+// worth fixing even though no product code is involved.
+//
+// KEYED ON AN EXPLICIT PRESENCE CHECK, NEVER ON CATCHING THE ERROR. A blanket
+// "tolerate 42701/42P07" would also swallow a genuine duplicate-object bug in a
+// migration -- exactly what the migration tests in the sibling file exist to
+// catch -- trading twelve honest failures for twelve dishonest passes.
+//
+// Still correct on a virgin database: the probe simply reports absent and the
+// migration runs. The guard adds a skip, it does not assume a state.
+async function applyMigrationIfAbsent(client, migModule, presenceSql) {
+  const present = await client.query(presenceSql);
+  if (present.rowCount > 0) return false;
+  await applyMigration(client, migModule, 'up');
+  return true;
+}
+
+const HAS_STAT_BONUS_COLUMN = `SELECT 1 FROM information_schema.columns
+   WHERE table_name = 'item_types' AND column_name = 'stat_bonus_stat'`;
+const HAS_STONE_INSTANCES = `SELECT 1 FROM information_schema.tables
+   WHERE table_name = 'stone_instances'`;
+
+// SOMET-320. Serialize with the other files that write item_types' stone rows.
+// `node --test` runs files in parallel and three of them touch these rows; two
+// doing so in different orders produced an observed "deadlock detected" in a
+// full-suite run that passed in isolation. Transaction-scoped, so the ROLLBACK
+// in `finally` releases it. See the full rationale in
+// migration_stone_item_type_down_guard_db.test.js.
+const STONE_CATALOG_LOCK = "SELECT pg_advisory_xact_lock(hashtext('somet320:item_types_stone'))";
+
 // See the header comment above for why this exists. Only 'BEGIN'/'COMMIT'/
 // 'ROLLBACK' (matched by EXACT string, same as items.js issues them -- no
 // trailing semicolon, no extra whitespace beyond a trim) are intercepted;
@@ -116,8 +155,9 @@ async function openTxClient(t) {
     return null;
   }
   await client.query('BEGIN');
-  await applyMigration(client, migStoneType, 'up');
-  await applyMigration(client, migStoneInstances, 'up');
+  await client.query(STONE_CATALOG_LOCK);
+  await applyMigrationIfAbsent(client, migStoneType, HAS_STAT_BONUS_COLUMN);
+  await applyMigrationIfAbsent(client, migStoneInstances, HAS_STONE_INSTANCES);
   return client;
 }
 
