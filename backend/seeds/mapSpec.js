@@ -569,6 +569,59 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
     errors.push(`spec must have exactly one world with is_entry: true (found ${entries.length})`);
   }
 
+  // SOMET-335. If the entry world declares a village, entry_spawn must BE that
+  // village's spawn tile.
+  //
+  // This is SOMET-153's original acceptance criterion, and migration
+  // 1714440175000 (SOMET-282) delivered it on the LIVE rows by writing
+  // worlds.entry_spawn FROM villages.spawn_x/spawn_y, precisely so the two
+  // could not disagree. That guarantee is not durable: applyMapSpec upserts
+  // entry_spawn from the spec on every re-seed, so a spec that disagrees
+  // silently undoes the migration. Nothing anywhere related the two numbers
+  // until this check, and hub-vale/hub shipped with entry_spawn on the map
+  // CENTRE and its village 20 tiles away -- through an authoring pass, a
+  // resize (SOMET-307, which translated both correctly and so preserved the
+  // inconsistency exactly) and every re-seed since.
+  //
+  // Scoped to a village the entry world actually declares: an entry world with
+  // no village is still legal (loop-catacombs/entry is one), and this must not
+  // start demanding villages that were never part of that spec's design.
+  // entry_spawn is REQUIRED once a village is declared, because "absent" is
+  // the same failure as "wrong" -- the player still does not start in the
+  // village.
+  //
+  // Compared as tile-exact pixel pairs rather than "inside the box": these two
+  // are the same point (first join and respawn land on the same tile), not
+  // merely compatible ones. villageGeometryError already proves separately
+  // that the village's own spawn is a legal interior tile, so equality here
+  // carries interiority with it.
+  //
+  // Only villages that are themselves WELL-FORMED are compared against. A
+  // malformed entry (null, a string, a missing spawn) already has its own
+  // error from the village block above, and this check has nothing meaningful
+  // to say about it -- reading `.spawn_x` off it would THROW, aborting
+  // validateMapSpec and hiding every other problem in the spec, which is the
+  // posture every other check here deliberately avoids.
+  if (entries.length === 1) {
+    const entry = entries[0];
+    const entryVillages = villagesOf(entry).filter(
+      (v) => v && typeof v === 'object'
+        && Number.isInteger(v.spawn_x) && Number.isInteger(v.spawn_y),
+    );
+    if (entryVillages.length > 0) {
+      const spawn = entry.entry_spawn;
+      const spawns = entryVillages.map((v) => `${v.spawn_x},${v.spawn_y}`);
+      if (!spawn || !Number.isInteger(spawn.x) || !Number.isInteger(spawn.y)) {
+        errors.push(`entry world "${entry.key}" declares a village but no integer entry_spawn `
+          + '-- a new character\'s first join and their respawn point must be the village spawn tile');
+      } else if (!spawns.includes(`${spawn.x},${spawn.y}`)) {
+        errors.push(`entry world "${entry.key}" entry_spawn (${spawn.x},${spawn.y}) is not the spawn `
+          + `of any village it declares (${spawns.join(' / ')}) -- a new character would start `
+          + 'outside the starting village');
+      }
+    }
+  }
+
   const usedEdges = new Set();
   // Every portal TILE a spec claims, whichever side of a link declared it.
   // setPortalLink writes TWO rows per declared link -- the declared

@@ -494,7 +494,12 @@ const villagePopulationSpec = () => ({
       // tiles are all walkable and its creature_types includes 'Slime', which
       // matches allowed_creature_types below.
       chunk_size: 64, biomes: ['Meadow'], biome_cell: 32,
-      allowed_creature_types: ['Slime'], is_entry: true, entry_spawn: { x: 3200, y: 3200 },
+      // entry_spawn IS the village spawn below, not the map centre it used to
+      // be: world `a` is is_entry, and SOMET-335's validator gate refuses an
+      // entry world whose entry_spawn is not the spawn of a village it
+      // declares. Nothing in this fixture's assertions depends on the two
+      // being different -- it is about village/population ordering.
+      allowed_creature_types: ['Slime'], is_entry: true, entry_spawn: { x: 2150, y: 2550 },
       // Spawn is an interior tile of the box: rows 24..27, cols 20..25, so the
       // interior is rows 25..26, cols 21..24 and the S gate is at (row 27, col
       // 23). Tile (row 25, col 21) -> pixel centre (2150,2550), which is clear
@@ -893,9 +898,12 @@ const multiVillageSpec = ({ safe = false, villages = [MULTI_VILLAGE_A, MULTI_VIL
       key: 'a', name: 'zzTestMultiVillage', grid: [15, -3], seed: 995, width: 64, height: 64,
       chunk_size: 64, biomes: ['Meadow'], biome_cell: 32,
       allowed_creature_types: [], is_entry: true,
-      // Tile (row 5, col 5): clear of both village boxes (rows 10-13/30-33),
-      // walkable Meadow terrain, off the wall ring.
-      entry_spawn: { x: 550, y: 550 },
+      // MULTI_VILLAGE_A's spawn tile (row 11, col 11). It used to be tile
+      // (5,5), chosen to sit clear of both village boxes -- a shape SOMET-335
+      // made illegal for an is_entry world, which must start the player IN a
+      // village it declares. A is used rather than B because the `oneVillage()`
+      // variant below drops B, and both variants have to stay valid.
+      entry_spawn: { x: 1150, y: 1150 },
       villages,
       ...(safe ? {
         safe_road_radius: 3,
