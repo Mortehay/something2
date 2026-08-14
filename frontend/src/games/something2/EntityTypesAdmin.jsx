@@ -12,7 +12,8 @@ import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutli
 import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
 import { orphanedSpawnTiles } from './catalogReferences.js';
-import { withOptionalBiome } from './generationJobPayload.js';
+import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
+import { ProviderChoice, ProviderAnimationNote } from './ProviderChoice.jsx';
 import { HiOutlineMagnifyingGlass } from "react-icons/hi2";
 import {
   buildBiomeIndex, biomesWithEntities, filterByBiomeTab, filterBySearch, paginate,
@@ -747,6 +748,9 @@ function EntityTexturePanel({ entity, prompt }) {
   const [mode, setMode] = useState(null);     // 'image' | 'animated' while a job runs
   const [jobId, setJobId] = useState(null);
   const [biome, setBiome] = useState('');     // '' = no biome art context
+  // '' = follow the active provider; 'local' = pin to sprite-gen; '<id>' = pin
+  // to that provider. See generationJobPayload.withOptionalProvider.
+  const [provider, setProvider] = useState('');
   const { data: capability } = useSpriteCapability();
   const { biomes, isLoadingBiomes } = useBiomes();
   const generate = useGenerateEntityJob();
@@ -759,9 +763,12 @@ function EntityTexturePanel({ entity, prompt }) {
     setMode(which);
     setJobId(null);
     generate.mutate(
-      withOptionalBiome(
-        { entity_type: entity.name, base_prompt: base, frames: which === 'animated' ? 4 : 1 },
-        biome,
+      withOptionalProvider(
+        withOptionalBiome(
+          { entity_type: entity.name, base_prompt: base, frames: which === 'animated' ? 4 : 1 },
+          biome,
+        ),
+        provider,
       ),
       { onSuccess: (data) => setJobId(data.job_id) }
     );
@@ -815,6 +822,8 @@ function EntityTexturePanel({ entity, prompt }) {
           Steers the generated art toward that biome's palette, style and exclusions.
         </div>
       </div>
+      <ProviderChoice value={provider} onChange={setProvider} />
+      <ProviderAnimationNote provider={provider} />
       <div style={{ display: 'flex', gap: '0.5rem' }}>
         <SecondaryButton type="button" onClick={() => start('image')} disabled={generate.isPending}>Generate image</SecondaryButton>
         <SecondaryButton type="button" onClick={() => start('animated')} disabled={generate.isPending}>Generate animation</SecondaryButton>
