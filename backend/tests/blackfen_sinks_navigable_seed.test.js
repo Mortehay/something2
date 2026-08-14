@@ -2,12 +2,20 @@
 //
 // SOMET-273's residual defect: Blackfen Sinks' LIVE doorways (N, E -- see
 // 1714440164000's commit message for why these differ from the spec's stale
-// single S doorway) form a sealed pocket at its current seed, 2005. This
-// covers the fix migration, 1714440165000_blackfen_sinks_navigable_seed.js:
-// the seed swap touches only Blackfen Sinks, and the chosen seed (2011) is
-// actually navigable with the world's REAL doorways -- not the spec's.
+// single S doorway) formed a sealed pocket at its then-current seed, 2005.
+// This covers the fix migration, 1714440165000_blackfen_sinks_navigable_seed.js
+// (the seed swap touches only Blackfen Sinks, and its chosen seed, 2011, was
+// navigable with the world's REAL doorways -- not the spec's -- at the 64x64
+// size mire had then), AND the world's actual current state: SOMET-306/307
+// (this branch, SOMET-301) moved mire onto the size ramp (96x96 now) and
+// re-picked its seed again, to 2006 -- independently of this migration, by
+// re-applying hub-vale.map.json. 2011 does not survive that resize (see
+// below); this file checks what is actually true today, not just what this
+// one migration once fixed.
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('fs');
+const path = require('path');
 const { Pool } = require('pg');
 
 const MIGRATION = '1714440165000_blackfen_sinks_navigable_seed.js';
@@ -68,10 +76,22 @@ const BIOMES_BY_NAME = new Map(STARTER_BIOMES.map((b) => [b.name, b]));
 // ever declared S -> mire/hub).
 const LIVE_DOORWAYS = ['N', 'E'];
 
-function checkSeed(seed) {
+// mire's real current width/height/seed, read straight from the spec that
+// actually seeds it (hub-vale.map.json) instead of a literal copied into
+// this file -- SOMET-306/307 moved mire off the old uniform 64x64 onto the
+// size ramp (now 96x96) and re-picked its seed (2005 -> 2006, this
+// migration's NEW_SEED=2011 is unrelated to that pick, see below). A
+// hardcoded 64 here kept this offline leg green while asserting a fact about
+// a size the world no longer has (SOMET-301 final review, finding 1).
+const HUB_VALE_SPEC = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '../seeds/maps/hub-vale.map.json'), 'utf8'));
+const MIRE_SPEC = HUB_VALE_SPEC.worlds.find((w) => w.key === 'mire');
+assert.ok(MIRE_SPEC, "hub-vale.map.json has no 'mire' world -- update this test's assumptions");
+
+function checkSeed(seed, width, height) {
   const w = {
     key: 'mire', name: 'Blackfen Sinks',
-    width: 64, height: 64, chunk_size: 32, biome_cell: 16,
+    width, height, chunk_size: 32, biome_cell: 16,
     entry_spawn: null, biomes: ['Storm Coast', 'Mire'],
   };
   const row = {
@@ -86,16 +106,21 @@ function checkSeed(seed) {
   return assertNavigable(cfg, required);
 }
 
-test('the OLD seed (2005) is sealed with the real doorways -- pins the regression', () => {
-  const problems = checkSeed(OLD_SEED);
+test('the OLD seed (2005) is sealed with the real doorways, at the world\'s real size -- pins the regression', () => {
+  const problems = checkSeed(OLD_SEED, MIRE_SPEC.width, MIRE_SPEC.height);
   assert.notEqual(problems.length, 0,
     'expected seed 2005 to reproduce the sealed-pocket defect against the live doorways; ' +
     'if this now passes, the defect this migration fixes may already be gone and the migration should be reconsidered');
 });
 
-test('the NEW seed (2011) is navigable with the real doorways', () => {
-  const problems = checkSeed(NEW_SEED);
-  assert.deepEqual(problems, [], `unexpected navigability problem(s) at seed ${NEW_SEED}:\n  - ${problems.join('\n  - ')}`);
+// NOT a check of NEW_SEED (2011): that seed was hand-picked for the OLD
+// 64x64 mire and is itself sealed at the size this branch introduced (see
+// the migration's header comment -- verified offline: seed 2011 at 96x96
+// fails with "doorway E at (48,95) is unreachable"). What actually ships is
+// whatever hub-vale.map.json's mire entry says, so that is what this checks.
+test(`the world's current spec seed (${MIRE_SPEC.seed}) is navigable with the real doorways at its real size (${MIRE_SPEC.width}x${MIRE_SPEC.height})`, () => {
+  const problems = checkSeed(MIRE_SPEC.seed, MIRE_SPEC.width, MIRE_SPEC.height);
+  assert.deepEqual(problems, [], `unexpected navigability problem(s) at seed ${MIRE_SPEC.seed}:\n  - ${problems.join('\n  - ')}`);
 });
 
 // --- Live database ---
@@ -157,20 +182,26 @@ test('applying up() in a transaction touches only Blackfen Sinks\' seed', async 
   }
 });
 
-test('against the live database: Blackfen Sinks is navigable with its real doorways at the new seed', async (t) => {
+test('against the live database: Blackfen Sinks is navigable with its real doorways at its real seed', async (t) => {
   if (!requireTestDb(t, 'reads live map_links/biomes for Blackfen Sinks')) return;
   const pool = await openPool();
   if (pool.unreachable) { t.skip(`NO DATABASE at ${DB_URL}`); return; }
   try {
-    const wr = await pool.query(`SELECT id, width, height, chunk_size, biome_cell, biomes, entry_spawn
+    const wr = await pool.query(`SELECT id, seed, width, height, chunk_size, biome_cell, biomes, entry_spawn
                                     FROM worlds WHERE name = 'Blackfen Sinks'`);
     if (wr.rows.length === 0) { t.skip('Blackfen Sinks not seeded in this database'); return; }
     const world = wr.rows[0];
 
     const linkRows = await fetchLinks(pool, world.id);
     const doorways = linkRows.map((l) => l.edge);
-    assert.deepEqual([...doorways].sort(), ['E', 'N'],
-      'Blackfen Sinks\' live doorways changed -- re-derive the navigable seed rather than trusting this test\'s assumption');
+    // Not pinned to a specific edge set: hub-vale.map.json only ever declares
+    // one (S), the live topology has carried a different real pair (N, E) at
+    // least once already (see 1714440164000's commit message), and a freshly
+    // seeded database is not guaranteed to reproduce either. What matters is
+    // that SOME doorways exist and whatever they are gets fed into the same
+    // check the client/server actually rely on -- a world with zero doorways
+    // would make requiredTilesFor produce nothing to check at all.
+    assert.notEqual(doorways.length, 0, 'Blackfen Sinks has no live doorways to check navigability against');
     // Fetched live, not hardcoded to [], so a village added to Blackfen Sinks
     // after this test is written is still exercised -- a village box carves
     // a room out of the interior and could reshape reachability.
@@ -188,8 +219,13 @@ test('against the live database: Blackfen Sinks is navigable with its real doorw
     const { rows: tileRows } = await pool.query('SELECT name, walkable FROM tile_types');
     const tileTypes = Object.fromEntries(tileRows.map((r) => [r.name, { walkable: r.walkable }]));
 
+    // The world's ACTUAL live seed, not the migration's NEW_SEED (2011) --
+    // that seed was only ever verified at the old 64x64 size (offline it
+    // fails at 96x96, the size this branch moved mire to; see the migration
+    // file's header). Whatever seed is really sitting in the database is the
+    // one a player actually experiences, so that is what gets checked.
     const row = {
-      seed: NEW_SEED, chunk_size: world.chunk_size, width: world.width, height: world.height,
+      seed: world.seed, chunk_size: world.chunk_size, width: world.width, height: world.height,
       entry_spawn: world.entry_spawn, biome_cell: world.biome_cell,
       level_min: 1, level_max: 1,
     };

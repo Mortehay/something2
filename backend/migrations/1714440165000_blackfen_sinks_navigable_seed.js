@@ -25,6 +25,22 @@ exports.shorthands = undefined;
 // world's seed live. Do NOT reuse this reasoning for "mire" itself: SOMET-273
 // left mire's seed untouched on purpose (nudging it would corrupt an
 // unrelated pair of links -- see 1714440164000).
+//
+// 2026-08 (SOMET-306/307, SOMET-301 final review): mire moved off the 64x64
+// this seed was chosen for, onto the size ramp (now 96x96) -- and NEW_SEED
+// (2011) does NOT survive that resize. Checked offline with this repo's own
+// navigability harness (buildWorldGenConfig + assertNavigable +
+// requiredTilesFor, fed the real N/E doorways): 2011 at 96x96 fails with
+// "doorway E at (48,95) is unreachable". mire's seed was independently
+// re-picked to 2006 for the new size by re-applying hub-vale.map.json (NOT
+// by this migration -- see that spec file and 92aeb84's commit message).
+// down() below is therefore now a trap on any database that has been resized:
+// it would reinstall 2011, a seed sealed at mire's current dimensions,
+// undoing SOMET-307's fix rather than reverting to a working state. This
+// migration's own behavior is left unchanged (it is inert on an
+// already-migrated database, the UPDATE only ever fires once); this note
+// exists so a future `migrate down` is not run on the assumption that 2011
+// is still safe.
 const OLD_SEED = 2005;
 const NEW_SEED = 2011;
 
