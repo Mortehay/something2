@@ -626,11 +626,27 @@ const { commitCreatureDeath } = require('../src/authority/loot');
 
 const url = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
-// A minimal `entry`: commitCreatureDeath reads entry.worldId and
-// entry.world.getPlayer(...) only. A null killer skips the XP branch
-// entirely, which is what keeps this test about the respawn queue.
+// A minimal `entry`. commitCreatureDeath reaches into `entry` in four places
+// and only one of them is unguarded:
+//
+//   entry.creatureTypeIds.get(dead.type)  -- loot.js:131, NO null guard, so
+//       this field MUST be present or every test here dies with a TypeError.
+//       An empty Map makes spawnDrops return at its `entityTypeId == null`
+//       check (loot.js:132), so no drop rows are written and
+//       entry.world.groundItems is never touched.
+//   entry.behaviorDrops / entry.creatureGold / entry.behaviorGold -- all
+//       guarded with `&&`, so omitting them yields no drops and zero gold.
+//   entry.goldItemTypeId -- guarded with `!= null`.
+//   entry.world.getPlayer -- only reached when killerUserId != null.
+//
+// A null killer skips the XP branch entirely, which is what keeps this test
+// about the respawn queue and not about progression.
 function fakeEntry(worldId) {
-  return { worldId, world: { getPlayer: () => null } };
+  return {
+    worldId,
+    world: { getPlayer: () => null },
+    creatureTypeIds: new Map(),
+  };
 }
 
 // Creates a world we own outright, so nothing here touches shared content.
