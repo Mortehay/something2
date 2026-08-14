@@ -20,6 +20,18 @@ Claude and Codex follow the same rules. This file is the source of truth for bot
 - [.ai/styleguides/backend.md](.ai/styleguides/backend.md) — Express + pg patterns
 - `.ai/decisions/` — architecture decisions go here (created as needed)
 - [docs/superpowers/specs/2026-07-24-codebase-audit-cycle-design.md](docs/superpowers/specs/2026-07-24-codebase-audit-cycle-design.md) — the audit cycle; re-run it with the `audit-cycle` skill
+- [docs/ai-providers.md](docs/ai-providers.md) — remote AI image providers (SOMET-322): registering a service, template placeholders, pointer syntax, limitations
+
+### Trust note: AI providers
+
+An admin who can register an AI provider can make the **backend** issue HTTP
+requests to any host the backend container can reach, with a body they control.
+That is inherent to the feature — the image service is a machine on the
+operator's own network — so **admin is a trusted role for this feature**, by
+design and not by oversight. `backend/src/services/safeFetch.js` removes the
+surprises (non-HTTP schemes, credentials in the URL, redirects carrying the
+auth token off-origin, unbounded bodies); it deliberately does **not** block
+private address ranges, because those are the intended target.
 
 ## Quick start
 

@@ -14,6 +14,7 @@
 // and error handling against stubbed service shapes, with no network.
 
 const { selectAll } = require('./pointerPath');
+const { safeFetch, redactUrl } = require('./safeFetch');
 
 // Discovery and reachability are control-plane calls against a service that is
 // either up or not. They are NOT image generation, which is slow by nature and
@@ -82,14 +83,18 @@ async function fetchModels(provider, { fetchImpl = fetch } = {}) {
   }
   let res;
   try {
-    res = await fetchImpl(url, {
+    // safeFetch re-validates the scheme at CALL time (the column can be edited
+    // in psql) and re-validates every redirect hop, dropping the auth header
+    // on a cross-origin one so the token cannot follow a 302 off-site.
+    res = await safeFetch(url, {
       headers: authHeaders(provider),
       signal: AbortSignal.timeout(TIMEOUT_MS()),
-    });
+    }, { fetchImpl });
   } catch (err) {
-    // err.message here is a transport failure (ECONNREFUSED, DNS, abort). It
-    // does not contain request headers, so the token cannot ride along.
-    return { ok: false, error: `could not reach ${url}: ${err.message}` };
+    // err.message here is a transport failure (ECONNREFUSED, DNS, abort) or a
+    // guard rejection. It does not contain request headers, and the URL is
+    // redacted, so neither the token nor a key in a query string rides along.
+    return { ok: false, error: `could not reach ${redactUrl(url)}: ${err.message}` };
   }
   if (!res.ok) {
     return { ok: false, status: res.status, error: `service answered ${res.status}` };
@@ -117,10 +122,10 @@ async function testConnection(provider, { fetchImpl = fetch, now = Date.now } = 
   }
   const started = now();
   try {
-    const res = await fetchImpl(url, {
+    const res = await safeFetch(url, {
       headers: authHeaders(provider),
       signal: AbortSignal.timeout(TIMEOUT_MS()),
-    });
+    }, { fetchImpl });
     return {
       ok: res.ok,
       status: res.status,

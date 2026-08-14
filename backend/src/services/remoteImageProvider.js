@@ -18,6 +18,7 @@
 const crypto = require('node:crypto');
 const { selectOne } = require('./pointerPath');
 const assetStore = require('./assetStore');
+const { safeFetch, redactUrl } = require('./safeFetch');
 
 // Image generation on CPU can take a minute or more. This is NOT the 30s
 // control-plane budget spriteGen.js uses -- there the long work happens
@@ -227,14 +228,20 @@ async function runGeneration(jobId, provider, req, deps = {}) {
 
   let res;
   try {
-    res = await fetchImpl(provider.base_url, {
+    // Call-time scheme re-validation plus redirect re-validation. See
+    // services/safeFetch.js for why this is not the same check as the one the
+    // Settings form already did.
+    res = await safeFetch(provider.base_url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders(provider) },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(GENERATE_TIMEOUT_MS()),
-    });
+    }, { fetchImpl });
   } catch (err) {
-    setJob(jobId, { status: 'error', error: `could not reach the provider: ${err.message}` });
+    setJob(jobId, {
+      status: 'error',
+      error: `could not reach ${redactUrl(provider.base_url)}: ${err.message}`,
+    });
     return;
   }
   if (!res.ok) {
