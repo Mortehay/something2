@@ -240,6 +240,34 @@ function evictOrWarn(worldId) {
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
 const aiProviders = require('./services/aiProviders');
 const providerDiscovery = require('./services/providerDiscovery');
+const remoteImageProvider = require('./services/remoteImageProvider');
+const { resolveGenerationTarget, loadTypeOverride } = require('./services/generationTarget');
+
+// SOMET-328: the three /api/*-jobs/:jobId routes serve jobs from two different
+// engines now. The id prefix says which, so a caller polling a job never has
+// to know or care where it ran.
+//
+// JOB_ID_RE is NOT relaxed for this -- it already permits underscores, so
+// "rmt_<hex>" passes the existing traversal guard unchanged. That guard exists
+// because a sprite-gen job id is interpolated into an internal URL path
+// (SOMET-182), and remote ids never reach that path at all.
+async function fetchJobDocument(jobId) {
+  if (remoteImageProvider.isRemoteJobId(jobId)) {
+    const job = remoteImageProvider.getJob(jobId);
+    // The remote registry is in memory, so an id it has never heard of is
+    // almost always a job from before a backend restart. Answering with a
+    // failed job document -- rather than null, which the polling UI would
+    // spin on forever -- turns that into a message the admin can act on.
+    return job || {
+      id: jobId,
+      status: 'error',
+      progress: { done: 0, total: 0 },
+      result: null,
+      error: 'unknown remote job; the backend may have restarted since it started',
+    };
+  }
+  return spriteGen.getJob(jobId);
+}
 let spriteGen = require('./services/spriteGen');
 const __setSpriteGen = (impl) => { spriteGen = impl; };
 const assetStore = require('./services/assetStore');
@@ -2121,6 +2149,49 @@ async function startGenerationJob(req, res, { subject, kind, defaultFrames, fail
     // base prompt rather than failing the job.
     const [biomeRow] = biome ? await loadBiomes(pool, [biome]) : [];
     const prompt = composeBiomePrompt(base_prompt, biomeRow || null);
+
+    // SOMET-328: which service draws this. The resolution is a pure function
+    // (services/generationTarget.js) so the four-level precedence is testable
+    // on its own; everything below the branch is unchanged sprite-gen code.
+    //
+    // The two lookups are skipped entirely when the request already pins a
+    // target, so the common "no providers configured" path costs no queries.
+    const pinned = req.body.ai_provider_local === true
+      || Number.isInteger(req.body.ai_provider_id);
+    const [typeOverride, activeProvider] = pinned
+      ? [null, null]
+      : await Promise.all([
+        loadTypeOverride(pool, kind, subject).catch(() => null),
+        aiProviders.loadActiveProviderWithSecret(pool).catch(() => null),
+      ]);
+    const target = resolveGenerationTarget({
+      request: req.body, type: typeOverride, active: activeProvider,
+    });
+
+    if (target.source === 'remote') {
+      const provider = activeProvider && activeProvider.id === target.providerId
+        ? activeProvider
+        : await aiProviders.loadProviderWithSecret(pool, target.providerId);
+      if (!provider) {
+        return res.status(400).json({ error: 'the selected AI provider no longer exists' });
+      }
+      if (provider.enabled === false) {
+        return res.status(400).json({ error: `AI provider '${provider.name}' is disabled` });
+      }
+      const gen = remoteImageProvider.startGeneration(provider, {
+        subject, kind, prompt, seed, frames: frames || defaultFrames,
+      });
+      // Recorded in sprite_sets exactly like a local job so the admin's
+      // history is one list rather than two. `backend` carries the provider
+      // name, which is what an admin looking at an old row wants to know.
+      const row = await pool.query(
+        `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
+         VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
+        [subject, `remote:${provider.name}`, seed, frames || defaultFrames, gen.job_id],
+      );
+      return res.status(201).json({ ...row.rows[0], job_id: gen.job_id, provider: provider.name });
+    }
+
     let effectiveTier = tier;
     if (!effectiveTier && !backend) {
       // Best-effort: if capability lookup fails, let sprite-gen use its own default.
@@ -2153,7 +2224,7 @@ app.post('/api/sprite-jobs', adminGuard, (req, res) => startGenerationJob(req, r
 app.get('/api/sprite-jobs/:jobId', async (req, res) => {
   if (!JOB_ID_RE.test(req.params.jobId)) return res.status(400).json({ error: 'invalid job id' });
   try {
-    const job = await spriteGen.getJob(req.params.jobId);
+    const job = await fetchJobDocument(req.params.jobId);
     res.json(job);
   } catch (err) {
     console.error(err);
@@ -2223,7 +2294,7 @@ app.post('/api/entity-jobs', adminGuard, (req, res) => startGenerationJob(req, r
 app.get('/api/entity-jobs/:jobId', async (req, res) => {
   if (!JOB_ID_RE.test(req.params.jobId)) return res.status(400).json({ error: 'invalid job id' });
   try {
-    res.json(await spriteGen.getJob(req.params.jobId));
+    res.json(await fetchJobDocument(req.params.jobId));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch job' });
@@ -2292,7 +2363,7 @@ app.post('/api/tile-jobs', adminGuard, (req, res) => startGenerationJob(req, res
 app.get('/api/tile-jobs/:jobId', async (req, res) => {
   if (!JOB_ID_RE.test(req.params.jobId)) return res.status(400).json({ error: 'invalid job id' });
   try {
-    res.json(await spriteGen.getJob(req.params.jobId));
+    res.json(await fetchJobDocument(req.params.jobId));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch job' });

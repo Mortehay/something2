@@ -149,12 +149,18 @@ test('a partial update only validates the keys it carries', () => {
 
 test('exactly one provider can be active', { skip: !url ? 'no database URL' : false }, async (t) => {
   const pool = new Pool({ connectionString: url });
-  t.after(() => pool.end());
-
   const made = [];
+  // ONE after-hook, deleting before ending. node:test runs t.after hooks in
+  // registration order, so a separate `t.after(() => pool.end())` registered
+  // first would close the pool out from under the cleanup query and the rows
+  // would survive the run.
   t.after(async () => {
-    if (made.length) {
-      await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]);
+    try {
+      if (made.length) {
+        await pool.query('DELETE FROM ai_providers WHERE id = ANY($1)', [made]);
+      }
+    } finally {
+      await pool.end();
     }
   });
 
