@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const { Pool } = require('pg');
 const { commitCreatureDeath } = require('../src/authority/loot');
 const { enqueueDeficit } = require('../src/services/creatureRespawn');
@@ -225,4 +227,33 @@ test('a world with no allowed creature types enqueues nothing', { skip: !url }, 
   } finally {
     await pool.end();
   }
+});
+
+// No database needed -- pure source-text guard, not gated on `url`.
+//
+// Precedent: spawn_portal_fallback.test.js's "loadSpawn actually supplies
+// portals and isWalkable". The failure this catches is inertness with zero
+// coverage from the DB tests above: enqueueDeficit(pool, { worldRow: row,
+// ... }) reads row.density and row.allowed_creature_types, but `row` there
+// is whatever loadWorld's own SELECT names -- NOT `SELECT *`. The DB tests
+// above build worldRow themselves via `SELECT * FROM worlds`, so none of
+// them would notice if loadWorld's real SELECT stopped naming these columns.
+// Delete either one from that SELECT and every test in this repo still
+// passes while the load-time backstop silently enqueues 0 forever in
+// production -- the exact defect this task's brief shipped with (see the
+// comment directly above the SELECT this test reads) and the exact class of
+// bug SOMET-288 already shipped once for safe_road_radius/safe_rects.
+test('loadWorld selects density and allowed_creature_types for the load-time backstop', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/authority/server.js'), 'utf8');
+  const start = src.indexOf('async function loadWorld(');
+  assert.ok(start !== -1, 'could not locate loadWorld');
+  const body = src.slice(start, src.indexOf('\n  }\n', start));
+  const m = /pool\.query\('SELECT ([^']+) FROM worlds WHERE id = \$1'/.exec(body);
+  assert.ok(m, 'could not locate the worlds SELECT inside loadWorld');
+  const columns = m[1].split(',').map((c) => c.trim());
+  assert.ok(columns.includes('density'), 'loadWorld must select density');
+  assert.ok(
+    columns.includes('allowed_creature_types'),
+    'loadWorld must select allowed_creature_types',
+  );
 });

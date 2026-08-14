@@ -567,18 +567,26 @@ function attachAuthority(httpServer, pool, opts = {}) {
         };
         worlds.set(canonicalId, entry);
 
-        // SOMET-309: a player entering a drained world should find it
-        // populated, not watch it fill in around them over the next minute.
-        // Backfill first (this is what recovers populations lost before the
-        // respawn queue existed), then drain everything now due for it.
+        // SOMET-309: a player entering a drained world should have it refill,
+        // not stay empty forever. Enqueue the deficit ONLY -- do not drain it
+        // here. This is not a race, it is a hard ordering fact: the joining
+        // player is not added to entry.world.players until well after
+        // loadWorld returns (the `join` handler does that), so a sweep run
+        // from inside loadWorld would see getPlayers() = [] and
+        // isClearOfPlayers would be vacuously true for every row -- the one
+        // guarantee this feature makes (nothing spawns on top of a player)
+        // would not hold for the very rows this backstop exists to place.
+        // Review finding, SOMET-309 Task 6 round 1.
         //
-        // Deliberately awaited: the alternative is the first tick broadcast
-        // racing the spawn, so the player sees an empty world for a beat and
-        // then a burst of creatures appearing. Failure here must not prevent
-        // the join -- an unpopulated world is playable, a failed join is not.
+        // The rows are already respawn_at = now(), so the regular 10s sweep
+        // timer (creatureRespawnSweep, registered elsewhere) drains them on
+        // its next tick, by which point the join has completed and the
+        // player IS in entry.world.players -- so the distance rule applies
+        // for real. Cost: a drained world fills within ~10s of the first
+        // arrival rather than instantly. Failure here must not prevent the
+        // join -- an unpopulated world is playable, a failed join is not.
         try {
           await enqueueDeficit(pool, { worldRow: row, world: entry.mapGenConfig });
-          await creatureRespawnSweep();
         } catch (err) {
           console.error('world load top-up failed:', canonicalId, err);
         }

@@ -161,11 +161,18 @@ async function respawnDueCreatures(pool, {
 // makes the system self-healing: a population lost to ANY cause, including
 // causes not yet known, comes back the next time a player enters.
 //
-// Enqueues immediately-due rows rather than inserting creatures directly, so
-// there is exactly one spawn path and the player-distance rule applies to
-// backfilled creatures too. The cost is that placement runs twice for these
-// rows (once here to pick a tile, once in the sweep) -- bounded, because this
-// runs at most once per world load.
+// This function only ENQUEUES -- it never drains. Enqueuing immediately-due
+// rows rather than inserting creatures directly means there is exactly one
+// spawn path (respawnDueCreatures) and the player-distance rule applies to
+// backfilled creatures too -- but only because the caller does NOT also
+// drain them from inside loadWorld. A joining player is not added to
+// entry.world.players until after loadWorld returns, so a drain run from
+// here would see no players at all and isClearOfPlayers would be vacuously
+// true for every row, defeating the one guarantee this feature makes.
+// loadWorld enqueues only; the regular creatureRespawnSweep timer (10s,
+// registered independently of any world load) does the actual draining,
+// by which point the join has completed and the distance check is real.
+// SOMET-309 Task 6 review, round 1.
 //
 // Packs are deliberately excluded from the target: resolveDensity's pack
 // counts are re-rolled per populate, worlds.creature_count records only the
