@@ -60,6 +60,10 @@ const WORLD_ID = 'w-chest-cache';
 function makePool() {
   let chestState = 'unlocked';
   const pool = {
+    // SOMET-318: see the inventory-load branch below. A dead fixture branch is
+    // invisible to a passing suite; this counter is what distinguishes
+    // "answered by the branch" from "fell through to the identical default".
+    inventoryLoads: 0,
     query: async (sql) => {
       if (/FROM worlds WHERE id/i.test(sql)) {
         return {
@@ -129,8 +133,22 @@ function makePool() {
           rowCount: 1,
         };
       }
-      if (/^\s*SELECT id, item_type_id, quantity FROM player_items WHERE user_id/i.test(sql)) return { rows: [] };
-      if (/FROM player_equipment WHERE user_id/i.test(sql)) return { rows: [] };
+      // SOMET-318. Both of these answer loadInventory and both were DEAD: they
+      // matched `WHERE user_id`, retired by SOMET-257's re-key onto
+      // character_id. They read as this fixture's inventory answer and were
+      // never reached — the join fell through to the empty default below, which
+      // returns the same value, so nothing ever surfaced.
+      //
+      // Matched on the table + ownership predicate rather than the column list,
+      // for the reason SOMET-316 documents: pinning the exact SELECT turns any
+      // added column into a silently disabled branch and bogus ownership
+      // failures. `pool.inventoryLoads` lets a test prove the branch fires,
+      // which "the file passes" cannot.
+      if (/^\s*SELECT\b[^;]*\bFROM player_items WHERE character_id/i.test(sql)) {
+        pool.inventoryLoads += 1;
+        return { rows: [] };
+      }
+      if (/FROM player_equipment WHERE character_id/i.test(sql)) return { rows: [] };
       if (/SELECT gold FROM users WHERE id/i.test(sql)) return { rows: [{ gold: 0 }] };
       return { rows: [] };
     },
@@ -159,6 +177,12 @@ test('opening a chest invalidates the /overview cache: a previously-cached windo
   ws.send(JSON.stringify({ type: 'openchest' }));
   const opened = await nextMsg(ws, 'chestOpened');
   assert.strictEqual(opened.chestId, 'chest-1');
+  // SOMET-318: prove the fixture's inventory-load branch answered this join
+  // rather than being bypassed. It sat dead behind a retired `WHERE user_id`
+  // predicate and this test passed regardless, because the fallthrough default
+  // returns the same empty result — so only a fired-or-not check can see the
+  // difference.
+  assert.ok(pool.inventoryLoads > 0, 'loadInventory was never answered by the fixture branch');
   ws.close(); handle.close(); server.close();
 
   // 3) Re-request the SAME window (same cache key: worldId:snappedCol:
