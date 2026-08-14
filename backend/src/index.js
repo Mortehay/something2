@@ -239,6 +239,7 @@ function evictOrWarn(worldId) {
 
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
 const aiProviders = require('./services/aiProviders');
+const providerDiscovery = require('./services/providerDiscovery');
 let spriteGen = require('./services/spriteGen');
 const __setSpriteGen = (impl) => { spriteGen = impl; };
 const assetStore = require('./services/assetStore');
@@ -2045,6 +2046,51 @@ app.post('/api/ai-providers/:id/activate', adminGuard, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to activate AI provider' });
+  }
+});
+
+// Ask a provider what models it has, and cache the answer on the row.
+//
+// A provider that is switched off is the NORMAL case here -- it is somebody's
+// desktop -- so an unreachable box answers 200 with ok:false and a reason the
+// UI can render, not a 5xx. Only a genuine server-side fault is a 500.
+//
+// On failure the previously cached list is deliberately left alone: an admin
+// who clicks Refresh while the box is asleep should not lose the model names
+// they already had.
+app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const provider = await aiProviders.loadProviderWithSecret(pool, id);
+    if (!provider) return res.status(404).json({ error: 'AI provider not found' });
+    const result = await providerDiscovery.fetchModels(provider);
+    if (!result.ok) {
+      return res.json({ ok: false, error: result.error, status: result.status ?? null });
+    }
+    await aiProviders.saveModelsCache(pool, id, result.models);
+    res.json({ ok: true, models: result.models });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to refresh models' });
+  }
+});
+
+// Reachability probe for the Test button. Same 200-with-ok:false contract.
+app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const provider = await aiProviders.loadProviderWithSecret(pool, id);
+    if (!provider) return res.status(404).json({ error: 'AI provider not found' });
+    // Spread explicitly rather than returning the provider: nothing from the
+    // row (least of all auth_token) belongs in this response.
+    const { ok, status = null, latency_ms = null, error = null } =
+      await providerDiscovery.testConnection(provider);
+    res.json({ ok, status, latency_ms, error });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to test AI provider' });
   }
 });
 
