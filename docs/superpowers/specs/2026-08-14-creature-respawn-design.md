@@ -82,7 +82,7 @@ re-litigate them.
 
 ### Component 1 — `creature_respawns` table
 
-New migration, `backend/migrations/1714440300000_creature_respawns.js`:
+New migration, `backend/migrations/1714440330000_creature_respawns.js`:
 
 ```sql
 CREATE TABLE creature_respawns (
@@ -107,8 +107,13 @@ table; a live creature is a row in that one; nothing is in both.
 
 **Timestamp collision hazard:** this repo has had two migration-timestamp
 collisions between parallel branches (see the `migration-timestamp-collision`
-note). `1714440300000` deliberately skips `…290000` to leave room. Before
-merging, re-check that no other branch has claimed it.
+note). This shipped as `1714440300000` and was renamed to `1714440330000`
+during final review: `main` moved on to `ba0101f` and now carries
+`1714440320000_entry_spawn_is_village_spawn.js`, which is not an ancestor of
+this branch. Sorting before it would make `migrate:up` refuse this migration on
+any database that had already applied 320000 unless run with
+`--no-check-order`. Re-check before merging that no branch has claimed
+`1714440330000` either.
 
 ### Component 2 — enqueue on death
 
@@ -151,7 +156,7 @@ permanent population leak — precisely the bug this ticket exists to fix.
 ### Component 3 — the sweep
 
 New module `backend/src/services/creatureRespawn.js`, exporting
-`respawnDueCreatures(client, { getWorld, getPlayerPositions, onSpawn })`.
+`respawnDueCreatures(client, { getWorld, getPlayers, onSpawn })`.
 
 It mirrors `respawnDueFieldChests` (`backend/src/services/chests.js:211`)
 deliberately, rather than inventing a second sweep idiom. The four properties
@@ -208,15 +213,29 @@ someone farms one spot, the less it gives them, which is the opposite of this
 ticket's goal.
 
 Player positions are read from the live sim via an injected
-`getPlayerPositions(worldId)`, not from the database. The DB's character
+`getPlayers(worldId)`, not from the database. The DB's character
 position lags the sim by up to a sync interval, and a stale position is exactly
 the input that would let a creature spawn in someone's face.
 
 ### Component 5 — top-up at world load
 
-`loadWorld` runs one immediate sweep pass scoped to the world it just loaded,
-before the first tick broadcast. A player entering a drained world finds it
-repopulated rather than watching it fill in around them over the next minute.
+`loadWorld` ENQUEUES the world's deficit (Component 6) and does not drain it.
+It runs no sweep pass of its own.
+
+This changed during review, and the reason is an ordering fact rather than a
+preference: `loadWorld` completes before the joining player is registered in
+`entry.world.players` (the `join` handler does that), so a sweep run from
+inside it would see `getPlayers()` returning `[]` and `isClearOfPlayers` would
+be vacuously true for every row — the one guarantee this feature makes
+(nothing spawns on top of a player) would not hold for exactly the rows the
+backstop exists to place.
+
+The rows are enqueued `respawn_at = now()`, so the regular 10-second sweep
+timer delivers them on its next tick, by which point the join has completed and
+the distance rule is real. **Consequence, stated honestly:** a player entering
+a drained world does not find it repopulated on arrival — it fills in around
+them up to ~10 seconds later. That is the price of the distance guarantee being
+enforceable at all.
 
 ### Component 6 — deficit backstop
 
@@ -224,9 +243,11 @@ A per-death queue only knows about deaths that happen after it ships. The
 48,131 creatures alive today have no queue rows, and any world drained before
 this lands would stay drained forever.
 
-So, in the same `loadWorld` pass, before draining the queue: compare the
-world's live wild-creature count against its density target and enqueue the
-difference as immediately-due rows at positions chosen by `placeMapCreatures`.
+So, in the same `loadWorld` pass (which, per Component 5, enqueues only —
+nothing drains from there): compare the world's live wild-creature count
+against its density target and enqueue the difference as immediately-due rows
+at positions chosen by `placeMapCreatures`, for the 10-second sweep timer to
+deliver.
 
 ```sql
 SELECT count(*) FROM world_creatures
@@ -236,6 +257,14 @@ SELECT count(*) FROM world_creatures
 against `resolveDensity(row.density, row.width, row.height).scatterCount`,
 minus the rows already pending in `creature_respawns` for that world (so a
 world with 40 kills in flight does not double-fill).
+
+Note the two sides are not like for like: `worldPopulation.js` writes both
+scattered creatures and pack members with `home_x IS NULL`, so the `count(*)`
+includes packs while `scatterCount` does not. The backstop therefore restores a
+floor BELOW the seeded total by roughly the world's pack budget (up to ~72 at
+`swarm`), and a world must fall that far before it fires at all. That is
+deliberate under-delivery rather than an exact refill — see the pack paragraph
+below.
 
 This makes the system self-healing rather than merely forward-looking: a
 population lost to any cause at all, including causes not yet known, comes
@@ -318,7 +347,7 @@ rather than on top of the character. Screenshot both.
 
 | Action | Path |
 |---|---|
-| Create | `backend/migrations/1714440300000_creature_respawns.js` |
+| Create | `backend/migrations/1714440330000_creature_respawns.js` |
 | Create | `backend/src/services/creatureRespawn.js` |
 | Create | `backend/tests/creature_respawn.test.js` |
 | Create | `backend/tests/creature_respawn_db.test.js` |

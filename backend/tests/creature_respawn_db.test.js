@@ -243,6 +243,47 @@ test('a world with no allowed creature types enqueues nothing', { skip: !url }, 
 // production -- the exact defect this task's brief shipped with (see the
 // comment directly above the SELECT this test reads) and the exact class of
 // bug SOMET-288 already shipped once for safe_road_radius/safe_rects.
+// No database needed -- the second source-text guard, same reasoning as the one
+// below and the same failure class: an edit that every existing test still
+// passes for, while the feature quietly stops working.
+//
+// Swap `client` for the bare `pool` at commitCreatureDeath's
+// `INSERT INTO creature_respawns` and the death still commits, the row is still
+// written, and every DB test above still passes -- because they only look at
+// the happy path. What is lost is atomicity: the INSERT would run in its own
+// implicit transaction, so a failure in the XP award or the drop roll (both of
+// which follow it) rolls the DELETE back and leaves an orphan respawn row, and
+// a failure of the INSERT itself leaves a committed death with no replacement
+// queued -- the exact permanent population leak SOMET-309 exists to fix.
+//
+// Scoped to commitCreatureDeath's body: loot.js has many other pool.query and
+// client.query calls, so a whole-file search would prove nothing.
+test('commitCreatureDeath enqueues the respawn inside the death transaction', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/authority/loot.js'), 'utf8');
+  const start = src.indexOf('async function commitCreatureDeath(');
+  assert.ok(start !== -1, 'could not locate commitCreatureDeath');
+  const end = src.indexOf('\nasync function spawnDrops(', start);
+  assert.ok(end !== -1, 'could not locate the end of commitCreatureDeath');
+  const body = src.slice(start, end);
+
+  const m = /await\s+(\w+)\.query\(\s*`INSERT INTO creature_respawns/.exec(body);
+  assert.ok(m, 'commitCreatureDeath must issue the creature_respawns INSERT itself');
+  assert.equal(
+    m[1], 'client',
+    'the respawn INSERT must go through the transaction client, not the bare pool',
+  );
+
+  // ...and it must sit between the BEGIN and the COMMIT, not after the
+  // transaction has already closed.
+  const begin = body.indexOf("client.query('BEGIN')");
+  const commit = body.indexOf("client.query('COMMIT')");
+  const insert = body.indexOf('INSERT INTO creature_respawns');
+  assert.ok(begin !== -1, 'could not locate BEGIN');
+  assert.ok(commit !== -1, 'could not locate COMMIT');
+  assert.ok(begin < insert, 'the respawn INSERT must come after BEGIN');
+  assert.ok(insert < commit, 'the respawn INSERT must come before COMMIT');
+});
+
 test('loadWorld selects density and allowed_creature_types for the load-time backstop', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/authority/server.js'), 'utf8');
   const start = src.indexOf('async function loadWorld(');

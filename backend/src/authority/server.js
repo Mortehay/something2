@@ -2548,6 +2548,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
   async function creatureRespawnSweep() {
     try {
       await respawnDueCreatures(pool, {
+        // Final review, Critical C1: the due-row window is capped and ordered
+        // oldest-first, so rows for worlds nobody has loaded must never enter
+        // it -- they cannot be actioned, they are never deleted, and they would
+        // sit at the head of every pass until the window held nothing else and
+        // respawns stopped system-wide. Snapshotted per pass, so a world loaded
+        // or evicted between passes is picked up on the next one.
+        loadedWorldIds: [...worlds.keys()],
         // The buildWorldGenConfig shape placeMapCreatures requires -- camelCase
         // levelMin/levelMax plus tileTypes -- exactly as chestRespawnSweep
         // passes it. Handing over entry.row instead would throw

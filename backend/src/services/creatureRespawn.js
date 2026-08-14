@@ -56,20 +56,42 @@ const FALLBACK_CANDIDATES = 5;
 // simply stays due for a later pass. The sweep must never load a world itself:
 // nothing but a socket close handler evicts one, so a background load would
 // leak a permanently-loaded empty world.
+//
+// `loadedWorldIds` is what keeps that "stays due" behaviour from starving the
+// whole feature (final review, Critical C1). The window is ordered oldest-first
+// and capped at `limit`, so rows the sweep CANNOT action -- ones whose world is
+// unloaded -- would otherwise sit permanently at the head of every pass. A
+// player who kills something and leaves before the 30s delay elapses orphans a
+// row that way, and across ~86 worlds those accumulate: once `limit` of them
+// exist system-wide, the window contains nothing but orphans and no respawn
+// ever fires again, in any world, with nothing logged. Filtering in SQL means
+// the window only ever contains actionable rows. (enqueueDeficit's `pending`
+// subtraction makes it worse, not better: a world holding orphans computes a
+// deficit near zero, so the backstop cannot rescue it either.)
+//
+// Empty means the authority has no world loaded at all: there is nothing this
+// pass could act on, so it does not query.
 async function respawnDueCreatures(pool, {
-  getWorld, getPlayers, onSpawn = () => {}, limit = 200,
+  getWorld, getPlayers, onSpawn = () => {}, limit = 200, loadedWorldIds = [],
 } = {}) {
+  const worldIds = [...loadedWorldIds];
+  if (worldIds.length === 0) return 0;
+
   const due = await pool.query(
     `SELECT id, world_id, type, x, y, level FROM creature_respawns
-      WHERE respawn_at <= now() ORDER BY respawn_at LIMIT $1`,
-    [limit],
+      WHERE respawn_at <= now() AND world_id = ANY($2::uuid[])
+      ORDER BY respawn_at LIMIT $1`,
+    [limit, worldIds],
   );
 
   let spawned = 0;
   for (const row of due.rows) {
     try {
+      // Defence in depth, not the primary filter: the query above already
+      // restricts the window to loaded worlds, but a world can be evicted
+      // between that query and this row being actioned.
       const world = getWorld(row.world_id);
-      if (!world) continue; // not loaded this pass; stays due, retried later
+      if (!world) continue; // unloaded since the query; stays due, retried later
 
       // Full row: placeMapCreatures reads .hp/.defense/.resistances off each
       // allowed type, and scaleCreature needs hp/defense too. A name-only row
@@ -174,11 +196,32 @@ async function respawnDueCreatures(pool, {
 // by which point the join has completed and the distance check is real.
 // SOMET-309 Task 6 review, round 1.
 //
-// Packs are deliberately excluded from the target: resolveDensity's pack
-// counts are re-rolled per populate, worlds.creature_count records only the
-// scattered figure, and treating packs as a floor would make this oscillate.
-// The backstop restores the scatter baseline; packs are a seeding-time
-// flourish that does not regenerate.
+// WHAT THE ARITHMETIC ACTUALLY DOES (final review, I1). This is NOT an exact
+// refill to the seeded population, and the numbers are not comparable like for
+// like:
+//
+//   target = resolveDensity(...).scatterCount   -- SCATTER creatures only
+//   live   = count(world_creatures WHERE home_x IS NULL ...)
+//
+// but worldPopulation.js inserts BOTH scattered creatures and pack members with
+// home_x NULL, so `live` counts pack members too while `target` does not. The
+// floor this restores therefore sits BELOW the seeded total by roughly the
+// world's pack budget, and a world must lose that many creatures before the
+// backstop enqueues anything at all -- up to ~72 at `swarm` density (6 packs of
+// up to 12). That dead zone is deliberate under-delivery, not an exact refill:
+// packs are re-rolled on every populate and have no persistent representation
+// (no column, no row, nothing to count), so making them part of the target
+// would mean inventing one, and a target built on a fresh random pack roll
+// would make this oscillate. Restoring a conservative floor is the trade taken;
+// a world will not be re-filled to its seeded headcount by this path alone.
+//
+// CONCURRENCY (final review, I2). This is count-then-insert with no lock, which
+// is safe ONLY because a single authority process owns the database. Two
+// processes would both read the same `live`/`pending`, both compute the same
+// deficit and both insert, overshooting to 2x target. A multi-process
+// deployment must wrap the count-then-insert in a pg advisory lock keyed by
+// world id (pg_advisory_xact_lock). Deliberately not built now -- there is one
+// authority process.
 async function enqueueDeficit(pool, { worldRow, world }) {
   if (!isBoundedWorld(worldRow)) return 0;
 

@@ -74,6 +74,10 @@ test('a row whose world is not loaded stays due and spawns nothing', async () =>
   });
 
   const spawned = await respawnDueCreatures(pool, {
+    // The world was loaded when the pass started (so its rows are in the
+    // window) and is gone by the time the row is actioned -- the eviction race
+    // the getWorld null-check exists for.
+    loadedWorldIds: ['w1'],
     getWorld: () => null,
     getPlayers: () => [],
   });
@@ -91,6 +95,7 @@ test('a row whose creature type is gone from the catalog is deleted, not retried
   });
 
   const spawned = await respawnDueCreatures(pool, {
+    loadedWorldIds: ['w1'],
     getWorld: () => ({ tileTypes: [{ name: 'grass' }], width: 96, height: 96, levelMin: 1, levelMax: 5 }),
     getPlayers: () => [],
   });
@@ -124,6 +129,7 @@ test('one failing row does not stop later rows in the same pass', async () => {
   });
 
   const spawned = await respawnDueCreatures(pool, {
+    loadedWorldIds: ['w1'],
     getWorld: () => ({ tileTypes: [{ name: 'grass' }], width: 96, height: 96, levelMin: 1, levelMax: 5 }),
     getPlayers: () => [],
   });
@@ -142,6 +148,7 @@ test('a respawn reuses the recorded position when no player is near it', async (
 
   const seen = [];
   const spawned = await respawnDueCreatures(pool, {
+    loadedWorldIds: ['w1'],
     getWorld: () => ({ tileTypes: [{ name: 'grass' }], width: 96, height: 96, levelMin: 1, levelMax: 5 }),
     getPlayers: () => [{ x: 9000, y: 9000 }],
     onSpawn: async (s) => { seen.push(s); },
@@ -169,6 +176,7 @@ test('the sweep claims each row with a gated DELETE inside a transaction', async
   });
 
   const spawned = await respawnDueCreatures(pool, {
+    loadedWorldIds: ['w1'],
     getWorld: () => ({ tileTypes: [{ name: 'grass' }], width: 96, height: 96, levelMin: 1, levelMax: 5 }),
     getPlayers: () => [],
   });
@@ -179,4 +187,63 @@ test('the sweep claims each row with a gated DELETE inside a transaction', async
   assert.equal(pool.queries.some((q) => q.sql.includes('INSERT INTO world_creatures')), false);
   assert.equal(pool.queries.some((q) => q.sql === 'ROLLBACK'), true);
   assert.equal(pool.client.released, true);
+});
+
+// Final review, Critical C1. The due window is capped and ordered oldest-first,
+// and a row whose world is not loaded is skipped WITHOUT being deleted. So if
+// unactionable rows can enter the window they never leave it, and once `limit`
+// of them exist the sweep spawns nothing anywhere, forever, with nothing
+// logged. Only rows for currently-loaded worlds may be selected.
+const ORPHAN_ROW = {
+  id: 'row-orphan', world_id: 'w-unloaded', type: 'Wolf', x: 10, y: 10, level: 1,
+};
+
+test('a due row for an unloaded world does not consume the sweep window', async () => {
+  const pool = fakePool((sql, params) => {
+    // DELETE checked first: it contains 'FROM creature_respawns' too.
+    if (sql.includes('DELETE FROM creature_respawns')) return { rows: [], rowCount: 1 };
+    if (sql.includes('FROM creature_respawns')) {
+      // Stands in for Postgres. The orphan is listed FIRST because it is the
+      // older row and the query orders by respawn_at -- that is precisely the
+      // position from which it would starve everything behind it. $1 is the
+      // LIMIT; $2, if the query passes one, is the loaded-world filter.
+      const loaded = params[1] || null;
+      const all = [ORPHAN_ROW, DUE_ROW];
+      const visible = loaded ? all.filter((r) => loaded.includes(r.world_id)) : all;
+      const window = visible.slice(0, params[0]);
+      return { rows: window, rowCount: window.length };
+    }
+    if (sql.includes('FROM entity_types')) return { rows: [WOLF_TYPE], rowCount: 1 };
+    if (sql.includes('INSERT INTO world_creatures')) return { rows: [{ id: 'c-1' }], rowCount: 1 };
+    return null;
+  });
+
+  // limit 1 = the whole window is one row. Unfiltered, the orphan takes it.
+  const spawned = await respawnDueCreatures(pool, {
+    limit: 1,
+    loadedWorldIds: ['w1'],
+    getWorld: (worldId) => (worldId === 'w1'
+      ? { tileTypes: [{ name: 'grass' }], width: 96, height: 96, levelMin: 1, levelMax: 5 }
+      : null),
+    getPlayers: () => [],
+  });
+
+  assert.equal(spawned, 1);
+  const insert = pool.queries.find((q) => q.sql.includes('INSERT INTO world_creatures'));
+  assert.equal(insert.params[0], 'w1'); // the loaded world's row, not the orphan
+});
+
+test('the sweep does not query at all when no world is loaded', async () => {
+  const pool = fakePool(() => null);
+
+  const spawned = await respawnDueCreatures(pool, {
+    loadedWorldIds: [],
+    getWorld: () => null,
+    getPlayers: () => [],
+  });
+
+  assert.equal(spawned, 0);
+  // `world_id = ANY('{}')` matches nothing, so the query would be pure waste on
+  // every 10s tick of an idle authority.
+  assert.equal(pool.queries.length, 0);
 });
