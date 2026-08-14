@@ -1328,6 +1328,7 @@ module.exports = {
     collectPathCells,
     normalizeAuthoredRoads,
     placeMapCreatures,
+    CREATURE_BASE_DAMAGE,
     placeCreaturePacks,
     creatureTileCandidates,
     stampBounds,
