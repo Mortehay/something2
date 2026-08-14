@@ -224,3 +224,74 @@ describe("Game._handleShopClick against the rendered shop layout", () => {
     expect(game.sent).toEqual([]);
   });
 });
+
+// SOMET-317 — bound items are LABELLED in the sell column, never gated there.
+//
+// trade.js refuses to sell a soulbound instance, and before this the only way
+// to learn that was to click Sell and read the rejection. The marker moves the
+// information in front of the click.
+//
+// The second test is the important one: it pins that the Sell control is STILL
+// drawn and still hit-testable for a bound row. Hiding it looks like a kindness
+// and is actually a client-side authorization decision — a stale or wrong flag
+// would then lock a player out of selling an item they own, silently. Left
+// live, a wrong flag costs a misleading word and the server still answers.
+describe("bound items in the sell column (SOMET-317)", () => {
+  // Same item TYPE, different provenance — the distinction soulbound exists to
+  // draw. A renderer keying off the type instead of the instance passes a
+  // single-row fixture and is wrong in game.
+  const MIXED = {
+    items: [
+      { id: 'granted', typeId: 5, quantity: 1, soulbound: true },
+      { id: 'looted', typeId: 5, quantity: 1, soulbound: false },
+    ],
+    types: ITEM_TYPES,
+    equipment: {},
+  };
+
+  function renderWithInventory(inventory) {
+    const ctx = stubCtx();
+    const hitAreas = [];
+    renderer(ctx).renderShop(ctx, SHOP, inventory, ITEM_TYPES, 500, hitAreas, { tab: "catalog", page: 0 });
+    return { ctx, hitAreas };
+  }
+
+  it("marks the bound instance and not the unbound one of the same type", () => {
+    const { ctx } = renderWithInventory(MIXED);
+    const bound = ctx.texts.filter((t) => t.text === "bound");
+    expect(bound).toHaveLength(1);
+    for (const t of bound) expect(t.y).toBeLessThan(PY + PANEL_H);
+  });
+
+  it("still offers a working Sell control for a bound row — label, not gate", () => {
+    const { hitAreas } = renderWithInventory(MIXED);
+    const sells = hitAreas.filter((a) => a.kind === "sell");
+    // BOTH rows remain sellable-by-click; the server owns the refusal.
+    expect(sells.map((a) => a.id).sort()).toEqual(["granted", "looted"]);
+    for (const a of sells) expect(insidePanel(a)).toBe(true);
+
+    // Drive the real click handler to prove the frame actually goes out for
+    // the bound row rather than being swallowed client-side.
+    const sent = [];
+    const game = {
+      shopOpen: true,
+      shopView: { tab: "catalog", page: 0 },
+      renderSystem: { _shopHitAreas: hitAreas },
+      authorityClient: { sendBuy: () => {}, sendSell: (id) => sent.push(id) },
+    };
+    const boundSell = sells.find((a) => a.id === "granted");
+    Game.prototype._handleShopClick.call(
+      game, boundSell.x + boundSell.w / 2, boundSell.y + boundSell.h / 2,
+    );
+    expect(sent).toEqual(["granted"]);
+  });
+
+  it("draws no marker when nothing is bound", () => {
+    const { ctx } = renderWithInventory({
+      items: [{ id: 'plain', typeId: 5, quantity: 1, soulbound: false }],
+      types: ITEM_TYPES,
+      equipment: {},
+    });
+    expect(ctx.texts.some((t) => t.text === "bound")).toBe(false);
+  });
+});

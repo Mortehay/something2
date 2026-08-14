@@ -1352,6 +1352,25 @@ export class RenderSystem {
       ctx.font = "12px monospace";
       ctx.fillText(type.name, rightX + 8, ry + 6);
 
+      // SOMET-317: bound instances refuse to sell (trade.js sellItem, the
+      // SOMET-277 anti-faucet rule), and until now the only way to find that
+      // out was to click Sell and read the rejection. Same amber `bound`
+      // subline, in the same ry + 22 slot, that renderBank already draws — one
+      // item must not read as two different states on two screens.
+      //
+      // THE SELL CONTROL BELOW IS DELIBERATELY LEFT ALONE. This is a label, not
+      // a gate: withholding the hit area would move an authorization decision
+      // into the client, so a stale or wrong flag would lock a player out of
+      // selling an item they legitimately own, with nothing on screen
+      // explaining why. Left live, a wrong flag costs a misleading word and the
+      // server still answers correctly — the safe direction to fail. Same
+      // division of labour as canEquipClient (affordance) vs items.js canEquip
+      // (authority).
+      if (item.soulbound === true) {
+        ctx.fillStyle = "#caa24a";
+        ctx.fillText("bound", rightX + 8, ry + 22);
+      }
+
       const sellX = rightX + rightW - 8 - sellW;
       const sellY = ry + (rowH - sellH) / 2;
       ctx.fillStyle = "rgba(255,90,90,0.22)";
