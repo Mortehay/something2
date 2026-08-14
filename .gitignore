@@ -55,3 +55,6 @@ frontend/.vite/
 # postgres_data/
 # minio_data/
 .mcp.json
+
+# SOMET-336: pgmigrations ledger backups written by scripts/repair-migration-order.js
+backend/.migration-backups/
