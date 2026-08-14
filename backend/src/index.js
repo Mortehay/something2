@@ -238,6 +238,7 @@ function evictOrWarn(worldId) {
 }
 
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
+const aiProviders = require('./services/aiProviders');
 let spriteGen = require('./services/spriteGen');
 const __setSpriteGen = (impl) => { spriteGen = impl; };
 const assetStore = require('./services/assetStore');
@@ -1947,6 +1948,103 @@ app.delete('/api/biomes/:id', adminGuard, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete biome' });
+  }
+});
+
+// --- Remote AI image providers (SOMET-322 / SOMET-324) -------------------
+//
+// Registered remote image services. EVERY route here is adminGuard'd,
+// including the reads: the rows carry a base_url pointing into the operator's
+// own network and a has_token flag, neither of which is player business.
+//
+// The token itself never appears in a response -- services/aiProviders.js's
+// serializeProvider is the only thing these routes return, and it strips it.
+
+app.get('/api/ai-providers', adminGuard, async (req, res) => {
+  try {
+    res.json(await aiProviders.listProviders(pool));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch AI providers' });
+  }
+});
+
+app.get('/api/ai-providers/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const row = await aiProviders.getProvider(pool, id);
+    if (!row) return res.status(404).json({ error: 'AI provider not found' });
+    res.json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch AI provider' });
+  }
+});
+
+app.post('/api/ai-providers', adminGuard, async (req, res) => {
+  const bad = aiProviders.providerFieldError(req.body);
+  if (bad) return res.status(400).json({ error: bad });
+  try {
+    res.status(201).json(await aiProviders.createProvider(pool, req.body));
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({ error: 'an AI provider with that name already exists' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create AI provider' });
+  }
+});
+
+// PATCH, not PUT, and that is load-bearing: the browser cannot send back a
+// token it was never given, so a partial update is the only shape that lets
+// an admin rename a provider without wiping its credentials. See
+// buildProviderPatch for the absent/""/value convention.
+app.patch('/api/ai-providers/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  const bad = aiProviders.providerFieldError(req.body, { partial: true });
+  if (bad) return res.status(400).json({ error: bad });
+  try {
+    const row = await aiProviders.updateProvider(pool, id, req.body);
+    if (!row) return res.status(404).json({ error: 'AI provider not found' });
+    res.json(row);
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({ error: 'an AI provider with that name already exists' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update AI provider' });
+  }
+});
+
+app.delete('/api/ai-providers/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const deleted = await aiProviders.deleteProvider(pool, id);
+    if (!deleted) return res.status(404).json({ error: 'AI provider not found' });
+    res.json({ success: true, id: Number(id) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete AI provider' });
+  }
+});
+
+// Activation is its own endpoint rather than a PATCH field because it has a
+// cross-row effect: it deactivates whichever provider held the flag. Doing
+// that inside a general field update would make "rename this profile" capable
+// of silently switching which service draws every sprite.
+app.post('/api/ai-providers/:id/activate', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const row = await aiProviders.setActiveProvider(pool, id);
+    if (!row) return res.status(404).json({ error: 'AI provider not found' });
+    res.json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to activate AI provider' });
   }
 });
 
