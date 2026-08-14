@@ -7,6 +7,9 @@
 // and folding a hot per-death path into a seeding module would couple them for
 // no gain.
 
+const { placeMapCreatures, CREATURE_BASE_DAMAGE } = require('./mapService');
+const { scaleCreature } = require('./creatureLevel');
+
 // The delay between a creature dying and its replacement becoming due.
 const RESPAWN_DELAY_MS = 30000;
 
@@ -35,7 +38,122 @@ function isClearOfPlayers(x, y, players, minDistance = RESPAWN_MIN_PLAYER_DISTAN
   return true;
 }
 
+// How many candidate tiles to ask placeMapCreatures for when the recorded
+// position is blocked. More than one because placeMapCreatures does not know
+// about players -- it rejects on terrain, village safe zones, safe_road_radius
+// and safe_rects only -- so its first answer can still land next to someone.
+const FALLBACK_CANDIDATES = 5;
+
+// Drains due creature_respawns rows back into world_creatures.
+//
+// Modelled on chests.js's respawnDueFieldChests, deliberately: same injected
+// getWorld serving only LOADED worlds, same per-row try/catch, same onSpawn
+// patch contract, same test seam on the server. Two sweep idioms for two
+// respawning things would be one too many.
+//
+// getWorld returns null for a world that is not currently loaded, and that row
+// simply stays due for a later pass. The sweep must never load a world itself:
+// nothing but a socket close handler evicts one, so a background load would
+// leak a permanently-loaded empty world.
+async function respawnDueCreatures(pool, {
+  getWorld, getPlayers, onSpawn = () => {}, limit = 200,
+} = {}) {
+  const due = await pool.query(
+    `SELECT id, world_id, type, x, y, level FROM creature_respawns
+      WHERE respawn_at <= now() ORDER BY respawn_at LIMIT $1`,
+    [limit],
+  );
+
+  let spawned = 0;
+  for (const row of due.rows) {
+    try {
+      const world = getWorld(row.world_id);
+      if (!world) continue; // not loaded this pass; stays due, retried later
+
+      // Full row: placeMapCreatures reads .hp/.defense/.resistances off each
+      // allowed type, and scaleCreature needs hp/defense too. A name-only row
+      // would silently respawn every creature at the 10hp/0-defense fallback.
+      const et = await pool.query(
+        `SELECT id, name, hp, defense, resistances FROM entity_types
+          WHERE name = $1 AND is_creature = true`,
+        [row.type],
+      );
+      if (et.rowCount === 0) {
+        // The catalog no longer has this creature. Retrying forever would pin
+        // a permanently-failing row at the head of every sweep; drop it.
+        await pool.query('DELETE FROM creature_respawns WHERE id = $1', [row.id]);
+        continue;
+      }
+      const t = et.rows[0];
+      const players = getPlayers(row.world_id);
+
+      // Prefer the tile it died on. Relocate rather than defer when a player
+      // is standing there: deferring would mean the more someone farms one
+      // spot, the less it gives them -- the opposite of this feature's point.
+      let pos = null;
+      if (isClearOfPlayers(row.x, row.y, players)) {
+        pos = { x: row.x, y: row.y };
+      } else {
+        const seed = Math.floor(Math.random() * 2 ** 31);
+        const candidates = placeMapCreatures(world, FALLBACK_CANDIDATES, [t], seed);
+        // placeMapCreatures is used purely as a legal-tile finder here; its
+        // own level roll is discarded so the respawn keeps the level it died
+        // at rather than re-rolling into a different band.
+        const clear = candidates.find((c) => isClearOfPlayers(c.x, c.y, players));
+        if (!clear) continue; // no legal tile clear of players this pass; retry later
+        pos = { x: clear.x, y: clear.y };
+      }
+
+      const scaled = scaleCreature(
+        { hp: t.hp || 10, damage: CREATURE_BASE_DAMAGE, defense: Number(t.defense ?? 0) || 0 },
+        row.level,
+      );
+
+      const client = await pool.connect();
+      let creatureId = null;
+      try {
+        await client.query('BEGIN');
+        // Gated exactly like commitCreatureDeath's own DELETE: rowCount === 1
+        // means THIS pass claimed the row. Two concurrent sweeps seeing the
+        // same due row must produce exactly one creature, and the loser must
+        // insert nothing.
+        const claim = await client.query('DELETE FROM creature_respawns WHERE id = $1', [row.id]);
+        if (claim.rowCount !== 1) {
+          await client.query('ROLLBACK');
+          continue;
+        }
+        const ins = await client.query(
+          `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          [row.world_id, t.name, pos.x, pos.y, scaled.hp, 'S', row.level, scaled.damage, scaled.defense],
+        );
+        await client.query('COMMIT');
+        creatureId = ins.rows[0].id;
+      } catch (err) {
+        // client.release() does NOT roll back -- without this the connection
+        // returns to the pool holding an open transaction.
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      spawned += 1;
+      // Counted above: the DB write committed, so this creature EXISTS
+      // regardless of whether the caller's best-effort cache sync throws.
+      // Awaited so the server's test seam observes the injection.
+      await onSpawn({ worldId: row.world_id, creatureId });
+    } catch (err) {
+      // One bad row must not abort the pass -- every other due row still gets
+      // its turn, and this one stays due for a retry.
+      console.error(`respawnDueCreatures: failed to respawn row ${row.id}:`, err);
+    }
+  }
+  return spawned;
+}
+
 module.exports = {
   isClearOfPlayers,
+  respawnDueCreatures,
   RESPAWN_DELAY_MS, CREATURE_SWEEP_MS, RESPAWN_MIN_PLAYER_DISTANCE,
 };
