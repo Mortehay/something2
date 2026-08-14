@@ -40,7 +40,18 @@ export function applyJoined(inv, msg) {
   // it is carried through here because the ammo HUD sums it across stacks.
   // Defaulted to 1 rather than dropped so an older/partial frame degrades to
   // "one unit" instead of silently contributing 0 to that sum.
-  inv.items = (msg.items || []).map((i) => ({ id: i.id, typeId: i.typeId, quantity: qtyOf(i) }));
+  // SOMET-316: `soulbound` is carried through so a panel can MARK a bound item
+  // (the account chest's Carrying tab). Normalized to a real boolean rather
+  // than passed through, because an older server that does not send the field
+  // must read as "not bound" instead of `undefined` — a falsy value renders the
+  // same today, but a later `!== false` test written against a raw pass-through
+  // would silently invert on exactly those frames.
+  //
+  // NEVER a permission: what may be sold or dropped is decided server-side
+  // against the row. This copy exists to label a row, nothing more.
+  inv.items = (msg.items || []).map((i) => ({
+    id: i.id, typeId: i.typeId, quantity: qtyOf(i), soulbound: i.soulbound === true,
+  }));
   inv.equipment = { ...(msg.equipment || {}) };
   // A join snapshot is the whole truth about every stack the player holds, so
   // every cached ammo count is now stale by definition.
@@ -63,7 +74,12 @@ export function typeOf(inv, itemId) {
 export function addItem(inv, item) {
   if (!item || item.id == null) return;
   if (inv.items.some((it) => it.id === item.id)) return;
-  inv.items.push({ id: item.id, typeId: item.typeId, quantity: qtyOf(item) });
+  // Same normalization as applyJoined — this is the path a withdrawn item
+  // arrives on (`withdrawn` -> addItem), and a bound item taken back out of the
+  // account chest must keep its marker.
+  inv.items.push({
+    id: item.id, typeId: item.typeId, quantity: qtyOf(item), soulbound: item.soulbound === true,
+  });
   forgetAmmoCount(inv, item.typeId);
 }
 

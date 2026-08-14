@@ -105,7 +105,7 @@ function resolveGoldItemTypeId(itemTypes) {
 // ownership check in this file.
 async function loadInventory(pool, characterId) {
   const ir = await pool.query(
-    'SELECT id, item_type_id, quantity FROM player_items WHERE character_id = $1 ORDER BY created_at ASC, id ASC',
+    'SELECT id, item_type_id, quantity, soulbound FROM player_items WHERE character_id = $1 ORDER BY created_at ASC, id ASC',
     [characterId],
   );
   const er = await pool.query(
@@ -123,7 +123,27 @@ async function loadInventory(pool, characterId) {
   );
   const equipment = {};
   for (const row of er.rows) equipment[row.slot] = row.item_id;
-  const items = ir.rows.map((r) => ({ id: r.id, typeId: r.item_type_id, quantity: Number(r.quantity ?? 1) }));
+  // SOMET-316: `soulbound` rides the join snapshot so the client can MARK a
+  // bound item while it is still being carried. It was absent before, which
+  // left the account chest panel able to label a stored item `bound` and
+  // unable to label the very same item in the Carrying tab beside it.
+  //
+  // DISPLAY ONLY, and it has to stay that way: every rule that actually reads
+  // this flag -- sellItem's refusal (trade.js), dropItem's (loot.js) -- runs
+  // server-side against the row, never against this copy. A stale or forged
+  // value here can mislead a player's own panel and can authorize nothing.
+  //
+  // This is the only loader that can emit a true value. grantStartingLoadout
+  // is the sole writer of soulbound = true, and every other path that hands
+  // the client an item INSERTs a fresh row that takes the column default
+  // (buy, chest-open, and claimItem -- see loot.js:428 for why dropping a
+  // bound item is refused rather than laundered).
+  const items = ir.rows.map((r) => ({
+    id: r.id,
+    typeId: r.item_type_id,
+    quantity: Number(r.quantity ?? 1),
+    soulbound: r.soulbound === true,
+  }));
   const byId = new Map(items.map((it) => [it.id, it]));
   for (const row of sr.rows) {
     const hostItem = byId.get(row.host_id);

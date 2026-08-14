@@ -23,6 +23,44 @@ function recordingPool(handlers) {
   };
 }
 
+// SOMET-316. The join snapshot is the ONLY loader that can emit soulbound:true
+// (grantStartingLoadout is the sole writer of the flag), so if it is dropped
+// here no panel can ever mark a carried item bound -- which is exactly what
+// shipped with SOMET-310 and left the account chest labelling a stored item and
+// not the identical carried one.
+//
+// Asserted per instance, mixed true/false in one row set, because the bug this
+// guards is not "the field is missing" but "the field is constant": a mapper
+// that hardcoded false would satisfy the all-false case above and still be
+// wrong for every bound item in the game.
+test('loadInventory reports soulbound per instance, not per item type', async () => {
+  const pool = recordingPool([
+    [/FROM player_items/i, () => ({ rows: [
+      // Same item_type_id, different provenance: one granted at creation, one
+      // looted or bought. That distinction is the entire point of the column.
+      { id: 'granted', item_type_id: 10, quantity: 1, soulbound: true },
+      { id: 'looted', item_type_id: 10, quantity: 1, soulbound: false },
+    ] })],
+    [/FROM player_equipment/i, () => ({ rows: [] })],
+  ]);
+  const inv = await loadInventory(pool, 'c1');
+  assert.deepEqual(inv.items.map((i) => [i.id, i.soulbound]), [['granted', true], ['looted', false]]);
+});
+
+test('loadInventory selects the soulbound column', async () => {
+  const pool = recordingPool([
+    [/FROM player_items/i, () => ({ rows: [] })],
+    [/FROM player_equipment/i, () => ({ rows: [] })],
+  ]);
+  await loadInventory(pool, 'c1');
+  // Reading the field off a row the query never asked for yields undefined and
+  // silently degrades every item to "not bound", so the SELECT list is worth
+  // pinning directly rather than only through a fixture that supplies the
+  // column regardless of whether it was requested.
+  const itemsQuery = pool.calls.find((c) => /FROM player_items/i.test(c.sql));
+  assert.match(itemsQuery.sql, /SELECT[^;]*\bsoulbound\b[^;]*FROM player_items/i);
+});
+
 test('loadInventory returns owned instances and the equipment map', async () => {
   const pool = recordingPool([
     [/FROM player_items/i, () => ({ rows: [
@@ -34,7 +72,10 @@ test('loadInventory returns owned instances and the equipment map', async () => 
     ] })],
   ]);
   const inv = await loadInventory(pool, 'u1');
-  assert.deepEqual(inv.items, [{ id: 'i1', typeId: 1, quantity: 1 }, { id: 'i2', typeId: 5, quantity: 1 }]);
+  assert.deepEqual(inv.items, [
+    { id: 'i1', typeId: 1, quantity: 1, soulbound: false },
+    { id: 'i2', typeId: 5, quantity: 1, soulbound: false },
+  ]);
   assert.deepEqual(inv.equipment, { main_hand: 'i1' });
 });
 

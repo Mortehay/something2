@@ -94,7 +94,12 @@ function makePool({ userItems = [], stoneInstances = new Map() } = {}) {
       if (/^\s*DELETE FROM world_items WHERE expires_at/i.test(sql)) return { rows: [], rowCount: 0 };
       if (/SELECT.*FROM world_items/i.test(sql)) return { rows: [], rowCount: 0 };
       if (/FROM world_chests WHERE world_id/i.test(sql)) return { rows: [] };
-      if (/^\s*SELECT id, item_type_id, quantity FROM player_items WHERE character_id/i.test(sql)) {
+      // Column-list agnostic on purpose — see the same branch in
+      // authority_use_field_chest_integration.test.js. Pinning loadInventory's
+      // exact SELECT means any column added to that query silently disables
+      // this branch and hands the authority an EMPTY inventory, which surfaces
+      // as bogus ownership failures rather than as a fixture mismatch.
+      if (/^\s*SELECT\b[^;]*\bFROM player_items WHERE character_id/i.test(sql)) {
         return { rows: userItems.map((it) => ({ id: it.id, item_type_id: it.item_type_id, quantity: 1 })) };
       }
       if (/FROM player_equipment WHERE character_id/i.test(sql)) return { rows: [] };

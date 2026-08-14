@@ -161,7 +161,17 @@ function makePool({ bounded = true, userItems = [], safeRoadRadius = 0, safeRect
         };
       }
       if (/FROM world_chests WHERE world_id/i.test(sql)) return { rows: [] }; // fetchChests at load: none yet
-      if (/^\s*SELECT id, item_type_id, quantity FROM player_items WHERE character_id/i.test(sql)) {
+      // Matched on the TABLE and the OWNERSHIP predicate, never on the column
+      // list: this is loadInventory's inventory read, and pinning the exact
+      // `SELECT id, item_type_id, quantity` made adding a column to that query
+      // silently turn this branch off (SOMET-316 added `soulbound`). The
+      // fixture then fell through to the default empty result, the in-memory
+      // inventory came back EMPTY, and ten tests in this file failed as
+      // "you do not own that item" — a fixture bug wearing an ownership bug's
+      // clothes. `SELECT ... FROM player_items WHERE character_id` is the only
+      // plain read of this table on the join path, so the loose form is still
+      // unambiguous.
+      if (/^\s*SELECT\b[^;]*\bFROM player_items WHERE character_id/i.test(sql)) {
         return { rows: userItems };
       }
       if (/FROM player_equipment WHERE character_id/i.test(sql)) return { rows: [] };
