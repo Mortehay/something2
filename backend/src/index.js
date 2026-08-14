@@ -536,6 +536,23 @@ app.get('/api/map/tiles', async (req, res) => {
 // a row is left to the FK constraint itself; the resulting 500 there is a
 // pre-existing, out-of-scope gap noted in the DELETE /api/creature-behaviors
 // handler below.
+// SOMET-338. display_width/display_height are the SPRITE size the client draws
+// (RenderSystem.drawEntity uses them verbatim), so a typo in the admin form
+// becomes a decoration the size of the viewport with nothing to catch it: the
+// `Tree` row shipped at 777x888, over half a 1280x720 screen, from one tile.
+//
+// Null is explicitly ALLOWED, and that is the point of the null-guard rather
+// than a NOT NULL column or a blanket CHECK: ~296 of the 304 rows -- every
+// creature type plus Player -- legitimately carry no display size and fall
+// back to the renderer's own default. Only a value actually supplied is bound.
+//
+// The ceiling is 4 tiles at MAP_TILE_SIZE 100. Every legitimate row in the
+// table is <= 104, so this rejects the two known-bad values (777x888, and
+// `Village Guard`'s 0x0) with a wide margin over anything real. 0 is rejected
+// deliberately: it currently degrades to the 40px fallback only by accident,
+// because `e.displayWidth || e.width || 40` treats 0 as falsy.
+const MAX_ENTITY_DISPLAY_PX = 400;
+
 function entityTypeFieldError(body) {
   if (body.attack_element != null && !ELEMENTS.includes(body.attack_element)) {
     return `attack_element must be one of ${ELEMENTS.join(', ')}`;
@@ -543,6 +560,13 @@ function entityTypeFieldError(body) {
   if (body.behavior_id != null
       && (typeof body.behavior_id !== 'number' || !Number.isInteger(body.behavior_id))) {
     return 'behavior_id must be an integer';
+  }
+  for (const field of ['display_width', 'display_height']) {
+    const v = body[field];
+    if (v == null) continue; // omitted or explicitly null -> renderer default
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > MAX_ENTITY_DISPLAY_PX) {
+      return `${field} must be an integer between 1 and ${MAX_ENTITY_DISPLAY_PX}`;
+    }
   }
   return null;
 }
@@ -3106,4 +3130,5 @@ if (require.main === module) {
 module.exports = {
   app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, boundedCacheSet,
   apiRateLimiter, behaviorFieldError, abilityFieldError, behaviorAbilitiesError,
+  entityTypeFieldError,
 };
