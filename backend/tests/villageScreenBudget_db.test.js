@@ -209,25 +209,57 @@ test('the entry world has a village and its entry_spawn IS that village spawn', 
   }
 });
 
-test('no hostile stands inside any village footprint', async (t) => {
-  const pool = await openPool(t, 'the village-footprint invariant');
+test('nothing is PLACED inside a village footprint except its guards', async (t) => {
+  const pool = await openPool(t, 'the village-footprint placement invariant');
   if (!pool) return;
   try {
     await readingLiveWorld(pool, async () => {
-    // The epic's invariant, stated as a query: inside a village box, the only
-    // creature is a Village Guard.
+    // SOMET-352. This used to assert that no hostile STANDS inside a village
+    // box, on any row in world_creatures. That is not an invariant this system
+    // maintains, and the test was unfalsifiable red: nothing in the codebase is
+    // wrong when it fires.
+    //
+    // Measured, not argued. Thornbriar Reach held a Bat and a Skeleton inside
+    // its box, frozen there for hours. Joining a character so the world
+    // actually ticked resolved it without a single code change:
+    //
+    //   BEFORE     intruders=2   guards at 4852,4200 (both, stacked)
+    //   AFTER 10s  intruders=2   guards at 4780,4200  <- closing
+    //   AFTER 20s  intruders=0   guards at 4637/4639,4200
+    //   AFTER 45s  intruders=0   guards at 4585,4233 / 4564,4264 <- separated
+    //
+    // The guards cleared them in ~20s and then spread back out, so the stacking
+    // was transient convergence on one target rather than a defect either.
+    //
+    // WHY the old assertion could not hold: worldPopulation.js refuses village
+    // tiles when PLACING, but creatures.js has no village check for hostiles at
+    // all -- its only village references concern guards. The wall ring has one
+    // deliberately walkable gate, so a wandering hostile strolling in is legal
+    // behaviour. And a world only ticks while someone is in it, so
+    // world_creatures is a frozen snapshot that can preserve a mid-incursion
+    // moment indefinitely for any world nobody is visiting.
+    //
+    // So the guarantee is about PLACEMENT, and that is what is asserted now:
+    // nothing is ANCHORED inside a village box except its guards. home_x/home_y
+    // is the anchor seeding writes -- village guards (insertVillageGuards) and
+    // penned creatures (the pen pass, whose boxes validateMapSpec already
+    // forbids from overlapping a village). A wandering intruder has home NULL,
+    // which is exactly what the two Thornbriar hostiles had. This still fails
+    // loudly if a seeding change ever parks a creature in a village, which is
+    // the regression the epic actually cared about.
     const bad = (await pool.query(
-      `SELECT w.name AS world, c.type, c.x, c.y
+      `SELECT w.name AS world, c.type, c.home_x, c.home_y
          FROM world_creatures c
          JOIN villages v ON v.world_id = c.world_id
          JOIN worlds w ON w.id = c.world_id
         WHERE c.type <> $1
-          AND floor(c.x / ${TILE}) BETWEEN v.min_col AND v.min_col + v.width - 1
-          AND floor(c.y / ${TILE}) BETWEEN v.min_row AND v.min_row + v.height - 1`,
+          AND c.home_x IS NOT NULL AND c.home_y IS NOT NULL
+          AND floor(c.home_x / ${TILE}) BETWEEN v.min_col AND v.min_col + v.width - 1
+          AND floor(c.home_y / ${TILE}) BETWEEN v.min_row AND v.min_row + v.height - 1`,
       [GUARD_TYPE],
     )).rows;
     assert.deepEqual(bad, [],
-      `${bad.length} non-guard creature(s) are standing inside a village box: ${JSON.stringify(bad)}`);
+      `${bad.length} non-guard creature(s) are ANCHORED inside a village box: ${JSON.stringify(bad)}`);
 
     // Non-vacuity: the query above proves nothing if there are no villages, or
     // no creatures in the villages' worlds at all.
@@ -236,6 +268,36 @@ test('no hostile stands inside any village footprint', async (t) => {
          FROM villages v LEFT JOIN world_creatures c ON c.world_id = v.world_id`)).rows[0];
     assert.ok(scope.villages >= 5, `expected >= 5 villages in scope, got ${scope.villages}`);
     assert.ok(scope.creatures > 0, 'no creatures in any village world -- the check above is vacuous');
+
+    // The anchor check is only meaningful if anchored non-guard creatures exist
+    // somewhere to be caught. Without this the WHERE clause could match nothing
+    // for the wrong reason -- e.g. if the pen pass stopped writing home_x at
+    // all -- and this test would go green while covering nothing.
+    const anchored = (await pool.query(
+      `SELECT count(*)::int AS n FROM world_creatures
+        WHERE type <> $1 AND home_x IS NOT NULL`, [GUARD_TYPE])).rows[0];
+    assert.ok(anchored.n > 0,
+      'no non-guard creature anywhere carries a home anchor -- the placement check above is vacuous');
+
+    // Transient intruders are REPORTED, never asserted on: a hostile that walked
+    // in through the gate is legal, and the guards clear it. Printed so a real
+    // pattern (say, dozens across many villages, or one that never clears)
+    // is still visible to a human reading the output.
+    const standing = (await pool.query(
+      `SELECT w.name AS world, c.type
+         FROM world_creatures c
+         JOIN villages v ON v.world_id = c.world_id
+         JOIN worlds w ON w.id = c.world_id
+        WHERE c.type <> $1
+          AND floor(c.x / ${TILE}) BETWEEN v.min_col AND v.min_col + v.width - 1
+          AND floor(c.y / ${TILE}) BETWEEN v.min_row AND v.min_row + v.height - 1`,
+      [GUARD_TYPE],
+    )).rows;
+    if (standing.length) {
+      console.log(`  note: ${standing.length} hostile(s) currently standing inside a village box `
+        + `(${[...new Set(standing.map((s) => s.world))].join(', ')}) -- expected and transient; `
+        + 'guards clear them ~20s after the world next ticks.');
+    }
     });
   } finally {
     await pool.end();
