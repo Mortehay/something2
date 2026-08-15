@@ -110,15 +110,15 @@ test('an augment stone classifies as its own kind, not as a spell stone', () => 
   assert.equal(stoneKind({ element: null, stat_bonus_stat: 'strength' }), 'buff');
 });
 
-test('an augment stone is refused by a projectile weapon, not silently inert', () => {
-  // DELIBERATE LIMITATION, pinned so it cannot rot: the bonus packet is
-  // applied on the melee paths only. Accepting the socket and adding nothing
-  // is the silent-inertness failure this epic exists to remove.
-  //
-  // When projectiles.js starts applying the packet, THIS test fails and is the
-  // reminder to lift the restriction.
+test('an augment stone fits any weapon, melee or projectile', () => {
+  // SOMET-332 restricted this to melee because projectiles.js did not read the
+  // augment packet, and pinned the restriction here so it could not rot.
+  // SOMET-343 wired all four projectile damage sites and lifted it -- this is
+  // that deliberate update, not a deleted test.
   assert.equal(isCompatible('augment', 'weapon', 'melee'), true);
-  assert.equal(isCompatible('augment', 'weapon', 'projectile'), false);
+  assert.equal(isCompatible('augment', 'weapon', 'projectile'), true);
+  // Armor is still refused: armor does not attack, so there is no packet to
+  // add a bonus to.
   assert.equal(isCompatible('augment', 'armor', null), false);
   // The other two kinds are untouched by the new argument.
   assert.equal(isCompatible('spell', 'weapon'), true);
