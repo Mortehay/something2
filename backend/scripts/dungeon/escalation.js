@@ -48,6 +48,18 @@ function deriveDensity(hopFraction) {
 // shows ~225 tiles at once (1280x720 with a translate-only camera and an
 // isometric area scale of K^2 = 0.4096): 96x96 is ~41 screens and 224x224 is
 // ~223. The old uniform 64x64 was ~18. See the design doc for the derivation.
+//
+// SOMET-311: this table is NOT the per-player load lever, measured rather than
+// assumed. The authority activates and broadcasts a radius-1 chunk
+// neighbourhood (server.js recomputeActive / broadcastCreatures) -- 9 chunks =
+// 9,216 tiles -- and every entry here is at least 3 chunks (96 tiles) wide, so
+// the neighbourhood is already fully saturated at the SMALLEST step. Area
+// above 96x96 never enters a tick: it only adds world_creatures rows and
+// world_chunks rows. Measured per-broadcast creature counts scale with the
+// DENSITY tier alone (see densityTiers.js's measured table), not with size --
+// 192@horde broadcast ~2x fewer creatures than 224@swarm, exactly the 24 vs 48
+// perThousand ratio. Lowering the top of this ramp to cut per-player load
+// would therefore buy nothing.
 const SIZE_STEPS = [96, 128, 160, 192, 224];
 function deriveSize(hopFraction) {
   const idx = Math.min(SIZE_STEPS.length - 1, Math.floor(hopFraction * SIZE_STEPS.length));
