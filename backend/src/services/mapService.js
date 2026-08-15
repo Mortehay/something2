@@ -365,6 +365,16 @@ const DECO_DENSITY = 0.58;        // a tile is "in a clump" when the density fie
 const DECO_FILL = 0.6;            // fraction of in-clump tiles that actually get an object
 const SPAWN_CLEAR_RADIUS = 1;     // Chebyshev tiles around entry spawn kept clear of blockers
 
+// SOMET-339 — the lane kept clear of blockers directly outside a village gate.
+//
+// LENGTH is DECO_CELL, not a round number picked by feel: DECO_CELL is the
+// clump cell size, so a lane that long is guaranteed to run past at least one
+// whole clump rather than stopping inside the one sitting on the gate. HALFWIDTH
+// gives the gate line one tile of slack either side, so a walker can step around
+// a blocker that lands just off-centre instead of needing a pixel-perfect line.
+const GATE_CORRIDOR_LENGTH = DECO_CELL;
+const GATE_CORRIDOR_HALFWIDTH = 1;
+
 // Entry-spawn tile (row,col) for a bounded world, or null. entry_spawn is world
 // pixels; MAP_TILE_SIZE-agnostic here (100 px/tile, matching collision.js).
 function spawnTileCell(world) {
@@ -373,9 +383,43 @@ function spawnTileCell(world) {
   return { row: Math.floor(sp.y / 100), col: Math.floor(sp.x / 100) };
 }
 
+// SOMET-339 — true when this absolute cell lies in the lane running outward
+// from a village's gate.
+//
+// The midRow/midCol expressions are deliberately identical to villageGateCell's
+// (and villageGatePoint's): all three must agree on which tile the gate is, or
+// this clears a lane leading out of a wall. They are repeated rather than
+// factored out for the same reason villageGatePoint repeats them — villageGateCell
+// sits on the terrain stamper's hot per-tile loop — and are pinned by test
+// instead. A village with no gateEdge has no corridor at all rather than a
+// default one, because guessing an edge would clear a lane through solid wall.
+function inGateCorridor(v, gRow, gCol) {
+  if (!v.gateEdge) return false;
+  const rMax = v.minRow + v.height - 1;
+  const cMax = v.minCol + v.width - 1;
+  const midCol = v.minCol + Math.floor(v.width / 2);
+  const midRow = v.minRow + Math.floor(v.height / 2);
+  const L = GATE_CORRIDOR_LENGTH;
+  const H = GATE_CORRIDOR_HALFWIDTH;
+  if (v.gateEdge === 'E') return gCol > cMax && gCol <= cMax + L && Math.abs(gRow - midRow) <= H;
+  if (v.gateEdge === 'W') return gCol < v.minCol && gCol >= v.minCol - L && Math.abs(gRow - midRow) <= H;
+  if (v.gateEdge === 'S') return gRow > rMax && gRow <= rMax + L && Math.abs(gCol - midCol) <= H;
+  if (v.gateEdge === 'N') return gRow < v.minRow && gRow >= v.minRow - L && Math.abs(gCol - midCol) <= H;
+  return false;
+}
+
 // True when a BLOCKING decoration must not occupy this absolute cell: within the
-// spawn clear radius, or inside a village footprint. (Path cells are excluded by
-// the caller for ALL decorations, blocking or not.)
+// spawn clear radius, inside a village footprint, or in the lane leading out of a
+// village gate. (Path cells are excluded by the caller for ALL decorations,
+// blocking or not.)
+//
+// The gate corridor is the SOMET-339 fix. Sparing only the footprint left the
+// ground outside the gate fair game, so the clump field could wall a village in
+// completely -- which is exactly what happened to the entry world: a solid
+// blocking column one tile past the wall, and a new player sealed inside with a
+// reachable area of nine tiles. It was survivable while players spawned outside
+// a village (a sealed gate merely meant "cannot get in"); SOMET-335 moved the
+// entry spawn inside one and turned it into "cannot play the game".
 function isExcludedBlockerCell(cfg, spawn, gRow, gCol) {
   if (spawn && Math.max(Math.abs(gRow - spawn.row), Math.abs(gCol - spawn.col)) <= SPAWN_CLEAR_RADIUS) {
     return true;
@@ -384,6 +428,7 @@ function isExcludedBlockerCell(cfg, spawn, gRow, gCol) {
     for (const v of cfg.villages) {
       if (gRow >= v.minRow && gRow < v.minRow + v.height &&
           gCol >= v.minCol && gCol < v.minCol + v.width) return true;
+      if (inGateCorridor(v, gRow, gCol)) return true;
     }
   }
   return false;

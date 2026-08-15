@@ -31,7 +31,11 @@ describe("Player.update chunked branch", () => {
     // place near east edge of chunk (0,0); a step east enters unloaded (1,0)
     p.x = N * T - 30; p.y = 50; p.width = 20; p.height = 20; p.speed = 100; p.speedMultiplier = 1;
     p.update(1, { d: true }, m); // big dt, tries to cross frontier
-    expect(p.x).toBeCloseTo(379.99, 2); // clamps up to the frontier (was: stayed put)
+    // SOMET-337: the clamp reads the FOOTPRINT face, not the box edge. Centre
+    // 380, footprint half-extent 5 (20/2 * FOOTPRINT_SCALE) -> face 385
+    // clamps to 400-EPS, so x advances 399.99-385 = 14.99. Same geometry and
+    // same number as the movement.test.js frontier vector.
+    expect(p.x).toBeCloseTo(384.99, 2);
   });
 
   it("can move to negative world coordinates (no clamp to 0)", () => {
