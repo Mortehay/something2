@@ -17,6 +17,28 @@ const selectStyle = {
   fontSize: '1.2rem',
 };
 
+
+// Whether a generation with this selector value will run on the LOCAL
+// sprite-gen service. Mirrors the backend's resolveGenerationTarget for the
+// two levels the panel can see (request choice, then active provider).
+//
+// This exists because the local service's health must only gate work that
+// will actually run locally. Disabling Generate because the local container
+// is down, while a healthy remote provider is active, defeats the entire
+// point of registering one -- and that is exactly what shipped until a
+// browser pass caught it.
+export function willUseLocal(choice, activeProvider) {
+  if (choice === 'local') return true;
+  if (choice) return false;              // an explicit provider id
+  return !activeProvider;                // "Default": local only if none active
+}
+
+// Hook form, for panels that do not already have the provider list.
+export function useWillUseLocal(choice) {
+  const { activeProvider } = useAiProviders();
+  return willUseLocal(choice, activeProvider);
+}
+
 export function ProviderChoice({ value, onChange }) {
   const { providers, activeProvider, isLoadingProviders } = useAiProviders();
 

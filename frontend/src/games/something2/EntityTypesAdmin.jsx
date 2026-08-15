@@ -13,7 +13,7 @@ import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
 import { orphanedSpawnTiles } from './catalogReferences.js';
 import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
-import { ProviderChoice, ProviderAnimationNote } from './ProviderChoice.jsx';
+import { ProviderChoice, ProviderAnimationNote, useWillUseLocal } from './ProviderChoice.jsx';
 import { HiOutlineMagnifyingGlass } from "react-icons/hi2";
 import {
   buildBiomeIndex, biomesWithEntities, filterByBiomeTab, filterBySearch, paginate,
@@ -596,6 +596,12 @@ const KeyLabel = styled.span`
 function SpritePanel({ entity, capability, capabilityDown }) {
   const [expanded, setExpanded] = useState(false);
   const [backend, setBackend] = useState('auto');
+  // SOMET-331/346: which service draws this directional sprite set.
+  const [provider, setProvider] = useState('');
+  // The local service being offline must not block a job bound for a remote
+  // provider. See willUseLocal.
+  const runsLocally = useWillUseLocal(provider);
+  const blockedByLocal = capabilityDown && runsLocally;
   const [frames, setFrames] = useState(4);
   const [seed, setSeed] = useState(0);
   const [basePrompt, setBasePrompt] = useState('');
@@ -620,7 +626,10 @@ function SpritePanel({ entity, capability, capabilityDown }) {
       seed: parseInt(seed, 10) || 0
     };
     if (backend !== 'auto') body.backend = backend;
-    generateSprite.mutate(body, { onSuccess: (data) => setJobId(data.job_id) });
+    // Same contract as the other two panels: an unset selector sends NO
+    // provider key, so this request stays byte-identical to today's.
+    generateSprite.mutate(withOptionalProvider(body, provider),
+      { onSuccess: (data) => setJobId(data.job_id) });
   };
 
   const handleApprove = () => {
@@ -698,12 +707,15 @@ function SpritePanel({ entity, capability, capabilityDown }) {
             />
           </FormGroup>
 
+          <ProviderChoice value={provider} onChange={setProvider} />
+          <ProviderAnimationNote provider={provider} />
+
           <MainButton
             type="button"
             onClick={handleGenerate}
-            disabled={generateSprite.isPending || capabilityDown}
+            disabled={generateSprite.isPending || blockedByLocal}
           >
-            {capabilityDown ? 'Sprite service offline' : generateSprite.isPending ? 'Starting...' : 'Generate'}
+            {blockedByLocal ? 'Sprite service offline' : generateSprite.isPending ? 'Starting...' : 'Generate'}
           </MainButton>
 
           {jobId && (

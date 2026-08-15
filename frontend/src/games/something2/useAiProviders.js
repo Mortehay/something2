@@ -14,7 +14,17 @@ export function useAiProviders() {
   const { data, isLoading, error } = useQuery({
     queryKey: KEY,
     queryFn: async () => {
-      const res = await apiFetch(`${API_URL}/api/ai-providers`);
+      // authHeaders() is NOT optional here, and this is the one place it is
+      // easy to forget: apiFetch does not attach the token itself, it only
+      // notices auth failures. The sibling catalog GETs (useBiomes and the
+      // other catalog hooks) omit it safely because those routes are public
+      // -- but every
+      // /api/ai-providers route is adminGuard'd, including the reads.
+      //
+      // Without it the request 401s, noteAuthFailure fires, and the admin is
+      // signed out the moment they open the AI Providers tab. Caught in the
+      // browser; no unit test sees it, because none of them run the guard.
+      const res = await apiFetch(`${API_URL}/api/ai-providers`, { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to fetch AI providers");
       return res.json();
     },

@@ -261,8 +261,9 @@ export default function SettingsAdmin() {
         provider, generation uses the local sprite-gen service exactly as before.
       </Hint>
       <Hint>
-        A provider returns one image per request, so it produces static images. Animated and directional
-        sprites still use the local sprite-gen service.
+        The other machine creates the image or sprite; this side only sends the request, waits, and
+        stores what comes back. For animation it must return one ready-made sprite sheet — set the
+        sheet layout and grid on the provider so this side knows how to cut it.
       </Hint>
       {!isLoadingProviders && !activeProvider && providers.length > 0 && (
         <WarnText>No provider is active — generation is using the local sprite-gen service.</WarnText>
