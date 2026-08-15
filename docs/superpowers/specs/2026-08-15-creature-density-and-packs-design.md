@@ -153,16 +153,30 @@ Two steps fix that, both computed in the same single pass that builds the BFS
 distance field:
 
 1. **Normalize.** While walking the map, accumulate the raw product over every
-   *placeable* tile and divide by the mean. The tier rate is then honoured
-   exactly: a `normal` world averages 18 per 1000 tiles whatever its biome mix
-   and noise happen to be.
+   interior non-safe tile and divide each weight by that mean, so the field has
+   mean 1.0 on any map whatever its biome mix and noise happen to be.
 2. **Clamp to `[0.15, 1.5]`** after normalizing. The floor keeps quiet regions
    genuinely quiet without creating dead map; the ceiling is what makes the
    "field peak" column below true by construction.
 
-Clamping after normalizing perturbs the mean slightly — a heavily-clamped map
-lands a few percent under its tier. That is accepted, and it is visible: the
-existing `scatter under-delivered` warning already reports a shortfall.
+**What normalization is and is not for.** `placeMapCreatures` loops
+`for (i = 0; i < count; i++)` with up to `maxAttempts` retries per creature, so
+it places `count` creatures whatever the field says. **The field is purely
+redistributive**: it decides *where* a world's creatures go, not *how many*
+it gets. A world's total stays exactly what the tier and `MAX_WORLD_CREATURES`
+dictate — the thick regions are paid for by the thin ones.
+
+Normalization therefore exists to keep the **acceptance rate** high, not to hit
+a target count. An un-normalized field on a low-density map would reject the
+vast majority of samples, exhaust `maxAttempts`, and under-deliver — which is
+the actual failure mode to test for. Tests must assert the *distribution*
+(thick regions hold proportionally more) and that the *total* is unchanged;
+a test asserting that the field changes a world's headcount is asserting a
+bug.
+
+This also means the per-screen figures in the ladder below are properties of
+the field's shape, not of the count: a `swarm` world holds its mean of 20 per
+screen and its clamped peak of 30 in the same world, at the same time.
 
 **The clamp is deliberately tight, and authored hotspots are the escape
 hatch.** Organic terrain stays inside `[0.15, 1.5]`; a true set-piece — a
@@ -204,10 +218,46 @@ needs no migration and no spec churn.
 did not before: `swarm` on the largest shipped world (224², 50,176 tiles)
 resolves to ~4,470 and clamps.
 
-The authority ticks **every** creature in a loaded world every frame
-(`for (const c of this.creatures.values())` — `authority/creatures.js`), so
-world totals, not per-screen counts, are the cost. Today that same world at
-swarm ships 2,408 creatures and runs.
+**How the tick actually scales** — measured from `CreatureSim.tick`
+(`authority/creatures.js:1122`), because the obvious reading of it is wrong.
+The tick has two layers with different costs:
+
+- **Chunk-scoped.** The main behaviour loop skips any creature whose chunk is
+  outside `activeChunkKeys` (`if (!active.has(...)) continue;`). The expensive
+  per-creature AI — pathing, aggro, attack resolution — is therefore paid only
+  near players, not for the whole world.
+- **Whole-set, every tick, regardless of activity.** Three passes are not
+  scoped: `[...this.creatures.values()]` allocates an array of every creature,
+  `computeAuras(all)` runs over all of them, and `for (const c of all) c._buff
+  = ...` assigns to every one.
+
+`computeAuras` is the one that matters, because it is **O(leaders × all)** —
+each aura-carrying creature scans the entire population for creatures in
+range.
+
+**This is a direct constraint on Component 2, not a background worry.**
+`Champion` is the *only* behaviour in the catalog with `aura_radius > 0`
+(radius 260, +25% damage / +20% defense / +10% speed to its faction), and
+`Champion` is exactly the role a pack master gets promoted into. Today leaders
+are rare. With one master per pack and pack counts scaling by area, leaders
+scale with area too — and `leaders × all` becomes quadratic in world size.
+
+Concretely: 50 packs on a swarm 224² world is 50 leaders × ~4,500 creatures =
+225,000 distance checks per tick, 13.5M/second at 60 Hz. At 200 leaders it is
+54M/second, which will not hold.
+
+Two consequences, both binding:
+
+1. Slice A's measurement must cover the **whole-set passes at a realistic
+   leader count**, not just the chunk-scoped loop, or it will measure the cheap
+   half and report a false all-clear.
+2. **Slice B may not scale pack counts by area without either capping the
+   leader count or making `computeAuras` spatially indexed.** That is a
+   decision for Slice B's plan, recorded here so it is not discovered during
+   its final review.
+
+Today a 224² swarm world ships 2,408 creatures with a handful of leaders and
+runs.
 
 **The cap moves only on a measurement, never on a guess.** The implementation
 plan must include a tick-cost measurement at ~2,400 and ~4,500 creatures. If
