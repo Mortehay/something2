@@ -24,6 +24,35 @@ const { Pool } = require('pg');
 
 const { villageMerchantPost, villageGatePosts } = require('../src/services/mapService.js');
 const { villageGeometryError, villageSizeError, GUARD_TYPE } = require('../src/services/villages.js');
+const { withAdvisoryLock } = require('./helpers/advisoryLock.js');
+const { ENTRY_LOCK_KEY } = require('./helpers/entryWorld.js');
+
+// SOMET-351. Every test below asserts an invariant over the WHOLE live
+// database -- every village, the single is_entry world, every creature standing
+// in any village box. Six other files apply a map spec, which creates a
+// throwaway world with its own village, its own hostiles and its own is_entry
+// claim, and then deletes it. Each of those wraps its apply in
+// withEntryPreserved, holding ENTRY_LOCK_KEY across the whole
+// save -> apply -> restore window.
+//
+// The writers were already serialized correctly. This file was the one
+// participant that never asked for the lock, so it read the database mid-apply:
+// a fixture world holding is_entry, its village stamped, its hostiles scattered
+// but not yet penned. That is not load-sensitivity -- load only widens the
+// window. Running this file concurrently with seed_map_db.test.js alone
+// reproduced it 5 times out of 5, and on "no hostile stands inside any village
+// footprint" rather than on the entry-world assertion that had been surfacing.
+//
+// Taking the SAME key is the whole fix. As advisoryLock.js puts it, a lock only
+// serializes those who ask for it. This stays read-only: it acquires the lock
+// and runs SELECTs, never a save/restore, which is why it calls
+// withAdvisoryLock directly rather than withEntryPreserved.
+//
+// Deliberately NOT filtered by fixture name (a `zz%` prefix): that would make
+// this file blind to any real world a future spec happens to name badly, and it
+// would not help the entry-world assertion at all -- during an apply the
+// fixture legitimately IS the entry world, whatever it is called.
+const readingLiveWorld = (pool, fn) => withAdvisoryLock(pool, ENTRY_LOCK_KEY, fn);
 
 const TILE = 100;
 const DB_URL = process.env.TEST_DATABASE_URL
@@ -62,19 +91,21 @@ test('every live village fits the on-screen size budget', async (t) => {
   const pool = await openPool(t, 'the live village size limit');
   if (!pool) return;
   try {
-    const rows = (await pool.query(VILLAGES_SQL)).rows;
-    // The size check runs BEFORE the count guard on purpose: an over-budget
-    // hub must fail this test by NAME, not by "there are fewer villages than
-    // expected", or the message sends the next reader to the wrong problem.
-    for (const r of rows) {
-      assert.equal(
-        villageSizeError({ width: r.width, height: r.height }), null,
-        `${r.world}: ${r.width}x${r.height} is over the screen budget`,
-      );
-    }
-    // Non-vacuity.
-    assert.ok(rows.length >= 5,
-      `expected at least the five live villages (4 pre-existing + the entry world's), got ${rows.length}`);
+    await readingLiveWorld(pool, async () => {
+      const rows = (await pool.query(VILLAGES_SQL)).rows;
+      // The size check runs BEFORE the count guard on purpose: an over-budget
+      // hub must fail this test by NAME, not by "there are fewer villages than
+      // expected", or the message sends the next reader to the wrong problem.
+      for (const r of rows) {
+        assert.equal(
+          villageSizeError({ width: r.width, height: r.height }), null,
+          `${r.world}: ${r.width}x${r.height} is over the screen budget`,
+        );
+      }
+      // Non-vacuity.
+      assert.ok(rows.length >= 5,
+        `expected at least the five live villages (4 pre-existing + the entry world's), got ${rows.length}`);
+    });
   } finally {
     await pool.end();
   }
@@ -84,6 +115,7 @@ test('every live village has a legal spawn and merchant/guard posts matching its
   const pool = await openPool(t, 'the live village geometry');
   if (!pool) return;
   try {
+    await readingLiveWorld(pool, async () => {
     const rows = (await pool.query(VILLAGES_SQL)).rows;
     const guards = (await pool.query(
       'SELECT world_id, home_x, home_y FROM world_creatures WHERE type = $1 ORDER BY home_x, home_y',
@@ -131,6 +163,7 @@ test('every live village has a legal spawn and merchant/guard posts matching its
       assert.equal(new Set(tiles).size, 4,
         `${r.world}: spawn/merchant/guard posts collide -- tiles ${JSON.stringify(tiles)}`);
     }
+    });
   } finally {
     await pool.end();
   }
@@ -140,6 +173,7 @@ test('the entry world has a village and its entry_spawn IS that village spawn', 
   const pool = await openPool(t, "the entry world's village");
   if (!pool) return;
   try {
+    await readingLiveWorld(pool, async () => {
     const entries = (await pool.query(
       'SELECT id, name, entry_spawn FROM worlds WHERE is_entry = true')).rows;
     assert.equal(entries.length, 1, `expected exactly one is_entry world, got ${entries.length}`);
@@ -169,6 +203,7 @@ test('the entry world has a village and its entry_spawn IS that village spawn', 
       null,
       `${entry.name}: entry_spawn is not inside the village interior`,
     );
+    });
   } finally {
     await pool.end();
   }
@@ -178,6 +213,7 @@ test('no hostile stands inside any village footprint', async (t) => {
   const pool = await openPool(t, 'the village-footprint invariant');
   if (!pool) return;
   try {
+    await readingLiveWorld(pool, async () => {
     // The epic's invariant, stated as a query: inside a village box, the only
     // creature is a Village Guard.
     const bad = (await pool.query(
@@ -200,6 +236,7 @@ test('no hostile stands inside any village footprint', async (t) => {
          FROM villages v LEFT JOIN world_creatures c ON c.world_id = v.world_id`)).rows[0];
     assert.ok(scope.villages >= 5, `expected >= 5 villages in scope, got ${scope.villages}`);
     assert.ok(scope.creatures > 0, 'no creatures in any village world -- the check above is vacuous');
+    });
   } finally {
     await pool.end();
   }
