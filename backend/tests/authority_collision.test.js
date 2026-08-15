@@ -1,7 +1,39 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { resolveMove, ServerMap, MAP_TILE_SIZE, MAX_CHUNKS } = require('../src/authority/collision.js');
+const {
+  resolveMove, ServerMap, MAP_TILE_SIZE, MAX_CHUNKS, FOOTPRINT_SCALE, WALL_EPS,
+} = require('../src/authority/collision.js');
 const { generateChunk, generateChunkDecorations } = require('../src/services/mapService');
+
+// SOMET-344. A tripwire, not a tautology.
+//
+// SOMET-337 changed FOOTPRINT_SCALE from an implicit 1.0 to 0.5 and left three
+// fixtures in OTHER files placed against the old geometry. Two of them then
+// failed on assertions labelled "precondition" and one reported the answer for
+// an ordinary unobstructed step while still carrying the word "clamps" in its
+// name -- three cryptic failures, in three files, none of which said what had
+// actually changed.
+//
+// Those fixtures keep hand-computed literals on purpose: deriving them from
+// FOOTPRINT_SCALE would make them agree with any future value, including a
+// wrong one, so they would stop being evidence. The cost of that choice is that
+// a deliberate change to the constant breaks them. This test pays that cost
+// down to one clear message that names every place needing attention.
+//
+// If you are here because this failed: the change is probably fine. Update the
+// value below, then re-derive the three fixtures named in the message.
+test('the footprint geometry three fixtures depend on', () => {
+  assert.equal(FOOTPRINT_SCALE, 0.5,
+    'FOOTPRINT_SCALE changed. Hand-computed positions in these fixtures assume 0.5 and must be '
+    + 're-derived: authority_world.test.js "tick clamps a player to the wall face" (player x=50, '
+    + 'expects 51.99); creature_skittish.test.js "a creature cornered against a wall" '
+    + '(CORNERED = BOX - 12); guardChaseGiveUp.test.js "a new target starts a fresh stall window" '
+    + '(h2 must stay due north of the post so the guard has no free sidestep -- re-check that it '
+    + 'still fails when the _chaseStall reset is deleted, because a sidestep silently disarms it).');
+  assert.equal(WALL_EPS, 0.01,
+    'WALL_EPS changed. authority_world.test.js\'s expected 51.99 is (100 - WALL_EPS) - 16 - 32 '
+    + 'and must be re-derived.');
+});
 
 // --- Footprint collision golden vectors ---------------------------------
 // A column-based wall stub: tile column `blockedCol` (world x in

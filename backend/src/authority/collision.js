@@ -187,4 +187,12 @@ class ServerMap {
   }
 }
 
-module.exports = { resolveMove, ServerMap, MAP_TILE_SIZE, MAX_CHUNKS };
+// FOOTPRINT_SCALE and WALL_EPS are exported for TESTS ONLY, and only so one
+// test can pin them (see authority_collision.test.js's "the footprint geometry
+// three fixtures depend on"). Nothing in src reads them from here. Fixtures
+// deliberately keep their expected positions as literals rather than
+// recomputing them from these values -- an assertion derived from the same
+// constant as the code under test agrees with a wrong constant.
+module.exports = {
+  resolveMove, ServerMap, MAP_TILE_SIZE, MAX_CHUNKS, FOOTPRINT_SCALE, WALL_EPS,
+};

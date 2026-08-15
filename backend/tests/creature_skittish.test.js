@@ -187,10 +187,28 @@ test('once damaged it closes on the player and bites', () => {
 test('a creature cornered against a wall turns and fights instead of jittering', () => {
   // One wall, along the west face of the creature's own tile. The player is to
   // the east, so every retreat step aims straight into it.
-  const { s, player: p, active, c } = scenario(skittish(), CX + 100, { isWalkable: (x) => x >= BOX });
+  //
+  // SOMET-344. The creature spawns at x=BOX, which pressed its 48px sprite box
+  // flush against the wall -- true until SOMET-337 halved the collision box to
+  // a feet footprint. Since then the footprint's west face sits 12px EAST of
+  // the sprite's, so the creature had room to retreat (it moved to 1997.7) and
+  // was never cornered at all. The test failed on its own "precondition"
+  // assertion, which is the only reason this was noticed rather than quietly
+  // passing while measuring nothing.
+  //
+  // CORNERED shifts the spawn 12px west so the FOOTPRINT is flush instead:
+  // centre 1988+24 = 2012, west footprint face 2012-12 = 2000 = the wall. Now
+  // every retreat step is refused outright, which is the scenario this test is
+  // named for. A literal rather than a value derived from FOOTPRINT_SCALE, for
+  // the reason authority_collision.test.js's pin explains.
+  const CORNERED = BOX - 12;
+  const { s, player: p, active, c } = scenario(skittish(), CX + 100, {
+    isWalkable: (x) => x >= BOX,
+    creature: { x: CORNERED },
+  });
 
   s.tick(DT, active, [p], 0);
-  assert.equal(c.x, BOX, 'precondition: the wall must actually refuse the retreat');
+  assert.equal(c.x, CORNERED, 'precondition: the wall must actually refuse the retreat');
   assert.ok(angryAt(c, 'u1', 0), 'nowhere to run and it still did not fight');
 
   for (let i = 1; i < 120; i++) s.tick(DT, active, [p], i * MS);
