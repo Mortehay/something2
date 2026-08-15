@@ -120,3 +120,5 @@ export function toCytoscapeElements(payload) {
 
   return [...nodes, ...edges];
 }
+
+export default toCytoscapeElements;
