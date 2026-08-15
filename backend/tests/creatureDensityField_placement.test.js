@@ -35,7 +35,14 @@ test('placement concentrates creatures where the field is heavy', () => {
   // the threshold, and the tempting fix then is to weaken the assertion
   // rather than investigate. A large sample keeps the margin real.
   //
-  // Threshold 1.25 against a measured effect of ~1.40x at this world's seed
+  // Threshold 1.25 sits between a measured NULL and a measured EFFECT, not
+  // just under the effect -- a threshold above an accidental baseline but
+  // below the real one would still be vacuous. NULL: with the density gate
+  // temporarily deleted (uniform placement), this exact statistic measured
+  // 1.0501 at N=1500 -- ~1.0, as it must be by construction: under uniform
+  // sampling, heavyRate and lightRate are both just (draws in that group) /
+  // (tiles in that group), which are equal in expectation regardless of how
+  // the tiles split. EFFECT: with the gate live, ~1.40x at this world's seed
   // (4242, N=1500, rngSeed=99), full-grid-enumeration-confirmed stable through
   // N=8000 (1.43) -- i.e. that is this seed's real ceiling, not sampling
   // noise. A 30-seed sweep of the same measurement (world seed 1-30, same N
@@ -44,8 +51,9 @@ test('placement concentrates creatures where the field is heavy', () => {
   // itself. The plan's original 1.5 was estimated before the real
   // globalValueNoise was wired in (Task 2's synthetic Math.sin stand-in has no
   // spatial autocorrelation and swings harder) and sits above the actual
-  // effect for most seeds, this one included -- 1.25 records what the field
-  // really does rather than what the plan guessed it would do.
+  // effect for most seeds, this one included -- 1.25 sits ~19% above the
+  // measured null and ~11% below the measured effect, recording what the
+  // field really does rather than what the plan guessed it would do.
   const placed = placeMapCreatures(w, 1500, TYPES, 99);
 
   // Split the placements by the weight of the tile each landed on, then compare
@@ -94,29 +102,50 @@ test('packs still seat every member', () => {
 test('pack anchors prefer heavy tiles', () => {
   const w = world();
   const field = densityFieldFor(w);
-  // 150 single-member packs are 150 independent anchor draws. A pack of size 1
-  // emits only its anchor, so this isolates anchor selection from member
-  // spreading. 150 rather than 40 for the same margin reason as the test above.
+  let heavyTiles = 0, lightTiles = 0;
+  for (let r = 1; r <= 62; r++) {
+    for (let c = 1; c <= 62; c++) {
+      if (field.weightAt(r, c) >= 1) heavyTiles++; else lightTiles++;
+    }
+  }
+
+  // Same anchors-per-tile RATE statistic the test above uses, not a raw count
+  // fraction of anchors landing on heavy tiles. A count fraction has the
+  // wrong null here: roughly half the interior tiles clip at WEIGHT_MAX (see
+  // heavyTiles/lightTiles above -- close to a 50/50 split), so even UNIFORM
+  // placement puts close to half of all anchors on "heavy" tiles by pure
+  // arithmetic, leaving only a sliver of real separation above that
+  // accidental baseline. The rate statistic's null is 1.0 by construction:
+  // under uniform sampling heavyRate and lightRate are both just (draws in
+  // that group) / (tiles in that group), equal in expectation regardless of
+  // the heavy/light split, so 100% of any measured departure from 1.0 is the
+  // field's real effect.
   //
-  // Threshold 0.45 against a measured effect of ~0.53 at this world's seed
-  // (4242, N=150, rngSeed=21) -- the field's true (full-grid, sample-size-
-  // independent) mass fraction on heavy tiles for this seed is ~0.59, and 150
-  // draws is small enough that the sampled fraction moves around that true
-  // value; a 30-seed sweep of the same measurement (world seed 1-30, same N
-  // and rngSeed) landed in [0.56, 0.77], mean ~0.64, with seed 4242 sitting
-  // below even that range's low end. As with the ratio test above, the plan's
-  // original 0.55 was estimated before the real globalValueNoise was wired
-  // in; 0.45 records the field's real, still-substantial pull toward heavy
-  // tiles rather than a number picked to make one seed's sample look bigger.
-  const specs = Array.from({ length: 150 }, () => ({ size: 1 }));
+  // 1500 single-member packs, not 150: a pack of size 1 emits only its
+  // anchor, so this isolates anchor selection from member spreading, and at
+  // N=150 the gated effect (~1.18) sits too close to the null to give a
+  // threshold real margin on both sides. NULL
+  // (gate temporarily deleted, uniform placement): 1.0116 at N=1500 -- ~1.0,
+  // confirming the statistic is unbiased. EFFECT (gate live) at this world's
+  // seed (4242, N=1500, rngSeed=21): 1.5037, stable across N=3000/5000/8000
+  // spot checks (1.50-1.52). A 30-seed sweep of the same measurement (world
+  // seed 1-30, N=1500) landed in [1.41, 1.99], mean ~1.62, so 4242 is
+  // unremarkable for this metric. Threshold 1.2 sits ~19% above the measured
+  // null and ~20% below the measured effect -- real margin on both sides, so
+  // this fails if the gate is deleted and passes only because the field
+  // actually steers anchors toward heavy tiles.
+  const specs = Array.from({ length: 1500 }, () => ({ size: 1 }));
   const packed = placeCreaturePacks(w, specs, TYPES, 21);
-  let heavy = 0;
+  let heavyAnchors = 0, lightAnchors = 0;
   for (const p of packed) {
     const r = Math.floor(p.y / 100), c = Math.floor(p.x / 100);
-    if (field.weightAt(r, c) >= 1) heavy++;
+    if (field.weightAt(r, c) >= 1) heavyAnchors++; else lightAnchors++;
   }
-  assert.ok(heavy > packed.length * 0.45,
-    `only ${heavy}/${packed.length} anchors landed on heavy tiles`);
+  const heavyRate = heavyAnchors / heavyTiles;
+  const lightRate = lightAnchors / lightTiles;
+  assert.ok(heavyRate > lightRate * 1.2,
+    `heavy tiles took ${heavyRate.toFixed(4)}/tile vs light ${lightRate.toFixed(4)}/tile `
+    + '-- anchors are not steered toward heavy tiles');
 });
 
 // Caching is asserted at the CONFIG level, not the world level, and that is not
