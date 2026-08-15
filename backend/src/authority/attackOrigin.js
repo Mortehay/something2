@@ -15,10 +15,49 @@
 // computed once, at launch, and carried -- exactly as `damage` and `vfxTrail`
 // already are.
 
-// Fraction of the actor's body height, measured UP from the feet. These move
-// into the `attack_origins` catalog table in slice B (SOMET-329); the column
-// already stores names rather than numbers so that becomes a constraint swap.
-const ORIGIN_FRACTIONS = { feet: 0, middle: 0.5, head: 0.85 };
+// Fraction of the actor's body height, measured UP from the feet.
+//
+// SOMET-329 moved these into the `attack_origins` catalog table. What is left
+// here are the SEED DEFAULTS, kept for three reasons: they are what a world
+// built before the catalog loads uses, they are what the pure unit tests
+// exercise without a database, and they are the fallback if the table is ever
+// empty -- an empty catalog must not silently drop every attack to the ground.
+//
+// configureAttackOrigins() below replaces them with the live rows, so an admin
+// editing height_fraction actually moves where attacks launch from. The
+// migration seeds exactly these values, so that swap is a no-op on day one.
+const DEFAULT_ORIGIN_FRACTIONS = { feet: 0, middle: 0.5, head: 0.85 };
+
+let ORIGIN_FRACTIONS = { ...DEFAULT_ORIGIN_FRACTIONS };
+
+// Called once per catalog load (server.js, beside loadItemTypes). Module-level
+// rather than threaded through every call site because the catalog is global
+// by construction -- one database, one set of origins, shared by every world --
+// and attackLift is reached from three unrelated files (world.js, creatures.js,
+// projectiles.js) that would otherwise all have to carry it.
+//
+// An empty or unusable map is IGNORED rather than applied: losing the table
+// must degrade to the seeded defaults, never to "no origins exist", which
+// bodyLift would resolve as a 0 lift -- every attack on the ground.
+function configureAttackOrigins(fractions) {
+  if (!fractions) return ORIGIN_FRACTIONS;
+  const entries = fractions instanceof Map ? [...fractions.entries()] : Object.entries(fractions);
+  const next = {};
+  for (const [name, value] of entries) {
+    const f = Number(value);
+    if (typeof name === 'string' && name && Number.isFinite(f) && f >= 0 && f <= 1) next[name] = f;
+  }
+  if (Object.keys(next).length === 0) return ORIGIN_FRACTIONS;
+  ORIGIN_FRACTIONS = next;
+  return ORIGIN_FRACTIONS;
+}
+
+// Test seam: restores the seeded defaults so one test's catalog cannot leak
+// into the next. Never called by production code.
+function resetAttackOrigins() {
+  ORIGIN_FRACTIONS = { ...DEFAULT_ORIGIN_FRACTIONS };
+  return ORIGIN_FRACTIONS;
+}
 
 // Kind-level defaults, resolved binding -> kind default -> fallback, the same
 // shape vfx.js's KIND_DEFAULTS uses.
@@ -70,8 +109,14 @@ function resolveAttackOrigin(source) {
 function bodyLift(bodyHeight, origin) {
   const h = Number(bodyHeight);
   const height = Number.isFinite(h) && h > 0 ? h : FALLBACK_BODY_HEIGHT;
-  const fraction = ORIGIN_FRACTIONS[origin];
-  return Math.round(height * (fraction === undefined ? ORIGIN_FRACTIONS[FALLBACK_ORIGIN] : fraction));
+  // Three rungs, because the fractions are admin data since SOMET-329 and an
+  // admin can delete a row: the named origin, then `middle`, then the SEEDED
+  // middle. Without that last rung a catalog missing `middle` would multiply
+  // by undefined and put NaN on the wire, which the client reads as a junk
+  // anchor -- every attack silently back on the legacy tile lift.
+  const fraction = ORIGIN_FRACTIONS[origin] ?? ORIGIN_FRACTIONS[FALLBACK_ORIGIN]
+    ?? DEFAULT_ORIGIN_FRACTIONS[FALLBACK_ORIGIN];
+  return Math.round(height * fraction);
 }
 
 // The lift for an attack made with `weapon` by an actor `bodyHeight` tall.
@@ -83,6 +128,11 @@ function attackLift(weapon, bodyHeight) {
 }
 
 module.exports = {
-  ORIGIN_FRACTIONS, KIND_DEFAULTS, FALLBACK_ORIGIN, FALLBACK_BODY_HEIGHT,
+  DEFAULT_ORIGIN_FRACTIONS, KIND_DEFAULTS, FALLBACK_ORIGIN, FALLBACK_BODY_HEIGHT,
   resolveAttackOrigin, bodyLift, attackLift,
+  configureAttackOrigins, resetAttackOrigins,
+  // A getter, not the object: ORIGIN_FRACTIONS is reassigned by
+  // configureAttackOrigins, and a destructured export would hand callers a
+  // snapshot of whatever it was at require() time.
+  originFractions: () => ORIGIN_FRACTIONS,
 };

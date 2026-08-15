@@ -10,6 +10,7 @@ import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
 import { effectProgress, effectAlpha, isoArcAngle, particlesAt } from "../core/vfx.js";
 import { anchorY } from "../core/attackAnchor.js";
+import { elementTint } from "../core/elements.js";
 import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffects.js";
 
 // Mirrors PICKUP_RADIUS in backend/src/authority/groundItems.js — used here
@@ -447,11 +448,13 @@ export class RenderSystem {
   // already element-specific, so this is a second, cheaper lever: a generic
   // effect fired by an elemental weapon still reads as that element rather
   // than as a white spark. `el` rides the impact descriptor from the server.
-  static get ELEMENT_TINT() {
-    return {
-      fire: "#ff9a4d", ice: "#8fdcff", lightning: "#ffe66b", arcane: "#c08cff",
-      physical: null,   // explicitly no tint -- the effect's own colour wins
-    };
+  //
+  // SOMET-329: the table itself moved to core/elements.js and is now fed by
+  // the server's catalog. Kept as an accessor because it was a public-ish
+  // surface on this class; it is a live view, not a snapshot, so a catalog
+  // applied after construction is picked up.
+  static tintFor(element) {
+    return elementTint(element);
   }
 
   // Particles for one effect. Positions come from vfx.js's particlesAt, which
@@ -473,7 +476,7 @@ export class RenderSystem {
     const parts = particlesAt(fx, t);
     if (parts.length === 0) return;
 
-    const tint = RenderSystem.ELEMENT_TINT[fx.el] || null;
+    const tint = RenderSystem.tintFor(fx.el);
     const size = Math.max(0, Number(def.particle_size) || 2);
     if (size === 0) return;
 
