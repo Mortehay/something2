@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   substituteTemplate, decodeImage, stripDataUri, storageKey, isRemoteJobId,
-  startGeneration, runGeneration, createJob, getJob, __resetJobs,
+  startGeneration, runGeneration, createJob, getJob, setJob, __resetJobs,
 } = require('../src/services/remoteImageProvider');
 
 // A one-pixel PNG, so "did a real image land in storage" is checkable rather
@@ -255,4 +255,74 @@ test('a throw inside generation becomes a failed job, not an unhandled rejection
   const job = getJob(out.job_id);
   assert.strictEqual(job.status, 'error');
   assert.match(job.error, /boom/);
+});
+
+// --- Registry bounds -----------------------------------------------------
+// The registry lives inside the long-running API server. Without eviction it
+// gains one entry per generation and never gives one back.
+
+const { __jobCount, pruneJobs } = require('../src/services/remoteImageProvider');
+
+test('the job registry does not grow without bound', async (t) => {
+  t.after(__resetJobs);
+  __resetJobs();
+  process.env.AI_PROVIDER_MAX_JOBS = '10';
+  t.after(() => { delete process.env.AI_PROVIDER_MAX_JOBS; });
+
+  for (let i = 0; i < 50; i += 1) createJob();
+  assert.ok(__jobCount() <= 10, `registry must stay capped, saw ${__jobCount()}`);
+});
+
+test('the newest jobs survive eviction, because those are the ones being polled', async (t) => {
+  t.after(__resetJobs);
+  __resetJobs();
+  process.env.AI_PROVIDER_MAX_JOBS = '3';
+  t.after(() => { delete process.env.AI_PROVIDER_MAX_JOBS; });
+
+  const ids = [];
+  for (let i = 0; i < 6; i += 1) ids.push(createJob());
+  // The last three must still be retrievable; the first three must be gone.
+  for (const id of ids.slice(-3)) {
+    assert.ok(getJob(id), `the newest jobs must survive: ${id}`);
+  }
+  assert.strictEqual(getJob(ids[0]), null, 'the oldest job should have been evicted');
+});
+
+test('jobs older than the TTL are dropped', async (t) => {
+  t.after(__resetJobs);
+  __resetJobs();
+  const old = createJob(1_000_000);
+  const fresh = createJob(1_000_000);
+  assert.ok(getJob(old));
+  // Prune at a clock far past the default 1h TTL.
+  pruneJobs(1_000_000 + 7_200_000);
+  assert.strictEqual(getJob(old), null, 'a job past the TTL must be evicted');
+  assert.strictEqual(getJob(fresh), null, 'same-age job evicted too');
+});
+
+test('the job document keeps sprite-gen\'s exact field set after the registry change', async (t) => {
+  t.after(__resetJobs);
+  __resetJobs();
+  const id = createJob();
+  // Registry bookkeeping (the timestamp) must NOT leak into what the client
+  // polls -- the UI and the three proxy routes expect sprite-gen's shape.
+  assert.deepStrictEqual(Object.keys(getJob(id)).sort(),
+    ['error', 'id', 'progress', 'result', 'status']);
+  setJob(id, { status: 'done' });
+  assert.deepStrictEqual(Object.keys(getJob(id)).sort(),
+    ['error', 'id', 'progress', 'result', 'status']);
+});
+
+// --- Template keys that collide with the prototype -----------------------
+
+test('a __proto__ key in a template is sent, not silently dropped', async () => {
+  // JSON.parse makes "__proto__" an ordinary own property; plain assignment
+  // would hit the prototype setter, dropping the key from the outgoing body.
+  const tpl = JSON.parse('{"__proto__": {"a": 1}, "prompt": "{{prompt}}"}');
+  const out = substituteTemplate(tpl, { prompt: 'wolf' });
+  assert.strictEqual(out.prompt, 'wolf');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(out)).__proto__, { a: 1 },
+    'the key must survive into the serialized body');
+  // And nothing global is harmed.
+  assert.notStrictEqual({}.a, 1);
 });

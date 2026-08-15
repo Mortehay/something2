@@ -45,23 +45,68 @@ function isRemoteJobId(id) {
 // finishes rather than one that failed. sprite-gen's own JobManager has
 // exactly the same property (a dict in the Python process), so this is parity
 // with the thing it sits beside, not a new class of fragility.
+// Entries are { at, doc }: the timestamp is registry bookkeeping and is kept
+// OUT of `doc`, because doc is handed to the client verbatim and must keep
+// sprite-gen's exact field set (id/status/progress/result/error).
 const jobs = new Map();
 
-function createJob() {
+// The registry is bounded in two ways, because without either it grows for the
+// lifetime of the process: one entry per generation, forever. sprite-gen has
+// the same shape of storage but is a separate, restartable process; this one
+// lives inside the long-running API server.
+//
+// TTL is generous relative to how long a poll lasts (the admin UI stops
+// polling within seconds of `done`), and the hard cap is the backstop for a
+// burst that outruns the TTL.
+const JOB_TTL_MS = () => parseInt(process.env.AI_PROVIDER_JOB_TTL_MS || '3600000', 10);
+const MAX_JOBS = () => parseInt(process.env.AI_PROVIDER_MAX_JOBS || '500', 10);
+
+// Called on insert rather than on a timer: no interval to leak, and the work
+// is proportional to how much the feature is actually used.
+function pruneJobs(now) {
+  const ttl = JOB_TTL_MS();
+  for (const [id, entry] of jobs) {
+    if (now - entry.at > ttl) jobs.delete(id);
+  }
+  // Map preserves insertion order, so the oldest surviving entries are first.
+  const max = MAX_JOBS();
+  if (jobs.size > max) {
+    const overflow = jobs.size - max;
+    let dropped = 0;
+    for (const id of jobs.keys()) {
+      if (dropped >= overflow) break;
+      jobs.delete(id);
+      dropped += 1;
+    }
+  }
+}
+
+function createJob(now = Date.now()) {
   const id = REMOTE_JOB_PREFIX + crypto.randomBytes(12).toString('hex');
   jobs.set(id, {
-    id, status: 'queued', progress: { done: 0, total: 1 }, result: null, error: null,
+    at: now,
+    doc: { id, status: 'queued', progress: { done: 0, total: 1 }, result: null, error: null },
   });
+  // Prune AFTER inserting, so MAX_JOBS is a true ceiling rather than a
+  // ceiling the registry is allowed to sit one above. The just-created job is
+  // the newest, so it is never the one evicted.
+  pruneJobs(now);
   return id;
 }
 
 function setJob(id, patch) {
-  const job = jobs.get(id);
-  if (job) jobs.set(id, { ...job, ...patch });
+  const entry = jobs.get(id);
+  if (entry) jobs.set(id, { ...entry, doc: { ...entry.doc, ...patch } });
 }
 
 function getJob(id) {
-  return jobs.get(id) || null;
+  const entry = jobs.get(id);
+  return entry ? entry.doc : null;
+}
+
+// Test seam: the registry's size, without exposing the Map itself.
+function __jobCount() {
+  return jobs.size;
 }
 
 // Test seam: lets a test assert on registry state without exporting the Map.
@@ -100,7 +145,16 @@ function substituteTemplate(template, vars) {
     if (Array.isArray(node)) return node.map(walk);
     if (node && typeof node === 'object') {
       const out = {};
-      for (const [k, v] of Object.entries(node)) out[k] = walk(v);
+      for (const [k, v] of Object.entries(node)) {
+        // defineProperty, not assignment: a template containing a "__proto__"
+        // key (JSON.parse makes it an ordinary own property) would otherwise
+        // hit the prototype setter -- silently DROPPING that key from the body
+        // and changing the output's prototype. Nothing global is polluted
+        // either way, but "the template goes out as written" has to be true.
+        Object.defineProperty(out, k, {
+          value: walk(v), enumerable: true, writable: true, configurable: true,
+        });
+      }
       return out;
     }
     return node;
@@ -318,6 +372,10 @@ module.exports = {
   getJob,
   setJob,
   __resetJobs,
+  __jobCount,
+  pruneJobs,
+  JOB_TTL_MS,
+  MAX_JOBS,
   GENERATE_TIMEOUT_MS,
   MAX_IMAGE_BYTES,
 };
