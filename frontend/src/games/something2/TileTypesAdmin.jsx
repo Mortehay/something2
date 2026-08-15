@@ -8,7 +8,8 @@ import { useSpriteCapability } from './useSprites.js';
 import { useBiomes } from './useBiomes.js';
 import { validateTileType } from './catalogValidation.js';
 import { entityTypesReferencingTile } from './catalogReferences.js';
-import { withOptionalBiome } from './generationJobPayload.js';
+import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
+import { ProviderChoice, ProviderAnimationNote } from './ProviderChoice.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -292,6 +293,9 @@ function TileSpritePanel({ tile }) {
   const [mode, setMode] = useState(null);     // 'image' | 'animated' while a job runs
   const [jobId, setJobId] = useState(null);
   const [biome, setBiome] = useState('');     // '' = no biome art context
+  // '' = follow the active provider; 'local' = pin to sprite-gen; '<id>' = pin
+  // to that provider. See generationJobPayload.withOptionalProvider.
+  const [provider, setProvider] = useState('');
   const { data: capability } = useSpriteCapability();
   const { biomes, isLoadingBiomes } = useBiomes();
   const generate = useGenerateTileJob();
@@ -303,9 +307,12 @@ function TileSpritePanel({ tile }) {
     setMode(which);
     setJobId(null);
     generate.mutate(
-      withOptionalBiome(
-        { tile_type: tile.name, base_prompt: tile.prompt || tile.name, frames: which === 'animated' ? 4 : 1 },
-        biome,
+      withOptionalProvider(
+        withOptionalBiome(
+          { tile_type: tile.name, base_prompt: tile.prompt || tile.name, frames: which === 'animated' ? 4 : 1 },
+          biome,
+        ),
+        provider,
       ),
       { onSuccess: (data) => setJobId(data.job_id) }
     );
@@ -357,6 +364,8 @@ function TileSpritePanel({ tile }) {
           Steers the generated art toward that biome's palette, style and exclusions.
         </div>
       </div>
+      <ProviderChoice value={provider} onChange={setProvider} />
+      <ProviderAnimationNote provider={provider} />
       <div style={{ display: 'flex', gap: '0.5rem' }}>
         <SecondaryButton type="button" onClick={() => start('image')} disabled={generate.isPending}>Generate texture</SecondaryButton>
         <SecondaryButton type="button" onClick={() => start('animated')} disabled={generate.isPending}>Generate animation</SecondaryButton>

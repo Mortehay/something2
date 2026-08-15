@@ -43,12 +43,15 @@ describe('visibleSections', () => {
     expect(items.every((i) => !i.adminType)).toBe(true);
   });
 
-  it('shows an admin the two player screens plus all eight admin screens', () => {
+  it('shows an admin the two player screens plus all nine admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(10);
+    expect(items).toHaveLength(11);
     expect(items.map((i) => i.path)).toEqual([
       '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
       '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/world-map',
+      // SOMET-330: AI Providers, last because it is configuration rather than
+      // content -- opened once to point the game at a machine, not per session.
+      '/game/settings',
     ]);
   });
 

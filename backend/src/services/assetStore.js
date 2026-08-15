@@ -29,7 +29,30 @@ async function getObjectStream(key) {
   return getClient().getObject(BUCKET(), key);
 }
 
-// Test seam: inject a fake client ({ getObject(bucket, key) -> Readable }).
+// SOMET-327: write side. Until now every object in this bucket was written by
+// the Python sprite-gen service and this module only ever read them back. A
+// remote provider's image arrives as bytes in an HTTP response to THIS
+// process, so the backend needs to be able to store one.
+//
+// ensureBucket is called on the write path because a fresh environment may
+// have no bucket yet -- sprite-gen creates it lazily for the same reason, and
+// whichever of the two writes first should not fail.
+async function ensureBucket() {
+  const bucket = BUCKET();
+  const c = getClient();
+  if (!(await c.bucketExists(bucket))) await c.makeBucket(bucket);
+}
+
+async function putObject(key, buffer, contentType = 'image/png') {
+  await ensureBucket();
+  await getClient().putObject(BUCKET(), key, buffer, buffer.length, {
+    'Content-Type': contentType,
+  });
+  return key;
+}
+
+// Test seam: inject a fake client ({ getObject(bucket, key) -> Readable,
+// bucketExists, makeBucket, putObject }).
 const __setAssetClient = (impl) => { client = impl; };
 
-module.exports = { getObjectStream, __setAssetClient, BUCKET };
+module.exports = { getObjectStream, putObject, ensureBucket, __setAssetClient, BUCKET };

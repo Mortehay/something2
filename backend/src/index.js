@@ -238,6 +238,36 @@ function evictOrWarn(worldId) {
 }
 
 // Sprite-gen HTTP bridge (mutable holder so tests can mock the outbound calls).
+const aiProviders = require('./services/aiProviders');
+const providerDiscovery = require('./services/providerDiscovery');
+const remoteImageProvider = require('./services/remoteImageProvider');
+const { resolveGenerationTarget, loadTypeOverride } = require('./services/generationTarget');
+
+// SOMET-328: the three /api/*-jobs/:jobId routes serve jobs from two different
+// engines now. The id prefix says which, so a caller polling a job never has
+// to know or care where it ran.
+//
+// JOB_ID_RE is NOT relaxed for this -- it already permits underscores, so
+// "rmt_<hex>" passes the existing traversal guard unchanged. That guard exists
+// because a sprite-gen job id is interpolated into an internal URL path
+// (SOMET-182), and remote ids never reach that path at all.
+async function fetchJobDocument(jobId) {
+  if (remoteImageProvider.isRemoteJobId(jobId)) {
+    const job = remoteImageProvider.getJob(jobId);
+    // The remote registry is in memory, so an id it has never heard of is
+    // almost always a job from before a backend restart. Answering with a
+    // failed job document -- rather than null, which the polling UI would
+    // spin on forever -- turns that into a message the admin can act on.
+    return job || {
+      id: jobId,
+      status: 'error',
+      progress: { done: 0, total: 0 },
+      result: null,
+      error: 'unknown remote job; the backend may have restarted since it started',
+    };
+  }
+  return spriteGen.getJob(jobId);
+}
 let spriteGen = require('./services/spriteGen');
 const __setSpriteGen = (impl) => { spriteGen = impl; };
 const assetStore = require('./services/assetStore');
@@ -1974,6 +2004,148 @@ app.delete('/api/biomes/:id', adminGuard, async (req, res) => {
   }
 });
 
+// --- Remote AI image providers (SOMET-322 / SOMET-324) -------------------
+//
+// Registered remote image services. EVERY route here is adminGuard'd,
+// including the reads: the rows carry a base_url pointing into the operator's
+// own network and a has_token flag, neither of which is player business.
+//
+// The token itself never appears in a response -- services/aiProviders.js's
+// serializeProvider is the only thing these routes return, and it strips it.
+
+app.get('/api/ai-providers', adminGuard, async (req, res) => {
+  try {
+    res.json(await aiProviders.listProviders(pool));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch AI providers' });
+  }
+});
+
+app.get('/api/ai-providers/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const row = await aiProviders.getProvider(pool, id);
+    if (!row) return res.status(404).json({ error: 'AI provider not found' });
+    res.json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch AI provider' });
+  }
+});
+
+app.post('/api/ai-providers', adminGuard, async (req, res) => {
+  const bad = aiProviders.providerFieldError(req.body);
+  if (bad) return res.status(400).json({ error: bad });
+  try {
+    res.status(201).json(await aiProviders.createProvider(pool, req.body));
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({ error: 'an AI provider with that name already exists' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create AI provider' });
+  }
+});
+
+// PATCH, not PUT, and that is load-bearing: the browser cannot send back a
+// token it was never given, so a partial update is the only shape that lets
+// an admin rename a provider without wiping its credentials. See
+// buildProviderPatch for the absent/""/value convention.
+app.patch('/api/ai-providers/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  const bad = aiProviders.providerFieldError(req.body, { partial: true });
+  if (bad) return res.status(400).json({ error: bad });
+  try {
+    const row = await aiProviders.updateProvider(pool, id, req.body);
+    if (!row) return res.status(404).json({ error: 'AI provider not found' });
+    res.json(row);
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({ error: 'an AI provider with that name already exists' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update AI provider' });
+  }
+});
+
+app.delete('/api/ai-providers/:id', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const deleted = await aiProviders.deleteProvider(pool, id);
+    if (!deleted) return res.status(404).json({ error: 'AI provider not found' });
+    res.json({ success: true, id: Number(id) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete AI provider' });
+  }
+});
+
+// Activation is its own endpoint rather than a PATCH field because it has a
+// cross-row effect: it deactivates whichever provider held the flag. Doing
+// that inside a general field update would make "rename this profile" capable
+// of silently switching which service draws every sprite.
+app.post('/api/ai-providers/:id/activate', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const row = await aiProviders.setActiveProvider(pool, id);
+    if (!row) return res.status(404).json({ error: 'AI provider not found' });
+    res.json(row);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to activate AI provider' });
+  }
+});
+
+// Ask a provider what models it has, and cache the answer on the row.
+//
+// A provider that is switched off is the NORMAL case here -- it is somebody's
+// desktop -- so an unreachable box answers 200 with ok:false and a reason the
+// UI can render, not a 5xx. Only a genuine server-side fault is a 500.
+//
+// On failure the previously cached list is deliberately left alone: an admin
+// who clicks Refresh while the box is asleep should not lose the model names
+// they already had.
+app.post('/api/ai-providers/:id/refresh-models', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const provider = await aiProviders.loadProviderWithSecret(pool, id);
+    if (!provider) return res.status(404).json({ error: 'AI provider not found' });
+    const result = await providerDiscovery.fetchModels(provider);
+    if (!result.ok) {
+      return res.json({ ok: false, error: result.error, status: result.status ?? null });
+    }
+    await aiProviders.saveModelsCache(pool, id, result.models);
+    res.json({ ok: true, models: result.models });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to refresh models' });
+  }
+});
+
+// Reachability probe for the Test button. Same 200-with-ok:false contract.
+app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
+  const { id } = req.params;
+  if (invalidId(id)) return res.status(400).json({ error: 'id must be an integer' });
+  try {
+    const provider = await aiProviders.loadProviderWithSecret(pool, id);
+    if (!provider) return res.status(404).json({ error: 'AI provider not found' });
+    // Spread explicitly rather than returning the provider: nothing from the
+    // row (least of all auth_token) belongs in this response.
+    const { ok, status = null, latency_ms = null, error = null } =
+      await providerDiscovery.testConnection(provider);
+    res.json({ ok, status, latency_ms, error });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to test AI provider' });
+  }
+});
+
 // Report the sprite-gen service's detected hardware capability so the entity
 // editor can show the tier and pick the right generation options.
 app.get('/api/sprite-capability', async (req, res) => {
@@ -2001,6 +2173,49 @@ async function startGenerationJob(req, res, { subject, kind, defaultFrames, fail
     // base prompt rather than failing the job.
     const [biomeRow] = biome ? await loadBiomes(pool, [biome]) : [];
     const prompt = composeBiomePrompt(base_prompt, biomeRow || null);
+
+    // SOMET-328: which service draws this. The resolution is a pure function
+    // (services/generationTarget.js) so the four-level precedence is testable
+    // on its own; everything below the branch is unchanged sprite-gen code.
+    //
+    // The two lookups are skipped entirely when the request already pins a
+    // target, so the common "no providers configured" path costs no queries.
+    const pinned = req.body.ai_provider_local === true
+      || Number.isInteger(req.body.ai_provider_id);
+    const [typeOverride, activeProvider] = pinned
+      ? [null, null]
+      : await Promise.all([
+        loadTypeOverride(pool, kind, subject).catch(() => null),
+        aiProviders.loadActiveProviderWithSecret(pool).catch(() => null),
+      ]);
+    const target = resolveGenerationTarget({
+      request: req.body, type: typeOverride, active: activeProvider,
+    });
+
+    if (target.source === 'remote') {
+      const provider = activeProvider && activeProvider.id === target.providerId
+        ? activeProvider
+        : await aiProviders.loadProviderWithSecret(pool, target.providerId);
+      if (!provider) {
+        return res.status(400).json({ error: 'the selected AI provider no longer exists' });
+      }
+      if (provider.enabled === false) {
+        return res.status(400).json({ error: `AI provider '${provider.name}' is disabled` });
+      }
+      const gen = remoteImageProvider.startGeneration(provider, {
+        subject, kind, prompt, seed, frames: frames || defaultFrames,
+      });
+      // Recorded in sprite_sets exactly like a local job so the admin's
+      // history is one list rather than two. `backend` carries the provider
+      // name, which is what an admin looking at an old row wants to know.
+      const row = await pool.query(
+        `INSERT INTO sprite_sets (creature, backend, seed, frames, job_id, status)
+         VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING *`,
+        [subject, `remote:${provider.name}`, seed, frames || defaultFrames, gen.job_id],
+      );
+      return res.status(201).json({ ...row.rows[0], job_id: gen.job_id, provider: provider.name });
+    }
+
     let effectiveTier = tier;
     if (!effectiveTier && !backend) {
       // Best-effort: if capability lookup fails, let sprite-gen use its own default.
@@ -2033,7 +2248,7 @@ app.post('/api/sprite-jobs', adminGuard, (req, res) => startGenerationJob(req, r
 app.get('/api/sprite-jobs/:jobId', async (req, res) => {
   if (!JOB_ID_RE.test(req.params.jobId)) return res.status(400).json({ error: 'invalid job id' });
   try {
-    const job = await spriteGen.getJob(req.params.jobId);
+    const job = await fetchJobDocument(req.params.jobId);
     res.json(job);
   } catch (err) {
     console.error(err);
@@ -2103,7 +2318,7 @@ app.post('/api/entity-jobs', adminGuard, (req, res) => startGenerationJob(req, r
 app.get('/api/entity-jobs/:jobId', async (req, res) => {
   if (!JOB_ID_RE.test(req.params.jobId)) return res.status(400).json({ error: 'invalid job id' });
   try {
-    res.json(await spriteGen.getJob(req.params.jobId));
+    res.json(await fetchJobDocument(req.params.jobId));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch job' });
@@ -2172,7 +2387,7 @@ app.post('/api/tile-jobs', adminGuard, (req, res) => startGenerationJob(req, res
 app.get('/api/tile-jobs/:jobId', async (req, res) => {
   if (!JOB_ID_RE.test(req.params.jobId)) return res.status(400).json({ error: 'invalid job id' });
   try {
-    res.json(await spriteGen.getJob(req.params.jobId));
+    res.json(await fetchJobDocument(req.params.jobId));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch job' });

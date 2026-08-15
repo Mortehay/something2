@@ -12,7 +12,8 @@ import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutli
 import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
 import { orphanedSpawnTiles } from './catalogReferences.js';
-import { withOptionalBiome } from './generationJobPayload.js';
+import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
+import { ProviderChoice, ProviderAnimationNote, useWillUseLocal } from './ProviderChoice.jsx';
 import { HiOutlineMagnifyingGlass } from "react-icons/hi2";
 import {
   buildBiomeIndex, biomesWithEntities, filterByBiomeTab, filterBySearch, paginate,
@@ -595,6 +596,12 @@ const KeyLabel = styled.span`
 function SpritePanel({ entity, capability, capabilityDown }) {
   const [expanded, setExpanded] = useState(false);
   const [backend, setBackend] = useState('auto');
+  // SOMET-331/346: which service draws this directional sprite set.
+  const [provider, setProvider] = useState('');
+  // The local service being offline must not block a job bound for a remote
+  // provider. See willUseLocal.
+  const runsLocally = useWillUseLocal(provider);
+  const blockedByLocal = capabilityDown && runsLocally;
   const [frames, setFrames] = useState(4);
   const [seed, setSeed] = useState(0);
   const [basePrompt, setBasePrompt] = useState('');
@@ -619,7 +626,10 @@ function SpritePanel({ entity, capability, capabilityDown }) {
       seed: parseInt(seed, 10) || 0
     };
     if (backend !== 'auto') body.backend = backend;
-    generateSprite.mutate(body, { onSuccess: (data) => setJobId(data.job_id) });
+    // Same contract as the other two panels: an unset selector sends NO
+    // provider key, so this request stays byte-identical to today's.
+    generateSprite.mutate(withOptionalProvider(body, provider),
+      { onSuccess: (data) => setJobId(data.job_id) });
   };
 
   const handleApprove = () => {
@@ -697,12 +707,15 @@ function SpritePanel({ entity, capability, capabilityDown }) {
             />
           </FormGroup>
 
+          <ProviderChoice value={provider} onChange={setProvider} />
+          <ProviderAnimationNote provider={provider} />
+
           <MainButton
             type="button"
             onClick={handleGenerate}
-            disabled={generateSprite.isPending || capabilityDown}
+            disabled={generateSprite.isPending || blockedByLocal}
           >
-            {capabilityDown ? 'Sprite service offline' : generateSprite.isPending ? 'Starting...' : 'Generate'}
+            {blockedByLocal ? 'Sprite service offline' : generateSprite.isPending ? 'Starting...' : 'Generate'}
           </MainButton>
 
           {jobId && (
@@ -747,6 +760,9 @@ function EntityTexturePanel({ entity, prompt }) {
   const [mode, setMode] = useState(null);     // 'image' | 'animated' while a job runs
   const [jobId, setJobId] = useState(null);
   const [biome, setBiome] = useState('');     // '' = no biome art context
+  // '' = follow the active provider; 'local' = pin to sprite-gen; '<id>' = pin
+  // to that provider. See generationJobPayload.withOptionalProvider.
+  const [provider, setProvider] = useState('');
   const { data: capability } = useSpriteCapability();
   const { biomes, isLoadingBiomes } = useBiomes();
   const generate = useGenerateEntityJob();
@@ -759,9 +775,12 @@ function EntityTexturePanel({ entity, prompt }) {
     setMode(which);
     setJobId(null);
     generate.mutate(
-      withOptionalBiome(
-        { entity_type: entity.name, base_prompt: base, frames: which === 'animated' ? 4 : 1 },
-        biome,
+      withOptionalProvider(
+        withOptionalBiome(
+          { entity_type: entity.name, base_prompt: base, frames: which === 'animated' ? 4 : 1 },
+          biome,
+        ),
+        provider,
       ),
       { onSuccess: (data) => setJobId(data.job_id) }
     );
@@ -815,6 +834,8 @@ function EntityTexturePanel({ entity, prompt }) {
           Steers the generated art toward that biome's palette, style and exclusions.
         </div>
       </div>
+      <ProviderChoice value={provider} onChange={setProvider} />
+      <ProviderAnimationNote provider={provider} />
       <div style={{ display: 'flex', gap: '0.5rem' }}>
         <SecondaryButton type="button" onClick={() => start('image')} disabled={generate.isPending}>Generate image</SecondaryButton>
         <SecondaryButton type="button" onClick={() => start('animated')} disabled={generate.isPending}>Generate animation</SecondaryButton>
