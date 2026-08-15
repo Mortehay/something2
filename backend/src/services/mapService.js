@@ -229,6 +229,7 @@ function worldConfig(world = {}) {
     // polyline, and the walker itself would either loop forever on a
     // non-axis-aligned segment or silently draw nothing on a malformed point.
     authoredRoads: normalizeAuthoredRoads(world.authoredRoads),
+    generatedRoads: generateConnectingRoads(world, pathTile),
   };
 }
 
@@ -236,6 +237,50 @@ function worldConfig(world = {}) {
 // put every region border exactly on a terrain-band border and collapse the
 // two-level sampler back into one level.
 const BIOME_FIELD_XOR = 0x6a09e667;
+
+// A simple Manhattan pathfinder for connecting villages and doorways
+function generateConnectingRoads(world, defaultPathTile) {
+  if (!world.villages || world.villages.length === 0) return [];
+  const roads = [];
+  
+  // Helper to draw an axis-aligned path between two points
+  const connectPoints = (r1, c1, r2, c2, type) => {
+    const line = [[r1, c1]];
+    let r = r1, c = c1;
+    // Move along the axis with the largest distance first
+    while (r !== r2 || c !== c2) {
+      if (Math.abs(r2 - r) > Math.abs(c2 - c)) {
+        r += Math.sign(r2 - r);
+      } else {
+        c += Math.sign(c2 - c);
+      }
+      line.push([r, c]);
+    }
+    roads.push({ type, line });
+  };
+
+  const vCenters = world.villages.map(v => ({
+    r: v.minRow + Math.floor(v.height / 2),
+    c: v.minCol + Math.floor(v.width / 2)
+  }));
+
+  // Connect villages to each other (e.g. grass_road)
+  for (let i = 0; i < vCenters.length - 1; i++) {
+    connectPoints(vCenters[i].r, vCenters[i].c, vCenters[i+1].r, vCenters[i+1].c, 'grass_road');
+  }
+
+  // Connect the first village to all doorways (e.g. stone_road)
+  if (world.width && world.height && world.doorways) {
+    const w = world.width, h = world.height;
+    const midW = Math.floor(w / 2), midH = Math.floor(h / 2);
+    if (world.doorways.has('N')) connectPoints(vCenters[0].r, vCenters[0].c, 0, midW, 'stone_road');
+    if (world.doorways.has('S')) connectPoints(vCenters[0].r, vCenters[0].c, h - 1, midW, 'stone_road');
+    if (world.doorways.has('E')) connectPoints(vCenters[0].r, vCenters[0].c, midH, w - 1, 'stone_road');
+    if (world.doorways.has('W')) connectPoints(vCenters[0].r, vCenters[0].c, midH, 0, 'stone_road');
+  }
+
+  return roads;
+}
 
 // Which biome owns this absolute cell, or null when the world declares none.
 // Coarse global noise (biomeCell >> cellSize), so regions read as places and
@@ -328,14 +373,15 @@ function generateWorldOverview(world, centerCol, centerRow, span, step) {
 // generateChunk is a fixed-size wrapper over this.
 function generateRegion(world, rMin, cMin, rows, cols) {
   const cfg = worldConfig(world);
-  const paths = collectPathCells(cfg, rMin, cMin, rows, cols);
+  const pathsMap = collectPathCells(cfg, rMin, cMin, rows, cols);
   const grid = [];
   for (let r = 0; r < rows; r++) {
     const row = new Array(cols);
     for (let c = 0; c < cols; c++) {
       const gRow = rMin + r, gCol = cMin + c;
-      row[c] = cfg.pathTile && paths.has(`${gRow},${gCol}`)
-        ? cfg.pathTile
+      const key = `${gRow},${gCol}`;
+      row[c] = pathsMap.has(key)
+        ? pathsMap.get(key)
         : sampleTerrain(cfg, gRow, gCol);
     }
     grid[r] = row;
@@ -566,8 +612,13 @@ function normalizeAuthoredRoads(authoredRoads) {
   if (!Array.isArray(authoredRoads)) {
     throw new Error(`authoredRoads must be an array (got ${typeof authoredRoads})`);
   }
+  const out = [];
   for (let i = 0; i < authoredRoads.length; i++) {
-    const line = authoredRoads[i];
+    const raw = authoredRoads[i];
+    const isObj = raw && !Array.isArray(raw) && typeof raw === 'object';
+    const line = isObj ? raw.line : raw;
+    const type = isObj ? raw.type : undefined;
+
     if (!Array.isArray(line) || line.length === 0) {
       throw new Error(`authoredRoads[${i}] must be a non-empty array of [row, col] points`);
     }
@@ -586,59 +637,54 @@ function normalizeAuthoredRoads(authoredRoads) {
           + 'consecutive points must share a row or a column');
       }
     }
+    out.push({ type, line });
   }
-  return authoredRoads;
+  return out;
 }
 
 // Every path cell inside the window [rMin,rMin+rows) x [cMin,cMin+cols).
-// Iterate coarse nodes whose segments could reach the window (one extra ring),
-// union their segment cells, clipped to the window.
-//
-// SOMET-289: cfg.authoredRoads is unioned in as well, clipped to the same
-// window. THIS is the one place roads are derived, so an authored road is drawn
-// by generateRegion (which stamps cfg.pathTile on whatever this returns) AND
-// made safe by safeRegion (which is handed this same Set through
-// safeContextFor) without either of them naming the feature. An empty
-// authoredRoads adds nothing, so every world that has not opted in gets the
-// byte-identical Set it got before.
+// Returns a Map from `${r},${c}` -> tile name.
 function collectPathCells(cfg, rMin, cMin, rows, cols) {
-  const set = new Set();
-  // Authored roads share the lattice's fate on a world with no path tile:
-  // generateRegion has nothing to draw them WITH, so a "safe road" that is
-  // invisible would be worse than none. Inside the guard, not before it.
-  if (!cfg.pathTile) return set;
-  {
-    const rMaxA = rMin + rows;
-    const cMaxA = cMin + cols;
-    for (const line of cfg.authoredRoads || []) {
-      authoredLineCells(line, (r, c) => {
-        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) set.add(`${r},${c}`);
+  const map = new Map();
+  const rMaxA = rMin + rows;
+  const cMaxA = cMin + cols;
+
+  if (cfg.pathTile) {
+    for (const road of cfg.authoredRoads || []) {
+      authoredLineCells(road.line, (r, c) => {
+        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) map.set(`${r},${c}`, road.type || cfg.pathTile);
       });
     }
   }
-  const rMax = rMin + rows, cMax = cMin + cols;
-  // Coarse-node index range covering the window, padded so trails entering
-  // from outside are included. A node's segment can reach up to pathJitter
-  // tiles beyond its nominal pathCell span (anchor jitter), so the padding
-  // ring must cover that reach -- not just a fixed 1 node -- or a window
-  // computed narrowly could miss cells a wider region would include.
-  const pad = Math.ceil(cfg.pathJitter / cfg.pathCell) + 1;
-  const piLo = Math.floor(rMin / cfg.pathCell) - pad;
-  const piHi = Math.floor((rMax - 1) / cfg.pathCell) + pad;
-  const pjLo = Math.floor(cMin / cfg.pathCell) - pad;
-  const pjHi = Math.floor((cMax - 1) / cfg.pathCell) + pad;
-  const add = (cells) => {
-    for (const [r, c] of cells) {
-      if (r >= rMin && r < rMax && c >= cMin && c < cMax) set.add(`${r},${c}`);
-    }
-  };
-  for (let pi = piLo; pi <= piHi; pi++) {
-    for (let pj = pjLo; pj <= pjHi; pj++) {
-      add(pathSegmentCells(cfg, pi, pj, 'E'));
-      add(pathSegmentCells(cfg, pi, pj, 'S'));
+
+  // Generated connection roads between villages/doorways
+  for (const road of cfg.generatedRoads || []) {
+    authoredLineCells(road.line, (r, c) => {
+      if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) map.set(`${r},${c}`, road.type || cfg.pathTile);
+    });
+  }
+
+  if (cfg.pathTile) {
+    const pad = Math.ceil(cfg.pathJitter / cfg.pathCell) + 1;
+    const piLo = Math.floor(rMin / cfg.pathCell) - pad;
+    const piHi = Math.floor((rMaxA - 1) / cfg.pathCell) + pad;
+    const pjLo = Math.floor(cMin / cfg.pathCell) - pad;
+    const pjHi = Math.floor((cMaxA - 1) / cfg.pathCell) + pad;
+    const add = (cells) => {
+      for (const [r, c] of cells) {
+        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) {
+          if (!map.has(`${r},${c}`)) map.set(`${r},${c}`, cfg.pathTile);
+        }
+      }
+    };
+    for (let pi = piLo; pi <= piHi; pi++) {
+      for (let pj = pjLo; pj <= pjHi; pj++) {
+        add(pathSegmentCells(cfg, pi, pj, 'E'));
+        add(pathSegmentCells(cfg, pi, pj, 'S'));
+      }
     }
   }
-  return set;
+  return map;
 }
 
 // densityAt() (a global object-density field) was removed here as dead code
@@ -688,7 +734,7 @@ function safeContextFor(cfg) {
   const ctx = buildSafeContext({
     villages: cfg.villages,
     pathCells: radius > 0 && cfg.bounds
-      ? collectPathCells(cfg, 0, 0, cfg.bounds.height, cfg.bounds.width)
+      ? new Set(collectPathCells(cfg, 0, 0, cfg.bounds.height, cfg.bounds.width).keys())
       : new Set(),
     safeRoadRadius: radius,
     safeRects: cfg.safeRects,
