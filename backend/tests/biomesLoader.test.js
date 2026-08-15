@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const { loadBiomes } = require('../src/services/biomes');
 
 function poolReturning(rows) {
@@ -57,4 +59,16 @@ test('selects every column the generator and prompt composer need', async () => 
   for (const col of ['name', 'terrain_tiles', 'flora_types', 'creature_types', 'palette', 'art_style', 'exclusions', 'color']) {
     assert.match(sql, new RegExp(`\\b${col}\\b`), `SELECT must include ${col}`);
   }
+});
+
+// A SOURCE-TEXT test, deliberately. loadBiomes uses an explicit column list,
+// so a column missing from it arrives `undefined` on the authority and on the
+// /chunk route and NOWHERE ELSE -- a DB test builds its row differently and
+// cannot see the difference. Same guard shape as spawn_portal_fallback.test.js.
+test('loadBiomes SELECT names creature_density', () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'services', 'biomes.js'), 'utf8');
+  assert.match(src, /creature_density/,
+    'loadBiomes must name creature_density in its explicit SELECT, or the '
+    + 'column arrives undefined on the live authority with a green suite');
 });

@@ -143,6 +143,12 @@ function normalizeBiomes(rawBiomes, names) {
       terrainNames: biomeTerrainNames(b, names),
       floraTypes: Array.isArray(b.flora_types) ? b.flora_types : [],
       creatureTypes: Array.isArray(b.creature_types) ? b.creature_types : [],
+      // The creature-density field's biome term (Slice A). Anything that is
+      // not a positive finite number becomes 1.0 -- "no opinion" -- rather
+      // than 0 or NaN: a 0 would make a biome silently uninhabitable and a
+      // NaN would poison the whole normalized field through the mean.
+      creatureDensity: (Number.isFinite(b.creature_density) && b.creature_density > 0)
+        ? Number(b.creature_density) : 1,
     }));
 }
 
