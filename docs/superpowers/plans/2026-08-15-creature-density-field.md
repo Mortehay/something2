@@ -618,7 +618,8 @@ Create `backend/tests/creatureDensityField_placement.test.js`:
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  placeMapCreatures, placeCreaturePacks, densityFieldFor,
+  placeMapCreatures, placeCreaturePacks, densityFieldFor, densityFieldForConfig,
+  worldConfig,
 } = require('../src/services/mapService');
 
 const TILE_TYPES = { grass: { walkable: true }, map_wall: { walkable: false } };
@@ -645,7 +646,13 @@ test('the field is redistributive: the placed count is unchanged', () => {
 test('placement concentrates creatures where the field is heavy', () => {
   const w = world();
   const field = densityFieldFor(w);
-  const placed = placeMapCreatures(w, 400, TYPES, 99);
+  // 1500, not a few hundred: the assertion below compares two rates whose
+  // expected ratio is ~1.8 against a 1.5 threshold. Placement is seeded and
+  // therefore deterministic -- there is no intermittent flake -- but a thin
+  // margin means a future seed change could land the wrong side of the
+  // threshold, and the tempting fix then is to weaken the assertion rather
+  // than investigate. A large sample keeps the margin near 3 sigma.
+  const placed = placeMapCreatures(w, 1500, TYPES, 99);
 
   // Split the placements by the weight of the tile each landed on, then compare
   // how many creatures per tile each half received. Comparing raw counts would
@@ -693,8 +700,10 @@ test('packs still seat every member', () => {
 test('pack anchors prefer heavy tiles', () => {
   const w = world();
   const field = densityFieldFor(w);
-  // 40 single-member packs are 40 independent anchor draws.
-  const specs = Array.from({ length: 40 }, () => ({ size: 1 }));
+  // 150 single-member packs are 150 independent anchor draws. A pack of size 1
+  // emits only its anchor, so this isolates anchor selection from member
+  // spreading. 150 rather than 40 for the same margin reason as the test above.
+  const specs = Array.from({ length: 150 }, () => ({ size: 1 }));
   const packed = placeCreaturePacks(w, specs, TYPES, 21);
   let heavy = 0;
   for (const p of packed) {
@@ -705,9 +714,15 @@ test('pack anchors prefer heavy tiles', () => {
     `only ${heavy}/${packed.length} anchors landed on heavy tiles`);
 });
 
-test('densityFieldFor caches per config object', () => {
-  const w = world();
-  assert.strictEqual(densityFieldFor(w), densityFieldFor(w));
+// Caching is asserted at the CONFIG level, not the world level, and that is not
+// a detail. worldConfig() returns a NEW object on every call and the WeakMap is
+// keyed on that object, so densityFieldFor(w) === densityFieldFor(w) is false by
+// construction -- two equal-valued fields with different identities. The
+// property that actually matters is that one config builds its field once,
+// because building it walks the whole map.
+test('densityFieldForConfig caches per config object', () => {
+  const cfg = worldConfig(world());
+  assert.strictEqual(densityFieldForConfig(cfg), densityFieldForConfig(cfg));
 });
 
 // THE PARITY TEST. Two call sites place wild creatures: populateWorld
@@ -832,9 +847,9 @@ and inside the **anchor** attempt loop only, after `if (!candidates) continue;`:
 
 Do **not** add this to the member-spread loop further down.
 
-- [ ] **Step 6: Export `densityFieldFor`**
+- [ ] **Step 6: Export both accessors**
 
-Add `densityFieldFor` to `mapService.js`'s `module.exports`.
+Add `densityFieldFor` **and** `densityFieldForConfig` to `mapService.js`'s `module.exports`. Both are needed: the distribution tests hold world literals and want the former, and the caching test must assert identity on a single config object, which only the latter allows.
 
 - [ ] **Step 7: Run the tests to verify they pass**
 
@@ -1052,6 +1067,23 @@ function buildSim(n, leaders) {
     });
   }
   sim.addCreatures(list);
+
+  // ASSERT THE FIXTURE, do not trust it. addCreatures stamps
+  // `behavior: resolveInstanceBehavior(c)`, and if that function does not read
+  // the field this fixture sets, every creature silently gets a non-aura
+  // behaviour -- the benchmark then measures the cheap, chunk-scoped half of
+  // the tick and reports a false all-clear, which is precisely the failure this
+  // task exists to prevent. Read resolveInstanceBehavior in
+  // src/authority/creatures.js and shape `list` to match it; this assertion is
+  // what proves you got it right.
+  const actual = [...sim.creatures.values()]
+    .filter((c) => c.behavior && c.behavior.auraRadius > 0).length;
+  if (actual !== leaders) {
+    throw new Error(
+      `fixture built ${actual} aura-carrying creatures, expected ${leaders} -- `
+      + 'the behaviour field addCreatures reads does not match this fixture, so '
+      + 'the benchmark would measure the wrong half of the tick');
+  }
   return sim;
 }
 
