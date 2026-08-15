@@ -6,6 +6,7 @@ const { rollCreatureLevel, scaleCreature } = require('./creatureLevel');
 // module would be a cycle), so the box test lives there and this module is
 // the one that imports it, never the reverse.
 const { buildSafeContext, isSafeTile, inBox: pointInVillageBox } = require('./safeRegion');
+const { buildDensityField } = require('./creatureDensityField');
 
 // generateWFC() (a wave-function-collapse generator driven by
 // tile_types.valid_neighbors) was removed here as dead code (F-010 /
@@ -703,6 +704,37 @@ function safeContextFor(cfg) {
   return ctx;
 }
 
+// One density field per generation config, cached exactly as SAFE_CTX is and
+// for the same reason: worldConfig() returns a fresh object per call, both
+// placers call it once at the top of a run, and building the field walks the
+// whole map. A WeakMap so nothing observable is mutated and the entry dies with
+// the config.
+//
+// NOTE the argument order trap: this takes the ALREADY-NORMALIZED cfg that
+// worldConfig returns, never a raw world row. worldConfig is not idempotent --
+// it deliberately omits tileTypes, so worldConfig(worldConfig(x)) throws
+// 'tileTypes is empty'.
+const DENSITY_FIELD = new WeakMap();
+
+function densityFieldFor(world) {
+  const cfg = worldConfig(world);
+  return densityFieldForConfig(cfg);
+}
+
+function densityFieldForConfig(cfg) {
+  const hit = DENSITY_FIELD.get(cfg);
+  if (hit) return hit;
+  const safeCtx = safeContextFor(cfg);
+  const field = buildDensityField(cfg, {
+    safeAt: (r, c) => isSafeTile(safeCtx, r, c),
+  }, {
+    noise: globalValueNoise,
+    regionAt: sampleBiomeRegion,
+  });
+  DENSITY_FIELD.set(cfg, field);
+  return field;
+}
+
 // Returns the creature types the local biome admits here, or null if no
 // creature may stand on this tile at all. The world's allowlist stays
 // authoritative -- a biome can only REMOVE candidates from it, never add one.
@@ -742,6 +774,7 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
   const rLo = 1, rHi = height - 2, cLo = 1, cHi = width - 2;
   if (rHi < rLo || cHi < cLo) return [];
   const rng = makeRng(rngSeed >>> 0);
+  const field = densityFieldForConfig(cfg);
   const out = [];
   for (let i = 0; i < count; i++) {
     for (let a = 0; a < maxAttempts; a++) {
@@ -749,6 +782,17 @@ function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40
       const col = cLo + Math.floor(rng() * (cHi - cLo + 1));
       const candidates = creatureTileCandidates(world, cfg, row, col, allowedTypes);
       if (!candidates) continue;
+      // The density gate (Slice A). AFTER creatureTileCandidates, never
+      // before: safe regions, walls and biome type-gating are absolute, and
+      // this only redistributes among tiles that already passed them.
+      //
+      // Drawn from the same rng stream so placement stays deterministic. This
+      // consumes one extra draw per ATTEMPT (not per placement), which shifts
+      // the stream for everything after it -- newly seeded and re-rolled worlds
+      // lay out differently than they did before this change. Creatures are
+      // persisted at world creation, so existing worlds are untouched until
+      // re-rolled. Expected, not a bug report.
+      if (rng() * field.max > field.weightAt(row, col)) continue;
       const t = candidates[Math.floor(rng() * candidates.length)];
       // Drawn from the same stream, immediately after the type pick, so the
       // roll stays deterministic given rngSeed. NOTE: this consumes one extra
@@ -811,6 +855,7 @@ function placeCreaturePacks(world, packSpecs, allowedTypes, rngSeed, maxAttempts
   const rLo = 1, rHi = height - 2, cLo = 1, cHi = width - 2;
   if (rHi < rLo || cHi < cLo) return [];
   const rng = makeRng((rngSeed ^ PACK_SALT) >>> 0);
+  const field = densityFieldForConfig(cfg);
   const out = [];
 
   const emit = (t, gRow, gCol) => {
@@ -843,6 +888,10 @@ function placeCreaturePacks(world, packSpecs, allowedTypes, rngSeed, maxAttempts
       const col = cLo + Math.floor(rng() * (cHi - cLo + 1));
       const candidates = creatureTileCandidates(world, cfg, row, col, allowedTypes);
       if (!candidates) continue;
+      // Anchors obey the field; MEMBERS do not. A pack straddling a density
+      // boundary must stay a pack -- gating members would shred it into the
+      // heavy half and defeat the point of placing a group.
+      if (rng() * field.max > field.weightAt(row, col)) continue;
       anchorRow = row;
       anchorCol = col;
       packType = candidates[Math.floor(rng() * candidates.length)];
@@ -1381,6 +1430,8 @@ module.exports = {
     placeMapCreatures,
     CREATURE_BASE_DAMAGE,
     placeCreaturePacks,
+    densityFieldFor,
+    densityFieldForConfig,
     creatureTileCandidates,
     stampBounds,
     isBoundedWorld,
