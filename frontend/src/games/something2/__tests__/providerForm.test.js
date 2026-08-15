@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   emptyProviderForm, providerToForm, providerFormToPayload, validateProviderForm,
-  parseTemplate, templateWarning, EXAMPLE_TEMPLATE,
+  parseTemplate, templateWarning, EXAMPLE_TEMPLATE, PLACEHOLDERS,
 } from '../providerForm.js';
 
 // A row as GET /api/ai-providers returns it: has_token, never auth_token.
@@ -150,5 +150,48 @@ describe('round trip', () => {
     const form = providerToForm(null);
     expect(parseTemplate(form.request_template).template).toEqual(EXAMPLE_TEMPLATE);
     expect(templateWarning(form.request_template)).toBeNull();
+  });
+});
+
+describe('sprite sheet grid (SOMET-346)', () => {
+  it('defaults to no sheet, which is a single static image', () => {
+    const form = emptyProviderForm();
+    expect(form.sheet_layout).toBe('');
+    const payload = providerFormToPayload({ ...form, name: 'x', base_url: 'http://h:1' });
+    expect(payload.sheet_layout).toBeNull();
+    expect(payload.sheet_columns).toBeNull();
+    expect(payload.sheet_rows).toBeNull();
+  });
+
+  it('sends the grid as numbers, never as empty strings', () => {
+    // The columns are integer; "" would be a cast error rather than "unset".
+    const payload = providerFormToPayload({
+      ...emptyProviderForm(), name: 'x', base_url: 'http://h:1',
+      sheet_layout: 'directional', sheet_columns: '4', sheet_rows: '8',
+      sheet_directions: 'S,SW,W,NW,N,NE,E,SE',
+    });
+    expect(payload.sheet_layout).toBe('directional');
+    expect(payload.sheet_columns).toBe(4);
+    expect(payload.sheet_rows).toBe(8);
+    expect(typeof payload.sheet_columns).toBe('number');
+    expect(payload.sheet_directions).toBe('S,SW,W,NW,N,NE,E,SE');
+  });
+
+  it('round-trips a configured sheet from a stored row', () => {
+    const form = providerToForm(row({
+      sheet_layout: 'flat', sheet_columns: 4, sheet_rows: 1, sheet_directions: null,
+    }));
+    expect(form.sheet_layout).toBe('flat');
+    expect(form.sheet_columns).toBe('4');
+    expect(form.sheet_rows).toBe('1');
+    expect(form.sheet_directions).toBe('');
+    // And back out unchanged.
+    const payload = providerFormToPayload(form);
+    expect(payload.sheet_columns).toBe(4);
+    expect(payload.sheet_directions).toBeNull();
+  });
+
+  it('offers {{frames}} so the template can tell the remote how many to draw', () => {
+    expect(PLACEHOLDERS).toContain('{{frames}}');
   });
 });

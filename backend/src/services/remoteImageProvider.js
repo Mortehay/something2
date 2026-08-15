@@ -19,6 +19,7 @@ const crypto = require('node:crypto');
 const { selectOne } = require('./pointerPath');
 const assetStore = require('./assetStore');
 const { safeFetch, redactUrl, readCapped, readJsonCapped } = require('./safeFetch');
+const { manifestForSheet } = require('./spriteSheet');
 
 // Image generation on CPU can take a minute or more. This is NOT the 30s
 // control-plane budget spriteGen.js uses -- there the long work happens
@@ -217,11 +218,11 @@ function decodeImage({ contentType, json, body }, pointer) {
 //   <bucket>/<name>/<job_id>/static.png             for creatures
 // Matching it is what lets the existing GET /api/assets/* route serve these
 // with no change, and keeps the MinIO console browsable in one scheme.
-function storageKey({ bucket, kind, subject, jobId }) {
+function storageKey({ bucket, kind, subject, jobId, file = 'static.png' }) {
   const safe = String(subject).replace(/[^A-Za-z0-9_-]/g, '_');
-  if (kind === 'tile') return `${bucket}/tiles/${safe}/${jobId}/static.png`;
-  if (kind === 'object') return `${bucket}/objects/${safe}/${jobId}/static.png`;
-  return `${bucket}/${safe}/${jobId}/static.png`;
+  if (kind === 'tile') return `${bucket}/tiles/${safe}/${jobId}/${file}`;
+  if (kind === 'object') return `${bucket}/objects/${safe}/${jobId}/${file}`;
+  return `${bucket}/${safe}/${jobId}/${file}`;
 }
 
 // Same defaults sprite-gen uses (main.py): tiles are square, everything else
@@ -259,25 +260,17 @@ async function runGeneration(jobId, provider, req, deps = {}) {
 
   setJob(jobId, { status: 'running' });
 
-  // The honest failure for the one thing this path cannot do. Silently
-  // returning a still image for an animation request would look like success
-  // until somebody noticed the sprite never moved.
-  if (Number(frames) > 1) {
-    setJob(jobId, {
-      status: 'error',
-      error: 'this provider returns a single image; animated generation needs the local '
-        + 'sprite-gen service (or SOMET-334 async queue support)',
-    });
-    return;
-  }
-
   const size = defaultSize(kind);
+  const frameCount = Math.max(1, Number(frames) || 1);
+  // {{frames}} lets the template tell the REMOTE how many frames to draw. The
+  // other machine builds the sheet; this side only needs to know how to cut it.
   const body = substituteTemplate(provider.request_template, {
     prompt,
     model: provider.model || '',
     seed: Number(seed) || 0,
     width: req.width || size.width,
     height: req.height || size.height,
+    frames: frameCount,
   });
 
   let res;
@@ -339,23 +332,55 @@ async function runGeneration(jobId, provider, req, deps = {}) {
     return;
   }
 
-  // Storage is the LAST step, after every validation above. A failed job must
-  // never leave a half-written object behind for the asset route to serve.
-  const key = storageKey({ bucket: store.BUCKET(), kind, subject, jobId });
-  try {
-    await store.putObject(key, decoded.buffer, 'image/png');
-  } catch (err) {
-    setJob(jobId, { status: 'error', error: `could not store the generated image: ${err.message}` });
-    return;
+  // A multi-frame request means the remote returned a SHEET. Compute the
+  // manifest BEFORE storing anything, so a grid that does not match the image
+  // fails without leaving an atlas the renderer would crop wrongly.
+  let sheet = null;
+  if (frameCount > 1) {
+    sheet = manifestForSheet(decoded.buffer, provider, frameCount);
+    if (sheet.error) {
+      setJob(jobId, { status: 'error', error: `sprite sheet unusable: ${sheet.error}` });
+      return;
+    }
   }
 
-  setJob(jobId, {
-    status: 'done',
-    progress: { done: 1, total: 1 },
-    // Same field names sprite-gen's _put_flat returns, so TileTypesAdmin's
-    // `result.image_key` and its approve mutation work unchanged.
-    result: { image_key: key, frames: 1, provider_id: provider.id },
-  });
+  // Storage is the LAST step, after every validation above. A failed job must
+  // never leave a half-written object behind for the asset route to serve.
+  const bucket = store.BUCKET();
+  try {
+    if (sheet) {
+      // Same names and layout sprite-gen's _put_flat writes, so the admin UI's
+      // existing animated path (atlas_key + manifest_key) needs no change.
+      const atlasKey = storageKey({ bucket, kind, subject, jobId, file: 'atlas.png' });
+      const manifestKey = storageKey({ bucket, kind, subject, jobId, file: 'atlas.json' });
+      await store.putObject(atlasKey, decoded.buffer, 'image/png');
+      await store.putObject(
+        manifestKey, Buffer.from(JSON.stringify(sheet.manifest)), 'application/json',
+      );
+      setJob(jobId, {
+        status: 'done',
+        progress: { done: sheet.frameCount, total: sheet.frameCount },
+        result: {
+          atlas_key: atlasKey,
+          manifest_key: manifestKey,
+          frames: sheet.frameCount,
+          provider_id: provider.id,
+        },
+      });
+      return;
+    }
+    const key = storageKey({ bucket, kind, subject, jobId });
+    await store.putObject(key, decoded.buffer, 'image/png');
+    setJob(jobId, {
+      status: 'done',
+      progress: { done: 1, total: 1 },
+      // Same field names sprite-gen's _put_flat returns, so TileTypesAdmin's
+      // `result.image_key` and its approve mutation work unchanged.
+      result: { image_key: key, frames: 1, provider_id: provider.id },
+    });
+  } catch (err) {
+    setJob(jobId, { status: 'error', error: `could not store the generated image: ${err.message}` });
+  }
 }
 
 module.exports = {

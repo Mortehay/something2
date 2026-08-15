@@ -10,6 +10,18 @@ const {
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const PNG_BYTES = Buffer.from(PNG_B64, 'base64');
 
+// A PNG header of an arbitrary size -- enough for pngSize to read the grid.
+function sheetPngB64(width, height) {
+  const buf = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buf, 0);
+  buf.writeUInt32BE(13, 8);
+  buf.write('IHDR', 12, 'ascii');
+  buf.writeUInt32BE(width, 16);
+  buf.writeUInt32BE(height, 20);
+  return buf.toString('base64');
+}
+
+
 // --- Template substitution ----------------------------------------------
 
 test('substitution walks nested objects and arrays', () => {
@@ -173,17 +185,53 @@ test('the request body is the substituted template, with the auth header', async
   assert.strictEqual(body.height, 128);
 });
 
-test('an animation request fails loudly instead of returning a still', async (t) => {
+test('an animation request now produces a sheet-backed atlas, not a refusal', async (t) => {
+  // SOMET-346 reverses SOMET-327's refusal. The other machine draws the whole
+  // sheet; this side stores it and computes the manifest. A 512x1280 sheet is
+  // 8 direction rows of 4 frames at 128x160.
   t.after(__resetJobs);
   const store = fakeStore();
   const jobId = createJob();
-  await runGeneration(jobId, provider, { subject: 'Wolf', kind: 'object', prompt: 'wolf', frames: 4 },
-    { fetchImpl: async () => okJson({ images: [PNG_B64] }), store });
+  const sheetProvider = { ...provider, sheet_layout: 'directional' };
+  await runGeneration(jobId, sheetProvider,
+    { subject: 'Wolf', kind: 'object', prompt: 'wolf', frames: 4 },
+    { fetchImpl: async () => okJson({ images: [sheetPngB64(512, 1280)] }), store });
 
   const job = getJob(jobId);
+  assert.strictEqual(job.status, 'done', job.error);
+  assert.ok(job.result.atlas_key.endsWith('/atlas.png'), job.result.atlas_key);
+  assert.ok(job.result.manifest_key.endsWith('/atlas.json'), job.result.manifest_key);
+  assert.strictEqual(job.result.frames, 32, '8 directions x 4 frames');
+  // Both objects really landed, and the manifest is the renderer's shape.
+  assert.ok(store.written.has(job.result.atlas_key));
+  const manifest = JSON.parse(store.written.get(job.result.manifest_key).toString());
+  assert.deepStrictEqual(manifest.cell, [128, 160]);
+  assert.deepStrictEqual(manifest.frames['S/0'], [0, 0, 128, 160]);
+});
+
+test('the frame count is offered to the template as {{frames}}', async (t) => {
+  t.after(__resetJobs);
+  let seen = null;
+  const p = { ...provider, request_template: { prompt: '{{prompt}}', batch_size: '{{frames}}' } };
+  const jobId = createJob();
+  await runGeneration(jobId, p, { subject: 'Wolf', kind: 'object', prompt: 'w', frames: 4 },
+    { fetchImpl: async (u, init) => { seen = JSON.parse(init.body); return okJson({ images: [sheetPngB64(512, 160)] }); },
+      store: fakeStore() });
+  assert.strictEqual(seen.batch_size, 4, 'the remote must be told how many frames to draw');
+  assert.strictEqual(typeof seen.batch_size, 'number');
+});
+
+test('a sheet whose grid does not match the image fails without storing anything', async (t) => {
+  t.after(__resetJobs);
+  const store = fakeStore();
+  const jobId = createJob();
+  // 510px cannot be cut into 4 equal columns (500 can -- 125 each).
+  await runGeneration(jobId, provider, { subject: 'g', kind: 'tile', prompt: 'g', frames: 4 },
+    { fetchImpl: async () => okJson({ images: [sheetPngB64(510, 128)] }), store });
+  const job = getJob(jobId);
   assert.strictEqual(job.status, 'error');
-  assert.match(job.error, /single image|animated/i);
-  assert.strictEqual(store.written.size, 0, 'a rejected request must store nothing');
+  assert.match(job.error, /does not divide evenly/);
+  assert.strictEqual(store.written.size, 0, 'a bad grid must not leave an atlas behind');
 });
 
 test('every failure path leaves no object in storage', async (t) => {

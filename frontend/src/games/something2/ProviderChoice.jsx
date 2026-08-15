@@ -54,22 +54,24 @@ export function ProviderChoice({ value, onChange }) {
   );
 }
 
-// A remote provider answers one request with one image, so it cannot produce
-// the multi-frame directional atlas the "Generate animation" button asks for.
-// Saying so here is cheaper than letting the admin click it and read a job
-// error thirty seconds later.
+// A remote provider CAN produce animation now (SOMET-346): the other machine
+// draws the whole sheet and this side cuts it using the grid configured on the
+// provider. The only thing worth saying is when that grid is missing, because
+// then an animated request will come back as an unusable sheet.
 export function ProviderAnimationNote({ provider }) {
   const { activeProvider, providers } = useAiProviders();
   if (providers.length === 0) return null;
 
-  const usingRemote = provider === ''
-    ? Boolean(activeProvider)
-    : provider !== 'local';
-  if (!usingRemote) return null;
+  const chosen = provider === ''
+    ? activeProvider
+    : (provider === 'local' ? null : providers.find((p) => String(p.id) === provider));
+  if (!chosen) return null;                       // local sprite-gen: nothing to say
+  if (chosen.sheet_layout) return null;           // configured, nothing to warn about
 
   return (
     <div style={{ fontSize: '1rem', opacity: 0.75, marginBottom: '0.75rem', color: 'var(--s2-warning, #d9822b)' }}>
-      Remote providers return a single image. Use “Local sprite-gen” for animation.
+      “{chosen.name}” has no sprite-sheet layout configured, so “Generate animation” will
+      return a sheet this side cannot cut. Set the layout and grid in AI Providers settings.
     </div>
   );
 }

@@ -30,6 +30,11 @@ const WRITABLE = [
   'models_pointer',
   'response_image_pointer',
   'enabled',
+  // SOMET-346: how to cut a multi-frame sheet the remote returns whole.
+  'sheet_layout',
+  'sheet_columns',
+  'sheet_rows',
+  'sheet_directions',
 ];
 
 // The row as the browser is allowed to see it: auth_token replaced by a

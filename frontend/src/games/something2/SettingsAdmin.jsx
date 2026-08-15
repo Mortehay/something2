@@ -144,6 +144,45 @@ function ProviderCard({ provider, isOnlyActive }) {
       </Row>
 
       <Row>
+        <Label>Sprite sheet</Label>
+        <Select value={form.sheet_layout} onChange={e => set('sheet_layout', e.target.value)}>
+          <option value="">Single image (no animation)</option>
+          <option value="flat">Flat grid — frames "0","1",… (tiles, objects)</option>
+          <option value="directional">Directional — one row per facing (creatures)</option>
+        </Select>
+      </Row>
+      {form.sheet_layout && (
+        <>
+          <Row>
+            <Label>Grid</Label>
+            <Input
+              type="number" min="1" style={{ minWidth: 90 }}
+              value={form.sheet_columns} onChange={e => set('sheet_columns', e.target.value)}
+              placeholder="columns"
+            />
+            <Input
+              type="number" min="1" style={{ minWidth: 90 }}
+              value={form.sheet_rows} onChange={e => set('sheet_rows', e.target.value)}
+              placeholder="rows"
+            />
+            {form.sheet_layout === 'directional' && (
+              <Input
+                value={form.sheet_directions}
+                onChange={e => set('sheet_directions', e.target.value)}
+                placeholder="S,SW,W,NW,N,NE,E,SE (row order)"
+                style={{ minWidth: 300 }}
+              />
+            )}
+          </Row>
+          <Hint>
+            The other machine returns the whole sheet; this only says how to cut it. Blank columns
+            uses the requested frame count; blank rows uses 1 (or one per direction). The image must
+            divide evenly into the grid or the job fails rather than cropping wrongly.
+          </Hint>
+        </>
+      )}
+
+      <Row>
         <Label>Model</Label>
         {models.length > 0 ? (
           <Select value={form.model} onChange={e => set('model', e.target.value)}>

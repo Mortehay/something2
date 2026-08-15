@@ -25,7 +25,7 @@ export const EXAMPLE_TEMPLATE = {
   override_settings: { sd_model_checkpoint: '{{model}}' },
 };
 
-export const PLACEHOLDERS = ['{{prompt}}', '{{model}}', '{{seed}}', '{{width}}', '{{height}}'];
+export const PLACEHOLDERS = ['{{prompt}}', '{{model}}', '{{seed}}', '{{width}}', '{{height}}', '{{frames}}'];
 
 export function emptyProviderForm() {
   return {
@@ -41,6 +41,12 @@ export function emptyProviderForm() {
     models_path: '/sdapi/v1/sd-models',
     models_pointer: '$[*].model_name',
     response_image_pointer: 'images[0]',
+    // SOMET-346: how to cut a multi-frame sheet the remote returns whole.
+    // Blank = a single static image, which is the pre-346 behaviour.
+    sheet_layout: '',
+    sheet_columns: '',
+    sheet_rows: '',
+    sheet_directions: '',
     enabled: true,
     // Never populated from the server -- it cannot be. Tracks whether a token
     // exists so the UI can say so without knowing its value.
@@ -64,6 +70,10 @@ export function providerToForm(row) {
     models_path: row.models_path || '',
     models_pointer: row.models_pointer || '',
     response_image_pointer: row.response_image_pointer || '',
+    sheet_layout: row.sheet_layout || '',
+    sheet_columns: row.sheet_columns == null ? '' : String(row.sheet_columns),
+    sheet_rows: row.sheet_rows == null ? '' : String(row.sheet_rows),
+    sheet_directions: row.sheet_directions || '',
     enabled: row.enabled !== false,
     has_token: Boolean(row.has_token),
     token_touched: false,
@@ -137,6 +147,12 @@ export function providerFormToPayload(form) {
     models_path: form.models_path.trim() || null,
     models_pointer: form.models_pointer.trim() || null,
     response_image_pointer: form.response_image_pointer.trim() || null,
+    sheet_layout: form.sheet_layout || null,
+    // Sent as numbers or null, never as "" -- the column is integer, and an
+    // empty string would be a cast error rather than "not configured".
+    sheet_columns: form.sheet_columns === '' ? null : Number(form.sheet_columns),
+    sheet_rows: form.sheet_rows === '' ? null : Number(form.sheet_rows),
+    sheet_directions: form.sheet_directions.trim() || null,
     enabled: form.enabled !== false,
   };
   // The three-way token decision, and the only place it is made.

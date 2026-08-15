@@ -24,3 +24,15 @@ make down      # stop everything
 - [.ai/context.md](.ai/context.md) — project context
 - [.ai/commands.md](.ai/commands.md) — full command reference
 - [.ai/stack.md](.ai/stack.md) — tech stack details
+
+## Remote AI image providers
+
+Tile textures and entity sprites can be generated on another machine (a desktop
+running Automatic1111 or similar) instead of the local `sprite-gen` container.
+This side prepares the request, waits, receives the response and stores it;
+**the other machine draws the image or sprite sheet**.
+
+See **[docs/ai-providers.md](docs/ai-providers.md)** for the full round trip —
+the exact request that goes out, the response expected back, where the result is
+stored, sprite-sheet grids, worked Automatic1111 / OpenAI-compatible templates,
+and troubleshooting.
