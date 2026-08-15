@@ -603,10 +603,17 @@ test('seeding refuses a world sealed by its own terrain', async (t) => {
   }
   try {
     await cleanup(pool);
+    // creature_types is ["Slime"] -- the type populationSpec's worlds allow --
+    // and NOT empty. This fixture is about TERRAIN sealing a world, and
+    // validateMapSpec now rejects an allowlist no declared biome admits
+    // (SOMET-315) before the navigability check ever runs. An empty roster here
+    // would make the spec fail for the wrong reason and this test would assert
+    // the wrong guard while still looking green on the regex.
     await pool.query(
       `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color)
-       VALUES ('zzSealed', '["cave_wall"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '', '', '#000000')
-       ON CONFLICT (name) DO UPDATE SET terrain_tiles = EXCLUDED.terrain_tiles`);
+       VALUES ('zzSealed', '["cave_wall"]'::jsonb, '[]'::jsonb, '["Slime"]'::jsonb, '[]'::jsonb, '', '', '#000000')
+       ON CONFLICT (name) DO UPDATE SET terrain_tiles = EXCLUDED.terrain_tiles,
+                                        creature_types = EXCLUDED.creature_types`);
     const spec = populationSpec();
     spec.worlds.forEach((w) => { w.biomes = ['zzSealed']; });
     await assert.rejects(

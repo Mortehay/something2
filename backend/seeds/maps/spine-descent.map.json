@@ -124,8 +124,7 @@
       ],
       "biome_cell": 16,
       "allowed_creature_types": [
-        "Slime",
-        "Bat"
+        "Slime"
       ],
       "is_entry": false,
       "village": {
@@ -210,7 +209,9 @@
       ],
       "biome_cell": 16,
       "allowed_creature_types": [
-        "Bat"
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line"
       ],
       "is_entry": false,
       "level_band": [
@@ -235,7 +236,9 @@
       ],
       "biome_cell": 16,
       "allowed_creature_types": [
-        "Skeleton"
+        "Ember Swarm",
+        "Ember Skirmisher",
+        "Ember Line"
       ],
       "is_entry": false,
       "level_band": [
@@ -261,8 +264,12 @@
       ],
       "biome_cell": 16,
       "allowed_creature_types": [
-        "Bat",
-        "Skeleton"
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line",
+        "Crystal Swarm",
+        "Crystal Skirmisher",
+        "Crystal Line"
       ],
       "is_entry": false,
       "level_band": [
@@ -287,7 +294,9 @@
       ],
       "biome_cell": 16,
       "allowed_creature_types": [
-        "Skeleton"
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line"
       ],
       "is_entry": false,
       "level_band": [
@@ -313,8 +322,12 @@
       ],
       "biome_cell": 16,
       "allowed_creature_types": [
-        "Bat",
-        "Skeleton"
+        "Umbral Swarm",
+        "Umbral Skirmisher",
+        "Umbral Line",
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line"
       ],
       "is_entry": false,
       "level_band": [
@@ -340,7 +353,12 @@
       ],
       "biome_cell": 16,
       "allowed_creature_types": [
-        "Skeleton"
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line",
+        "Void Swarm",
+        "Void Skirmisher",
+        "Void Line"
       ],
       "is_entry": false,
       "level_band": [

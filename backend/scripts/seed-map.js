@@ -137,8 +137,15 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
 }
 
 async function applyMapSpec(pool, spec) {
+  // One biome read, two catalog entries: biomeNames answers "does this biome
+  // exist", biomeCreatureTypes answers "which creatures can actually spawn in
+  // it" (SOMET-315). Deriving the name set from the same rows keeps them from
+  // describing two different snapshots of the table.
+  const biomeRows = (await pool.query('SELECT name, creature_types FROM biomes')).rows;
   const catalogs = {
-    biomeNames: new Set((await pool.query('SELECT name FROM biomes')).rows.map((r) => r.name)),
+    biomeNames: new Set(biomeRows.map((r) => r.name)),
+    biomeCreatureTypes: new Map(
+      biomeRows.map((r) => [r.name, Array.isArray(r.creature_types) ? r.creature_types : []])),
     creatureTypeNames: new Set(
       (await pool.query('SELECT name FROM entity_types WHERE is_creature = true')).rows.map((r) => r.name)),
   };
