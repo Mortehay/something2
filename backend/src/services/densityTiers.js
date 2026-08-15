@@ -58,10 +58,10 @@ const DEFAULT_DENSITY = 'normal';
 // and POST /api/worlds/:id/creatures -- are bounded by construction: neither
 // can place more than this without first resolving a density, and there is
 // exactly one resolver.
-// Raised from 2000 to 4000 when the tier rates doubled (SOMET-302). The
-// deepest world on the size ramp -- 224x224 at swarm -- resolves to 2408,
-// so no world the game ships is near this; it still guards the case it was
-// written for, resolveDensity('normal', 4096, 4096).
+// Raised from 2000 to 4000 when the tier rates doubled (SOMET-302). After
+// the density tier re-scale (SOMET-350), the deepest world on the size ramp
+// -- 224x224 at swarm -- resolves to ~4466 (89 * 50176 / 1000) and IS now
+// clamped. The cap still guards against larger maps and resolveDensity('normal', 4096, 4096).
 const MAX_WORLD_CREATURES = 4000;
 
 // Pure. Never reads a database -- populateWorld does the writing, including

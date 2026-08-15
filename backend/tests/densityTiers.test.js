@@ -89,7 +89,7 @@ test('the clamped total never exceeds 4000 creatures for any tier', () => {
 });
 
 // The deepest world on the size ramp is 224x224 at swarm. With the re-scaled
-// tiers, this is now clamped (4465 raw, 3928 clamped). The clamp must stay
+// tiers, this is now clamped (4466 raw, 3928 clamped). The clamp must stay
 // invisible to every world the game actually ships, which is exactly why a
 // regression in it would go unnoticed without this.
 test('the cap clamps the largest shipped world, and clamping behavior is stable', () => {

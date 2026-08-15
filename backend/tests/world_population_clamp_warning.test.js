@@ -4,12 +4,12 @@
 // (populateWorld, "was clamped to ... by MAX_WORLD_CREATURES") had ZERO
 // coverage. resolveDensity's `clamped` flag is well covered by
 // densityTiers.test.js, but the SURFACING of it -- the entire point of that
-// code -- was asserted nowhere, and is unreachable for every world the game
-// actually ships (the deepest, 224x224 swarm, resolves to 2408 against a
-// 4000 ceiling; see densityTiers.js's MAX_WORLD_CREATURES comment). A warning
-// nobody triggers in any test can be deleted by accident with the whole
-// suite still green -- exactly the "inert feature, passing suite" pattern
-// this project has shipped before (see e.g. SOMET-249's TWO-LOADER trap).
+// code -- was asserted nowhere. After the density tier re-scale (SOMET-350),
+// the deepest shipped world (224x224 swarm, ~4466 creatures) IS now clamped
+// against the 4000 ceiling. A warning that used to be unreachable can be
+// deleted by accident with the whole suite still green -- exactly the "inert
+// feature, passing suite" pattern this project has shipped before (see e.g.
+// SOMET-249's TWO-LOADER trap).
 //
 // Deliberately NOT in world_population_db.test.js: that file is DB-backed
 // (requires DATABASE_URL against the shared dev database), and the plan's
@@ -118,7 +118,7 @@ test('populateWorld does not warn when the density tier is not clamped', async (
 // this documents the margin rather than hand-waving it.
 test('sanity: the clamp fixture world genuinely exceeds MAX_WORLD_CREATURES', () => {
   const area = 4096 * 4096;
-  const target = Math.round((6 * area) / 1000); // 'normal' perThousand = 6
+  const target = Math.round((18 * area) / 1000); // 'normal' perThousand = 18
   assert.ok(target > MAX_WORLD_CREATURES,
     `fixture no longer clamps (target ${target} <= ceiling ${MAX_WORLD_CREATURES}) -- pick a larger world`);
 });
