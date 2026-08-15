@@ -15,19 +15,28 @@ const { Client } = require('pg');
 // catalog-touching section in withAdvisoryLock(pool, SAME_KEY, fn) makes those
 // two sections mutually exclusive across processes, without serializing the
 // whole suite -- unrelated files with no shared key still run fully parallel.
-// SOMET-275: was 30000. `npm test` runs every file with --test-timeout=20000,
-// so a single acquisition that used the full old budget already guaranteed
-// the file blew its own timeout -- the "give up and run unguarded, loudly"
-// fallback below could never actually fire; the test runner killed the file
-// first. seed_map_db.test.js alone calls withEntryPreserved (this lock) NINE
-// times in one run, sharing ENTRY_LOCK_KEY with entry_world.test.js,
-// chests_integration_db.test.js, seed_map_portals.test.js, and
-// seed_map_vault_chests_db.test.js -- under full-suite parallel load (218
-// files) that is enough serialized queueing on one global key to eat the
-// whole 20s budget well before any single wait reaches 30s. 6s keeps any one
+// SOMET-275: was 30000. `npm test` runs every file with a per-file
+// --test-timeout, so a single acquisition that used the full old budget
+// already guaranteed the file blew its own timeout -- the "give up and run
+// unguarded, loudly" fallback below could never actually fire; the test runner
+// killed the file first. seed_map_db.test.js alone calls withEntryPreserved
+// (this lock) NINE times in one run, sharing ENTRY_LOCK_KEY with
+// entry_world.test.js, chests_integration_db.test.js, seed_map_portals.test.js,
+// and seed_map_vault_chests_db.test.js -- under full-suite parallel load (218
+// files) that is enough serialized queueing on one global key to eat a whole
+// per-file budget well before any single wait reaches 30s. 6s keeps any one
 // acquisition from being able to consume the entire per-file timeout by
 // itself, so degrade-to-unguarded gets a real chance to run instead of the
 // file just dying.
+//
+// SOMET-345 raised that per-file budget from 20000 to 60000 (bcrypt at cost 12
+// is ~547ms a hash, and auth_routes.test.js makes 17 auth calls, so it took
+// >20s under heavy parallel load). 6000 is deliberately NOT re-derived from the
+// new number: nine sequential waits of 6s is 54s, which would fill even the
+// larger budget, and the value's real job is to bound ONE acquisition well
+// below whatever the budget is. It is stated as an absolute here rather than a
+// fraction so that reading this file tells you what it does without having to
+// go and look up package.json.
 const LOCK_WAIT_MS = 6000;
 const POLL_INTERVAL_MS = 50;
 
