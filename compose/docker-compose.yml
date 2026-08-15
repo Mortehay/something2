@@ -9,7 +9,6 @@ services:
       - "15173:5173"
     volumes:
       - ./frontend:/app
-      - /app/node_modules
     environment:
       - VITE_API_URL=http://localhost:13101
       - VITE_ENGINE_WS_URL=ws://localhost:18080/ws
@@ -24,7 +23,7 @@ services:
       - "13101:3101"
     volumes:
       - ./backend:/app
-      - /app/node_modules
+      - ./.env:/app/.env
     environment:
       - DATABASE_URL=postgres://user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/game_db
       - MINIO_ENDPOINT=minio
@@ -46,7 +45,6 @@ services:
       - "18080:8080"
     volumes:
       - ./engine:/app
-      - /app/bin
     environment:
       - ENGINE_PORT=8080
       - ENGINE_TICK_HZ=${ENGINE_TICK_HZ:-60}

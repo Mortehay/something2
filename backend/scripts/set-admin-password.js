@@ -18,8 +18,12 @@ const dotenv = require('dotenv');
 const bcrypt = require('bcryptjs');
 const { Pool } = require('pg');
 
-const ENV_PATH = path.resolve(__dirname, '../../.env');
-const BCRYPT_ROUNDS = 12; // Must match migrations/1714440025000_users.js.
+const ENV_PATH = fs.existsSync(path.resolve(__dirname, '../.env'))
+  ? path.resolve(__dirname, '../.env')
+  : fs.existsSync(path.resolve(__dirname, '../../.env'))
+  ? path.resolve(__dirname, '../../.env')
+  : path.resolve(__dirname, '../.env');
+const BCRYPT_ROUNDS = 12;
 
 // Excludes look-alikes (O/0/I/l/1) and every character that changes meaning
 // inside single quotes or under dotenv-expand: ' " ` \ $ and #.
