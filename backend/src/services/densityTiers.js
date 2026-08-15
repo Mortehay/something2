@@ -8,13 +8,33 @@
 //
 // Keep the key set in sync with worlds_density_check (migration
 // 1714440070000). The duplication is deliberate and documented there.
+//
+// Rates are per 1000 tiles, and they are the world's MEAN -- creatureDensityField
+// redistributes around them, so a `normal` world holds quiet stretches and thick
+// pockets while averaging this number.
+//
+// The per-screen column is what these were tuned against. The canvas is a fixed
+// 1280x720 with no zoom and a tile projects to a 128x64 iso diamond (4096 px^2),
+// so ONE SCREEN IS ~225 TILES and perThousand * 0.225 is creatures per screen.
+// Before this table was re-scaled the game shipped 0.7-2.7 per screen -- and
+// since every checked-in map spec uses only sparse/normal/dense, the top two
+// tiers were theoretical.
+//
+//   tier     per1000   quiet(x0.15)   mean/screen   peak(x1.5)
+//   sparse         9            0.3             2            3
+//   normal        18            0.6             4            6
+//   dense         36            1.2             8           12
+//   horde         62            2.1            14           21
+//   swarm         89            3.0            20           30
+//
+// packCount/packSize are untouched here; Slice B scales them by area.
 const DENSITY_TIERS = {
   dead:   { perThousand: 0,  packCount: 0, packSizeMin: 0, packSizeMax: 0 },
-  sparse: { perThousand: 3,  packCount: 0, packSizeMin: 0, packSizeMax: 0 },
-  normal: { perThousand: 6,  packCount: 1, packSizeMin: 3, packSizeMax: 4 },
-  dense:  { perThousand: 12, packCount: 2, packSizeMin: 4, packSizeMax: 6 },
-  horde:  { perThousand: 24, packCount: 4, packSizeMin: 5, packSizeMax: 8 },
-  swarm:  { perThousand: 48, packCount: 6, packSizeMin: 8, packSizeMax: 12 },
+  sparse: { perThousand: 9,  packCount: 0, packSizeMin: 0, packSizeMax: 0 },
+  normal: { perThousand: 18, packCount: 1, packSizeMin: 3, packSizeMax: 4 },
+  dense:  { perThousand: 36, packCount: 2, packSizeMin: 4, packSizeMax: 6 },
+  horde:  { perThousand: 62, packCount: 4, packSizeMin: 5, packSizeMax: 8 },
+  swarm:  { perThousand: 89, packCount: 6, packSizeMin: 8, packSizeMax: 12 },
 };
 
 const DENSITY_NAMES = Object.keys(DENSITY_TIERS);

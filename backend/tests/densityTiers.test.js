@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  resolveDensity, DENSITY_NAMES, DEFAULT_DENSITY, MAX_WORLD_CREATURES,
+  resolveDensity, DENSITY_TIERS, DENSITY_NAMES, DEFAULT_DENSITY, MAX_WORLD_CREATURES,
 } = require('../src/services/densityTiers');
 
 // Expected counts are written as LITERALS, never recomputed from the tier
@@ -9,19 +9,19 @@ const {
 // would assert that arithmetic works, not that the table holds the intended
 // numbers -- the test would keep passing through any edit to the table.
 
-test('normal on a 64x64 map scatters 25 with one small pack', () => {
+test('normal on a 64x64 map scatters 74 with one small pack', () => {
   assert.deepEqual(resolveDensity('normal', 64, 64),
-    { scatterCount: 25, packCount: 1, packSizeMin: 3, packSizeMax: 4, clamped: false });
+    { scatterCount: 74, packCount: 1, packSizeMin: 3, packSizeMax: 4, clamped: false });
 });
 
-test('horde on a 64x64 map is roughly 130 creatures all told', () => {
+test('horde on a 64x64 map is roughly 254 creatures all told', () => {
   assert.deepEqual(resolveDensity('horde', 64, 64),
-    { scatterCount: 98, packCount: 4, packSizeMin: 5, packSizeMax: 8, clamped: false });
+    { scatterCount: 254, packCount: 4, packSizeMin: 5, packSizeMax: 8, clamped: false });
 });
 
-test('swarm on a 64x64 map is roughly 270 creatures all told', () => {
+test('swarm on a 64x64 map is roughly 365 creatures all told', () => {
   assert.deepEqual(resolveDensity('swarm', 64, 64),
-    { scatterCount: 197, packCount: 6, packSizeMin: 8, packSizeMax: 12, clamped: false });
+    { scatterCount: 365, packCount: 6, packSizeMin: 8, packSizeMax: 12, clamped: false });
 });
 
 test('dead places nothing at all', () => {
@@ -30,15 +30,15 @@ test('dead places nothing at all', () => {
 });
 
 test('sparse and dense sit either side of normal', () => {
-  assert.equal(resolveDensity('sparse', 64, 64).scatterCount, 12);
-  assert.equal(resolveDensity('dense', 64, 64).scatterCount, 49);
+  assert.equal(resolveDensity('sparse', 64, 64).scatterCount, 37);
+  assert.equal(resolveDensity('dense', 64, 64).scatterCount, 147);
 });
 
 // The whole point of scaling per 1000 tiles: a bigger map is not sparser at
 // the same setting. 96x96 is 9216 tiles against 64x64's 4096.
 test('scatter scales with map area, so a 96x96 world is not sparser', () => {
-  assert.equal(resolveDensity('normal', 96, 96).scatterCount, 55);
-  assert.equal(resolveDensity('horde', 96, 96).scatterCount, 221);
+  assert.equal(resolveDensity('normal', 96, 96).scatterCount, 166);
+  assert.equal(resolveDensity('horde', 96, 96).scatterCount, 571);
 });
 
 test('a nullish tier resolves to the default rather than throwing', () => {
@@ -88,21 +88,56 @@ test('the clamped total never exceeds 4000 creatures for any tier', () => {
   }
 });
 
-// The deepest world on the size ramp is 224x224 at swarm -- 2408 creatures,
-// comfortably inside the ceiling. The clamp must stay invisible to every world
-// the game actually ships, which is exactly why a regression in it would go
-// unnoticed without this.
-test('the cap leaves every world on the size ramp untouched', () => {
-  assert.equal(resolveDensity('swarm', 224, 224).scatterCount, 2408);
-  assert.equal(resolveDensity('swarm', 286, 286).scatterCount, 3926);   // just under the clamp
-  assert.equal(resolveDensity('swarm', 287, 287).scatterCount, 3928);   // one tile wider: clamped
+// The deepest world on the size ramp is 224x224 at swarm. With the re-scaled
+// tiers, this is now clamped (4465 raw, 3928 clamped). The clamp must stay
+// invisible to every world the game actually ships, which is exactly why a
+// regression in it would go unnoticed without this.
+test('the cap clamps the largest shipped world, and clamping behavior is stable', () => {
+  assert.equal(resolveDensity('swarm', 224, 224).scatterCount, 3928);   // clamped
+  assert.equal(resolveDensity('swarm', 210, 210).scatterCount, 3925);   // just under the clamp
+  assert.equal(resolveDensity('swarm', 211, 211).clamped, true);        // gets clamped at 211x211
 });
 
 // The flag is the whole point of SOMET-302's ceiling work: before it, a
 // truncated world was indistinguishable from a world authored thin.
 test('clamped is true only when the ceiling actually cut the target', () => {
-  assert.equal(resolveDensity('swarm', 286, 286).clamped, false);
-  assert.equal(resolveDensity('swarm', 287, 287).clamped, true);
+  assert.equal(resolveDensity('swarm', 210, 210).clamped, false);
+  assert.equal(resolveDensity('swarm', 211, 211).clamped, true);
   assert.equal(resolveDensity('normal', 64, 64).clamped, false);
   assert.equal(resolveDensity('dead', 4096, 4096).clamped, false);
+});
+
+// Hand-typed literals. Deriving these from DENSITY_TIERS would make the test
+// pass at any value and assert nothing at all.
+//
+// The per-screen column is the reason these numbers were chosen: the canvas is
+// a fixed 1280x720 with no zoom and a tile projects to a 128x64 iso diamond
+// (4096 px^2), so one screen shows ~225 tiles. perThousand * 0.225 = per screen.
+test('density tiers deliver the intended per-screen counts', () => {
+  const perScreen = (tier) => DENSITY_TIERS[tier].perThousand * 0.225;
+  assert.strictEqual(DENSITY_TIERS.dead.perThousand, 0);
+  assert.strictEqual(DENSITY_TIERS.sparse.perThousand, 9);
+  assert.strictEqual(DENSITY_TIERS.normal.perThousand, 18);
+  assert.strictEqual(DENSITY_TIERS.dense.perThousand, 36);
+  assert.strictEqual(DENSITY_TIERS.horde.perThousand, 62);
+  assert.strictEqual(DENSITY_TIERS.swarm.perThousand, 89);
+
+  assert.ok(Math.abs(perScreen('sparse') - 2) < 0.3, 'sparse should average ~2/screen');
+  assert.ok(Math.abs(perScreen('swarm') - 20) < 0.5, 'swarm should average ~20/screen');
+});
+
+test('the ladder rises monotonically', () => {
+  const order = ['dead', 'sparse', 'normal', 'dense', 'horde', 'swarm'];
+  for (let i = 1; i < order.length; i++) {
+    assert.ok(
+      DENSITY_TIERS[order[i]].perThousand > DENSITY_TIERS[order[i - 1]].perThousand,
+      `${order[i]} must exceed ${order[i - 1]}`,
+    );
+  }
+});
+
+test('swarm on the largest shipped world clamps rather than overrunning the cap', () => {
+  const r = resolveDensity('swarm', 224, 224);
+  assert.strictEqual(r.clamped, true);
+  assert.ok(r.scatterCount <= MAX_WORLD_CREATURES);
 });
