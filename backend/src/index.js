@@ -8,7 +8,7 @@ const path = require('path');
 const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
 const {
-  fetchVillages, createVillage, insertVillageGuards, GUARD_TYPE, VILLAGE_LIMITS, villageGeometryError,
+  fetchVillages, createVillage, rederiveVillageGuards, VILLAGE_LIMITS, villageGeometryError,
 } = require('./services/villages');
 const { fetchChests } = require('./services/chests.js');
 const { worldOverviewCache, clearOverviewCache } = require('./services/overviewCache.js');
@@ -2875,10 +2875,10 @@ app.post('/api/worlds/:id/regenerate', adminGuard, async (req, res) => {
       // guards, since populateWorld's delete has no village_id to spare them
       // by. Re-derived the same way the re-roll route does: wipe and
       // re-insert from the current village rows rather than trying to spare
-      // existing guard rows individually.
-      await client.query('DELETE FROM world_creatures WHERE world_id = $1 AND type = $2',
-        [id, GUARD_TYPE]);
-      await insertVillageGuards(client, id, await fetchVillages(client, id));
+      // existing guard rows individually. The three copies of that pair in
+      // this file (and a fourth in the map seeder, for a MOVED village) are
+      // one function in services/villages.js as of SOMET-312.
+      await rederiveVillageGuards(client, id);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -2931,9 +2931,7 @@ app.post('/api/worlds/:id/creatures', adminGuard, async (req, res) => {
       });
       placed = n.total;
 
-      await client.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`,
-        [id, GUARD_TYPE]);
-      await insertVillageGuards(client, id, await fetchVillages(client, world.id));
+      await rederiveVillageGuards(client, id);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -3103,8 +3101,7 @@ app.delete('/api/worlds/:id/villages/:villageId', adminGuard, async (req, res) =
       // deletes every guard for the world, then re-inserts exactly two per
       // surviving village, so a village deleted alongside others leaves the
       // rest's guards intact, and deleting the last village leaves zero.
-      await client.query(`DELETE FROM world_creatures WHERE world_id = $1 AND type = $2`, [id, GUARD_TYPE]);
-      await insertVillageGuards(client, id, await fetchVillages(client, id));
+      await rederiveVillageGuards(client, id);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});

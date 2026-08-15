@@ -351,6 +351,30 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       errors.push(`world "${w.key}" village must be an object (got ${JSON.stringify(w.village)})`);
     }
     const villages = villagesOf(w);
+    // SOMET-312. A village's IDENTITY, and the reason this is required rather
+    // than optional.
+    //
+    // Until this key existed, the only thing a village had was its box, so
+    // scripts/seed-map.js could not tell "the author moved the village" from
+    // "the author replaced it with a different one" -- and chose to skip a
+    // world that already had any village at all. Moving a box in a spec and
+    // re-seeding in place was therefore a SILENT no-op: one row, one
+    // declaration, no count difference, nothing to warn about. SOMET-308 found
+    // the result in a browser (player spawned at the world centre, village 16
+    // tiles away).
+    //
+    // Required, not optional, because an optional identity is no identity: a
+    // spec that omits it falls straight back into the box-matching guesswork
+    // this key exists to end, and it would do so silently, at seed time, on
+    // whichever spec somebody forgot. The live rows that predate the key are
+    // ADOPTED by the applier (see the village pass in scripts/seed-map.js), so
+    // requiring it here costs nothing but the word in each spec file.
+    //
+    // Unique WITHIN the world only. Two maps may both call their village
+    // `commons`, exactly as two worlds in different specs may share a world
+    // key; the database index (villages_world_spec_key_unique) scopes it the
+    // same way.
+    const villageKeys = new Set();
     for (const v of villages) {
       // A null/non-object entry inside an otherwise well-formed array (e.g.
       // `villages: [null]`) must be REPORTED, not dereferenced -- `v.width`
@@ -360,6 +384,16 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       if (!v || typeof v !== 'object') {
         errors.push(`world "${w.key}" villages entry must be an object (got ${JSON.stringify(v)})`);
         continue;
+      }
+      if (typeof v.key !== 'string' || v.key.trim() === '') {
+        errors.push(`world "${w.key}" village must declare a non-empty string "key" `
+          + `(got ${JSON.stringify(v.key)}) -- it is what lets a re-seed MOVE this village `
+          + 'instead of silently leaving it where it was');
+      } else if (villageKeys.has(v.key)) {
+        errors.push(`world "${w.key}" declares two villages with key "${v.key}" -- `
+          + 'a village key must be unique within its world, or a re-seed cannot tell them apart');
+      } else {
+        villageKeys.add(v.key);
       }
       if (!(v.width >= VILLAGE_LIMITS.minW && v.width <= VILLAGE_LIMITS.maxW)) {
         errors.push(`world "${w.key}" village width must be between 3 and 8 tiles`);

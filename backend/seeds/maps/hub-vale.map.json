@@ -14,6 +14,7 @@
       "is_entry": true,
       "entry_spawn": { "x": 4650, "y": 4550 },
       "village": {
+        "key": "vale-crossing",
         "min_row": 44, "min_col": 44, "width": 6, "height": 4,
         "gate_edge": "E", "spawn_x": 4650, "spawn_y": 4550
       }
@@ -29,6 +30,7 @@
       "allowed_creature_types": ["Bat", "Skeleton"],
       "is_entry": false,
       "village": {
+        "key": "thornbriar",
         "min_row": 41, "min_col": 44, "width": 6, "height": 4,
         "gate_edge": "S", "spawn_x": 4550, "spawn_y": 4250
       },

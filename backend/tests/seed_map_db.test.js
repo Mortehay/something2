@@ -74,8 +74,8 @@ const spec = () => ({
     { key: 'b', name: 'zzTestBeta', grid: [6, -3], seed: 992, width: 64, height: 64,
       chunk_size: 64, biomes: [], biome_cell: 32,
       allowed_creature_types: [], is_entry: false,
-      village: { min_row: 10, min_col: 10, width: 4, height: 3, gate_edge: 'S',
-                 spawn_x: 1150, spawn_y: 1150 } },
+      village: { key: 'beta-village', min_row: 10, min_col: 10, width: 4, height: 3,
+                 gate_edge: 'S', spawn_x: 1150, spawn_y: 1150 } },
   ],
   links: [{ from: 'a', edge: 'E', to: 'b' }],
 });
@@ -123,8 +123,11 @@ test('applying a spec twice produces identical rows', async (t) => {
         // (SOMET-292, SOMET-289). An exact-shape assertion is the point: a
         // counter silently dropped from the return value is a pass that wrote
         // nothing.
-        { worlds: 2, links: 1, villages: 1, portalGuards: 0, creatures: 0, vaultChests: 0,
-          waypoints: 0, waypointsRemoved: 0, penCreatures: 0 },
+        // villagesMoved is 0 for the same reason (SOMET-312): on a first seed
+        // every village is CREATED, so a non-zero here would mean the applier
+        // had counted a creation as a move.
+        { worlds: 2, links: 1, villages: 1, villagesMoved: 0, portalGuards: 0, creatures: 0,
+          vaultChests: 0, waypoints: 0, waypointsRemoved: 0, penCreatures: 0 },
         'applyMapSpec must report exactly what it wrote, not just resolve');
 
       // Correctness rule 3: is_entry must actually be set on the spec's
@@ -507,7 +510,7 @@ const villagePopulationSpec = () => ({
       // 26, cols 22 and 24). It used to read (2350,2650) = a tile outside the
       // box entirely -- harmless to this fixture's assertions but not a legal
       // village, and validateMapSpec now rejects it (SOMET-153).
-      village: { ...VILLAGE_BOX, gate_edge: 'S', spawn_x: 2150, spawn_y: 2550 } },
+      village: { key: 'pop-village', ...VILLAGE_BOX, gate_edge: 'S', spawn_x: 2150, spawn_y: 2550 } },
   ],
   links: [],
 });
@@ -886,10 +889,22 @@ test('allows_fast_travel round-trips through a real seed, both directions', asyn
 // the ON CONFLICT SET actually re-asserts these two columns the way
 // "allows_fast_travel round-trips through a real seed" proves it for that
 // column.
-const MULTI_VILLAGE_A = { min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
-  spawn_x: 1150, spawn_y: 1150 };
-const MULTI_VILLAGE_B = { min_row: 30, min_col: 30, width: 6, height: 4, gate_edge: 'S',
-  spawn_x: 3150, spawn_y: 3150 };
+// Only the APPLIER's own warnings. populateWorld writes to the same stream (its
+// scatter under-delivery line) and names the same world, so matching on the
+// world name alone would let an unrelated warning satisfy an assertion about
+// this one. Shared by the two village-convergence tests below.
+const captureSeedWarnings = async (fn) => {
+  const lines = [];
+  const real = console.warn;
+  console.warn = (...args) => { lines.push(args.join(' ')); };
+  try { await fn(); } finally { console.warn = real; }
+  return lines.filter((l) => l.startsWith('seed-map:'));
+};
+
+const MULTI_VILLAGE_A = { key: 'north', min_row: 10, min_col: 10, width: 6, height: 4,
+  gate_edge: 'S', spawn_x: 1150, spawn_y: 1150 };
+const MULTI_VILLAGE_B = { key: 'south', min_row: 30, min_col: 30, width: 6, height: 4,
+  gate_edge: 'S', spawn_x: 3150, spawn_y: 3150 };
 const multiVillageSpec = ({ safe = false, villages = [MULTI_VILLAGE_A, MULTI_VILLAGE_B] } = {}) => ({
   name: 'zz-test-multi-village-fixture',
   topology: 'spine',
@@ -954,12 +969,15 @@ test('a world with two villages creates both, idempotently, and safe-territory c
       assert.equal(safeAfterFirst.safe_road_radius, 3);
       assert.deepEqual(safeAfterFirst.safe_rects, [{ min_row: 0, min_col: 0, width: 2, height: 2 }]);
 
-      // Idempotent: the village-existence check is per-world, all-or-nothing
-      // -- re-applying must not create a third/fourth village or double the
-      // guard count.
+      // Idempotent: villages are matched to the spec by their key (SOMET-312),
+      // so re-applying must not create a third/fourth village, must not report
+      // a move, and must not double the guard count.
       const second = await applyMapSpec(pool, s);
       assert.equal(second.villages, 0,
         're-applying an unchanged spec must not report re-creating either village');
+      assert.equal(second.villagesMoved, 0,
+        're-applying an UNCHANGED spec must not report moving anything either — a move '
+        + 'reported here would mean the applier cannot tell an unchanged box from a moved one');
       const villageRowsAfter = await pool.query(
         `SELECT count(*)::int AS n FROM villages v
            JOIN worlds w ON w.id = v.world_id WHERE w.name = 'zzTestMultiVillage'`);
@@ -989,36 +1007,31 @@ test('a world with two villages creates both, idempotently, and safe-territory c
   }
 });
 
-// SOMET-288 review, finding 3. Villages are the ONE authored thing a re-seed
-// does not converge: every column on `worlds` is re-asserted via ON CONFLICT
-// SET (safe_road_radius and safe_rects included, proved just above), so an
-// author who adds a village to an already-seeded world gets a clean exit code
-// and no second village. SOMET-289 does exactly that.
+// SOMET-288 review finding 3, as re-answered by SOMET-312.
 //
-// The no-op itself is deliberate and unchanged here -- a village has no
-// identity beyond its box, so "create the missing ones" cannot be written
-// safely. What changes is that it stops being silent.
-test('adding a village to an already-seeded world warns instead of silently doing nothing', async (t) => {
+// Villages used to be the ONE authored thing a re-seed did not converge: every
+// column on `worlds` is re-asserted via ON CONFLICT SET (safe_road_radius and
+// safe_rects included, proved just above), but a world that already held any
+// village was skipped whole. An author who added a village to a seeded world
+// (SOMET-289) got a clean exit code and no second village; SOMET-288's answer
+// was to make that no-op WARN, because "a village has no identity beyond its
+// box" and creating "the missing ones" could not be written safely.
+//
+// It has one now -- `key` -- so the no-op is gone and this asserts the
+// convergence that replaced it. The refusal has not disappeared, it has moved
+// to the case that is genuinely ambiguous: see the "cannot be untangled" test
+// below, which is what stops this from being a licence to guess.
+test('adding a village to an already-seeded world creates it, matched by key', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) {
-    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — the village-drift warning is UNVERIFIED`;
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — village convergence is UNVERIFIED`;
     if (process.env.CI) assert.fail(msg);
     t.skip(msg);
     return;
   }
-  // Only this applier's own warnings. populateWorld writes to the same stream
-  // (its scatter under-delivery line) and names the same world, so matching on
-  // the world name alone would let an unrelated warning satisfy this test.
-  const captureSeedWarnings = async (fn) => {
-    const lines = [];
-    const real = console.warn;
-    console.warn = (...args) => { lines.push(args.join(' ')); };
-    try { await fn(); } finally { console.warn = real; }
-    return lines.filter((l) => l.startsWith('seed-map:'));
-  };
-  const villageCount = async () => (await pool.query(
-    `SELECT count(*)::int AS n FROM villages v JOIN worlds w ON w.id = v.world_id
-      WHERE w.name = 'zzTestMultiVillage'`)).rows[0].n;
+  const villageRows = async () => (await pool.query(
+    `SELECT v.spec_key, v.min_row FROM villages v JOIN worlds w ON w.id = v.world_id
+      WHERE w.name = 'zzTestMultiVillage' ORDER BY v.min_row`)).rows;
 
   try {
     await cleanup(pool);
@@ -1031,32 +1044,103 @@ test('adding a village to an already-seeded world warns instead of silently doin
       });
       assert.deepEqual(firstRunWarnings, [],
         'a first seed creates every village it declares — warning there is pure noise');
+      assert.deepEqual(await villageRows(), [{ spec_key: 'north', min_row: MULTI_VILLAGE_A.min_row }],
+        'the created village must carry its spec key, or nothing can find it again');
 
       // Control: an UNCHANGED spec re-applied is a legitimate no-op and must
-      // stay quiet, or the warning means nothing when it does fire.
+      // stay quiet, or a warning means nothing when it does fire.
       const unchangedWarnings = await captureSeedWarnings(() => applyMapSpec(pool, oneVillage()));
       assert.deepEqual(unchangedWarnings, [],
-        're-applying an unchanged spec must not warn — the counts agree');
+        're-applying an unchanged spec must not warn');
 
       // The real case: the spec now declares two villages, the world has one.
-      const driftWarnings = await captureSeedWarnings(async () => {
+      // "north" is matched by key and left alone; "south" is missing and is
+      // created. No warning, because nothing is ambiguous.
+      const grownWarnings = await captureSeedWarnings(async () => {
         const grown = await applyMapSpec(pool, multiVillageSpec());
-        assert.equal(grown.villages, 0,
-          'the all-or-nothing no-op must be unchanged — this task warns, it does not mutate');
+        assert.equal(grown.villages, 1, 'the village the spec added must be CREATED, not skipped');
+        assert.equal(grown.villagesMoved, 0,
+          'the village that did not move must not be reported as moved');
       });
-      assert.equal(driftWarnings.length, 1, `expected exactly one warning, got ${JSON.stringify(driftWarnings)}`);
-      assert.match(driftWarnings[0], /zzTestMultiVillage/, 'the warning must name the world');
-      assert.match(driftWarnings[0], /already has 1 village/, 'the warning must carry the live count');
-      assert.match(driftWarnings[0], /declares 2/, 'the warning must carry the spec count');
+      assert.deepEqual(grownWarnings, [],
+        'adding a village is unambiguous — matched by key, so there is nothing to warn about');
 
-      assert.equal(await villageCount(), 1,
-        'the live village rows must be left exactly as they were');
-      // The second village really is missing -- if the applier had created it
-      // the count above would be 2 and the warning would have been wrong.
-      const rows = await pool.query(
-        `SELECT v.min_row FROM villages v JOIN worlds w ON w.id = v.world_id
-          WHERE w.name = 'zzTestMultiVillage'`);
-      assert.equal(Number(rows.rows[0].min_row), MULTI_VILLAGE_A.min_row);
+      assert.deepEqual(await villageRows(), [
+        { spec_key: 'north', min_row: MULTI_VILLAGE_A.min_row },
+        { spec_key: 'south', min_row: MULTI_VILLAGE_B.min_row },
+      ], 'both villages must exist as real rows, each under its own spec key');
+
+      // Four guards, not two: the created village brought its own pair, and the
+      // pre-existing one did not lose or duplicate its own.
+      const guards = await pool.query(
+        `SELECT count(*)::int AS n FROM world_creatures wc JOIN worlds w ON w.id = wc.world_id
+          WHERE w.name = 'zzTestMultiVillage' AND wc.type = 'Village Guard'`);
+      assert.equal(guards.rows[0].n, 4, 'each village must hold exactly two gate guards');
+    });
+  } finally {
+    await cleanup(pool);
+    await pool.end().catch(() => {});
+  }
+});
+
+// SOMET-312 — the case the applier must still REFUSE.
+//
+// Convergence by key is safe because the key is an identity. Take it away and
+// there is nothing left to reason with, so the applier must decline rather than
+// pair rows off in array order: an unkeyed row is adopted only when the pairing
+// is forced (one spec entry, one row). Two unkeyed rows against one declaration
+// is a genuine ambiguity, and guessing there is the exact mistake this ticket
+// is about, one level up.
+test('villages that cannot be untangled are refused, loudly, and left alone', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} (${pool.unreachable}) — the ambiguity refusal is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  const boxes = async () => (await pool.query(
+    `SELECT v.min_row FROM villages v JOIN worlds w ON w.id = v.world_id
+      WHERE w.name = 'zzTestMultiVillage' ORDER BY v.min_row`)).rows.map((r) => Number(r.min_row));
+
+  try {
+    await cleanup(pool);
+    await withEntryPreserved(pool, async () => {
+      await applyMapSpec(pool, multiVillageSpec());          // two villages, both keyed
+      assert.deepEqual(await boxes(), [MULTI_VILLAGE_A.min_row, MULTI_VILLAGE_B.min_row],
+        'the fixture must start with BOTH villages, or the ambiguity below never arises');
+
+      // Strip the keys: this is what a database seeded before SOMET-312 looks
+      // like. Written through SQL rather than by seeding, because there is no
+      // longer any code path that produces an unkeyed seeded village -- which
+      // is the point: the state exists in the wild, not in this repo.
+      await pool.query(
+        `UPDATE villages SET spec_key = NULL
+          WHERE world_id = (SELECT id FROM worlds WHERE name = 'zzTestMultiVillage')`);
+
+      // One declaration, two unkeyed rows, and the declaration's box matches
+      // NEITHER of them -- so the exact-box adoption cannot fire either.
+      //
+      // Shifted by one tile rather than moved across the map, because this
+      // world is is_entry and SOMET-335 pins its entry_spawn to a village spawn
+      // it declares: rows 9..12 / cols 9..14 still holds spawn tile (11,11), so
+      // the box genuinely differs from both live rows while the spec stays
+      // valid and this test keeps failing for the reason it is named for.
+      const moved = { ...MULTI_VILLAGE_A, min_row: 9, min_col: 9 };
+      const warnings = await captureSeedWarnings(async () => {
+        const n = await applyMapSpec(pool, multiVillageSpec({ villages: [moved] }));
+        assert.equal(n.villages, 0, 'nothing may be created while the pairing is ambiguous');
+        assert.equal(n.villagesMoved, 0, 'nothing may be moved while the pairing is ambiguous');
+      });
+
+      assert.equal(warnings.length, 1, `expected exactly one warning, got ${JSON.stringify(warnings)}`);
+      assert.match(warnings[0], /zzTestMultiVillage/, 'the warning must name the world');
+      assert.match(warnings[0], /cannot be\s+deduced/, 'the warning must say why nothing was applied');
+      assert.match(warnings[0], /"north"/, 'the warning must name the spec village left unapplied');
+
+      assert.deepEqual(await boxes(), [MULTI_VILLAGE_A.min_row, MULTI_VILLAGE_B.min_row],
+        'both live rows must be exactly where they were — a refusal that still wrote something '
+        + 'would be worse than the silent skip it replaced');
     });
   } finally {
     await cleanup(pool);
@@ -1106,8 +1190,8 @@ const PEN_SPEC = () => ({
       // restores the real entry world afterwards, but it cannot close the window
       // while the apply is running.
       entry_spawn: { x: 1150, y: 1150 },
-      village: { min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
-                 spawn_x: 1150, spawn_y: 1150 },
+      village: { key: 'pen-village', min_row: 10, min_col: 10, width: 6, height: 4,
+                 gate_edge: 'S', spawn_x: 1150, spawn_y: 1150 },
       level_band: [1, 2],
       safe_road_radius: 3,
       chest: { x: 550, y: 550, guard_creature_type: 'Wolf', level: 3 },

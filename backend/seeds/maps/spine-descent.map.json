@@ -27,6 +27,7 @@
         "y": 4850
       },
       "village": {
+        "key": "trailhead",
         "min_row": 47,
         "min_col": 46,
         "width": 6,
@@ -129,6 +130,7 @@
       ],
       "is_entry": false,
       "village": {
+        "key": "windwatch",
         "min_row": 56,
         "min_col": 70,
         "width": 6,

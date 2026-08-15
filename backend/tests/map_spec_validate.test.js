@@ -247,7 +247,7 @@ test('does not throw when a linked world grid is not an array', () => {
 test('rejects a village outside the size limits the API enforces', () => {
   // index.js validateVillageBody: width 3-8, height 3-6.
   const errs = errorsFor((s) => {
-    s.worlds[0].village = { min_row: 4, min_col: 4, width: 20, height: 20,
+    s.worlds[0].village = { key: 'v', min_row: 4, min_col: 4, width: 20, height: 20,
       gate_edge: 'S', spawn_x: 500, spawn_y: 600 };
   });
   assert.ok(errs.some((e) => /width must be between 3 and 8/i.test(e)), errs.join('; '));
@@ -261,7 +261,7 @@ test('rejects a village gate_edge outside N/E/S/W', () => {
   // Nothing in the brief's suite ever sets an invalid gate_edge -- this
   // fixture uses valid width/height so gate_edge is the only broken field.
   const errs = errorsFor((s) => {
-    s.worlds[0].village = { min_row: 4, min_col: 4, width: 5, height: 4,
+    s.worlds[0].village = { key: 'v', min_row: 4, min_col: 4, width: 5, height: 4,
       gate_edge: 'UP', spawn_x: 500, spawn_y: 600 };
     // World `a` is the entry world, so SOMET-335 also requires entry_spawn to
     // BE this village's spawn. Aligned here so gate_edge stays the only broken
@@ -395,11 +395,11 @@ test('several worlds may allow fast travel at once', () => {
 // A legal 6x4 village whose spawn is genuinely interior. Cloned per case so a
 // mutation in one test cannot leak into another.
 const VILLAGE_A = () => ({
-  min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
+  key: 'a-village', min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
   spawn_x: 1150, spawn_y: 1150,
 });
 const VILLAGE_B = () => ({
-  min_row: 30, min_col: 30, width: 6, height: 4, gate_edge: 'S',
+  key: 'b-village', min_row: 30, min_col: 30, width: 6, height: 4, gate_edge: 'S',
   spawn_x: 3150, spawn_y: 3150,
 });
 
@@ -426,6 +426,69 @@ test('the singular village key still validates unchanged', () => {
   assert.deepEqual(errorsFor((s) => {
     s.worlds[0].village = VILLAGE_A();
     alignEntrySpawn(s.worlds[0], VILLAGE_A());
+  }), []);
+});
+
+// --- SOMET-312: a village's identity ---------------------------------------
+//
+// The key is what lets scripts/seed-map.js MOVE a village instead of skipping
+// the world it is in. Required rather than optional: an optional identity is no
+// identity, because the spec that omits it silently falls back into the
+// box-matching guesswork that let a moved village drift unreported (SOMET-308).
+test('a village without a key is rejected', () => {
+  const noKey = (make) => { const v = make(); delete v.key; return v; };
+  const errs = errorsFor((s) => {
+    s.worlds[0].village = noKey(VILLAGE_A);
+    alignEntrySpawn(s.worlds[0], VILLAGE_A());
+  });
+  assert.equal(errs.length, 1, errs.join('; '));
+  assert.match(errs[0], /village must declare a non-empty string "key"/);
+  assert.match(errs[0], /world "a"/, 'the error must name the world an author has to go and edit');
+
+  // The plural form is the same rule, applied to EVERY entry rather than the
+  // first: a rule that checks one element of a list is the same half-applied
+  // rule in a new costume (the phrasing this file already uses for the geometry
+  // checks, and the mistake those checks were fixed for).
+  const second = errorsFor((s) => {
+    s.worlds[0].villages = [VILLAGE_A(), noKey(VILLAGE_B)];
+    alignEntrySpawn(s.worlds[0], VILLAGE_A());
+  });
+  assert.equal(second.length, 1, second.join('; '));
+  assert.match(second[0], /village must declare a non-empty string "key"/);
+});
+
+test('a village key must be a non-empty string, not merely present', () => {
+  // Each of these is a way a hand-edited spec gets it wrong, and each would be
+  // truthy-enough to reach the database as a key nothing could ever match back.
+  for (const bad of [null, '', '   ', 7, true, {}]) {
+    const errs = errorsFor((s) => {
+      s.worlds[0].village = { ...VILLAGE_A(), key: bad };
+      alignEntrySpawn(s.worlds[0], VILLAGE_A());
+    });
+    assert.equal(errs.length, 1, `key ${JSON.stringify(bad)}: ${errs.join('; ')}`);
+    assert.match(errs[0], /non-empty string "key"/, `key ${JSON.stringify(bad)} was accepted`);
+  }
+});
+
+test('two villages in one world may not share a key', () => {
+  // Duplicated keys are worse than missing ones: villages_world_spec_key_unique
+  // would refuse the second INSERT mid-transaction with a raw constraint error,
+  // and before that the applier would match both spec entries to one row.
+  const errs = errorsFor((s) => {
+    s.worlds[0].villages = [VILLAGE_A(), { ...VILLAGE_B(), key: VILLAGE_A().key }];
+    alignEntrySpawn(s.worlds[0], VILLAGE_A());
+  });
+  assert.equal(errs.length, 1, errs.join('; '));
+  assert.match(errs[0], /two villages with key/);
+});
+
+test('two worlds MAY reuse a village key', () => {
+  // Scoped per world, like the database index. Two maps naming their village
+  // `commons` is not a mistake, and rejecting it would be an invented rule.
+  assert.deepEqual(errorsFor((s) => {
+    s.worlds[0].village = VILLAGE_A();
+    alignEntrySpawn(s.worlds[0], VILLAGE_A());
+    s.worlds[1].village = { ...VILLAGE_B(), key: VILLAGE_A().key };
   }), []);
 });
 
@@ -460,7 +523,7 @@ test('two villages in one world may not overlap', () => {
   const errs = errorsFor((s) => {
     s.worlds[0].villages = [
       VILLAGE_A(),
-      { min_row: 12, min_col: 12, width: 6, height: 4, gate_edge: 'S',
+      { key: 'overlapper', min_row: 12, min_col: 12, width: 6, height: 4, gate_edge: 'S',
         spawn_x: 1350, spawn_y: 1350 },
     ];
   });
@@ -586,7 +649,7 @@ test('every key the applier actually reads is accepted', () => {
       roads: [[[32, 1], [32, 40]]],
       pens: [{ min_row: 40, min_col: 40, width: 4, height: 4,
                creature_type: 'Slime', count: 3, level: 1 }],
-      village: { min_row: 20, min_col: 20, width: 6, height: 4, gate_edge: 'S',
+      village: { key: 'v', min_row: 20, min_col: 20, width: 6, height: 4, gate_edge: 'S',
                  spawn_x: 2150, spawn_y: 2150 },
       // World `a` is the entry world; SOMET-335 requires entry_spawn to be the
       // spawn of the village it declares. `entry_spawn` is on the allowlist
@@ -624,7 +687,7 @@ test('an unknown key on a world that also fails another check is still reported'
 // 10..15, so its interior is rows 11..12 and cols 11..14 and spawn
 // (1150,1150) = tile (11,11) is genuinely interior.
 const B_VILLAGE = () => ({
-  min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
+  key: 'b-village', min_row: 10, min_col: 10, width: 6, height: 4, gate_edge: 'S',
   spawn_x: 1150, spawn_y: 1150,
 });
 const B_PEN = () => ({
@@ -776,7 +839,7 @@ test('the entry world may match ANY of several villages it declares', () => {
   assert.deepEqual(errorsFor((s) => {
     s.worlds[0].villages = [
       B_VILLAGE(),
-      { min_row: 20, min_col: 20, width: 6, height: 4, gate_edge: 'S', spawn_x: 2150, spawn_y: 2150 },
+      { key: 'second', min_row: 20, min_col: 20, width: 6, height: 4, gate_edge: 'S', spawn_x: 2150, spawn_y: 2150 },
     ];
     s.worlds[0].entry_spawn = { x: 2150, y: 2150 };
   }), []);

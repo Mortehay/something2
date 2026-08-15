@@ -258,6 +258,7 @@
       ],
       "density": "sparse",
       "village": {
+        "key": "underdeep-hub",
         "min_row": 44,
         "min_col": 44,
         "width": 6,
@@ -855,6 +856,7 @@
       ],
       "density": "dense",
       "village": {
+        "key": "frozen-vaults-hub",
         "min_row": 76,
         "min_col": 76,
         "width": 6,
@@ -1452,6 +1454,7 @@
       ],
       "density": "swarm",
       "village": {
+        "key": "abyss-hub",
         "min_row": 108,
         "min_col": 108,
         "width": 6,

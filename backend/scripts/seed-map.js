@@ -24,7 +24,9 @@ const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const { validateMapSpec, villagesOf } = require('../seeds/mapSpec.js');
 const { fetchLinks, setLink, setPortalLink } = require('../src/services/mapLinks.js');
-const { createVillage, fetchVillages } = require('../src/services/villages.js');
+const {
+  createVillage, fetchVillages, repositionVillage, rederiveVillageGuards,
+} = require('../src/services/villages.js');
 const {
   pensOf, placePenCreatures, insertPenCreatures, worldHasPennedCreatures,
 } = require('../src/services/pens.js');
@@ -339,47 +341,192 @@ async function applyMapSpec(pool, spec) {
           + 'declaring `guard` does not remove them').join('\n  - '));
     }
 
+    // Villages CONVERGE to the spec (SOMET-312), the same way every authored
+    // column on `worlds` already does.
+    //
+    // This pass used to be all-or-nothing per world -- a world that held any
+    // village was skipped whole, and only a COUNT difference warned. A village
+    // whose box had moved is 1 row against 1 declaration, so it drifted in
+    // total silence; SOMET-308 hit it in a browser, spawning the player at a
+    // resized world's centre with the village still 16 tiles away. The reason
+    // given for the skip was that "a village has no identity beyond its box".
+    // It has one now: `key`, required by validateMapSpec and stored in
+    // villages.spec_key, which is what lets this MOVE a village instead of
+    // guessing whether it is the same one.
+    //
+    // What still does NOT happen here is a DELETE. A village row owns its
+    // merchant_stock by ON DELETE CASCADE, and that stock includes items
+    // players listed for sale, so dropping a village the spec stopped
+    // declaring would confiscate player property on the strength of an edit to
+    // a JSON file. Those rows are reported instead, loudly, and left for a
+    // human -- `make reseed-map` (which clears every world first) is still the
+    // way to converge a removal.
     let villages = 0;
+    let villagesMoved = 0;
     for (const w of spec.worlds) {
       const specVillages = villagesOf(w);
       if (specVillages.length === 0) continue;
       const worldId = idByKey.get(w.key);
-      const existing = await client.query('SELECT id FROM villages WHERE world_id = $1', [worldId]);
-      // Idempotent, and all-or-nothing per world: a world that already has any
-      // village is left exactly as it is. Creating "the ones that are missing"
-      // would need an identity for a village beyond its box, which the spec
-      // does not carry -- and a partial re-create would double a village's
-      // guards and re-seed its merchant.
-      if (existing.rowCount === 0) {
-        for (const v of specVillages) {
+      const existing = (await client.query(
+        // created_at ASC is the order fetchVillages uses and the order this
+        // loop created them in on the first seed, so "the Nth row" and "the Nth
+        // spec entry" mean the same thing for anything this script wrote. `id`
+        // breaks the tie for two villages created inside one transaction, where
+        // now() -- and so created_at -- is identical for both.
+        `SELECT id, spec_key, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y
+           FROM villages WHERE world_id = $1 ORDER BY created_at ASC, id ASC`,
+        [worldId],
+      )).rows;
+
+      // --- match spec entries to live rows -------------------------------
+      // Three passes, most certain first. Nothing is ever matched by guesswork:
+      // a leftover on either side is reported rather than paired up.
+      const claimed = new Set();
+      const matched = new Map();   // spec village -> live row (or undefined)
+
+      // 1. By key. The only match that survives a move, and the only one that
+      //    exists at all once a database has been seeded by this version.
+      const byKey = new Map(existing.filter((r) => r.spec_key != null).map((r) => [r.spec_key, r]));
+      for (const v of specVillages) {
+        const row = byKey.get(v.key);
+        if (row) { matched.set(v, row); claimed.add(row.id); }
+      }
+
+      // 2. ADOPTION, exact box. A row written before spec_key existed carries
+      //    no key, but if its box is still byte-for-byte what the spec says
+      //    then which village it is cannot be in doubt. Stamping the key here
+      //    is what makes the NEXT edit to that box a move rather than a
+      //    re-adoption -- and it is why no migration backfills this column
+      //    (SOMET-335: a migration that repairs seeded content is undone by the
+      //    next re-seed; the seed path has to be the one that converges).
+      const sameBox = (r, v) => r.min_row === v.min_row && r.min_col === v.min_col
+        && r.width === v.width && r.height === v.height
+        && String(r.gate_edge).trim() === v.gate_edge;
+      for (const v of specVillages) {
+        if (matched.has(v)) continue;
+        const row = existing.find((r) => r.spec_key == null && !claimed.has(r.id) && sameBox(r, v));
+        if (row) { matched.set(v, row); claimed.add(row.id); }
+      }
+
+      // 3. ADOPTION, last one standing. The MOVE case on a database seeded
+      //    before this key existed: the box no longer matches anything, so
+      //    step 2 cannot see it. Allowed only when exactly one unmatched spec
+      //    entry faces exactly one unclaimed unkeyed row -- with one candidate
+      //    on each side there is nothing to choose between, so this is
+      //    deduction and not a guess. Two of either and the pass stops and
+      //    reports; pairing them off in array order would be inventing an
+      //    identity, which is the mistake this whole ticket is about.
+      // Recomputed from `claimed` rather than captured, so step 3's own claim
+      // is visible to the apply loop below.
+      const unclaimedRows = () => existing.filter((r) => !claimed.has(r.id));
+      const orphanSpec = specVillages.filter((v) => !matched.has(v));
+      const orphanRows = unclaimedRows();
+      if (orphanSpec.length === 1 && orphanRows.length === 1 && orphanRows[0].spec_key == null) {
+        matched.set(orphanSpec[0], orphanRows[0]);
+        claimed.add(orphanRows[0].id);
+      }
+
+      // --- apply -----------------------------------------------------------
+      let guardsStale = false;
+      for (const v of specVillages) {
+        const row = matched.get(v);
+        if (!row) {
+          // Create ONLY when no unmatched live row is left, because any such
+          // row could be this very village under a box nobody recognises --
+          // creating alongside it would leave the world holding both. This is
+          // what makes "add a second village to a seeded world" (SOMET-289)
+          // work while "the spec and the rows have diverged in a way nothing
+          // can untangle" still refuses to act.
+          if (unclaimedRows().length > 0) continue;   // ambiguous; reported below
           await createVillage(client, worldId, v);
           villages += 1;
+          continue;
         }
-      } else if (existing.rowCount !== specVillages.length) {
-        // The spec and the live rows disagree and THIS SEED WILL NOT FIX IT.
+        // TWO different reasons to write, kept apart on purpose.
         //
-        // Every other authored column on `worlds` is re-asserted on every seed
-        // via ON CONFLICT SET (safe_road_radius and safe_rects included, a few
-        // dozen lines up), so an author reasonably concludes the spec is
-        // authoritative for everything -- and then adds a second village to an
-        // already-seeded world, gets a clean exit code, and finds no second
-        // village. SOMET-289 does exactly that. This is the only feedback loop
-        // there is, so it has to be loud rather than silent.
+        // `placementChanged` is the real event: the box, the gate or the spawn
+        // no longer match the spec. `row.spec_key !== v.key` on its own is only
+        // the adoption stamp -- the first run after SOMET-312 finds every live
+        // village unkeyed and has to write the key, and that is not a move.
+        // Folding the two together would print "MOVED from rows 44..47 to rows
+        // 44..47" for every village in the game on that one run, and would
+        // re-derive every guard in the game with it. A warning that cries wolf
+        // once per village is a warning nobody reads the next time.
         //
-        // A warning and not a fix: creating "the ones that are missing" needs
-        // an identity for a village beyond its box, which the spec does not
-        // carry (see the note above). `make reseed-map` clears every world
-        // first, so re-seeding from scratch is the supported way to converge.
-        //
-        // Only when rows already exist: on a FIRST seed the branch above
-        // creates every village, so the counts match by the time the loop
-        // ends and a warning there would be pure noise on every run.
+        // Compared against the SPEC field by field, and merchant_x/merchant_y
+        // are deliberately NOT in it: they are derived from the box, so
+        // comparing them would compare villageMerchantPost against itself and
+        // always agree.
+        const placementChanged = !sameBox(row, v)
+          || Number(row.spawn_x) !== v.spawn_x || Number(row.spawn_y) !== v.spawn_y;
+        if (!placementChanged && row.spec_key === v.key) continue;
+
+        const { before, after } = await repositionVillage(client, row.id, v);
+        if (!placementChanged) {
+          console.log(
+            `seed-map: world "${w.key}" (${w.name}) adopted its existing village as `
+            + `"${v.key}" (unchanged box). A later spec edit can now move it.`);
+          continue;
+        }
+        guardsStale = true;
+        villagesMoved += 1;
+
+        // A player_binds row IS a village's spawn point -- authority/server.js
+        // writes `{ x: v.spawnX, y: v.spawnY }` when a player enters a village,
+        // and death returns them to it. Leaving it behind would respawn every
+        // bound player on the patch of ground the village used to occupy, which
+        // is now open terrain (or water, or the inside of a wall the generator
+        // put there). Matched on the OLD spawn in THIS world, so it moves
+        // exactly the binds this village issued and nothing else.
+        const rebound = await client.query(
+          `UPDATE player_binds SET x = $2, y = $3, updated_at = now()
+            WHERE world_id = $1 AND x = $4 AND y = $5`,
+          [worldId, after.spawn_x, after.spawn_y, before.spawn_x, before.spawn_y],
+        );
+
         console.warn(
-          `seed-map: world "${w.key}" (${w.name}) already has ${existing.rowCount} `
-          + `village(s) but its spec declares ${specVillages.length} -- villages are `
-          + 'seeded all-or-nothing per world, so the existing rows were left untouched '
-          + 'and the difference was NOT applied. Clear this world\'s villages (or run '
-          + 'make reseed-map) to re-seed them from the spec.');
+          `seed-map: world "${w.key}" (${w.name}) village "${v.key}" MOVED from `
+          + `rows ${before.min_row}..${before.min_row + before.height - 1}, `
+          + `cols ${before.min_col}..${before.min_col + before.width - 1} `
+          + `(spawn ${before.spawn_x},${before.spawn_y}) to `
+          + `rows ${after.min_row}..${after.min_row + after.height - 1}, `
+          + `cols ${after.min_col}..${after.min_col + after.width - 1} `
+          + `(spawn ${after.spawn_x},${after.spawn_y}). Its merchant stock and `
+          + `id are kept; ${rebound.rowCount} player bind(s) followed it.`);
+      }
+
+      // Guards live in world_creatures with no village_id, so nothing moves
+      // them for us: a moved village would keep two level-150 guards standing
+      // in open ground at its old gate, and its new gate would be undefended.
+      // Re-derived once per world (the wipe is world-scoped) and ONLY when
+      // something moved -- doing it on every seed would heal every guard in the
+      // game on every run. createVillage inserts its own, so a world where
+      // nothing moved but something was created is already correct.
+      if (guardsStale) await rederiveVillageGuards(client, worldId);
+
+      // What is left over. Loud, because this is the only feedback loop there
+      // is, and it is the same argument the old count warning made: every other
+      // authored column converges, so an author reasonably assumes villages do
+      // too and otherwise finds out in a browser.
+      const stillOrphanSpec = specVillages.filter((v) => !matched.has(v));
+      const stillOrphanRows = unclaimedRows();
+      if (stillOrphanSpec.length && stillOrphanRows.length) {
+        console.warn(
+          `seed-map: world "${w.key}" (${w.name}) has ${stillOrphanRows.length} village row(s) `
+          + `that match no key in its spec (${stillOrphanRows.map((r) => r.spec_key == null
+            ? `unkeyed at rows ${r.min_row}..${r.min_row + r.height - 1}` : `"${r.spec_key}"`).join(', ')}) `
+          + `and ${stillOrphanSpec.length} spec village(s) with no live row `
+          + `(${stillOrphanSpec.map((v) => `"${v.key}"`).join(', ')}). Which is which cannot be `
+          + 'deduced, so NOTHING was applied for them. Give the live rows their spec keys, or run '
+          + 'make reseed-map to re-seed this map from scratch.');
+      } else if (stillOrphanRows.length) {
+        console.warn(
+          `seed-map: world "${w.key}" (${w.name}) has ${stillOrphanRows.length} village row(s) `
+          + 'the spec no longer declares '
+          + `(${stillOrphanRows.map((r) => r.spec_key == null
+            ? `unkeyed at rows ${r.min_row}..${r.min_row + r.height - 1}` : `"${r.spec_key}"`).join(', ')}). `
+          + 'They were LEFT IN PLACE: deleting a village cascades its merchant_stock, including '
+          + 'items players listed for sale. Delete them by hand, or run make reseed-map.');
       }
     }
 
@@ -544,6 +691,11 @@ async function applyMapSpec(pool, spec) {
     await client.query('COMMIT');
     return {
       worlds: worldsWritten, links: linksWritten, villages,
+      // Counted separately from `villages` (created): a run that reports 0
+      // created and 3 moved has done real work, and the old return shape had
+      // no way to say so -- which is precisely how a drifted village stayed
+      // invisible behind "0 villages" on every re-seed (SOMET-312).
+      villagesMoved,
       portalGuards: portalGuardsWritten, creatures: creaturesWritten,
       vaultChests: vaultChestsWritten, waypoints: waypointsWritten,
       // Reported, not just done: a prune cascades character_waypoints, so a
@@ -573,7 +725,8 @@ if (require.main === module) {
   applyMapSpec(pool, JSON.parse(fs.readFileSync(file, 'utf8')))
     .then((n) => {
       console.log(
-        `applied ${name}: ${n.worlds} worlds, ${n.links} links, ${n.villages} villages, `
+        `applied ${name}: ${n.worlds} worlds, ${n.links} links, `
+        + `${n.villages} villages (${n.villagesMoved} moved), `
         + `${n.portalGuards} portal guards, ${n.creatures} creatures, ${n.vaultChests} vault chests, `
         + `${n.waypoints} waypoints (${n.waypointsRemoved} removed), `
         + `${n.penCreatures} pen creatures`);
