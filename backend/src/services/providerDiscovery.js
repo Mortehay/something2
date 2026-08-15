@@ -14,7 +14,11 @@
 // and error handling against stubbed service shapes, with no network.
 
 const { selectAll } = require('./pointerPath');
-const { safeFetch, redactUrl } = require('./safeFetch');
+const { safeFetch, redactUrl, readJsonCapped } = require('./safeFetch');
+
+// A model list is a few kilobytes. Anything remotely near this cap is either a
+// misconfigured endpoint or something hostile, and neither deserves memory.
+const MAX_DISCOVERY_BYTES = () => parseInt(process.env.AI_PROVIDER_MAX_DISCOVERY_BYTES || '2097152', 10);
 
 // Discovery and reachability are control-plane calls against a service that is
 // either up or not. They are NOT image generation, which is slow by nature and
@@ -99,12 +103,14 @@ async function fetchModels(provider, { fetchImpl = fetch } = {}) {
   if (!res.ok) {
     return { ok: false, status: res.status, error: `service answered ${res.status}` };
   }
-  let payload;
-  try {
-    payload = await res.json();
-  } catch (_) {
-    return { ok: false, status: res.status, error: 'service did not answer with JSON' };
+  // Capped read, NOT res.json(): res.json() buffers the whole body before any
+  // limit could apply, which is a free memory-exhaustion primitive for a
+  // service we do not control.
+  const read = await readJsonCapped(res, MAX_DISCOVERY_BYTES());
+  if (read.error) {
+    return { ok: false, status: res.status, error: `service did not answer with usable JSON: ${read.error}` };
   }
+  const payload = read.json;
   const extracted = extractModels(payload, provider.models_pointer);
   if (extracted.error) return { ok: false, status: res.status, error: extracted.error };
   return { ok: true, status: res.status, models: extracted.models };

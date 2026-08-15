@@ -109,8 +109,13 @@ async function safeFetch(url, init = {}, { fetchImpl = fetch, maxRedirects = MAX
 // part-way instead of being fully buffered and then measured.
 async function readCapped(res, maxBytes) {
   if (!res.body || typeof res.body.getReader !== 'function') {
-    // No streaming available (a test stub, or an older runtime): fall back to
-    // buffering, then enforce the cap. Correct, just less defensive.
+    if (typeof res.arrayBuffer !== 'function') {
+      // Neither a stream nor a buffer: this is a hand-written stub in a test.
+      // Report it rather than pretending a cap was applied.
+      return { error: 'response body is not readable' };
+    }
+    // No streaming available (an older runtime): buffer, then enforce the cap.
+    // Correct, just less defensive -- the body is already in memory by then.
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > maxBytes) return { error: 'response exceeded the size cap' };
     return { buffer: buf };
@@ -132,4 +137,39 @@ async function readCapped(res, maxBytes) {
   return { buffer: Buffer.concat(chunks, total) };
 }
 
-module.exports = { assertSafeUrl, unsafeUrlReason, redactUrl, safeFetch, readCapped, MAX_REDIRECTS };
+// JSON, but never more than maxBytes of it.
+//
+// res.json() reads the WHOLE body before it can be capped, which hands a
+// hostile or broken service a trivial way to exhaust this process -- the size
+// cap on the decoded image is applied far too late to help. So the body is
+// read through readCapped first and parsed from the capped buffer.
+//
+// Returns { json } or { error }.
+async function readJsonCapped(res, maxBytes) {
+  // A stub with only .json() (several of this repo's tests) cannot be capped;
+  // fall through to it rather than failing, but only when there is genuinely
+  // no body to stream. Real undici responses always have one.
+  if ((!res.body || typeof res.body.getReader !== 'function')
+      && typeof res.arrayBuffer !== 'function'
+      && typeof res.json === 'function') {
+    try {
+      return { json: await res.json() };
+    } catch (_) {
+      // res.json() throws on a non-JSON body. Returning the error keeps this
+      // branch's contract identical to the streaming one above -- letting it
+      // propagate would turn "the service answered HTML" into a 500.
+      return { error: 'response was not valid JSON' };
+    }
+  }
+  const read = await readCapped(res, maxBytes);
+  if (read.error) return { error: read.error };
+  try {
+    return { json: JSON.parse(read.buffer.toString('utf8')) };
+  } catch (_) {
+    return { error: 'response was not valid JSON' };
+  }
+}
+
+module.exports = {
+  assertSafeUrl, unsafeUrlReason, redactUrl, safeFetch, readCapped, readJsonCapped, MAX_REDIRECTS,
+};

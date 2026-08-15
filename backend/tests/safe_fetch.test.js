@@ -114,3 +114,71 @@ test('discovery refuses a file:// base_url at call time, not just at save time',
   assert.strictEqual(called, false, 'the transport must never be reached for a refused scheme');
   assert.match(out.error, /not allowed|refusing/);
 });
+
+// --- Size caps, exercised against a REAL body stream ---------------------
+// These matter because res.json()/res.arrayBuffer() buffer the whole body
+// before any limit can apply, handing an untrusted service a free
+// memory-exhaustion primitive. A stubbed .json() would not prove the cap, so
+// these build an actual ReadableStream.
+
+const { readCapped, readJsonCapped } = require('../src/services/safeFetch');
+
+function streamedResponse(text) {
+  const bytes = Buffer.from(text, 'utf8');
+  let sent = 0;
+  let cancelled = false;
+  const res = {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (sent >= bytes.length) return { done: true, value: undefined };
+          // 8 bytes at a time, so a cap can bite part-way through.
+          const chunk = bytes.subarray(sent, sent + 8);
+          sent += chunk.length;
+          return { done: false, value: new Uint8Array(chunk) };
+        },
+        cancel: async () => { cancelled = true; },
+      }),
+    },
+  };
+  return { res, bytesSent: () => sent, wasCancelled: () => cancelled, total: bytes.length };
+}
+
+test('readCapped abandons an oversized body part-way instead of buffering it', async () => {
+  const big = 'x'.repeat(10000);
+  const s = streamedResponse(big);
+  const out = await readCapped(s.res, 64);
+  assert.match(out.error || '', /size cap/);
+  assert.ok(s.bytesSent() < s.total,
+    `must stop early: read ${s.bytesSent()} of ${s.total} bytes`);
+  assert.ok(s.wasCancelled(), 'the reader must be cancelled, not left dangling');
+});
+
+test('readCapped returns the whole body when it fits', async () => {
+  const s = streamedResponse('hello world');
+  const out = await readCapped(s.res, 1024);
+  assert.strictEqual(out.buffer.toString('utf8'), 'hello world');
+});
+
+test('readJsonCapped parses within the cap and refuses beyond it', async () => {
+  const small = streamedResponse(JSON.stringify({ models: ['a', 'b'] }));
+  assert.deepStrictEqual((await readJsonCapped(small.res, 1024)).json, { models: ['a', 'b'] });
+
+  const huge = streamedResponse(JSON.stringify({ pad: 'y'.repeat(50000) }));
+  const out = await readJsonCapped(huge.res, 128);
+  assert.match(out.error || '', /size cap/);
+  assert.ok(huge.bytesSent() < huge.total, 'an oversized JSON body must not be fully read');
+});
+
+test('readJsonCapped reports malformed JSON rather than throwing', async () => {
+  const s = streamedResponse('{not json');
+  const out = await readJsonCapped(s.res, 1024);
+  assert.match(out.error || '', /not valid JSON/);
+});
+
+test('a body that is neither streamable nor bufferable is reported, not silently uncapped', async () => {
+  const out = await readCapped({ ok: true, status: 200 }, 1024);
+  assert.match(out.error || '', /not readable/);
+});

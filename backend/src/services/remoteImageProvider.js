@@ -18,7 +18,7 @@
 const crypto = require('node:crypto');
 const { selectOne } = require('./pointerPath');
 const assetStore = require('./assetStore');
-const { safeFetch, redactUrl } = require('./safeFetch');
+const { safeFetch, redactUrl, readCapped, readJsonCapped } = require('./safeFetch');
 
 // Image generation on CPU can take a minute or more. This is NOT the 30s
 // control-plane budget spriteGen.js uses -- there the long work happens
@@ -253,15 +253,24 @@ async function runGeneration(jobId, provider, req, deps = {}) {
   let decoded;
   try {
     if (contentType && /^image\//i.test(contentType)) {
-      const raw = Buffer.from(await res.arrayBuffer());
-      if (raw.length > MAX_IMAGE_BYTES()) {
-        setJob(jobId, { status: 'error', error: 'provider response exceeded the image size cap' });
+      // Streamed with a hard ceiling, so an enormous body is abandoned
+      // part-way instead of being buffered and only then measured.
+      const read = await readCapped(res, MAX_IMAGE_BYTES());
+      if (read.error) {
+        setJob(jobId, { status: 'error', error: `provider response rejected: ${read.error}` });
         return;
       }
-      decoded = decodeImage({ contentType, body: raw }, provider.response_image_pointer);
+      decoded = decodeImage({ contentType, body: read.buffer }, provider.response_image_pointer);
     } else {
-      const json = await res.json();
-      decoded = decodeImage({ contentType, json }, provider.response_image_pointer);
+      // Same ceiling for the JSON path. A base64 image inflates ~33%, so the
+      // JSON carrying it is legitimately larger than the image itself; the
+      // cap is applied to the transport bytes either way.
+      const read = await readJsonCapped(res, MAX_IMAGE_BYTES());
+      if (read.error) {
+        setJob(jobId, { status: 'error', error: `provider response rejected: ${read.error}` });
+        return;
+      }
+      decoded = decodeImage({ contentType, json: read.json }, provider.response_image_pointer);
     }
   } catch (err) {
     setJob(jobId, { status: 'error', error: `could not read the provider response: ${err.message}` });

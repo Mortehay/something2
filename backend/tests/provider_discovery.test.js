@@ -155,7 +155,7 @@ test('a non-JSON answer is reported rather than crashing the parse', async () =>
   }));
   const out = await fetchModels({ base_url: 'http://box:7860', models_path: '/x' }, { fetchImpl });
   assert.strictEqual(out.ok, false);
-  assert.match(out.error, /did not answer with JSON/);
+  assert.match(out.error, /did not answer with usable JSON/);
 });
 
 test('no failure path echoes the auth token', async () => {
