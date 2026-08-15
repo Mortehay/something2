@@ -355,18 +355,48 @@ test('a guard standing on its target never gives up on it', () => {
 test('a new target starts a fresh stall window', () => {
   const { s, g } = scene({ hostile: { x: POST_N.x, y: POST_N.y - 350 } });
   // Stop just short of the give-up.
-  run(s, GUARD_CHASE_STALL_TICKS - 2);
+  //
+  // SOMET-344. This was `run(s, GUARD_CHASE_STALL_TICKS - 2)` — a fixed tick
+  // count that assumed the guard wedges against the wall almost immediately.
+  // SOMET-337's feet footprint let it travel ~2 ticks further before blocking,
+  // so after the same 38 ticks the window held 19 rather than the 21+ this test
+  // needs, and it failed on its own "precondition". A fixed count encodes an
+  // assumption about travel time that no one revisits when geometry changes.
+  //
+  // Driven by the CONDITION the test actually needs instead: keep ticking until
+  // the window is nearly full. Bounded so a guard that never stalls fails here,
+  // loudly, rather than spinning forever.
+  const TARGET_STALL = GUARD_CHASE_STALL_TICKS - 2;
+  let ticks = 0;
+  while (g._chaseStall < TARGET_STALL && ticks < GUARD_CHASE_STALL_TICKS * 10) {
+    run(s, 1);
+    ticks += 1;
+  }
   assert.equal(g._target, 'h', 'precondition: still chasing the first hostile');
-  assert.ok(g._chaseStall > GUARD_CHASE_STALL_TICKS / 2,
-    `precondition: the window must be nearly full, was ${g._chaseStall}`);
+  assert.ok(g._chaseStall >= TARGET_STALL,
+    `precondition: the window must be nearly full, was ${g._chaseStall} after ${ticks} ticks`);
 
   // Swap it for a second hostile behind the SAME wall. Same wall on purpose:
   // the guard is already pressed against it, so the new chase is blocked from
   // its very first tick and an inherited counter would fire immediately. Put
   // h2 on the far side of the village instead and the guard turns round and
   // walks, which clears the counter incidentally and hides the defect.
+  //
+  // SOMET-344. h2 was 80px EAST of the post, which satisfied that requirement
+  // only under the pre-SOMET-337 full-box footprint. With the halved footprint
+  // the guard gained room to sidestep east, so its first tick on h2 DELIVERED
+  // movement and the `else` branch zeroed _chaseStall incidentally -- the exact
+  // hiding mechanism the paragraph above warns about, arrived at by a change to
+  // geometry rather than to this fixture. Confirmed by probe: with the reset
+  // deleted the counter read 38 at t0 and 0 at t1, and the test still passed.
+  // Under scale 1.0 the same mutation gave 38 -> 39 -> dropped, and the test
+  // failed. So this guard was live before SOMET-337 and silently inert after.
+  //
+  // h2 now sits due NORTH like h did, straight through the same wall, so the
+  // chase vector points into the wall from the first tick and there is no
+  // free sidestep to clear the counter.
   s.creatures.delete('h');
-  s.addCreatures([{ id: 'h2', type: 'Slime', x: POST_N.x + 80 - 24, y: POST_N.y - 340 - 24,
+  s.addCreatures([{ id: 'h2', type: 'Slime', x: POST_N.x - 24, y: POST_N.y - 340 - 24,
     hp: 1e9, behavior: STILL_BH, damage: 0 }]);
   let acquired = -1, dropped = -1;
   for (let i = 0; i < 400 && dropped < 0; i++) {

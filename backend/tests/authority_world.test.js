@@ -39,16 +39,33 @@ test('tick advances a player on open ground', () => {
 
 test('tick clamps a player to the wall face instead of entering an unwalkable tile', () => {
   const w = new World(stubMap(100)); // wall at the x=100 tile boundary (tile-aligned)
-  w.addPlayer('u1', { x: 30, y: 0 }); // 64-wide box, east face at 94 — just shy of the wall
+  // SOMET-344. Was x=30, chosen when movement resolved against the whole 64px
+  // sprite box (east face 94, one 10px step crossed the wall at 100). SOMET-337
+  // halved the collision box to a FEET FOOTPRINT, so from x=30 the footprint
+  // east face is only at 78 and a 10px step lands at 88 -- short of the wall.
+  // The test still passed its own name while measuring an ORDINARY UNOBSTRUCTED
+  // STEP: it reported x=40, the free-movement answer, and the clamp never ran.
+  //
+  // x=50 puts the footprint east face at 98, so the step genuinely crosses the
+  // boundary and the clamp is what decides the result. Verified by sweeping the
+  // start position: 30 steps freely, 42 and 50 clamp, 60 is already inside and
+  // cannot move at all.
+  w.addPlayer('u1', { x: 50, y: 0 }); // 64px box -> 32px footprint, east face at 98
   w.setInput('u1', 1, 1, 0); // seq=1, dx=1 (east), dy=0
   w.tick(0.05); // realistic sub-tile step
   const p = w.getPlayer('u1');
-  // Deterministic clamp: box east face stops flush at WALL_EPS shy of x=100.
+  // Deterministic clamp: the FOOTPRINT's east face stops flush at WALL_EPS shy
+  // of x=100 -- centre 99.99-16 = 83.99, so x = 83.99-32 = 51.99.
   // (World's player state has no `moved` field — only resolveMove's return
   // shape does, and World.tick discards it — so the exact x pin below is
-  // both the determinism check and the "it moved" check: x=35.99 is only
-  // reachable if the player actually moved from its spawn at x=30.)
-  assert.ok(Math.abs(p.x - 35.99) < 1e-6, `x=${p.x}`);
+  // both the determinism check and the "it moved" check: x=51.99 is only
+  // reachable if the player actually moved from its spawn at x=50.)
+  //
+  // A LITERAL, not a value recomputed from FOOTPRINT_SCALE/WALL_EPS: deriving
+  // it would make this assertion agree with any future value of those
+  // constants, including a wrong one. If they change deliberately, the pin in
+  // authority_collision.test.js fails first and names this line.
+  assert.ok(Math.abs(p.x - 51.99) < 1e-6, `x=${p.x}`);
 });
 
 test('ackSeq tracks the latest input seq; snapshot has the right shape', () => {
