@@ -20,6 +20,8 @@
 // no database is reachable at all.
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const { Pool } = require('pg');
 
 const { villageMerchantPost, villageGatePosts } = require('../src/services/mapService.js');
@@ -73,11 +75,45 @@ async function openPool(t, why) {
   }
 }
 
+// SOMET-353. The AUTHORED worlds -- every world name the checked-in specs
+// declare. Tests 1, 2 and 4 below are about authored content and say so in
+// their own comments ("it is true of every box that has ever been authored
+// here"), but they were querying whatever happened to be in the database.
+//
+// That is not the same thing. Other test files create legal-but-different
+// villages: zzTestBeta's is 4x3, the smallest box the validator allows, whose
+// interior is a single row -- so its spawn, merchant and both guard posts
+// necessarily clamp onto two tiles instead of four. The "four DISTINCT tiles"
+// assertion then fails on a fixture that is perfectly valid, and the assertion
+// itself already documents that it is not a universal truth about villages.
+//
+// SOMET-351's lock does not close this and cannot: those fixtures exist
+// legitimately outside every lock window (cleanup runs after the
+// withEntryPreserved block, and a crashed test can leave one behind for good).
+// Serializing against a fixture's whole lifetime would need teardown moved
+// inside the lock at 22 call sites across 4 files, and would still lose to a
+// crash.
+//
+// Naming the subject positively is both simpler and stronger. This is NOT a
+// `zz%` name filter -- it is an allowlist derived from the specs themselves, so
+// a real world a future spec adds is covered automatically, and a real world
+// someone names `zzSomething` would still be checked.
+const SPEC_WORLD_NAMES = (() => {
+  const dir = path.join(__dirname, '..', 'seeds', 'maps');
+  const names = [];
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.map.json'))) {
+    const spec = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+    for (const w of spec.worlds || []) names.push(w.name);
+  }
+  return names;
+})();
+
 const VILLAGES_SQL = `
   SELECT w.name AS world, w.is_entry, w.entry_spawn,
          v.world_id, v.min_row, v.min_col, v.width, v.height, v.gate_edge,
          v.spawn_x, v.spawn_y, v.merchant_x, v.merchant_y
     FROM villages v JOIN worlds w ON w.id = v.world_id
+   WHERE w.name = ANY($1)
    ORDER BY w.name`;
 
 // The camelCase shape villageMerchantPost / villageGatePosts read (fetchVillages'
@@ -92,7 +128,7 @@ test('every live village fits the on-screen size budget', async (t) => {
   if (!pool) return;
   try {
     await readingLiveWorld(pool, async () => {
-      const rows = (await pool.query(VILLAGES_SQL)).rows;
+      const rows = (await pool.query(VILLAGES_SQL, [SPEC_WORLD_NAMES])).rows;
       // The size check runs BEFORE the count guard on purpose: an over-budget
       // hub must fail this test by NAME, not by "there are fewer villages than
       // expected", or the message sends the next reader to the wrong problem.
@@ -116,7 +152,14 @@ test('every live village has a legal spawn and merchant/guard posts matching its
   if (!pool) return;
   try {
     await readingLiveWorld(pool, async () => {
-    const rows = (await pool.query(VILLAGES_SQL)).rows;
+    const rows = (await pool.query(VILLAGES_SQL, [SPEC_WORLD_NAMES])).rows;
+    // Non-vacuity, and the only one of these four tests that lacked it: every
+    // assertion below lives inside the `for` loop, so zero rows is a silent
+    // pass. Caught by mutating SPEC_WORLD_NAMES to [] -- tests 1 and 4 went red
+    // on their own guards and this one stayed green while checking nothing.
+    assert.ok(rows.length >= 5,
+      `expected at least the five authored villages, got ${rows.length} -- `
+      + 'the geometry checks below are vacuous without them');
     const guards = (await pool.query(
       'SELECT world_id, home_x, home_y FROM world_creatures WHERE type = $1 ORDER BY home_x, home_y',
       [GUARD_TYPE],
@@ -252,11 +295,11 @@ test('nothing is PLACED inside a village footprint except its guards', async (t)
          FROM world_creatures c
          JOIN villages v ON v.world_id = c.world_id
          JOIN worlds w ON w.id = c.world_id
-        WHERE c.type <> $1
+        WHERE c.type <> $1 AND w.name = ANY($2)
           AND c.home_x IS NOT NULL AND c.home_y IS NOT NULL
           AND floor(c.home_x / ${TILE}) BETWEEN v.min_col AND v.min_col + v.width - 1
           AND floor(c.home_y / ${TILE}) BETWEEN v.min_row AND v.min_row + v.height - 1`,
-      [GUARD_TYPE],
+      [GUARD_TYPE, SPEC_WORLD_NAMES],
     )).rows;
     assert.deepEqual(bad, [],
       `${bad.length} non-guard creature(s) are ANCHORED inside a village box: ${JSON.stringify(bad)}`);
@@ -265,7 +308,10 @@ test('nothing is PLACED inside a village footprint except its guards', async (t)
     // no creatures in the villages' worlds at all.
     const scope = (await pool.query(
       `SELECT count(DISTINCT v.id)::int AS villages, count(c.id)::int AS creatures
-         FROM villages v LEFT JOIN world_creatures c ON c.world_id = v.world_id`)).rows[0];
+         FROM villages v
+         JOIN worlds w ON w.id = v.world_id
+         LEFT JOIN world_creatures c ON c.world_id = v.world_id
+        WHERE w.name = ANY($1)`, [SPEC_WORLD_NAMES])).rows[0];
     assert.ok(scope.villages >= 5, `expected >= 5 villages in scope, got ${scope.villages}`);
     assert.ok(scope.creatures > 0, 'no creatures in any village world -- the check above is vacuous');
 
@@ -288,10 +334,10 @@ test('nothing is PLACED inside a village footprint except its guards', async (t)
          FROM world_creatures c
          JOIN villages v ON v.world_id = c.world_id
          JOIN worlds w ON w.id = c.world_id
-        WHERE c.type <> $1
+        WHERE c.type <> $1 AND w.name = ANY($2)
           AND floor(c.x / ${TILE}) BETWEEN v.min_col AND v.min_col + v.width - 1
           AND floor(c.y / ${TILE}) BETWEEN v.min_row AND v.min_row + v.height - 1`,
-      [GUARD_TYPE],
+      [GUARD_TYPE, SPEC_WORLD_NAMES],
     )).rows;
     if (standing.length) {
       console.log(`  note: ${standing.length} hostile(s) currently standing inside a village box `
