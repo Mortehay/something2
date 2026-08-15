@@ -97,7 +97,7 @@ test('populateWorld warns when MAX_WORLD_CREATURES truncates the scatter count',
 
 test('populateWorld does not warn when the density tier is not clamped', async () => {
   // A 64x64 'normal' world: resolveDensity('normal', 64, 64) targets far
-  // below MAX_WORLD_CREATURES (~25 scattered creatures), so clamped is false.
+  // below MAX_WORLD_CREATURES (~74 scattered creatures), so clamped is false.
   const worldRow = {
     id: 2, name: 'zzClampSilent', width: 64, height: 64, chunk_size: 32,
     density: 'normal', allowed_creature_types: ['Skeleton'], biomes: [],

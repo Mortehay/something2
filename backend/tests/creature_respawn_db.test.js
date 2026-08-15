@@ -171,8 +171,10 @@ test('the backstop enqueues nothing for a world already at target', { skip: !url
     await pool.query(
       `UPDATE worlds SET allowed_creature_types = '["Wolf"]'::jsonb WHERE id = $1`, [worldId],
     );
-    // 60 live wild creatures, well short of the 166 target (166 - 60 = 106 deficit).
-    for (let i = 0; i < 60; i += 1) {
+    // 170 live wild creatures, comfortably over the 166 target. This fixture deliberately
+    // sits above target so that enqueueDeficit's early return for deficit <= 0 is the branch
+    // under test — the case where no spawning is needed at all.
+    for (let i = 0; i < 170; i += 1) {
       await pool.query(
         `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
          VALUES ($1,'Wolf',$2,$2,20,'S',1,5,0)`, [worldId, 100 + i],
@@ -180,7 +182,7 @@ test('the backstop enqueues nothing for a world already at target', { skip: !url
     }
     const row = (await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId])).rows[0];
 
-    assert.equal(await enqueueDeficit(pool, { worldRow: row, world: fakeWorldConfig() }), 106);
+    assert.equal(await enqueueDeficit(pool, { worldRow: row, world: fakeWorldConfig() }), 0);
 
     await pool.query('DELETE FROM worlds WHERE id = $1', [worldId]);
   } finally {
