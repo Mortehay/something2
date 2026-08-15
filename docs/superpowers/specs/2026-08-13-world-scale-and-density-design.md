@@ -151,6 +151,42 @@ Three costs do scale with area and are accepted:
   an admin surface, not a gameplay path; if it becomes slow, that is a separate
   ticket.
 
+#### Measured, after the fact (SOMET-311)
+
+The prediction above holds for CPU and is wrong about nothing, but it missed a
+cost. Measured against the dev stack on 2026-08-16 with one character parked in
+each world's **densest** radius-1 chunk neighbourhood (9 chunks = 9,216 tiles —
+the set `recomputeActive` activates and `broadcastCreatures` sends), 20–45 s
+samples:
+
+| world | size / tier | rows in world | creatures per broadcast | bytes per broadcast | per-socket | server tick rate |
+|---|---|---|---|---|---|---|
+| Ashfields Reach | 96, sparse | 28 | 28 | 5.3 KB | 30 KiB/s | 19.90 Hz |
+| The Ossuary Depths: Entry | 128, normal | 102 | 60 | 11.5 KB | 60 KiB/s | 19.92 Hz |
+| The Crystal Foundry: Entry | 192, horde | 907 | 194 | 36.2 KB | 180 KiB/s | 19.83 Hz |
+| The Abyss: Hub | 224, swarm | 2,469 | 549–571 | 104–108 KB | 510–528 KiB/s | 19.95 Hz |
+
+Reading it:
+
+- **Tick budget is fine.** `tickMs` is 50 (20 Hz) and creature frames go out
+  every 4th tick (5 Hz). The loop held 19.83–19.96 Hz in every world, and the
+  backend container drew ~2–4 % of one core idle versus ~7–25 % with a player
+  parked in the swarm neighbourhood. Simulation cost really does scale with
+  players, not area.
+- **Size is not the lever.** Every `SIZE_STEPS` entry is ≥ 3 chunks wide, so the
+  9-chunk neighbourhood is saturated from the *smallest* step up; area above
+  96×96 never enters a tick. The per-broadcast counts track the density tier
+  alone (192@horde ≈ half of 224@swarm, the 24-vs-48 `perThousand` ratio).
+  Trimming the top of the size ramp would not move per-player load at all.
+- **Bandwidth is the real cost.** ~184 bytes per creature per frame at 5 Hz is
+  ~920 B/s per creature per socket; `swarm` is ~4.2 Mbit/s of JSON down one
+  socket, paid again for every socket in the neighbourhood. The client viewport
+  is ~225 tiles against the neighbourhood's 9,216, so ~97 % of it is off-screen.
+  The lever is the broadcast AOI and the wire shape (of the 184 bytes, ~62 are
+  fields that never change after the first sighting: `type`, `color`, `maxHp`,
+  `level`), not the size ramp and not the density table. That is its own ticket:
+  it needs a client change and browser verification.
+
 ### Resizing existing worlds
 
 Terrain caching is already correct for resizes: both `backend/scripts/seed-map.js:237`

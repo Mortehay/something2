@@ -8,6 +8,26 @@
 //
 // Keep the key set in sync with worlds_density_check (migration
 // 1714440070000). The duplication is deliberate and documented there.
+//
+// SOMET-311 measured this table's runtime price, one player parked in each
+// world's densest radius-1 chunk neighbourhood (9 chunks = 9,216 tiles, the
+// set the authority activates AND broadcasts) against the dev stack on
+// 2026-08-16, 20-45s samples:
+//
+//   world (size, tier)                 rows   per-broadcast   bytes/frame  per-socket
+//   Ashfields Reach (96, sparse)         28      28              5.3 KB     30 KiB/s
+//   Ossuary Depths: Entry (128, normal) 102      60             11.5 KB     60 KiB/s
+//   Crystal Foundry: Entry (192, horde) 907     194             36.2 KB    180 KiB/s
+//   The Abyss: Hub (224, swarm)        2469     549-571        104-108 KB  510-528 KiB/s
+//
+// Creature frames go out every 4 ticks (5 Hz) at ~184 bytes/creature, so the
+// per-socket cost is ~920 B/s PER CREATURE in the neighbourhood, and it is
+// paid once per socket. The tick loop itself held 19.83-19.96 Hz against a
+// nominal 20 Hz in every world, so this is a BANDWIDTH cost, not a tick-budget
+// one: `swarm` is ~4.2 Mbit/s of JSON down one socket, ~97% of it outside the
+// ~225 tiles the client can actually see. The lever for that is the broadcast
+// AOI (broadcastCreatures' neighbourhood radius / the wire shape), not this
+// table and not the size ramp -- see escalation.js's SIZE_STEPS comment.
 const DENSITY_TIERS = {
   dead:   { perThousand: 0,  packCount: 0, packSizeMin: 0, packSizeMax: 0 },
   sparse: { perThousand: 3,  packCount: 0, packSizeMin: 0, packSizeMax: 0 },
