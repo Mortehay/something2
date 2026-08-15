@@ -134,7 +134,9 @@ const WORLD_KEYS = new Set([
   'creature_count',
 ]);
 
-function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } = {}) {
+function validateMapSpec(spec, {
+  biomeNames = null, creatureTypeNames = null, biomeCreatureTypes = null,
+} = {}) {
   const errors = [];
   if (!spec || typeof spec !== 'object') return ['spec is not an object'];
   const worlds = Array.isArray(spec.worlds) ? spec.worlds : [];
@@ -559,6 +561,56 @@ function validateMapSpec(spec, { biomeNames = null, creatureTypeNames = null } =
       for (const c of w.allowed_creature_types ?? []) {
         if (!creatureTypeNames.has(c)) {
           errors.push(`world "${w.key}" references unknown creature type "${c}"`);
+        }
+      }
+    }
+
+    // SOMET-315: a world's allowlist must be REACHABLE through its biomes.
+    //
+    // creatureTileCandidates (mapService.js) intersects the world allowlist
+    // with the local biome's own creature_types on EVERY candidate tile, and
+    // treats an empty intersection as "no creature may stand here" -- the
+    // biome can only remove from the allowlist, never add to it. So a type the
+    // declared biomes do not list is not "rare", it is unspawnable, and a world
+    // whose whole allowlist is unlisted places nothing anywhere: rejection
+    // sampling rejects all 40 attempts on all N creatures and the world seeds
+    // empty. Thirteen shipped worlds were in exactly that state -- the two
+    // hand-authored specs kept the pre-biome generic roster (Slime/Bat/
+    // Skeleton) while the biome catalog moved to per-biome families -- and
+    // nothing anywhere related the two columns, so every re-seed reproduced it
+    // in silence. Measured over the whole interior tile space of all 13:
+    // wall/doorway and safe-region rejected 0 tiles, and this intersection
+    // rejected 100% of what was left (e.g. Farrow Hall 36100/36100).
+    //
+    // Checked HERE rather than at populateWorld time for the reason SOMET-335
+    // put the entry-spawn invariant here: the spec is re-applied on every
+    // re-seed, so anything only fixed on the live row is undone by the next
+    // one. Both halves of the pair are catalog-derived, so this is skipped
+    // entirely when the caller passes no biome rosters (every pure unit call).
+    //
+    // A world declaring NO biomes is exempt by construction, not by omission:
+    // sampleBiomeRegion returns null there and creatureTileCandidates falls
+    // through to the unfiltered allowlist, so every allowed type is spawnable.
+    const allowed = w.allowed_creature_types ?? [];
+    const declaredBiomes = w.biomes ?? [];
+    if (biomeCreatureTypes && declaredBiomes.length > 0 && allowed.length > 0) {
+      const admitted = new Set();
+      for (const b of declaredBiomes) {
+        for (const c of biomeCreatureTypes.get(b) ?? []) admitted.add(c);
+      }
+      const orphans = allowed.filter((c) => !admitted.has(c));
+      if (orphans.length === allowed.length) {
+        errors.push(
+          `world "${w.key}" allows [${allowed.join(', ')}] but none of its biomes `
+          + `[${declaredBiomes.join(', ')}] admits any of them, so it would seed `
+          + 'zero creatures',
+        );
+      } else {
+        for (const c of orphans) {
+          errors.push(
+            `world "${w.key}" allows creature type "${c}", which none of its biomes `
+            + `[${declaredBiomes.join(', ')}] admits, so it can never spawn there`,
+          );
         }
       }
     }

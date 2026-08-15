@@ -3,7 +3,9 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const { validateMapSpec } = require('../seeds/mapSpec.js');
+const { placeMapCreatures } = require('../src/services/mapService.js');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
+const { DEFAULT_TILE_TYPES } = require('../seeds/data/tileTypes.js');
 const { HOSTILE_CREATURES } = require('../seeds/data/entityTypes.js');
 const { BESTIARY_P4_CREATURES } = require('../seeds/data/bestiaryP4.js');
 
@@ -25,6 +27,12 @@ const BIOMES = new Set(STARTER_BIOMES.map((b) => b.name));
 const CREATURES = new Set(
   [...HOSTILE_CREATURES, ...BESTIARY_P4_CREATURES].map((c) => c.name)
 );
+
+// SOMET-315. The other half of the same catalog: not just "does this biome
+// exist" but "which creatures can spawn in it". Without this, a spec could
+// name a real biome and a real creature and still seed a world with zero
+// creatures, because creatureTileCandidates intersects the two per tile.
+const BIOME_ROSTERS = new Map(STARTER_BIOMES.map((b) => [b.name, b.creature_types]));
 
 const specFiles = () => fs.readdirSync(MAPS_DIR).filter((f) => f.endsWith('.map.json'));
 
@@ -106,11 +114,84 @@ test('all three example topologies ship', () => {
 });
 
 test('every shipped spec validates against the live catalogs', () => {
-  for (const f of specFiles()) {
+  const files = specFiles();
+  // Non-vacuity: an empty MAPS_DIR (or a renamed extension) would otherwise
+  // make this loop pass while validating nothing at all.
+  assert.ok(files.length >= SHIPPED_EXAMPLES.length,
+    `expected at least ${SHIPPED_EXAMPLES.length} specs, found ${files.length}`);
+  for (const f of files) {
     const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, f), 'utf8'));
-    const errs = validateMapSpec(spec, { biomeNames: BIOMES, creatureTypeNames: CREATURES });
+    const errs = validateMapSpec(spec, {
+      biomeNames: BIOMES, creatureTypeNames: CREATURES, biomeCreatureTypes: BIOME_ROSTERS,
+    });
     assert.deepEqual(errs, [], `${f}: ${errs.join('; ')}`);
   }
+});
+
+// SOMET-315: the END-TO-END form of the rule the validator now enforces.
+//
+// The validator reasons about two catalog columns; this runs the REAL placer
+// over every shipped world and asserts creatures actually come out. Thirteen
+// worlds across loop-catacombs and spine-descent shipped seeding zero
+// creatures for years -- their allowlists were the pre-biome generic roster
+// (Slime/Bat/Skeleton) while their biomes had moved to per-biome families --
+// and every existing test stayed green, because nothing ever ran placement
+// against the shipped spec text.
+//
+// GEOMETRY ONLY: no villages, roads or safe_rects are fed in. Those can only
+// REMOVE candidate tiles, so this is an upper bound on what placement finds --
+// deliberately so, because this test is about the biome/allowlist relationship
+// and must not turn into a second, drifting copy of safe-region behaviour.
+// Measured over the 13 (whole interior tile space, live config including safe
+// regions and villages): safe regions rejected 0 tiles and the biome
+// intersection rejected 100% of the rest, so the bound is not hiding anything
+// here.
+//
+// PROBE_COUNT rather than the world's real density target: cost. Asking each
+// of ~86 worlds for its full tier is ~30k placements and ~16s; 40 is enough to
+// prove the tile space is not empty and keeps the file at a couple of seconds.
+// It is a floor, not an equality -- under-delivery against a tier is a
+// separate concern that populateWorld warns about at seed time.
+const PROBE_COUNT = 40;
+
+test('every shipped world with an allowlist actually places creatures', () => {
+  const tileTypes = {};
+  for (const t of DEFAULT_TILE_TYPES) {
+    tileTypes[t.name] = { walkable: t.walkable, speed: t.speed };
+  }
+  // The bounded-world overlay's own two tiles, which stampBounds writes and
+  // the tile catalog does not carry.
+  tileTypes.map_wall = { walkable: false, speed: 1 };
+  tileTypes.map_doorway = { walkable: true, speed: 1 };
+  const biomeByName = new Map(STARTER_BIOMES.map((b) => [b.name, b]));
+
+  let checked = 0;
+  const empty = [];
+  for (const f of specFiles()) {
+    const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, f), 'utf8'));
+    for (const w of spec.worlds) {
+      const names = w.allowed_creature_types ?? [];
+      if (names.length === 0) continue; // deliberately unpopulated, not a bug
+      const allowed = names.map((n) => ({ name: n, hp: 10, defense: 0, resistances: {} }));
+      const cfg = {
+        seed: w.seed, chunkSize: w.chunk_size, width: w.width, height: w.height,
+        tileTypes, biomes: (w.biomes ?? []).map((n) => biomeByName.get(n)),
+        biomeCell: w.biome_cell, doorways: [], villages: [],
+        levelMin: 1, levelMax: 1, safeRoadRadius: 0, safeRects: [], authoredRoads: [],
+      };
+      const placed = placeMapCreatures(cfg, PROBE_COUNT, allowed, w.seed >>> 0);
+      checked++;
+      if (placed.length < PROBE_COUNT) {
+        empty.push(`${f}/${w.key}: ${placed.length}/${PROBE_COUNT} placed `
+          + `(biomes ${JSON.stringify(w.biomes ?? [])}, allows ${JSON.stringify(names)})`);
+      }
+    }
+  }
+  // Non-vacuity: a spec loader that silently produced no worlds, or an
+  // allowlist key renamed out from under the `continue` above, would make the
+  // loop assert nothing.
+  assert.ok(checked >= 80, `expected to probe most shipped worlds, probed ${checked}`);
+  assert.deepEqual(empty, [], empty.join('\n'));
 });
 
 // "difficulty escalates with distance from the entry" (creature_count-based)

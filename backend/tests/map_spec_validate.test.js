@@ -291,6 +291,63 @@ test('cross-checks creature type names when the catalog is supplied', () => {
   assert.ok(errs.some((e) => /unknown creature type "Wolf"/i.test(e)), errs.join('; '));
 });
 
+// SOMET-315. The fixture's world `a` is Meadow + ['Slime'] and world `b` is
+// Meadow + ['Wolf'], and the roster below is the real Meadow roster, so the
+// baseline is a spec whose allowlists ARE reachable through its biomes -- the
+// negative cases each break exactly one of them.
+const MEADOW_ROSTER = () => new Map([
+  ['Meadow', ['Slime', 'Wolf']],
+  ['Frostvault', ['Rime Swarm']],
+]);
+
+test('a spec whose allowlists are admitted by their biomes passes the roster check', () => {
+  assert.deepEqual(validateMapSpec(valid(), { biomeCreatureTypes: MEADOW_ROSTER() }), []);
+});
+
+test('rejects a world whose whole allowlist is disjoint from its biome rosters', () => {
+  // This is the shipped bug, in miniature: Frostvault admits only Rime Swarm,
+  // so a Slime allowlist means creatureTileCandidates returns null on every
+  // tile of the map and the world seeds ZERO creatures -- silently, because
+  // both names are individually real.
+  const spec = valid();
+  spec.worlds[0].biomes = ['Frostvault'];
+  const errs = validateMapSpec(spec, { biomeCreatureTypes: MEADOW_ROSTER() });
+  assert.equal(errs.length, 1, errs.join('; '));
+  assert.match(errs[0], /world "a" allows \[Slime\].*Frostvault.*zero creatures/);
+});
+
+test('rejects a single allowed type no declared biome admits', () => {
+  // The partial form of the same drift: the world still populates, but "Wolf"
+  // is dead text -- nothing anywhere can ever spawn it there.
+  const spec = valid();
+  spec.worlds[0].allowed_creature_types = ['Slime', 'Rime Swarm'];
+  const errs = validateMapSpec(spec, { biomeCreatureTypes: MEADOW_ROSTER() });
+  assert.equal(errs.length, 1, errs.join('; '));
+  assert.match(errs[0], /world "a" allows creature type "Rime Swarm"/);
+});
+
+test('a world declaring no biomes is exempt from the roster check', () => {
+  // No biomes means sampleBiomeRegion returns null and creatureTileCandidates
+  // falls through to the unfiltered allowlist, so every type is spawnable.
+  const spec = valid();
+  spec.worlds[0].biomes = [];
+  spec.worlds[0].allowed_creature_types = ['Rime Swarm'];
+  assert.deepEqual(validateMapSpec(spec, { biomeCreatureTypes: MEADOW_ROSTER() }), []);
+});
+
+test('the roster check is skipped when no roster catalog is supplied', () => {
+  // Every pure unit call passes no catalogs; the rule must not fire there.
+  const spec = valid();
+  spec.worlds[0].biomes = ['Frostvault'];
+  assert.deepEqual(validateMapSpec(spec), []);
+});
+
+test('an empty allowlist is a deliberate choice, not a roster violation', () => {
+  const spec = valid();
+  spec.worlds[0].allowed_creature_types = [];
+  assert.deepEqual(validateMapSpec(spec, { biomeCreatureTypes: MEADOW_ROSTER() }), []);
+});
+
 test('level_band must be a two-element array of integers', () => {
   const errs = errorsFor((s) => { s.worlds[0].level_band = [3]; });
   assert.ok(errs.some((e) => /level_band/i.test(e)), errs.join('; '));
