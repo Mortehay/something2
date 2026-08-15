@@ -291,6 +291,82 @@ function stampCreatureAttack(attacks, impacts, c, target, from, to) {
 }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
+// SOMET-314 — the player spawn sanctuary.
+//
+// WHY THIS IS ON THE ROAM PATH AND NOT IN PLACEMENT. The ticket reported a
+// level-2 Slime camping the Old Trailhead spawn and killing level-1 characters
+// on sight and again on every respawn, and proposed excluding hostile SPAWNS
+// near the spawn point. Measured before writing this: replaying the real
+// placement pass (placeMapCreatures + placeCreaturePacks, via the real world
+// rows) over 200 seeds for all four worlds that carry an `entry_spawn` put
+// ZERO hostiles inside aggro range of it -- the closest any seed ever came was
+// 447px on Old Trailhead. Placement was never the mechanism, so a placement
+// radius would have shipped as a no-op against the reported symptom.
+//
+// What IS the mechanism: creatures ROAM, and flushAndPrune persists where they
+// roamed to every 3s (authority/server.js's creatureFlushTimer). In the live
+// database 47042 of 48122 world_creatures rows still sit exactly on a tile
+// centre -- the coordinate placement produces -- but of the three worlds that
+// have actually been played, Old Trailhead has 0 of 77 rows on a tile centre,
+// Vale Crossing 6 of 103 and Thornbriar Reach 5 of 63. Every creature in a
+// played world has walked away from where it was placed. A hostile arrives at
+// the spawn point by wandering there, which no placement rule can prevent.
+//
+// THE RULE: a wild hostile may not ROAM to within its own aggro radius (plus
+// one tile) of the world's authored arrival point. So a player standing on the
+// spawn is never acquired by something that merely wandered onto the doormat.
+//
+// The radius is per-creature rather than one flat number because aggro_radius
+// is a per-behaviour catalog column spanning 180 (Lurker) to 600 (Apex): a flat
+// radius tuned for a Slime world under-protects an Apex one, and one tuned for
+// Apex carves a 6-tile dead zone out of every starter map. Each creature keeps
+// exactly its own sight line clear and no more.
+//
+// The one-tile margin is not slack for its own sake. `chooseSpawn` returns the
+// player's top-left corner while aggro is measured centre-to-centre, so the
+// point this measures from is up to PLAYER_HALF (32px) off the centre the aggro
+// check actually uses; and a roam step is only clamped at tick granularity, so
+// without a margin a creature could end a tick sitting exactly on the aggro
+// boundary. One tile covers both with room to spare.
+//
+// DELIBERATELY NOT APPLIED TO A CHASE. This is the same line services/
+// safeRegion.js draws for placement and for the same reason: a hostile already
+// chasing a player must be able to follow them home, or the sanctuary becomes
+// an invisible wall and the village guards have nothing to rescue anyone from.
+// Safety here is a property of the doormat, not of the player.
+const SPAWN_SANCTUARY_MARGIN = MAP_TILE_SIZE;
+
+// The world's authored arrival point in world pixels, or null when the world
+// has none (81 of the 85 real worlds). Tolerates a map with no `.world` at all:
+// every unit test in this file builds a stub map that is just
+// { isWalkable, speedAt, chunkSize }, and those must keep roaming freely.
+function spawnSanctuaryPoint(map) {
+  const sp = map && map.world && map.world.entry_spawn;
+  if (!sp || !Number.isFinite(sp.x) || !Number.isFinite(sp.y)) return null;
+  return { x: sp.x, y: sp.y };
+}
+
+// MONOTONE, exactly like withinLeashBudget above, and for the same reason. A
+// hard "destination must be outside" test would freeze solid every creature
+// that is ALREADY inside the sanctuary -- and there are such creatures right
+// now, persisted there by the flush this whole rule is about. Refusing only the
+// steps that move CLOSER makes the boundary reflecting rather than absorbing:
+// a roamer outside can never get in (any step from outside to inside is
+// strictly closer than where it started), and one that starts inside random-
+// walks its way back out instead of standing on the spawn tile forever.
+//
+// bh.aggroRadius falls back to the module default rather than being trusted:
+// a hand-built behaviour without one gives NaN, every comparison against NaN is
+// false, and this would silently refuse nothing at all -- the same failure mode
+// leashAnchorOf's comment describes for leashRadius.
+function roamsIntoSanctuary(spawn, bh, fromX, fromY, toX, toY) {
+  const aggro = Number.isFinite(bh.aggroRadius) ? bh.aggroRadius : AGGRO_RADIUS;
+  const radius = aggro + SPAWN_SANCTUARY_MARGIN;
+  const to2 = dist2(toX, toY, spawn.x, spawn.y);
+  if (to2 >= radius * radius) return false;
+  return to2 < dist2(fromX, fromY, spawn.x, spawn.y);
+}
+
 // A guard with no home anchor is unconstrained (matches a hostile's
 // leash-from-self behavior for creatures that predate the anchor column).
 function withinLeash(x, y, home, radius) {
@@ -1134,6 +1210,10 @@ class CreatureSim {
     // read from OUTSIDE this loop too: another creature's attack and a
     // projectile collision both need a target's defence buff.
     for (const c of all) c._buff = buffs.get(c.id) || NO_BUFF;
+    // SOMET-314. Resolved once per tick rather than per creature: it is a
+    // property of the world, it never changes for the life of this manager, and
+    // the roam clamp below is on the hot path.
+    const sanctuary = spawnSanctuaryPoint(this.map);
     for (const c of this.creatures.values()) {
       const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
       if (!active.has(CHUNK_KEY(cx, cy))) continue; // frozen (out of active set)
@@ -1802,7 +1882,20 @@ class CreatureSim {
       // paces its pen instead of standing in the corner it first reached.
       const roamInLeash = !anchor || withinLeashBudget(c, cc.x, cc.y,
         r.x + c.width / 2, r.y + c.height / 2, anchor.radius);
-      if ((r.x !== c.x || r.y !== c.y) && roamInLeash) {
+      // SOMET-314 — and the spawn sanctuary refuses it the same way, with the
+      // same "blocked -> turn" answer, so a creature that reaches the edge
+      // paces along it instead of stalling in place.
+      //
+      // Gated on `!anchor`: an anchored creature is standing where a map author
+      // put it, not where it wandered. Village guards never reach this line at
+      // all (the guard branch above `continue`s), but the portal packs from
+      // dungeonGuards.js and SOMET-289's penned creatures are ordinary hostiles
+      // with a home_x, and a portal posted near a spawn point must keep pacing
+      // its post rather than being pushed off it by a rule about wanderers.
+      const roamOutsideSanctuary = !sanctuary || anchor
+        || !roamsIntoSanctuary(sanctuary, bh, cc.x, cc.y,
+          r.x + c.width / 2, r.y + c.height / 2);
+      if ((r.x !== c.x || r.y !== c.y) && roamInLeash && roamOutsideSanctuary) {
         c.x = r.x; c.y = r.y;
         c.facing = DIR_FACING[c._dir];
         c.dirty = true;
@@ -2018,6 +2111,10 @@ module.exports = {
   // SOMET-290: the monotone leash budget, shared by the flee clamp and
   // shoveCreature and exported so it can be pinned without a full tick.
   withinLeashBudget,
+  // SOMET-314: the spawn sanctuary. SPAWN_SANCTUARY_MARGIN is exported for the
+  // same reason GUARD_CHASE_STALL_TICKS is -- a test carrying its own copy of
+  // the margin keeps passing after the real one is tuned to nothing.
+  roamsIntoSanctuary, spawnSanctuaryPoint, SPAWN_SANCTUARY_MARGIN,
   // SOMET-283: the leash-aware shove every creature-targeting knockback site
   // goes through (world.js's melee, projectiles.js's direct hit and AoE, and
   // the guard branch's own strike below), exported so its clamp can be pinned
