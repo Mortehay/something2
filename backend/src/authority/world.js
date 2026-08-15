@@ -492,6 +492,10 @@ class World {
       }
       const killed = this.creatures.applyMeleeArc(
         cx, cy, nx, ny, w.reach, w.arc_width, weaponDamage(p, w), w.element, this.now, userId,
+        // SOMET-332: the augment stone's bonus packet, or null. Passed rather
+        // than folded into weaponDamage above so the bonus is mitigated by the
+        // AUGMENT's element, not the weapon's.
+        w.augment || null,
       );
       // SOMET-253 Task 9: survivors = targets minus killed. `creatureTargets`
       // was captured BEFORE applyMeleeArc ran, and applyMeleeArc deletes
@@ -525,6 +529,15 @@ class World {
           applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION,
             this.now, playerKey(userId));
           applyElementEffect(other, w.element, this.now, userId);
+          // SOMET-332: the augment's bonus as a SECOND packet, mirroring the
+          // creature path in applyMeleeArc. A player and a creature must take
+          // the same swing identically -- an augment that only worked against
+          // creatures would be a PvP balance bug nothing else would catch.
+          if (w.augment && w.augment.bonusDamage > 0) {
+            applyDamageWithEffects(other, w.augment.bonusDamage, w.augment.element,
+              other.mit || NO_MITIGATION, this.now, playerKey(userId));
+            applyElementEffect(other, w.augment.element, this.now, userId);
+          }
           playerHits++;
           // Same list as the creature impacts above -- a player hit and a
           // creature hit are one event kind, distinguished only by the id

@@ -24,7 +24,7 @@ async function loadItemTypes(pool, catalogs = null) {
             range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element,
             defense, resistances, stackable, ammo_type_id, aoe_radius, vfx, knockback,
             stat_bonus_stat, stat_bonus_amount, attack_origin,
-            projectile_shape_id, impact_behavior_id
+            projectile_shape_id, impact_behavior_id, stone_mode, bonus_damage
      FROM item_types ORDER BY id ASC`,
   );
   const shapes = catalogs && catalogs.projectileShapes ? catalogs.projectileShapes : null;
@@ -102,6 +102,14 @@ async function loadItemTypes(pool, catalogs = null) {
       // never reads these -- it reads the resolved values above.
       projectile_shape_id: num(row.projectile_shape_id),
       impact_behavior_id: num(row.impact_behavior_id),
+      // SOMET-332. Defaulted to 'replace' rather than passed through: the
+      // column is NOT NULL in the schema, but this loader is also fed by test
+      // fixtures and by any catalog snapshot predating the column, and a stone
+      // whose mode read `undefined` would fall through activeWeaponType's
+      // augment check into the replace branch -- silently overwriting the
+      // host weapon, which is the exact behaviour augment exists to avoid.
+      stone_mode: row.stone_mode === 'augment' ? 'augment' : 'replace',
+      bonus_damage: num(row.bonus_damage),
     });
   }
   return m;
@@ -355,6 +363,35 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
     const type = item ? itemTypes.get(item.typeId) : null;
     if (type && type.category === 'weapon') {
       const stoneType = item.socketedStoneTypeId != null ? itemTypes.get(item.socketedStoneTypeId) : null;
+      // SOMET-332 -- AUGMENT mode. Checked BEFORE the replace branch below,
+      // because an augment stone also has a non-null element and would
+      // otherwise fall straight into it and overwrite the host's spell fields,
+      // which is precisely the behaviour augment exists to avoid.
+      //
+      // The host weapon is returned UNCHANGED except for one added field: its
+      // damage, cooldown, mana_cost and element are all still its own. The
+      // augment is a rider the damage sites apply as a SECOND packet, never a
+      // merge -- blending it into `damage` here would make the bonus be
+      // mitigated by the weapon's element rather than its own.
+      if (stoneType && stoneType.stone_mode === 'augment'
+          && stoneType.element != null && stoneType.bonus_damage > 0) {
+        return {
+          ...type,
+          augment: {
+            element: stoneType.element,
+            bonusDamage: stoneType.bonus_damage,
+            // Slice B's impact behaviour, carried so an augment can make a
+            // shot detonate. null for every melee augment.
+            impactBehaviorId: stoneType.impact_behavior_id ?? null,
+          },
+          // TRAP 1 (the ticket's own review checklist). world.js gates stone
+          // XP on `w.stoneItemId != null`, and before this line only the
+          // replace branch set it -- so an augment stone would have landed
+          // every hit and never gained a single point of XP, with nothing
+          // failing loudly. Same field, same meaning, same award path.
+          stoneItemId: item.socketedStoneItemId ?? null,
+        };
+      }
       if (stoneType && stoneType.element != null) {
         return {
           ...type,
@@ -562,7 +599,9 @@ async function socketStone(pool, characterId, inv, stonePlayerItemId, hostPlayer
     const stoneTypeId = stoneRow.rows[0].item_type_id;
     const stoneType = itemTypes.get(stoneTypeId);
     const hostType = itemTypes.get(hostRow.rows[0].item_type_id);
-    if (!stoneType || !hostType || !isCompatible(stoneKind(stoneType), hostType.category)) {
+    // hostType.kind is threaded through for the augment rule (SOMET-332):
+    // an augment stone is melee-only until projectiles.js applies its packet.
+    if (!stoneType || !hostType || !isCompatible(stoneKind(stoneType), hostType.category, hostType.kind)) {
       await client.query('ROLLBACK'); return { ok: false, reason: 'stone is not compatible with this item' };
     }
 

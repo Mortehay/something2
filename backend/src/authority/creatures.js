@@ -1911,7 +1911,18 @@ class CreatureSim {
   // Task 5 this call site passed no sourceId at all, so a creature that died
   // to a melee-applied burn (rather than the swing itself) could never be
   // attributed to anyone; this is that gap closed, not a new feature.
-  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null) {
+  // SOMET-332: `augment` is an optional SECOND damage packet -- an augment
+  // stone's bonus, in the stone's own element. Applied inside this same loop,
+  // deliberately, rather than by a second pass over the arc:
+  //   * both packets hit the same target set, computed once;
+  //   * there is still exactly ONE hp<=0 check per target, so a creature
+  //     finished off by the bonus is reported as killed exactly once. A second
+  //     pass would either miss those kills (targets already deleted) or
+  //     double-count them.
+  // It is a separate packet, never added into `damage`, so each portion is
+  // mitigated and rides its status effect under its OWN element -- frost on a
+  // physical sword must be resisted as frost.
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null, augment = null) {
     const killed = [];
     for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth)) {
       const c = this.creatures.get(id);
@@ -1924,6 +1935,15 @@ class CreatureSim {
       // deals damage — one call adjacent to each applyDamage, never a second
       // rider table.
       applyElementEffect(c, element, now, sourceId);
+      if (augment && augment.bonusDamage > 0) {
+        // effectiveMit is re-read rather than cached across the two packets:
+        // the first packet's rider can change what the second is mitigated by
+        // (a chill lands, then the bonus is measured against the chilled
+        // target), and reusing a stale snapshot would silently diverge from
+        // what every other damage site in the file does.
+        applyDamageWithEffects(c, augment.bonusDamage, augment.element, effectiveMit(c), now, playerKey(sourceId));
+        applyElementEffect(c, augment.element, now, sourceId);
+      }
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
     }
