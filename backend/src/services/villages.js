@@ -406,11 +406,39 @@ async function insertVillageGuards(db, worldId, villages) {
   }
 }
 
+// Wipe every gate guard in a world and re-insert exactly two per village that
+// exists NOW. The fourth call site of an idiom that had three identical copies
+// (village delete, creature re-roll and regenerate-terrain in src/index.js) is
+// the point at which it becomes a function -- and SOMET-312 needs it for a
+// fifth reason, a MOVED village, whose guards would otherwise keep standing at
+// the box the village has left.
+//
+// Wipe-and-re-derive rather than sparing rows individually, for the reason the
+// delete route states: world_creatures carries no village_id, so there is no
+// way to ask which guard belongs to which village. The set is small (two per
+// village) and fully derived from the boxes, so recomputing it is cheaper than
+// any bookkeeping that could drift from it.
+//
+// The accepted cost, and it is why this is NOT called on an unchanged seed: a
+// re-derived guard is a NEW row at full hp. Calling it every run would heal a
+// world's guards on every seed and re-issue their ids.
+async function rederiveVillageGuards(db, worldId) {
+  await db.query('DELETE FROM world_creatures WHERE world_id = $1 AND type = $2',
+    [worldId, GUARD_TYPE]);
+  await insertVillageGuards(db, worldId, await fetchVillages(db, worldId));
+}
+
 // The three dependent writes a village needs to be playable: the row itself,
 // its gate guards, and its merchant's base catalog. `client` is the caller's
 // transaction client (village create/delete and the seed applier all run
 // this inside their own BEGIN/COMMIT/ROLLBACK) so this function owns none of
 // the transaction handling or error mapping -- only the write sequence.
+//
+// `village.key` (SOMET-312) is the map-spec identity of this village and is
+// stored so a later seed can find and MOVE this row rather than skip the world.
+// Absent for a village created through POST /api/worlds/:id/villages, which no
+// spec authors: the column is nullable and `?? null` is what keeps that route
+// from inventing an identity it does not have.
 async function createVillage(client, worldId, village) {
   const { min_row, min_col, width, height, gate_edge, spawn_x, spawn_y } = village;
   const mpost = villageMerchantPost({
@@ -418,9 +446,10 @@ async function createVillage(client, worldId, village) {
   });
 
   const ins = await client.query(
-    `INSERT INTO villages (world_id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-    [worldId, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, mpost.x, mpost.y],
+    `INSERT INTO villages (world_id, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, merchant_x, merchant_y, spec_key)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [worldId, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y, mpost.x, mpost.y,
+      village.key ?? null],
   );
   const row = ins.rows[0];
   await insertVillageGuards(client, worldId, [{
@@ -431,8 +460,65 @@ async function createVillage(client, worldId, village) {
   return row;
 }
 
+// SOMET-312 -- move an EXISTING village onto the box its spec now declares,
+// keeping its id.
+//
+// Keeping the id is the whole reason this is an UPDATE and not a
+// delete-then-create. merchant_stock.village_id is ON DELETE CASCADE, and a
+// merchant's stock includes rows a PLAYER listed for sale (seller_user_id is
+// not null) plus whatever they have not sold yet. Re-creating the row would
+// cascade every one of those away -- a village that moves three tiles east
+// would confiscate player property, which is a far worse bug than the drift
+// this fixes.
+//
+// Every position DERIVED from the box moves with it, and there are four:
+//
+//   merchant_x/merchant_y  written here, from villageMerchantPost -- the same
+//                          call createVillage makes, so a moved village and a
+//                          freshly created one land their merchant identically.
+//   spawn_x/spawn_y        authored, comes from the spec, written here.
+//   the two guard posts    NOT here: they live in world_creatures and the
+//                          caller re-derives them once per world through
+//                          rederiveVillageGuards (a world can hold several
+//                          villages and the wipe is per world, not per village).
+//   the bank chest         nothing to write: villageBankPost derives it from
+//                          the box and the merchant post on every read.
+//
+// Returns the row as it was BEFORE the move alongside the new one, because the
+// caller has to be able to say what moved and from where, and because the old
+// spawn point is the key to the player_binds fixup (a bind IS a village spawn,
+// see the seed applier).
+async function repositionVillage(client, villageId, village) {
+  const { min_row, min_col, width, height, gate_edge, spawn_x, spawn_y } = village;
+  const mpost = villageMerchantPost({
+    minRow: min_row, minCol: min_col, width, height, gateEdge: gate_edge,
+  });
+  // Read BEFORE the write, and FOR UPDATE. Two plain statements rather than one
+  // clever RETURNING: the caller prints "moved from A to B", and an `A` that
+  // was actually read after the write would make every such line say "from B to
+  // B" -- a report that can only ever agree with itself is the shape of vacuous
+  // assertion this repo keeps finding. The row lock is what stops a concurrent
+  // writer landing between the two.
+  const prev = await client.query('SELECT * FROM villages WHERE id = $1 FOR UPDATE', [villageId]);
+  if (prev.rowCount === 0) throw new Error(`village ${villageId} does not exist`);
+
+  const r = await client.query(
+    `UPDATE villages
+        SET min_row = $2, min_col = $3, width = $4, height = $5, gate_edge = $6,
+            spawn_x = $7, spawn_y = $8, merchant_x = $9, merchant_y = $10,
+            spec_key = $11
+      WHERE id = $1
+      RETURNING *`,
+    [villageId, min_row, min_col, width, height, gate_edge, spawn_x, spawn_y,
+      mpost.x, mpost.y, village.key ?? null],
+  );
+  return { before: prev.rows[0], after: r.rows[0] };
+}
+
 module.exports = {
   fetchVillages, createVillage, insertVillageGuards, guardStats,
+  // SOMET-312: moving a seeded village, and the guard set that has to follow it.
+  repositionVillage, rederiveVillageGuards,
   GUARD_TYPE, GUARD_LEVEL, VILLAGE_LIMITS,
   villageGeometryError,
   // The two halves, exported for tests that need to attribute a rejection to

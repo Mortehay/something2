@@ -90,6 +90,7 @@ test('the seed-spec validator rejects a village spawning on the wall ring', () =
     worlds: [{
       key: 'hub', name: 'Hub', grid: [0, 0], width: 64, height: 64, is_entry: true,
       village: {
+        key: 'hub-village',
         min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S',
         spawn_x: 3250, spawn_y: 3150,   // tile (row 31, col 32) = south wall
       },
@@ -109,6 +110,7 @@ test('the seed-spec validator accepts the corrected interior spawn', () => {
     worlds: [{
       key: 'hub', name: 'Hub', grid: [0, 0], width: 64, height: 64, is_entry: true,
       village: {
+        key: 'hub-village',
         min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S',
         spawn_x: 3050, spawn_y: 2950,
       },

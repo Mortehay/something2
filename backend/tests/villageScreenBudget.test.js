@@ -206,9 +206,13 @@ test('POST /villages still accepts the same box at a legal size (control)', asyn
 // entry_spawn to BE the spawn of the village it declares. Deriving it keeps
 // every case below -- legal and over-budget alike -- about the SIZE rule these
 // tests are named for, with no second unrelated error to filter out.
+// `key` (SOMET-312) is supplied here rather than in each case for the same
+// reason entry_spawn is derived: every case below is about the SIZE rule, and a
+// missing village key would add a second unrelated error to filter out.
 const specWith = (village) => ({
   worlds: [{
-    key: 'hub', name: 'Hub', grid: [0, 0], width: 64, height: 64, is_entry: true, village,
+    key: 'hub', name: 'Hub', grid: [0, 0], width: 64, height: 64, is_entry: true,
+    village: { key: 'hub-village', ...village },
     entry_spawn: { x: village.spawn_x, y: village.spawn_y },
   }],
   links: [],
