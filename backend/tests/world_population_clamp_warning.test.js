@@ -4,12 +4,17 @@
 // (populateWorld, "was clamped to ... by MAX_WORLD_CREATURES") had ZERO
 // coverage. resolveDensity's `clamped` flag is well covered by
 // densityTiers.test.js, but the SURFACING of it -- the entire point of that
-// code -- was asserted nowhere. After the density tier re-scale (SOMET-350),
-// the deepest shipped world (224x224 swarm, ~4466 creatures) IS now clamped
-// against the 4000 ceiling. A warning that used to be unreachable can be
-// deleted by accident with the whole suite still green -- exactly the "inert
-// feature, passing suite" pattern this project has shipped before (see e.g.
-// SOMET-249's TWO-LOADER trap).
+// code -- was asserted nowhere. After the density tier re-scale (SOMET-350
+// Task 4), the deepest shipped world (224x224 swarm, ~4466 creatures) was
+// clamped against the 4000 ceiling; Task 5's measurement raised the cap to
+// 5000, which lifted that specific clamp again (see densityTiers.test.js's
+// boundary test), so this file's own fixture below uses a 4096x4096 world
+// instead of 224x224 -- comfortably over the cap at any tier this table can
+// produce, so it stays a valid "genuinely clamped" fixture across future cap
+// moves too (see the sanity test at the bottom of this file). A warning that
+// used to be unreachable can be deleted by accident with the whole suite
+// still green -- exactly the "inert feature, passing suite" pattern this
+// project has shipped before (see e.g. SOMET-249's TWO-LOADER trap).
 //
 // Deliberately NOT in world_population_db.test.js: that file is DB-backed
 // (requires DATABASE_URL against the shared dev database), and the plan's

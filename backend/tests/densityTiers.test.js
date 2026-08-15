@@ -66,43 +66,53 @@ test('an unbounded world resolves to no creatures', () => {
 // of event-loop-blocking rejection sampling in the same process as the live
 // authority, plus that many INSERTs inside one open write transaction.
 //
-// The expected values are literals: 4000 minus each tier's worst-case pack
+// The expected values are literals: 5000 minus each tier's worst-case pack
 // budget (packCount * packSizeMax). Recomputing them from MAX_WORLD_CREATURES
 // and DENSITY_TIERS would assert the clamp's own arithmetic back at itself.
+//
+// SOMET-350 Task 5: MAX_WORLD_CREATURES raised 4000 -> 5000 on a measured
+// tick cost (see densityTiers.js's comment on the constant), so every literal
+// below that was "4000 minus a pack budget" moves to "5000 minus a pack
+// budget".
 test('a map large enough to blow past the cap is clamped, packs included', () => {
-  // normal: 1 pack of at most 4 -> 4000 - 4.
-  assert.equal(resolveDensity('normal', 4096, 4096).scatterCount, 3996);
-  // dense: 2 packs of at most 6 -> 4000 - 12.
-  assert.equal(resolveDensity('dense', 4096, 4096).scatterCount, 3988);
-  // swarm: 6 packs of at most 12 -> 4000 - 72.
-  assert.equal(resolveDensity('swarm', 4096, 4096).scatterCount, 3928);
+  // normal: 1 pack of at most 4 -> 5000 - 4.
+  assert.equal(resolveDensity('normal', 4096, 4096).scatterCount, 4996);
+  // dense: 2 packs of at most 6 -> 5000 - 12.
+  assert.equal(resolveDensity('dense', 4096, 4096).scatterCount, 4988);
+  // swarm: 6 packs of at most 12 -> 5000 - 72.
+  assert.equal(resolveDensity('swarm', 4096, 4096).scatterCount, 4928);
 });
 
-test('the clamped total never exceeds 4000 creatures for any tier', () => {
-  assert.equal(MAX_WORLD_CREATURES, 4000);
+test('the clamped total never exceeds 5000 creatures for any tier', () => {
+  assert.equal(MAX_WORLD_CREATURES, 5000);
   for (const tier of DENSITY_NAMES) {
     const d = resolveDensity(tier, 4096, 4096);
     const worstCaseTotal = d.scatterCount + d.packCount * d.packSizeMax;
-    assert.ok(worstCaseTotal <= 4000,
+    assert.ok(worstCaseTotal <= 5000,
       `${tier} on a 4096x4096 map resolves to ${worstCaseTotal} creatures`);
   }
 });
 
-// The deepest world on the size ramp is 224x224 at swarm. With the re-scaled
-// tiers, this is now clamped (4466 raw, 3928 clamped). The clamp must stay
-// invisible to every world the game actually ships, which is exactly why a
-// regression in it would go unnoticed without this.
-test('the cap clamps the largest shipped world, and clamping behavior is stable', () => {
-  assert.equal(resolveDensity('swarm', 224, 224).scatterCount, 3928);   // clamped
-  assert.equal(resolveDensity('swarm', 210, 210).scatterCount, 3925);   // just under the clamp
-  assert.equal(resolveDensity('swarm', 211, 211).clamped, true);        // gets clamped at 211x211
+// The deepest world on the size ramp is 224x224 at swarm: 4466 raw (89 *
+// 50176 / 1000). SOMET-350 Task 5 raised the cap specifically because this
+// was clamping at 4000 (ceiling 3928 after the pack budget) -- at 5000 the
+// ceiling is 4928, comfortably above 4466, so this world now scatters its
+// full, unclamped count. The clamp itself must still exist and still be
+// exercisable, so this also pins the new boundary (square swarm worlds) where
+// it starts biting: 235x235 fits under the ceiling, 236x236 does not.
+test('the raised cap no longer clamps the largest shipped world, and the clamp boundary moved with it', () => {
+  assert.equal(resolveDensity('swarm', 224, 224).scatterCount, 4466);   // unclamped now
+  assert.equal(resolveDensity('swarm', 224, 224).clamped, false);
+  assert.equal(resolveDensity('swarm', 235, 235).scatterCount, 4915);   // just under the new clamp
+  assert.equal(resolveDensity('swarm', 235, 235).clamped, false);
+  assert.equal(resolveDensity('swarm', 236, 236).clamped, true);        // gets clamped at 236x236
 });
 
 // The flag is the whole point of SOMET-302's ceiling work: before it, a
 // truncated world was indistinguishable from a world authored thin.
 test('clamped is true only when the ceiling actually cut the target', () => {
-  assert.equal(resolveDensity('swarm', 210, 210).clamped, false);
-  assert.equal(resolveDensity('swarm', 211, 211).clamped, true);
+  assert.equal(resolveDensity('swarm', 235, 235).clamped, false);
+  assert.equal(resolveDensity('swarm', 236, 236).clamped, true);
   assert.equal(resolveDensity('normal', 64, 64).clamped, false);
   assert.equal(resolveDensity('dead', 4096, 4096).clamped, false);
 });
@@ -136,8 +146,16 @@ test('the ladder rises monotonically', () => {
   }
 });
 
-test('swarm on the largest shipped world clamps rather than overrunning the cap', () => {
-  const r = resolveDensity('swarm', 224, 224);
-  assert.strictEqual(r.clamped, true);
-  assert.ok(r.scatterCount <= MAX_WORLD_CREATURES);
+// SOMET-350 Task 5: with the raised cap, swarm on the largest shipped world
+// (224x224) is exactly the case that stopped clamping -- see the boundary
+// test above. scatterCount must still never exceed the cap regardless, both
+// where the ceiling does not bite (224x224) and where it does (4096x4096).
+test('scatterCount never exceeds the cap, clamped or not', () => {
+  const unclamped = resolveDensity('swarm', 224, 224);
+  assert.strictEqual(unclamped.clamped, false);
+  assert.ok(unclamped.scatterCount <= MAX_WORLD_CREATURES);
+
+  const clamped = resolveDensity('swarm', 4096, 4096);
+  assert.strictEqual(clamped.clamped, true);
+  assert.ok(clamped.scatterCount <= MAX_WORLD_CREATURES);
 });

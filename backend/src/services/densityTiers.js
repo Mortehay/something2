@@ -62,7 +62,30 @@ const DEFAULT_DENSITY = 'normal';
 // the density tier re-scale (SOMET-350), the deepest world on the size ramp
 // -- 224x224 at swarm -- resolves to ~4466 (89 * 50176 / 1000) and IS now
 // clamped. The cap still guards against larger maps and resolveDensity('normal', 4096, 4096).
-const MAX_WORLD_CREATURES = 4000;
+//
+// SOMET-350 Task 5: raised 4000 -> 5000 on a measurement, not a guess.
+// CreatureSim.tick (authority/creatures.js) has a cheap, chunk-scoped
+// behaviour loop and an EXPENSIVE unscoped pass -- computeAuras, O(leaders x
+// all), running over the whole population every tick regardless of the
+// active chunk set. Leader count, not headcount, is what bends the curve, so
+// the population/leader sweep below deliberately varies leaders, using the
+// Champion behaviour (aura_radius 260, the only aura-carrying entry in the
+// catalog and what a later slice promotes pack masters into).
+//
+// Measured 2026-08-16 on an AMD Ryzen 5 7530U (12 logical cores), backend/tests/
+// creature_tick_cost.test.js, CreatureSim.tick with a 3x3 active chunk block:
+//   2400 creatures /   6 leaders: 1.010 ms/tick
+//   4500 creatures /   6 leaders: 1.897 ms/tick
+//   4500 creatures /  50 leaders: 6.839 ms/tick
+//   4500 creatures / 200 leaders: 25.787 ms/tick
+// computeAuras is O(leaders x all) and runs over the WHOLE population every
+// tick, outside the chunk gate -- so the leader count, not the headcount, is
+// what bends this curve. Slice B (pack masters use the Champion behaviour,
+// the only one with aura_radius > 0) must budget against the last two rows:
+// a single active area with 50 leaders already spends most of the 8ms
+// half-budget, and 200 leaders blows well past the whole 16ms frame budget.
+// The 5000-creature/6-leader decision row itself has headroom to spare.
+const MAX_WORLD_CREATURES = 5000;
 
 // Pure. Never reads a database -- populateWorld does the writing, including
 // persisting scatterCount back to worlds.creature_count.
