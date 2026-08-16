@@ -30,11 +30,13 @@ const { villageGatePosts, villageMerchantPost } = require('../src/services/mapSe
 
 const url = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
-// The two specs that own the home region. Thornbriar Reach is a hub-vale world
-// and the other two are spine-descent worlds, which is also why the migration
-// resolves worlds by NAME rather than by spec: the region is a gameplay region,
-// not a map file.
-const SPEC_NAMES = ['spine-descent', 'hub-vale'];
+// The spec that owns the home region. It used to be TWO specs -- Thornbriar
+// Reach in hub-vale, the other two in spine-descent -- which is why the
+// migration resolves worlds by NAME rather than by spec: the region is a
+// gameplay region, not a map file. SOMET-355 merged those specs (and
+// loop-catacombs) into `vale-region`, so the region now sits in one file; the
+// name-keyed resolution below is unchanged and still the right one.
+const SPEC_NAMES = ['vale-region'];
 const MAPS_DIR = path.join(__dirname, '..', 'seeds', 'maps');
 
 const TILE = 100;

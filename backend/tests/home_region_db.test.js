@@ -22,14 +22,18 @@ const { populateWorld } = require('../src/services/worldPopulation.js');
 const URL = process.env.DATABASE_URL;
 const describeDb = URL ? test : test.skip;
 
-// The three home-region worlds, and the spec each is authored in. Old Trailhead
-// and Windwatch Pass are in spine-descent; Thornbriar Reach is in hub-vale --
-// the Old Trailhead <-> Thornbriar link that makes them neighbours exists only
-// in the live database and is in no checked-in spec.
+// The three home-region worlds and their spec keys. SOMET-355: spine-descent
+// and hub-vale are now the `spine_` and `vale_` REGIONS of the merged
+// `vale-region` spec -- and the Old Trailhead <-> Thornbriar Reach link that
+// makes them neighbours, which the comment here used to note "exists only in
+// the live database and is in no checked-in spec", is now declared as
+// `vale_forest --E--> spine_entry`. That undeclared link was the whole of
+// SOMET-355: a re-seed would have dropped it and split the home region in two.
+const HOME_SPEC = 'vale-region';
 const HOME_WORLDS = [
-  ['Old Trailhead', 'spine-descent', 'entry'],
-  ['Windwatch Pass', 'spine-descent', 'pass'],
-  ['Thornbriar Reach', 'hub-vale', 'forest'],
+  ['Old Trailhead', HOME_SPEC, 'spine_entry'],
+  ['Windwatch Pass', HOME_SPEC, 'spine_pass'],
+  ['Thornbriar Reach', HOME_SPEC, 'vale_forest'],
 ];
 
 const specWorld = (specName, key) => {

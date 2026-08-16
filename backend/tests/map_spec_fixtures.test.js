@@ -39,6 +39,40 @@ const specFiles = () => fs.readdirSync(MAPS_DIR).filter((f) => f.endsWith('.map.
 const readSpec = (name) =>
   JSON.parse(fs.readFileSync(path.join(MAPS_DIR, `${name}.map.json`), 'utf8'));
 
+// SOMET-355. hub-vale, spine-descent and loop-catacombs were merged into the
+// single spec `vale-region`, because the doorways connecting them could not be
+// declared while each lived in its own file: validateMapSpec checks every link
+// against ITS OWN spec's grid, so a cross-file link is unexpressible, and the
+// three maps were in fact wired together by ten hand-drawn map_links rows that
+// no spec declared. One spec, one grid, three disjoint regions.
+//
+// Each region survives as a key prefix (`vale_`, `spine_`, `cata_`), and the
+// per-region assertions below still run against exactly the worlds they always
+// did -- de-prefixed, so a region view is shaped like the standalone spec it
+// used to be and helpers like bfsDistances/hasCycle work on it unchanged.
+//
+// `is_entry` is synthesised per region rather than read: a spec may declare
+// only ONE entry world (validateMapSpec enforces it), so after the merge only
+// Vale Crossing carries the flag, and bfsDistances needs a root for the spine
+// and catacombs views too. The root is the region's own historical entry key.
+const REGION_ENTRY_KEY = { vale: 'hub', spine: 'entry', cata: 'entry' };
+
+function region(prefix, spec = readSpec('vale-region')) {
+  const strip = (k) => k.slice(prefix.length + 1);
+  const mine = (k) => k.startsWith(`${prefix}_`);
+  const worlds = spec.worlds.filter((w) => mine(w.key)).map((w) => ({
+    ...w, key: strip(w.key), is_entry: strip(w.key) === REGION_ENTRY_KEY[prefix],
+  }));
+  // Links with BOTH ends inside the region. The three connector links that
+  // join the regions are deliberately excluded -- they are what makes the
+  // merged graph one map, and counting them would, for instance, make the hub
+  // look like it had more spokes than it does.
+  const links = spec.links
+    .filter((l) => mine(l.from) && mine(l.to))
+    .map((l) => ({ ...l, from: strip(l.from), to: strip(l.to) }));
+  return { name: prefix, worlds, links };
+}
+
 // BFS hop distance from the entry over the UNDIRECTED link graph. Shared by
 // the cycle test and the escalation test below so both reason about the same
 // graph shape.
@@ -104,9 +138,9 @@ function hasCycle(spec) {
 // `node --test tests/map_spec_fixtures.test.js`. An exact-set assertion here
 // would fail a fourth, unrelated, perfectly valid spec and name nothing to
 // do with the author's own work.
-const SHIPPED_EXAMPLES = ['hub-vale.map.json', 'loop-catacombs.map.json', 'spine-descent.map.json'];
+const SHIPPED_EXAMPLES = ['vale-region.map.json', 'p5-descent.map.json'];
 
-test('all three example topologies ship', () => {
+test('the shipped example specs are all present', () => {
   const files = specFiles();
   for (const f of SHIPPED_EXAMPLES) {
     assert.ok(files.includes(f), `expected shipped example ${f} to still be present`);
@@ -208,7 +242,7 @@ test('every shipped world with an allowlist actually places creatures', () => {
 // catalogs" above.
 
 test('hub-vale has a village in its hub and at most four spokes', () => {
-  const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, 'hub-vale.map.json'), 'utf8'));
+  const spec = region('vale');
   const hub = spec.worlds.find((w) => w.is_entry);
   assert.ok(hub.village, 'the hub is the bind point and needs a village');
   const outgoing = spec.links.filter((l) => l.from === hub.key).length;
@@ -216,7 +250,7 @@ test('hub-vale has a village in its hub and at most four spokes', () => {
 });
 
 test('loop-catacombs actually contains a cycle', () => {
-  const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, 'loop-catacombs.map.json'), 'utf8'));
+  const spec = region('cata');
   assert.ok(hasCycle(spec), 'no cycle: the loop topology does not close on the grid');
 });
 
@@ -225,7 +259,7 @@ test('spine-descent escalates its level bands with depth', () => {
   // declare bands that wander or flatten and every other test would still be
   // green -- the same shape of hole that let a dangling creature reference
   // survive in biomes_seed.test.js.
-  const spec = JSON.parse(fs.readFileSync(path.join(MAPS_DIR, 'spine-descent.map.json'), 'utf8'));
+  const spec = region('spine');
   const banded = spec.worlds.filter((w) => w.level_band);
   assert.ok(banded.length >= 4, 'spine-descent should band most of its worlds');
 
@@ -270,14 +304,14 @@ test('spine-descent escalates its level bands with depth', () => {
 // name an underground biome, and no shipped spec may still reference the
 // surface biomes underground.
 test('every loop-catacombs world uses an underground biome', () => {
-  const spec = readSpec('loop-catacombs');
+  const spec = region('cata');
   const surface = new Set(['Meadow', 'Deep Forest', 'Arid Dunes', 'Frozen Waste', 'Mire']);
   const offenders = spec.worlds.filter((w) => (w.biomes || []).some((b) => surface.has(b)));
   assert.deepEqual(offenders.map((w) => w.key), []);
 });
 
 test('spine-descent goes underground as it descends', () => {
-  const spec = readSpec('spine-descent');
+  const spec = region('spine');
   const byKey = Object.fromEntries(spec.worlds.map((w) => [w.key, w.biomes]));
   assert.deepEqual(byKey.entry, ['Meadow']);            // entry stays surface
   assert.deepEqual(byKey.cache, ['Cavern']);            // underground by band 3-5
@@ -301,7 +335,7 @@ test('spine-descent goes underground as it descends', () => {
 // still reads as a storm-lashed tidal fen (water 29% + swamp 9%). Verified by
 // generating the world and flood-filling it -- see the P3 final fix report.
 test('hub-vale keeps its original biome first and gains one new surface biome', () => {
-  const spec = readSpec('hub-vale');
+  const spec = region('vale');
   const expected = {
     hub: ['Meadow', 'Highlands'],
     forest: ['Deep Forest', 'Verdant Jungle'],
@@ -317,7 +351,7 @@ test('hub-vale keeps its original biome first and gains one new surface biome', 
 // Stated separately from the exact lists so re-ordering a world for
 // navigability can never quietly drop a biome at the same time.
 test('every hub-vale world still pairs its original biome with one new surface biome', () => {
-  const spec = readSpec('hub-vale');
+  const spec = region('vale');
   const ORIGINAL = new Set(['Meadow', 'Deep Forest', 'Arid Dunes', 'Frozen Waste', 'Mire']);
   const NEW_SURFACE = new Set(['Highlands', 'Verdant Jungle', 'Storm Coast', 'Sunken Ruins', 'Ashfields']);
   for (const w of spec.worlds) {
