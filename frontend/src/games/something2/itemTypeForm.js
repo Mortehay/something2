@@ -4,7 +4,25 @@
 // exporting only its default component (react-refresh/only-export-components).
 
 // Mirrors backend/src/index.js's ITEM_ELEMENTS / ITEM_SLOTS exactly.
+// SOMET-329: both lists are CATALOG data, fetched from /api/weapon-catalogs
+// and passed into validateClient. These are the seeded fallbacks, used before
+// the fetch resolves and if it fails — a form that validated against an empty
+// list would reject every element the game actually has.
 export const ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
+export const ATTACK_ORIGINS = ['feet', 'middle', 'head'];
+
+// The shape /api/weapon-catalogs returns, normalized for the form. Exported so
+// the admin component and its tests agree on it.
+export function emptyCatalogs() {
+  return { attackOrigins: [], elements: [], projectileShapes: [], impactBehaviors: [] };
+}
+
+// Names from a fetched catalog, or the seeded fallback when it is empty.
+export function catalogNames(rows, fallback) {
+  if (!Array.isArray(rows) || rows.length === 0) return fallback;
+  const names = rows.map((r) => r && r.name).filter((n) => typeof n === 'string' && n);
+  return names.length > 0 ? names : fallback;
+}
 
 // Attack VFX binding moments (slice E, SOMET-162), and which weapon kinds can
 // actually produce each one.
@@ -107,6 +125,14 @@ export function emptyForm() {
     name: '',
     category: 'weapon',
     element: '',
+    // SOMET-326. '' is "unset", which the backend stores as NULL and
+    // authority/attackOrigin.js resolves to the kind default (middle) --
+    // i.e. exactly how every weapon rendered before this slice.
+    attack_origin: '',
+    // SOMET-329. '' is "no named shape/behaviour" — the hand-tuned
+    // projectile_radius / aoe_radius+pierce columns stay authoritative.
+    projectile_shape_id: '',
+    impact_behavior_id: '',
     stackable: false,
     ...WEAPON_DEFAULTS,
     slot: '',
@@ -123,6 +149,9 @@ export function formFromType(t) {
     name: t.name,
     category: t.category,
     element: t.element || '',
+    attack_origin: t.attack_origin || '',
+    projectile_shape_id: t.projectile_shape_id ?? '',
+    impact_behavior_id: t.impact_behavior_id ?? '',
     kind: t.kind || 'melee',
     damage: t.damage ?? 0,
     cooldown: t.cooldown ?? 0,
@@ -168,11 +197,18 @@ export function formFromType(t) {
 // reserved row (`gold`, category `currency`) was rejected here before the
 // request was ever sent, so the row the backend had just made *editable* stayed
 // uneditable through the UI (SOMET-284).
-export function validateClient(f, existing = null) {
+// SOMET-329: `catalogs` is the fetched option catalog. Optional and defaulted,
+// so every existing caller and test keeps working against the seeded lists.
+export function validateClient(f, existing = null, catalogs = null) {
+  const elements = catalogNames(catalogs && catalogs.elements, ELEMENTS);
+  const origins = catalogNames(catalogs && catalogs.attackOrigins, ATTACK_ORIGINS);
   const keepsReserved = keepsReservedCategory(f.category, existing);
   if (!f.name.trim()) return 'Name is required';
   if (!keepsReserved && !['weapon', 'armor', 'ammo'].includes(f.category)) return "category must be 'weapon', 'armor' or 'ammo'";
-  if (f.element && !ELEMENTS.includes(f.element)) return `element must be one of ${ELEMENTS.join(', ')}`;
+  if (f.element && !elements.includes(f.element)) return `element must be one of ${elements.join(', ')}`;
+  if (f.attack_origin && !origins.includes(f.attack_origin)) {
+    return `attack origin must be one of ${origins.join(', ')}`;
+  }
   if (f.category === 'armor' && f.slot && !SLOTS.includes(f.slot)) return `slot must be one of ${SLOTS.join(', ')}`;
   // Mirrors validateItemType's `value` check (F-003/F-047): a non-negative integer, or unset.
   if (f.value !== '' && f.value != null) {
@@ -293,6 +329,16 @@ export function buildPayload(f, existing = null) {
     return {
       ...base,
       kind: f.kind,
+      // SOMET-326. Not kind-gated: both melee and projectile weapons launch
+      // their visuals from somewhere on the body, and the column carries no
+      // gate either. '' -> null is "unset", which resolves to the kind default.
+      attack_origin: f.attack_origin || null,
+      // SOMET-329. Shape is projectile-only (a melee swing has no projectile
+      // to size), impact behaviour likewise — both kind-gated the same way
+      // range/reach already are, so switching a weapon to melee cannot leave
+      // a stale projectile setting silently attached to it.
+      projectile_shape_id: f.kind === 'projectile' ? num(f.projectile_shape_id) : null,
+      impact_behavior_id: f.kind === 'projectile' ? num(f.impact_behavior_id) : null,
       damage: num(f.damage, 0),
       cooldown: num(f.cooldown, 0),
       two_handed: !!f.two_handed,

@@ -4,10 +4,11 @@ import { useItemTypes, useCreateItemType, useUpdateItemType, useDeleteItemType, 
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import {
-  ELEMENTS, SLOTS, WEAPON_DEFAULTS, ARMOR_DEFAULTS, AMMO_DEFAULTS,
+  ELEMENTS, ATTACK_ORIGINS, SLOTS, WEAPON_DEFAULTS, ARMOR_DEFAULTS, AMMO_DEFAULTS,
   emptyForm, formFromType, validateClient, buildPayload, VFX_MOMENTS,
-  isReservedItemType,
+  isReservedItemType, catalogNames,
 } from './itemTypeForm.js';
+import { useWeaponCatalogs } from './useWeaponCatalogs.js';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -320,6 +321,8 @@ function ItemTypesAdmin() {
 
   // The live effect library, for the binding dropdowns in the editor.
   const { vfxEffects = [] } = useVfxEffects();
+  // SOMET-329: the four bounded option catalogs behind the weapon dropdowns.
+  const { catalogs } = useWeaponCatalogs();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingType, setEditingType] = useState(null);
   const [formData, setFormData] = useState(emptyForm());
@@ -398,7 +401,10 @@ function ItemTypesAdmin() {
     // `editingType` (the STORED row, null on create) is what tells both helpers
     // a reserved row is allowed to keep its own category -- same argument, same
     // meaning, as `existing` in the backend's validateItemType().
-    const problem = validateClient(formData, editingType);
+    // SOMET-329: validate against the LIVE catalogs, so a newly authored
+    // element is accepted here rather than rejected by a stale seeded list
+    // after the dropdown just offered it.
+    const problem = validateClient(formData, editingType, catalogs);
     if (problem) {
       toast.error(problem);
       return;
@@ -608,9 +614,11 @@ function ItemTypesAdmin() {
 
               <FormGroup>
                 <label>Element</label>
+                {/* SOMET-329: options come from the `elements` catalog, with
+                    the seeded list as the fallback while it loads. */}
                 <select value={formData.element} onChange={e => setFormData({ ...formData, element: e.target.value })}>
                   <option value="">none</option>
-                  {ELEMENTS.map(el => <option key={el} value={el}>{el}</option>)}
+                  {catalogNames(catalogs.elements, ELEMENTS).map(el => <option key={el} value={el}>{el}</option>)}
                 </select>
               </FormGroup>
 
@@ -639,6 +647,58 @@ function ItemTypesAdmin() {
                       <option value="projectile">projectile</option>
                     </select>
                   </FormGroup>
+
+                  {/* SOMET-326: where this weapon's attack visuals launch from
+                      on the wielder's body. Purely visual -- it never moves
+                      where a swing or a shot actually connects. */}
+                  <FormGroup>
+                    <label>Attack origin</label>
+                    <select
+                      value={formData.attack_origin}
+                      onChange={e => setFormData({ ...formData, attack_origin: e.target.value })}
+                    >
+                      <option value="">default (middle)</option>
+                      {catalogNames(catalogs.attackOrigins, ATTACK_ORIGINS).map(o => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  </FormGroup>
+
+                  {/* SOMET-329: projectile-only. A named shape SUPPLIES the
+                      radius; "none" leaves the hand-tuned number below
+                      authoritative, which is how every pre-slice-B weapon
+                      keeps working untouched. */}
+                  {formData.kind === 'projectile' ? (
+                    <>
+                      <FormGroup>
+                        <label>Projectile shape</label>
+                        <select
+                          value={formData.projectile_shape_id}
+                          onChange={e => setFormData({ ...formData, projectile_shape_id: e.target.value })}
+                        >
+                          <option value="">none (use radius below)</option>
+                          {(catalogs.projectileShapes || []).map(s => (
+                            <option key={s.id} value={s.id}>{s.name} — r{s.radius}</option>
+                          ))}
+                        </select>
+                      </FormGroup>
+
+                      <FormGroup>
+                        <label>Impact behaviour</label>
+                        <select
+                          value={formData.impact_behavior_id}
+                          onChange={e => setFormData({ ...formData, impact_behavior_id: e.target.value })}
+                        >
+                          <option value="">none (use pierce / aoe below)</option>
+                          {(catalogs.impactBehaviors || []).map(b => (
+                            <option key={b.id} value={b.id}>
+                              {b.name}{b.detonates ? ` — detonates on ${b.detonate_at}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </FormGroup>
+                    </>
+                  ) : null}
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                     <FormGroup>

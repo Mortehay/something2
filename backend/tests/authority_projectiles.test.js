@@ -316,11 +316,28 @@ test('AoE: detonating on a player replaces the single-target hit, not adds to it
   assert.equal(target.hp, 16, 'the target must take the blast OR the direct hit, not both');
 });
 
-test('AoE: the detonation carries the blast point, radius and element', () => {
+test('AoE: the detonation carries the blast point, radius, element and anchor', () => {
+  // SOMET-326 added `o`, the vertical render anchor, which a blast INHERITS
+  // from its own projectile so the ring goes off at the height the shot was
+  // flying rather than flat on the ground.
+  const sim = new ProjectileSim();
+  sim.spawn({
+    ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, originLift: 54,
+    weapon: { ...STAFF, range: 40, element: 'fire' },
+  });
+  const r = sim.step(1, { creatures: creaturesStub([]), players: [], map: WALK_ALL });
+  assert.deepEqual(r.detonations, [{ x: 48, y: 0, radius: 100, element: 'fire', o: 54 }]);
+});
+
+test('AoE: a shot launched with no anchor detonates with an explicit null', () => {
+  // null, not undefined and not 0: the client reads a missing anchor as "use
+  // the legacy tile lift" (today's appearance), whereas 0 is `feet` and would
+  // drop the ring to the ground. deepEqual does not distinguish a missing key
+  // from an undefined one, so the value is asserted directly.
   const sim = new ProjectileSim();
   sim.spawn({ ownerId: 'u1', x: 0, y: 0, nx: 1, ny: 0, weapon: { ...STAFF, range: 40, element: 'fire' } });
   const r = sim.step(1, { creatures: creaturesStub([]), players: [], map: WALK_ALL });
-  assert.deepEqual(r.detonations, [{ x: 48, y: 0, radius: 100, element: 'fire' }]);
+  assert.strictEqual(r.detonations[0].o, null);
 });
 
 test('AoE: the blast goes through the shared mitigation path', () => {

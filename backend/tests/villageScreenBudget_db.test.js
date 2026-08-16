@@ -54,7 +54,42 @@ const { ENTRY_LOCK_KEY } = require('./helpers/entryWorld.js');
 // this file blind to any real world a future spec happens to name badly, and it
 // would not help the entry-world assertion at all -- during an apply the
 // fixture legitimately IS the entry world, whatever it is called.
-const readingLiveWorld = (pool, fn) => withAdvisoryLock(pool, ENTRY_LOCK_KEY, fn);
+//
+// ---------------------------------------------------------------------------
+// SOMET-357. Taking the key was necessary and STILL insufficient, for a reason
+// the comment above could not have anticipated: withAdvisoryLock deliberately
+// degrades to running UNGUARDED after LOCK_WAIT_MS rather than hanging the
+// suite. That is correct for the writers -- a racy write is recoverable, a hung
+// suite is not -- but for this file, "unguarded" means reading the database in
+// exactly the mid-apply window the lock exists to exclude, and then reporting a
+// defect that does not exist.
+//
+// It is not hypothetical: in the 2594-test run on 2026-08-16 the suite logged
+// exactly one `withAdvisoryLock(626526517): could not take the lock in 6000ms`,
+// and that same run failed here with `the entry world "zzTestWpA" must have
+// exactly one village ... got 0` -- zzTestWpA being seed_map_db.test.js's
+// fixture, mid-apply. One degrade, one false failure, same key.
+//
+// So a degraded read SKIPS instead of asserting. Skipping is the honest verdict
+// because an unguarded snapshot cannot distinguish "the invariant is broken"
+// from "someone else's fixture is halfway through being applied" -- and a red
+// that means the second is worse than no result at all, since it was cited as
+// evidence in SOMET-341 and sent a reader looking for a bug that was not there.
+//
+// Deliberately NOT retried: each acquisition already costs up to 6s, and four
+// call sites retried even twice would approach the 60s per-file budget on their
+// own. One degrade in a full suite is rare enough that skipping costs less
+// coverage than a timeout would.
+const readingLiveWorld = async (pool, t, fn) => withAdvisoryLock(
+  pool, ENTRY_LOCK_KEY, async ({ locked }) => {
+    if (!locked) {
+      t.skip('could not take ENTRY_LOCK_KEY -- a peer is mid-apply, so a '
+        + 'whole-database invariant cannot be read consistently here');
+      return undefined;
+    }
+    return fn();
+  },
+);
 
 const TILE = 100;
 const DB_URL = process.env.TEST_DATABASE_URL
@@ -127,7 +162,7 @@ test('every live village fits the on-screen size budget', async (t) => {
   const pool = await openPool(t, 'the live village size limit');
   if (!pool) return;
   try {
-    await readingLiveWorld(pool, async () => {
+    await readingLiveWorld(pool, t, async () => {
       const rows = (await pool.query(VILLAGES_SQL, [SPEC_WORLD_NAMES])).rows;
       // The size check runs BEFORE the count guard on purpose: an over-budget
       // hub must fail this test by NAME, not by "there are fewer villages than
@@ -151,7 +186,7 @@ test('every live village has a legal spawn and merchant/guard posts matching its
   const pool = await openPool(t, 'the live village geometry');
   if (!pool) return;
   try {
-    await readingLiveWorld(pool, async () => {
+    await readingLiveWorld(pool, t, async () => {
     const rows = (await pool.query(VILLAGES_SQL, [SPEC_WORLD_NAMES])).rows;
     // Non-vacuity, and the only one of these four tests that lacked it: every
     // assertion below lives inside the `for` loop, so zero rows is a silent
@@ -216,7 +251,7 @@ test('the entry world has a village and its entry_spawn IS that village spawn', 
   const pool = await openPool(t, "the entry world's village");
   if (!pool) return;
   try {
-    await readingLiveWorld(pool, async () => {
+    await readingLiveWorld(pool, t, async () => {
     const entries = (await pool.query(
       'SELECT id, name, entry_spawn FROM worlds WHERE is_entry = true')).rows;
     assert.equal(entries.length, 1, `expected exactly one is_entry world, got ${entries.length}`);
@@ -256,7 +291,7 @@ test('nothing is PLACED inside a village footprint except its guards', async (t)
   const pool = await openPool(t, 'the village-footprint placement invariant');
   if (!pool) return;
   try {
-    await readingLiveWorld(pool, async () => {
+    await readingLiveWorld(pool, t, async () => {
     // SOMET-352. This used to assert that no hostile STANDS inside a village
     // box, on any row in world_creatures. That is not an invariant this system
     // maintains, and the test was unfalsifiable red: nothing in the codebase is

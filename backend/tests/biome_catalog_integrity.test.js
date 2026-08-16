@@ -103,6 +103,15 @@ test('biome names are unique', () => {
   assert.equal(new Set(names).size, names.length);
 });
 
+test('every seeded biome declares a creature_density in range', () => {
+  for (const b of STARTER_BIOMES) {
+    assert.ok(Number.isFinite(b.creature_density),
+      `biome ${b.name} is missing creature_density`);
+    assert.ok(b.creature_density >= 0.4 && b.creature_density <= 2.5,
+      `biome ${b.name} density ${b.creature_density} outside [0.4, 2.5]`);
+  }
+});
+
 // The design's rule is about the three tiles THIS sub-project adds, not about
 // impassable terrain in general -- `water` is pre-existing and `Mire` has
 // always banded it. Deriving the set from every walkable:false tile would

@@ -5,6 +5,8 @@ const { currentUserForToken } = require('../auth/tokens.js');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
 const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout, socketStone, unsocketStone } = require('./items');
+const { loadCatalogs, elementsForWire } = require('./catalogs');
+const { configureAttackOrigins } = require('./attackOrigin.js');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
 const { ownedCharacter } = require('../services/characters.js');
@@ -531,7 +533,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const {
           creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
         } = await loadCreatureTypes(pool);
-        const itemTypes = await loadItemTypes(pool);
+        // SOMET-329: the option catalogs, loaded BEFORE the item types that
+        // resolve against them. `configureAttackOrigins` makes an admin's
+        // height_fraction edits take effect -- the fractions are data now, not
+        // constants in attackOrigin.js.
+        const catalogs = await loadCatalogs(pool);
+        configureAttackOrigins(catalogs.attackOrigins);
+        const itemTypes = await loadItemTypes(pool, catalogs);
         const defaultWeaponId = resolveDefaultWeaponId(itemTypes);
         const goldItemTypeId = resolveGoldItemTypeId(itemTypes);
         const linkRows = await fetchLinks(pool, canonicalId);
@@ -586,6 +594,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const map = new ServerMap({ ...mapGenConfig, decorationDefs });
         const entry = {
           worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
+          // SOMET-329: kept on the entry so `joined` can ship the element
+          // palette without a second query per player.
+          catalogs,
           tileTypes, creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
           goldItemTypeId, links, portalLinks, villages, waypoints, chests, mapGenConfig,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
@@ -1437,6 +1448,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
         send(ws, {
           type: 'joined', user_id: ws.userId, character_id: character.id, spawn, tickRate: 1000 / tickMs,
           itemTypes: [...entry.world.weapons.values()],
+          // SOMET-329: the element palette. The ONE catalog the client needs —
+          // it draws projectiles, trails, blast rings, status tints and impact
+          // bursts in element colours, and those colours used to be hardcoded
+          // client-side in two separate literals. Everything else about an
+          // element stays server-side.
+          elements: elementsForWire(entry.catalogs),
           items: inv.items,
           equipment: inv.equipment,
           // Server-authoritative: addPlayer always resets this to false, but

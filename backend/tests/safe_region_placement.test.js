@@ -41,16 +41,25 @@ test('the fixture actually has roads — otherwise every road test below is vacu
 // (see below) would still pass if some future change altered BOTH calls
 // identically; this pins the actual pre-existing behaviour so drift in
 // either the scatter or pack RNG path at radius 0 is caught for real.
+//
+// RE-PINNED for SOMET-350 (Task 3): the density gate consumes one extra rng()
+// draw per attempt in both placers, which shifts the shared stream for every
+// draw after it. This is exactly the "already-seeded worlds are unaffected,
+// newly-seeded ones lay out differently" tradeoff the gate's own comment in
+// mapService.js documents -- expected churn, not a regression. The invariant
+// this test actually protects (radius-0 scatter/pack output is byte-for-byte
+// identical whether safeRoadRadius is omitted or explicitly 0) was verified
+// to still hold against the new values before pinning them.
 const GOLDEN_SCATTERED_TILES = [
-  [26, 13], [31, 14], [16, 28], [28, 46], [40, 10], [9, 11], [6, 10], [27, 23],
-  [6, 40], [32, 15], [46, 5], [36, 22], [44, 11], [5, 17], [43, 32], [37, 40],
-  [6, 36], [40, 46], [44, 32], [20, 38], [32, 35], [31, 20], [27, 3], [13, 26],
-  [1, 30], [1, 33], [32, 25], [20, 36], [45, 11], [22, 41], [16, 8], [5, 18],
-  [30, 6], [41, 6], [25, 3], [3, 42], [21, 12], [20, 29], [3, 38], [26, 32],
+  [24, 31], [10, 30], [6, 10], [20, 27], [6, 40], [15, 40], [23, 28], [29, 44],
+  [20, 38], [35, 8], [30, 1], [40, 32], [40, 45], [20, 16], [5, 18], [6, 9],
+  [10, 3], [36, 3], [21, 12], [29, 10], [23, 21], [5, 23], [45, 34], [11, 32],
+  [1, 34], [17, 37], [44, 18], [29, 24], [38, 24], [6, 3], [20, 7], [38, 32],
+  [21, 16], [41, 16], [28, 35], [24, 39], [8, 21], [39, 29], [33, 36], [44, 26],
 ];
 const GOLDEN_PACKED_TILES = [
-  [24, 33], [24, 31], [27, 29], [20, 30], [24, 30], [20, 32],
-  [21, 10], [23, 13], [19, 9], [17, 11], [20, 14], [18, 9],
+  [31, 25], [27, 27], [28, 23], [28, 22], [30, 27], [28, 27],
+  [14, 18], [10, 17], [15, 15], [12, 21], [15, 19], [15, 17],
 ];
 
 test('with radius 0, placement is byte-for-byte what it was before safe regions', () => {

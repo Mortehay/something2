@@ -29,6 +29,7 @@ const {
 } = require('../src/services/villages.js');
 const {
   pensOf, placePenCreatures, insertPenCreatures, worldHasPennedCreatures,
+  deleteStrayPennedCreatures,
 } = require('../src/services/pens.js');
 const { insertPortalGuards } = require('../src/services/dungeonGuards.js');
 const { insertVaultChest } = require('../src/services/chests.js');
@@ -578,6 +579,31 @@ async function applyMapSpec(pool, spec) {
       const wr = await client.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
       const row = wr.rows[0];
       const pens = pensOf(row);
+
+      // RECONCILE BEFORE THE IDEMPOTENCY CHECK, not after (SOMET-356).
+      //
+      // The check below asks whether this world already holds creatures inside
+      // the boxes the spec authors TODAY. Move a pen and the answer is no, so
+      // the pass seeds a fresh herd in the new box -- and the old herd stays,
+      // because populateWorld's DELETE spares every row carrying home_x. The
+      // home region accumulated 17 such creatures that way, standing in pens
+      // that no longer exist.
+      //
+      // Deleting the strays first makes the seeder CONVERGE: a steady-state
+      // re-seed removes nothing and skips as before, while the first re-seed
+      // after a pen moves clears the abandoned herd and lets the pass below
+      // rebuild it deterministically in the new box. Putting the repair here
+      // rather than in a migration is the SOMET-335 lesson -- a migration that
+      // fixes seeded content is undone by the next re-seed.
+      const strays = await deleteStrayPennedCreatures(client, worldId, pens);
+      if (strays > 0) {
+        // Loud, because silence is what let this run for three days. Zero on
+        // every steady-state seed, non-zero exactly once after a pen moves.
+        console.warn(
+          `seed-map: world "${w.key}" removed ${strays} penned creature(s) `
+          + 'anchored outside every authored pen -- a pen box moved and left its '
+          + 'livestock behind; the pass below reseeds it in the current box.');
+      }
 
       // Idempotent per world, the same all-or-nothing shape villages use.
       //

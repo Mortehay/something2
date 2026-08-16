@@ -4,6 +4,7 @@
 // only by weapon data.
 
 const { resolveEffectName, blockedImpact } = require('./vfx.js');
+const { bodyLift } = require('./attackOrigin.js');
 const {
   applyDamageWithEffects, NO_MITIGATION, playerKey, creatureKey,
 } = require('./damage');
@@ -78,7 +79,53 @@ function recordBlock(p, c, x, y, nx, ny, blocks) {
   const key = `b:${c.id}`;
   if (p.hitIds.has(key)) return;
   p.hitIds.add(key);
-  blocks.push(blockedImpact(c.id, x, y, nx, ny));
+  // SOMET-326: anchored on the GUARD that refused the shot, not on the
+  // projectile's own launch height -- a block is a fact about the target. The
+  // shooter may be long gone, but `c` is in hand right here.
+  blocks.push(blockedImpact(c.id, x, y, nx, ny, bodyLift(c.height, 'middle')));
+}
+
+// SOMET-343: an augment stone's bonus, applied to a CREATURE as a second
+// damage packet in the augment's own element.
+//
+// ORDERING RULE, and the reason this helper exists at all. Unlike the melee
+// path -- where both packets land inside applyMeleeArc's single loop, before
+// one hp<=0 check -- every creature site here goes through
+// damageCreatureById, which applies damage AND resolves the kill AND deletes
+// the creature. So the bonus MUST land BEFORE the weapon's own packet:
+//
+//   * applied after, and the creature may already be deleted -- the bonus
+//     silently vanishes on exactly the hits that mattered most;
+//   * applied after and allowed to kill, and one projectile hit produces TWO
+//     kill signals, so loot and XP fire twice.
+//
+// Landing first leaves the main packet's existing kill check as the single
+// authority, and every call site below keeps the kill bookkeeping it already
+// had. Total damage and kill credit are identical either way; the only
+// visible difference is that a rider (chill, burn) is applied before the
+// weapon packet is mitigated rather than after.
+//
+// Returns true if the bonus KILLED the creature -- callers must report that
+// kill themselves, because the main packet that follows will find nothing.
+function applyCreatureAugment(p, creatures, c, scale, now) {
+  if (!p.augment || !(p.augment.bonusDamage > 0)) return false;
+  const died = creatures.damageCreatureById(
+    c.id, p.augment.bonusDamage * scale, p.augment.element, now, provokerKeyFor(p),
+  );
+  if (!died) applyElementEffect(c, p.augment.element, now, killerUserIdFor(p));
+  return died;
+}
+
+// The player-side equivalent. Deliberately much simpler and NOT sharing the
+// function above: a player is never removed from `players` on death
+// (resolveDeaths respawns them separately), so there is no deletion hazard and
+// no kill to report -- the ordering that is load-bearing for creatures is
+// merely cosmetic here.
+function applyPlayerAugment(p, pl, scale, now) {
+  if (!p.augment || !(p.augment.bonusDamage > 0)) return;
+  applyDamageWithEffects(pl, p.augment.bonusDamage * scale, p.augment.element,
+    pl.mit || NO_MITIGATION, now, provokerKeyFor(p));
+  applyElementEffect(pl, p.augment.element, now, p.ownerId);
 }
 
 function projectileHitsPlayer(p, player) {
@@ -128,10 +175,43 @@ class ProjectileSim {
   // flight must not change damage because its owner respecced mid-flight --
   // falls back to weapon.damage so callers that don't pass one (existing
   // tests, stub weapons) are unaffected.
+  // SOMET-343: `ammo` is the item_types row of the ammunition this shot
+  // consumed, or null. Before this slice ProjectileSim read ONLY `weapon.*`,
+  // so an ammo row was spent and then contributed nothing to the shot it
+  // became -- "explosive arrows" could not be authored at all.
   spawn({
     ownerId, ownerKind = 'player', ownerFaction = null, x, y, nx, ny, weapon, damage,
+    originLift, ammo = null,
   }) {
     const id = String(++this._id);
+    // Ammo wins over the weapon where it speaks, so an explosive arrow makes
+    // an ordinary bow detonate. A silent ammo row (no aoe of its own) leaves
+    // the weapon's own value alone, which is every arrow in the game today.
+    const mergedAoe = ammo && ammo.aoe_radius > 0 ? ammo.aoe_radius : weapon.aoe_radius;
+    // THE MERGED-STATE GUARD. item_types_aoe_pierce_check ("a detonating
+    // projectile may not also pierce") is a ROW-level CHECK: it validates the
+    // arbalest row and the explosive-bolt row separately, and both pass on
+    // their own -- pierce 2 with no aoe, aoe with no pierce. The forbidden
+    // combination only ever exists HERE, in memory, after the merge, where no
+    // constraint can see it.
+    //
+    // Resolved by clamping pierce, not by dropping the aoe, because that is
+    // the direction the constraint's own comment argues: "A detonating
+    // projectile has nothing left to pierce with". A shot that detonates is
+    // over.
+    // SOMET-343 part 3. WHERE a detonating shot goes off. Ammo wins over the
+    // weapon, as with the radius. Anything other than an explicit 'max_range'
+    // is 'contact' -- which is what every weapon authored before this slice
+    // resolves to, so none of them change.
+    const mergedDetonateAt = (ammo && ammo.detonate_at) || weapon.detonate_at;
+    const detonateAt = mergedDetonateAt === 'max_range' ? 'max_range' : 'contact';
+
+    const rawPierce = weapon.pierce;
+    // The pierce clamp applies ONLY to a contact detonator. A max_range shot
+    // is defined by flying THROUGH what it meets, so clamping it to one target
+    // would stop it at the first creature and it would never reach the range
+    // it is supposed to explode at -- the feature would be inert.
+    const mergedPierce = detonateAt === 'contact' && mergedAoe > 0 && rawPierce > 1 ? 1 : rawPierce;
     this.projectiles.push({
       id,
       ownerId,
@@ -146,10 +226,11 @@ class ProjectileSim {
       remaining: weapon.range,
       damage: damage ?? weapon.damage,
       radius: weapon.projectile_radius,
-      pierceLeft: weapon.pierce,
+      pierceLeft: mergedPierce,
       // null = today's point-collision projectile, unchanged. Normalized here
       // so a 0/negative/non-finite radius can never reach the falloff division.
-      aoeRadius: weapon.aoe_radius > 0 ? weapon.aoe_radius : null,
+      aoeRadius: mergedAoe > 0 ? mergedAoe : null,
+      detonateAt,
       element: weapon.element ?? null,
       // Slice D (SOMET-161): the resolved TRAIL effect name, taken once at
       // launch and carried for the shot's whole flight. Resolved server-side
@@ -163,6 +244,15 @@ class ProjectileSim {
       // (every player weapon today) -- a creature shot's ability.knockback
       // is the only live non-zero source until item_types gains its own.
       knockback: Number.isFinite(weapon.knockback) ? weapon.knockback : 0,
+      // SOMET-326: the vertical render anchor, in screen pixels up from the
+      // SHOOTER's feet, resolved at launch and carried for the whole flight
+      // (and inherited by this shot's detonation). Snapshotted for the same
+      // reason `damage` and `vfxTrail` above are, plus one specific to this
+      // field: by the time the shot lands the shooter can be dead or out of
+      // view, so there would be no body left to measure. A non-finite value
+      // stays null, which the client reads as "use the legacy tile lift" --
+      // today's appearance, never an invisible or ground-level shot.
+      originLift: Number.isFinite(originLift) ? originLift : null,
       hitIds: new Set(), // 'c:<id>' / 'p:<id>' already hit by this projectile
       // Magic Stones (SOMET-245) Task 7: the socketed spell stone's own
       // player_items.id, read straight off `weapon` (items.js's
@@ -175,6 +265,11 @@ class ProjectileSim {
       // must not change which stone it credits because the player
       // unsocketed mid-flight.
       stoneItemId: weapon.stoneItemId ?? null,
+      // SOMET-343: the augment stone's bonus packet, snapshotted at launch for
+      // the same reason `damage` and `stoneItemId` above are -- a shot already
+      // in flight must not change because the player unsocketed mid-flight.
+      // null for every unaugmented weapon and every creature ability.
+      augment: weapon.augment || null,
     });
     return id;
   }
@@ -222,9 +317,19 @@ class ProjectileSim {
         recordBlock(p, c, cx, cy, (bx - cx) / len, (by - cy) / len, blocks);
         continue;
       }
+      // SOMET-343: the augment bonus lands FIRST and takes the SAME falloff --
+      // a bonus that ignored distance would make an augmented blast hit harder
+      // at the rim than the weapon it is attached to. If it kills, this blast
+      // owns that kill and the weapon packet below finds nothing.
+      const fall = 1 - d / r;
+      if (applyCreatureAugment(p, creatures, c, fall, now)) {
+        kills.push({ id: c.id, killerUserId: killerUserIdFor(p) });
+        if (p.stoneItemId != null) stoneHits.push({ stoneItemId: p.stoneItemId });
+        continue;
+      }
       // Falloff scales the RAW damage; the creature's own defense and
       // resistances are applied on top, inside damageCreatureById.
-      if (creatures.damageCreatureById(c.id, p.damage * (1 - d / r), p.element, now, provokerKeyFor(p))) {
+      if (creatures.damageCreatureById(c.id, p.damage * fall, p.element, now, provokerKeyFor(p))) {
         kills.push({ id: c.id, killerUserId: killerUserIdFor(p) });
       } else if (p.knockback > 0) {
         // Survivors only -- a creature the line above already deleted must
@@ -258,6 +363,8 @@ class ProjectileSim {
       if (!hasLineOfSight(map, bx, by, px, py)) continue;
       // Falloff scales the RAW damage; applyDamage still applies defense and
       // resistances on top. It floors at 1, so an edge hit still registers.
+      // SOMET-343: same falloff as the weapon packet (see the creature branch).
+      applyPlayerAugment(p, pl, 1 - d / r, now);
       applyDamageWithEffects(pl, p.damage * (1 - d / r), p.element, pl.mit || NO_MITIGATION,
         now, provokerKeyFor(p));
       applyElementEffect(pl, p.element, now, p.ownerId);
@@ -267,7 +374,10 @@ class ProjectileSim {
       if (pl.hp > 0 && p.knockback > 0) shoveAwayFrom(map, bx, by, pl, p.knockback);
       if (p.stoneItemId != null) stoneHits.push({ stoneItemId: p.stoneItemId });
     }
-    return { x: bx, y: by, radius: r, element: p.element };
+    // SOMET-326: the blast INHERITS its projectile's launch anchor, so a
+    // detonation goes off where the shot was actually flying rather than on
+    // the ground under it.
+    return { x: bx, y: by, radius: r, element: p.element, o: p.originLift };
   }
 
   // Advance every projectile one tick; resolve terrain, creature, and player
@@ -348,11 +458,27 @@ class ProjectileSim {
           const cx = c.x + half, cy = c.y + c.height / 2;
           const rr = p.radius + half;
           if (dist2(p.x, p.y, cx, cy) <= rr * rr) {
-            if (p.aoeRadius) {
+            // SOMET-343: only a CONTACT detonator goes off on touching
+            // something. A 'max_range' shot flies through, taking the ordinary
+            // direct-hit path below, and detonates when its distance runs out
+            // (see the p.remaining <= 0 branch). Terrain and range expiry
+            // detonate for BOTH modes -- a wall ends the flight, which is the
+            // end of its distance either way.
+            if (p.aoeRadius && p.detonateAt === 'contact') {
               detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits, blocks));
               dead = true; break;
             }
             p.hitIds.add(key);
+            // SOMET-343: bonus first, at full strength (a direct hit has no
+            // falloff). A kill here is this shot's kill; the weapon packet
+            // below would find a deleted creature, so we report and stop.
+            if (applyCreatureAugment(p, creatures, c, 1, now)) {
+              kills.push({ id: c.id, killerUserId: killerUserIdFor(p) });
+              if (p.stoneItemId != null) stoneHits.push({ stoneItemId: p.stoneItemId });
+              p.pierceLeft -= 1;
+              if (p.pierceLeft <= 0) { dead = true; break; }
+              continue;
+            }
             if (creatures.damageCreatureById(c.id, p.damage, p.element, now, provokerKeyFor(p))) {
               kills.push({ id: c.id, killerUserId: killerUserIdFor(p) });
             } else if (p.knockback > 0) {
@@ -386,11 +512,19 @@ class ProjectileSim {
           const px = pl.x + half, py = pl.y + pl.height / 2;
           const rr = p.radius + half;
           if (dist2(p.x, p.y, px, py) <= rr * rr) {
-            if (p.aoeRadius) {
+            // SOMET-343: only a CONTACT detonator goes off on touching
+            // something. A 'max_range' shot flies through, taking the ordinary
+            // direct-hit path below, and detonates when its distance runs out
+            // (see the p.remaining <= 0 branch). Terrain and range expiry
+            // detonate for BOTH modes -- a wall ends the flight, which is the
+            // end of its distance either way.
+            if (p.aoeRadius && p.detonateAt === 'contact') {
               detonations.push(this._detonate(p, p.x, p.y, ctx, kills, stoneHits, blocks));
               dead = true; break;
             }
             p.hitIds.add(key);
+            // SOMET-343: full-strength bonus on a direct hit, no falloff.
+            applyPlayerAugment(p, pl, 1, now);
             applyDamageWithEffects(pl, p.damage, p.element, pl.mit || NO_MITIGATION,
               now, provokerKeyFor(p));
             applyElementEffect(pl, p.element, now, p.ownerId);
@@ -432,6 +566,11 @@ class ProjectileSim {
       // has no projectile-spawn message to hang it off, and a shot that flies
       // into a newly-streamed neighbourhood must still draw its trail.
       v: p.vfxTrail || null,
+      // SOMET-326. On every snapshot for exactly the reason `v` above is: a
+      // shot that flies into a newly-streamed neighbourhood has no spawn
+      // message to have learned its anchor from, and would otherwise draw at
+      // the client's legacy fallback height for the rest of its flight.
+      o: p.originLift,
     }));
   }
 

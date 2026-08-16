@@ -881,7 +881,39 @@ app.delete('/api/entity-types/:id', adminGuard, async (req, res) => {
 
 
 // Item Types CRUD + admin item grant
-const ITEM_ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
+// SOMET-329: these two are CATALOG data now (tables `elements` and
+// `attack_origins`). What is left here are the seeded values, which serve as
+// the fallback when the cache has not loaded yet or the query failed — a
+// validator that rejected everything because a SELECT timed out would make the
+// Items admin unusable, whereas one running a tick behind the catalog merely
+// rejects a brand-new element until the next refresh.
+//
+// Cached rather than queried per validate(): validateItemType is synchronous
+// and called from two request paths, and making it async would ripple through
+// every test that calls it directly.
+const SEEDED_ITEM_ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
+const SEEDED_ATTACK_ORIGINS = ['feet', 'middle', 'head'];
+let ITEM_ELEMENTS = [...SEEDED_ITEM_ELEMENTS];
+let ATTACK_ORIGINS = [...SEEDED_ATTACK_ORIGINS];
+
+// Refreshes both lists from the catalogs. Called at boot and whenever the
+// admin reads the catalogs (i.e. every time the Items form opens), which is
+// enough to pick up a newly authored element without a restart.
+//
+// A failed or EMPTY result deliberately leaves the previous lists in place:
+// replacing them with [] would reject every element and origin in the game.
+async function refreshWeaponCatalogCache() {
+  try {
+    const [els, origins] = await Promise.all([
+      pool.query('SELECT name FROM elements ORDER BY sort_order ASC, name ASC'),
+      pool.query('SELECT name FROM attack_origins ORDER BY sort_order ASC, name ASC'),
+    ]);
+    if (els.rows.length > 0) ITEM_ELEMENTS = els.rows.map((r) => r.name);
+    if (origins.rows.length > 0) ATTACK_ORIGINS = origins.rows.map((r) => r.name);
+  } catch (err) {
+    console.error('weapon catalog cache refresh failed; keeping previous lists', err.message);
+  }
+}
 const ITEM_SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
 
 // SOMET-278: `gold` is not an ordinary catalog row -- it is the game's
@@ -952,6 +984,11 @@ function validateItemType(b, existing = null) {
   }
   if (b.kind != null && !['melee', 'projectile'].includes(b.kind)) {
     return "kind must be 'melee' or 'projectile' (or unset)";
+  }
+  // Unset is legal and meaningful: it selects the kind default (middle) rather
+  // than being a missing value -- see authority/attackOrigin.js.
+  if (b.attack_origin != null && !ATTACK_ORIGINS.includes(b.attack_origin)) {
+    return `attack_origin must be one of ${ATTACK_ORIGINS.join(', ')} (or unset)`;
   }
   // A reserved (currency) row has none of these shapes -- it is neither a
   // weapon nor ammo, and demanding `armor needs slot and defense` of it (the
@@ -1028,14 +1065,17 @@ app.post('/api/item-types', adminGuard, async (req, res) => {
       `INSERT INTO item_types
         (name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
          range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element, defense, resistances, icon,
-         stackable, ammo_type_id, aoe_radius, value, knockback)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING *`,
+         stackable, ammo_type_id, aoe_radius, value, knockback, attack_origin,
+         projectile_shape_id, impact_behavior_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
        b.mana_cost ?? 0, b.stamina_cost ?? 0, b.element ?? null, b.defense ?? null,
        JSON.stringify(b.resistances ?? {}), b.icon ?? null,
-       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0, b.knockback ?? 0],
+       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0, b.knockback ?? 0,
+       b.attack_origin ?? null,
+       b.projectile_shape_id ?? null, b.impact_behavior_id ?? null],
     );
     const row = result.rows[0];
     // SOMET-186 / F-006: without this, a weapon/armor type created after a
@@ -1086,8 +1126,19 @@ app.put('/api/item-types/:id', adminGuard, async (req, res) => {
         -- client, or a script) leaves the existing bindings alone instead of
         -- silently unbinding every moment on an unrelated edit.
         vfx=COALESCE($25, vfx),
+        -- SOMET-326. NOT COALESCEd, unlike vfx above: NULL is a real authored
+        -- value here ("use the kind default"), so clearing the dropdown has to
+        -- actually clear the column. vfx's COALESCE protects a jsonb map that
+        -- an older client would omit entirely; this column has no such
+        -- ambiguity to protect -- an older client omitting it writes NULL,
+        -- which is the same default that client already renders.
+        attack_origin=$26,
+        -- SOMET-329. Same reasoning as attack_origin above: NULL is a real
+        -- authored value ("no named shape / behaviour, use the raw columns"),
+        -- so these are assigned, not COALESCEd.
+        projectile_shape_id=$27, impact_behavior_id=$28,
         updated_at=now()
-       WHERE id=$26 RETURNING *`,
+       WHERE id=$29 RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
@@ -1095,6 +1146,8 @@ app.put('/api/item-types/:id', adminGuard, async (req, res) => {
        JSON.stringify(b.resistances ?? {}), b.icon ?? null,
        b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0, b.knockback ?? 0,
        b.vfx === undefined ? null : JSON.stringify(b.vfx),
+       b.attack_origin ?? null,
+       b.projectile_shape_id ?? null, b.impact_behavior_id ?? null,
        req.params.id],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
@@ -1216,6 +1269,40 @@ app.post('/api/players/:characterId/items', adminGuard, async (req, res) => {
 
 // VFX effect library. Read-only and unauthenticated: every client needs it to
 // draw an attack. Admin CRUD lands in slice E.
+// --- Weapon option catalogs (SOMET-329) ------------------------------------
+//
+// ONE endpoint for all four rather than four endpoints: the Items admin needs
+// every list to render a single form, and four round trips would let the form
+// paint with some dropdowns populated and others empty.
+//
+// Not behind adminGuard. These are four tiny lists of names and numbers with
+// no player or account data in them, and the game client is served the element
+// half of it on `joined` anyway — gating them would only stop the admin form
+// loading, not protect anything.
+app.get('/api/weapon-catalogs', async (req, res) => {
+  try {
+    const [origins, elements, shapes, behaviors] = await Promise.all([
+      pool.query('SELECT name, height_fraction, label FROM attack_origins ORDER BY sort_order ASC, name ASC'),
+      pool.query('SELECT name, color, tint_color, damage_type, on_hit_effect FROM elements ORDER BY sort_order ASC, name ASC'),
+      pool.query('SELECT id, name, radius, vfx_effect FROM projectile_shapes ORDER BY sort_order ASC, name ASC'),
+      pool.query('SELECT id, name, detonates, detonate_at, pierce_default FROM impact_behaviors ORDER BY sort_order ASC, name ASC'),
+    ]);
+    // Keep the validator's cached lists in step with what the form is about
+    // to show, so a dropdown can never offer a value the write path rejects.
+    if (origins.rows.length > 0) ATTACK_ORIGINS = origins.rows.map((r) => r.name);
+    if (elements.rows.length > 0) ITEM_ELEMENTS = elements.rows.map((r) => r.name);
+    res.json({
+      attackOrigins: origins.rows,
+      elements: elements.rows,
+      projectileShapes: shapes.rows,
+      impactBehaviors: behaviors.rows,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch weapon catalogs' });
+  }
+});
+
 app.get('/api/vfx-effects', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM vfx_effects ORDER BY id ASC');
@@ -3313,6 +3400,12 @@ if (require.main === module) {
   process.on('unhandledRejection', (reason) => {
     console.error('unhandledRejection (backstopped, process kept alive):', reason);
   });
+
+  // SOMET-329: prime the element/attack-origin validation lists from the
+  // catalogs. Fire-and-forget — it degrades to the seeded lists on failure,
+  // and blocking boot on a cache warm-up would trade a stale dropdown for an
+  // unreachable server.
+  refreshWeaponCatalogCache();
 
   const server = app.listen(port, () => {
     console.log(`Backend server running on port ${port}`);

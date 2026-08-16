@@ -19,7 +19,7 @@ async function loadBiomes(pool, names) {
   if (wanted.length === 0) return [];
   const { rows } = await pool.query(
     `SELECT id, name, terrain_tiles, flora_types, creature_types,
-            palette, art_style, exclusions, color
+            palette, art_style, exclusions, color, creature_density
        FROM biomes
       WHERE name = ANY($1::text[])`,
     [wanted],

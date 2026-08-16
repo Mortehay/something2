@@ -11,16 +11,34 @@ const SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1
 function num(v) { return v == null ? null : Number(v); }
 
 // Load the whole item catalog (weapons + armor) keyed by id.
-async function loadItemTypes(pool) {
+//
+// `catalogs` (SOMET-329, from authority/catalogs.js) is optional. When given,
+// a row's projectile_shape_id / impact_behavior_id RESOLVE into the concrete
+// numbers combat already reads, here at load time -- so nothing downstream
+// learns the catalogs exist and the client still never needs them. Omitted
+// (every existing test, any caller that predates slice B), the raw columns are
+// used exactly as before.
+async function loadItemTypes(pool, catalogs = null) {
   const r = await pool.query(
     `SELECT id, name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
             range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element,
             defense, resistances, stackable, ammo_type_id, aoe_radius, vfx, knockback,
-            stat_bonus_stat, stat_bonus_amount
+            stat_bonus_stat, stat_bonus_amount, attack_origin,
+            projectile_shape_id, impact_behavior_id, stone_mode, bonus_damage
      FROM item_types ORDER BY id ASC`,
   );
+  const shapes = catalogs && catalogs.projectileShapes ? catalogs.projectileShapes : null;
+  const behaviors = catalogs && catalogs.impactBehaviors ? catalogs.impactBehaviors : null;
   const m = new Map();
   for (const row of r.rows) {
+    // SOMET-329. Resolved ONCE here, not at each read: combat reads
+    // projectile_radius/pierce/aoe_radius on the hot path (every shot), and a
+    // catalog lookup per read would also give two call sites the chance to
+    // disagree about which wins.
+    const shape = shapes && row.projectile_shape_id != null
+      ? shapes.get(row.projectile_shape_id) : null;
+    const behavior = behaviors && row.impact_behavior_id != null
+      ? behaviors.get(row.impact_behavior_id) : null;
     m.set(row.id, {
       id: row.id,
       name: row.name,
@@ -34,8 +52,11 @@ async function loadItemTypes(pool) {
       arc_width: num(row.arc_width),
       range: num(row.range),
       projectile_speed: num(row.projectile_speed),
-      projectile_radius: num(row.projectile_radius),
-      pierce: num(row.pierce),
+      // A named shape SUPPLIES the radius; with no shape the hand-tuned
+      // column stays authoritative, so every weapon authored before slice B
+      // is untouched.
+      projectile_radius: shape ? shape.radius : num(row.projectile_radius),
+      pierce: behavior && behavior.pierceDefault != null ? behavior.pierceDefault : num(row.pierce),
       mana_cost: Number(row.mana_cost ?? 0),
       stamina_cost: Number(row.stamina_cost ?? 0),
       element: row.element ?? null,
@@ -43,7 +64,16 @@ async function loadItemTypes(pool) {
       resistances: row.resistances || {},
       stackable: row.stackable === true,
       ammo_type_id: num(row.ammo_type_id),
-      aoe_radius: num(row.aoe_radius),
+      // A behaviour that does not detonate must not blast, whatever radius the
+      // row happens to carry -- otherwise picking `pierce` on a weapon that
+      // once had an aoe_radius would leave it silently still exploding, which
+      // is the exact "the dropdown lied" failure this slice exists to stop.
+      aoe_radius: behavior && !behavior.detonates ? null : num(row.aoe_radius),
+      // SOMET-343: WHERE a detonating shot goes off. 'contact' (the default,
+      // and today's behaviour for every existing weapon) means the first
+      // contact of any kind; 'max_range' means it flies through contacts and
+      // detonates only when its distance runs out. Null = contact.
+      detonate_at: behavior && behavior.detonates ? behavior.detonateAt : null,
       // Effect-name bindings per moment, e.g. { attack: 'sweep_arc' }.
       // Normalized to null so `weapon.vfx` is never undefined downstream.
       vfx: row.vfx || null,
@@ -67,6 +97,24 @@ async function loadItemTypes(pool) {
       // would make every stone look like a buff stone.
       stat_bonus_stat: row.stat_bonus_stat ?? null,
       stat_bonus_amount: row.stat_bonus_amount == null ? null : Number(row.stat_bonus_amount),
+      // SOMET-326: the THIRD instance of the trap the two comments above
+      // document. Null passthrough, never defaulted to a string --
+      // attackOrigin.js's resolveAttackOrigin distinguishes "unauthored"
+      // (fall to the kind default) from an authored name, and a coerced ''
+      // would take the same branch as junk rather than the default branch.
+      attack_origin: row.attack_origin ?? null,
+      // SOMET-329: carried so the admin can round-trip the selection. Combat
+      // never reads these -- it reads the resolved values above.
+      projectile_shape_id: num(row.projectile_shape_id),
+      impact_behavior_id: num(row.impact_behavior_id),
+      // SOMET-332. Defaulted to 'replace' rather than passed through: the
+      // column is NOT NULL in the schema, but this loader is also fed by test
+      // fixtures and by any catalog snapshot predating the column, and a stone
+      // whose mode read `undefined` would fall through activeWeaponType's
+      // augment check into the replace branch -- silently overwriting the
+      // host weapon, which is the exact behaviour augment exists to avoid.
+      stone_mode: row.stone_mode === 'augment' ? 'augment' : 'replace',
+      bonus_damage: num(row.bonus_damage),
     });
   }
   return m;
@@ -320,6 +368,35 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
     const type = item ? itemTypes.get(item.typeId) : null;
     if (type && type.category === 'weapon') {
       const stoneType = item.socketedStoneTypeId != null ? itemTypes.get(item.socketedStoneTypeId) : null;
+      // SOMET-332 -- AUGMENT mode. Checked BEFORE the replace branch below,
+      // because an augment stone also has a non-null element and would
+      // otherwise fall straight into it and overwrite the host's spell fields,
+      // which is precisely the behaviour augment exists to avoid.
+      //
+      // The host weapon is returned UNCHANGED except for one added field: its
+      // damage, cooldown, mana_cost and element are all still its own. The
+      // augment is a rider the damage sites apply as a SECOND packet, never a
+      // merge -- blending it into `damage` here would make the bonus be
+      // mitigated by the weapon's element rather than its own.
+      if (stoneType && stoneType.stone_mode === 'augment'
+          && stoneType.element != null && stoneType.bonus_damage > 0) {
+        return {
+          ...type,
+          augment: {
+            element: stoneType.element,
+            bonusDamage: stoneType.bonus_damage,
+            // Slice B's impact behaviour, carried so an augment can make a
+            // shot detonate. null for every melee augment.
+            impactBehaviorId: stoneType.impact_behavior_id ?? null,
+          },
+          // TRAP 1 (the ticket's own review checklist). world.js gates stone
+          // XP on `w.stoneItemId != null`, and before this line only the
+          // replace branch set it -- so an augment stone would have landed
+          // every hit and never gained a single point of XP, with nothing
+          // failing loudly. Same field, same meaning, same award path.
+          stoneItemId: item.socketedStoneItemId ?? null,
+        };
+      }
       if (stoneType && stoneType.element != null) {
         return {
           ...type,
@@ -527,7 +604,9 @@ async function socketStone(pool, characterId, inv, stonePlayerItemId, hostPlayer
     const stoneTypeId = stoneRow.rows[0].item_type_id;
     const stoneType = itemTypes.get(stoneTypeId);
     const hostType = itemTypes.get(hostRow.rows[0].item_type_id);
-    if (!stoneType || !hostType || !isCompatible(stoneKind(stoneType), hostType.category)) {
+    // hostType.kind is threaded through for the augment rule (SOMET-332):
+    // an augment stone is melee-only until projectiles.js applies its packet.
+    if (!stoneType || !hostType || !isCompatible(stoneKind(stoneType), hostType.category, hostType.kind)) {
       await client.query('ROLLBACK'); return { ok: false, reason: 'stone is not compatible with this item' };
     }
 
