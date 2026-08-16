@@ -27,10 +27,10 @@ export function movementKeys(state) {
 
 export function inputVector(keys) {
     let dx = 0, dy = 0;
-    if (keys['w'] || keys['arrowup']) dy -= 1;
-    if (keys['s'] || keys['arrowdown']) dy += 1;
-    if (keys['a'] || keys['arrowleft']) dx -= 1;
-    if (keys['d'] || keys['arrowright']) dx += 1;
+    if (keys['w'] || keys['arrowup']) { dx -= 1; dy -= 1; }
+    if (keys['s'] || keys['arrowdown']) { dx += 1; dy += 1; }
+    if (keys['a'] || keys['arrowleft']) { dx -= 1; dy += 1; }
+    if (keys['d'] || keys['arrowright']) { dx += 1; dy -= 1; }
     return { dx, dy };
 }
 
