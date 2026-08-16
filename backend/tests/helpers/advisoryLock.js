@@ -81,7 +81,20 @@ async function withAdvisoryLock(pool, lockKey, fn) {
   }
 
   try {
-    return await fn();
+    // fn is told WHETHER it is actually guarded (SOMET-357).
+    //
+    // The degrade above is the right call for a writer -- a racy write is
+    // recoverable, a hung suite is not -- but it is silently wrong for a READER
+    // that asserts an invariant over the whole database. Such a reader running
+    // unguarded can observe another file's mid-apply state and report a defect
+    // that does not exist, which is exactly what happened to
+    // villageScreenBudget_db.test.js: it saw a throwaway fixture holding
+    // is_entry and failed with "the entry world must have exactly one village".
+    //
+    // Passing `locked` rather than throwing keeps this a decision the CALLER
+    // makes, because the two kinds of caller genuinely want opposite things.
+    // Every existing caller ignores the argument and keeps the old behaviour.
+    return await fn({ locked });
   } finally {
     if (locker) {
       if (locked) await locker.query('SELECT pg_advisory_unlock($1)', [lockKey]).catch(() => {});
