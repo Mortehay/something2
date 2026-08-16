@@ -139,15 +139,16 @@ test('the backstop enqueues the gap between target and live population', { skip:
       );
       const row = (await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId])).rows[0];
 
-      // 96x96 at 'normal' (6 per 1000 tiles) targets 55 scattered creatures.
+      // 96x96 at 'normal' (18 per 1000 tiles) targets 166 scattered creatures.
+      // Math: 18 * 9216 / 1000 = 165.888 ≈ 166.
       // Hand-typed from the shipped tier table, NOT recomputed from
       // resolveDensity -- deriving it from the code under test would make this
       // assertion true for any tier values at all.
       const enqueued = await enqueueDeficit(pool, { worldRow: row, world: fakeWorldConfig() });
-      assert.equal(enqueued, 55);
+      assert.equal(enqueued, 166);
 
       const q = await pool.query('SELECT count(*)::int AS n FROM creature_respawns WHERE world_id = $1', [worldId]);
-      assert.equal(q.rows[0].n, 55);
+      assert.equal(q.rows[0].n, 166);
     });
   } finally {
     await pool.end();
@@ -161,8 +162,11 @@ test('the backstop enqueues nothing for a world already at target', { skip: !url
       await pool.query(
         `UPDATE worlds SET allowed_creature_types = '["Wolf"]'::jsonb WHERE id = $1`, [worldId],
       );
-      // 60 live wild creatures, comfortably over the 55 target.
-      for (let i = 0; i < 60; i += 1) {
+      // 170 live wild creatures, comfortably over the 166 target. This fixture
+      // deliberately sits above target so that enqueueDeficit's early return for
+      // deficit <= 0 is the branch under test -- the case where no spawning is
+      // needed at all.
+      for (let i = 0; i < 170; i += 1) {
         await pool.query(
           `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
            VALUES ($1,'Wolf',$2,$2,20,'S',1,5,0)`, [worldId, 100 + i],
@@ -184,8 +188,9 @@ test('already-pending respawns count against the deficit', { skip: !url }, async
       await pool.query(
         `UPDATE worlds SET allowed_creature_types = '["Wolf"]'::jsonb WHERE id = $1`, [worldId],
       );
-      // 50 kills already in flight. Without subtracting these the world would
-      // be filled to 55 now and then again as each pending row comes due.
+      // 50 kills already in flight. Target is 166, so deficit = 166 - 50 = 116.
+      // Without subtracting these pending spawns the world would be filled
+      // and then filled again as each pending row comes due.
       for (let i = 0; i < 50; i += 1) {
         await pool.query(
           `INSERT INTO creature_respawns (world_id, type, x, y, level, respawn_at)
@@ -194,7 +199,7 @@ test('already-pending respawns count against the deficit', { skip: !url }, async
       }
       const row = (await pool.query('SELECT * FROM worlds WHERE id = $1', [worldId])).rows[0];
 
-      assert.equal(await enqueueDeficit(pool, { worldRow: row, world: fakeWorldConfig() }), 5);
+      assert.equal(await enqueueDeficit(pool, { worldRow: row, world: fakeWorldConfig() }), 116);
     });
   } finally {
     await pool.end();

@@ -197,13 +197,23 @@ describeDb('the live home region matches the checked-in specs', async () => {
       // in -- including this one. Excluded BY ID off world_chests rather than
       // by type, so a chest guard of a penned creature's own type is still
       // excluded exactly once and a genuine stray of that type still fails.
+      // STRING, not Number, and that is not a style preference (SOMET-356).
+      // world_creatures.id is a uuid and guard_creature_ids is jsonb holding
+      // uuid strings, so Number() yields NaN on BOTH sides -- and a Set matches
+      // NaN against itself (SameValueZero). The moment this world held one
+      // guarded chest, `chestGuardIds` gained a NaN, `has(Number(c.id))` became
+      // true for EVERY creature, and the stray check below silently passed no
+      // matter what was loose in the world. It only ever caught anything
+      // because no home-region world has a guarded chest today -- and the
+      // comment above explains that a `loot_map` consumable can create one at
+      // any time, which is precisely when the guard would have vanished.
       const chestGuardIds = new Set(
         (await pool.query('SELECT guard_creature_ids FROM world_chests WHERE world_id = $1',
-          [row.id])).rows.flatMap((ch) => (ch.guard_creature_ids || []).map(Number)));
+          [row.id])).rows.flatMap((ch) => (ch.guard_creature_ids || []).map(String)));
       for (const c of creatures) {
         if (c.type === GUARD_TYPE || c.home_x === null) continue;
         if (c.blocks_portal_id !== null) continue;          // portal guard (SOMET-246)
-        if (chestGuardIds.has(Number(c.id))) continue;      // chest guard (SOMET-244)
+        if (chestGuardIds.has(String(c.id))) continue;      // chest guard (SOMET-244)
         const [hr, hc] = [Math.floor(Number(c.home_y) / CREATURE_TILE_PX),
           Math.floor(Number(c.home_x) / CREATURE_TILE_PX)];
         assert.ok(spec.pens.some((pen) => inBox(hr, hc, pen)),

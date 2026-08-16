@@ -9,6 +9,7 @@ const {
   applyDamageWithEffects, NO_MITIGATION, isProvokedBy, provoke, playerKey, creatureKey,
 } = require('./damage');
 const { resolveEffectName } = require('./vfx.js');
+const { bodyLift } = require('./attackOrigin.js');
 const { applyElementEffect, activeEffectKeys, canAct } = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
 const { shoveAwayFrom } = require('./knockback');
@@ -278,6 +279,12 @@ function stampCreatureAttack(attacks, impacts, c, target, from, to) {
     v: resolveEffectName({ kind: 'creature', vfx: c.vfx }, 'attack'),
     x: from.x, y: from.y,
     nx: nx0 / len, ny: ny0 / len,
+    // SOMET-326: read off THIS creature's own box. A creature is 48px against
+    // a player's 64, so the retired tile constant (32px, half a TILE) sat at
+    // 67% of a creature's height -- its neck -- while sitting at exactly 50%
+    // of a player's. That divergence is the reported bug, and a creature's
+    // own swing is where it was most visible.
+    o: bodyLift(c.height, 'middle'),
     reach: CONTACT_RANGE,
     arc: 1.2,
     hit: true,          // a contact attack only stamps once it has landed
@@ -287,6 +294,9 @@ function stampCreatureAttack(attacks, impacts, c, target, from, to) {
     x: to.x, y: to.y,
     v: resolveEffectName({ kind: 'creature', vfx: c.vfx }, 'impact'),
     el: 'physical',     // contact damage is always physical (see the sites)
+    // The TARGET's mid-body, matching world.js's melee impacts: an impact is
+    // anchored on who was hit, never on who swung.
+    o: bodyLift(target.height, 'middle'),
   });
 }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
@@ -1792,6 +1802,11 @@ class CreatureSim {
               x: cc.x, y: cc.y,
               nx: (tc.x - cc.x) / d, ny: (tc.y - cc.y) / d,
               damage: dmg,
+              // SOMET-326: the shooter's own mid-body, resolved here while the
+              // creature is still in hand. world.js passes it straight to
+              // ProjectileSim.spawn, which carries it for the shot's whole
+              // flight -- by the time it lands this creature may be dead.
+              originLift: bodyLift(c.height, 'middle'),
               // A `ranged` ability fires physical; only `cast` carries an
               // element and therefore its status rider. The ability's own
               // element wins when it has one (an Apex's physical slam next to
@@ -1989,7 +2004,18 @@ class CreatureSim {
   // Task 5 this call site passed no sourceId at all, so a creature that died
   // to a melee-applied burn (rather than the swing itself) could never be
   // attributed to anyone; this is that gap closed, not a new feature.
-  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null) {
+  // SOMET-332: `augment` is an optional SECOND damage packet -- an augment
+  // stone's bonus, in the stone's own element. Applied inside this same loop,
+  // deliberately, rather than by a second pass over the arc:
+  //   * both packets hit the same target set, computed once;
+  //   * there is still exactly ONE hp<=0 check per target, so a creature
+  //     finished off by the bonus is reported as killed exactly once. A second
+  //     pass would either miss those kills (targets already deleted) or
+  //     double-count them.
+  // It is a separate packet, never added into `damage`, so each portion is
+  // mitigated and rides its status effect under its OWN element -- frost on a
+  // physical sword must be resisted as frost.
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null, augment = null) {
     const killed = [];
     for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth)) {
       const c = this.creatures.get(id);
@@ -2002,6 +2028,15 @@ class CreatureSim {
       // deals damage — one call adjacent to each applyDamage, never a second
       // rider table.
       applyElementEffect(c, element, now, sourceId);
+      if (augment && augment.bonusDamage > 0) {
+        // effectiveMit is re-read rather than cached across the two packets:
+        // the first packet's rider can change what the second is mitigated by
+        // (a chill lands, then the bonus is measured against the chilled
+        // target), and reusing a stale snapshot would silently diverge from
+        // what every other damage site in the file does.
+        applyDamageWithEffects(c, augment.bonusDamage, augment.element, effectiveMit(c), now, playerKey(sourceId));
+        applyElementEffect(c, augment.element, now, sourceId);
+      }
       c.dirty = true;
       if (c.hp <= 0) { this.creatures.delete(id); killed.push(id); }
     }

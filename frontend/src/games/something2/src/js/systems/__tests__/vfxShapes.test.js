@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { RenderSystem } from '../RenderSystem.js';
 import { addEffects, BLOCK_EFFECT_DEF } from '../../core/vfx.js';
 import { worldToScreen } from '../../core/iso.js';
-import { ISO_TILE_H } from '../../core/constants.js';
+import { anchorY } from '../../core/attackAnchor.js';
 
 // Slice B (SOMET-159): the four shapes added beyond `arc`.
 //
@@ -108,7 +108,11 @@ describe('the guard block cue', () => {
   // The real wire descriptor: what world.js/projectiles.js put on frame.impacts
   // for a refused attack -- no effect NAME, `b: true`, the direction the blow
   // came from.
-  const BLOCK_EVENT = { t: 'c:guard', x: 300, y: 300, nx: -1, ny: 0, b: true };
+  // SOMET-326: `o` is the vertical render anchor the server resolves. 24 is a
+  // 48px creature's mid-body -- deliberately NOT the 32 (half a tile) this
+  // shape used to hardcode, so a regression that reinstates the tile constant
+  // shifts every coordinate below and fails rather than passing by coincidence.
+  const BLOCK_EVENT = { t: 'c:guard', x: 300, y: 300, nx: -1, ny: 0, o: 24, b: true };
 
   // The whole client path, from the frame field to the canvas calls, with an
   // EMPTY effect library -- which is the case the built-in def exists for.
@@ -170,7 +174,7 @@ describe('the guard block cue', () => {
       const c = shieldCentre(pts);
       const g = guardScreen();
       const dx = c.x - g.x;
-      const dy = c.y - (g.y - ISO_TILE_H / 2);     // chest height, as the shape uses
+      const dy = c.y - anchorY(g.y, BLOCK_EVENT.o);   // the event's own anchor, as the shape uses
       const dir = screenDir(nx, ny);
       // Displacement must be a POSITIVE multiple of the projected wire vector.
       // Parallel alone would accept the far side; a positive dot alone would

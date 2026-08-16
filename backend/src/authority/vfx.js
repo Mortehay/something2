@@ -86,8 +86,14 @@ function momentForAttack(landed) {
 // One shape, built HERE, for both the melee arc and the projectile paths --
 // two literals would be free to drift and only one of them would be under any
 // given test.
-function blockedImpact(targetId, x, y, nx, ny) {
-  return { t: `c:${targetId}`, x, y, nx, ny, b: true };
+// SOMET-326 added `o`, the vertical render anchor in screen pixels. It is the
+// TARGET's mid-body (a block happens on the guard, not on the attacker), and
+// it is REQUIRED rather than optional: every other field here is deliberately
+// non-degradable for the reason above, and an omitted anchor would silently
+// fall back to the client's legacy tile constant -- putting the glint at a
+// 48px guard's neck, which is the exact mis-anchoring this slice removes.
+function blockedImpact(targetId, x, y, nx, ny, o) {
+  return { t: `c:${targetId}`, x, y, nx, ny, o, b: true };
 }
 
 module.exports = {

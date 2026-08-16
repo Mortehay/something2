@@ -9,6 +9,8 @@ import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
 import { effectProgress, effectAlpha, isoArcAngle, particlesAt } from "../core/vfx.js";
+import { anchorY } from "../core/attackAnchor.js";
+import { elementTint } from "../core/elements.js";
 import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffects.js";
 
 // Mirrors PICKUP_RADIUS in backend/src/authority/groundItems.js — used here
@@ -270,7 +272,7 @@ export class RenderSystem {
       if (this._drawProjectileTrail(pr)) continue;
       const s = worldToScreen(pr.x, pr.y);
       this.ctx.beginPath();
-      this.ctx.arc(s.x, s.y - ISO_TILE_H / 2, 6, 0, Math.PI * 2);
+      this.ctx.arc(s.x, anchorY(s.y, pr.o), 6, 0, Math.PI * 2);
       this.ctx.fillStyle = elementColor(pr.element);
       this.ctx.fill();
     }
@@ -321,12 +323,13 @@ export class RenderSystem {
     for (const b of blasts) {
       const t = blastProgress(b, now);
       // Same conversion as the projectile draw above — worldToScreen returns
-      // the tile diamond's CENTRE, and the ISO_TILE_H/2 lift puts the ring at
-      // the chest height projectiles fly at rather than flat on the ground.
+      // the tile diamond's CENTRE, and the anchor lift puts the ring at the
+      // height its own shot was flying at (SOMET-326: inherited from the
+      // projectile, no longer half a tile) rather than flat on the ground.
       // Do not add any further offset: doing so is what put markers a tile
       // away from their subject in an earlier slice.
       const s = worldToScreen(b.x, b.y);
-      const cy = s.y - ISO_TILE_H / 2;
+      const cy = anchorY(s.y, b.o);
       // A world circle projects to a 2:1 ellipse, not a circle — drawing an
       // arc here would claim a blast reaches further north/south than it does.
       const rx = blastScreenRadiusX(b.radius) * t;
@@ -367,10 +370,11 @@ export class RenderSystem {
       if (fx.def.shape !== "arc") { this._drawVfxShape(fx, now); continue; }
       const t = effectProgress(fx, now);
       // Same conversion as drawBlasts above — worldToScreen gives the tile
-      // diamond's CENTRE, and the ISO_TILE_H/2 lift puts the swing at chest
-      // height rather than flat on the ground. Do not add a further offset.
+      // diamond's CENTRE, and the anchor lift puts the swing at the height
+      // this attacker's weapon launches from (SOMET-326) rather than flat on
+      // the ground. Do not add a further offset.
       const s = worldToScreen(fx.x, fx.y);
-      const cy = s.y - ISO_TILE_H / 2;
+      const cy = anchorY(s.y, fx.o);
       // A world circle projects to a 2:1 ellipse, not a circle — the same
       // ground-plane projection the blast ring uses, reused rather than
       // re-derived so the two can never disagree.
@@ -415,7 +419,7 @@ export class RenderSystem {
     if (!def) return false;
 
     const s = worldToScreen(pr.x, pr.y);
-    const cy = s.y - ISO_TILE_H / 2;
+    const cy = anchorY(s.y, pr.o);
     // Unit direction of travel, sent on the snapshot. Without it the streak
     // has no meaningful orientation, and a plain dot reads better than a
     // streak pointing the wrong way -- so that case falls back rather than
@@ -431,7 +435,9 @@ export class RenderSystem {
     this.ctx.lineWidth = Number(def.width) || 3;
     this.ctx.globalAlpha = 0.9;
     this.ctx.beginPath();
-    this.ctx.moveTo(back.x, back.y - ISO_TILE_H / 2);
+    // The SAME anchor as the head of the streak — a trail whose two ends
+    // lifted by different amounts would slope for no physical reason.
+    this.ctx.moveTo(back.x, anchorY(back.y, pr.o));
     this.ctx.lineTo(s.x, cy);
     this.ctx.stroke();
     this.ctx.restore();
@@ -442,11 +448,13 @@ export class RenderSystem {
   // already element-specific, so this is a second, cheaper lever: a generic
   // effect fired by an elemental weapon still reads as that element rather
   // than as a white spark. `el` rides the impact descriptor from the server.
-  static get ELEMENT_TINT() {
-    return {
-      fire: "#ff9a4d", ice: "#8fdcff", lightning: "#ffe66b", arcane: "#c08cff",
-      physical: null,   // explicitly no tint -- the effect's own colour wins
-    };
+  //
+  // SOMET-329: the table itself moved to core/elements.js and is now fed by
+  // the server's catalog. Kept as an accessor because it was a public-ish
+  // surface on this class; it is a live view, not a snapshot, so a catalog
+  // applied after construction is picked up.
+  static tintFor(element) {
+    return elementTint(element);
   }
 
   // Particles for one effect. Positions come from vfx.js's particlesAt, which
@@ -468,7 +476,7 @@ export class RenderSystem {
     const parts = particlesAt(fx, t);
     if (parts.length === 0) return;
 
-    const tint = RenderSystem.ELEMENT_TINT[fx.el] || null;
+    const tint = RenderSystem.tintFor(fx.el);
     const size = Math.max(0, Number(def.particle_size) || 2);
     if (size === 0) return;
 
@@ -479,7 +487,7 @@ export class RenderSystem {
       // nudged in screen space.
       const s = worldToScreen(fx.x + pt.dx, fx.y + pt.dy);
       this.ctx.globalAlpha = pt.alpha;
-      this.ctx.fillRect(s.x - size / 2, s.y - ISO_TILE_H / 2 - size / 2, size, size);
+      this.ctx.fillRect(s.x - size / 2, anchorY(s.y, fx.o) - size / 2, size, size);
     }
     this.ctx.globalAlpha = 1;
   }
@@ -500,7 +508,7 @@ export class RenderSystem {
 
     const t = effectProgress(fx, now);
     const s = worldToScreen(fx.x, fx.y);
-    const cy = s.y - ISO_TILE_H / 2;         // chest height, as the arc uses
+    const cy = anchorY(s.y, fx.o);           // the attacker's own launch height, as the arc uses
     const reach = Number(fx.reach) || 0;
 
     this.ctx.globalAlpha = effectAlpha(fx, now);
@@ -512,7 +520,7 @@ export class RenderSystem {
     // pointing where the player actually aimed on the iso ground plane.
     const along = (d) => {
       const p = worldToScreen(fx.x + fx.nx * d, fx.y + fx.ny * d);
-      return { x: p.x, y: p.y - ISO_TILE_H / 2 };
+      return { x: p.x, y: anchorY(p.y, fx.o) };
     };
 
     if (shape === "line") {
@@ -579,7 +587,7 @@ export class RenderSystem {
       const o = dirOk
         ? worldToScreen(fx.x + fx.nx * OFFSET_WORLD, fx.y + fx.ny * OFFSET_WORLD)
         : s;
-      const ox = o.x, oy = o.y - ISO_TILE_H / 2;
+      const ox = o.x, oy = anchorY(o.y, fx.o);
       // Flares to full size early, then holds while the alpha fades: a glint,
       // not a growing bubble.
       const k = BLOCK_PX * (0.55 + 0.45 * t);
@@ -597,7 +605,7 @@ export class RenderSystem {
       // always skid off its face and never off its back; when that offset is
       // degenerate (no direction sent) there is no line to throw them along
       // and the shield alone carries the cue.
-      const dx = ox - s.x, dy = oy - (s.y - ISO_TILE_H / 2);
+      const dx = ox - s.x, dy = oy - anchorY(s.y, fx.o);
       const len = Math.hypot(dx, dy);
       if (len > 0) {
         const base = Math.atan2(dy, dx);
@@ -672,9 +680,10 @@ export class RenderSystem {
     // worldToScreen returns the diamond's CENTRE (see the tile draw above,
     // which draws its vertices at s.y +/- halfH / s.x +/- halfW around this
     // same point) — so no lift is needed to sit the marker on the tile.
-    // Unlike here, the projectile draw below intentionally lifts by
-    // ISO_TILE_H/2, because projectiles fly at chest height rather than
-    // resting on the ground.
+    // Unlike here, the projectile draw intentionally lifts by its shot's own
+    // anchor (SOMET-326: attackAnchor.js's anchorY, resolved from the
+    // shooter's body — it used to be a flat ISO_TILE_H/2), because projectiles
+    // fly at body height rather than resting on the ground.
     const s = worldToScreen(item.x, item.y);
     const dx = s.x, dy = s.y;
     const type = inventory && inventory.types ? inventory.types.get(item.typeId) : null;

@@ -3,6 +3,7 @@ const { CreatureSim, CREATURE_SIZE, shoveCreature } = require('./creatures');
 const { shoveAwayFrom } = require('./knockback');
 const { normalizeAim, inArc, hasLineOfSight } = require('./weapons');
 const { resolveEffectName, momentForAttack, blockedImpact } = require('./vfx.js');
+const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION, playerKey } = require('./damage');
 const {
@@ -332,6 +333,7 @@ class World {
         ownerFaction: s.ownerFaction,
         x: s.x, y: s.y, nx: s.nx, ny: s.ny,
         damage: s.damage,
+        originLift: s.originLift,
         // ProjectileSim reads its flight parameters off a weapon-shaped
         // object; a creature's profile supplies the same four fields.
         weapon: {
@@ -427,6 +429,12 @@ class World {
 
     const { nx, ny } = normalizeAim(ax, ay, p.facing);
     const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
+    // SOMET-326: how far up THIS attacker's body this weapon launches from,
+    // in screen pixels, resolved here and carried on the wire so the client
+    // never needs the weapon catalog. Computed from the attacker's own height
+    // rather than a tile constant -- that substitution is the whole fix.
+    // Render-only: nothing below reads it for reach, arc or line-of-sight.
+    const originLift = attackLift(w, p.height);
 
     if (w.kind === 'melee') {
       const f = facingFromInput(sign(nx), sign(ny));
@@ -452,7 +460,19 @@ class World {
       const impactAt = [];
       for (const id of creatureTargets) {
         const c = this.creatures.get(id);
-        if (c) impactAt.push({ t: `c:${id}`, x: c.x + CREATURE_SIZE / 2, y: c.y + CREATURE_SIZE / 2 });
+        // SOMET-326: an impact is a point ON A TARGET, so its anchor is the
+        // TARGET's mid-body -- deliberately not the attacker's weapon origin.
+        // Where a blow lands is a fact about who was hit, not about what swung:
+        // a head-origin thrown dart still connects with a creature's middle.
+        // This is also the case the old tile constant got most visibly wrong --
+        // 32px on a 48px creature is 67% of its height, i.e. a hit spark
+        // floating at its neck.
+        if (c) {
+          impactAt.push({
+            t: `c:${id}`, x: c.x + CREATURE_SIZE / 2, y: c.y + CREATURE_SIZE / 2,
+            o: bodyLift(CREATURE_SIZE, 'middle'),
+          });
+        }
       }
       // SOMET-286: the refusal cue, one per guard the swing actually reached.
       // Positioned on the GUARD, not the attacker, which is what separates it
@@ -466,11 +486,16 @@ class World {
         if (c) {
           blockedAt.push(blockedImpact(
             id, c.x + CREATURE_SIZE / 2, c.y + CREATURE_SIZE / 2, -nx, -ny,
+            bodyLift(CREATURE_SIZE, 'middle'),
           ));
         }
       }
       const killed = this.creatures.applyMeleeArc(
         cx, cy, nx, ny, w.reach, w.arc_width, weaponDamage(p, w), w.element, this.now, userId,
+        // SOMET-332: the augment stone's bonus packet, or null. Passed rather
+        // than folded into weaponDamage above so the bonus is mitigated by the
+        // AUGMENT's element, not the weapon's.
+        w.augment || null,
       );
       // SOMET-253 Task 9: survivors = targets minus killed. `creatureTargets`
       // was captured BEFORE applyMeleeArc ran, and applyMeleeArc deletes
@@ -504,11 +529,22 @@ class World {
           applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION,
             this.now, playerKey(userId));
           applyElementEffect(other, w.element, this.now, userId);
+          // SOMET-332: the augment's bonus as a SECOND packet, mirroring the
+          // creature path in applyMeleeArc. A player and a creature must take
+          // the same swing identically -- an augment that only worked against
+          // creatures would be a PvP balance bug nothing else would catch.
+          if (w.augment && w.augment.bonusDamage > 0) {
+            applyDamageWithEffects(other, w.augment.bonusDamage, w.augment.element,
+              other.mit || NO_MITIGATION, this.now, playerKey(userId));
+            applyElementEffect(other, w.augment.element, this.now, userId);
+          }
           playerHits++;
           // Same list as the creature impacts above -- a player hit and a
           // creature hit are one event kind, distinguished only by the id
           // prefix, so the client draws them through one path.
-          impactAt.push({ t: `p:${other.userId}`, x: ocx, y: ocy });
+          // Same target-anchored rule as the creature impacts above, read off
+          // this player's own box rather than a shared constant.
+          impactAt.push({ t: `p:${other.userId}`, x: ocx, y: ocy, o: bodyLift(other.height, 'middle') });
           // Survivors only -- a player at <=0 hp is picked up by
           // resolveDeaths() and respawned elsewhere; shoving first would move
           // a position respawn is about to overwrite anyway. Written straight
@@ -554,6 +590,10 @@ class World {
           v: resolveEffectName(w, momentForAttack(landed)),
           x: cx, y: cy,
           nx, ny,
+          // SOMET-326: the vertical render anchor, in screen pixels up from
+          // this attacker's feet. See attackOrigin.js for why a resolved
+          // number travels rather than the authored origin NAME.
+          o: originLift,
           reach: w.reach, arc: w.arc_width,
           hit: landed,
         }],
@@ -585,6 +625,16 @@ class World {
     if (staminaCost) p.stamina -= staminaCost;
     this.projectiles.spawn({
       ownerId: userId, x: cx, y: cy, nx, ny, weapon: w, damage: weaponDamage(p, w),
+      // Snapshotted at launch for the same reason `damage` is, and for one
+      // more: the shooter can be dead or out of view before this lands, so
+      // there would be no body left to measure against later.
+      originLift,
+      // SOMET-343: the ammunition this shot consumed. server.js has already
+      // spent it by the time attack() runs; this is the catalog row, so an
+      // explosive arrow can make an ordinary bow detonate. null when the
+      // weapon needs no ammo (staves, darts) or the row is missing from the
+      // in-memory catalog.
+      ammo: w.ammo_type_id != null ? (this.weapons.get(w.ammo_type_id) || null) : null,
     });
     applyAttackCooldown(p, w);
     // Projectiles already render as a moving dot; their trail effects are
