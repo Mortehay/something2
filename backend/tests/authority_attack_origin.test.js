@@ -1,8 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
-  resolveAttackOrigin, bodyLift, attackLift, ORIGIN_FRACTIONS,
+  resolveAttackOrigin, bodyLift, attackLift, originFractions,
+  configureAttackOrigins, resetAttackOrigins,
 } = require('../src/authority/attackOrigin.js');
+
+// SOMET-329 made the fractions admin data. Every test below asserts against
+// the SEEDED defaults, so any test that configures a catalog must put them
+// back -- otherwise it leaks into whatever runs next in the same process.
+test.afterEach(() => resetAttackOrigins());
 
 test('an authored origin wins over the kind default', () => {
   assert.equal(resolveAttackOrigin({ kind: 'projectile', attack_origin: 'head' }), 'head');
@@ -69,7 +75,45 @@ test('attackLift composes resolution and measurement', () => {
 });
 
 test('every fraction in the table is a usable 0..1', () => {
-  for (const [name, f] of Object.entries(ORIGIN_FRACTIONS)) {
+  for (const [name, f] of Object.entries(originFractions())) {
     assert.ok(Number.isFinite(f) && f >= 0 && f <= 1, `${name} = ${f}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// SOMET-329: the fractions are catalog data now.
+// ---------------------------------------------------------------------------
+
+test('a configured catalog actually moves where attacks launch from', () => {
+  // The point of making this data: an admin editing height_fraction must
+  // change the game, not just the row.
+  configureAttackOrigins(new Map([['feet', 0], ['middle', 0.25], ['head', 0.9]]));
+  assert.equal(bodyLift(64, 'middle'), 16, 'not the seeded 32 -- the catalog wins');
+  assert.equal(bodyLift(64, 'head'), 58);
+});
+
+test('a catalog can introduce an origin the code never knew about', () => {
+  configureAttackOrigins({ feet: 0, middle: 0.5, head: 0.85, shoulder: 0.7 });
+  assert.equal(resolveAttackOrigin({ attack_origin: 'shoulder' }), 'shoulder');
+  assert.equal(bodyLift(64, 'shoulder'), 45);
+});
+
+test('an empty or junk catalog is ignored, never applied', () => {
+  // Applying an empty table would leave bodyLift with no fractions at all,
+  // and its `middle` fallback would resolve to undefined -> NaN on the wire.
+  for (const junk of [null, undefined, new Map(), {}, { middle: 'half' }, { '': 0.5 }, { middle: 4 }, { middle: -1 }]) {
+    configureAttackOrigins(junk);
+    assert.equal(bodyLift(64, 'middle'), 32, `junk catalog: ${JSON.stringify(junk)}`);
+  }
+});
+
+test('a catalog missing middle still cannot produce NaN', () => {
+  // An admin may delete rows. `middle` is the fallback every unauthored
+  // weapon resolves to, so losing it is the one deletion that could take the
+  // whole game's attack rendering down.
+  configureAttackOrigins({ feet: 0, head: 0.85 });
+  const lift = bodyLift(64, 'middle');
+  assert.ok(Number.isFinite(lift), `expected a finite lift, got ${lift}`);
+  assert.equal(lift, 32, 'falls back to the SEEDED middle');
+  assert.ok(Number.isFinite(attackLift({ kind: 'melee' }, 48)));
 });

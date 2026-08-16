@@ -2,6 +2,8 @@
 // canEquipClient only drives UI affordances (disabled slots), and must mirror
 // the server rule in items.js canEquip.
 
+import { configureElements } from './elements.js';
+
 export const SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
 const HAND_SLOTS = ['main_hand', 'off_hand'];
 
@@ -36,6 +38,13 @@ function forgetAmmoCount(inv, typeId) {
 
 export function applyJoined(inv, msg) {
   inv.types = new Map((msg.itemTypes || []).map((t) => [t.id, t]));
+  // SOMET-329: the element palette rides the same frame as the item catalog
+  // and is applied here, at the one point where both arrive together. It is
+  // module state rather than inventory state because the draw loop reads it
+  // from four unrelated places (projectile, trail, blast ring, status tint)
+  // that have no inventory in hand. An absent or empty list leaves the
+  // built-in colours in place — see configureElements.
+  configureElements(msg.elements);
   // `quantity` is always sent and always a number (see authority/items.js);
   // it is carried through here because the ammo HUD sums it across stacks.
   // Defaulted to 1 rather than dropped so an older/partial frame degrades to
