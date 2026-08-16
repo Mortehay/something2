@@ -162,7 +162,8 @@ export default function WaypointTravel({ gameRef, characterId }) {
   useEffect(() => { openRef.current = open; });
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key.toLowerCase() !== 't' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      const isT = (e.key || '').toLowerCase() === 't' || e.code === 'KeyT';
+      if (!isT || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
       const tag = (e.target && e.target.tagName) || '';
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       setOpen(!openRef.current);

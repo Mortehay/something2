@@ -125,7 +125,8 @@ export default function Minimap({ gameRef, tileColors }) {
   // render-mode toggle) or focus is in a text field.
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key.toLowerCase() !== 'm' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      const isM = (e.key || '').toLowerCase() === 'm' || e.code === 'KeyM';
+      if (!isM || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
       const tag = (e.target && e.target.tagName) || '';
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       persistVisible(!visibleRef.current);

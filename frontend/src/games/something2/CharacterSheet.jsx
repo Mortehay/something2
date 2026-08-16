@@ -312,7 +312,8 @@ export default function CharacterSheet({ gameRef }) {
   useEffect(() => { visibleRef.current = visible; });
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key.toLowerCase() !== 'c' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      const isC = (e.key || '').toLowerCase() === 'c' || e.code === 'KeyC';
+      if (!isC || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
       const tag = (e.target && e.target.tagName) || '';
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       persistVisible(!visibleRef.current);
