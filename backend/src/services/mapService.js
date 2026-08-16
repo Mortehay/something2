@@ -269,11 +269,13 @@ function generateConnectingRoads(cfg, defaultPathTile) {
   const roads = [];
   
   // Helper to draw an axis-aligned path between two points
-  const connectPoints = (r1, c1, r2, c2, type) => {
+  const connectPoints = (r1, c1, r2, c2, type, verticalFirst = false) => {
     if (r1 === r2 && c1 === c2) return;
     let line;
     if (r1 === r2 || c1 === c2) {
       line = [[r1, c1], [r2, c2]];
+    } else if (verticalFirst) {
+      line = [[r1, c1], [r2, c1], [r2, c2]];
     } else {
       line = [[r1, c1], [r1, c2], [r2, c2]];
     }
@@ -286,7 +288,8 @@ function generateConnectingRoads(cfg, defaultPathTile) {
   for (let i = 0; i < exits.length - 1; i++) {
     const a = exits[i];
     const b = exits[i + 1];
-    connectPoints(a.exit[0], a.exit[1], b.exit[0], b.exit[1], 'grass_road');
+    const verticalFirst = (cfg.villages[i].gateEdge === 'E' || cfg.villages[i].gateEdge === 'W');
+    connectPoints(a.exit[0], a.exit[1], b.exit[0], b.exit[1], 'grass_road', verticalFirst);
   }
 
   // Connect the primary/closest village to each doorway (e.g. stone_road or defaultPathTile)
@@ -301,32 +304,35 @@ function generateConnectingRoads(cfg, defaultPathTile) {
 
     const findClosestExit = (r, c) => {
       let best = exits[0];
+      let bestIdx = 0;
       let bestDist = Infinity;
-      for (const ex of exits) {
+      for (let i = 0; i < exits.length; i++) {
+        const ex = exits[i];
         const d = Math.abs(ex.exit[0] - r) + Math.abs(ex.exit[1] - c);
         if (d < bestDist) {
           bestDist = d;
           best = ex;
+          bestIdx = i;
         }
       }
-      return best;
+      return { exit: best, verticalFirst: cfg.villages[bestIdx]?.gateEdge === 'E' || cfg.villages[bestIdx]?.gateEdge === 'W' };
     };
 
     if (hasDoorway('N')) {
-      const closest = findClosestExit(0, midW);
-      connectPoints(closest.exit[0], closest.exit[1], 0, midW, 'stone_road');
+      const { exit, verticalFirst } = findClosestExit(0, midW);
+      connectPoints(exit.exit[0], exit.exit[1], 0, midW, 'stone_road', verticalFirst);
     }
     if (hasDoorway('S')) {
-      const closest = findClosestExit(h - 1, midW);
-      connectPoints(closest.exit[0], closest.exit[1], h - 1, midW, 'stone_road');
+      const { exit, verticalFirst } = findClosestExit(h - 1, midW);
+      connectPoints(exit.exit[0], exit.exit[1], h - 1, midW, 'stone_road', verticalFirst);
     }
     if (hasDoorway('E')) {
-      const closest = findClosestExit(midH, w - 1);
-      connectPoints(closest.exit[0], closest.exit[1], midH, w - 1, 'stone_road');
+      const { exit, verticalFirst } = findClosestExit(midH, w - 1);
+      connectPoints(exit.exit[0], exit.exit[1], midH, w - 1, 'stone_road', verticalFirst);
     }
     if (hasDoorway('W')) {
-      const closest = findClosestExit(midH, 0);
-      connectPoints(closest.exit[0], closest.exit[1], midH, 0, 'stone_road');
+      const { exit, verticalFirst } = findClosestExit(midH, 0);
+      connectPoints(exit.exit[0], exit.exit[1], midH, 0, 'stone_road', verticalFirst);
     }
   }
 
