@@ -76,22 +76,26 @@ test('physical is seeded with no tint, so an impact keeps its own colour', () =>
   assert.equal(physical.damageType, 'physical');
 });
 
-test('no impact behaviour claims max_range until the engine can honour it', () => {
-  // THE point of this guard. authority/projectiles.js detonates an AoE shot on
-  // its FIRST contact of ANY kind -- terrain, creature, player, or running out
-  // of range -- so 'contact' and 'max_range' are today indistinguishable.
-  // Seeding a 'max_range' row would put a value in the catalog that the engine
-  // silently ignores, which is the exact class of defect this epic exists to
-  // remove. Slice C makes the distinction real; this fails the moment someone
-  // seeds it early.
-  const block = MIGRATION.match(/INSERT INTO impact_behaviors[\s\S]*?VALUES([\s\S]*?)ON CONFLICT/);
-  assert.ok(block, 'could not find the impact_behaviors seed');
-  assert.ok(
-    !/'max_range'/.test(block[1]),
-    "an impact_behaviors row seeds detonate_at='max_range', but projectiles.js cannot distinguish it from 'contact' yet",
+test('a max_range row exists only alongside the engine gate that honours it', () => {
+  // ORIGINALLY (SOMET-329) this asserted that NO row used 'max_range',
+  // because projectiles.js detonated on the first contact of any kind and so
+  // could not tell it from 'contact' -- seeding it would have put a value in
+  // the catalog the engine silently ignored.
+  //
+  // SOMET-343 added the gate and the row together. This is the deliberate
+  // update, not a deleted test: the pairing is what it now pins, so neither
+  // half can be removed while the other stands.
+  assert.match(MIGRATION, /detonate_at IN \('contact','max_range'\)/,
+    'the column must still accept both modes');
+
+  const seedsMaxRange = /'max_range'/.test(
+    fs.readFileSync(path.join(__dirname, '../migrations/1714440370000_detonate_at_max_range.js'), 'utf8'),
   );
-  // The column must still ACCEPT it -- the constraint is what slice C builds on.
-  assert.match(MIGRATION, /detonate_at IN \('contact','max_range'\)/);
+  const engineGates = /p\.detonateAt === 'contact'/.test(
+    fs.readFileSync(path.join(__dirname, '../src/authority/projectiles.js'), 'utf8'),
+  );
+  assert.equal(seedsMaxRange, engineGates,
+    'a seeded max_range behaviour and the projectiles.js gate that honours it must ship together');
 });
 
 test('the pre-existing element CHECK is dropped, or the catalog is decorative', () => {
