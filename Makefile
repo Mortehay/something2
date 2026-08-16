@@ -1,7 +1,8 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map \
-        clear-maps list-maps list-specs reseed-map dev dev-stop dev-status
+        clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
+        migrate-up migrate-status migrate-repair
 
 COMPOSE_FILE = compose/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
@@ -146,6 +147,33 @@ engine-shell:
 
 # --- Admin -----------------------------------------------------------------
 # Runs scripts inside the running backend container.
+
+# `npm run migrate:up` without having to shell in first. Same reason the seed
+# targets exist: the command only works from /app inside the backend container
+# (that is where node_modules, the migrations directory and DATABASE_URL all
+# line up), so running it from the host checkout fails in a way that looks like
+# a broken migration rather than a wrong working directory.
+#
+# Note the dev server also applies migrations on start, so a `make dev` can get
+# there first and this prints "No migrations to run!" even though the migration
+# is new -- check the pgmigrations ledger, not this output, before concluding a
+# migration did not run.
+migrate-up:
+	$(COMPOSE) exec -T backend npm run migrate:up
+
+# What has actually run, newest first. `migrate-up` reports nothing useful once
+# a migration has been applied, and the usual confusion ("Not run migration X
+# is preceding Y") is an ORDERING complaint about rows in here, not a missing
+# file -- read the ledger before reaching for migrate-repair.
+migrate-status:
+	$(COMPOSE) exec -T db psql -U user -d game_db \
+	  -c "SELECT name, run_on FROM pgmigrations ORDER BY id DESC LIMIT 20;"
+
+# The supported fix for that ordering complaint. Never pass --no-check-order to
+# node-pg-migrate instead: that silences the check rather than repairing the
+# ledger it is complaining about.
+migrate-repair:
+	$(COMPOSE) exec -T backend node scripts/repair-migration-order.js
 
 admin-password:
 	$(COMPOSE) exec -T backend node scripts/set-admin-password.js
