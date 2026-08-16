@@ -182,7 +182,7 @@ function worldConfig(world = {}) {
   const terrainNames = pathTile && biomeSource.length > 1
     ? biomeSource.filter((n) => n !== pathTile)
     : biomeSource;
-  return {
+  const cfg = {
     seed: world.seed || 0,
     chunkSize: world.chunkSize || 64,
     cellSize: world.cellSize || 8,
@@ -203,13 +203,24 @@ function worldConfig(world = {}) {
     villages: Array.isArray(world.villages) && world.villages.length
       ? world.villages.map((v) => ({
           id: v.id,
-          minRow: v.minRow, minCol: v.minCol,
+          minRow: v.minRow !== undefined ? v.minRow : v.min_row,
+          minCol: v.minCol !== undefined ? v.minCol : v.min_col,
           width: v.width, height: v.height,
-          gateEdge: v.gateEdge,
-          spawnX: v.spawnX, spawnY: v.spawnY,
+          gateEdge: v.gateEdge || v.gate_edge,
+          spawnX: v.spawnX !== undefined ? v.spawnX : v.spawn_x,
+          spawnY: v.spawnY !== undefined ? v.spawnY : v.spawn_y,
           wallTile: 'wooden_wall', gateTile: 'village_gate',
         }))
-      : null,
+      : (world.village ? [{
+          id: world.village.id,
+          minRow: world.village.minRow !== undefined ? world.village.minRow : world.village.min_row,
+          minCol: world.village.minCol !== undefined ? world.village.minCol : world.village.min_col,
+          width: world.village.width, height: world.village.height,
+          gateEdge: world.village.gateEdge || world.village.gate_edge,
+          spawnX: world.village.spawnX !== undefined ? world.village.spawnX : world.village.spawn_x,
+          spawnY: world.village.spawnY !== undefined ? world.village.spawnY : world.village.spawn_y,
+          wallTile: 'wooden_wall', gateTile: 'village_gate',
+        }] : null),
     // SOMET-288. safeRegion.buildSafeContext does the real normalization (a
     // junk radius becomes 0, never NaN); the radius is coerced here as well so
     // a hand-built test world and a world that came through
@@ -229,8 +240,10 @@ function worldConfig(world = {}) {
     // polyline, and the walker itself would either loop forever on a
     // non-axis-aligned segment or silently draw nothing on a malformed point.
     authoredRoads: normalizeAuthoredRoads(world.authoredRoads),
-    generatedRoads: generateConnectingRoads(world, pathTile),
+    generatedRoads: [],
   };
+  cfg.generatedRoads = generateConnectingRoads(cfg, pathTile);
+  return cfg;
 }
 
 // Decorrelates the biome field from the terrain field. Sharing a seed would
@@ -238,45 +251,83 @@ function worldConfig(world = {}) {
 // two-level sampler back into one level.
 const BIOME_FIELD_XOR = 0x6a09e667;
 
-// A simple Manhattan pathfinder for connecting villages and doorways
-function generateConnectingRoads(world, defaultPathTile) {
-  if (!world.villages || world.villages.length === 0) return [];
+function villageGateExit(v) {
+  const midCol = v.minCol + Math.floor(v.width / 2);
+  const midRow = v.minRow + Math.floor(v.height / 2);
+  const rMax = v.minRow + v.height - 1;
+  const cMax = v.minCol + v.width - 1;
+  if (v.gateEdge === 'N') return { gate: [v.minRow, midCol], exit: [v.minRow - 1, midCol], dir: [-1, 0] };
+  if (v.gateEdge === 'S') return { gate: [rMax, midCol], exit: [rMax + 1, midCol], dir: [1, 0] };
+  if (v.gateEdge === 'W') return { gate: [midRow, v.minCol], exit: [midRow, v.minCol - 1], dir: [0, -1] };
+  if (v.gateEdge === 'E') return { gate: [midRow, cMax], exit: [midRow, cMax + 1], dir: [0, 1] };
+  return { gate: [midRow, midCol], exit: [midRow, midCol], dir: [0, 0] };
+}
+
+// A Manhattan pathfinder for connecting villages and doorways
+function generateConnectingRoads(cfg, defaultPathTile) {
+  if (!cfg.villages || cfg.villages.length === 0) return [];
   const roads = [];
   
   // Helper to draw an axis-aligned path between two points
   const connectPoints = (r1, c1, r2, c2, type) => {
-    const line = [[r1, c1]];
-    let r = r1, c = c1;
-    // Move along the axis with the largest distance first
-    while (r !== r2 || c !== c2) {
-      if (Math.abs(r2 - r) > Math.abs(c2 - c)) {
-        r += Math.sign(r2 - r);
-      } else {
-        c += Math.sign(c2 - c);
-      }
-      line.push([r, c]);
+    if (r1 === r2 && c1 === c2) return;
+    let line;
+    if (r1 === r2 || c1 === c2) {
+      line = [[r1, c1], [r2, c2]];
+    } else {
+      line = [[r1, c1], [r1, c2], [r2, c2]];
     }
     roads.push({ type, line });
   };
 
-  const vCenters = world.villages.map(v => ({
-    r: v.minRow + Math.floor(v.height / 2),
-    c: v.minCol + Math.floor(v.width / 2)
-  }));
+  const exits = cfg.villages.map(v => villageGateExit(v));
 
-  // Connect villages to each other (e.g. grass_road)
-  for (let i = 0; i < vCenters.length - 1; i++) {
-    connectPoints(vCenters[i].r, vCenters[i].c, vCenters[i+1].r, vCenters[i+1].c, 'grass_road');
+  // Connect villages to each other (e.g. grass_road or defaultPathTile)
+  for (let i = 0; i < exits.length - 1; i++) {
+    const a = exits[i];
+    const b = exits[i + 1];
+    connectPoints(a.exit[0], a.exit[1], b.exit[0], b.exit[1], 'grass_road');
   }
 
-  // Connect the first village to all doorways (e.g. stone_road)
-  if (world.width && world.height && world.doorways) {
-    const w = world.width, h = world.height;
+  // Connect the primary/closest village to each doorway (e.g. stone_road or defaultPathTile)
+  if (cfg.bounds && cfg.bounds.doorways && cfg.bounds.width && cfg.bounds.height) {
+    const w = cfg.bounds.width, h = cfg.bounds.height;
     const midW = Math.floor(w / 2), midH = Math.floor(h / 2);
-    if (world.doorways.has('N')) connectPoints(vCenters[0].r, vCenters[0].c, 0, midW, 'stone_road');
-    if (world.doorways.has('S')) connectPoints(vCenters[0].r, vCenters[0].c, h - 1, midW, 'stone_road');
-    if (world.doorways.has('E')) connectPoints(vCenters[0].r, vCenters[0].c, midH, w - 1, 'stone_road');
-    if (world.doorways.has('W')) connectPoints(vCenters[0].r, vCenters[0].c, midH, 0, 'stone_road');
+    const hasDoorway = (edge) => {
+      if (cfg.bounds.doorways instanceof Set) return cfg.bounds.doorways.has(edge);
+      if (Array.isArray(cfg.bounds.doorways)) return cfg.bounds.doorways.includes(edge);
+      return false;
+    };
+
+    const findClosestExit = (r, c) => {
+      let best = exits[0];
+      let bestDist = Infinity;
+      for (const ex of exits) {
+        const d = Math.abs(ex.exit[0] - r) + Math.abs(ex.exit[1] - c);
+        if (d < bestDist) {
+          bestDist = d;
+          best = ex;
+        }
+      }
+      return best;
+    };
+
+    if (hasDoorway('N')) {
+      const closest = findClosestExit(0, midW);
+      connectPoints(closest.exit[0], closest.exit[1], 0, midW, 'stone_road');
+    }
+    if (hasDoorway('S')) {
+      const closest = findClosestExit(h - 1, midW);
+      connectPoints(closest.exit[0], closest.exit[1], h - 1, midW, 'stone_road');
+    }
+    if (hasDoorway('E')) {
+      const closest = findClosestExit(midH, w - 1);
+      connectPoints(closest.exit[0], closest.exit[1], midH, w - 1, 'stone_road');
+    }
+    if (hasDoorway('W')) {
+      const closest = findClosestExit(midH, 0);
+      connectPoints(closest.exit[0], closest.exit[1], midH, 0, 'stone_road');
+    }
   }
 
   return roads;
@@ -642,10 +693,16 @@ function normalizeAuthoredRoads(authoredRoads) {
   return out;
 }
 
+class PathCellsMap extends Map {
+  [Symbol.iterator]() {
+    return this.keys();
+  }
+}
+
 // Every path cell inside the window [rMin,rMin+rows) x [cMin,cMin+cols).
-// Returns a Map from `${r},${c}` -> tile name.
+// Returns a PathCellsMap (iterable keys for Set-compatibility, .get() for tile names).
 function collectPathCells(cfg, rMin, cMin, rows, cols) {
-  const map = new Map();
+  const map = new PathCellsMap();
   const rMaxA = rMin + rows;
   const cMaxA = cMin + cols;
 
@@ -655,16 +712,14 @@ function collectPathCells(cfg, rMin, cMin, rows, cols) {
         if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) map.set(`${r},${c}`, road.type || cfg.pathTile);
       });
     }
-  }
 
-  // Generated connection roads between villages/doorways
-  for (const road of cfg.generatedRoads || []) {
-    authoredLineCells(road.line, (r, c) => {
-      if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) map.set(`${r},${c}`, road.type || cfg.pathTile);
-    });
-  }
+    // Generated connection roads between villages/doorways
+    for (const road of cfg.generatedRoads || []) {
+      authoredLineCells(road.line, (r, c) => {
+        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) map.set(`${r},${c}`, road.type || cfg.pathTile);
+      });
+    }
 
-  if (cfg.pathTile) {
     const pad = Math.ceil(cfg.pathJitter / cfg.pathCell) + 1;
     const piLo = Math.floor(rMin / cfg.pathCell) - pad;
     const piHi = Math.floor((rMaxA - 1) / cfg.pathCell) + pad;
