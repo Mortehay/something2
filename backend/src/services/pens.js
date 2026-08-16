@@ -200,7 +200,10 @@ function pensOf(row) {
 // marker, the spec validator already refuses a pen overlapping a village for
 // the same class of reason, and `down` deletes exactly what `up` skipped on,
 // so the two halves still agree about it.
-function pennedCreatureFilter(worldId, pens) {
+// The two halves of the predicate, kept separate so "inside a pen" and "loose
+// in the world" are built from ONE reading of the boxes and can never drift
+// apart into disagreeing about which rows count as penned (SOMET-356).
+function penPredicateParts(worldId, pens) {
   const params = [worldId, GUARD_TYPE];
   const boxes = (pens || []).map((p) => {
     const b = params.length;
@@ -211,10 +214,22 @@ function pennedCreatureFilter(worldId, pens) {
     return `(home_x >= $${b + 1} AND home_x < $${b + 2}`
       + ` AND home_y >= $${b + 3} AND home_y < $${b + 4})`;
   });
-  const where = 'world_id = $1 AND type <> $2 AND blocks_portal_id IS NULL'
-    + ' AND home_x IS NOT NULL AND home_y IS NOT NULL'
-    + (boxes.length > 0 ? ` AND (${boxes.join(' OR ')})` : ' AND false');
-  return { where, params };
+  // "homed, not a village guard, not a portal guard" -- true of a penned
+  // creature AND of a chest guard, which is why the box test carries the rest
+  // of the weight here and an explicit chest exclusion carries it in the
+  // stray filter below.
+  const base = 'world_id = $1 AND type <> $2 AND blocks_portal_id IS NULL'
+    + ' AND home_x IS NOT NULL AND home_y IS NOT NULL';
+  // `false` rather than an empty string: a world authoring no pens has no
+  // penned creatures BY DEFINITION, and the negation of that ("everything
+  // homed is a stray") is exactly the dangerous reading, so the stray filter
+  // refuses an empty pen list outright rather than relying on this.
+  return { base, boxes: boxes.length > 0 ? `(${boxes.join(' OR ')})` : 'false', params };
+}
+
+function pennedCreatureFilter(worldId, pens) {
+  const { base, boxes, params } = penPredicateParts(worldId, pens);
+  return { where: `${base} AND ${boxes}`, params };
 }
 
 // Has this world's pen pass already run? The idempotency guard every seeding
@@ -230,6 +245,62 @@ async function worldHasPennedCreatures(db, worldId, pens) {
 // narrower would leave a row that blocks the next `up` and says nothing.
 async function deletePennedCreatures(db, worldId, pens) {
   const { where, params } = pennedCreatureFilter(worldId, pens);
+  const r = await db.query(`DELETE FROM world_creatures WHERE ${where}`, params);
+  return r.rowCount ?? 0;
+}
+
+// Livestock left behind by a pen that MOVED (SOMET-356).
+//
+// worldHasPennedCreatures asks "is there a penned creature inside the boxes the
+// spec authors TODAY", so when a pen's box moves the answer is no, the pen pass
+// runs again, and it seeds a second herd in the new box. Nothing removes the
+// first: populateWorld's DELETE deliberately spares any row carrying home_x, so
+// the abandoned herd is permanent. That is how the home region ended up with 17
+// homed creatures standing in pens that no longer exist -- five in Windwatch
+// Pass, five in Thornbriar Reach, seven in Old Trailhead.
+//
+// This is the same shape as SOMET-312's silently-drifting village, and it gets
+// a cheaper fix for one reason: a village needed a spec_key because
+// merchant_stock FKs to it and players hold listings against that id, so it had
+// to be MOVED rather than replaced. Penned livestock has no such identity --
+// nothing references a penned creature's id -- so reconciling by deletion and
+// letting the deterministic placer rebuild the herd is enough, and it needs no
+// column and no migration.
+//
+// THE CHEST-GUARD EXCLUSION IS LOAD-BEARING, and it is why this is not simply
+// pennedCreatureFilter with a NOT around the boxes. That filter can omit chest
+// guards only because it looks INSIDE pen boxes, where a chest guard has no
+// business being. Invert the box test and the predicate suddenly describes
+// every homed row in the world -- which includes the guard insertVaultChest and
+// spawnFieldChest anchor to their chest tile (SOMET-244), and a player using a
+// `loot_map` consumable can spawn one of those in any world they are standing
+// in, including a home-region world. Deleting those would be a worse bug than
+// the one being fixed, so guards are excluded by id off world_chests.
+//
+// guard_creature_ids is JSONB holding uuid STRINGS and world_creatures.id is a
+// uuid, hence `@> to_jsonb(id::text)` containment rather than any numeric or
+// array comparison. home_region_db.test.js got exactly this wrong in the other
+// direction -- see the note added there.
+function strayPennedCreatureFilter(worldId, pens) {
+  const { base, boxes, params } = penPredicateParts(worldId, pens);
+  const where = `${base} AND NOT ${boxes}`
+    + ' AND NOT EXISTS (SELECT 1 FROM world_chests wc WHERE wc.world_id = $1'
+    + ' AND wc.guard_creature_ids @> to_jsonb(world_creatures.id::text))';
+  return { where, params };
+}
+
+// Delete the strays. Returns how many, so the seeder can report a number that
+// is zero on a steady-state re-seed and non-zero exactly once after a pen moves
+// -- silence here would reproduce the original bug's worst property.
+//
+// Callers MUST pass the world's authored pens and MUST only call this for a
+// world that declares at least one. With an empty pen list the base predicate
+// is `AND false`, whose negation matches every homed row in the world; the
+// seeder's `specPens.length === 0 -> continue` is what keeps that unreachable,
+// and the guard below makes it unreachable here too rather than by convention.
+async function deleteStrayPennedCreatures(db, worldId, pens) {
+  if (!pens || pens.length === 0) return 0;
+  const { where, params } = strayPennedCreatureFilter(worldId, pens);
   const r = await db.query(`DELETE FROM world_creatures WHERE ${where}`, params);
   return r.rowCount ?? 0;
 }
@@ -325,5 +396,5 @@ async function insertPenCreatures(client, worldId, rows) {
 module.exports = {
   PEN_LIMITS, penGeometryError, pensOf, placePenCreatures, insertPenCreatures,
   penTileIsPlaceable, pennedCreatureFilter, worldHasPennedCreatures,
-  deletePennedCreatures,
+  deletePennedCreatures, strayPennedCreatureFilter, deleteStrayPennedCreatures,
 };
