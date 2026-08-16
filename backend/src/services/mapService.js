@@ -189,7 +189,7 @@ function worldConfig(world = {}) {
   const terrainNames = pathTile && biomeSource.length > 1
     ? biomeSource.filter((n) => n !== pathTile)
     : biomeSource;
-  return {
+  const cfg = {
     seed: world.seed || 0,
     chunkSize: world.chunkSize || 64,
     cellSize: world.cellSize || 8,
@@ -210,13 +210,24 @@ function worldConfig(world = {}) {
     villages: Array.isArray(world.villages) && world.villages.length
       ? world.villages.map((v) => ({
           id: v.id,
-          minRow: v.minRow, minCol: v.minCol,
+          minRow: v.minRow !== undefined ? v.minRow : v.min_row,
+          minCol: v.minCol !== undefined ? v.minCol : v.min_col,
           width: v.width, height: v.height,
-          gateEdge: v.gateEdge,
-          spawnX: v.spawnX, spawnY: v.spawnY,
+          gateEdge: v.gateEdge || v.gate_edge,
+          spawnX: v.spawnX !== undefined ? v.spawnX : v.spawn_x,
+          spawnY: v.spawnY !== undefined ? v.spawnY : v.spawn_y,
           wallTile: 'wooden_wall', gateTile: 'village_gate',
         }))
-      : null,
+      : (world.village ? [{
+          id: world.village.id,
+          minRow: world.village.minRow !== undefined ? world.village.minRow : world.village.min_row,
+          minCol: world.village.minCol !== undefined ? world.village.minCol : world.village.min_col,
+          width: world.village.width, height: world.village.height,
+          gateEdge: world.village.gateEdge || world.village.gate_edge,
+          spawnX: world.village.spawnX !== undefined ? world.village.spawnX : world.village.spawn_x,
+          spawnY: world.village.spawnY !== undefined ? world.village.spawnY : world.village.spawn_y,
+          wallTile: 'wooden_wall', gateTile: 'village_gate',
+        }] : null),
     // SOMET-288. safeRegion.buildSafeContext does the real normalization (a
     // junk radius becomes 0, never NaN); the radius is coerced here as well so
     // a hand-built test world and a world that came through
@@ -236,13 +247,121 @@ function worldConfig(world = {}) {
     // polyline, and the walker itself would either loop forever on a
     // non-axis-aligned segment or silently draw nothing on a malformed point.
     authoredRoads: normalizeAuthoredRoads(world.authoredRoads),
+    generatedRoads: [],
   };
+  cfg.generatedRoads = generateConnectingRoads(cfg, pathTile);
+  return cfg;
 }
 
 // Decorrelates the biome field from the terrain field. Sharing a seed would
 // put every region border exactly on a terrain-band border and collapse the
 // two-level sampler back into one level.
 const BIOME_FIELD_XOR = 0x6a09e667;
+
+function villageGateExit(v) {
+  const midCol = v.minCol + Math.floor(v.width / 2);
+  const midRow = v.minRow + Math.floor(v.height / 2);
+  const rMax = v.minRow + v.height - 1;
+  const cMax = v.minCol + v.width - 1;
+  if (v.gateEdge === 'N') return { gate: [v.minRow, midCol], exit: [v.minRow - 1, midCol], dir: [-1, 0] };
+  if (v.gateEdge === 'S') return { gate: [rMax, midCol], exit: [rMax + 1, midCol], dir: [1, 0] };
+  if (v.gateEdge === 'W') return { gate: [midRow, v.minCol], exit: [midRow, v.minCol - 1], dir: [0, -1] };
+  if (v.gateEdge === 'E') return { gate: [midRow, cMax], exit: [midRow, cMax + 1], dir: [0, 1] };
+  return { gate: [midRow, midCol], exit: [midRow, midCol], dir: [0, 0] };
+}
+
+// A highway and avenue pathfinder connecting villages and doorways
+function generateConnectingRoads(cfg, defaultPathTile) {
+  const pathTile = defaultPathTile || cfg.pathTile || 'dirt';
+  if (!pathTile) return [];
+  const roads = [];
+  
+  const addRoad = (line, type = pathTile) => {
+    if (!Array.isArray(line) || line.length < 2) return;
+    roads.push({ type, line });
+  };
+
+  const exits = (cfg.villages || []).map(v => villageGateExit(v));
+
+  // Multi-village connections (if more than 1 village)
+  for (let i = 0; i < exits.length - 1; i++) {
+    const a = exits[i];
+    const b = exits[i + 1];
+    const verticalFirst = (cfg.villages[i].gateEdge === 'E' || cfg.villages[i].gateEdge === 'W');
+    if (verticalFirst) {
+      addRoad([[a.exit[0], a.exit[1]], [b.exit[0], a.exit[1]], [b.exit[0], b.exit[1]]]);
+    } else {
+      addRoad([[a.exit[0], a.exit[1]], [a.exit[0], b.exit[1]], [b.exit[0], b.exit[1]]]);
+    }
+  }
+
+  // Doorway highways and village avenues
+  if (cfg.bounds && cfg.bounds.doorways && cfg.bounds.width && cfg.bounds.height) {
+    const w = cfg.bounds.width, h = cfg.bounds.height;
+    const midW = Math.floor(w / 2), midH = Math.floor(h / 2);
+    const hasDoorway = (edge) => {
+      if (cfg.bounds.doorways instanceof Set) return cfg.bounds.doorways.has(edge);
+      if (Array.isArray(cfg.bounds.doorways)) return cfg.bounds.doorways.includes(edge);
+      return false;
+    };
+
+    const hasN = hasDoorway('N');
+    const hasS = hasDoorway('S');
+    const hasE = hasDoorway('E');
+    const hasW = hasDoorway('W');
+
+    // Horizontal highway (E-W)
+    if (hasW && hasE) {
+      addRoad([[midH, 0], [midH, w - 1]]);
+    } else if (hasW) {
+      addRoad([[midH, 0], [midH, midW]]);
+    } else if (hasE) {
+      addRoad([[midH, midW], [midH, w - 1]]);
+    }
+
+    // Vertical highway (N-S)
+    if (hasN && hasS) {
+      addRoad([[0, midW], [h - 1, midW]]);
+    } else if (hasN) {
+      addRoad([[0, midW], [midH, midW]]);
+    } else if (hasS) {
+      addRoad([[midH, midW], [h - 1, midW]]);
+    }
+
+    // Connect each village gate to the highway network
+    for (let i = 0; i < exits.length; i++) {
+      const ex = exits[i];
+      const gateEdge = cfg.villages[i]?.gateEdge;
+      const [r, c] = ex.exit;
+
+      if (gateEdge === 'E' || gateEdge === 'W') {
+        // Step horizontally out of the gate towards the N-S spine (midW), then vertically to the crossroads (midH)
+        if (r === midH && c === midW) {
+          // Already at crossroads
+        } else if (r === midH) {
+          addRoad([[r, c], [r, midW]]);
+        } else if (c === midW) {
+          addRoad([[r, c], [midH, c]]);
+        } else {
+          addRoad([[r, c], [r, midW], [midH, midW]]);
+        }
+      } else {
+        // Step vertically out of the gate towards the E-W spine (midH), then horizontally to the crossroads (midW)
+        if (r === midH && c === midW) {
+          // Already at crossroads
+        } else if (c === midW) {
+          addRoad([[r, c], [midH, c]]);
+        } else if (r === midH) {
+          addRoad([[r, c], [r, midW]]);
+        } else {
+          addRoad([[r, c], [midH, c], [midH, midW]]);
+        }
+      }
+    }
+  }
+
+  return roads;
+}
 
 // Which biome owns this absolute cell, or null when the world declares none.
 // Coarse global noise (biomeCell >> cellSize), so regions read as places and
@@ -335,14 +454,15 @@ function generateWorldOverview(world, centerCol, centerRow, span, step) {
 // generateChunk is a fixed-size wrapper over this.
 function generateRegion(world, rMin, cMin, rows, cols) {
   const cfg = worldConfig(world);
-  const paths = collectPathCells(cfg, rMin, cMin, rows, cols);
+  const pathsMap = collectPathCells(cfg, rMin, cMin, rows, cols);
   const grid = [];
   for (let r = 0; r < rows; r++) {
     const row = new Array(cols);
     for (let c = 0; c < cols; c++) {
       const gRow = rMin + r, gCol = cMin + c;
-      row[c] = cfg.pathTile && paths.has(`${gRow},${gCol}`)
-        ? cfg.pathTile
+      const key = `${gRow},${gCol}`;
+      row[c] = pathsMap.has(key)
+        ? pathsMap.get(key)
         : sampleTerrain(cfg, gRow, gCol);
     }
     grid[r] = row;
@@ -573,8 +693,13 @@ function normalizeAuthoredRoads(authoredRoads) {
   if (!Array.isArray(authoredRoads)) {
     throw new Error(`authoredRoads must be an array (got ${typeof authoredRoads})`);
   }
+  const out = [];
   for (let i = 0; i < authoredRoads.length; i++) {
-    const line = authoredRoads[i];
+    const raw = authoredRoads[i];
+    const isObj = raw && !Array.isArray(raw) && typeof raw === 'object';
+    const line = isObj ? raw.line : raw;
+    const type = isObj ? raw.type : undefined;
+
     if (!Array.isArray(line) || line.length === 0) {
       throw new Error(`authoredRoads[${i}] must be a non-empty array of [row, col] points`);
     }
@@ -593,59 +718,58 @@ function normalizeAuthoredRoads(authoredRoads) {
           + 'consecutive points must share a row or a column');
       }
     }
+    out.push({ type, line });
   }
-  return authoredRoads;
+  return out;
+}
+
+class PathCellsMap extends Map {
+  [Symbol.iterator]() {
+    return this.keys();
+  }
 }
 
 // Every path cell inside the window [rMin,rMin+rows) x [cMin,cMin+cols).
-// Iterate coarse nodes whose segments could reach the window (one extra ring),
-// union their segment cells, clipped to the window.
-//
-// SOMET-289: cfg.authoredRoads is unioned in as well, clipped to the same
-// window. THIS is the one place roads are derived, so an authored road is drawn
-// by generateRegion (which stamps cfg.pathTile on whatever this returns) AND
-// made safe by safeRegion (which is handed this same Set through
-// safeContextFor) without either of them naming the feature. An empty
-// authoredRoads adds nothing, so every world that has not opted in gets the
-// byte-identical Set it got before.
+// Returns a PathCellsMap (iterable keys for Set-compatibility, .get() for tile names).
 function collectPathCells(cfg, rMin, cMin, rows, cols) {
-  const set = new Set();
-  // Authored roads share the lattice's fate on a world with no path tile:
-  // generateRegion has nothing to draw them WITH, so a "safe road" that is
-  // invisible would be worse than none. Inside the guard, not before it.
-  if (!cfg.pathTile) return set;
-  {
-    const rMaxA = rMin + rows;
-    const cMaxA = cMin + cols;
-    for (const line of cfg.authoredRoads || []) {
-      authoredLineCells(line, (r, c) => {
-        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) set.add(`${r},${c}`);
+  const map = new PathCellsMap();
+  const rMaxA = rMin + rows;
+  const cMaxA = cMin + cols;
+
+  if (cfg.pathTile) {
+    for (const road of cfg.authoredRoads || []) {
+      authoredLineCells(road.line, (r, c) => {
+        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) map.set(`${r},${c}`, road.type || cfg.pathTile);
       });
     }
-  }
-  const rMax = rMin + rows, cMax = cMin + cols;
-  // Coarse-node index range covering the window, padded so trails entering
-  // from outside are included. A node's segment can reach up to pathJitter
-  // tiles beyond its nominal pathCell span (anchor jitter), so the padding
-  // ring must cover that reach -- not just a fixed 1 node -- or a window
-  // computed narrowly could miss cells a wider region would include.
-  const pad = Math.ceil(cfg.pathJitter / cfg.pathCell) + 1;
-  const piLo = Math.floor(rMin / cfg.pathCell) - pad;
-  const piHi = Math.floor((rMax - 1) / cfg.pathCell) + pad;
-  const pjLo = Math.floor(cMin / cfg.pathCell) - pad;
-  const pjHi = Math.floor((cMax - 1) / cfg.pathCell) + pad;
-  const add = (cells) => {
-    for (const [r, c] of cells) {
-      if (r >= rMin && r < rMax && c >= cMin && c < cMax) set.add(`${r},${c}`);
+
+    // Generated connection roads between villages/doorways
+    for (const road of cfg.generatedRoads || []) {
+      authoredLineCells(road.line, (r, c) => {
+        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) map.set(`${r},${c}`, road.type || cfg.pathTile);
+      });
     }
-  };
-  for (let pi = piLo; pi <= piHi; pi++) {
-    for (let pj = pjLo; pj <= pjHi; pj++) {
-      add(pathSegmentCells(cfg, pi, pj, 'E'));
-      add(pathSegmentCells(cfg, pi, pj, 'S'));
+
+    const pad = Math.ceil(cfg.pathJitter / cfg.pathCell) + 1;
+    const piLo = Math.floor(rMin / cfg.pathCell) - pad;
+    const piHi = Math.floor((rMaxA - 1) / cfg.pathCell) + pad;
+    const pjLo = Math.floor(cMin / cfg.pathCell) - pad;
+    const pjHi = Math.floor((cMaxA - 1) / cfg.pathCell) + pad;
+    const add = (cells) => {
+      for (const [r, c] of cells) {
+        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) {
+          if (!map.has(`${r},${c}`)) map.set(`${r},${c}`, cfg.pathTile);
+        }
+      }
+    };
+    for (let pi = piLo; pi <= piHi; pi++) {
+      for (let pj = pjLo; pj <= pjHi; pj++) {
+        add(pathSegmentCells(cfg, pi, pj, 'E'));
+        add(pathSegmentCells(cfg, pi, pj, 'S'));
+      }
     }
   }
-  return set;
+  return map;
 }
 
 // densityAt() (a global object-density field) was removed here as dead code
@@ -695,7 +819,7 @@ function safeContextFor(cfg) {
   const ctx = buildSafeContext({
     villages: cfg.villages,
     pathCells: radius > 0 && cfg.bounds
-      ? collectPathCells(cfg, 0, 0, cfg.bounds.height, cfg.bounds.width)
+      ? new Set(collectPathCells(cfg, 0, 0, cfg.bounds.height, cfg.bounds.width).keys())
       : new Set(),
     safeRoadRadius: radius,
     safeRects: cfg.safeRects,

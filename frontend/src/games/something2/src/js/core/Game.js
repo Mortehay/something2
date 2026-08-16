@@ -975,102 +975,84 @@ export class Game {
         if (this._inputAttached) return;
         this._inputAttached = true;
 
+        const CODE_TO_KEY = {
+            KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd',
+            KeyI: 'i', KeyE: 'e', KeyB: 'b', KeyG: 'g',
+            KeyM: 'm', KeyT: 't', KeyC: 'c',
+            ArrowUp: 'arrowup', ArrowDown: 'arrowdown', ArrowLeft: 'arrowleft', ArrowRight: 'arrowright',
+            Escape: 'escape',
+        };
+
         this._keydownHandler = (e) => {
-            const key = e.key.toLowerCase();
+            const key = (e.key || '').toLowerCase();
+            const codeKey = CODE_TO_KEY[e.code] || key;
             this.keys[key] = true;
+            if (codeKey) this.keys[codeKey] = true;
+
+            const isKey = (target) => key === target || codeKey === target;
 
             // Inventory / paper-doll toggle (replaces the retired number-key
             // weapon switch — equipping now goes through the panel). Gated on
             // !shopOpen so the two centred panels can never stack (the shop is
             // closed with 'e' or Escape first).
-            if (key === 'i' && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen) {
+            if (isKey('i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen) {
                 this.inventoryOpen = !this.inventoryOpen;
                 if (!this.inventoryOpen) this.inventorySelectedItemId = null;
             }
 
-            if(key === 'escape'){
+            if (isKey('escape')) {
                 console.log("Escape pressed, current state:", this.state);
                 if (this.shopOpen) {
                     this.shopOpen = false;
                 } else if (this.bankOpen) {
-                    // Ordered after the shop only because the two can never be
-                    // open at once (each key gates on the other); the chain is
-                    // written out rather than collapsed so adding a fourth
-                    // panel is an obvious edit rather than a subtle one.
                     this.bankOpen = false;
                 } else if(this.state === 'playing'){
                     this.pause();
-                }else if(this.state === 'paused'){
+                } else if(this.state === 'paused'){
                     this.resume();
                 }
             }
 
             // Merchant interact (Slice D): 'e' either closes an already-open
             // shop panel or asks the server whether a merchant is in range
-            // (a 'shop' frame comes back only if one is; see onShop above).
-            // Gated on !inventoryOpen like 'g' pickup — the two panels don't
-            // stack, and game-world intents don't fire while one consumes
-            // input.
-            if (key === 'e' && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
+            if (isKey('e') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
                 if (this.shopOpen) { this.shopOpen = false; return; }
                 if (this.authorityClient) this.authorityClient.sendInteract();
                 return;
             }
 
             // Account chest (SOMET-310): 'b' either closes an open bank panel
-            // or asks the server whether a bank post is in range (a 'bank'
-            // frame comes back only if one is), exactly mirroring 'e' above.
-            //
-            // A SEPARATE KEY, not a second meaning for 'e'. The bank post sits
-            // one tile from the merchant and both are normally inside
-            // INTERACT_RADIUS at once, so one key serving both would have to
-            // pick by distance -- and which panel opened would then depend on
-            // where the player's feet happened to be within a tile. Two keys
-            // makes the choice the player's.
-            if (key === 'b' && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen) {
+            // or asks the server whether a bank post is in range
+            if (isKey('b') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
                 return;
             }
 
-            if (key === 'g' && this.state === 'playing' && this.chunked) {
-                // Match the mouse handler's rule: no game-world intents
-                // fire while a panel is open and consuming input. (The shop
-                // is deliberately NOT in this test -- it never has been, and
-                // changing that is not this ticket's business.)
+            if (isKey('g') && this.state === 'playing' && this.chunked) {
                 if (!e.repeat && this.authorityClient && !this.inventoryOpen && !this.bankOpen) this.authorityClient.sendPickup();
             }
 
             // Dev: cycle the global render-mode override (none -> rect -> static -> animated).
             // Moved to Shift+M so plain M can toggle the minimap HUD (handled in Minimap.jsx).
-            if(key === 'm' && e.shiftKey && this.state === 'playing' && !e.repeat){
+            if (isKey('m') && e.shiftKey && this.state === 'playing' && !e.repeat) {
                 const mode = this.renderSystem.cycleRenderModeOverride();
                 console.log(`Render-mode override: ${mode ?? 'off (per-entity)'}`);
             }
 
             // Dev: toggle tile textures on/off (falls back to flat color).
             // Moved to Shift+T so plain T can open the waypoint travel popup
-            // (handled in WaypointTravel.jsx) — the second time a dev key has
-            // had to give up its unmodified letter to a player-facing panel,
-            // after Shift+M above.
-            //
-            // WHY THE DEV KEY MOVES AND NOT THE PLAYER ONE. These are two
-            // separate window keydown listeners in two files, so both fired:
-            // pressing T opened the panel AND turned tile textures off, with
-            // the "Tile textures off" toast hidden behind the panel's backdrop.
-            // Closing the panel the two ways it invites — Esc, or a backdrop
-            // click — left the whole map flat-coloured for the rest of the
-            // session with nothing on screen saying why. A player-facing key
-            // must be the plain letter the help panel names; a dev toggle
-            // nobody but us presses is the one that can afford a modifier.
-            if (key === 't' && e.shiftKey && this.renderSystem && this.chunked && !e.repeat) {
+            if (isKey('t') && e.shiftKey && this.renderSystem && this.chunked && !e.repeat) {
                 const on = this.renderSystem.toggleTileTextures();
                 this._showToast(`Tile textures ${on ? 'on' : 'off'}`);
             }
         };
 
         this._keyupHandler = (e) => {
-            this.keys[e.key.toLowerCase()] = false;
+            const key = (e.key || '').toLowerCase();
+            const codeKey = CODE_TO_KEY[e.code] || key;
+            this.keys[key] = false;
+            if (codeKey) this.keys[codeKey] = false;
         };
 
         this._contextMenuHandler = () => {

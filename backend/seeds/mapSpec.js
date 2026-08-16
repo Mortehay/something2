@@ -490,9 +490,14 @@ function validateMapSpec(spec, {
     if (w.roads !== undefined && !Array.isArray(w.roads)) {
       errors.push(`world "${w.key}" roads must be an array (got ${typeof w.roads})`);
     }
-    for (const [i, line] of (Array.isArray(w.roads) ? w.roads : []).entries()) {
+    for (const [i, raw] of (Array.isArray(w.roads) ? w.roads : []).entries()) {
+      const isObj = raw && !Array.isArray(raw) && typeof raw === 'object';
+      const line = isObj ? raw.line : raw;
+      if (isObj && raw.type !== undefined && typeof raw.type !== 'string') {
+        errors.push(`world "${w.key}" roads[${i}].type must be a string`);
+      }
       if (!Array.isArray(line) || line.length === 0) {
-        errors.push(`world "${w.key}" roads[${i}] must be a non-empty array of [row, col] points`);
+        errors.push(`world "${w.key}" roads[${i}] must be a non-empty array of [row, col] points, or an object { type, line }`);
         continue;
       }
       let prev = null;
