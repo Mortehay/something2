@@ -2087,6 +2087,81 @@ class CreatureSim {
     }
     return out;
   }
+
+  // SOMET-354. The broadcast snapshot, per socket. snapshotForNeighborhood
+  // above is the FULL, un-narrowed form and is kept as the reference shape
+  // (and for tests that want every field for every creature); this is what
+  // actually goes on the wire.
+  //
+  // Measured problem: broadcastCreatures sent the whole radius-1 chunk
+  // neighbourhood -- 9 chunks, 9,216 tiles -- to every socket at 5Hz, while a
+  // client viewport is roughly 225 tiles. About 97% of every frame was
+  // off-screen. In the densest world that was 549-571 creatures, 104-108 KB
+  // per frame, ~510 KiB/s (~4.2 Mbit/s) PER SOCKET, and the array was rebuilt
+  // separately for each one.
+  //
+  // Two independent savings, both applied here:
+  //
+  // 1. TWO ZONES, not one radius. Simulation must stay wider than vision or
+  //    creatures visibly freeze at the edge of what you can see, so the
+  //    activation neighbourhood is unchanged and the NARROWING happens only on
+  //    the wire. Inside `nearPx` a creature gets the fields needed to render
+  //    and fight it; beyond it, only position -- because the only consumer of
+  //    a far creature is the minimap, which reads x/y/color and nothing else
+  //    (Game.getMinimapSnapshot). Sending one array rather than two is
+  //    deliberate: the client's existing merge already skips fields a record
+  //    omits, so a far record needs no new client concept and the minimap
+  //    keeps working unchanged.
+  //
+  // 2. IMMUTABLE FIELDS ONCE. type/color/maxHp/level never change after a
+  //    creature is first seen, and cost ~62 B of a ~184 B record. `known` is
+  //    the per-socket set of ids that have already been told; the CALLER owns
+  //    it and this method rewrites it in place to exactly the ids in this
+  //    frame, so a creature that leaves the neighbourhood and comes back is
+  //    re-introduced in full rather than arriving as a position with no type.
+  //
+  // x/y are rounded to whole world pixels (~11% off the remainder). They feed
+  // an interpolator on the client, and MAP_TILE_SIZE is 100 -- a sub-pixel
+  // creature position is noise, not signal.
+  //
+  // `f: 1` marks a far record. It is what tells the client "these fields are
+  // ABSENT, not cleared" -- without it a far creature's effects would be wiped
+  // on every frame, because the client assigns effects unconditionally so that
+  // an expired effect actually disappears.
+  snapshotAOI(keys, now, playerX, playerY, nearPx, known) {
+    const set = keys instanceof Set ? keys : new Set(keys);
+    const out = [];
+    const stillHere = new Set();
+    for (const c of this.creatures.values()) {
+      const { cx, cy } = chunkOf(c.x, c.y, this.chunkSize);
+      if (!set.has(CHUNK_KEY(cx, cy))) continue;
+      stillHere.add(c.id);
+
+      const row = { id: c.id, x: Math.round(c.x), y: Math.round(c.y) };
+      // Chebyshev, not Euclidean: the viewport is a rectangle, so a circle
+      // would either clip its corners or overshoot its edges.
+      const near = Math.abs(c.x - playerX) <= nearPx && Math.abs(c.y - playerY) <= nearPx;
+      if (near) {
+        row.facing = c.facing;
+        row.hp = Math.round(c.hp);
+        row.mode = c.mode;
+        const fx = activeEffectKeys(c, now);
+        if (fx) row.effects = fx;
+      } else {
+        row.f = 1;
+      }
+      if (!known.has(c.id)) {
+        row.type = c.type; row.color = c.color;
+        row.maxHp = c.maxHp; row.level = c.level;
+      }
+      out.push(row);
+    }
+    // Rewrite in place: `known` must end up equal to what this frame sent, so
+    // the next frame's "already told" test is exact.
+    known.clear();
+    for (const id of stillHere) known.add(id);
+    return out;
+  }
 }
 
 module.exports = {
