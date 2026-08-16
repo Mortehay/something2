@@ -476,13 +476,15 @@ export default function GameShell() {
 
   return (
     <StyledGameContainer>
-      <HelpButton
-        title="Help — controls & operations"
-        aria-label="Help"
-        onClick={() => setHelpOpen(true)}
-      >
-        ?
-      </HelpButton>
+      {!isPlaying && (
+        <HelpButton
+          title="Help — controls & operations"
+          aria-label="Help"
+          onClick={() => setHelpOpen(true)}
+        >
+          ?
+        </HelpButton>
+      )}
 
       <ContentArea ref={contentRef}>
         {/* Rendered INSIDE contentRef (the fullscreen element) so the panel is
