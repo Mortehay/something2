@@ -1,10 +1,34 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map \
-        clear-maps list-maps reseed-map dev dev-stop dev-status
+        clear-maps list-maps list-specs reseed-map dev dev-stop dev-status
 
 COMPOSE_FILE = compose/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
+
+# --- Map specs -------------------------------------------------------------
+# SPEC= for seed-map/reseed-map is a FILENAME STEM under backend/seeds/maps,
+# not the `name` field inside the JSON (those differ), so the list is derived
+# from the filenames here rather than by parsing the specs.
+#
+# Read on the HOST, on purpose. `make list-maps` already prints the same list
+# but only via `docker compose exec backend`, so the one moment you most need
+# it -- a bare `make seed-map` that just told you SPEC is required, quite
+# possibly before the stack is even up -- was the one moment it could not
+# answer. Guarding and listing here costs no container.
+MAPS_DIR = backend/seeds/maps
+SPECS = $(patsubst %.map.json,%,$(notdir $(wildcard $(MAPS_DIR)/*.map.json)))
+
+SHOW_SPECS = echo "available specs ($(MAPS_DIR)/*.map.json):"; \
+	     for s in $(SPECS); do echo "  $$s"; done; \
+	     [ -n "$(SPECS)" ] || echo "  (none found -- is $(MAPS_DIR) present?)";
+
+# Canned recipe: reject a missing or misspelled SPEC before shelling into the
+# container, and always say what the valid answers are.
+define require-spec
+@[ -n "$(SPEC)" ] || { echo "usage: make $@ SPEC=<name>"; $(SHOW_SPECS) exit 1; }
+@[ -f "$(MAPS_DIR)/$(SPEC).map.json" ] || { echo "no such spec: $(SPEC)  ($(MAPS_DIR)/$(SPEC).map.json not found)"; $(SHOW_SPECS) exit 1; }
+endef
 
 up:
 	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) up -d
@@ -131,20 +155,25 @@ admin-password-rotate:
 
 seed-catalogs:
 	$(COMPOSE) exec -T backend node scripts/seed-catalogs.js
-
+#make seed-map SPEC=vale-region
+#make seed-map SPEC=p5-descent
 seed-map:
-	@[ -n "$(SPEC)" ] || (echo "usage: make seed-map SPEC=<name>  (see: make list-maps)"; exit 1)
+	$(require-spec)
 	$(COMPOSE) exec -T backend sh -c "SPEC=$(SPEC) node scripts/seed-map.js"
 
 clear-maps:
 	$(COMPOSE) exec -T backend node scripts/clear-maps.js
 
+# Specs plus what is currently seeded in `worlds` (needs the stack up).
 list-maps:
 	$(COMPOSE) exec -T backend node scripts/list-maps.js
 
+# Just the spec names, straight off the host -- works with the stack down.
+list-specs:
+	@$(SHOW_SPECS)
+
 reseed-map:
-	@[ -n "$(SPEC)" ] || (echo "usage: make reseed-map SPEC=<name>  (see: make list-maps)"; exit 1)
-	$(COMPOSE) exec -T backend sh -c "test -f seeds/maps/$(SPEC).map.json" || (echo "no such spec: backend/seeds/maps/$(SPEC).map.json  (see: make list-maps)"; exit 1)
+	$(require-spec)
 	RESEED_SPEC=$(SPEC) $(MAKE) clear-maps
 	$(MAKE) seed-catalogs
 	$(MAKE) seed-map SPEC=$(SPEC)
