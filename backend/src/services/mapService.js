@@ -765,8 +765,18 @@ function creatureTileCandidates(world, cfg, gRow, gCol, allowedTypes) {
 // deterministic given `rngSeed`. Returns rows shaped like placeCreaturePacks'.
 // Unbounded worlds return [] (world creation now requires width and height
 // together, SOMET-246, so this is a defensive no-op rather than a live path).
-function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40) {
-  const cfg = worldConfig(world);
+//
+// `precomputedCfg`, if given, is used INSTEAD of calling worldConfig(world) --
+// for a caller that must place creatures for the same world several times in
+// one pass (creatureRespawn.js's per-sweep loop) and wants SAFE_CTX/
+// DENSITY_FIELD's cfg-identity-keyed caches to hit on every call after the
+// first, rather than rebuilding the O(width*height) BFS + normalization pass
+// every time. Must be the exact object worldConfig(world) itself returned
+// (worldConfig is not idempotent), and it is the caller's job to discard it
+// rather than reuse it across a world re-roll or a later sweep pass -- this
+// function does no caching of its own and does not remember what it is given.
+function placeMapCreatures(world, count, allowedTypes, rngSeed, maxAttempts = 40, precomputedCfg = null) {
+  const cfg = precomputedCfg || worldConfig(world);
   if (!cfg.bounds) return [];
   if (!count || count < 1) return [];
   if (!allowedTypes || allowedTypes.length === 0) return [];

@@ -117,9 +117,9 @@ test('PUT /api/worlds/:id accepts a creature_count at the cap', async () => {
   ]);
   __setPool(pool);
   const res = await request(app).put('/api/worlds/w1').set(...AUTH)
-    .send({ name: 'AtCap', width: 24, height: 24, creature_count: 2000 });
+    .send({ name: 'AtCap', width: 24, height: 24, creature_count: 5000 });
   assert.equal(res.status, 200);
-  assert.equal(res.body.creature_count, 2000);
+  assert.equal(res.body.creature_count, 5000);
 });
 
 test('PUT /api/worlds/:id 404 when the row is absent', async () => {

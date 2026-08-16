@@ -148,8 +148,8 @@ function invalidId(id) {
 // Upper bound for PUT /api/worlds/:id creature_count (SOMET-188 / F-008).
 // ONE number, defined in densityTiers.js: that is where it now does the real
 // work, clamping the count resolveDensity hands to both population callers.
-// Two literal 2000s would let the API's advertised limit and the limit
-// actually enforced during placement drift apart.
+// Two literal copies of the number would let the API's advertised limit and
+// the limit actually enforced during placement drift apart.
 const MAX_CREATURE_COUNT = MAX_WORLD_CREATURES;
 
 // World preview memo
@@ -1926,6 +1926,32 @@ function nameArray(v) {
   return Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()) : [];
 }
 
+// The biome creature-density multiplier, landing on the same fallback
+// mapService's normalizeBiomes uses on the read side: anything that is not a
+// positive finite number becomes 1.0 ("no opinion"), never 0 or NaN -- a 0
+// would make a biome silently uninhabitable and a NaN would poison the
+// normalized field through its mean.
+//
+// It is looser than normalizeBiomes in one direction on purpose: Number("1.5")
+// is accepted here, where normalizeBiomes' Number.isFinite check would reject
+// the string and fall back to 1. That divergence is safe because it cannot
+// reach the read side -- biomes.creature_density is a `real`, so whatever this
+// writes is a number by the time normalizeBiomes ever sees it -- and it keeps
+// an admin form that posts its number field as a string from silently saving
+// 1.0 over the value the operator typed.
+//
+// Deliberately not a 400: this matches the no-validation-error,
+// default-when-absent style art_style/exclusions/color already use in these
+// routes, and keeps a client that predates the column working unchanged.
+//
+// Shared by POST and PUT, and by PUT's own before/after comparison, so the
+// write and the change-detection can never disagree about what a given input
+// means.
+function biomeCreatureDensity(v) {
+  const n = Number(v);
+  return (Number.isFinite(n) && n > 0) ? n : 1;
+}
+
 // Worlds that still list `name` in their biome set. worlds.biomes is a jsonb
 // array of names with no FK (same as allowed_creature_types), so a rename or
 // delete here would silently orphan the reference and quietly revert those
@@ -1949,7 +1975,10 @@ app.get('/api/biomes', async (req, res) => {
 
 app.post('/api/biomes', adminGuard, async (req, res) => {
   try {
-    const { name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color } = req.body;
+    const {
+      name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color,
+      creature_density,
+    } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'name is required' });
     }
@@ -1957,13 +1986,13 @@ app.post('/api/biomes', adminGuard, async (req, res) => {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
     const result = await pool.query(
-      `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color)
-       VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6, $7, $8) RETURNING *`,
+      `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color, creature_density)
+       VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6, $7, $8, $9) RETURNING *`,
       [
         name.trim(),
         JSON.stringify(nameArray(terrain_tiles)), JSON.stringify(nameArray(flora_types)),
         JSON.stringify(nameArray(creature_types)), JSON.stringify(nameArray(palette)),
-        art_style || '', exclusions || '', color || '#888888',
+        art_style || '', exclusions || '', color || '#888888', biomeCreatureDensity(creature_density),
       ],
     );
     res.status(201).json(result.rows[0]);
@@ -1977,7 +2006,10 @@ app.post('/api/biomes', adminGuard, async (req, res) => {
 app.put('/api/biomes/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color } = req.body;
+    const {
+      name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color,
+      creature_density,
+    } = req.body;
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'name is required' });
     }
@@ -1985,7 +2017,7 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
     const cur = await pool.query(
-      'SELECT name, terrain_tiles, flora_types, creature_types FROM biomes WHERE id = $1', [id],
+      'SELECT name, terrain_tiles, flora_types, creature_types, creature_density FROM biomes WHERE id = $1', [id],
     );
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Biome not found' });
     const oldName = cur.rows[0].name;
@@ -2026,19 +2058,30 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
     // row is stale, so this only needs evictOrWarn (idle world: nothing to
     // do, it re-resolves on its next load; live world: warn, matching
     // terrainChanged's warning).
+    const nextDensity = biomeCreatureDensity(creature_density);
+    // creature_density belongs on THIS branch, not terrainChanged's: it never
+    // reaches world_chunks (it weights where creatures are placed, not which
+    // tile a cell gets), so there is no persisted grid to wipe. But it is
+    // baked into a live world's config exactly like flora/creature_types are
+    // -- worldConfig().biomes[i].creatureDensity feeds creatureDensityField,
+    // and authority/server.js resolves loadBiomes() once per session -- so
+    // without this an admin edit would appear to save and then change nothing
+    // about placement until the world happened to reload.
+    const densityChanged = biomeCreatureDensity(cur.rows[0].creature_density) !== nextDensity;
     const decorationChanged =
       JSON.stringify(nameArray(cur.rows[0].flora_types)) !== JSON.stringify(nextFlora)
-      || JSON.stringify(nameArray(cur.rows[0].creature_types)) !== JSON.stringify(nextCreatures);
+      || JSON.stringify(nameArray(cur.rows[0].creature_types)) !== JSON.stringify(nextCreatures)
+      || densityChanged;
     const result = await pool.query(
       `UPDATE biomes SET name = $1, terrain_tiles = $2::jsonb, flora_types = $3::jsonb,
          creature_types = $4::jsonb, palette = $5::jsonb, art_style = $6, exclusions = $7,
-         color = $8, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $9 RETURNING *`,
+         color = $8, creature_density = $9, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $10 RETURNING *`,
       [
         name.trim(),
         JSON.stringify(nextTerrainTiles), JSON.stringify(nextFlora),
         JSON.stringify(nextCreatures), JSON.stringify(nameArray(palette)),
-        art_style || '', exclusions || '', color || '#888888', id,
+        art_style || '', exclusions || '', color || '#888888', nextDensity, id,
       ],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Biome not found' });
@@ -2702,7 +2745,7 @@ app.put('/api/worlds/:id', adminGuard, async (req, res) => {
     // this column with what it actually scattered. Nothing reads the value
     // written here for placement, and MapsAdmin now renders the field
     // read-only, echoing back whatever it was sent. The bound that does the
-    // real work moved to resolveDensity (MAX_WORLD_CREATURES, raised to 4000
+    // real work moved to resolveDensity (MAX_WORLD_CREATURES, raised to 5000
     // when the tier rates doubled -- SOMET-302); this check remains so the
     // column can never be poked past what a population pass could
     // legitimately write, and so the API keeps rejecting nonsense with a

@@ -204,7 +204,7 @@ test('seeding biomes twice is a no-op the second time', async (t) => {
   }
   try {
     await seedCatalogs(pool);
-    const cols = 'name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color';
+    const cols = 'name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color, creature_density';
     const after1 = await pool.query(`SELECT ${cols} FROM biomes ORDER BY name`);
     await seedCatalogs(pool);
     const after2 = await pool.query(`SELECT ${cols} FROM biomes ORDER BY name`);
@@ -212,6 +212,14 @@ test('seeding biomes twice is a no-op the second time', async (t) => {
     assert.deepEqual(after2.rows, after1.rows, 'second seed changed biomes');
     assert.ok(after1.rowCount >= STARTER_BIOMES.length,
       'fewer biomes than the seed file defines — the upsert did not apply');
+
+    // Mire is authored at 2.0 (not the column default of 1.0). If
+    // seedOneBiome ever drops creature_density from its column list again,
+    // this row round-trips at 1.0 and this assertion catches it.
+    const mire = after1.rows.find((r) => r.name === 'Mire');
+    assert.ok(mire, 'Mire is not seeded — cannot exercise this assertion');
+    assert.equal(Number(mire.creature_density), 2.0,
+      'Mire creature_density did not round-trip its authored value — the column is not reaching the database');
   } finally { await pool.end(); }
 });
 

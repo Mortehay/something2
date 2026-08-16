@@ -7,7 +7,7 @@
 // and folding a hot per-death path into a seeding module would couple them for
 // no gain.
 
-const { placeMapCreatures, CREATURE_BASE_DAMAGE, isBoundedWorld } = require('./mapService');
+const { placeMapCreatures, CREATURE_BASE_DAMAGE, isBoundedWorld, worldConfig } = require('./mapService');
 const { scaleCreature } = require('./creatureLevel');
 const { resolveDensity } = require('./densityTiers');
 
@@ -84,92 +84,135 @@ async function respawnDueCreatures(pool, {
     [limit, worldIds],
   );
 
-  let spawned = 0;
+  // Grouped by world_id, respawn_at order preserved WITHIN each group (the
+  // SELECT above already sorted the whole window that way, and Map iterates
+  // groups in first-insertion order, so this is a stable partition, not a
+  // reorder of the fetched window). Every row the query returned is still
+  // processed exactly once either way, so this does not reopen the
+  // starvation gap `loadedWorldIds` exists to close (see the header comment
+  // above) -- that guarantee comes from the SQL WHERE clause bounding the
+  // window to loaded worlds, not from the order rows are actioned in.
+  //
+  // The grouping exists so the expensive part of relocation -- see the `cfg`
+  // comment below -- happens once per world per sweep pass instead of once
+  // per row (SOMET-350 final review, FIX 2: this loop was measured paying an
+  // O(width*height) BFS + normalization pass, ~3.2ms on a 224x224 world, on
+  // EVERY row that needed relocating, up to `limit` times per sweep).
+  const byWorld = new Map();
   for (const row of due.rows) {
-    try {
-      // Defence in depth, not the primary filter: the query above already
-      // restricts the window to loaded worlds, but a world can be evicted
-      // between that query and this row being actioned.
-      const world = getWorld(row.world_id);
-      if (!world) continue; // unloaded since the query; stays due, retried later
+    if (!byWorld.has(row.world_id)) byWorld.set(row.world_id, []);
+    byWorld.get(row.world_id).push(row);
+  }
 
-      // Full row: placeMapCreatures reads .hp/.defense/.resistances off each
-      // allowed type, and scaleCreature needs hp/defense too. A name-only row
-      // would silently respawn every creature at the 10hp/0-defense fallback.
-      const et = await pool.query(
-        `SELECT id, name, hp, defense, resistances FROM entity_types
-          WHERE name = $1 AND is_creature = true`,
-        [row.type],
-      );
-      if (et.rowCount === 0) {
-        // The catalog no longer has this creature. Retrying forever would pin
-        // a permanently-failing row at the head of every sweep; drop it.
-        await pool.query('DELETE FROM creature_respawns WHERE id = $1', [row.id]);
-        continue;
-      }
-      const t = et.rows[0];
-      const players = getPlayers(row.world_id);
+  let spawned = 0;
+  for (const [worldId, rows] of byWorld) {
+    // Defence in depth, not the primary filter: the query above already
+    // restricts the window to loaded worlds, but a world can be evicted
+    // between that query and these rows being actioned.
+    const world = getWorld(worldId);
+    if (!world) continue; // unloaded since the query; every row here stays due, retried later
 
-      // Prefer the tile it died on. Relocate rather than defer when a player
-      // is standing there: deferring would mean the more someone farms one
-      // spot, the less it gives them -- the opposite of this feature's point.
-      let pos = null;
-      if (isClearOfPlayers(row.x, row.y, players)) {
-        pos = { x: row.x, y: row.y };
-      } else {
-        const seed = Math.floor(Math.random() * 2 ** 31);
-        const candidates = placeMapCreatures(world, FALLBACK_CANDIDATES, [t], seed);
-        // placeMapCreatures is used purely as a legal-tile finder here; its
-        // own level roll is discarded so the respawn keeps the level it died
-        // at rather than re-rolling into a different band.
-        const clear = candidates.find((c) => isClearOfPlayers(c.x, c.y, players));
-        if (!clear) continue; // no legal tile clear of players this pass; retry later
-        pos = { x: clear.x, y: clear.y };
-      }
+    // worldConfig() returns a fresh object every call, and mapService's
+    // SAFE_CTX/DENSITY_FIELD caches are keyed on THAT object's identity (see
+    // mapService.js's own comments on both WeakMaps) -- so building cfg once
+    // here and passing it into every placeMapCreatures call below for this
+    // world lets those caches hit for every row after the first, instead of
+    // rebuilding on every row. Scoped to this one pass over this one world
+    // and discarded when the loop moves on; never attached to `world` or
+    // `worldId`, so unlike a cache keyed on the world itself this raises no
+    // stale-cache question across a world re-roll -- the very next sweep
+    // pass calls worldConfig() again and gets a config as fresh as before
+    // this change.
+    const cfg = worldConfig(world);
 
-      const scaled = scaleCreature(
-        { hp: t.hp || 10, damage: CREATURE_BASE_DAMAGE, defense: Number(t.defense ?? 0) || 0 },
-        row.level,
-      );
-
-      const client = await pool.connect();
-      let creatureId = null;
+    for (const row of rows) {
       try {
-        await client.query('BEGIN');
-        // Gated exactly like commitCreatureDeath's own DELETE: rowCount === 1
-        // means THIS pass claimed the row. Two concurrent sweeps seeing the
-        // same due row must produce exactly one creature, and the loser must
-        // insert nothing.
-        const claim = await client.query('DELETE FROM creature_respawns WHERE id = $1', [row.id]);
-        if (claim.rowCount !== 1) {
-          await client.query('ROLLBACK');
+        // Full row: placeMapCreatures reads .hp/.defense/.resistances off each
+        // allowed type, and scaleCreature needs hp/defense too. A name-only row
+        // would silently respawn every creature at the 10hp/0-defense fallback.
+        const et = await pool.query(
+          `SELECT id, name, hp, defense, resistances FROM entity_types
+            WHERE name = $1 AND is_creature = true`,
+          [row.type],
+        );
+        if (et.rowCount === 0) {
+          // The catalog no longer has this creature. Retrying forever would pin
+          // a permanently-failing row at the head of every sweep; drop it.
+          await pool.query('DELETE FROM creature_respawns WHERE id = $1', [row.id]);
           continue;
         }
-        const ins = await client.query(
-          `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-          [row.world_id, t.name, pos.x, pos.y, scaled.hp, 'S', row.level, scaled.damage, scaled.defense],
-        );
-        await client.query('COMMIT');
-        creatureId = ins.rows[0].id;
-      } catch (err) {
-        // client.release() does NOT roll back -- without this the connection
-        // returns to the pool holding an open transaction.
-        await client.query('ROLLBACK').catch(() => {});
-        throw err;
-      } finally {
-        client.release();
-      }
+        const t = et.rows[0];
+        // Fetched per row, deliberately NOT hoisted alongside cfg above: real
+        // wall-clock time passes between rows in this inner loop (the
+        // entity_types SELECT and the claim/insert transaction below both
+        // await), during which a live world's players keep moving. Reusing
+        // one snapshot for the whole group would relocate later rows in this
+        // world against stale positions -- cfg has no such freshness
+        // requirement (it depends on the map, not on players), which is
+        // exactly why only cfg is hoisted.
+        const players = getPlayers(row.world_id);
 
-      spawned += 1;
-      // Counted above: the DB write committed, so this creature EXISTS
-      // regardless of whether the caller's best-effort cache sync throws.
-      // Awaited so the server's test seam observes the injection.
-      await onSpawn({ worldId: row.world_id, creatureId });
-    } catch (err) {
-      // One bad row must not abort the pass -- every other due row still gets
-      // its turn, and this one stays due for a retry.
-      console.error(`respawnDueCreatures: failed to respawn row ${row.id}:`, err);
+        // Prefer the tile it died on. Relocate rather than defer when a player
+        // is standing there: deferring would mean the more someone farms one
+        // spot, the less it gives them -- the opposite of this feature's point.
+        let pos = null;
+        if (isClearOfPlayers(row.x, row.y, players)) {
+          pos = { x: row.x, y: row.y };
+        } else {
+          const seed = Math.floor(Math.random() * 2 ** 31);
+          const candidates = placeMapCreatures(world, FALLBACK_CANDIDATES, [t], seed, undefined, cfg);
+          // placeMapCreatures is used purely as a legal-tile finder here; its
+          // own level roll is discarded so the respawn keeps the level it died
+          // at rather than re-rolling into a different band.
+          const clear = candidates.find((c) => isClearOfPlayers(c.x, c.y, players));
+          if (!clear) continue; // no legal tile clear of players this pass; retry later
+          pos = { x: clear.x, y: clear.y };
+        }
+
+        const scaled = scaleCreature(
+          { hp: t.hp || 10, damage: CREATURE_BASE_DAMAGE, defense: Number(t.defense ?? 0) || 0 },
+          row.level,
+        );
+
+        const client = await pool.connect();
+        let creatureId = null;
+        try {
+          await client.query('BEGIN');
+          // Gated exactly like commitCreatureDeath's own DELETE: rowCount === 1
+          // means THIS pass claimed the row. Two concurrent sweeps seeing the
+          // same due row must produce exactly one creature, and the loser must
+          // insert nothing.
+          const claim = await client.query('DELETE FROM creature_respawns WHERE id = $1', [row.id]);
+          if (claim.rowCount !== 1) {
+            await client.query('ROLLBACK');
+            continue;
+          }
+          const ins = await client.query(
+            `INSERT INTO world_creatures (world_id, type, x, y, hp, facing, level, damage, defense)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+            [row.world_id, t.name, pos.x, pos.y, scaled.hp, 'S', row.level, scaled.damage, scaled.defense],
+          );
+          await client.query('COMMIT');
+          creatureId = ins.rows[0].id;
+        } catch (err) {
+          // client.release() does NOT roll back -- without this the connection
+          // returns to the pool holding an open transaction.
+          await client.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          client.release();
+        }
+
+        spawned += 1;
+        // Counted above: the DB write committed, so this creature EXISTS
+        // regardless of whether the caller's best-effort cache sync throws.
+        // Awaited so the server's test seam observes the injection.
+        await onSpawn({ worldId: row.world_id, creatureId });
+      } catch (err) {
+        // One bad row must not abort the pass -- every other due row still gets
+        // its turn, and this one stays due for a retry.
+        console.error(`respawnDueCreatures: failed to respawn row ${row.id}:`, err);
+      }
     }
   }
   return spawned;

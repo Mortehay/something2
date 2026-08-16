@@ -163,6 +163,16 @@ function buildDensityField(cfg, safeCtx, deps = {}) {
 
   const weightAt = (gRow, gCol) => {
     const w = raw(gRow, gCol) / mean;
+    // A safe tile's raw weight is 0 (safety === 0 short-circuits above), but
+    // this clamp floors it to WEIGHT_MIN rather than leaving it 0. Harmless
+    // today because creatureTileCandidates refuses safe tiles independently,
+    // so nothing is ever placed there regardless of what this function
+    // returns for them. But this function has no knowledge of that separate
+    // refusal -- a future consumer, e.g. a distribution test that scores
+    // heavy/light tiles across a village-bearing world by weightAt() alone,
+    // would classify every safe tile as "light" instead of "excluded" and
+    // undercount it as a zero-placement light tile, inflating the observed
+    // heavy/light ratio.
     return Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN, w));
   };
 

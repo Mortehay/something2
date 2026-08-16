@@ -247,3 +247,87 @@ test('the sweep does not query at all when no world is loaded', async () => {
   // every 10s tick of an idle authority.
   assert.equal(pool.queries.length, 0);
 });
+
+// --- the per-world grouping (SOMET-350) ---------------------------------
+//
+// respawnDueCreatures partitions the fetched window by world_id so the
+// expensive per-world setup (worldConfig, and through it the SAFE_CTX /
+// DENSITY_FIELD caches placeMapCreatures reads) is paid once per world per
+// sweep instead of once per ROW. That is a real change to the order rows are
+// actioned in, and to how a missing world is handled -- the two tests below
+// pin the properties that must survive it.
+
+const WORLD = { tileTypes: [{ name: 'grass' }], width: 96, height: 96, levelMin: 1, levelMax: 5 };
+
+function spawnablePool(rows) {
+  return fakePool((sql) => {
+    // Specific DELETE branch first -- "DELETE FROM creature_respawns" contains
+    // the generic substring too (see the note on the failing-row test above).
+    if (sql.includes('DELETE FROM creature_respawns')) return { rows: [], rowCount: 1 };
+    if (sql.includes('FROM creature_respawns')) return { rows, rowCount: rows.length };
+    if (sql.includes('FROM entity_types')) return { rows: [WOLF_TYPE], rowCount: 1 };
+    if (sql.includes('INSERT INTO world_creatures')) return { rows: [{ id: 'c-x' }], rowCount: 1 };
+    return null;
+  });
+}
+
+test('rows interleaved across worlds all respawn, and each world is resolved once', async () => {
+  // Deliberately INTERLEAVED (w1, w2, w1) rather than pre-sorted: the grouping
+  // must be what collects w1's two rows, not the order they happened to arrive
+  // in. Every row in the fetched window must still be actioned exactly once --
+  // grouping reorders WITHIN the window, it must never drop from it.
+  const rows = [
+    { ...DUE_ROW, id: 'row-1', world_id: 'w1' },
+    { ...DUE_ROW, id: 'row-2', world_id: 'w2' },
+    { ...DUE_ROW, id: 'row-3', world_id: 'w1' },
+  ];
+  const resolved = [];
+  const pool = spawnablePool(rows);
+
+  const spawned = await respawnDueCreatures(pool, {
+    loadedWorldIds: ['w1', 'w2'],
+    getWorld: (worldId) => { resolved.push(worldId); return WORLD; },
+    getPlayers: () => [],
+  });
+
+  assert.equal(spawned, 3, 'every row in the window must respawn');
+
+  // The point of the refactor: one resolution per WORLD (2), not per ROW (3).
+  // Hand-typed counts, not derived from rows.length -- a test that computes its
+  // expectation from the input passes whether or not the grouping happened.
+  assert.equal(resolved.length, 2, 'getWorld ran per row instead of per world group');
+  assert.deepEqual([...resolved].sort(), ['w1', 'w2']);
+
+  const inserted = pool.queries
+    .filter((q) => q.sql.includes('INSERT INTO world_creatures'))
+    .map((q) => q.params[0]);
+  assert.deepEqual(inserted.filter((w) => w === 'w1').length, 2);
+  assert.deepEqual(inserted.filter((w) => w === 'w2').length, 1);
+});
+
+test('one unloaded world does not take the other worlds down with it', async () => {
+  // The eviction check moved from per-row to per-GROUP, so a null getWorld now
+  // skips a whole world at once. The rows it skips must stay due (no DELETE
+  // claiming them), and -- the regression this guards -- the OTHER world's
+  // rows must still be processed rather than the pass bailing out.
+  const rows = [
+    { ...DUE_ROW, id: 'row-1', world_id: 'gone' },
+    { ...DUE_ROW, id: 'row-2', world_id: 'w2' },
+  ];
+  const pool = spawnablePool(rows);
+
+  const spawned = await respawnDueCreatures(pool, {
+    loadedWorldIds: ['gone', 'w2'],
+    getWorld: (worldId) => (worldId === 'w2' ? WORLD : null),
+    getPlayers: () => [],
+  });
+
+  assert.equal(spawned, 1);
+  const inserted = pool.queries.filter((q) => q.sql.includes('INSERT INTO world_creatures'));
+  assert.equal(inserted.length, 1);
+  assert.equal(inserted[0].params[0], 'w2');
+  // The evicted world's row must be retried on a later sweep, never claimed.
+  const claims = pool.queries.filter((q) => q.sql.includes('DELETE FROM creature_respawns'));
+  assert.equal(claims.length, 1, 'the evicted world\'s row must not be claimed');
+  assert.equal(claims[0].params[0], 'row-2');
+});

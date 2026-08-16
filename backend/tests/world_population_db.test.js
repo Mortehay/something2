@@ -3,7 +3,14 @@ const assert = require('node:assert');
 const { Pool } = require('pg');
 const { populateWorld } = require('../src/services/worldPopulation');
 
-const URL = process.env.DATABASE_URL;
+// TEST_DATABASE_URL, and deliberately NOT a fallback to DATABASE_URL -- the
+// same ruling seed_catalogs_db.test.js and seed_map_db.test.js already apply.
+// This file INSERTs and DELETEs rows in `worlds` and calls populateWorld,
+// which rewrites world_creatures; pointed at a dev DATABASE_URL, a bare
+// `npm test` mutates the shared development database. The cleanup() below
+// deletes its own fixtures by name, but "cleans up after itself" is not the
+// same as "safe to run there" -- populateWorld's writes are not fixtures.
+const URL = process.env.TEST_DATABASE_URL;
 const describeDb = URL ? test : test.skip;
 
 // Fixture worlds are named zzPop* and deleted by name, unconditionally, in a
@@ -329,7 +336,7 @@ describeDb('the dead tier leaves a world genuinely empty', async () => {
 // (254 for horde) before the empty-allowlist early return, leaving the admin
 // UI showing a nonzero count over a genuinely empty map. Density is 'horde'
 // specifically so scatterCount is nonzero -- against the old write-before-
-// checking ordering this assertion would see 98, not 0.
+// checking ordering this assertion would see 254, not 0.
 describeDb('an empty allowlist zeroes creature_count rather than leaving a stale value', async () => {
   const pool = new Pool({ connectionString: URL });
   try {

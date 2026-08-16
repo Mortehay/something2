@@ -490,3 +490,101 @@ test("PUT /api/worlds/:id changing the biome set busts the preview cache too", a
     'a biome-set change must bust the preview cache, not just world_chunks -- ' +
     'otherwise /preview keeps serving pre-change terrain after the game switches to post-change terrain');
 });
+
+// --- biome creature_density (SOMET-350) ---------------------------------
+//
+// The column, the seed data, loadBiomes' SELECT and mapService's
+// normalizeBiomes all shipped with the density field, but BOTH admin routes
+// dropped creature_density from their column lists -- so the one surface an
+// operator can actually reach silently reset every biome it saved to the
+// column default. These pin the plumbing and the cache invalidation.
+
+// Param index of creature_density: [name, terrain, flora, creature, palette,
+// art_style, exclusions, color, DENSITY, (id)]. Hand-counted against the route's
+// own placeholder list, not read back from the code under test.
+const DENSITY_PARAM = 8;
+
+test('POST /api/biomes persists creature_density', async () => {
+  const pool = mockPool([[/INSERT INTO biomes/i, () => ({ rows: [BIOME] })]]);
+  __setPool(pool);
+  const res = await request(app).post('/api/biomes').set(ADMIN_HEADERS).send({
+    name: 'Mire', terrain_tiles: ['swamp'], flora_types: [], creature_types: [],
+    palette: [], art_style: '', exclusions: '', color: '#333333',
+    creature_density: 2.5,
+  });
+  assert.equal(res.status, 201);
+  const insert = pool.calls.find((c) => /INSERT INTO biomes/i.test(c.sql));
+  assert.match(insert.sql, /creature_density/, 'the column never reached the INSERT');
+  assert.equal(insert.params[DENSITY_PARAM], 2.5);
+});
+
+test('POST /api/biomes falls back to 1 rather than writing 0 or NaN', async () => {
+  // 0 would make the biome silently uninhabitable and NaN would poison the
+  // whole normalized field through its mean (see creatureDensityField), so
+  // neither may reach the column. A 400 is deliberately NOT the contract --
+  // art_style/exclusions/color already default rather than reject here.
+  for (const bad of [0, -3, 'not a number', null, undefined]) {
+    const pool = mockPool([[/INSERT INTO biomes/i, () => ({ rows: [BIOME] })]]);
+    __setPool(pool);
+    const res = await request(app).post('/api/biomes').set(ADMIN_HEADERS).send({
+      name: 'Mire', terrain_tiles: ['swamp'], creature_density: bad,
+    });
+    assert.equal(res.status, 201);
+    const insert = pool.calls.find((c) => /INSERT INTO biomes/i.test(c.sql));
+    assert.equal(insert.params[DENSITY_PARAM], 1, `creature_density ${JSON.stringify(bad)} must fall back to 1`);
+  }
+});
+
+test('PUT /api/biomes/:id evicts referencing worlds when only creature_density changes', async () => {
+  // The regression this guards: density feeds creatureDensityField through
+  // worldConfig().biomes[i].creatureDensity, and authority/server.js resolves
+  // loadBiomes() once per session -- so without eviction the edit saves to the
+  // database and changes nothing about placement until the world reloads.
+  const evicted = [];
+  const pool = mockPool([
+    [/SELECT name.*FROM biomes WHERE id/i, () => ({
+      rows: [{
+        name: 'Meadow', terrain_tiles: ['grass'], flora_types: ['bush'],
+        creature_types: ['Slime'], creature_density: 1,
+      }],
+    })],
+    [/UPDATE biomes SET/i, () => ({ rows: [{ ...BIOME, creature_density: 2 }] })],
+    [/FROM worlds WHERE biomes/i, () => ({ rows: [{ id: 'w1', name: 'Entry' }] })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: (id) => { evicted.push(id); return true; }, isWorldLive: () => false });
+  // Everything EXCEPT density is byte-identical to the stored row, so an
+  // eviction here can only have come from the density comparison.
+  const res = await request(app).put('/api/biomes/1').set(ADMIN_HEADERS)
+    .send({ ...BIOME, creature_density: 2 });
+  assert.equal(res.status, 200);
+  const update = pool.calls.find((c) => /UPDATE biomes SET/i.test(c.sql));
+  assert.match(update.sql, /creature_density/, 'the column never reached the UPDATE');
+  assert.equal(update.params[DENSITY_PARAM], 2);
+  assert.deepEqual(evicted, ['w1'], 'a creature_density change must evict every referencing world');
+  assert.ok(!pool.calls.some((c) => /DELETE FROM world_chunks/i.test(c.sql)),
+    'density never reaches world_chunks, so there is no persisted grid to wipe');
+});
+
+test('PUT /api/biomes/:id does NOT evict when creature_density is unchanged', async () => {
+  // The other half: a cosmetic edit must not start evicting worlds just
+  // because density is now compared. 1 vs a body that omits the field
+  // entirely must read as "no change", not as 1-vs-default churn.
+  const evicted = [];
+  const pool = mockPool([
+    [/SELECT name.*FROM biomes WHERE id/i, () => ({
+      rows: [{
+        name: 'Meadow', terrain_tiles: ['grass'], flora_types: ['bush'],
+        creature_types: ['Slime'], creature_density: 1,
+      }],
+    })],
+    [/UPDATE biomes SET/i, () => ({ rows: [BIOME] })],
+    [/FROM worlds WHERE biomes/i, () => ({ rows: [{ id: 'w1', name: 'Entry' }] })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: (id) => { evicted.push(id); return true; }, isWorldLive: () => false });
+  const res = await request(app).put('/api/biomes/1').set(ADMIN_HEADERS)
+    .send({ ...BIOME, color: '#111111' });
+  assert.equal(res.status, 200);
+  assert.deepEqual(evicted, [], 'a cosmetic-only edit must not evict');
+});

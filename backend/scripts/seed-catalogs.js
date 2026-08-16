@@ -65,17 +65,17 @@ async function seedOneTile(db, t) {
 //
 // So: a seed entry supplying a NON-EMPTY list still wins (the original five
 // stay authoritative, and P4's edits will land normally); a seed entry
-// supplying an EMPTY one keeps whatever the row already holds. The other seven
-// columns are populated on every entry, and `biomes` has exactly these eight
+// supplying an EMPTY one keeps whatever the row already holds. The other eight
+// columns are populated on every entry, and `biomes` has exactly these nine
 // columns, so there is no column-omission hazard here of the kind the tile
-// path had.
+// path had -- as long as every column in the table is actually listed below.
 //
 // Split out of seedCatalogs, mirroring seedOneTile, so the preservation rule
 // can be tested against the REAL statement rather than a restatement of it.
 async function seedOneBiome(db, b) {
   await db.query(
-    `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color)
-     VALUES ($1,$2::jsonb,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7,$8)
+    `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color, creature_density)
+     VALUES ($1,$2::jsonb,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7,$8,$9)
      ON CONFLICT (name) DO UPDATE
        SET terrain_tiles = EXCLUDED.terrain_tiles, flora_types = EXCLUDED.flora_types,
            creature_types = CASE
@@ -83,10 +83,10 @@ async function seedOneBiome(db, b) {
              ELSE EXCLUDED.creature_types END,
            palette = EXCLUDED.palette,
            art_style = EXCLUDED.art_style, exclusions = EXCLUDED.exclusions,
-           color = EXCLUDED.color`,
+           color = EXCLUDED.color, creature_density = EXCLUDED.creature_density`,
     [b.name, JSON.stringify(b.terrain_tiles ?? []), JSON.stringify(b.flora_types ?? []),
      JSON.stringify(b.creature_types ?? []), JSON.stringify(b.palette ?? []),
-     b.art_style, b.exclusions, b.color],
+     b.art_style, b.exclusions, b.color, b.creature_density ?? 1],
   );
 }
 

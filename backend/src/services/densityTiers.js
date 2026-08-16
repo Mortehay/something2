@@ -74,8 +74,8 @@ const DEFAULT_DENSITY = 'normal';
 
 // Hard ceiling on how many creatures ONE population pass may place.
 //
-// This is the same 2000 that PUT /api/worlds/:id has capped creature_count at
-// since SOMET-188 / F-008, moved to where it still bites. That cap explained
+// This is the same number PUT /api/worlds/:id caps creature_count at (the cap
+// SOMET-188 / F-008 introduced at 2000), moved to where it still bites. That cap explained
 // itself as bounding what the re-roll route places -- but since SOMET-246 the
 // route resolves its count from `density` and never reads creature_count, so
 // the number it guarded had stopped being an input. Area scaling then made the
