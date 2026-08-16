@@ -7,6 +7,7 @@ const {
   valueNoise,
   makeRng,
   placeEntities,
+  worldConfig,
 } = require('../src/services/mapService');
 
 // Build a rows x cols grid filled with `tile`.
@@ -147,4 +148,32 @@ test('placeEntities clearings carve out empty regions', () => {
   // The immediate center of each clearing must be object-free.
   const set = new Set(placed.map((p) => `${p.row},${p.col}`));
   for (const [cr, cc] of clearings) assert.ok(!set.has(`${cr},${cc}`), 'clearing center is open');
+});
+
+// --- normalizeBiomes / creature_density -----------------------------------
+
+test('normalizeBiomes carries creature_density through as creatureDensity', () => {
+  const cfg = worldConfig({
+    tileTypes: { grass: { walkable: true } },
+    biomes: [{ name: 'swamp', creature_density: 2, creature_types: ['Wolf'] }],
+  });
+  assert.strictEqual(cfg.biomes[0].creatureDensity, 2);
+});
+
+test('normalizeBiomes defaults creature_density to 1 when absent or junk', () => {
+  const cfg = worldConfig({
+    tileTypes: { grass: { walkable: true } },
+    biomes: [
+      { name: 'a' },
+      { name: 'b', creature_density: null },
+      { name: 'c', creature_density: 'heavy' },
+      { name: 'd', creature_density: -3 },
+    ],
+  });
+  assert.strictEqual(cfg.biomes[0].creatureDensity, 1);
+  assert.strictEqual(cfg.biomes[1].creatureDensity, 1);
+  assert.strictEqual(cfg.biomes[2].creatureDensity, 1);
+  // Negative is not a "thin" biome -- a negative weight would invert the
+  // acceptance gate. Rejected to the default, never coerced to 0.
+  assert.strictEqual(cfg.biomes[3].creatureDensity, 1);
 });

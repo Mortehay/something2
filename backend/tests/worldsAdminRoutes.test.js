@@ -414,12 +414,12 @@ test('POST /api/worlds/:id/creatures places creatures and reports the count', as
   __setPool(pool);
   const res = await request(app).post('/api/worlds/w1/creatures').set(...AUTH).send({});
   assert.equal(res.status, 200);
-  assert.ok(res.body.placed === 6 || res.body.placed === 7,
-    `placed must be scatter(3) + one normal-tier pack(3-4), got ${res.body.placed}`);
+  assert.ok(res.body.placed === 13 || res.body.placed === 14,
+    `placed must be scatter(10) + one normal-tier pack(3-4), got ${res.body.placed}`);
   assert.equal(inserted.length, res.body.placed);
   // populateWorld writes creature_count from the SCATTER count only (not
   // scatter+packed) -- see worldPopulation.js's own comment on that split.
-  assert.equal(wroteCreatureCount, 3);
+  assert.equal(wroteCreatureCount, 10);
   assert.equal(res.body.liveWarning, undefined, 'no warning when the world was not live');
 });
 
@@ -474,7 +474,7 @@ test('POST /api/worlds/:id/creatures threads the world\'s declared biomes into p
   __setPool(pool);
   const res = await request(app).post('/api/worlds/w1/creatures').set(...AUTH).send({});
   assert.equal(res.status, 200);
-  assert.ok(res.body.placed === 6 || res.body.placed === 7,
+  assert.ok(res.body.placed === 13 || res.body.placed === 14,
     `placement still succeeds once biomes are threaded in, got ${res.body.placed}`);
   assert.ok(
     pool.calls.some((c) => /FROM biomes/i.test(c.sql) && c.params?.[0]?.includes('Meadow')),
@@ -536,7 +536,7 @@ test('POST /api/worlds/:id/creatures warns when a player is connected so the re-
   assert.equal(res.status, 200, 'the DB write still succeeds — only the live simulation is stale');
   // SOMET-246 Task 7: density-driven count, not the old creature_count
   // literal -- see the first creatures test's comment for the breakdown.
-  assert.ok(res.body.placed === 6 || res.body.placed === 7, `got ${res.body.placed}`);
+  assert.ok(res.body.placed === 13 || res.body.placed === 14, `got ${res.body.placed}`);
   assert.match(res.body.liveWarning, /connected/i,
     'the response must say the change did not reach the live world, not silently claim success');
 });
