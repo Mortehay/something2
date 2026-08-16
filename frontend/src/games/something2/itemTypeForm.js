@@ -5,6 +5,11 @@
 
 // Mirrors backend/src/index.js's ITEM_ELEMENTS / ITEM_SLOTS exactly.
 export const ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
+// SOMET-326. Must stay in step with backend/src/index.js's ATTACK_ORIGINS, the
+// item_types_attack_origin_check CHECK, and authority/attackOrigin.js's
+// ORIGIN_FRACTIONS. Slice B (SOMET-329) replaces all four with a catalog table
+// served to the admin, which is what removes this fourth copy.
+export const ATTACK_ORIGINS = ['feet', 'middle', 'head'];
 
 // Attack VFX binding moments (slice E, SOMET-162), and which weapon kinds can
 // actually produce each one.
@@ -107,6 +112,10 @@ export function emptyForm() {
     name: '',
     category: 'weapon',
     element: '',
+    // SOMET-326. '' is "unset", which the backend stores as NULL and
+    // authority/attackOrigin.js resolves to the kind default (middle) --
+    // i.e. exactly how every weapon rendered before this slice.
+    attack_origin: '',
     stackable: false,
     ...WEAPON_DEFAULTS,
     slot: '',
@@ -123,6 +132,7 @@ export function formFromType(t) {
     name: t.name,
     category: t.category,
     element: t.element || '',
+    attack_origin: t.attack_origin || '',
     kind: t.kind || 'melee',
     damage: t.damage ?? 0,
     cooldown: t.cooldown ?? 0,
@@ -173,6 +183,9 @@ export function validateClient(f, existing = null) {
   if (!f.name.trim()) return 'Name is required';
   if (!keepsReserved && !['weapon', 'armor', 'ammo'].includes(f.category)) return "category must be 'weapon', 'armor' or 'ammo'";
   if (f.element && !ELEMENTS.includes(f.element)) return `element must be one of ${ELEMENTS.join(', ')}`;
+  if (f.attack_origin && !ATTACK_ORIGINS.includes(f.attack_origin)) {
+    return `attack origin must be one of ${ATTACK_ORIGINS.join(', ')}`;
+  }
   if (f.category === 'armor' && f.slot && !SLOTS.includes(f.slot)) return `slot must be one of ${SLOTS.join(', ')}`;
   // Mirrors validateItemType's `value` check (F-003/F-047): a non-negative integer, or unset.
   if (f.value !== '' && f.value != null) {
@@ -293,6 +306,10 @@ export function buildPayload(f, existing = null) {
     return {
       ...base,
       kind: f.kind,
+      // SOMET-326. Not kind-gated: both melee and projectile weapons launch
+      // their visuals from somewhere on the body, and the column carries no
+      // gate either. '' -> null is "unset", which resolves to the kind default.
+      attack_origin: f.attack_origin || null,
       damage: num(f.damage, 0),
       cooldown: num(f.cooldown, 0),
       two_handed: !!f.two_handed,

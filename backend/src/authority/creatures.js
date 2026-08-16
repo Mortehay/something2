@@ -9,6 +9,7 @@ const {
   applyDamageWithEffects, NO_MITIGATION, isProvokedBy, provoke, playerKey, creatureKey,
 } = require('./damage');
 const { resolveEffectName } = require('./vfx.js');
+const { bodyLift } = require('./attackOrigin.js');
 const { applyElementEffect, activeEffectKeys, canAct } = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
 const { shoveAwayFrom } = require('./knockback');
@@ -278,6 +279,12 @@ function stampCreatureAttack(attacks, impacts, c, target, from, to) {
     v: resolveEffectName({ kind: 'creature', vfx: c.vfx }, 'attack'),
     x: from.x, y: from.y,
     nx: nx0 / len, ny: ny0 / len,
+    // SOMET-326: read off THIS creature's own box. A creature is 48px against
+    // a player's 64, so the retired tile constant (32px, half a TILE) sat at
+    // 67% of a creature's height -- its neck -- while sitting at exactly 50%
+    // of a player's. That divergence is the reported bug, and a creature's
+    // own swing is where it was most visible.
+    o: bodyLift(c.height, 'middle'),
     reach: CONTACT_RANGE,
     arc: 1.2,
     hit: true,          // a contact attack only stamps once it has landed
@@ -287,6 +294,9 @@ function stampCreatureAttack(attacks, impacts, c, target, from, to) {
     x: to.x, y: to.y,
     v: resolveEffectName({ kind: 'creature', vfx: c.vfx }, 'impact'),
     el: 'physical',     // contact damage is always physical (see the sites)
+    // The TARGET's mid-body, matching world.js's melee impacts: an impact is
+    // anchored on who was hit, never on who swung.
+    o: bodyLift(target.height, 'middle'),
   });
 }
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
@@ -1792,6 +1802,11 @@ class CreatureSim {
               x: cc.x, y: cc.y,
               nx: (tc.x - cc.x) / d, ny: (tc.y - cc.y) / d,
               damage: dmg,
+              // SOMET-326: the shooter's own mid-body, resolved here while the
+              // creature is still in hand. world.js passes it straight to
+              // ProjectileSim.spawn, which carries it for the shot's whole
+              // flight -- by the time it lands this creature may be dead.
+              originLift: bodyLift(c.height, 'middle'),
               // A `ranged` ability fires physical; only `cast` carries an
               // element and therefore its status rider. The ability's own
               // element wins when it has one (an Apex's physical slam next to

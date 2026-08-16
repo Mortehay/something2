@@ -4,7 +4,7 @@ import { useItemTypes, useCreateItemType, useUpdateItemType, useDeleteItemType, 
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import {
-  ELEMENTS, SLOTS, WEAPON_DEFAULTS, ARMOR_DEFAULTS, AMMO_DEFAULTS,
+  ELEMENTS, ATTACK_ORIGINS, SLOTS, WEAPON_DEFAULTS, ARMOR_DEFAULTS, AMMO_DEFAULTS,
   emptyForm, formFromType, validateClient, buildPayload, VFX_MOMENTS,
   isReservedItemType,
 } from './itemTypeForm.js';
@@ -637,6 +637,20 @@ function ItemTypesAdmin() {
                     <select value={formData.kind} onChange={e => handleKindChange(e.target.value)}>
                       <option value="melee">melee</option>
                       <option value="projectile">projectile</option>
+                    </select>
+                  </FormGroup>
+
+                  {/* SOMET-326: where this weapon's attack visuals launch from
+                      on the wielder's body. Purely visual -- it never moves
+                      where a swing or a shot actually connects. */}
+                  <FormGroup>
+                    <label>Attack origin</label>
+                    <select
+                      value={formData.attack_origin}
+                      onChange={e => setFormData({ ...formData, attack_origin: e.target.value })}
+                    >
+                      <option value="">default (middle)</option>
+                      {ATTACK_ORIGINS.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                   </FormGroup>
 

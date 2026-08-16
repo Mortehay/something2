@@ -4,6 +4,7 @@
 // only by weapon data.
 
 const { resolveEffectName, blockedImpact } = require('./vfx.js');
+const { bodyLift } = require('./attackOrigin.js');
 const {
   applyDamageWithEffects, NO_MITIGATION, playerKey, creatureKey,
 } = require('./damage');
@@ -78,7 +79,10 @@ function recordBlock(p, c, x, y, nx, ny, blocks) {
   const key = `b:${c.id}`;
   if (p.hitIds.has(key)) return;
   p.hitIds.add(key);
-  blocks.push(blockedImpact(c.id, x, y, nx, ny));
+  // SOMET-326: anchored on the GUARD that refused the shot, not on the
+  // projectile's own launch height -- a block is a fact about the target. The
+  // shooter may be long gone, but `c` is in hand right here.
+  blocks.push(blockedImpact(c.id, x, y, nx, ny, bodyLift(c.height, 'middle')));
 }
 
 function projectileHitsPlayer(p, player) {
@@ -130,6 +134,7 @@ class ProjectileSim {
   // tests, stub weapons) are unaffected.
   spawn({
     ownerId, ownerKind = 'player', ownerFaction = null, x, y, nx, ny, weapon, damage,
+    originLift,
   }) {
     const id = String(++this._id);
     this.projectiles.push({
@@ -163,6 +168,15 @@ class ProjectileSim {
       // (every player weapon today) -- a creature shot's ability.knockback
       // is the only live non-zero source until item_types gains its own.
       knockback: Number.isFinite(weapon.knockback) ? weapon.knockback : 0,
+      // SOMET-326: the vertical render anchor, in screen pixels up from the
+      // SHOOTER's feet, resolved at launch and carried for the whole flight
+      // (and inherited by this shot's detonation). Snapshotted for the same
+      // reason `damage` and `vfxTrail` above are, plus one specific to this
+      // field: by the time the shot lands the shooter can be dead or out of
+      // view, so there would be no body left to measure. A non-finite value
+      // stays null, which the client reads as "use the legacy tile lift" --
+      // today's appearance, never an invisible or ground-level shot.
+      originLift: Number.isFinite(originLift) ? originLift : null,
       hitIds: new Set(), // 'c:<id>' / 'p:<id>' already hit by this projectile
       // Magic Stones (SOMET-245) Task 7: the socketed spell stone's own
       // player_items.id, read straight off `weapon` (items.js's
@@ -267,7 +281,10 @@ class ProjectileSim {
       if (pl.hp > 0 && p.knockback > 0) shoveAwayFrom(map, bx, by, pl, p.knockback);
       if (p.stoneItemId != null) stoneHits.push({ stoneItemId: p.stoneItemId });
     }
-    return { x: bx, y: by, radius: r, element: p.element };
+    // SOMET-326: the blast INHERITS its projectile's launch anchor, so a
+    // detonation goes off where the shot was actually flying rather than on
+    // the ground under it.
+    return { x: bx, y: by, radius: r, element: p.element, o: p.originLift };
   }
 
   // Advance every projectile one tick; resolve terrain, creature, and player
@@ -432,6 +449,11 @@ class ProjectileSim {
       // has no projectile-spawn message to hang it off, and a shot that flies
       // into a newly-streamed neighbourhood must still draw its trail.
       v: p.vfxTrail || null,
+      // SOMET-326. On every snapshot for exactly the reason `v` above is: a
+      // shot that flies into a newly-streamed neighbourhood has no spawn
+      // message to have learned its anchor from, and would otherwise draw at
+      // the client's legacy fallback height for the rest of its flight.
+      o: p.originLift,
     }));
   }
 

@@ -882,6 +882,10 @@ app.delete('/api/entity-types/:id', adminGuard, async (req, res) => {
 
 // Item Types CRUD + admin item grant
 const ITEM_ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
+// SOMET-326. Must stay in step with the item_types_attack_origin_check CHECK
+// constraint and with authority/attackOrigin.js's ORIGIN_FRACTIONS; slice B
+// (SOMET-329) replaces all three with the `attack_origins` catalog table.
+const ATTACK_ORIGINS = ['feet', 'middle', 'head'];
 const ITEM_SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
 
 // SOMET-278: `gold` is not an ordinary catalog row -- it is the game's
@@ -952,6 +956,11 @@ function validateItemType(b, existing = null) {
   }
   if (b.kind != null && !['melee', 'projectile'].includes(b.kind)) {
     return "kind must be 'melee' or 'projectile' (or unset)";
+  }
+  // Unset is legal and meaningful: it selects the kind default (middle) rather
+  // than being a missing value -- see authority/attackOrigin.js.
+  if (b.attack_origin != null && !ATTACK_ORIGINS.includes(b.attack_origin)) {
+    return `attack_origin must be one of ${ATTACK_ORIGINS.join(', ')} (or unset)`;
   }
   // A reserved (currency) row has none of these shapes -- it is neither a
   // weapon nor ammo, and demanding `armor needs slot and defense` of it (the
@@ -1028,14 +1037,15 @@ app.post('/api/item-types', adminGuard, async (req, res) => {
       `INSERT INTO item_types
         (name, category, slot, two_handed, kind, damage, cooldown, reach, arc_width,
          range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element, defense, resistances, icon,
-         stackable, ammo_type_id, aoe_radius, value, knockback)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING *`,
+         stackable, ammo_type_id, aoe_radius, value, knockback, attack_origin)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
        b.mana_cost ?? 0, b.stamina_cost ?? 0, b.element ?? null, b.defense ?? null,
        JSON.stringify(b.resistances ?? {}), b.icon ?? null,
-       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0, b.knockback ?? 0],
+       b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0, b.knockback ?? 0,
+       b.attack_origin ?? null],
     );
     const row = result.rows[0];
     // SOMET-186 / F-006: without this, a weapon/armor type created after a
@@ -1086,8 +1096,15 @@ app.put('/api/item-types/:id', adminGuard, async (req, res) => {
         -- client, or a script) leaves the existing bindings alone instead of
         -- silently unbinding every moment on an unrelated edit.
         vfx=COALESCE($25, vfx),
+        -- SOMET-326. NOT COALESCEd, unlike vfx above: NULL is a real authored
+        -- value here ("use the kind default"), so clearing the dropdown has to
+        -- actually clear the column. vfx's COALESCE protects a jsonb map that
+        -- an older client would omit entirely; this column has no such
+        -- ambiguity to protect -- an older client omitting it writes NULL,
+        -- which is the same default that client already renders.
+        attack_origin=$26,
         updated_at=now()
-       WHERE id=$26 RETURNING *`,
+       WHERE id=$27 RETURNING *`,
       [b.name, b.category, b.slot ?? null, b.two_handed ?? false, b.kind ?? null,
        b.damage ?? 0, b.cooldown ?? 0, b.reach ?? null, b.arc_width ?? null,
        b.range ?? null, b.projectile_speed ?? null, b.projectile_radius ?? null, b.pierce ?? null,
@@ -1095,6 +1112,7 @@ app.put('/api/item-types/:id', adminGuard, async (req, res) => {
        JSON.stringify(b.resistances ?? {}), b.icon ?? null,
        b.stackable ?? false, b.ammo_type_id ?? null, b.aoe_radius ?? null, b.value ?? 0, b.knockback ?? 0,
        b.vfx === undefined ? null : JSON.stringify(b.vfx),
+       b.attack_origin ?? null,
        req.params.id],
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Item type not found' });
