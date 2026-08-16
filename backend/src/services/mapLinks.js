@@ -87,4 +87,75 @@ async function clearPortalLink(pool, fromId, fromX, fromY) {
   }
 }
 
-module.exports = { fetchLinks, setLink, clearLink, setPortalLink, clearPortalLink };
+// SOMET-355. Converge a spec's worlds onto exactly the compass doorways the
+// spec declares, and REPORT every row it had to remove.
+//
+// This exists because the specs were not actually the source of truth they were
+// treated as. Ten live rows (five undirected edges) across the three authored
+// maps had been drawn by hand through the admin map-link graph tab
+// (PUT /api/worlds/:id/links) and declared nowhere, and `make reseed-map` --
+// which rebuilds from the specs -- would have silently dropped them, changing
+// the shape of the graph players navigate with nothing warning. The same
+// argument pruneWaypoints makes applies verbatim: the runtime reads the TABLE,
+// not the spec, so an undeclared doorway is a live route regardless of what any
+// spec says. Converging it is the only thing that makes "re-apply the spec" a
+// safe operation instead of a destructive one.
+//
+// PORTAL rows are untouched. A portal is declared per source TILE, not per
+// edge, and the two are pruned by different keys -- portals converge through
+// setPortalLink/clearPortalLink and the guard pass that reads
+// blocks_portal_id. Deleting a portal here would also orphan those guards.
+//
+// Two DELETEs, not one, because a compass link is two rows and a spec only owns
+// one end of a cross-spec pair:
+//   1. OUTBOUND -- a row leaving one of this spec's worlds that the spec does
+//      not declare. This is the ordinary case.
+//   2. INBOUND ORPHAN -- a row from a world this spec does NOT own, pointing at
+//      one it does. Its mirror was just deleted by (1), so leaving it behind
+//      would strand a one-way doorway: a player walks in and cannot walk back.
+//      Two such half-links already existed live (`Sunscar Flats -S-> Blackfen
+//      Sinks`, `Sealed Mausoleum -N-> Vale Crossing`) because the mirror slot
+//      was taken -- map_links_compass_unique is UNIQUE(from_world_id, edge), so
+//      a second link into an occupied edge silently keeps only one direction.
+//
+// The consequence is deliberate and is the standing limitation migration
+// 1714440164000 flagged: a compass link between two worlds in DIFFERENT specs
+// cannot survive, because neither spec can declare it (a spec's grid is
+// self-contained, and validateMapSpec checks every link against that grid).
+// Worlds that must connect belong in one spec -- which is why hub-vale,
+// spine-descent and loop-catacombs were merged into vale-region.
+//
+// `keepSlots` are `${worldId}:${edge}` strings for BOTH directions of every
+// declared link; setLink writes the mirror itself, so pruning has to expect it.
+async function pruneCompassLinks(client, worldIds, keepSlots) {
+  const removed = [];
+  const outbound = await client.query(
+    `DELETE FROM map_links ml
+      USING worlds wf, worlds wt
+      WHERE ml.from_world_id = wf.id AND ml.to_world_id = wt.id
+        AND ml.edge <> 'PORTAL'
+        AND ml.from_world_id = ANY($1::uuid[])
+        AND (ml.from_world_id::text || ':' || ml.edge) <> ALL($2::text[])
+      RETURNING wf.name AS from_name, ml.edge, wt.name AS to_name`,
+    [worldIds, keepSlots],
+  );
+  removed.push(...outbound.rows.map((r) => ({ ...r, reason: 'not declared by this spec' })));
+
+  const inbound = await client.query(
+    `DELETE FROM map_links ml
+      USING worlds wf, worlds wt
+      WHERE ml.from_world_id = wf.id AND ml.to_world_id = wt.id
+        AND ml.edge <> 'PORTAL'
+        AND ml.to_world_id = ANY($1::uuid[])
+        AND ml.from_world_id <> ALL($1::uuid[])
+      RETURNING wf.name AS from_name, ml.edge, wt.name AS to_name`,
+    [worldIds],
+  );
+  removed.push(...inbound.rows.map((r) => ({ ...r, reason: 'one-way link in from a world this spec does not own' })));
+
+  return removed;
+}
+
+module.exports = {
+  fetchLinks, setLink, clearLink, setPortalLink, clearPortalLink, pruneCompassLinks,
+};

@@ -23,7 +23,10 @@ const fs = require('fs');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const { validateMapSpec, villagesOf } = require('../seeds/mapSpec.js');
-const { fetchLinks, setLink, setPortalLink } = require('../src/services/mapLinks.js');
+const {
+  fetchLinks, setLink, setPortalLink, pruneCompassLinks,
+} = require('../src/services/mapLinks.js');
+const { oppositeEdge } = require('../src/services/mapService.js');
 const {
   createVillage, fetchVillages, repositionVillage, rederiveVillageGuards,
 } = require('../src/services/villages.js');
@@ -170,6 +173,11 @@ async function applyMapSpec(pool, spec) {
     // was actually written, the same way `villages` below already does.
     let worldsWritten = 0;
     let linksWritten = 0;
+    // SOMET-355. Filled by the prune pass below; reported (not just done) for
+    // the same reason waypointsRemoved is -- a removed doorway changes the
+    // shape of the graph players navigate, so a re-seed that drops one must
+    // say which one, by name.
+    let linksRemoved = [];
     let portalGuardsWritten = 0;
     let creaturesWritten = 0;
     let vaultChestsWritten = 0;
@@ -261,6 +269,22 @@ async function applyMapSpec(pool, spec) {
       }
       linksWritten += 1;
     }
+
+    // SOMET-355. Converge the compass topology onto the spec, AFTER the writes
+    // above so a link this spec both declares and moves is upserted (not
+    // deleted and re-created, which would reset its created_at and lose the
+    // only forensic record of how a row got there).
+    //
+    // Both directions of every declared link go into keepSlots: setLink writes
+    // the mirror itself, so a prune that only knew the forward rows would
+    // delete every mirror it had just written.
+    const keepSlots = [];
+    for (const l of spec.links) {
+      if (l.kind === 'portal') continue;
+      keepSlots.push(`${idByKey.get(l.from)}:${l.edge}`);
+      keepSlots.push(`${idByKey.get(l.to)}:${oppositeEdge(l.edge)}`);
+    }
+    linksRemoved = await pruneCompassLinks(client, [...idByKey.values()], keepSlots);
 
     // Guard packs are a separate pass (after every portal link exists) and
     // are call-site-guarded the same way village guards are just below:
@@ -708,6 +732,11 @@ async function applyMapSpec(pool, spec) {
       // Reported, not just done: a prune cascades character_waypoints, so a
       // re-seed that quietly un-lights a waypoint for every player must say so.
       waypointsRemoved: waypointsRemoved.length,
+      // SOMET-355. The FULL rows, not a count, unlike waypointsRemoved above:
+      // "3 doorways removed" is not actionable, and the whole point of this
+      // field is that an operator can see the graph change before it surprises
+      // a player. The CLI prints every one of them as a warning.
+      linksRemoved,
       penCreatures,
     };
   } catch (err) {
@@ -737,6 +766,23 @@ if (require.main === module) {
         + `${n.portalGuards} portal guards, ${n.creatures} creatures, ${n.vaultChests} vault chests, `
         + `${n.waypoints} waypoints (${n.waypointsRemoved} removed), `
         + `${n.penCreatures} pen creatures`);
+      // SOMET-355. LOUD, per row, and above the restart note rather than buried
+      // in the summary line: the ticket's whole finding was that a re-seed
+      // dropped ten live doorways with nothing warning. A count in the tally
+      // above would have been just as silent -- an operator has to be able to
+      // read WHICH connection the players lost.
+      if (n.linksRemoved.length) {
+        console.warn(
+          `\nWARNING: removed ${n.linksRemoved.length} live doorway row(s) that `
+          + `"${name}" does not declare. The world graph players navigate has CHANGED:`);
+        for (const l of n.linksRemoved) {
+          console.warn(`  - ${l.from_name} --${l.edge}--> ${l.to_name}   (${l.reason})`);
+        }
+        console.warn(
+          'If any of these were intended, declare them in the spec and re-apply. A compass\n'
+          + 'link between worlds in two DIFFERENT specs cannot be declared -- put those\n'
+          + 'worlds in one spec instead.\n');
+      }
       // See this file's header: only the world_chunks cache is reachable from
       // here. Printed unconditionally rather than probed -- this process has no
       // way to tell whether a backend is up, and a note that only appears

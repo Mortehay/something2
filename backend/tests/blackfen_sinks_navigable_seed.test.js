@@ -70,11 +70,32 @@ const TILE_TYPES = Object.fromEntries(
   DEFAULT_TILE_TYPES.map((t) => [t.name, { walkable: t.walkable }]),
 );
 const BIOMES_BY_NAME = new Map(STARTER_BIOMES.map((b) => [b.name, b]));
-// Blackfen Sinks' real live doorways (map_links), NOT hub-vale.map.json's
-// declared topology -- see 1714440164000's commit message for why they
-// differ (Blackfen Sinks N -> Sunscar Flats, E -> Rimehollow; the spec only
-// ever declared S -> mire/hub).
-const LIVE_DOORWAYS = ['N', 'E'];
+const VALE_REGION_SPEC = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '../seeds/maps/vale-region.map.json'), 'utf8'));
+const MIRE_SPEC = VALE_REGION_SPEC.worlds.find((w) => w.key === 'vale_mire');
+assert.ok(MIRE_SPEC, "vale-region.map.json has no 'vale_mire' world -- update this test's assumptions");
+
+// SOMET-355. This used to read `['N', 'E']` -- Blackfen Sinks' real live
+// map_links, which DIFFERED from the declared topology because both of those
+// doorways had been drawn by hand through the admin graph tab and no spec
+// declared them. That gap is closed: applyMapSpec now prunes any live compass
+// link its spec does not declare, so "live" and "declared" can no longer
+// disagree, and the hand-drawn `E -> Rimehollow` is gone.
+//
+// DERIVED from the spec rather than restated as a literal, which is the whole
+// point: a hardcoded edge list is exactly how this file came to assert
+// navigability against a doorway set the world did not have. mire's declared
+// doorways are now N (mirror of `vale_hub S -> vale_mire`) and S (the new
+// `vale_mire S -> cata_crypt` connector into the catacombs).
+const MIRROR = { N: 'S', S: 'N', E: 'W', W: 'E' };
+const LIVE_DOORWAYS = [...new Set(VALE_REGION_SPEC.links.flatMap((l) => {
+  if (l.kind === 'portal') return [];
+  if (l.from === 'vale_mire') return [l.edge];
+  if (l.to === 'vale_mire') return [MIRROR[l.edge]];
+  return [];
+}))].sort();
+assert.ok(LIVE_DOORWAYS.length > 0,
+  'vale_mire declares no doorways -- this test would check nothing');
 
 // mire's real current width/height/seed, read straight from the spec that
 // actually seeds it (hub-vale.map.json) instead of a literal copied into
@@ -83,10 +104,6 @@ const LIVE_DOORWAYS = ['N', 'E'];
 // migration's NEW_SEED=2011 is unrelated to that pick, see below). A
 // hardcoded 64 here kept this offline leg green while asserting a fact about
 // a size the world no longer has (SOMET-301 final review, finding 1).
-const HUB_VALE_SPEC = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '../seeds/maps/hub-vale.map.json'), 'utf8'));
-const MIRE_SPEC = HUB_VALE_SPEC.worlds.find((w) => w.key === 'mire');
-assert.ok(MIRE_SPEC, "hub-vale.map.json has no 'mire' world -- update this test's assumptions");
 
 function checkSeed(seed, width, height) {
   const w = {

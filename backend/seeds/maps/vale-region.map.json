@@ -1,0 +1,834 @@
+{
+  "name": "vale-region",
+  "topology": "region",
+  "worlds": [
+    {
+      "key": "vale_hub",
+      "name": "Vale Crossing",
+      "allows_fast_travel": true,
+      "grid": [
+        0,
+        0
+      ],
+      "seed": 2001,
+      "width": 128,
+      "height": 128,
+      "chunk_size": 32,
+      "biomes": [
+        "Meadow",
+        "Highlands"
+      ],
+      "biome_cell": 32,
+      "allowed_creature_types": [
+        "Slime"
+      ],
+      "is_entry": true,
+      "entry_spawn": {
+        "x": 4650,
+        "y": 4550
+      },
+      "village": {
+        "key": "vale-crossing",
+        "min_row": 44,
+        "min_col": 44,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "E",
+        "spawn_x": 4650,
+        "spawn_y": 4550
+      }
+    },
+    {
+      "key": "vale_forest",
+      "name": "Thornbriar Reach",
+      "allows_fast_travel": true,
+      "grid": [
+        1,
+        0
+      ],
+      "seed": 2002,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Deep Forest",
+        "Verdant Jungle"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Bat",
+        "Skeleton"
+      ],
+      "is_entry": false,
+      "village": {
+        "key": "thornbriar",
+        "min_row": 41,
+        "min_col": 44,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "S",
+        "spawn_x": 4550,
+        "spawn_y": 4250
+      },
+      "safe_road_radius": 2,
+      "roads": [
+        [
+          [
+            48,
+            1
+          ],
+          [
+            48,
+            94
+          ]
+        ],
+        [
+          [
+            45,
+            47
+          ],
+          [
+            48,
+            47
+          ]
+        ]
+      ],
+      "pens": [
+        {
+          "min_row": 52,
+          "min_col": 30,
+          "width": 6,
+          "height": 5,
+          "creature_type": "Woodland Swarm",
+          "count": 5,
+          "level": 1
+        }
+      ],
+      "waypoints": [
+        {
+          "x": 4650,
+          "y": 4250,
+          "name": "Thornbriar Green"
+        }
+      ]
+    },
+    {
+      "key": "vale_dunes",
+      "name": "Sunscar Flats",
+      "allows_fast_travel": true,
+      "grid": [
+        -1,
+        0
+      ],
+      "seed": 2003,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Arid Dunes",
+        "Ashfields"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Skeleton"
+      ],
+      "is_entry": false
+    },
+    {
+      "key": "vale_frozen",
+      "name": "Rimehollow",
+      "allows_fast_travel": true,
+      "grid": [
+        0,
+        -1
+      ],
+      "seed": 2004,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Frozen Waste",
+        "Sunken Ruins"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Bat",
+        "Skeleton"
+      ],
+      "is_entry": false
+    },
+    {
+      "key": "vale_mire",
+      "name": "Blackfen Sinks",
+      "allows_fast_travel": true,
+      "grid": [
+        0,
+        1
+      ],
+      "seed": 2006,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Storm Coast",
+        "Mire"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Slime",
+        "Bat"
+      ],
+      "is_entry": false
+    },
+    {
+      "key": "spine_entry",
+      "name": "Old Trailhead",
+      "allows_fast_travel": true,
+      "grid": [
+        2,
+        0
+      ],
+      "seed": 1001,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Meadow"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Slime"
+      ],
+      "is_entry": false,
+      "entry_spawn": {
+        "x": 4750,
+        "y": 4850
+      },
+      "village": {
+        "key": "trailhead",
+        "min_row": 47,
+        "min_col": 46,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "S",
+        "spawn_x": 4750,
+        "spawn_y": 4850
+      },
+      "safe_road_radius": 2,
+      "roads": [
+        [
+          [
+            48,
+            1
+          ],
+          [
+            48,
+            43
+          ],
+          [
+            53,
+            43
+          ],
+          [
+            53,
+            55
+          ],
+          [
+            48,
+            55
+          ],
+          [
+            48,
+            94
+          ]
+        ],
+        [
+          [
+            51,
+            49
+          ],
+          [
+            53,
+            49
+          ]
+        ]
+      ],
+      "pens": [
+        {
+          "min_row": 28,
+          "min_col": 49,
+          "width": 6,
+          "height": 5,
+          "creature_type": "Beast Swarm",
+          "count": 5,
+          "level": 1
+        },
+        {
+          "min_row": 52,
+          "min_col": 31,
+          "width": 6,
+          "height": 5,
+          "creature_type": "Woodland Swarm",
+          "count": 5,
+          "level": 1
+        }
+      ],
+      "level_band": [
+        1,
+        2
+      ],
+      "waypoints": [
+        {
+          "x": 4850,
+          "y": 4850,
+          "name": "Old Trailhead Commons"
+        }
+      ]
+    },
+    {
+      "key": "spine_pass",
+      "name": "Windwatch Pass",
+      "allows_fast_travel": true,
+      "grid": [
+        3,
+        0
+      ],
+      "seed": 1002,
+      "width": 128,
+      "height": 128,
+      "chunk_size": 32,
+      "biomes": [
+        "Meadow",
+        "Highlands"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Slime"
+      ],
+      "is_entry": false,
+      "village": {
+        "key": "windwatch",
+        "min_row": 56,
+        "min_col": 70,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "S",
+        "spawn_x": 7150,
+        "spawn_y": 5750
+      },
+      "safe_road_radius": 2,
+      "roads": [
+        [
+          [
+            64,
+            1
+          ],
+          [
+            64,
+            126
+          ]
+        ],
+        [
+          [
+            1,
+            64
+          ],
+          [
+            126,
+            64
+          ]
+        ],
+        [
+          [
+            60,
+            73
+          ],
+          [
+            64,
+            73
+          ]
+        ]
+      ],
+      "pens": [
+        {
+          "min_row": 42,
+          "min_col": 68,
+          "width": 6,
+          "height": 5,
+          "creature_type": "Beast Swarm",
+          "count": 5,
+          "level": 2
+        }
+      ],
+      "level_band": [
+        2,
+        4
+      ],
+      "waypoints": [
+        {
+          "x": 7250,
+          "y": 5750,
+          "name": "Windwatch Waystone"
+        }
+      ]
+    },
+    {
+      "key": "spine_cache",
+      "name": "Hollow Cache",
+      "allows_fast_travel": true,
+      "grid": [
+        3,
+        -1
+      ],
+      "seed": 1003,
+      "width": 128,
+      "height": 128,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        3,
+        5
+      ]
+    },
+    {
+      "key": "spine_elite",
+      "name": "Ashfang Den",
+      "allows_fast_travel": true,
+      "grid": [
+        3,
+        1
+      ],
+      "seed": 1004,
+      "width": 160,
+      "height": 160,
+      "chunk_size": 32,
+      "biomes": [
+        "Emberdepths"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Ember Swarm",
+        "Ember Skirmisher",
+        "Ember Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        4,
+        6
+      ]
+    },
+    {
+      "key": "spine_gorge",
+      "name": "Shrikewind Gorge",
+      "allows_fast_travel": true,
+      "grid": [
+        4,
+        0
+      ],
+      "seed": 1005,
+      "width": 160,
+      "height": 160,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Crystal Hollows"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line",
+        "Crystal Swarm",
+        "Crystal Skirmisher",
+        "Crystal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        4,
+        6
+      ]
+    },
+    {
+      "key": "spine_shrine",
+      "name": "Frostbound Shrine",
+      "allows_fast_travel": true,
+      "grid": [
+        4,
+        1
+      ],
+      "seed": 1006,
+      "width": 192,
+      "height": 192,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        6,
+        9
+      ]
+    },
+    {
+      "key": "spine_deep",
+      "name": "The Deep Cut",
+      "allows_fast_travel": true,
+      "grid": [
+        5,
+        0
+      ],
+      "seed": 1007,
+      "width": 192,
+      "height": 192,
+      "chunk_size": 32,
+      "biomes": [
+        "Umbral Warren",
+        "Cavern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Umbral Swarm",
+        "Umbral Skirmisher",
+        "Umbral Line",
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        6,
+        9
+      ]
+    },
+    {
+      "key": "spine_end",
+      "name": "Glacier's End",
+      "allows_fast_travel": true,
+      "grid": [
+        6,
+        0
+      ],
+      "seed": 1008,
+      "width": 224,
+      "height": 224,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault",
+        "Abyssal Rift"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line",
+        "Void Swarm",
+        "Void Skirmisher",
+        "Void Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        9,
+        12
+      ]
+    },
+    {
+      "key": "cata_entry",
+      "name": "Catacomb Threshold",
+      "allows_fast_travel": true,
+      "grid": [
+        1,
+        2
+      ],
+      "seed": 3001,
+      "width": 128,
+      "height": 128,
+      "chunk_size": 32,
+      "biomes": [
+        "Catacombs"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Undead Swarm",
+        "Undead Skirmisher",
+        "Undead Line"
+      ],
+      "is_entry": false,
+      "entry_spawn": {
+        "x": 6450,
+        "y": 6450
+      }
+    },
+    {
+      "key": "cata_crypt",
+      "name": "Sealed Mausoleum",
+      "allows_fast_travel": true,
+      "grid": [
+        0,
+        2
+      ],
+      "seed": 3002,
+      "width": 128,
+      "height": 128,
+      "chunk_size": 32,
+      "biomes": [
+        "Catacombs",
+        "Ossuary"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Undead Swarm",
+        "Undead Skirmisher",
+        "Undead Line",
+        "Bonelord Swarm",
+        "Bonelord Skirmisher",
+        "Bonelord Line"
+      ],
+      "is_entry": false
+    },
+    {
+      "key": "cata_eastwing",
+      "name": "Sunken Eastwing",
+      "allows_fast_travel": true,
+      "grid": [
+        2,
+        2
+      ],
+      "seed": 3008,
+      "width": 160,
+      "height": 160,
+      "chunk_size": 32,
+      "biomes": [
+        "Sunken Cistern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Drowned Swarm",
+        "Drowned Skirmisher",
+        "Drowned Line"
+      ],
+      "is_entry": false
+    },
+    {
+      "key": "cata_southwing",
+      "name": "Drowned Southwing",
+      "allows_fast_travel": true,
+      "grid": [
+        1,
+        3
+      ],
+      "seed": 3004,
+      "width": 160,
+      "height": 160,
+      "chunk_size": 32,
+      "biomes": [
+        "Blightworks",
+        "Sunken Cistern"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Blight Swarm",
+        "Blight Skirmisher",
+        "Blight Line",
+        "Drowned Swarm",
+        "Drowned Skirmisher",
+        "Drowned Line"
+      ],
+      "is_entry": false
+    },
+    {
+      "key": "cata_farhall",
+      "name": "Farrow Hall",
+      "allows_fast_travel": true,
+      "grid": [
+        3,
+        2
+      ],
+      "seed": 3005,
+      "width": 192,
+      "height": 192,
+      "chunk_size": 32,
+      "biomes": [
+        "Hive Warrens"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Hive Swarm",
+        "Hive Skirmisher",
+        "Hive Line"
+      ],
+      "is_entry": false
+    },
+    {
+      "key": "cata_deepvault",
+      "name": "Deepvault Row",
+      "allows_fast_travel": true,
+      "grid": [
+        2,
+        3
+      ],
+      "seed": 3009,
+      "width": 192,
+      "height": 192,
+      "chunk_size": 32,
+      "biomes": [
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Construct Swarm",
+        "Construct Skirmisher",
+        "Construct Line"
+      ],
+      "is_entry": false
+    },
+    {
+      "key": "cata_heart",
+      "name": "Frozen Ossuary Heart",
+      "allows_fast_travel": true,
+      "grid": [
+        3,
+        3
+      ],
+      "seed": 3007,
+      "width": 224,
+      "height": 224,
+      "chunk_size": 32,
+      "biomes": [
+        "Ossuary",
+        "Frostvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Bonelord Swarm",
+        "Bonelord Skirmisher",
+        "Bonelord Line",
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line"
+      ],
+      "is_entry": false
+    }
+  ],
+  "links": [
+    {
+      "from": "vale_hub",
+      "edge": "E",
+      "to": "vale_forest"
+    },
+    {
+      "from": "vale_hub",
+      "edge": "W",
+      "to": "vale_dunes"
+    },
+    {
+      "from": "vale_hub",
+      "edge": "N",
+      "to": "vale_frozen"
+    },
+    {
+      "from": "vale_hub",
+      "edge": "S",
+      "to": "vale_mire"
+    },
+    {
+      "from": "spine_entry",
+      "edge": "E",
+      "to": "spine_pass"
+    },
+    {
+      "from": "spine_pass",
+      "edge": "N",
+      "to": "spine_cache"
+    },
+    {
+      "from": "spine_pass",
+      "edge": "S",
+      "to": "spine_elite"
+    },
+    {
+      "from": "spine_pass",
+      "edge": "E",
+      "to": "spine_gorge"
+    },
+    {
+      "from": "spine_gorge",
+      "edge": "S",
+      "to": "spine_shrine"
+    },
+    {
+      "from": "spine_gorge",
+      "edge": "E",
+      "to": "spine_deep"
+    },
+    {
+      "from": "spine_deep",
+      "edge": "E",
+      "to": "spine_end"
+    },
+    {
+      "from": "cata_entry",
+      "edge": "E",
+      "to": "cata_eastwing"
+    },
+    {
+      "from": "cata_entry",
+      "edge": "W",
+      "to": "cata_crypt"
+    },
+    {
+      "from": "cata_eastwing",
+      "edge": "E",
+      "to": "cata_farhall"
+    },
+    {
+      "from": "cata_farhall",
+      "edge": "S",
+      "to": "cata_heart"
+    },
+    {
+      "from": "cata_heart",
+      "edge": "W",
+      "to": "cata_deepvault"
+    },
+    {
+      "from": "cata_deepvault",
+      "edge": "W",
+      "to": "cata_southwing"
+    },
+    {
+      "from": "cata_southwing",
+      "edge": "N",
+      "to": "cata_entry"
+    },
+    {
+      "from": "vale_forest",
+      "edge": "E",
+      "to": "spine_entry"
+    },
+    {
+      "from": "vale_mire",
+      "edge": "S",
+      "to": "cata_crypt"
+    },
+    {
+      "from": "cata_farhall",
+      "edge": "N",
+      "to": "spine_elite"
+    }
+  ]
+}

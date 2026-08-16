@@ -21,10 +21,15 @@ function emitted(fn) {
 // rather than trusted. If the spec's classification changes, this fails and
 // whoever changed it has to add a NEW migration deliberately.
 test('the hardcoded names match the spec that classified them', () => {
+  // SOMET-355: hub-vale is now the `vale_` region of the merged `vale-region`
+  // spec. Scoped to that region on purpose -- the migration only ever named
+  // hub-vale's five worlds, so widening this to the whole merged spec would
+  // compare the migration against worlds it was never about and fail.
   const spec = JSON.parse(fs.readFileSync(
-    path.join(__dirname, '../seeds/maps/hub-vale.map.json'), 'utf8'));
+    path.join(__dirname, '../seeds/maps/vale-region.map.json'), 'utf8'));
   const fromSpec = spec.worlds
-    .filter((w) => w.allows_fast_travel === true).map((w) => w.name).sort();
+    .filter((w) => w.key.startsWith('vale_') && w.allows_fast_travel === true)
+    .map((w) => w.name).sort();
   const src = fs.readFileSync(path.join(__dirname, '../migrations', MIGRATION), 'utf8');
   const fromMigration = [...src.matchAll(/^\s*'([^']+)',$/gm)].map((m) => m[1]).sort();
 
@@ -58,8 +63,10 @@ test('against the live database', { skip: !url ? 'no TEST_DATABASE_URL' : false 
   t.after(() => pool.end());
 
   const spec = JSON.parse(fs.readFileSync(
-    path.join(__dirname, '../seeds/maps/hub-vale.map.json'), 'utf8'));
-  const names = spec.worlds.filter((w) => w.allows_fast_travel === true).map((w) => w.name);
+    path.join(__dirname, '../seeds/maps/vale-region.map.json'), 'utf8'));
+  const names = spec.worlds
+    .filter((w) => w.key.startsWith('vale_') && w.allows_fast_travel === true)
+    .map((w) => w.name);
 
   await t.test('every hub-vale travel target is flagged in the live rows', async () => {
     // The whole point of the migration. Without it these five are the gap

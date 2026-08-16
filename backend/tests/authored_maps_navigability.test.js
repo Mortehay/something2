@@ -56,10 +56,12 @@ const GENERATED_SPEC = 'p5-descent.map.json';
 // Pinned so a spec that loses worlds cannot quietly shrink what this file
 // checks. Not an exhaustive registry: an unlisted authored spec is still
 // checked, it just has no pinned count of its own.
+// SOMET-355: hub-vale (5) + spine-descent (8) + loop-catacombs (7) were merged
+// into the single spec `vale-region`, so the doorways between them could be
+// declared on one shared grid instead of living only as hand-drawn map_links
+// rows. 20 is their sum -- a pin that still fails loudly if a world is dropped.
 const EXPECTED_WORLD_COUNTS = {
-  'hub-vale.map.json': 5,
-  'loop-catacombs.map.json': 7,
-  'spine-descent.map.json': 8,
+  'vale-region.map.json': 20,
 };
 
 const specFiles = () => fs.readdirSync(MAPS_DIR)

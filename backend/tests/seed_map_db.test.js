@@ -126,8 +126,14 @@ test('applying a spec twice produces identical rows', async (t) => {
         // villagesMoved is 0 for the same reason (SOMET-312): on a first seed
         // every village is CREATED, so a non-zero here would mean the applier
         // had counted a creation as a move.
+        // linksRemoved is [] for the same reason, and is a LIST rather than a
+        // count (SOMET-355): a removed doorway changes the shape of the graph
+        // players navigate, so the applier has to be able to name which one.
+        // The empty array here is the both-halves statement -- this spec's two
+        // worlds have exactly the one link it declares, so the prune pass ran
+        // and correctly found nothing undeclared to remove.
         { worlds: 2, links: 1, villages: 1, villagesMoved: 0, portalGuards: 0, creatures: 0,
-          vaultChests: 0, waypoints: 0, waypointsRemoved: 0, penCreatures: 0 },
+          vaultChests: 0, waypoints: 0, waypointsRemoved: 0, linksRemoved: [], penCreatures: 0 },
         'applyMapSpec must report exactly what it wrote, not just resolve');
 
       // Correctness rule 3: is_entry must actually be set on the spec's
@@ -335,18 +341,28 @@ test('every shipped spec applies cleanly', async (t) => {
       // from the spec's own length instead of trivially matching it.
       assert.equal(first.worlds, s.worlds.length, `${s.name}: reported world count doesn't match the spec`);
       assert.equal(first.links, s.links.length, `${s.name}: reported link count doesn't match the spec`);
-      assert.deepEqual(second, { ...first, villages: 0 },
-        `${s.name}: re-applying should not re-create villages, worlds, or links`);
+      // penCreatures is pinned to 0 on the SECOND apply for the same reason
+      // villages is, and it is not a weakening: insertPenCreatures is guarded
+      // per world the way createVillage is, so a re-apply that re-stocked a pen
+      // would report 20 here and still fail. Only the first-ever apply against
+      // a given database reports a non-zero -- which is exactly the case this
+      // assertion used to get wrong, silently, because it had only ever run
+      // against a database whose pens already existed (SOMET-355).
+      assert.deepEqual(second, { ...first, villages: 0, penCreatures: 0 },
+        `${s.name}: re-applying should not re-create villages, pens, worlds, or links`);
     }
 
     // hub-vale is the one shipped spec with a village AND all four compass
     // edges from a single hub -- exercise both the village wiring and the
     // graph_x/graph_y sign convention against real, checked-in data instead
     // of only the synthetic east-west fixture above.
-    const hubVale = results['hub-vale'];
-    assert.ok(hubVale, 'expected backend/seeds/maps/hub-vale.map.json to exist and be named "hub-vale"');
-    assert.equal(hubVale.first.villages, villageAlreadyExisted ? 0 : 1,
-      'hub-vale declares one village; applyMapSpec must report creating it exactly once, ever');
+    // SOMET-355: hub-vale is now the `vale_` region of the merged `vale-region`
+    // spec. Vale Crossing is still the one world with a village AND all four
+    // compass edges, so this paragraph checks exactly what it always did.
+    const valeRegion = results['vale-region'];
+    assert.ok(valeRegion, 'expected backend/seeds/maps/vale-region.map.json to exist and be named "vale-region"');
+    assert.equal(valeRegion.first.villages, villageAlreadyExisted ? 0 : 1,
+      'vale-region declares one village; applyMapSpec must report creating it exactly once, ever');
 
     const villageRow = await pool.query(
       `SELECT v.id FROM villages v JOIN worlds w ON w.id = v.world_id WHERE w.name = 'Vale Crossing'`);

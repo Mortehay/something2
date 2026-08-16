@@ -12,22 +12,25 @@ const { listSpecs } = require('../scripts/list-maps.js');
 // `make list-maps` command down with it, including the OTHER specs and the
 // database listing that follows).
 
-test('listSpecs() returns all three shipped specs with name/topology/world-count', () => {
+// SOMET-355: hub-vale, spine-descent and loop-catacombs used to be three specs
+// and are now the three REGIONS of one spec, `vale-region` -- they had to share
+// a grid before the doorways between them could be declared. The world count is
+// the sum of the three (5 + 8 + 7) and is pinned here for the same reason the
+// three separate counts were: it is the cheapest possible witness that a merge
+// or an edit did not silently drop a world.
+test('listSpecs() returns the shipped specs with name/topology/world-count', () => {
   const specs = listSpecs();
-  // >= 3, not === 3: map-planner/SKILL.md tells authors a new spec is
-  // "covered automatically -- nothing to register", so a fourth valid spec
+  // >= 2, not === 2: map-planner/SKILL.md tells authors a new spec is
+  // "covered automatically -- nothing to register", so a third valid spec
   // an author drops in must not fail this test -- only a missing/broken
   // shipped example should.
-  assert.ok(specs.length >= 3, `expected at least the 3 shipped specs, got ${specs.length}`);
+  assert.ok(specs.length >= 2, `expected at least the 2 shipped specs, got ${specs.length}`);
   assert.deepEqual(specs.filter((s) => s.error), [], 'no shipped spec should report an error');
 
   const byName = Object.fromEntries(specs.map((s) => [s.name, s]));
-  assert.equal(byName['hub-vale'].topology, 'hub');
-  assert.equal(byName['hub-vale'].worlds, 5);
-  assert.equal(byName['loop-catacombs'].topology, 'loop');
-  assert.equal(byName['loop-catacombs'].worlds, 7);
-  assert.equal(byName['spine-descent'].topology, 'spine');
-  assert.equal(byName['spine-descent'].worlds, 8);
+  assert.equal(byName['vale-region'].topology, 'region');
+  assert.equal(byName['vale-region'].worlds, 20);
+  assert.equal(byName['p5-descent'].topology, 'chained-dungeons-plus-surface');
 });
 
 test('listSpecs() sorts valid specs by name', () => {
