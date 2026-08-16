@@ -1,22 +1,199 @@
 # something2
 
-Real-time 2D MMORPG. Go game engine over websockets (collisions, pathfinding, mob AI), Node + Express backend, Vite + React client, Postgres + Redis + MinIO.
+Real-time 2D MMORPG. Node + Express backend with the authoritative game server
+(WebSockets, 60Hz tick, collisions, mob AI) running in-process, Vite + React
+client, Postgres + Redis + MinIO.
 
-## Quickstart
+Everything runs in Docker. You do **not** need Node, Postgres or anything else
+installed on the host — only Docker, `make` and `git`.
 
+## Requirements
+
+| | |
+|---|---|
+| Docker Engine + Compose v2 | `docker compose version` must work (v2 syntax, not `docker-compose`) |
+| GNU make | the entrypoint for every command below |
+| git | |
+
+Host setup per OS is in [Ubuntu](#ubuntu) and [Windows](#windows) below.
+
+## First run
+
+```bash
+git clone git@github.com:Mortehay/something2.git
+cd something2
 ```
-make up        # start db + backend + frontend
-make logs      # tail logs
-make db-shell  # psql into game_db
-make down      # stop everything
+
+**1. Create `.env`.** It is gitignored, so a fresh clone has none, and compose
+refuses to start without these four. Any values will do for local dev:
+
+```bash
+cat > .env <<'EOF'
+POSTGRES_PASSWORD=devpassword
+JWT_SECRET=dev-jwt-secret-change-me
+MINIO_ROOT_PASSWORD=devminiopassword
+SPRITE_GEN_SHARED_SECRET=dev-sprite-secret
+EOF
 ```
+
+**2. Build and start the containers.**
+
+```bash
+make up
+```
+
+This starts the containers but **nothing is serving yet** — the images end in
+`tail -f /dev/null` on purpose, so a dev server can be restarted without
+bouncing the container.
+
+**3. Start the dev servers.**
+
+```bash
+make dev          # installs deps, then starts backend + frontend
+make dev-status   # confirms what is actually LISTENING
+```
+
+The backend applies any pending database migrations on start, so there is no
+separate migrate step on a fresh database.
+
+**4. Seed the catalogs and a map.** A fresh database has no tiles, creatures or
+worlds, so the game has nothing to render:
+
+```bash
+make seed-catalogs             # tiles, biomes, creatures, decorations
+make list-specs                # which maps you can seed
+make seed-map SPEC=vale-region # seed one — see the note below
+make admin-password            # print/set the admin login
+```
+
+Seed **one** spec per database. Only one world can be the entry world, and two
+specs seeded together leave the second one's worlds unreachable. `vale-region`
+is the friendlier start: you spawn inside a village. To switch later, use
+`make reseed-map SPEC=<name>` — it clears existing maps first.
+
+Then open **http://localhost:15173**, register an account, and log in.
+
+## Daily use
+
+```bash
+make up          # containers up (idle)
+make dev         # start backend + frontend dev servers
+make dev-status  # what is actually listening
+make logs        # tail all container logs
+make down        # stop everything
+```
+
+`make up`, `make restart` and `make rebuild` all leave the dev servers stopped —
+run `make dev` again after any of them.
+
+Database and migrations:
+
+```bash
+make db-shell        # psql into game_db
+make migrate-up      # apply pending migrations
+make migrate-status  # what has actually run
+```
+
+Full command reference: [.ai/commands.md](.ai/commands.md).
+
+## Ubuntu
+
+Tested on 22.04 and 24.04. The `docker.io` package in Ubuntu's own repos ships
+Compose v1, which this project does not support — install from Docker's
+repository instead:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg make git
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+```
+
+Run Docker without `sudo` — otherwise every `make` target needs it, and files
+the containers write end up owned by root:
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker            # or log out and back in
+docker compose version   # should print v2.x
+```
+
+Then follow [First run](#first-run).
+
+## Windows
+
+Use **WSL2**. `make` and the shell commands in the Makefile are not available in
+PowerShell or `cmd`, and running the stack from a Windows-native path is
+noticeably slower.
+
+**1. Install WSL2 and Ubuntu** (PowerShell as Administrator):
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+Reboot when prompted, then set your Linux username and password.
+
+**2. Install Docker Desktop** and enable WSL2 integration:
+Settings → Resources → WSL Integration → enable for your Ubuntu distro. Docker
+Desktop provides both `docker` and `docker compose`, so skip Ubuntu's Docker
+install steps above — but you still need `make`:
+
+```bash
+sudo apt-get update && sudo apt-get install -y make git
+```
+
+**3. Clone inside the WSL filesystem**, not under `/mnt/c/`:
+
+```bash
+cd ~                 # e.g. /home/<you>/ — NOT /mnt/c/Users/...
+git clone git@github.com:Mortehay/something2.git
+```
+
+A clone on `/mnt/c` runs through a filesystem translation layer; builds and
+file-watching (Vite HMR, nodemon) are far slower and sometimes miss changes.
+
+**4. Keep LF line endings.** The repo has no `.gitattributes`, so a git install
+configured with `core.autocrlf=true` will rewrite shell scripts to CRLF and they
+will fail inside the Linux containers with confusing `not found` errors:
+
+```bash
+git config --global core.autocrlf false
+```
+
+Then follow [First run](#first-run) from inside the WSL Ubuntu shell. Open
+http://localhost:15173 in your normal Windows browser — WSL2 forwards the port.
+
+## Ports
+
+| Service | URL | Notes |
+|---|---|---|
+| Frontend (Vite) | http://localhost:15173 | the game client |
+| Backend (Express + WebSocket) | http://localhost:13101 | REST API and the realtime authority |
+| Postgres | `127.0.0.1:15432` | `game_db`, user `user` |
+| Redis | `127.0.0.1:16379` | |
+| MinIO | http://localhost:19001 | console; API on `19000` |
+| sprite-gen | http://localhost:18100 | local Stable Diffusion, optional |
 
 ## Layout
 
-- `backend/` — Node + Express REST API, Postgres persistence
-- `frontend/` — Vite + React 19 client
-- `engine/` — Go game engine: WebSocket server, 60Hz tick, JWT auth, Postgres + Redis ([engine/README.md](engine/README.md))
+- `backend/` — Node + Express REST API, the authoritative game server
+  (`src/authority/`), Postgres persistence, migrations
+- `frontend/` — Vite + React 19 client, canvas game under
+  `src/games/something2/`
 - `compose/` — Docker Compose dev stack
+- `engine/` — **frozen.** An earlier Go implementation of the game server,
+  superseded by the Node authority in `backend/src/authority/`. Nothing in the
+  running game uses it. `make up` still starts its container because it remains
+  in the compose file; it is inert and safe to ignore.
 
 ## More
 
