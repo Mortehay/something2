@@ -50,7 +50,7 @@ test('connecting roads link two villages starting from their gate exits', () => 
 
   // Verify that an intermediate village-to-village road cell is drawn
   const region = generateRegion(WORLD_MULTI_VILLAGE, 25, 43, 1, 1);
-  assert.equal(region[0][0], 'grass_road');
+  assert.equal(region[0][0], 'dirt');
 });
 
 test('connecting roads connect villages to world doorways', () => {

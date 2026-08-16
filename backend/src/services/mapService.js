@@ -263,36 +263,32 @@ function villageGateExit(v) {
   return { gate: [midRow, midCol], exit: [midRow, midCol], dir: [0, 0] };
 }
 
-// A Manhattan pathfinder for connecting villages and doorways
+// A highway and avenue pathfinder connecting villages and doorways
 function generateConnectingRoads(cfg, defaultPathTile) {
-  if (!cfg.villages || cfg.villages.length === 0) return [];
+  const pathTile = defaultPathTile || cfg.pathTile || 'dirt';
+  if (!pathTile) return [];
   const roads = [];
   
-  // Helper to draw an axis-aligned path between two points
-  const connectPoints = (r1, c1, r2, c2, type, verticalFirst = false) => {
-    if (r1 === r2 && c1 === c2) return;
-    let line;
-    if (r1 === r2 || c1 === c2) {
-      line = [[r1, c1], [r2, c2]];
-    } else if (verticalFirst) {
-      line = [[r1, c1], [r2, c1], [r2, c2]];
-    } else {
-      line = [[r1, c1], [r1, c2], [r2, c2]];
-    }
+  const addRoad = (line, type = pathTile) => {
+    if (!Array.isArray(line) || line.length < 2) return;
     roads.push({ type, line });
   };
 
-  const exits = cfg.villages.map(v => villageGateExit(v));
+  const exits = (cfg.villages || []).map(v => villageGateExit(v));
 
-  // Connect villages to each other (e.g. grass_road or defaultPathTile)
+  // Multi-village connections (if more than 1 village)
   for (let i = 0; i < exits.length - 1; i++) {
     const a = exits[i];
     const b = exits[i + 1];
     const verticalFirst = (cfg.villages[i].gateEdge === 'E' || cfg.villages[i].gateEdge === 'W');
-    connectPoints(a.exit[0], a.exit[1], b.exit[0], b.exit[1], 'grass_road', verticalFirst);
+    if (verticalFirst) {
+      addRoad([[a.exit[0], a.exit[1]], [b.exit[0], a.exit[1]], [b.exit[0], b.exit[1]]]);
+    } else {
+      addRoad([[a.exit[0], a.exit[1]], [a.exit[0], b.exit[1]], [b.exit[0], b.exit[1]]]);
+    }
   }
 
-  // Connect the primary/closest village to each doorway (e.g. stone_road or defaultPathTile)
+  // Doorway highways and village avenues
   if (cfg.bounds && cfg.bounds.doorways && cfg.bounds.width && cfg.bounds.height) {
     const w = cfg.bounds.width, h = cfg.bounds.height;
     const midW = Math.floor(w / 2), midH = Math.floor(h / 2);
@@ -302,37 +298,58 @@ function generateConnectingRoads(cfg, defaultPathTile) {
       return false;
     };
 
-    const findClosestExit = (r, c) => {
-      let best = exits[0];
-      let bestIdx = 0;
-      let bestDist = Infinity;
-      for (let i = 0; i < exits.length; i++) {
-        const ex = exits[i];
-        const d = Math.abs(ex.exit[0] - r) + Math.abs(ex.exit[1] - c);
-        if (d < bestDist) {
-          bestDist = d;
-          best = ex;
-          bestIdx = i;
+    const hasN = hasDoorway('N');
+    const hasS = hasDoorway('S');
+    const hasE = hasDoorway('E');
+    const hasW = hasDoorway('W');
+
+    // Horizontal highway (E-W)
+    if (hasW && hasE) {
+      addRoad([[midH, 0], [midH, w - 1]]);
+    } else if (hasW) {
+      addRoad([[midH, 0], [midH, midW]]);
+    } else if (hasE) {
+      addRoad([[midH, midW], [midH, w - 1]]);
+    }
+
+    // Vertical highway (N-S)
+    if (hasN && hasS) {
+      addRoad([[0, midW], [h - 1, midW]]);
+    } else if (hasN) {
+      addRoad([[0, midW], [midH, midW]]);
+    } else if (hasS) {
+      addRoad([[midH, midW], [h - 1, midW]]);
+    }
+
+    // Connect each village gate to the highway network
+    for (let i = 0; i < exits.length; i++) {
+      const ex = exits[i];
+      const gateEdge = cfg.villages[i]?.gateEdge;
+      const [r, c] = ex.exit;
+
+      if (gateEdge === 'E' || gateEdge === 'W') {
+        // Step horizontally out of the gate towards the N-S spine (midW), then vertically to the crossroads (midH)
+        if (r === midH && c === midW) {
+          // Already at crossroads
+        } else if (r === midH) {
+          addRoad([[r, c], [r, midW]]);
+        } else if (c === midW) {
+          addRoad([[r, c], [midH, c]]);
+        } else {
+          addRoad([[r, c], [r, midW], [midH, midW]]);
+        }
+      } else {
+        // Step vertically out of the gate towards the E-W spine (midH), then horizontally to the crossroads (midW)
+        if (r === midH && c === midW) {
+          // Already at crossroads
+        } else if (c === midW) {
+          addRoad([[r, c], [midH, c]]);
+        } else if (r === midH) {
+          addRoad([[r, c], [r, midW]]);
+        } else {
+          addRoad([[r, c], [midH, c], [midH, midW]]);
         }
       }
-      return { exit: best, verticalFirst: cfg.villages[bestIdx]?.gateEdge === 'E' || cfg.villages[bestIdx]?.gateEdge === 'W' };
-    };
-
-    if (hasDoorway('N')) {
-      const { exit, verticalFirst } = findClosestExit(0, midW);
-      connectPoints(exit.exit[0], exit.exit[1], 0, midW, 'stone_road', verticalFirst);
-    }
-    if (hasDoorway('S')) {
-      const { exit, verticalFirst } = findClosestExit(h - 1, midW);
-      connectPoints(exit.exit[0], exit.exit[1], h - 1, midW, 'stone_road', verticalFirst);
-    }
-    if (hasDoorway('E')) {
-      const { exit, verticalFirst } = findClosestExit(midH, w - 1);
-      connectPoints(exit.exit[0], exit.exit[1], midH, w - 1, 'stone_road', verticalFirst);
-    }
-    if (hasDoorway('W')) {
-      const { exit, verticalFirst } = findClosestExit(midH, 0);
-      connectPoints(exit.exit[0], exit.exit[1], midH, 0, 'stone_road', verticalFirst);
     }
   }
 
