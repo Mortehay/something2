@@ -18,8 +18,15 @@ async function loadBiomes(pool, names) {
   }
   if (wanted.length === 0) return [];
   const { rows } = await pool.query(
+    // EXPLICIT column list, so every generator input must be added here by
+    // hand. path_tile (SOMET-349 follow-up) is one: mapService.normalizeBiomes
+    // reads it to pick each biome's road tile, and a row loaded without it
+    // arrives as `undefined`, which biomeRoadTile silently reads as "no road
+    // tile" and falls back to the ambient path tile. That failure renders as
+    // roads that are invisible again -- the precise bug the column was added
+    // to fix -- with nothing anywhere reporting an error.
     `SELECT id, name, terrain_tiles, flora_types, creature_types,
-            palette, art_style, exclusions, color, creature_density
+            palette, art_style, exclusions, color, creature_density, path_tile
        FROM biomes
       WHERE name = ANY($1::text[])`,
     [wanted],

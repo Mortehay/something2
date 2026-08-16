@@ -65,17 +65,25 @@ async function seedOneTile(db, t) {
 //
 // So: a seed entry supplying a NON-EMPTY list still wins (the original five
 // stay authoritative, and P4's edits will land normally); a seed entry
-// supplying an EMPTY one keeps whatever the row already holds. The other eight
-// columns are populated on every entry, and `biomes` has exactly these nine
+// supplying an EMPTY one keeps whatever the row already holds. The other nine
+// columns are populated on every entry, and `biomes` has exactly these ten
 // columns, so there is no column-omission hazard here of the kind the tile
 // path had -- as long as every column in the table is actually listed below.
+//
+// path_tile (SOMET-349 follow-up) is COALESCE-guarded rather than written
+// unconditionally, for the same reason the tile columns are: it is an
+// admin-authorable field, and a seed entry that omits it must keep whatever
+// the row holds instead of resetting a hand-picked road tile to NULL. NULL is
+// a meaningful value here -- mapService.roadTileAt reads it as "fall back to
+// the world's ambient path tile" -- so "omitted" and "deliberately cleared"
+// have to stay distinguishable, and clearing one is the admin UI's job.
 //
 // Split out of seedCatalogs, mirroring seedOneTile, so the preservation rule
 // can be tested against the REAL statement rather than a restatement of it.
 async function seedOneBiome(db, b) {
   await db.query(
-    `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color, creature_density)
-     VALUES ($1,$2::jsonb,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7,$8,$9)
+    `INSERT INTO biomes (name, terrain_tiles, flora_types, creature_types, palette, art_style, exclusions, color, creature_density, path_tile)
+     VALUES ($1,$2::jsonb,$3::jsonb,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10)
      ON CONFLICT (name) DO UPDATE
        SET terrain_tiles = EXCLUDED.terrain_tiles, flora_types = EXCLUDED.flora_types,
            creature_types = CASE
@@ -83,10 +91,11 @@ async function seedOneBiome(db, b) {
              ELSE EXCLUDED.creature_types END,
            palette = EXCLUDED.palette,
            art_style = EXCLUDED.art_style, exclusions = EXCLUDED.exclusions,
-           color = EXCLUDED.color, creature_density = EXCLUDED.creature_density`,
+           color = EXCLUDED.color, creature_density = EXCLUDED.creature_density,
+           path_tile = COALESCE($10, biomes.path_tile)`,
     [b.name, JSON.stringify(b.terrain_tiles ?? []), JSON.stringify(b.flora_types ?? []),
      JSON.stringify(b.creature_types ?? []), JSON.stringify(b.palette ?? []),
-     b.art_style, b.exclusions, b.color, b.creature_density ?? 1],
+     b.art_style, b.exclusions, b.color, b.creature_density ?? 1, b.path_tile ?? null],
   );
 }
 

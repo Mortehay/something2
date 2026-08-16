@@ -86,6 +86,39 @@ const DEFAULT_TILE_TYPES = [
   { name: 'cave_wall', color: '#3a352e', walkable: false, speed: 1.0, image: '', valid_neighbors: ['cave_wall', 'cave_floor', 'rocks'], prompt: 'solid rough cave rock wall', wall_height: 48 },
   { name: 'rubble', color: '#57524a', walkable: false, speed: 1.0, image: '', valid_neighbors: ['rubble', 'cave_floor', 'cobblestone', 'rocks'], prompt: 'impassable heap of collapsed rubble' },
   { name: 'chasm', color: '#14121a', walkable: false, speed: 0, image: '', valid_neighbors: ['chasm', 'cave_floor', 'void_floor'], prompt: 'a black bottomless chasm' },
+
+  // --- Roads (SOMET-349 follow-up) ----------------------------------------
+  //
+  // Until now there was no road tile at all. `cfg.pathTile` -- the tile both
+  // the ambient carvePaths noise AND the village-gate->doorway highways stamp
+  // -- was whatever detectPathTile's regex happened to hit first in catalog id
+  // order, which is `sand` (#FFFF00). So a deliberate highway was drawn in the
+  // same bright yellow as the procedural squiggles crossing the whole map, and
+  // was invisible as a road.
+  //
+  // These tiles are STAMPED, never WFC-placed and never sampled as terrain, so
+  // valid_neighbors is [] exactly as it is for map_wall/village_gate. Two
+  // mechanisms keep them out of terrain:
+  //   - mapService's isStructuralTile() treats the `road_` prefix as
+  //     structural, so they never enter cfg.terrainNames or a biome's list;
+  //   - detectPathTile() skips the prefix, so the AMBIENT path tile every
+  //     existing world already resolved to is unchanged and cached chunks stay
+  //     byte-identical.
+  // Both are pinned by tile_catalog_integrity.test.js -- the `road_` prefix is
+  // load-bearing, not cosmetic. Renaming one of these to e.g. `stone_road`
+  // would silently turn it into terrain AND make it a detectPathTile
+  // candidate.
+  //
+  // `speed` is deliberately >= the terrain each one runs over: a road that
+  // slowed you down would be a trap, not a road.
+  //
+  // Colours are picked to sit clearly off the terrain they cross, because
+  // until sprites are generated these colours ARE the road.
+  { name: 'road_dirt', color: '#b08d5e', walkable: true, speed: 1.15, image: '', valid_neighbors: [], prompt: 'packed tan dirt road, worn wheel ruts' },
+  { name: 'road_stone', color: '#9a958b', walkable: true, speed: 1.2, image: '', valid_neighbors: [], prompt: 'dressed pale flagstone road' },
+  { name: 'road_sand', color: '#e0c27a', walkable: true, speed: 1.1, image: '', valid_neighbors: [], prompt: 'wind-scoured desert caravan track' },
+  { name: 'road_snow', color: '#8fa3b3', walkable: true, speed: 1.1, image: '', valid_neighbors: [], prompt: 'road cleared through deep snow, grey-blue slush' },
+  { name: 'road_ash', color: '#6e6257', walkable: true, speed: 1.15, image: '', valid_neighbors: [], prompt: 'cinder road trodden through volcanic ash' },
 ];
 
 module.exports = { DEFAULT_TILE_TYPES };

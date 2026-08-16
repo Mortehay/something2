@@ -108,9 +108,26 @@ const PATH_NAME_RE = /path|dirt|road|trail|earth|sand/i;
 // into generated terrain as random impassable blobs.
 const STRUCTURAL_TILES = new Set(['map_wall', 'map_doorway', 'wooden_wall', 'village_gate']);
 
+// Road tiles (seeds/data/tileTypes.js) are structural in exactly the same
+// sense: stamped along a road line, never sampled. They are matched by PREFIX
+// rather than listed by name so that adding a sixth road tile to the catalog
+// needs no change here -- and correspondingly, a road tile named without the
+// prefix would silently become terrain.
+const ROAD_TILE_RE = /^road_/;
+function isStructuralTile(name) {
+  return STRUCTURAL_TILES.has(name) || ROAD_TILE_RE.test(name);
+}
+
+// `road_*` is skipped deliberately. PATH_NAME_RE matches "road", so without
+// this filter every newly seeded road tile would become a candidate for the
+// AMBIENT path tile -- and because detectPathTile returns the first match in
+// catalog id order, a future reordering could hand carvePaths a road tile and
+// repaint every existing world's procedural squiggles. The ambient tile stays
+// whatever it already resolved to (`sand` on this catalog); roads pick their
+// tile through roadTileAt() instead.
 function detectPathTile(tileNames, override) {
     if (override && tileNames.includes(override)) return override;
-    return tileNames.find((n) => PATH_NAME_RE.test(n)) || null;
+    return tileNames.find((n) => !ROAD_TILE_RE.test(n) && PATH_NAME_RE.test(n)) || null;
 }
 
 // A biome's terrain list, reduced to tiles this world can actually place:
@@ -129,8 +146,19 @@ function detectPathTile(tileNames, override) {
 // global list — see sampleTerrain.
 function biomeTerrainNames(biome, names) {
   return (biome.terrain_tiles || []).filter(
-    (n) => names.includes(n) && !STRUCTURAL_TILES.has(n),
+    (n) => names.includes(n) && !isStructuralTile(n),
   );
+}
+
+// The road tile this biome stamps its roads in, or null to fall back to the
+// world's ambient path tile. Validated against the catalog HERE rather than at
+// stamp time: a biome naming a road tile the world's tileTypes does not carry
+// would otherwise reach the grid as a tile name nothing can render, and the
+// failure would surface as an invisible road -- the exact bug this feature
+// exists to fix -- rather than as anything diagnosable.
+function biomeRoadTile(biome, names) {
+  const t = biome.path_tile;
+  return (typeof t === 'string' && names.includes(t)) ? t : null;
 }
 
 // Normalize raw biome rows (services/biomes.js shape) into the compact records
@@ -142,6 +170,7 @@ function normalizeBiomes(rawBiomes, names) {
     .map((b) => ({
       name: b.name,
       terrainNames: biomeTerrainNames(b, names),
+      roadTile: biomeRoadTile(b, names),
       floraTypes: Array.isArray(b.flora_types) ? b.flora_types : [],
       creatureTypes: Array.isArray(b.creature_types) ? b.creature_types : [],
       // The creature-density field's biome term (Slice A). Anything that is
@@ -184,7 +213,7 @@ function worldConfig(world = {}) {
   const pathTile = world.pathTile !== undefined
     ? world.pathTile
     : detectPathTile(names);
-  const nonStructural = names.filter((n) => !STRUCTURAL_TILES.has(n));
+  const nonStructural = names.filter((n) => !isStructuralTile(n));
   const biomeSource = nonStructural.length > 0 ? nonStructural : names;
   const terrainNames = pathTile && biomeSource.length > 1
     ? biomeSource.filter((n) => n !== pathTile)
@@ -275,8 +304,14 @@ function generateConnectingRoads(cfg, defaultPathTile) {
   const pathTile = defaultPathTile || cfg.pathTile || 'dirt';
   if (!pathTile) return [];
   const roads = [];
-  
-  const addRoad = (line, type = pathTile) => {
+
+  // `type` is left UNDEFINED on purpose (it used to default to `pathTile`).
+  // A generated road spans regions, so its tile cannot be decided once for the
+  // whole line -- collectPathCells resolves it per cell through roadTileAt(),
+  // which is what lets one highway run as `road_dirt` across a Meadow and
+  // continue as `road_stone` once it crosses into Highlands. An explicit type
+  // still wins, which is how authoredRoads pin a single tile.
+  const addRoad = (line, type) => {
     if (!Array.isArray(line) || line.length < 2) return;
     roads.push({ type, line });
   };
@@ -370,6 +405,21 @@ function sampleBiomeRegion(cfg, gRow, gCol) {
   if (cfg.biomes.length === 0) return null;
   const v = globalValueNoise((cfg.seed ^ BIOME_FIELD_XOR) >>> 0, gRow, gCol, cfg.biomeCell);
   return cfg.biomes[Math.min(cfg.biomes.length - 1, Math.floor(v * cfg.biomes.length))];
+}
+
+// The tile a road cell is stamped in: the owning biome's authored road tile,
+// else the world's ambient path tile.
+//
+// Sampled per CELL, off the same biome field sampleTerrain uses, so a road and
+// the terrain beneath it always agree about which biome they are in -- a road
+// changes surface exactly where the terrain around it changes.
+//
+// The fallback is what makes this change inert for everything not yet
+// authored: a world with no biomes, or biomes with no path_tile, keeps
+// stamping cfg.pathTile and generates byte-identical chunks.
+function roadTileAt(cfg, gRow, gCol) {
+  const region = sampleBiomeRegion(cfg, gRow, gCol);
+  return (region && region.roadTile) || cfg.pathTile;
 }
 
 // Terrain tile name at absolute world coords: band the global terrain noise
@@ -739,14 +789,14 @@ function collectPathCells(cfg, rMin, cMin, rows, cols) {
   if (cfg.pathTile) {
     for (const road of cfg.authoredRoads || []) {
       authoredLineCells(road.line, (r, c) => {
-        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) map.set(`${r},${c}`, road.type || cfg.pathTile);
+        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) map.set(`${r},${c}`, road.type || roadTileAt(cfg, r, c));
       });
     }
 
     // Generated connection roads between villages/doorways
     for (const road of cfg.generatedRoads || []) {
       authoredLineCells(road.line, (r, c) => {
-        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) map.set(`${r},${c}`, road.type || cfg.pathTile);
+        if (r >= rMin && r < rMaxA && c >= cMin && c < cMaxA) map.set(`${r},${c}`, road.type || roadTileAt(cfg, r, c));
       });
     }
 
@@ -1432,7 +1482,7 @@ function generateWorld(rows, cols, tileTypes, options = {}) {
     // Stage A: biome field -> map each tile's noise value to a tile-type band.
     // Exclude the path tile from the biome bands (when other tiles exist) so
     // carved paths read as distinct trails rather than blending into a biome.
-    const nonStructural = names.filter((n) => !STRUCTURAL_TILES.has(n));
+    const nonStructural = names.filter((n) => !isStructuralTile(n));
     const biomeSource = nonStructural.length > 0 ? nonStructural : names;
     const biomeNames = pathTile && biomeSource.length > 1
         ? biomeSource.filter((n) => n !== pathTile)
@@ -1543,6 +1593,8 @@ module.exports = {
     makeRng,
     valueNoise,
     detectPathTile,
+    isStructuralTile,
+    roadTileAt,
     carvePaths,
     uniqueTileNames,
     hash2,
