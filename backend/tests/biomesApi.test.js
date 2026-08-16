@@ -588,3 +588,34 @@ test('PUT /api/biomes/:id does NOT evict when creature_density is unchanged', as
   assert.equal(res.status, 200);
   assert.deepEqual(evicted, [], 'a cosmetic-only edit must not evict');
 });
+
+test('PUT /api/biomes/:id preserves an authored creature_density when the body omits it', async () => {
+  // The regression this exists for: no admin form sends creature_density, so
+  // every UI edit posts a body without it. If an absent field defaulted to 1,
+  // changing Mire's COLOUR would silently flatten its authored 2.0 -- a data
+  // loss with no error and no warning, on a field the operator never touched.
+  //
+  // Stored density is 2, NOT the column default -- a fixture sitting at 1
+  // cannot tell "preserved" apart from "reset", which is exactly how this
+  // slipped through the first time.
+  const evicted = [];
+  const pool = mockPool([
+    [/SELECT name.*FROM biomes WHERE id/i, () => ({
+      rows: [{
+        name: 'Meadow', terrain_tiles: ['grass'], flora_types: ['bush'],
+        creature_types: ['Slime'], creature_density: 2,
+      }],
+    })],
+    [/UPDATE biomes SET/i, () => ({ rows: [{ ...BIOME, creature_density: 2 }] })],
+    [/FROM worlds WHERE biomes/i, () => ({ rows: [{ id: 'w1', name: 'Entry' }] })],
+  ]);
+  __setPool(pool);
+  __setAuthorityHandle({ evictWorld: (id) => { evicted.push(id); return true; }, isWorldLive: () => false });
+  // BIOME carries no creature_density key, so this is a real UI-shaped body.
+  const res = await request(app).put('/api/biomes/1').set(ADMIN_HEADERS)
+    .send({ ...BIOME, color: '#111111' });
+  assert.equal(res.status, 200);
+  const update = pool.calls.find((c) => /UPDATE biomes SET/i.test(c.sql));
+  assert.equal(update.params[DENSITY_PARAM], 2, 'an omitted creature_density must not reset the stored value');
+  assert.deepEqual(evicted, [], 'preserving a value is not a change, so nothing should be evicted');
+});

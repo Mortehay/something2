@@ -2058,7 +2058,16 @@ app.put('/api/biomes/:id', adminGuard, async (req, res) => {
     // row is stale, so this only needs evictOrWarn (idle world: nothing to
     // do, it re-resolves on its next load; live world: warn, matching
     // terrainChanged's warning).
-    const nextDensity = biomeCreatureDensity(creature_density);
+    // ABSENT means "leave it alone", not "reset to the default" -- the same
+    // rule PUT /api/worlds/:id already applies to an omitted `biomes`. This is
+    // load-bearing rather than cosmetic: no admin form sends creature_density
+    // today, so defaulting an absent field to 1 would silently flatten every
+    // authored value (Mire 2.0, Catacombs 2.3) the first time an operator
+    // edited that biome's colour. Only an explicitly supplied value is
+    // coerced; null is treated as absent, not as junk to be defaulted.
+    const nextDensity = (creature_density === undefined || creature_density === null)
+      ? biomeCreatureDensity(cur.rows[0].creature_density)
+      : biomeCreatureDensity(creature_density);
     // creature_density belongs on THIS branch, not terrainChanged's: it never
     // reaches world_chunks (it weights where creatures are placed, not which
     // tile a cell gets), so there is no persisted grid to wipe. But it is
