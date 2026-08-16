@@ -259,3 +259,83 @@ test('snapshotForNeighborhood carries a chilled creature\'s effect keys, gated o
   assert.equal(rowFor('a', 999999).effects, undefined,
     'an expired chill is still broadcast — snapshotForNeighborhood ignored the clock it was given');
 });
+
+// --- SOMET-354: the AOI/delta broadcast snapshot ---------------------------
+//
+// snapshotAOI is what actually goes on the wire. It makes two claims the old
+// snapshotForNeighborhood did not, and both are failure-shaped: a creature that
+// re-enters must be RE-INTRODUCED (or the client renders a position with no
+// type), and a far creature must be distinguishable from a near one whose
+// effects expired (or every far creature is silently stripped of its effects
+// on each frame).
+
+test('snapshotAOI sends immutable fields once, then omits them', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([{ id: 'a', type: 'Wolf', x: 100, y: 100, hp: 10, facing: 'S', color: '#c0392b' }]);
+  const known = new Set();
+
+  const first = s.snapshotAOI(new Set(['0,0']), 0, 100, 100, 2400, known)[0];
+  assert.equal(first.type, 'Wolf', 'first sighting must carry the type');
+  assert.equal(first.color, '#c0392b');
+  assert.ok('maxHp' in first && 'level' in first);
+
+  const second = s.snapshotAOI(new Set(['0,0']), 0, 100, 100, 2400, known)[0];
+  for (const f of ['type', 'color', 'maxHp', 'level']) {
+    assert.ok(!(f in second), `"${f}" never changes and must not be re-sent every frame`);
+  }
+  // Still a usable record: position and the volatile fields are always there.
+  assert.deepEqual(Object.keys(second).sort(), ['facing', 'hp', 'id', 'mode', 'x', 'y']);
+});
+
+test('snapshotAOI re-introduces a creature that left the neighbourhood and came back', () => {
+  // The client DELETES any id absent from a frame, so an id it sees again is
+  // an id it knows nothing about. A `known` set that only ever grew would send
+  // it back as a bare position and the client would render an untyped ghost.
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([{ id: 'a', type: 'Wolf', x: 100, y: 100, hp: 10, color: '#c0392b' }]);
+  const known = new Set();
+
+  s.snapshotAOI(new Set(['0,0']), 0, 100, 100, 2400, known);
+  const away = s.snapshotAOI(new Set(['9,9']), 0, 100, 100, 2400, known);
+  assert.deepEqual(away, [], 'precondition: the creature is outside the broadcast neighbourhood');
+
+  const back = s.snapshotAOI(new Set(['0,0']), 0, 100, 100, 2400, known)[0];
+  assert.equal(back.type, 'Wolf', 'a returning creature must be re-introduced with its type');
+  assert.equal(back.color, '#c0392b');
+});
+
+test('snapshotAOI sends position only beyond the near zone, and marks it', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([
+    { id: 'near', type: 'Wolf', x: 100, y: 100, hp: 10, facing: 'S', color: '#c0392b' },
+    { id: 'far', type: 'Wolf', x: 1900, y: 100, hp: 10, facing: 'N', color: '#c0392b' },
+  ]);
+  // nearPx 1000: 'near' is 0px away, 'far' is 1800px away. Both are in chunk
+  // row 0, so both are in the same broadcast neighbourhood -- the ONLY thing
+  // separating them is the AOI, which is the point.
+  const known = new Set();
+  const snap = s.snapshotAOI(new Set(['0,0', '1,0', '2,0']), 0, 100, 100, 1000, known);
+  const by = Object.fromEntries(snap.map((r) => [r.id, r]));
+
+  assert.equal(by.near.f, undefined, 'a near creature is not flagged far');
+  assert.equal(by.near.facing, 'S');
+  assert.equal(by.near.mode !== undefined, true);
+
+  assert.equal(by.far.f, 1, 'a far creature must be flagged, or the client cannot tell omitted from cleared');
+  for (const f of ['facing', 'hp', 'mode', 'effects']) {
+    assert.ok(!(f in by.far), `a far creature must not carry "${f}" -- only the minimap reads it, and it reads x/y/color`);
+  }
+  // It is still SENT, not dropped: the minimap draws dots well beyond the
+  // detail zone, and narrowing detail must not narrow visibility.
+  assert.equal(by.far.x, 1900);
+});
+
+test('snapshotAOI rounds position and hp to whole units', () => {
+  const s = new CreatureSim(stubMap(), noRedirect);
+  s.addCreatures([{ id: 'a', type: 'Wolf', x: 100.4567, y: 100.5, hp: 10 }]);
+  s.creatures.get('a').hp = 7.318;
+  const r = s.snapshotAOI(new Set(['0,0']), 0, 100, 100, 2400, new Set())[0];
+  assert.equal(r.x, 100);
+  assert.equal(r.y, 101);
+  assert.equal(r.hp, 7);
+});

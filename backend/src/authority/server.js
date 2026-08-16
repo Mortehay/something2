@@ -325,6 +325,34 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const tickMs = opts.tickMs || 50;
   const flushMs = opts.flushMs || 30000;
   const creatureBroadcastEvery = opts.creatureBroadcastEvery || 4; // 4 ticks @50ms = ~5Hz
+  // SOMET-354. Half-extent, in world pixels, of the zone that gets FULL
+  // creature records. MAP_TILE_SIZE is 100, so 1600 is 16 tiles in each
+  // direction: a 33x33-tile box around the player.
+  //
+  // Sized off the two consumers, not off the chunk grid:
+  //   - the game viewport is roughly 15x15 tiles, so its half-extent is ~7.5
+  //     and this is over twice that -- a creature is fully tracked well before
+  //     it can be seen, and 5Hz updates plus client interpolation never have
+  //     to "pop in" a creature that is already on screen;
+  //   - the minimap draws creature dots out to ~60 tiles, and keeps doing so,
+  //     because far creatures are still SENT (position only) rather than
+  //     dropped. This constant decides DETAIL, not visibility.
+  //
+  // Deliberately NOT the activation radius. Simulation stays on the radius-1
+  // chunk neighbourhood so creatures do not freeze at the edge of vision;
+  // these two numbers were the same only by accident.
+  //
+  // Measured in the worst live world (The Abyss: Hub, 224/swarm, ~478
+  // creatures in the neighbourhood): 2400 -> 199 KiB/s, 1600 -> 180, 1200 ->
+  // 174, against 513 before this change. It flattens because past this point
+  // the payload is dominated by the 36-char uuid each record must carry, not
+  // by the near/far split -- shrinking the zone further costs detail and buys
+  // almost nothing.
+  const creatureNearPx = opts.creatureNearPx || 1600;
+  // Per-socket record of which creature ids this connection has already been
+  // told the immutable fields (type/color/maxHp/level) for. A WeakMap keyed by
+  // the socket so a dropped connection cannot leak its id set.
+  const creatureKnown = new WeakMap();
   const creatureFlushMs = opts.creatureFlushMs || 3000;
   const heartbeatMs = opts.heartbeatMs || 30000;
   const groundItemTtlMs = opts.groundItemTtlMs || 600000; // 10 min
@@ -1089,9 +1117,20 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (!p) continue;
       const { cx, cy } = chunkOf(p.x, p.y, N);
       const keys = neighborhoodKeys(cx, cy, 1);
+      // SOMET-354. Per SOCKET, not per player row: this is wire state (which
+      // ids this connection has already been told the immutable fields for),
+      // so it must die with the connection. Lazily created and never removed
+      // by hand -- `entry.sockets` is the lifetime, and a reconnect gets a
+      // fresh Set and therefore a full re-introduction of every creature.
+      let known = creatureKnown.get(ws);
+      if (!known) { known = new Set(); creatureKnown.set(ws, known); }
       // world.now, not Date.now(): the creature snapshot's effect keys are
       // decided against the same clock that applied and ticks those effects.
-      send(ws, { type: 'creatures', creatures: entry.world.creatures.snapshotForNeighborhood(keys, entry.world.now) });
+      send(ws, {
+        type: 'creatures',
+        creatures: entry.world.creatures.snapshotAOI(
+          keys, entry.world.now, p.x, p.y, creatureNearPx, known),
+      });
     }
   }
 
