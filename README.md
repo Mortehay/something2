@@ -25,16 +25,23 @@ cd something2
 ```
 
 **1. Create `.env`.** It is gitignored, so a fresh clone has none, and compose
-refuses to start without these four. Any values will do for local dev:
+refuses to start without four of the values. Copy the template:
 
 ```bash
-cat > .env <<'EOF'
-POSTGRES_PASSWORD=devpassword
-JWT_SECRET=dev-jwt-secret-change-me
-MINIO_ROOT_PASSWORD=devminiopassword
-SPRITE_GEN_SHARED_SECRET=dev-sprite-secret
-EOF
+cp .env.example .env
 ```
+
+[.env.example](.env.example) ships working local-dev defaults and explains every
+variable. Only these four are required — the rest are optional and documented
+where they matter:
+
+```
+POSTGRES_PASSWORD  JWT_SECRET  MINIO_ROOT_PASSWORD  SPRITE_GEN_SHARED_SECRET
+```
+
+Change them if you like; any values work locally. The ngrok keys are only needed
+for [Playing over the internet](#playing-over-the-internet), and the stack starts
+fine with them left as-is.
 
 **2. Build and start the containers.**
 
@@ -106,12 +113,16 @@ make tunnel       # public URL + dev servers, prints the address
 make tunnel-stop  # close the tunnel, restore the localhost origin
 ```
 
-Set both keys in `.env` first:
+Set both keys in `.env` first (they are in [.env.example](.env.example) with
+placeholder values):
 
 ```
-NGROK_AUTHTOKEN=...   # dashboard.ngrok.com
+NGROK_AUTHTOKEN=...   # dashboard.ngrok.com → Your Authtoken
 NGROK_DOMAIN=...      # the domain ngrok ASSIGNED you, e.g. foo-bar-baz.ngrok-free.dev
 ```
+
+`make tunnel` checks both are set and stops with a readable message if not, so a
+missing key never produces a half-open tunnel.
 
 `NGROK_DOMAIN` must be a domain the account actually owns. On the free plan it is
 auto-assigned and cannot be chosen — inventing a name fails with `ERR_NGROK_313`
@@ -224,6 +235,10 @@ http://localhost:15173 in your normal Windows browser — WSL2 forwards the port
 | Redis | `127.0.0.1:16379` | |
 | MinIO | http://localhost:19001 | console; API on `19000` |
 | sprite-gen | http://localhost:18100 | local Stable Diffusion, optional |
+| ngrok inspector | http://localhost:14040 | only while `make tunnel` is running; loopback-only |
+
+The public tunnel URL is the one `make tunnel` prints — it is not in this table
+because it belongs to your ngrok account, not to this project.
 
 ## Layout
 
