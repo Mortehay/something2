@@ -2,7 +2,7 @@
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
-        migrate-up migrate-status migrate-repair
+        migrate-up migrate-status migrate-repair tunnel tunnel-stop
 
 COMPOSE_FILE = compose/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
@@ -76,6 +76,50 @@ dev-stop:
 dev-status:
 	@printf 'backend  :13101  '; c=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:13101/api/health 2>/dev/null); [ "$$c" = "000" ] && echo "DOWN (nothing listening)" || echo "HTTP $$c"
 	@printf 'frontend :15173  '; c=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:15173/ 2>/dev/null); [ "$$c" = "000" ] && echo "DOWN (nothing listening)" || echo "HTTP $$c"
+
+# --- Public tunnel (SOMET-370) ---------------------------------------------
+# `make tunnel` puts the stack in TUNNEL MODE: an ngrok agent published on the
+# reserved domain, plus a frontend rebuilt to speak to that public origin.
+#
+# The second half is the part that is easy to miss. The client calls the backend
+# at an ABSOLUTE url (VITE_API_URL, ~20 call sites) and derives the authority ws
+# url from it, so a remote browser left on the default would call ITS OWN
+# localhost and fail at login. Tunnel mode repoints that at https://<domain>,
+# which comes back through the tunnel and lands on vite's /api + /authority
+# proxy (frontend/vite.config.js).
+#
+# Why a target instead of just reading NGROK_DOMAIN: that var lives permanently
+# in .env, so anything keyed off "is it set" would drag ordinary local dev onto
+# the public origin with no tunnel even running. Tunnel mode is opt-in per
+# invocation, and `make tunnel-stop` puts it back.
+#
+# --force-recreate is load-bearing: a container's environment is fixed when it
+# is CREATED, so restarting vite alone would keep serving the old origin while
+# looking like it worked.
+NGROK_DOMAIN := $(shell sed -n 's/^NGROK_DOMAIN=//p' .env 2>/dev/null | tail -1)
+
+tunnel:
+	@[ -n "$(NGROK_DOMAIN)" ] || { echo "NGROK_DOMAIN is not set in .env -- add your reserved ngrok domain first."; exit 1; }
+	@grep -qE '^NGROK_AUTHTOKEN=.+' .env || { echo "NGROK_AUTHTOKEN is not set in .env -- get one from dashboard.ngrok.com."; exit 1; }
+	@echo "==> tunnel mode: client origin https://$(NGROK_DOMAIN)"
+	TUNNEL_HOST=$(NGROK_DOMAIN) VITE_API_URL=https://$(NGROK_DOMAIN) \
+	  $(COMPOSE) --profile tunnel up -d --force-recreate frontend ngrok
+	@$(MAKE) --no-print-directory dev
+	@echo
+	@echo "public URL: https://$(NGROK_DOMAIN)"
+	@echo "  * OPEN TO ANYONE who has it -- registration and the admin panel included."
+	@echo "  * free tier shows a warning page on first load; click 'Visit Site' once."
+	@echo "  * request inspector: http://localhost:14040"
+	@echo "  * close it again with 'make tunnel-stop'."
+
+# Takes the agent offline and puts the frontend back on the localhost origin.
+# Both halves matter: leaving the container on the public origin would break
+# local dev the moment the tunnel is gone.
+tunnel-stop:
+	@$(COMPOSE) --profile tunnel rm -sf ngrok
+	@echo "==> restoring local origin (http://localhost:13101)"
+	$(COMPOSE) up -d --force-recreate frontend
+	@$(MAKE) --no-print-directory dev
 
 down:
 	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) down --remove-orphans

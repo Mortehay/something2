@@ -96,6 +96,48 @@ make migrate-status  # what has actually run
 
 Full command reference: [.ai/commands.md](.ai/commands.md).
 
+## Playing over the internet
+
+`make tunnel` publishes the running stack through ngrok so someone else can log
+in and play; `make tunnel-stop` closes it again and puts local dev back.
+
+```bash
+make tunnel       # public URL + dev servers, prints the address
+make tunnel-stop  # close the tunnel, restore the localhost origin
+```
+
+Set both keys in `.env` first:
+
+```
+NGROK_AUTHTOKEN=...   # dashboard.ngrok.com
+NGROK_DOMAIN=...      # the domain ngrok ASSIGNED you, e.g. foo-bar-baz.ngrok-free.dev
+```
+
+`NGROK_DOMAIN` must be a domain the account actually owns. On the free plan it is
+auto-assigned and cannot be chosen — inventing a name fails with `ERR_NGROK_313`
+("only paid plans may create endpoints with custom subdomains"). If you do not
+know yours, run the agent with no domain and read it from the log:
+
+```bash
+docker compose --project-directory . --env-file .env -f compose/docker-compose.yml \
+  --profile tunnel run --rm --no-deps ngrok http frontend:5173 --log=stdout | grep url=
+```
+
+**The URL is open to anyone who has it** — registration and the admin panel
+included. There is no gate in front of it, so bring it up only while someone is
+playing and take it down afterwards.
+
+Free-plan limits worth knowing: one online agent per account (a second tunnel on
+the same token fails with `ERR_NGROK_334`), one assigned domain, and a warning
+page on the first visit — each player clicks "Visit Site" once per browser, and
+the cookie it sets carries through to the API and WebSocket traffic.
+
+How it works: the tunnel points at vite, not the backend. Vite proxies `/api` and
+the `/authority` websocket through to the backend, so one tunnel covers all three
+surfaces the game needs, and `make tunnel` repoints the client's `VITE_API_URL` at
+the public origin (the client calls absolute URLs, so a remote browser left on the
+default would call its own machine).
+
 ## Ubuntu
 
 Tested on 22.04 and 24.04. The `docker.io` package in Ubuntu's own repos ships
