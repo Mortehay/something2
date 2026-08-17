@@ -72,5 +72,8 @@ commit_convention: branch `feat/<slug>` or `fix/<slug>`; commit subject
 project had no review state, so work jumped from In Progress straight to Done
 with nowhere to record evidence.
 
-**Modules are disabled in this workspace** — group work with a parent work item
-plus labels, not modules.
+**Modules are enabled** as of 2026-08-17, verified with `project get_features`
+(`modules: true`), and the hosting backlog uses them. This file previously said
+they were disabled, which was true when it was written; check the feature flags
+rather than trusting either statement. Grouping by a parent work item plus
+labels still works and is what the older epics use.
