@@ -162,9 +162,25 @@ fi
 # that silently stopped rather than as a deploy that was killed. It also
 # leaves the database up, which has no reason to bounce for an application
 # release.
-SERVICES="backend caddy cloudflared"
+# cloudflared is NOT here, and that is the single most useful thing in this
+# script. A quick tunnel takes a new random hostname every time it starts, so
+# restarting it on every deploy meant: the public URL players hold changes on
+# every deploy, and the DEPLOY_HOOK_URL that CI posts to goes stale, so the
+# NEXT push fails with a Cloudflare 530 against a hostname that no longer
+# exists. Both were observed.
+#
+# It does not need restarting. cloudflared connects to `caddy:80` by name, and
+# docker's embedded DNS resolves the replacement container -- so leaving the
+# tunnel alone across a deploy keeps the hostname stable for as long as the
+# board stays up, at the cost of a few seconds of 502 while Caddy restarts.
+SERVICES="backend caddy"
 run_step "stop the serving containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES stop $SERVICES"
 run_step "start the new containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps db $SERVICES"
+
+# Started if absent, never recreated -- see the note on SERVICES above. A
+# tunnel that is already up keeps its hostname.
+run_step "ensure the tunnel is running" \
+  pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --no-recreate cloudflared"
 
 # The deploy hook is started, never RESTARTED, and it is deliberately not in
 # $SERVICES above. When a deploy was triggered by the hook, restarting the

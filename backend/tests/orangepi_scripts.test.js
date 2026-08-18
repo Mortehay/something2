@@ -614,3 +614,24 @@ test('step durations survive a shell without nanosecond date', () => {
   assert.match(result.stdout, /\(1(\.\d+)?s\)/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('a deploy never restarts the tunnel or the hook', () => {
+  // Both are stateful in a way the game containers are not. Restarting
+  // cloudflared rotates the public URL -- which changes the address players
+  // hold AND invalidates the DEPLOY_HOOK_URL that CI posts to, so the next
+  // push fails against a hostname that no longer exists. Restarting the hook
+  // kills the very deploy that is running inside it.
+  const text = fs.readFileSync(path.join(SCRIPTS, 'deploy.sh'), 'utf8');
+  const stopLine = /run_step "stop the serving containers".*\n?.*/.exec(text)[0];
+  const services = /SERVICES="([^"]+)"/.exec(text)[1].split(/\s+/);
+  assert.ok(services.includes('backend') && services.includes('caddy'));
+  assert.ok(!services.includes('cloudflared'), 'restarting the tunnel rotates the public URL');
+  assert.ok(!services.includes('deploy-hook'), 'restarting the hook kills the deploy running inside it');
+  assert.doesNotMatch(stopLine, /cloudflared|deploy-hook/);
+  // Both are still brought UP if absent, with --no-recreate so a running one
+  // is left exactly as it is.
+  for (const service of ['cloudflared', 'deploy-hook']) {
+    const line = new RegExp(`up -d[^"]*--no-recreate ${service}`).exec(text);
+    assert.ok(line, `${service} must be started with --no-recreate`);
+  }
+});

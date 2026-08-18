@@ -283,10 +283,14 @@ dials outward. The cost is that **the hostname is random and changes every
 time the tunnel restarts**, and Cloudflare offers it without guarantees.
 
 That is survivable because the bundle addresses the API on the same origin
-that served it, so a new hostname never needs a rebuild. It is not free,
-though: `make pi-hook-register` has to be re-run after a restart, because the
-deploy hook's URL is one of the two Actions secrets. A stable hostname needs a
-named tunnel on a domain you own, which is phase 2.
+that served it, so a new hostname never needs a rebuild.
+
+A deploy does **not** restart the tunnel — only the game containers — so the
+hostname survives deploys and stays put for as long as the board does. It
+changes on a reboot, on `make pi-down`/`pi-up`, and if cloudflared itself
+restarts; after any of those, re-run `make pi-hook-register`, because the
+hook's URL is one of the two Actions secrets. A hostname that survives *that*
+needs a named tunnel on a domain you own, which is phase 2.
 
 ### Delivery from a push
 
