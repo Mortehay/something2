@@ -178,3 +178,27 @@ finish "pi-deploy"
 printf '\n%smoved%s      %s -> %s (%s)\n' "$C_BOLD" "$C_OFF" "$FROM_COMMIT" "$TO_COMMIT" "$IMAGE_SOURCE"
 url="$(pi_tunnel_url)"
 [ -n "$url" ] && printf '%spublic%s     %s\n' "$C_BOLD" "$C_OFF" "$url"
+
+# A deploy restarts the tunnel, and a quick tunnel takes a NEW hostname every
+# time -- so every deploy invalidates the DEPLOY_HOOK_URL that CI posts to,
+# and the next push fails with a Cloudflare 530 against a hostname that no
+# longer exists. That was observed, not predicted.
+#
+# So the URL is refreshed here rather than left as a manual step nobody
+# remembers. Deliberately narrow: only from the workstation (the board has no
+# gh and no credentials), only when gh is installed, and only when the
+# repository ALREADY has a DEPLOY_HOOK_URL -- i.e. when CD was wired up on
+# purpose. It never enables delivery as a side effect of a deploy; it only
+# keeps delivery that already exists from quietly breaking.
+if [ -z "${PI_LOCAL:-}" ] && [ -n "$url" ] && command -v gh >/dev/null 2>&1; then
+  repo_slug="$(printf '%s' "${GIT_REPOSITORY%.git}" | sed -E 's#.*github\.com[:/]##')"
+  if gh secret list --repo "$repo_slug" 2>/dev/null | grep -q '^DEPLOY_HOOK_URL'; then
+    if printf '%s' "${url}/deploy-hook" | gh secret set DEPLOY_HOOK_URL --repo "$repo_slug" >/dev/null 2>&1; then
+      printf '%shook%s       DEPLOY_HOOK_URL refreshed on %s (the tunnel hostname changed)\n' \
+        "$C_BOLD" "$C_OFF" "$repo_slug"
+    else
+      printf '%shook%s       could not refresh DEPLOY_HOOK_URL -- run `make pi-hook-register`\n' \
+        "$C_YELLOW" "$C_OFF" >&2
+    fi
+  fi
+fi
