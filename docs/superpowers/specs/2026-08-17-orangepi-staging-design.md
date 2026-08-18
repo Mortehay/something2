@@ -365,3 +365,31 @@ a stop, copy, repoint, start — not a migration.
   `Game.js:244` logs that the connection was lost and waits for a reload.
 - **The deploy hook is an internet-reachable endpoint.** HMAC verification is
   not optional, and a failure to verify must reject rather than log-and-continue.
+
+## Verified on hardware, 2026-08-18
+
+Built against a real Orange Pi Zero3 (`opiz03`, Allwinner H618, aarch64,
+Armbian 25.5.1). Deviations found by running it rather than reading it:
+
+- **`rm -rf /app` cannot work.** Removing a directory needs write permission
+  on its parent, which is `/`. Provisioning empties the app directory's
+  contents instead, which also preserves its ownership and any mount on it.
+- **The board's `.env` is written key by key**, not all-or-nothing. Generated
+  secrets are never rewritten; configuration the workstation owns is updated
+  in place. All-or-nothing meant a key added later never reached a board
+  provisioned before it existed.
+- **The deploy hook needs the board's own `.env`.** It runs `deploy.sh` on the
+  board, where the app directory has no `.env` at all, so `lib.sh` loads
+  `$ORANGEPI_DATA_DIR/.env` in `PI_LOCAL` mode.
+- **A deploy must not restart the hook container**, or a hook-triggered deploy
+  kills itself halfway through. It is started with `--no-recreate` and
+  recreated only by provisioning, which is always workstation-initiated.
+- **Every deploy rotates the quick tunnel's hostname**, which invalidates the
+  `DEPLOY_HOOK_URL` that CI posts to; the next push then fails with a
+  Cloudflare 530. A workstation deploy now refreshes that secret. This is the
+  cost of phase 1 and the clearest argument for phase 2.
+- **`docker stats` reports 0B on this kernel** (no cgroup memory accounting).
+  Measured with `ps` instead: the whole stack uses 548 MB of 3.9 GB, the
+  deploy hook 45 MB of that.
+- **Pulling the published arm64 image takes 11 seconds**, against ten to
+  twenty minutes to build the same commit on the board.
