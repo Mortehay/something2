@@ -275,13 +275,30 @@ finish() {
   printf '\n%sall %s step(s) ok.%s\n' "$C_GREEN" "${#STEP_NAMES[@]}" "$C_OFF"
 }
 
-# The public URL, read from the cloudflared container's log. Quick tunnels
-# print it once at startup and never again, so this reads the whole log rather
-# than tailing it. Empty output means "no tunnel running", which callers must
-# treat as a state, not as an error.
+# The public URL, read from the cloudflared container's log.
+#
+# Scoped to the CURRENT container run, and this is not a detail: a quick
+# tunnel takes a new random hostname on every restart, docker keeps the whole
+# log across restarts, and the URL is printed once at startup. A plain
+# `docker logs | tail -1` therefore returns the PREVIOUS hostname during the
+# seconds between a restart and the new banner -- which is exactly when a
+# deploy prints its summary. That was observed: a deploy reported a hostname
+# that had already stopped existing.
+#
+# Retries because the banner takes a moment to appear. Empty output means "no
+# tunnel running", which callers must treat as a state rather than an error.
 pi_tunnel_url() {
-  pi_ssh "docker logs something2-orangepi-cloudflared-1 2>&1 \
-    | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1" 2>/dev/null || true
+  local attempts="${1:-10}" started url
+  started="$(pi_ssh "docker inspect -f '{{.State.StartedAt}}' something2-orangepi-cloudflared-1 2>/dev/null" || true)"
+  [ -n "$started" ] || return 0
+  local i
+  for i in $(seq 1 "$attempts"); do
+    url="$(pi_ssh "docker logs --since $(printf '%q' "$started") something2-orangepi-cloudflared-1 2>&1 \
+      | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1" 2>/dev/null || true)"
+    [ -n "$url" ] && { printf '%s\n' "$url"; return 0; }
+    sleep 2
+  done
+  return 0
 }
 
 # --- Status rendering ------------------------------------------------------

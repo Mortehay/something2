@@ -202,6 +202,116 @@ still serves a good-looking page while leaving the game unplayable, so
 this is worth running before every deploy, not just after a routing
 change.
 
+## Operating the Orange Pi
+
+The board is treated as a production server, not a second development
+machine: no bind mounts, no dev server, no `make dev` equivalent. Everything
+is driven from the workstation over ssh, and every target reports the steps
+it performed, their status and their duration, then exits non-zero if any
+step failed.
+
+### First time
+
+Fill in the `Orange Pi REMOTE OPERATION` block in `.env` (see
+`.env.example`), then:
+
+```bash
+make pi-keygen      # workstation key -> the board's authorized_keys
+make pi-provision   # bare board -> running, publicly reachable stack
+```
+
+`pi-keygen` never regenerates an existing key — doing that silently would
+lock you out of the board — and it verifies a password-free login actually
+works rather than trusting that `ssh-copy-id` exited 0. After it succeeds,
+`ORANGEPI_PASSWORD` can be blanked; nothing else reads it.
+
+`pi-provision` is idempotent. Everything that can refuse happens before
+anything changes: reachability, the data-safety rule, and whether the board
+can reach the repository anonymously. So a wrong `.env` costs a ten-second
+refusal instead of a half-provisioned board.
+
+### The data-safety rule
+
+Two directories, and the difference between them is load-bearing:
+
+| | |
+|---|---|
+| `ORANGEPI_APP_DIR` (default `/app`) | the clone, and nothing else. **Emptied on every provision.** |
+| `ORANGEPI_DATA_DIR` (default `/srv/something2`) | Postgres's volume and the board's own `.env`. **Never touched by provisioning.** |
+
+`provision.sh` refuses to run when the data directory resolves *inside* the
+app directory, after symlinks are resolved on the board. Without that check a
+second `make pi-provision` would silently destroy every account and world on
+the box — and it would present as database corruption rather than as the
+operator error it is.
+
+The board's `.env` lives in the data directory for the same reason. Its
+secrets are generated **on the board** and never travel from the workstation,
+and an existing value is never rewritten: a regenerated `POSTGRES_PASSWORD`
+against an existing volume is an authentication failure that reads like data
+loss.
+
+### Day to day
+
+```bash
+make pi-status                  # containers, health, disk, memory, tunnel URL
+make pi-deploy                  # reset to the branch tip, migrate, restart
+make pi-logs                    # follow the board's logs
+make pi-up / pi-down / pi-restart
+make pi-migrate-up / pi-migrate-status
+make pi-seed-catalogs
+make pi-seed-map SPEC=vale-region
+make pi-shell / pi-db-shell
+make pi-tunnel-url              # the current public URL
+```
+
+The seeding targets reuse the same `require-spec` guard as their local twins,
+so a misspelled `SPEC` is rejected on the workstation before anything reaches
+the network.
+
+`make pi-reset CONFIRM=<the board's address>` wipes and re-seeds the board's
+database. It requires the address rather than a yes/no answer — a prompt is
+answered by reflex, an address is not — and every command in it runs through
+the remote transport, so it cannot reach the local development database
+whatever you pass it.
+
+### The public URL changes on every tunnel restart
+
+Phase 1 uses a `trycloudflare` quick tunnel: no account, no domain, no
+certificate on the board, and it works behind CGNAT because `cloudflared`
+dials outward. The cost is that **the hostname is random and changes every
+time the tunnel restarts**, and Cloudflare offers it without guarantees.
+
+That is survivable because the bundle addresses the API on the same origin
+that served it, so a new hostname never needs a rebuild. It is not free,
+though: `make pi-hook-register` has to be re-run after a restart, because the
+deploy hook's URL is one of the two Actions secrets. A stable hostname needs a
+named tunnel on a domain you own, which is phase 2.
+
+### Delivery from a push
+
+```
+main  --(promotion PR)-->  orangepi  --(push)-->  Actions  -->  GHCR  -->  hook  -->  the board
+```
+
+`orangepi` is the deployment branch and is never developed on directly; the
+promotion PR is the human gate in front of a publicly reachable machine. The
+workflow builds `linux/amd64` and `linux/arm64` natively in parallel, joins
+them into one manifest under the commit sha, and only then calls the board's
+deploy hook — a push webhook would fire before any image existed, and the
+board would fall back to a twenty-minute on-board build.
+
+Point Actions at the board once with:
+
+```bash
+make pi-hook-register    # sets DEPLOY_HOOK_SECRET and DEPLOY_HOOK_URL via gh
+```
+
+The hook verifies an HMAC over the request body, refuses stale requests,
+refuses a second deploy while one is running, and runs `deploy.sh` with
+nothing from the request in it. It exits rather than starting at all when no
+secret is configured.
+
 ## Ubuntu
 
 Tested on 22.04 and 24.04. The `docker.io` package in Ubuntu's own repos ships
