@@ -60,37 +60,12 @@ echo "###END"
 REMOTE
 )"
 
-section() { printf '%s\n' "$report" | sed -n "/^###$1\$/,/^###/p" | sed '1d;$d'; }
-
-containers="$(section CONTAINERS)"
-printf '%scontainers%s\n' "$C_BOLD" "$C_OFF"
-if [ -z "$containers" ]; then
-  # A reachable board with no containers is the normal "stack is down" state,
-  # not a failure of this command -- say so plainly and keep going.
-  printf '  %sSTACK DOWN%s -- no something2-orangepi containers are running\n' "$C_YELLOW" "$C_OFF"
-else
-  printf '%s\n' "$containers" | while IFS=$'\t' read -r name status; do
-    case "$status" in
-      Up*unhealthy*) colour="$C_RED" ;;
-      Up*) colour="$C_GREEN" ;;
-      *) colour="$C_YELLOW" ;;
-    esac
-    printf '  %s%-42s%s %s\n' "$colour" "$name" "$C_OFF" "$status"
-  done
-fi
-
-code="$(section HEALTH | tr -d '[:space:]')"
-printf '\n%shealth%s     ' "$C_BOLD" "$C_OFF"
-case "$code" in
-  200) printf '%sHTTP 200%s  (via caddy on 127.0.0.1:8080/api/health)\n' "$C_GREEN" "$C_OFF" ;;
-  000|'') printf '%sDOWN%s      (nothing answering on 127.0.0.1:8080)\n' "$C_RED" "$C_OFF" ;;
-  *) printf '%sHTTP %s%s  (caddy answered, but not with 200)\n' "$C_YELLOW" "$code" "$C_OFF" ;;
-esac
-
-printf '%sdisk%s       %s\n' "$C_BOLD" "$C_OFF" "$(section DISK)"
-printf '%smemory%s     %s\n' "$C_BOLD" "$C_OFF" "$(section MEMORY)"
-printf '%suptime%s     %s\n' "$C_BOLD" "$C_OFF" "$(section UPTIME)"
-printf '%scommit%s     %s\n' "$C_BOLD" "$C_OFF" "$(section COMMIT)"
+# Presentation is render_status in lib.sh; this script's job is the transport
+# and the tunnel URL, which needs a second command on the board.
+set +e
+printf '%s\n' "$report" | render_status
+health_ok=$?
+set -e
 
 url="$(pi_tunnel_url)"
 printf '%stunnel%s     ' "$C_BOLD" "$C_OFF"
@@ -103,4 +78,4 @@ fi
 # Exit code carries the headline so a script can gate on it: 0 only when the
 # stack is actually serving. `make pi-status` printing a red DOWN and exiting 0
 # would be a status command that lies to everything except a human reader.
-[ "$code" = "200" ] || exit 1
+exit "$health_ok"

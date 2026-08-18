@@ -253,3 +253,55 @@ pi_tunnel_url() {
   pi_ssh "docker logs something2-orangepi-cloudflared-1 2>&1 \
     | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1" 2>/dev/null || true
 }
+
+# --- Status rendering ------------------------------------------------------
+#
+# Presentation lives here, next to the other reporting, and takes the board's
+# report as DATA on stdin rather than fetching it. Transport (status.sh) and
+# presentation are then separable: the interesting states -- a stack that is
+# down, a health endpoint answering something other than 200 -- can be
+# exercised for real without stopping a running board to produce them, which
+# is not something a status command should require anybody to do.
+#
+# Sets STATUS_HEALTH_CODE and returns non-zero when the stack is not serving.
+render_status() {
+  local report; report="$(cat)"
+  local section
+  section() { printf '%s\n' "$report" | sed -n "/^###$1\$/,/^###/p" | sed '1d;$d'; }
+
+  local containers; containers="$(section CONTAINERS)"
+  printf '%scontainers%s\n' "$C_BOLD" "$C_OFF"
+  if [ -z "$containers" ]; then
+    # A reachable board with no containers is the normal "stack is down"
+    # state, not a failure of this command -- say so plainly and keep going,
+    # because the disk and memory numbers below are exactly what you want
+    # when the stack will not start.
+    printf '  %sSTACK DOWN%s -- no something2-orangepi containers are running\n' "$C_YELLOW" "$C_OFF"
+  else
+    local name status colour
+    while IFS=$'\t' read -r name status; do
+      [ -n "$name" ] || continue
+      case "$status" in
+        Up*unhealthy*) colour="$C_RED" ;;
+        Up*) colour="$C_GREEN" ;;
+        *) colour="$C_YELLOW" ;;
+      esac
+      printf '  %s%-42s%s %s\n' "$colour" "$name" "$C_OFF" "$status"
+    done <<< "$containers"
+  fi
+
+  STATUS_HEALTH_CODE="$(section HEALTH | tr -d '[:space:]')"
+  printf '\n%shealth%s     ' "$C_BOLD" "$C_OFF"
+  case "$STATUS_HEALTH_CODE" in
+    200) printf '%sHTTP 200%s  (via caddy on 127.0.0.1:8080/api/health)\n' "$C_GREEN" "$C_OFF" ;;
+    000|'') printf '%sDOWN%s      (nothing answering on 127.0.0.1:8080)\n' "$C_RED" "$C_OFF" ;;
+    *) printf '%sHTTP %s%s  (caddy answered, but not with 200)\n' "$C_YELLOW" "$STATUS_HEALTH_CODE" "$C_OFF" ;;
+  esac
+
+  printf '%sdisk%s       %s\n' "$C_BOLD" "$C_OFF" "$(section DISK)"
+  printf '%smemory%s     %s\n' "$C_BOLD" "$C_OFF" "$(section MEMORY)"
+  printf '%suptime%s     %s\n' "$C_BOLD" "$C_OFF" "$(section UPTIME)"
+  printf '%scommit%s     %s\n' "$C_BOLD" "$C_OFF" "$(section COMMIT)"
+
+  [ "$STATUS_HEALTH_CODE" = "200" ]
+}

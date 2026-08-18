@@ -261,3 +261,72 @@ test('pi-keygen says what to do when it cannot authenticate at all', () => {
   assert.match(result.stderr, /ORANGEPI_PASSWORD is empty|ssh-copy-id/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// The states a status command exists for are the bad ones, and they are
+// exactly the states that are expensive to produce on a live board. Feeding
+// render_status a report is how they get exercised for real without stopping
+// a running stack to see what stopping it looks like.
+function renderStatus(report) {
+  // %b, not %s: JSON.stringify writes newlines and tabs as backslash escapes,
+  // and %s would hand render_status one long line with no sections in it --
+  // which is a very convincing way to make every one of these tests pass or
+  // fail for the wrong reason.
+  return runWithLib(`printf '%b' ${JSON.stringify(report)} | render_status`);
+}
+
+const REPORT_UP = [
+  '###CONTAINERS',
+  'something2-orangepi-caddy-1\tUp 2 hours',
+  'something2-orangepi-backend-1\tUp 2 hours (healthy)',
+  '###HEALTH',
+  '200',
+  '###DISK',
+  '/dev/mmcblk0p1  57G  3.5G  53G  7% /',
+  '###MEMORY',
+  '3920 MB total, 574 MB used, 3346 MB available',
+  '###UPTIME',
+  'up 6 hours',
+  '###COMMIT',
+  'abc1234 some commit',
+  '###END',
+  '',
+].join('\n');
+
+test('pi-status reports a serving stack and exits zero', () => {
+  const result = renderStatus(REPORT_UP);
+  assert.strictEqual(result.status, 0);
+  assert.match(result.stdout, /something2-orangepi-caddy-1/);
+  assert.match(result.stdout, /HTTP 200/);
+  // The last section is the one a naive sed range silently truncates.
+  assert.match(result.stdout, /commit\s+abc1234 some commit/);
+});
+
+test('pi-status reports a stopped stack as DOWN, and does not exit zero', () => {
+  const result = renderStatus(
+    ['###CONTAINERS', '###HEALTH', '000', '###DISK', 'x', '###MEMORY', 'y', '###UPTIME', 'z',
+     '###COMMIT', 'abc1234 c', '###END', ''].join('\n')
+  );
+  assert.match(result.stdout, /STACK DOWN/);
+  assert.match(result.stdout, /DOWN\s+\(nothing answering/);
+  // A status command that prints a red DOWN and exits 0 lies to everything
+  // except a human reader -- including the CI gate that calls it.
+  assert.notStrictEqual(result.status, 0);
+  // The board is still reachable in this state, so the numbers that tell you
+  // WHY it will not start must still be printed.
+  assert.match(result.stdout, /disk/);
+  assert.match(result.stdout, /memory/);
+});
+
+test('pi-status distinguishes a wrong answer from no answer', () => {
+  // 502 means Caddy is up and the backend is not: a different fault from
+  // "nothing is listening", and it needs a different first move.
+  const result = renderStatus(REPORT_UP.replace('\n200\n', '\n502\n'));
+  assert.match(result.stdout, /HTTP 502/);
+  assert.match(result.stdout, /caddy answered, but not with 200/);
+  assert.notStrictEqual(result.status, 0);
+});
+
+test('pi-status flags an unhealthy container rather than calling it up', () => {
+  const result = renderStatus(REPORT_UP.replace('Up 2 hours (healthy)', 'Up 2 hours (unhealthy)'));
+  assert.match(result.stdout, /unhealthy/);
+});
