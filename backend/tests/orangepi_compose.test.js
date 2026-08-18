@@ -67,8 +67,12 @@ test('postgres data lives outside the app directory', () => {
   const text = read(COMPOSE);
   // Provisioning empties the app dir; data under it would be destroyed on
   // every re-provision, and would present as corruption rather than as
-  // operator error.
-  assert.match(text, /\$\{ORANGEPI_DATA_DIR[^}]*\}\/pgdata:\/var\/lib\/postgresql\/data/);
+  // operator error. It must be REQUIRED (`:?`), not merely present with a
+  // default (`:-`): a default path inside the app directory would still
+  // match a looser assertion here while defeating the invariant this test
+  // exists to guard -- only `:?` forces an operator to choose a real path
+  // outside the app directory before the stack will start.
+  assert.match(text, /\$\{ORANGEPI_DATA_DIR:\?[^}]*\}\/pgdata:\/var\/lib\/postgresql\/data/);
 });
 
 test('the tunnel never opens as a side effect of starting the stack', () => {

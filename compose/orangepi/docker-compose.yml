@@ -69,8 +69,12 @@ services:
       - POSTGRES_DB=game_db
     volumes:
       # OUTSIDE the app directory, always. Provisioning empties the app dir,
-      # and data underneath it would be destroyed on every re-provision.
-      - ${ORANGEPI_DATA_DIR:-./.orangepi-data}/pgdata:/var/lib/postgresql/data
+      # and data underneath it would be destroyed on every re-provision. This
+      # is REQUIRED rather than defaulted for exactly that reason: a default
+      # under the app directory would work fine today and silently lose every
+      # account and world on the next re-provision, presenting as database
+      # corruption rather than as the operator error it actually is.
+      - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d game_db"]
       interval: 10s
