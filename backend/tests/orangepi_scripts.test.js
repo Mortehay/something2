@@ -537,3 +537,60 @@ test('the seeding targets reuse the local require-spec guard', () => {
     assert.match(body, /\$\(require-spec\)/, `${name} must reject a bad SPEC before connecting`);
   }
 });
+
+// --- The board-side (PI_LOCAL) path ----------------------------------------
+//
+// deploy.sh runs in two places: an operator's workstation over ssh, and the
+// deploy hook ON the board. The second is the one CI uses and the one nobody
+// watches, and it has a different environment -- no ORANGEPI_LOGIN, no
+// ORANGEPI_ADDRESS, because there is nothing to reach. Under `set -u` a bare
+// reference to either kills the deploy one line in, which is exactly how the
+// hook's first working run died.
+
+test('deploy.sh runs on the board without the ssh variables', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-local-'));
+  fs.writeFileSync(path.join(dir, '.env'), '');
+  const result = spawnSync('bash', [path.join(SCRIPTS, 'deploy.sh')], {
+    encoding: 'utf8',
+    timeout: 60000,
+    env: {
+      ...process.env,
+      PI_LOCAL: '1',
+      REPO_ROOT: dir,
+      ORANGEPI_DATA_DIR: dir,
+      ORANGEPI_APP_DIR: path.join(dir, 'no-such-app'),
+      GIT_REPOSITORY: 'https://github.com/example/repo.git',
+      ORANGEPI_BRANCH: 'orangepi',
+      ORANGEPI_LOGIN: undefined,
+      ORANGEPI_ADDRESS: undefined,
+    },
+  });
+  const output = result.stdout + result.stderr;
+  // It is expected to FAIL here -- there is no clone at that path. What it
+  // must not do is fail for the wrong reason, before reaching any real work.
+  assert.doesNotMatch(output, /unbound variable/, output.slice(0, 400));
+  assert.match(output, /on the board itself/);
+});
+
+test('an image prefix that cannot be derived is reported, not guessed', () => {
+  // A nonsense prefix makes every pull fail and every deploy take the
+  // twenty-minute board build -- working, but slow for a reason nothing on
+  // screen explains.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-local-'));
+  fs.writeFileSync(path.join(dir, '.env'), '');
+  const result = spawnSync('bash', [path.join(SCRIPTS, 'deploy.sh')], {
+    encoding: 'utf8',
+    timeout: 60000,
+    env: {
+      ...process.env,
+      PI_LOCAL: '1',
+      REPO_ROOT: dir,
+      ORANGEPI_DATA_DIR: dir,
+      ORANGEPI_APP_DIR: dir,
+      GIT_REPOSITORY: 'https://gitlab.example.com/team/repo.git',
+      ORANGEPI_BRANCH: 'orangepi',
+    },
+  });
+  assert.match(result.stderr, /not a github\.com url/);
+  assert.match(result.stderr, /ORANGEPI_IMAGE_PREFIX/);
+});

@@ -34,15 +34,36 @@ PROFILES="$(pi_profiles)"
 # place to change it. Overridable for a fork or a different registry.
 derive_image_prefix() {
   local url="${GIT_REPOSITORY%.git}"
-  local path="${url#*github.com[:/]}"
-  path="${url#*github.com/}"
+  case "$url" in
+    *github.com[:/]*) ;;
+    *)
+      # Anything else would produce a nonsense prefix, every pull would fail,
+      # and every deploy would silently take the twenty-minute board build --
+      # working, but slow for a reason nothing on screen explains.
+      printf 'GIT_REPOSITORY (%s) is not a github.com url, so the GHCR image name cannot be derived from it.\n' "$GIT_REPOSITORY" >&2
+      printf 'set ORANGEPI_IMAGE_PREFIX explicitly, e.g. ORANGEPI_IMAGE_PREFIX=ghcr.io/owner/repo\n' >&2
+      return 1
+      ;;
+  esac
+  local path="${url#*github.com/}"
   path="${path#*github.com:}"
   printf 'ghcr.io/%s' "$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')"
 }
 IMAGE_PREFIX="${ORANGEPI_IMAGE_PREFIX:-$(derive_image_prefix)}"
 
-printf '%sboard%s      %s@%s\n%sbranch%s     %s\n%simages%s     %s-{backend,caddy}\n\n' \
-  "$C_BOLD" "$C_OFF" "$ORANGEPI_LOGIN" "$ORANGEPI_ADDRESS" \
+if [ -n "${PI_LOCAL:-}" ]; then
+  WHERE="on the board itself"
+else
+  WHERE="${ORANGEPI_LOGIN}@${ORANGEPI_ADDRESS}"
+fi
+
+# ORANGEPI_LOGIN and ORANGEPI_ADDRESS describe how to REACH the board, and in
+# PI_LOCAL mode there is nothing to reach -- this is running on it. They are
+# therefore not required there, and must not be dereferenced bare under
+# `set -u`: the deploy hook's first working run died on exactly that, one line
+# into a script that had otherwise resolved everything it needed.
+printf '%sboard%s      %s\n%sbranch%s     %s\n%simages%s     %s-{backend,caddy}\n\n' \
+  "$C_BOLD" "$C_OFF" "$WHERE" \
   "$C_BOLD" "$C_OFF" "$ORANGEPI_BRANCH" \
   "$C_BOLD" "$C_OFF" "$IMAGE_PREFIX"
 
