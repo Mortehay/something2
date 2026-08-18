@@ -150,7 +150,15 @@ run_privileged() {
   else echo "sudo needs a password and ORANGEPI_PASSWORD is empty" >&2; exit 1; fi
 }
 if [ -d "$DATA" ]; then
-  echo "keeping the existing data directory $DATA ($(du -sh "$DATA" 2>/dev/null | cut -f1) on disk)"
+  # Deliberately not `du`: pgdata is 0700 and owned by postgres's uid, so an
+  # unprivileged du reports a few kilobytes for a directory holding the whole
+  # database -- a reassuring number that is wrong in the one direction that
+  # matters here.
+  if [ -d "$DATA/pgdata" ]; then
+    echo "keeping the existing data directory $DATA (contains a postgres volume)"
+  else
+    echo "keeping the existing data directory $DATA (no postgres volume yet)"
+  fi
 else
   run_privileged mkdir -p "$DATA"
   run_privileged chown "$LOGIN:$LOGIN" "$DATA"
@@ -224,11 +232,18 @@ run_privileged() {
   elif [ -n "$PW" ]; then printf '%s\n' "$PW" | sudo -S -p '' "$@";
   else echo "sudo needs a password and ORANGEPI_PASSWORD is empty" >&2; exit 1; fi
 }
-if [ -d "$APP" ] && [ ! -w "$APP" ]; then
-  run_privileged chown -R "$LOGIN:$LOGIN" "$APP"
+if [ -d "$APP" ]; then
+  [ -w "$APP" ] || run_privileged chown -R "$LOGIN:$LOGIN" "$APP"
+  # Empty the CONTENTS, do not remove the directory itself. Removing /app
+  # needs write permission on its PARENT -- which is / -- so `rm -rf /app`
+  # fails with "permission denied" for a user who owns /app outright. It also
+  # keeps the directory's ownership and any mount on it intact, which
+  # recreating it would quietly change.
+  find "$APP" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null \
+    || run_privileged find "$APP" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+else
+  mkdir -p "$APP" 2>/dev/null || { run_privileged mkdir -p "$APP"; run_privileged chown "$LOGIN:$LOGIN" "$APP"; }
 fi
-rm -rf "$APP"
-mkdir -p "$APP" 2>/dev/null || { run_privileged mkdir -p "$APP"; run_privileged chown "$LOGIN:$LOGIN" "$APP"; }
 # --depth 1: the board needs the working tree, not the history, and a shallow
 # clone is a fraction of the bytes and of the flash writes. deploy.sh fetches
 # the same way.
