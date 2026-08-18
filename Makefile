@@ -4,7 +4,7 @@
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop
 
-COMPOSE_FILE = compose/docker-compose.yml
+COMPOSE_FILE = compose/develop/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
 
 # --- Map specs -------------------------------------------------------------
@@ -37,7 +37,7 @@ up:
 	@echo "Containers are up, but the app is NOT serving yet -- run 'make dev'."
 
 # The frontend/backend/engine images all end in `CMD ["tail","-f","/dev/null"]`
-# (compose/*.Dockerfile), so `make up` gives you idle containers with the
+# (compose/develop/*.Dockerfile), so `make up` gives you idle containers with the
 # source bind-mounted and nothing listening on :15173 or :13101. That is
 # deliberate -- it lets you restart a dev server without bouncing the
 # container -- but the "now start the servers" half was never written down or
@@ -56,7 +56,7 @@ dev:
 	@echo "check with 'make dev-status', follow output with 'make logs'."
 
 # `npm install` above is not busywork. Both services mount an ANONYMOUS volume
-# over /app/node_modules (compose/docker-compose.yml) purely to stop the host
+# over /app/node_modules (compose/develop/docker-compose.yml) purely to stop the host
 # checkout's node_modules from shadowing the image's. An anonymous volume is
 # populated once, when it is first created, and then survives `docker compose
 # build` and `up` untouched -- so adding a dependency to package.json and

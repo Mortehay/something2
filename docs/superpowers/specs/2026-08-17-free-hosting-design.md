@@ -36,8 +36,8 @@ exists and the reason it is larger than any single hosting module.
 
 ### There is no production path at all
 
-`compose/backend.Dockerfile`, `compose/frontend.Dockerfile` and
-`compose/engine.Dockerfile` all end in `CMD ["tail","-f","/dev/null"]`. The
+`compose/develop/backend.Dockerfile`, `compose/develop/frontend.Dockerfile` and
+`compose/develop/engine.Dockerfile` all end in `CMD ["tail","-f","/dev/null"]`. The
 containers idle with the host checkout bind-mounted, and `make dev` execs into
 them to start `nodemon` and the vite **dev server**. Nothing in the repo builds
 a production bundle or runs the backend as a service.

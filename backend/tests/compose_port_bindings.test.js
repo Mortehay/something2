@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-// F-039 (SOMET-219): compose/docker-compose.yml published db/redis with bare
+// F-039 (SOMET-219): compose/develop/docker-compose.yml published db/redis with bare
 // "HOST:CONTAINER" port mappings. Docker Compose binds a bare mapping to
 // 0.0.0.0, so Postgres (15432) and Redis (16379) were reachable from any
 // device on the LAN, not just the host — confirmed live via `ss -tlnp` and a
@@ -18,7 +18,7 @@ const path = require('node:path');
 // parser is a project dependency) and asserts the db/redis port mappings are
 // bound to 127.0.0.1 explicitly, not left bare.
 
-const COMPOSE_PATH = path.join(__dirname, '..', '..', 'compose', 'docker-compose.yml');
+const COMPOSE_PATH = path.join(__dirname, '..', '..', 'compose', 'develop', 'docker-compose.yml');
 
 function serviceBlock(text, serviceName) {
   const lines = text.split('\n');

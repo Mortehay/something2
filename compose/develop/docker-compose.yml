@@ -4,7 +4,7 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: compose/frontend.Dockerfile
+      dockerfile: compose/develop/frontend.Dockerfile
     ports:
       - "15173:5173"
     volumes:
@@ -26,7 +26,7 @@ services:
   backend:
     build:
       context: .
-      dockerfile: compose/backend.Dockerfile
+      dockerfile: compose/develop/backend.Dockerfile
     ports:
       - "13101:3101"
     volumes:
@@ -48,7 +48,7 @@ services:
   game-engine:
     build:
       context: .
-      dockerfile: compose/engine.Dockerfile
+      dockerfile: compose/develop/engine.Dockerfile
     ports:
       - "18080:8080"
     volumes:

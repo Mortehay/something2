@@ -130,7 +130,7 @@ auto-assigned and cannot be chosen — inventing a name fails with `ERR_NGROK_31
 know yours, run the agent with no domain and read it from the log:
 
 ```bash
-docker compose --project-directory . --env-file .env -f compose/docker-compose.yml \
+docker compose --project-directory . --env-file .env -f compose/develop/docker-compose.yml \
   --profile tunnel run --rm --no-deps ngrok http frontend:5173 --log=stdout | grep url=
 ```
 
@@ -246,7 +246,8 @@ because it belongs to your ngrok account, not to this project.
   (`src/authority/`), Postgres persistence, migrations
 - `frontend/` — Vite + React 19 client, canvas game under
   `src/games/something2/`
-- `compose/` — Docker Compose dev stack
+- `compose/` — Docker build files. `compose/develop/` is the dev stack;
+  production composition lands beside it.
 - `engine/` — **frozen.** An earlier Go implementation of the game server,
   superseded by the Node authority in `backend/src/authority/`. Nothing in the
   running game uses it. `make up` still starts its container because it remains

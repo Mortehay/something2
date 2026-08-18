@@ -30,7 +30,7 @@
 
 - Backend Express API is real (maps + tile-types + entity-types CRUD + WFC generation). No auth.
 - Frontend client-side game has core loop, map rendering, entities, camera. Recent work: Player + Entity classes wired to db, basic enter/exit world flow.
-- Redis is wired into [compose/docker-compose.yml](../compose/docker-compose.yml) (image `redis:7-alpine`, host port 16379) and used by the engine for live world state.
+- Redis is wired into [compose/develop/docker-compose.yml](../compose/develop/docker-compose.yml) (image `redis:7-alpine`, host port 16379) and used by the engine for live world state.
 - Go engine has full WebSocket hub, tick loop, grid collisions, JWT auth, and Postgres/Redis stores; client integration with the engine WebSocket is in progress.
 
 ## Things to avoid

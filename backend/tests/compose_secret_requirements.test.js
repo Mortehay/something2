@@ -22,7 +22,7 @@ const path = require('node:path');
 // non-secret config (POSTGRES_DB, ports) are deliberately out of scope --
 // they aren't the credential half of the pair.
 
-const COMPOSE_PATH = path.join(__dirname, '..', '..', 'compose', 'docker-compose.yml');
+const COMPOSE_PATH = path.join(__dirname, '..', '..', 'compose', 'develop', 'docker-compose.yml');
 
 function requiredPattern(varName) {
   // `${VAR:?...}` -- anything after the `:?` up to the closing brace counts

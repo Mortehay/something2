@@ -29,7 +29,7 @@ Source of truth for each piece is the linked config file. Update those, then upd
 - Authoritative for collisions (grid spatial hash), pathfinding, mob/NPC AI; 60Hz tick loop
 - Local dev and full layout: [engine/README.md](engine/README.md)
 
-## Infra — [compose/docker-compose.yml](compose/docker-compose.yml)
+## Infra — [compose/develop/docker-compose.yml](compose/develop/docker-compose.yml)
 
 - Postgres — db `game_db`, user `user` (compose default), host port 15432 (bound to 127.0.0.1 — host/container-network only, not the LAN)
 - Redis — live runtime state for the engine, image `redis:7-alpine`, host port 16379 (also 127.0.0.1-only)
@@ -52,4 +52,4 @@ External (host) ports use a `1xxxx` prefix to avoid clashes with other dev proje
 | minio    | 19000 | 9000      |
 | minio UI | 19001 | 9001      |
 
-Backend defaults to `process.env.PORT \|\| 3101` ([backend/src/index.js](backend/src/index.js)) — that's the **internal** port. The frontend hits `http://localhost:13101` ([compose/docker-compose.yml](compose/docker-compose.yml) `VITE_API_URL`) — that's the **host-mapped** port. They look mismatched but aren't.
+Backend defaults to `process.env.PORT \|\| 3101` ([backend/src/index.js](backend/src/index.js)) — that's the **internal** port. The frontend hits `http://localhost:13101` ([compose/develop/docker-compose.yml](compose/develop/docker-compose.yml) `VITE_API_URL`) — that's the **host-mapped** port. They look mismatched but aren't.
