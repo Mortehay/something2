@@ -65,3 +65,10 @@ backend/.migration-backups/
 # this path by convention anyway. Docker creates missing bind-mount sources
 # as root, so any such directory must never be committed.
 .orangepi-data/
+
+# SOMET-424: generated keys and tunnel credentials for the Orange Pi. Created
+# by `make pi-keygen`, never committed -- the private half of the workstation
+# key is the whole of the board's access control, and the repository is
+# PUBLIC, so anything landing here would be world-readable the moment it was
+# pushed. Ignored in the same change that created the directory.
+compose/orangepi/secrets/
