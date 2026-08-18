@@ -94,7 +94,15 @@ test('backend image runs the server rather than idling', () => {
     /^CMD \["node", "src\/index\.js"\]/m,
     'production backend must exec the server, not tail -f /dev/null'
   );
-  assert.doesNotMatch(text, /tail/, 'no dev-idling CMD in a production image');
+  // Scoped to CMD lines on purpose. The file's header comment names
+  // `tail -f /dev/null` to contrast with the development image, and a
+  // whole-file check would fail on that comment -- forbidding the code from
+  // explaining itself.
+  const cmdLines = text.split('\n').filter((l) => l.startsWith('CMD'));
+  assert.ok(cmdLines.length > 0, 'a production image must declare a CMD');
+  for (const line of cmdLines) {
+    assert.doesNotMatch(line, /tail/, `dev-idling CMD in a production image: ${line}`);
+  }
 });
 
 test('backend image installs from the lockfile without dev dependencies', () => {
@@ -249,10 +257,14 @@ test('frontend build refuses to bake a localhost API url', () => {
   // VITE_API_URL is read in 20+ modules with a http://localhost:13101
   // fallback. A bundle built without it points every player at their own
   // machine and fails silently, so the BUILD must fail loudly instead.
+  //
+  // Asserting on the GUARD, not on the bare word "localhost": this file's
+  // comments mention localhost too, so a looser check would still pass with
+  // the guard deleted -- a test that asserts nothing.
   assert.match(
     text,
-    /localhost/,
-    'the build must guard against a localhost VITE_API_URL'
+    /grep -qE 'localhost\|127\\\.0\\\.0\\\.1'/,
+    'the build must actively test VITE_API_URL against localhost'
   );
   assert.match(text, /exit 1/, 'the guard must fail the build, not warn');
 });
