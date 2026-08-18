@@ -193,3 +193,71 @@ test('pi-status reports an unreachable board instead of hanging', () => {
   // an absent board.
   assert.ok(elapsed < 45000, `pi-status took ${elapsed}ms on an unreachable board`);
 });
+
+test('pi-keygen never regenerates an existing key', () => {
+  // Silently replacing the workstation key locks the operator out of the
+  // board -- the new public half is not in authorized_keys and the old
+  // private half is gone -- and it does so at the exact moment they are
+  // trying to fix access. The board here is unreachable (TEST-NET-1), so the
+  // run fails at the install step; the key must still be exactly as it was.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-keygen-'));
+  const keyPath = path.join(dir, 'existing_key');
+  fs.writeFileSync(keyPath, 'PRETEND PRIVATE KEY\n');
+  fs.writeFileSync(`${keyPath}.pub`, 'ssh-ed25519 AAAA pretend\n');
+  const before = fs.readFileSync(keyPath, 'utf8');
+
+  const result = spawnSync('bash', [path.join(SCRIPTS, 'keygen.sh')], {
+    encoding: 'utf8',
+    timeout: 90000,
+    env: {
+      ...process.env,
+      ORANGEPI_ADDRESS: '192.0.2.1',
+      ORANGEPI_LOGIN: 'nobody',
+      ORANGEPI_SSH_KEY: keyPath,
+      ORANGEPI_PASSWORD: '',
+      ORANGEPI_DATA_DIR: '/srv/something2',
+      // Without an isolated REPO_ROOT these read the developer's REAL .env --
+      // which supplies a real ORANGEPI_PASSWORD, sends ssh-copy-id at the
+      // unreachable test address, and turns a 10-second assertion into a
+      // multi-minute hang whose cause is invisible from the test name.
+      REPO_ROOT: dir,
+    },
+  });
+
+  assert.strictEqual(fs.readFileSync(keyPath, 'utf8'), before, 'the existing key was modified');
+  // The operator must be able to SEE which of the two happened on a normal
+  // run, not only infer it from the file surviving.
+  assert.match(result.stdout, /keeping the existing one \(never regenerated\)/);
+  assert.doesNotMatch(result.stdout, /generating a new/);
+  // A run that could not install the key must not report success.
+  assert.notStrictEqual(result.status, 0);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('pi-keygen says what to do when it cannot authenticate at all', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-keygen-'));
+  const keyPath = path.join(dir, 'existing_key');
+  fs.writeFileSync(keyPath, 'PRETEND PRIVATE KEY\n');
+  fs.writeFileSync(`${keyPath}.pub`, 'ssh-ed25519 AAAA pretend\n');
+  const result = spawnSync('bash', [path.join(SCRIPTS, 'keygen.sh')], {
+    encoding: 'utf8',
+    timeout: 90000,
+    env: {
+      ...process.env,
+      ORANGEPI_ADDRESS: '192.0.2.1',
+      ORANGEPI_LOGIN: 'nobody',
+      ORANGEPI_SSH_KEY: keyPath,
+      ORANGEPI_PASSWORD: '',
+      ORANGEPI_DATA_DIR: '/srv/something2',
+      // Without an isolated REPO_ROOT these read the developer's REAL .env --
+      // which supplies a real ORANGEPI_PASSWORD, sends ssh-copy-id at the
+      // unreachable test address, and turns a 10-second assertion into a
+      // multi-minute hang whose cause is invisible from the test name.
+      REPO_ROOT: dir,
+    },
+  });
+  // "permission denied" is not an actionable message for the one step in this
+  // module that genuinely needs a password.
+  assert.match(result.stderr, /ORANGEPI_PASSWORD is empty|ssh-copy-id/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

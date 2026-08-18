@@ -3,7 +3,7 @@
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
-        pi-status
+        pi-keygen pi-status
 
 COMPOSE_FILE = compose/develop/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
@@ -271,6 +271,12 @@ verify-routing:
 # These targets never touch the local stack: they run compose ON THE BOARD,
 # over ssh, against compose/orangepi/docker-compose.yml there. The local
 # equivalents above are the ones without the pi- prefix.
+
+# Run FIRST, before pi-provision. Generates the workstation key if absent --
+# never if present -- installs its public half on the board and proves a
+# password-free login actually works.
+pi-keygen:
+	@bash compose/orangepi/scripts/keygen.sh
 
 pi-status:
 	@bash compose/orangepi/scripts/status.sh
