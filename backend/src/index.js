@@ -272,7 +272,11 @@ let spriteGen = require('./services/spriteGen');
 const __setSpriteGen = (impl) => { spriteGen = impl; };
 const assetStore = require('./services/assetStore');
 
-const runner = require('node-pg-migrate').default;
+// DI seam, same shape as __setPool/__setSpriteGen above: tests inject a fake
+// runner to exercise runMigrations()'s success/failure paths without hitting
+// a real database or requiring `require.main === module`.
+let migrationRunner = require('node-pg-migrate').default;
+const __setMigrationRunner = (impl) => { migrationRunner = impl; };
 
 // node-pg-migrate require()s EVERY file in the migrations directory. With no
 // ignorePattern it filters nothing at all (migration.js: `ignorePattern ===
@@ -288,30 +292,53 @@ const runner = require('node-pg-migrate').default;
 // the container disagree about what a migration is.
 const MIGRATION_IGNORE_PATTERN = '(?!.*\\.js$).*';
 
-// Run migrations
-async function runMigrations() {
-  try {
-    await runner({
-      databaseUrl: process.env.DATABASE_URL,
-      dir: path.join(__dirname, '..', 'migrations'),
-      direction: 'up',
-      migrationsTable: 'pgmigrations',
-      ignorePattern: MIGRATION_IGNORE_PATTERN,
-      verbose: true,
-    });
-    console.log('Migrations completed successfully');
-  } catch (err) {
-    console.error('Migration error:', err);
-  }
+// Whether boot should run migrations itself, vs. treating them as a
+// separate deploy step. Strict equality against the literal 'true' -- not
+// JS truthiness -- because the STRING 'false' (and '0', and '') are all
+// truthy, and that class of bug is exactly what this repo keeps shipping
+// (see SEED_TEST_USER's "1" check in .env.example / the seed migration for
+// the same defensiveness). Only an explicit opt-in counts.
+//
+// compose/develop/docker-compose.yml sets MIGRATE_ON_BOOT=true on the
+// backend service, preserving the existing developer experience.
+// compose/orangepi/docker-compose.yml deliberately does NOT set it --
+// migrations there are their own deploy stage (see
+// docs/superpowers/specs/2026-08-17-orangepi-staging-design.md), not a
+// side effect of the server starting.
+function shouldMigrateOnBoot(env = process.env) {
+  return env.MIGRATE_ON_BOOT === 'true';
 }
 
-// Only run migrations (and later, app.listen) when this file is executed
-// directly, not when it's required (e.g. by tests importing `app`). Same
-// guard protects the JWT_SECRET boot check: tests import `app` with their
-// own short, deterministic secret and must not trip it.
+// Run migrations. Deliberately does NOT catch: a failed migration must
+// abort boot rather than leave a half-migrated schema serving traffic. The
+// caller (the require.main block below) is responsible for turning a
+// rejection here into a non-zero process exit before app.listen(...) runs.
+async function runMigrations() {
+  await migrationRunner({
+    databaseUrl: process.env.DATABASE_URL,
+    dir: path.join(__dirname, '..', 'migrations'),
+    direction: 'up',
+    migrationsTable: 'pgmigrations',
+    ignorePattern: MIGRATION_IGNORE_PATTERN,
+    verbose: true,
+  });
+  console.log('Migrations completed successfully');
+}
+
+// The JWT guard must run on every boot, unconditionally, before the server
+// accepts a single connection -- see assertJwtSecret.js. Guarded by
+// `require.main === module` (not run at plain `require()` time) because
+// tests import `app` from this file with their own short, deterministic
+// secret and must not trip it.
+//
+// Migrations are decided and (when enabled) awaited further down, in the
+// same require.main block that calls app.listen(...), so a disabled or
+// failed migration step can never race the server accepting requests. See
+// that block for why this can't just be inlined here: it runs before every
+// route is registered, but route registration order doesn't matter for
+// migrations -- only completing (or aborting) before listen() does.
 if (require.main === module) {
   assertJwtSecretOrExit();
-  runMigrations();
 }
 
 // Decoration defs for GET /chunk's generateChunkDecorations call. Shared with
@@ -3453,21 +3480,40 @@ if (require.main === module) {
     console.error('unhandledRejection (backstopped, process kept alive):', reason);
   });
 
-  // SOMET-329: prime the element/attack-origin validation lists from the
-  // catalogs. Fire-and-forget — it degrades to the seeded lists on failure,
-  // and blocking boot on a cache warm-up would trade a stale dropdown for an
-  // unreachable server.
-  refreshWeaponCatalogCache();
+  // Boot sequence, wrapped in an IIFE so migrations (when enabled) can be
+  // awaited before app.listen(...) starts accepting connections -- an
+  // un-awaited runMigrations() would let the server serve requests against a
+  // schema that is still mid-migration, or one that failed outright.
+  (async () => {
+    if (shouldMigrateOnBoot()) {
+      try {
+        await runMigrations();
+      } catch (err) {
+        // Fail loudly and stop. Continuing here is exactly the bug this
+        // fixes: logging and carrying on leaves a half-migrated schema
+        // serving live traffic.
+        console.error('Migration failed -- aborting boot rather than serving a half-migrated schema:', err);
+        process.exit(1);
+        return;
+      }
+    }
 
-  const server = app.listen(port, () => {
-    console.log(`Backend server running on port ${port}`);
-  });
-  authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
-  console.log('Authority WS attached at /authority');
+    // SOMET-329: prime the element/attack-origin validation lists from the
+    // catalogs. Fire-and-forget — it degrades to the seeded lists on failure,
+    // and blocking boot on a cache warm-up would trade a stale dropdown for an
+    // unreachable server.
+    refreshWeaponCatalogCache();
+
+    const server = app.listen(port, () => {
+      console.log(`Backend server running on port ${port}`);
+    });
+    authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
+    console.log('Authority WS attached at /authority');
+  })();
 }
 
 module.exports = {
   app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, boundedCacheSet,
   apiRateLimiter, behaviorFieldError, abilityFieldError, behaviorAbilitiesError,
-  entityTypeFieldError,
+  entityTypeFieldError, shouldMigrateOnBoot, runMigrations, __setMigrationRunner,
 };
