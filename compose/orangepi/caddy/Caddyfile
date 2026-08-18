@@ -4,19 +4,32 @@
 :80 {
 	encode gzip
 
-	# Both backend surfaces are one upstream. The authority websocket is
-	# attached to the same http server as the REST API
+	# Route /api/* to the backend. Both backend surfaces are one upstream.
+	# The authority websocket is attached to the same http server as the REST API
 	# (backend/src/authority/server.js), and the client derives its url from
 	# the API url (Game.js:379), so they can never be on different hosts.
 	#
 	# Caddy v2 forwards websocket upgrades natively -- no Upgrade/Connection
 	# header dance is needed here, unlike nginx.
-	reverse_proxy /api/* backend:3101
-	reverse_proxy /authority* backend:3101
+	#
+	# Using handle blocks is crucial: handle directives match paths before
+	# applying their directives, so reverse_proxy sees the original path.
+	# Without handle, an unscoped try_files would rewrite every path to
+	# /index.html BEFORE reverse_proxy evaluates, making all paths unreachable.
+	handle /api/* {
+		reverse_proxy backend:3101
+	}
+
+	# Route /authority* to the same backend upstream.
+	handle /authority* {
+		reverse_proxy backend:3101
+	}
 
 	# Everything else is the built bundle. try_files sends unknown paths to
 	# index.html so a hard reload on a react-router route still works.
-	root * /srv
-	try_files {path} /index.html
-	file_server
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
 }

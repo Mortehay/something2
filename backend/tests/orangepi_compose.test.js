@@ -19,17 +19,22 @@ function read(file) {
 
 test('caddy proxies both backend surfaces to one upstream', () => {
   const text = read(CADDYFILE);
-  assert.match(text, /reverse_proxy \/api\/\* backend:3101/);
+  // handle blocks are crucial: they match paths before applying directives,
+  // so reverse_proxy sees the original path. Without handle blocks, try_files
+  // would rewrite every path to /index.html BEFORE reverse_proxy evaluates.
+  assert.match(text, /handle \/api\/\* \{[\s\S]*?reverse_proxy backend:3101/);
   // The authority websocket is attached to the SAME http server as the REST
   // API (backend/src/authority/server.js), so it is the same upstream.
-  assert.match(text, /reverse_proxy \/authority\* backend:3101/);
+  assert.match(text, /handle \/authority\* \{[\s\S]*?reverse_proxy backend:3101/);
 });
 
 test('caddy serves the SPA with a history fallback', () => {
   const text = read(CADDYFILE);
-  assert.match(text, /root \* \/srv/);
+  // The default handle block (no path matcher) catches unmatched paths and
+  // serves the SPA. Within a handle block, try_files sees only matching paths.
+  assert.match(text, /handle \{[\s\S]*?root \* \/srv/);
   // react-router owns client-side routes; without this, a hard reload on any
   // route other than / returns 404.
-  assert.match(text, /try_files \{path\} \/index\.html/);
-  assert.match(text, /file_server/);
+  assert.match(text, /handle \{[\s\S]*?try_files \{path\} \/index\.html/);
+  assert.match(text, /handle \{[\s\S]*?file_server/);
 });
