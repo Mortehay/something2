@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { rateLimit } = require('express-rate-limit');
 const { attachAuthority } = require('./authority/server');
+const { applyTrustProxy, clientIpKey } = require('./clientIp');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
@@ -26,6 +27,11 @@ require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3101;
+
+// Who a request came from, when something else terminated the connection
+// (SOMET-437). Off unless TRUST_PROXY says what is in front -- see
+// clientIp.js for why blanket trust is refused rather than defaulted.
+applyTrustProxy(app);
 
 // Helper to get tile types in the format expected by the game engine.
 // One-line adapter over services/tileTypes.js's loadTileTypes so the ~dozen
@@ -55,7 +61,18 @@ app.use(cors({ exposedHeaders: ['X-Live-World-Pending'] }));
 // applied below) so a test can build a much lower-ceiling instance on a
 // scratch app instead of firing 300 real requests to prove it works.
 function apiRateLimiter(limit = 300, windowMs = 60 * 1000) {
-  return rateLimit({ windowMs, limit, standardHeaders: true, legacyHeaders: false });
+  return rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: true,
+    legacyHeaders: false,
+    // SOMET-437. The default key is req.ip, which behind cloudflared -> caddy
+    // is the Caddy container for every player, making this one ceiling shared
+    // by everybody. clientIpKey resolves the real client where the deployment
+    // has said it is safe to. Wrapped in an arrow because the library calls
+    // keyGenerator(req, res) and clientIpKey's second parameter is `env`.
+    keyGenerator: (req) => clientIpKey(req),
+  });
 }
 app.use(apiRateLimiter());
 
