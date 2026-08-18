@@ -594,3 +594,23 @@ test('an image prefix that cannot be derived is reported, not guessed', () => {
   assert.match(result.stderr, /not a github\.com url/);
   assert.match(result.stderr, /ORANGEPI_IMAGE_PREFIX/);
 });
+
+test('step durations survive a shell without nanosecond date', () => {
+  // `date +%s%N` is a GNU extension. The deploy-hook container runs busybox,
+  // where it returns the seconds with a literal "N" appended -- so the
+  // arithmetic treated seconds as nanoseconds and every step in every
+  // CI-triggered deploy reported 0.0s. Durations are the point of the step
+  // reporting, and they were wrong in exactly the path nobody watches.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-busybox-'));
+  // A `date` that behaves like busybox: %N is not expanded.
+  fs.writeFileSync(
+    path.join(dir, 'date'),
+    '#!/usr/bin/env bash\nif [ "$1" = "+%s%N" ]; then printf "%sN\\n" "$(/bin/date +%s)"; else exec /bin/date "$@"; fi\n'
+  );
+  fs.chmodSync(path.join(dir, 'date'), 0o755);
+
+  const result = runWithLib('run_step "one second" sleep 1', { env: { PATH: `${dir}:${process.env.PATH}` } });
+  assert.doesNotMatch(result.stdout, /\(0\.0s\)/, 'a one-second step must not report 0.0s');
+  assert.match(result.stdout, /\(1(\.\d+)?s\)/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

@@ -107,13 +107,13 @@ try_pull() {
 # the documented fallback (a commit that never went through CI, a manual
 # dispatch, a build still running) -- so the step is reported for what it
 # actually was rather than as a failure the summary then contradicts.
-pull_start=$(date +%s%N)
+pull_start=$(now_ns)
 if try_pull >/dev/null 2>&1; then
   IMAGE_SOURCE="registry"
   export ORANGEPI_BACKEND_IMAGE="${IMAGE_PREFIX}-backend:${SHA}"
   export ORANGEPI_FRONTEND_IMAGE="${IMAGE_PREFIX}-caddy:${SHA}"
 fi
-pull_elapsed=$(awk "BEGIN{printf \"%.1f\", ($(date +%s%N) - $pull_start)/1000000000}")
+pull_elapsed=$(awk "BEGIN{printf \"%.1f\", ($(now_ns) - $pull_start)/1000000000}")
 
 if [ "$IMAGE_SOURCE" = "registry" ]; then
   record_step "images for ${SHA:0:7}: pulled from the registry" ok "$pull_elapsed"

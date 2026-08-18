@@ -211,6 +211,22 @@ pi_profiles() {
   printf '%s' "$profiles"
 }
 
+# Monotonic-ish nanoseconds, with a fallback for busybox.
+#
+# `date +%s%N` is a GNU extension. On busybox -- which is what the deploy-hook
+# container runs, and therefore what every CI-triggered deploy runs -- it
+# returns the seconds followed by a literal "N", so the arithmetic treated
+# SECONDS as nanoseconds and every step reported 0.0s. Durations are the whole
+# point of the step reporting, and they were quietly wrong in exactly the path
+# nobody watches.
+now_ns() {
+  local stamp; stamp="$(date +%s%N 2>/dev/null || true)"
+  case "$stamp" in
+    *[!0-9]*|'') printf '%s000000000' "$(date +%s)" ;;
+    *) printf '%s' "$stamp" ;;
+  esac
+}
+
 # --- Step reporting --------------------------------------------------------
 
 STEP_INDEX=0
@@ -231,12 +247,12 @@ run_step() {
   out="$(mktemp)"
   STEP_INDEX=$((STEP_INDEX + 1))
   printf '%s▶%s %s ... ' "$C_BOLD" "$C_OFF" "$label"
-  start=$(date +%s%N)
+  start=$(now_ns)
   # `|| rc=$?` rather than `set +e`: this file runs under `set -e`, and a
   # bare failing command inside a function would take the whole script down
   # before the failure could be reported at all.
   "$@" >"$out" 2>&1 || rc=$?
-  end=$(date +%s%N)
+  end=$(now_ns)
   elapsed=$(awk "BEGIN{printf \"%.1f\", ($end - $start)/1000000000}")
   STEP_NAMES+=("$label")
   STEP_TIMES+=("$elapsed")
