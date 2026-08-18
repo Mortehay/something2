@@ -13,11 +13,19 @@ WORKDIR /app
 # changes on every restart while the trycloudflare phase lasts.
 ARG VITE_API_URL
 
+# Opt-out for local workstation verification ONLY (README's "Production stack
+# (local verification)" section) -- a real deployment must never set this.
+# Defaults empty, which keeps the localhost check active. The check below is
+# case-INSENSITIVE specifically so this can't be sidestepped by spelling the
+# host `LocalHost` or `LOCALHOST` instead of asking for the real opt-out.
+ARG ALLOW_LOCALHOST_API_URL
+
 RUN if [ -z "$VITE_API_URL" ]; then \
       echo "ERROR: VITE_API_URL build-arg is required" >&2; exit 1; \
     fi; \
-    if echo "$VITE_API_URL" | grep -qE 'localhost|127\.0\.0\.1'; then \
+    if [ "$ALLOW_LOCALHOST_API_URL" != "1" ] && echo "$VITE_API_URL" | grep -qiE 'localhost|127\.0\.0\.1'; then \
       echo "ERROR: VITE_API_URL is still the localhost default: $VITE_API_URL" >&2; \
+      echo "ERROR: for LOCAL VERIFICATION ONLY, pass --build-arg ALLOW_LOCALHOST_API_URL=1 to opt out. A real deployment must NOT set this." >&2; \
       exit 1; \
     fi
 

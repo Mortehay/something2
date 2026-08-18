@@ -23,6 +23,10 @@ services:
         # The public origin players reach. Baked into the bundle at build
         # time, so changing it REQUIRES a rebuild, not just a restart.
         VITE_API_URL: ${PUBLIC_URL:?PUBLIC_URL must be set -- the public origin, e.g. https://example.trycloudflare.com}
+        # Local-verification-only opt-out for frontend.Dockerfile's localhost
+        # guard. Defaulted empty on purpose: a real deployment that never
+        # sets it keeps the guard active.
+        ALLOW_LOCALHOST_API_URL: ${ALLOW_LOCALHOST_API_URL:-}
     ports:
       # Loopback only. The public path is the tunnel; publishing on 0.0.0.0
       # would expose the game to the LAN as a side effect.

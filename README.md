@@ -156,6 +156,7 @@ mounts, no dev server. It is what the Orange Pi runs, and it can be exercised
 on a workstation without any hardware.
 
     export PUBLIC_URL=http://localhost:8080
+    export ALLOW_LOCALHOST_API_URL=1
     export ORANGEPI_DATA_DIR=/tmp/s2-orangepi-verify
     docker compose --project-directory . --env-file .env \
       -f compose/orangepi/docker-compose.yml up -d --build
@@ -163,10 +164,17 @@ on a workstation without any hardware.
 Then run the migrations and seed a map with `exec -T backend`, as in the
 development stack, and open http://localhost:8080.
 
-Two things to know. `PUBLIC_URL` is baked into the frontend bundle at build
-time, so changing it needs `--build`, not just a restart. And `cloudflared`
-sits behind the `tunnel` profile, so starting the stack never opens a public
-URL by accident — see the Orange Pi design doc for the tunnel itself.
+Things to know. `PUBLIC_URL` is baked into the frontend bundle at build time,
+so changing it needs `--build`, not just a restart. The build refuses to bake
+in a `localhost`/`127.0.0.1` origin by default — a bundle built without a real
+origin would silently point every player at their own machine — so local
+verification has to opt out with `ALLOW_LOCALHOST_API_URL=1`; a real
+deployment must **not** set it. `ORANGEPI_DATA_DIR` is required (the stack
+refuses to start without it) and must point **outside** this repository,
+because provisioning empties the app directory and would otherwise take
+Postgres's data with it. And `cloudflared` sits behind the `tunnel` profile,
+so starting the stack never opens a public URL by accident — see the Orange
+Pi design doc for the tunnel itself.
 
 ## Ubuntu
 

@@ -69,12 +69,44 @@ test('frontend build refuses to bake a localhost API url', () => {
   // Asserting on the GUARD, not on the bare word "localhost": this file's
   // comments mention localhost too, so a looser check would still pass with
   // the guard deleted -- a test that asserts nothing.
+  //
+  // Must be -qiE (case-insensitive), not -qE: an earlier version used -qE,
+  // which let `VITE_API_URL=http://LocalHost:8080` sail through the build
+  // untouched (SOMET-423 fix round 1) -- glibc/browsers resolve `LocalHost`
+  // identically to `localhost`, so the case-sensitive grep was a real bypass,
+  // not a hardened check.
   assert.match(
     text,
-    /grep -qE 'localhost\|127\\\.0\\\.0\\\.1'/,
-    'the build must actively test VITE_API_URL against localhost'
+    /grep -qiE 'localhost\|127\\\.0\\\.0\\\.1'/,
+    'the build must actively test VITE_API_URL against localhost, case-insensitively'
   );
   assert.match(text, /exit 1/, 'the guard must fail the build, not warn');
+});
+
+test('frontend build has a documented, opt-in-only escape hatch for the localhost guard', () => {
+  const text = read(FRONTEND_DOCKERFILE);
+  // The opt-out must exist as its own build arg (not, say, reusing
+  // VITE_API_URL itself), and it must default to unset/empty so a real
+  // deployment that never mentions it still gets the guard.
+  assert.match(text, /ARG ALLOW_LOCALHOST_API_URL/, 'opt-out must be a build arg');
+  // The guard must only skip the localhost check when the opt-out is
+  // exactly "1" -- not merely set, not "true", not any truthy string --
+  // and the empty-VITE_API_URL check must NOT be short-circuited by it.
+  assert.match(
+    text,
+    /\[ "\$ALLOW_LOCALHOST_API_URL" != "1" \] && echo "\$VITE_API_URL" \| grep -qiE/,
+    'the opt-out must gate only the localhost check, not the required-value check'
+  );
+  // The required-value check must run first and unconditionally -- the
+  // opt-out must never be checked (or able to short-circuit) before it.
+  const emptyCheckIdx = text.indexOf('if [ -z "$VITE_API_URL" ]');
+  const optOutCheckIdx = text.indexOf('$ALLOW_LOCALHOST_API_URL" != "1"');
+  assert.ok(emptyCheckIdx !== -1, 'the required-value check must still exist');
+  assert.ok(optOutCheckIdx !== -1, 'the opt-out condition must exist');
+  assert.ok(
+    emptyCheckIdx < optOutCheckIdx,
+    'the required-value check must precede the opt-out check, so the opt-out cannot bypass it'
+  );
 });
 
 test('frontend image serves the bundle from caddy', () => {
