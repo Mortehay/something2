@@ -1,0 +1,196 @@
+# Multi-architecture images for the board, and the deploy that follows them
+# (SOMET-397, SOMET-401).
+#
+# THE TRIGGER IS THE DEPLOYMENT BRANCH, NOT main. A pull request always
+# produces a new commit sha -- merge, squash and rebase all do, and the PR
+# interface offers no fast-forward -- so an image built from main would never
+# match the sha actually deployed on `orangepi`, and every deploy would fall
+# back to a twenty-minute on-board build while looking like it was working.
+#
+# THE DECISION THIS CARRIES (SOMET-397): emulated cross-build versus native
+# runners.
+#
+#   Emulated (buildx + QEMU on an amd64 runner) is one job and needs no extra
+#   setup, but it emulates every instruction. The expensive part of these
+#   images is `npm ci` and `vite build` -- CPU-bound Node work, which is the
+#   worst case for QEMU; measured elsewhere at roughly five to ten times
+#   native.
+#
+#   Native arm64 runners are free for public repositories, and this repository
+#   is public. So: build each architecture on its own native runner in
+#   parallel and join them into one manifest. The arm64 half is the half the
+#   board actually pulls, and it is built at full speed.
+#
+#   If the arm64 runner label ever becomes unavailable, the fallback is a
+#   single job with `docker/setup-qemu-action` and both platforms passed to
+#   one build -- slower, but a one-line change rather than a redesign.
+
+name: orangepi images
+
+on:
+  push:
+    branches: [orangepi]
+  workflow_dispatch:
+
+concurrency:
+  # One deploy pipeline at a time. Two builds racing to publish the same tag
+  # would be harmless; two deploys racing at the far end would not -- the
+  # authority is single-instance and a deploy is stop-then-start.
+  group: orangepi-delivery
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  test:
+    # Gate the images on the suite, so a broken commit never becomes a
+    # deployable artefact in the first place.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: backend unit tests
+        working-directory: backend
+        # The DB-backed tests need a database and are not part of this gate;
+        # `npm test` here is the file-level suite, which is what guards the
+        # compose and image invariants this pipeline depends on.
+        run: |
+          npm ci
+          npm test
+      - name: frontend tests
+        working-directory: frontend
+        run: |
+          npm ci
+          npx vitest run
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            suffix: amd64
+          - platform: linux/arm64
+            # Native arm64, free for public repositories. This is the half the
+            # board pulls.
+            runner: ubuntu-24.04-arm
+            suffix: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: lowercase the image prefix
+        id: prefix
+        # ghcr.io rejects uppercase in a repository name, and GitHub owners
+        # commonly have one.
+        run: echo "value=$(echo '${{ env.REGISTRY }}/${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: build and push the backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: compose/orangepi/backend.Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          # Per-architecture tags, joined into one manifest by the `manifest`
+          # job. Pushing both architectures to the same tag from two jobs
+          # would have each overwrite the other's manifest.
+          tags: ${{ steps.prefix.outputs.value }}-backend:${{ github.sha }}-${{ matrix.suffix }}
+          cache-from: type=gha,scope=backend-${{ matrix.suffix }}
+          cache-to: type=gha,mode=max,scope=backend-${{ matrix.suffix }}
+
+      - name: build and push the frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: compose/orangepi/frontend.Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: ${{ steps.prefix.outputs.value }}-caddy:${{ github.sha }}-${{ matrix.suffix }}
+          # VITE_API_URL is deliberately NOT passed. Left unset, the bundle
+          # calls /api and /authority on whatever origin served it, which is
+          # exactly right behind Caddy on one hostname -- and it means a
+          # changed tunnel hostname never invalidates a published image.
+          cache-from: type=gha,scope=frontend-${{ matrix.suffix }}
+          cache-to: type=gha,mode=max,scope=frontend-${{ matrix.suffix }}
+
+  manifest:
+    # Joins the two per-architecture tags into ONE sha tag, which is what
+    # deploy.sh pulls. The board gets its arm64 half; an amd64 workstation
+    # pulling the same tag gets its own.
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: lowercase the image prefix
+        id: prefix
+        run: echo "value=$(echo '${{ env.REGISTRY }}/${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - name: create the multi-architecture manifests
+        run: |
+          set -euo pipefail
+          for image in backend caddy; do
+            repo="${{ steps.prefix.outputs.value }}-${image}"
+            docker buildx imagetools create \
+              --tag "${repo}:${{ github.sha }}" \
+              --tag "${repo}:latest" \
+              "${repo}:${{ github.sha }}-amd64" \
+              "${repo}:${{ github.sha }}-arm64"
+            # Print what was published, so "both architectures under one tag"
+            # is visible in the log rather than assumed.
+            docker buildx imagetools inspect "${repo}:${{ github.sha }}"
+          done
+
+  deploy:
+    # AFTER the images exist, never on the push itself: a push-triggered
+    # deploy would tell the board to deploy a commit that has not been built,
+    # and it would then fall back to building it on four A53 cores.
+    needs: manifest
+    runs-on: ubuntu-24.04
+    steps:
+      - name: call the deploy hook on the board
+        env:
+          HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+          HOOK_SECRET: ${{ secrets.DEPLOY_HOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOOK_URL:-}" ] || [ -z "${HOOK_SECRET:-}" ]; then
+            echo "::notice::DEPLOY_HOOK_URL or DEPLOY_HOOK_SECRET is not configured; images were published but no deploy was triggered."
+            echo "the board can be deployed by hand with 'make pi-deploy'."
+            exit 0
+          fi
+          # The timestamp is inside the SIGNED body. A timestamp carried only
+          # in a header could be replaced on a replayed request, which is the
+          # thing it exists to prevent.
+          body="$(printf '{"timestamp":%s,"sha":"%s","ref":"%s"}' "$(date +%s000)" "${{ github.sha }}" "${{ github.ref_name }}")"
+          signature="sha256=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$HOOK_SECRET" | awk '{print $2}')"
+          code="$(curl -sS -o response.txt -w '%{http_code}' -X POST "$HOOK_URL" \
+            -H 'content-type: application/json' \
+            -H "x-deploy-signature: ${signature}" \
+            --data "$body")"
+          echo "hook responded ${code}: $(cat response.txt)"
+          # 202 is the only success. A 401 means the secrets disagree, a 409
+          # means a deploy was already running, and both must fail the run
+          # rather than leaving a green tick over a deploy that never happened.
+          [ "$code" = "202" ]

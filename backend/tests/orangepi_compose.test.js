@@ -88,7 +88,48 @@ test('production composition bind-mounts no application source', () => {
   // mount syntax and partial mounts like `./backend/src:/app/src`. Any bind
   // target under /app at all reintroduces a source mount regardless of
   // source path or short/long form, so also assert on the target side.
-  assert.ok(!/:\/app\b/.test(text), 'no volume may bind-mount anything to a path under /app');
+  // Scoped to the SERVING services (SOMET-401). The rule is that nothing
+  // which serves the game may have source bind-mounted -- for those, the
+  // container IS the service. The deploy-hook is not a serving container: it
+  // drives docker compose ON the board, so it must see the board's clone, and
+  // at the SAME path the host sees it, because the host daemon resolves the
+  // bind-mount paths in the compose file it is handed. Mounting the clone
+  // somewhere else would leave the CLI and the daemon disagreeing about what
+  // `.` means. Asserted per service rather than over the whole file, so this
+  // keeps its full strength where it matters.
+  for (const service of ['caddy', 'backend', 'db', 'cloudflared']) {
+    const block = extractServiceBlock(text, service);
+    assert.ok(
+      !/:\/app\b/.test(block),
+      `${service} serves the game and must not bind-mount anything under /app`
+    );
+  }
+});
+
+// Slices one service's block out of the compose file: from its two-space
+// header to the next two-space header (or end of file).
+function extractServiceBlock(text, service) {
+  const start = new RegExp(`^  ${service}:$`, 'm').exec(text);
+  assert.ok(start, `expected a ${service} service`);
+  const rest = text.slice(start.index + start[0].length);
+  const next = /^  [a-z][a-z0-9-]*:$/m.exec(rest);
+  return next ? rest.slice(0, next.index) : rest;
+}
+
+test('the deploy hook is opt-in and cannot run unauthenticated', () => {
+  const text = read(COMPOSE);
+  const block = extractServiceBlock(text, 'deploy-hook');
+  // An internet-reachable deploy trigger must be something you turn on
+  // deliberately, never something that appears because you started the stack
+  // -- the same rule the tunnel itself follows.
+  assert.match(block, /profiles: \["hook"\]/);
+  // Passed through with an empty default ON PURPOSE: compose interpolates
+  // every service whatever profile is active, so `${VAR:?...}` here would
+  // stop the whole stack -- game included -- on a board with no hook
+  // configured. The refusal lives in server.js, which exits rather than
+  // starting an unauthenticated endpoint.
+  assert.match(block, /DEPLOY_HOOK_SECRET=\$\{DEPLOY_HOOK_SECRET:-\}/);
+  assert.match(block, /PI_LOCAL=1/, 'the hook runs the same deploy.sh an operator runs');
 });
 
 test('postgres data lives outside the app directory', () => {

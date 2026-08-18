@@ -133,3 +133,38 @@ services:
     depends_on:
       - caddy
     restart: unless-stopped
+
+  # The CI-to-board deploy hook (SOMET-401). Behind its own profile: an
+  # internet-reachable deploy trigger must be something you turn on
+  # deliberately, not something that appears because you started the stack.
+  # `make pi-up` includes it only when DEPLOY_HOOK_SECRET is configured.
+  deploy-hook:
+    build:
+      context: .
+      dockerfile: compose/orangepi/deploy-hook/Dockerfile
+    image: ${ORANGEPI_HOOK_IMAGE:-something2-orangepi-deploy-hook:local}
+    profiles: ["hook"]
+    environment:
+      # Passed through with an empty default, NOT with `${VAR:?...}` like the
+      # required variables above. Compose interpolates every service whatever
+      # profile is active, so a required marker here would stop the whole
+      # stack -- game included -- on a board that simply has no deploy hook
+      # configured. The refusal belongs one layer in: server.js exits rather
+      # than starting an unauthenticated deploy endpoint.
+      - DEPLOY_HOOK_SECRET=${DEPLOY_HOOK_SECRET:-}
+      - ORANGEPI_DATA_DIR=${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}
+      - ORANGEPI_APP_DIR=/app
+      - ORANGEPI_BRANCH=${ORANGEPI_BRANCH:-orangepi}
+      - GIT_REPOSITORY=${GIT_REPOSITORY:-}
+      # PI_LOCAL makes lib.sh run commands here instead of over ssh, so the
+      # hook runs the SAME deploy.sh an operator runs from the workstation.
+      - PI_LOCAL=1
+    volumes:
+      # The board's clone: the deploy operates on it and reads deploy.sh from
+      # it, so the script that runs is the one belonging to the commit.
+      - ${ORANGEPI_APP_DIR:-/app}:/app
+      # Driving compose on the board means driving the board's docker.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The board's .env, which the compose commands inside a deploy read.
+      - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}:${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}:ro
+    restart: unless-stopped

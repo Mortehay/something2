@@ -25,6 +25,19 @@
 		reverse_proxy backend:3101
 	}
 
+	# The CI deploy hook (SOMET-401). Reaching it from GitHub is the whole
+	# point -- GitHub cannot open a connection to the board, so the tunnel
+	# carries it inbound. Everything about its safety is in the listener:
+	# an HMAC over the body, a timestamp window, and a process that runs one
+	# fixed script with nothing from the request in it.
+	#
+	# The route exists whether or not the hook container is running (it is
+	# behind a compose profile); with it stopped, Caddy answers 502, which is
+	# the correct answer to "deploy me" when no deploy endpoint is enabled.
+	handle /deploy-hook* {
+		reverse_proxy deploy-hook:9000
+	}
+
 	# Everything else is the built bundle. try_files sends unknown paths to
 	# index.html so a hard reload on a react-router route still works.
 	handle {

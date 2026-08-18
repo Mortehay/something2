@@ -129,8 +129,16 @@ fi
 # loop per live world, so two backends disagree about the same world. This is
 # roughly thirty seconds of downtime and that is the accepted trade at this
 # player count.
-run_step "stop the running stack" pi_ssh "$IMAGE_ENV $COMPOSE --profile tunnel down --remove-orphans"
-run_step "start the new stack" pi_ssh "$IMAGE_ENV $COMPOSE --profile tunnel up -d"
+#
+# Named services rather than `down`, for two reasons. `down` would stop the
+# DEPLOY HOOK container as well -- and when the hook is what started this
+# deploy, that kills the deploy halfway through, which presents as a deploy
+# that silently stopped rather than as a deploy that was killed. It also
+# leaves the database up, which has no reason to bounce for an application
+# release.
+SERVICES="backend caddy cloudflared"
+run_step "stop the serving containers" pi_ssh "$IMAGE_ENV $COMPOSE --profile tunnel stop $SERVICES"
+run_step "start the new containers" pi_ssh "$IMAGE_ENV $COMPOSE --profile tunnel up -d --no-deps db $SERVICES"
 
 # A container that starts and exits still leaves `up -d` exiting 0, so the
 # deploy is not finished until something answers.

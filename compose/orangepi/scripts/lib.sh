@@ -102,9 +102,14 @@ require_env() {
   fi
 }
 
-# The board's identity, needed by every remote script.
+# The board's identity, needed by every remote script. In PI_LOCAL mode there
+# is no board to address -- the script IS on it -- so only the paths matter.
 require_pi_env() {
-  require_env ORANGEPI_ADDRESS ORANGEPI_LOGIN ORANGEPI_DATA_DIR
+  if [ -n "${PI_LOCAL:-}" ]; then
+    require_env ORANGEPI_DATA_DIR
+  else
+    require_env ORANGEPI_ADDRESS ORANGEPI_LOGIN ORANGEPI_DATA_DIR
+  fi
 }
 
 # --- Transport -------------------------------------------------------------
@@ -133,7 +138,19 @@ pi_key_path() {
 #   ServerAliveInterval      a `docker build` on four A53 cores is long and
 #                            silent; without this the session can be dropped
 #                            mid-build by an idle timeout.
+# PI_LOCAL=1 runs the command HERE instead of over ssh, which is how the same
+# deploy.sh serves two callers: an operator on the workstation, and the deploy
+# hook running on the board itself. The alternative was a second board-side
+# copy of the deploy sequence -- two scripts that must stay in step, where the
+# one CI actually uses is the one no operator ever runs.
+#
+# stdin is passed through untouched, so the heredoc callers work identically
+# in both modes.
 pi_ssh() {
+  if [ -n "${PI_LOCAL:-}" ]; then
+    bash -c "$*"
+    return $?
+  fi
   local key; key="$(pi_key_path)"
   local -a opts=(
     -o BatchMode=yes
