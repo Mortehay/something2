@@ -231,8 +231,11 @@ if [ -z "${PI_LOCAL:-}" ] && [ -n "$url" ] && command -v gh >/dev/null 2>&1; the
   repo_slug="$(printf '%s' "${GIT_REPOSITORY%.git}" | sed -E 's#.*github\.com[:/]##')"
   if gh secret list --repo "$repo_slug" 2>/dev/null | grep -q '^DEPLOY_HOOK_URL'; then
     if printf '%s' "${url}/deploy-hook" | gh secret set DEPLOY_HOOK_URL --repo "$repo_slug" >/dev/null 2>&1; then
-      printf '%shook%s       DEPLOY_HOOK_URL refreshed on %s (the tunnel hostname changed)\n' \
-        "$C_BOLD" "$C_OFF" "$repo_slug"
+      # No claim about whether it CHANGED: since the tunnel is no longer
+      # restarted by a deploy it usually has not, and a message asserting a
+      # change that did not happen is worse than no message.
+      printf '%shook%s       DEPLOY_HOOK_URL confirmed on %s (%s)\n' \
+        "$C_BOLD" "$C_OFF" "$repo_slug" "$url"
     else
       printf '%shook%s       could not refresh DEPLOY_HOOK_URL -- run `make pi-hook-register`\n' \
         "$C_YELLOW" "$C_OFF" >&2
