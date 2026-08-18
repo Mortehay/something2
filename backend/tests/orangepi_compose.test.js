@@ -214,3 +214,41 @@ test('the frontend image copies the Caddyfile to where the caddy base image read
     'frontend.Dockerfile must copy the Caddyfile to /etc/caddy/Caddyfile'
   );
 });
+
+// SOMET-439. Two environment lines, and the whole of SOMET-437 is inert
+// without them: the backend only resolves a real client address when the
+// deployment tells it what is in front.
+//
+// Asserted against the backend service's ENVIRONMENT LINES, not its raw text,
+// for two reasons. Scoping to the service block alone would still pass if a
+// later edit moved the lines onto db or cloudflared, where they do nothing;
+// and matching raw text would let a COMMENT mentioning the variable satisfy
+// the guard — which is not hypothetical, the first version of this test
+// failed against the explanatory comment three lines above the real setting.
+function envLinesOf(text, service) {
+  return extractServiceBlock(text, service)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('- '));
+}
+
+test('the backend is told what proxies sit in front of it', () => {
+  const env = envLinesOf(read(COMPOSE), 'backend');
+  assert.ok(
+    env.includes('- TRUST_PROXY=${TRUST_PROXY:-2}'),
+    'backend must trust exactly the two hops in front of it (cloudflared -> caddy); '
+    + `without a hop count every player shares one rate-limit bucket. Saw: ${env.join(' | ')}`,
+  );
+  assert.ok(
+    env.includes('- TRUST_CF_CONNECTING_IP=${TRUST_CF_CONNECTING_IP:-1}'),
+    'behind Cloudflare the unforgeable client address is CF-Connecting-IP; '
+    + 'X-Forwarded-For alone is client-supplied',
+  );
+  // The value that must never be SET (a comment explaining why it is refused
+  // is fine): it would trust a header any client can write, turning both
+  // limiters into something anyone can walk past by rotating one.
+  assert.ok(
+    !env.some((l) => /^- TRUST_PROXY=(true|\$\{TRUST_PROXY:-true\})$/.test(l)),
+    'TRUST_PROXY must never be blanket-true',
+  );
+});

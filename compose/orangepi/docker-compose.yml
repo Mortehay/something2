@@ -71,6 +71,26 @@ services:
       # backend/src/index.js's shouldMigrateOnBoot and
       # docs/superpowers/specs/2026-08-17-orangepi-staging-design.md. Its
       # absence here is deliberate, not forgotten.
+      # SOMET-437/439. The backend keys BOTH rate limiters (the global
+      # 300/min and the credential-aware auth one) on the client address, and
+      # in this stack the connection it sees is always Caddy's -- cloudflared
+      # dials out to the edge, Caddy proxies to us, and req.ip is the same
+      # container address for every player. Without these two lines that is
+      # one shared bucket for the whole playerbase: ten players on a busy
+      # screen can 429 each other out of the API.
+      #
+      # Defaulted HERE rather than required in .env because the hop count is a
+      # property of THIS composition's topology (cloudflared -> caddy ->
+      # backend), not of whoever is operating it -- a fresh board is correct
+      # without anyone remembering to set it, and .env still overrides.
+      #
+      # CF-Connecting-IP is the one address in the chain a client cannot
+      # choose: Cloudflare sets and overwrites it at its edge. Blanket
+      # TRUST_PROXY=true is refused at startup by backend/src/clientIp.js --
+      # it would trust a client-supplied X-Forwarded-For and hand anyone a
+      # fresh bucket per request.
+      - TRUST_PROXY=${TRUST_PROXY:-2}
+      - TRUST_CF_CONNECTING_IP=${TRUST_CF_CONNECTING_IP:-1}
       - DATABASE_URL=postgres://user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/game_db
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
       # Object storage is not configured yet (SOMET-379). The MinIO client in
