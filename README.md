@@ -294,6 +294,10 @@ named tunnel on a domain you own, which is phase 2.
 main  --(promotion PR)-->  orangepi  --(push)-->  Actions  -->  GHCR  -->  hook  -->  the board
 ```
 
+Measured on this board: pulling the published arm64 image takes **11
+seconds**, against ten to twenty minutes to build the same commit on four
+A53 cores. That gap is why the pipeline exists.
+
 `orangepi` is the deployment branch and is never developed on directly; the
 promotion PR is the human gate in front of a publicly reachable machine. The
 workflow builds `linux/amd64` and `linux/arm64` natively in parallel, joins
