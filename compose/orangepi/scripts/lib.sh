@@ -305,3 +305,90 @@ render_status() {
 
   [ "$STATUS_HEALTH_CODE" = "200" ]
 }
+
+# --- The data-safety rule --------------------------------------------------
+#
+# Provisioning EMPTIES the app directory. That is only safe because game data
+# is forbidden from living there:
+#
+#   APP_DIR   the clone and nothing else. Disposable, wiped without ceremony.
+#   DATA_DIR  Postgres's volume, the board's own .env, sprite storage.
+#             Provisioning never touches it.
+#
+# Without this check a second `make pi-provision` silently destroys every
+# account and world on the board -- and it presents as database corruption
+# rather than as the operator error it is, so it gets diagnosed in entirely
+# the wrong place.
+#
+# The check runs ON THE BOARD, because that is where both paths mean
+# something: /app on the workstation is not /app on the Pi, and a symlink that
+# only exists on the board is exactly the case that a workstation-side string
+# comparison would wave through.
+# The resolver, kept as a string so the SAME code runs on the board over ssh
+# and in the tests against real local symlinks. A guard whose interesting case
+# -- a symlink that exists only on the board -- can only be exercised by
+# provisioning a board is a guard nobody exercises.
+#
+# It resolves symlinks on the deepest EXISTING ancestor: neither directory
+# need exist yet on a bare board, and `readlink -f` on a missing path resolves
+# the name literally, which would quietly skip the symlink check this exists
+# for.
+PATH_RESOLVE_SCRIPT='
+set -u
+resolve() {
+  p="$1"
+  while [ ! -e "$p" ] && [ "$p" != "/" ]; do p="$(dirname "$p")"; done
+  head="$(readlink -f "$p")"
+  tail="${1#"$p"}"
+  printf "%s\n" "${head%/}${tail}"
+}
+printf "%s\n%s\n" "$(resolve "$APP")" "$(resolve "$DATA")"
+'
+
+# Pure comparison, given two ALREADY-RESOLVED absolute paths. Returns 0 when
+# data is inside app -- the refusing case.
+#
+# Both sides get a trailing slash. Bare prefix matching would call
+# /srv/something2-data "inside" /srv/something2 and refuse a layout that is
+# perfectly safe; a guard that cries wolf is a guard that gets disabled.
+data_dir_is_inside_app_dir() {
+  local app_real="${1%/}" data_real="${2%/}"
+  case "${data_real}/" in
+    "${app_real}/"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Runs the resolver ON THE BOARD, because that is where both paths mean
+# something: /app on the workstation is not /app on the Pi, and a symlink that
+# exists only on the board is exactly what a workstation-side string
+# comparison waves through.
+assert_data_dir_outside_app_dir() {
+  local app="${1:-$ORANGEPI_APP_DIR}" data="${2:-$ORANGEPI_DATA_DIR}"
+  local resolved
+  resolved="$(pi_ssh "APP=$(printf '%q' "$app") DATA=$(printf '%q' "$data") bash -s" <<<"$PATH_RESOLVE_SCRIPT")" || {
+    printf '%scould not resolve the app and data directories on the board%s\n' "$C_RED" "$C_OFF" >&2
+    return 1
+  }
+  local app_real data_real
+  app_real="$(printf '%s\n' "$resolved" | sed -n 1p)"
+  data_real="$(printf '%s\n' "$resolved" | sed -n 2p)"
+
+  if data_dir_is_inside_app_dir "$app_real" "$data_real"; then
+    cat >&2 <<MSG
+${C_RED}refusing to provision: the data directory is inside the app directory.${C_OFF}
+
+  ORANGEPI_APP_DIR   $ORANGEPI_APP_DIR   -> $app_real
+  ORANGEPI_DATA_DIR  $ORANGEPI_DATA_DIR  -> $data_real
+
+provisioning EMPTIES the app directory. With this layout it would take the
+Postgres volume with it -- every account and every world on the board -- and
+the result would look like database corruption rather than an operator error.
+
+point ORANGEPI_DATA_DIR somewhere outside ${app_real} (the default,
+/srv/something2, is outside /app) and run this again.
+MSG
+    return 1
+  fi
+  printf '%s (app) and %s (data) are separate\n' "$app_real" "$data_real"
+}

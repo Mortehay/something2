@@ -330,3 +330,210 @@ test('pi-status flags an unhealthy container rather than calling it up', () => {
   const result = renderStatus(REPORT_UP.replace('Up 2 hours (healthy)', 'Up 2 hours (unhealthy)'));
   assert.match(result.stdout, /unhealthy/);
 });
+
+// --- The data-safety rule (SOMET-425) --------------------------------------
+//
+// Provisioning EMPTIES the app directory. Everything below is what keeps that
+// from taking the game's data with it. The resolver is exercised against REAL
+// symlinks: the interesting case is a data directory that only looks separate
+// until a link is followed, and a string comparison waves exactly that
+// through.
+
+function resolvePaths(app, data) {
+  const result = runWithLib(
+    `APP=${JSON.stringify(app)} DATA=${JSON.stringify(data)} bash -c "$PATH_RESOLVE_SCRIPT"`
+  );
+  assert.strictEqual(result.status, 0, result.stderr);
+  const [appReal, dataReal] = result.stdout.trim().split('\n');
+  return { appReal, dataReal };
+}
+
+function isInside(app, data) {
+  const result = runWithLib(
+    `if data_dir_is_inside_app_dir ${JSON.stringify(app)} ${JSON.stringify(data)}; then echo INSIDE; else echo outside; fi`
+  );
+  return result.stdout.trim() === 'INSIDE';
+}
+
+test('the guard refuses a data directory inside the app directory', () => {
+  assert.strictEqual(isInside('/app', '/app/pgdata'), true);
+  assert.strictEqual(isInside('/app', '/app/data/postgres'), true);
+});
+
+test('the guard refuses the two being the same directory', () => {
+  // Equal paths are the worst case, not an edge case: provisioning would
+  // empty the data directory itself.
+  assert.strictEqual(isInside('/app', '/app'), true);
+  assert.strictEqual(isInside('/app/', '/app'), true);
+});
+
+test('the guard allows a sibling whose name merely shares a prefix', () => {
+  // /srv/something2-data is NOT inside /srv/something2. A guard that refuses
+  // this cries wolf, and a guard that cries wolf gets switched off.
+  assert.strictEqual(isInside('/srv/something2', '/srv/something2-data'), false);
+  assert.strictEqual(isInside('/app', '/srv/something2'), false);
+});
+
+test('the resolver follows a symlink that hides the nesting', () => {
+  // The case the ticket calls out by name. /tmp/x/data -> /tmp/x/app/pgdata
+  // looks separate and is not, and only resolution tells them apart.
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-safety-'));
+  const appDir = path.join(base, 'app');
+  fs.mkdirSync(path.join(appDir, 'pgdata'), { recursive: true });
+  const link = path.join(base, 'data');
+  fs.symlinkSync(path.join(appDir, 'pgdata'), link);
+
+  const { appReal, dataReal } = resolvePaths(appDir, link);
+  assert.strictEqual(
+    isInside(appReal, dataReal),
+    true,
+    'a symlinked data directory inside the app directory must still be refused'
+  );
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+test('the resolver handles directories that do not exist yet', () => {
+  // A bare board has neither directory. `readlink -f` on a missing path
+  // resolves it literally, which would silently skip the symlink check the
+  // guard exists for -- so resolution walks up to the deepest existing
+  // ancestor instead.
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pi-safety-')));
+  const { appReal, dataReal } = resolvePaths(
+    path.join(base, 'not-created-yet', 'app'),
+    path.join(base, 'not-created-yet', 'data')
+  );
+  assert.strictEqual(appReal, path.join(base, 'not-created-yet', 'app'));
+  assert.strictEqual(isInside(appReal, dataReal), false);
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+test('the resolver sees through a symlinked ANCESTOR', () => {
+  // /link/data where /link -> /real/app: the nesting is one level above
+  // either path, so comparing the strings as given finds nothing wrong.
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pi-safety-')));
+  const real = path.join(base, 'real-app');
+  fs.mkdirSync(real, { recursive: true });
+  const link = path.join(base, 'link');
+  fs.symlinkSync(real, link);
+
+  const { appReal, dataReal } = resolvePaths(real, path.join(link, 'pgdata'));
+  assert.strictEqual(isInside(appReal, dataReal), true);
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+// --- pi-reset's confirmation guard (SOMET-430) -----------------------------
+
+function runReset(env) {
+  return spawnSync('bash', [path.join(SCRIPTS, 'reset.sh')], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: {
+      ...process.env,
+      ORANGEPI_ADDRESS: '10.0.0.5',
+      ORANGEPI_LOGIN: 'pi',
+      ORANGEPI_DATA_DIR: '/srv/something2',
+      REPO_ROOT: os.tmpdir(),
+      ...env,
+    },
+  });
+}
+
+test('pi-reset refuses without CONFIRM', () => {
+  const result = runReset({ CONFIRM: '' });
+  assert.notStrictEqual(result.status, 0);
+  assert.match(result.stderr, /refusing to reset/);
+  // The message must name the board, so the confirmation is a decision rather
+  // than a copy-paste of whatever the error suggested.
+  assert.match(result.stderr, /CONFIRM=10\.0\.0\.5/);
+});
+
+test('pi-reset refuses when CONFIRM names a different board', () => {
+  const result = runReset({ CONFIRM: '10.0.0.6' });
+  assert.notStrictEqual(result.status, 0);
+  assert.match(result.stderr, /does not match/);
+  assert.match(result.stderr, /nothing was touched/);
+});
+
+test('pi-reset cannot reach a local database under any argument', () => {
+  // Structural, not careful: every command in reset.sh runs through pi_ssh or
+  // remote.sh, so there is no branch that can talk to a local docker or a
+  // local psql whatever CONFIRM says. A reviewer on this project has already
+  // wiped the shared development catalog once with an unguarded delete.
+  const text = fs.readFileSync(path.join(SCRIPTS, 'reset.sh'), 'utf8');
+  const commandLines = text
+    .split('\n')
+    .filter((line) => /^\s*(run_step|bash|docker|psql)/.test(line))
+    .filter((line) => !line.trim().startsWith('#'));
+  for (const line of commandLines) {
+    if (/docker|psql/.test(line)) {
+      assert.match(
+        line,
+        /REMOTE_SH|remote\.sh|pi_ssh/,
+        `every docker/psql command must go through the remote transport: ${line.trim()}`
+      );
+    }
+  }
+});
+
+// --- remote.sh (SOMET-428) -------------------------------------------------
+
+test('remote.sh has no path to the local stack', () => {
+  const text = fs.readFileSync(path.join(SCRIPTS, 'remote.sh'), 'utf8');
+  const invocations = text
+    .split('\n')
+    .filter((line) => /docker compose|psql/.test(line) && !line.trim().startsWith('#'));
+  // Not "there are none" -- there are, and they are the point of the file.
+  // The invariant is that each one is handed to the REMOTE transport, so no
+  // argument to this script can make it act on the workstation's stack.
+  assert.ok(invocations.length > 0, 'the fixture is wrong if remote.sh runs nothing');
+  for (const line of invocations) {
+    assert.match(
+      line,
+      /pi_ssh|pi_ssh_tty|\$COMPOSE/,
+      `remote.sh must reach the board, never a local daemon: ${line.trim()}`
+    );
+  }
+  // The counterpart: the local targets must not gain a board path either.
+  const makefile = fs.readFileSync(path.join(__dirname, '..', '..', 'Makefile'), 'utf8');
+  const localTargets = makefile.match(/^(?!pi-)[a-z-]+:\n(\t.*\n)+/gm) || [];
+  // Scoped to the REMOTE scripts, not to compose/orangepi as a whole:
+  // `make verify-routing` legitimately runs verify-routing.sh, which spins up
+  // throwaway containers on THIS machine to test the Caddyfile. The rule is
+  // that no un-prefixed target reaches the board.
+  const REMOTE_SCRIPTS = /(remote|status|deploy|provision|reset|keygen)\.sh/;
+  for (const target of localTargets) {
+    assert.doesNotMatch(target, REMOTE_SCRIPTS, `a local target must not drive the board: ${target.split('\n')[0]}`);
+  }
+});
+
+test('every pi-* make target routes through the orangepi scripts', () => {
+  const makefile = fs.readFileSync(path.join(__dirname, '..', '..', 'Makefile'), 'utf8');
+  const targets = [...makefile.matchAll(/^(pi-[a-z-]+):\n((?:\t.*\n|\#.*\n)+)/gm)];
+  // Named explicitly rather than counted: a target that silently disappears
+  // from the Makefile would otherwise pass a count-based assertion by
+  // lowering the count.
+  const expected = [
+    'pi-keygen', 'pi-provision', 'pi-deploy', 'pi-up', 'pi-down', 'pi-restart',
+    'pi-logs', 'pi-status', 'pi-tunnel-url', 'pi-migrate-up', 'pi-migrate-status',
+    'pi-seed-catalogs', 'pi-seed-map', 'pi-reseed-map', 'pi-shell', 'pi-db-shell',
+    'pi-reset',
+  ];
+  const found = targets.map(([, name]) => name);
+  for (const name of expected) {
+    assert.ok(found.includes(name), `${name} is missing from the Makefile`);
+  }
+  for (const [, name, body] of targets) {
+    assert.match(body, /compose\/orangepi\/scripts\//, `${name} must run through the orangepi scripts`);
+  }
+});
+
+test('the seeding targets reuse the local require-spec guard', () => {
+  const makefile = fs.readFileSync(path.join(__dirname, '..', '..', 'Makefile'), 'utf8');
+  for (const name of ['pi-seed-map', 'pi-reseed-map']) {
+    const body = new RegExp(`^${name}:\\n((?:\\t.*\\n)+)`, 'm').exec(makefile)[1];
+    // Rejected on the WORKSTATION, before anything reaches the network: the
+    // spec files live in the host checkout, so a misspelling is knowable
+    // without an ssh connection.
+    assert.match(body, /\$\(require-spec\)/, `${name} must reject a bad SPEC before connecting`);
+  }
+});

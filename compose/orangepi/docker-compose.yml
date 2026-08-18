@@ -16,6 +16,14 @@ services:
   # to -- it serves the bundle and proxies both backend surfaces, so one origin
   # covers the whole game.
   caddy:
+    # Tagged so a deploy can PULL this image instead of building it. The Pi
+    # builds in ten to twenty minutes on four A53 cores and competes with the
+    # running game for memory while it does; pulling the same SHA from GHCR
+    # takes under a minute. deploy.sh sets these to a ghcr.io/...:<sha> when
+    # an image exists for the commit and builds locally when it does not, so
+    # the default here is what a purely local `docker compose up --build`
+    # produces.
+    image: ${ORANGEPI_FRONTEND_IMAGE:-something2-orangepi-caddy:local}
     build:
       context: .
       dockerfile: compose/orangepi/frontend.Dockerfile
@@ -45,6 +53,7 @@ services:
     restart: unless-stopped
 
   backend:
+    image: ${ORANGEPI_BACKEND_IMAGE:-something2-orangepi-backend:local}
     build:
       context: .
       dockerfile: compose/orangepi/backend.Dockerfile

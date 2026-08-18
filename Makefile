@@ -3,7 +3,9 @@
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
-        pi-keygen pi-status
+        pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
+        pi-migrate-up pi-migrate-status pi-seed-catalogs pi-seed-map pi-reseed-map \
+        pi-shell pi-db-shell pi-tunnel-url pi-reset
 
 COMPOSE_FILE = compose/develop/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
@@ -278,5 +280,77 @@ verify-routing:
 pi-keygen:
 	@bash compose/orangepi/scripts/keygen.sh
 
+# Bare board to a running, publicly reachable stack. Idempotent: a second run
+# changes nothing and destroys nothing -- the data directory is never touched.
+pi-provision:
+	@bash compose/orangepi/scripts/provision.sh
+
+# The update path, and what the CI deploy hook calls: reset to the branch tip,
+# pull the SHA-tagged image or build on the board, migrate, restart.
+pi-deploy:
+	@bash compose/orangepi/scripts/deploy.sh
+
+# --- Remote lifecycle ------------------------------------------------------
+# The tunnel profile is included, so `pi-up` opens the public URL and
+# `pi-down` closes it. Every one of these acts on the BOARD; the local
+# equivalents are the same names without the pi- prefix.
+
+pi-up:
+	@bash compose/orangepi/scripts/remote.sh compose up -d
+
+pi-down:
+	@bash compose/orangepi/scripts/remote.sh compose down --remove-orphans
+
+pi-restart:
+	@bash compose/orangepi/scripts/remote.sh compose restart
+
+pi-logs:
+	@bash compose/orangepi/scripts/remote.sh compose logs -f --tail 200
+
 pi-status:
 	@bash compose/orangepi/scripts/status.sh
+
+pi-tunnel-url:
+	@bash compose/orangepi/scripts/remote.sh tunnel-url
+
+# --- Remote migrations -----------------------------------------------------
+# Migrations are a deploy STEP on this stack, never a side effect of the
+# server booting (MIGRATE_ON_BOOT is unset in compose/orangepi). These are for
+# running one by hand between deploys.
+
+pi-migrate-up:
+	@bash compose/orangepi/scripts/remote.sh backend npm run migrate:up
+
+pi-migrate-status:
+	@bash compose/orangepi/scripts/remote.sh compose exec -T db psql -U user -d game_db -c "SELECT name, run_on FROM pgmigrations ORDER BY id DESC LIMIT 20;"
+
+# --- Remote seeding --------------------------------------------------------
+# require-spec is the SAME guard the local seed targets use, so a missing or
+# misspelled SPEC is rejected on the workstation, before anything reaches the
+# network -- and the spec list it prints is read from the host checkout.
+
+pi-seed-catalogs:
+	@bash compose/orangepi/scripts/remote.sh backend node scripts/seed-catalogs.js
+
+pi-seed-map:
+	$(require-spec)
+	@bash compose/orangepi/scripts/remote.sh backend sh -c "SPEC=$(SPEC) node scripts/seed-map.js"
+
+pi-reseed-map:
+	$(require-spec)
+	@bash compose/orangepi/scripts/remote.sh backend sh -c "RESEED_SPEC=$(SPEC) node scripts/clear-maps.js"
+	@bash compose/orangepi/scripts/remote.sh backend node scripts/seed-catalogs.js
+	@bash compose/orangepi/scripts/remote.sh backend sh -c "SPEC=$(SPEC) node scripts/seed-map.js"
+
+# --- Interactive -----------------------------------------------------------
+
+pi-shell:
+	@bash compose/orangepi/scripts/remote.sh shell
+
+pi-db-shell:
+	@bash compose/orangepi/scripts/remote.sh db-shell
+
+# --- Destructive -----------------------------------------------------------
+# Requires CONFIRM=<the board's address>. See compose/orangepi/scripts/reset.sh.
+pi-reset:
+	@bash compose/orangepi/scripts/reset.sh
