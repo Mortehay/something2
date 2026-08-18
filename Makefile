@@ -2,7 +2,7 @@
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
-        migrate-up migrate-status migrate-repair tunnel tunnel-stop
+        migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing
 
 COMPOSE_FILE = compose/develop/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
@@ -249,3 +249,16 @@ reseed-map:
 	RESEED_SPEC=$(SPEC) $(MAKE) clear-maps
 	$(MAKE) seed-catalogs
 	$(MAKE) seed-map SPEC=$(SPEC)
+
+# --- Orange Pi production stack (SOMET-423) --------------------------------
+# compose/orangepi/ is the production-shaped stack: see the README's
+# "Production stack (local verification)" section for how to bring it up.
+
+# Behavioral test of compose/orangepi/caddy/Caddyfile against real throwaway
+# containers -- its own network, its own stub backend, cleaned up on exit
+# either way. Proves actual HTTP routing AND websocket upgrade forwarding,
+# not just that the Caddyfile's text looks right (that half is
+# backend/tests/orangepi_compose.test.js, which runs on every `node --test`).
+# Run this after editing the Caddyfile.
+verify-routing:
+	bash compose/orangepi/scripts/verify-routing.sh

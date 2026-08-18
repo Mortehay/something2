@@ -179,6 +179,19 @@ Postgres's data with it. And `cloudflared` sits behind the `tunnel` profile,
 so starting the stack never opens a public URL by accident — see the Orange
 Pi design doc for the tunnel itself.
 
+After editing `compose/orangepi/caddy/Caddyfile`, check routing with:
+
+```bash
+make verify-routing
+```
+
+This starts real throwaway containers (its own network, its own stub
+backend) against the actual Caddyfile and asserts both plain HTTP routing
+and a genuine websocket upgrade handshake on `/authority` — a broken proxy
+still serves a good-looking page while leaving the game unplayable, so
+this is worth running before every deploy, not just after a routing
+change.
+
 ## Ubuntu
 
 Tested on 22.04 and 24.04. The `docker.io` package in Ubuntu's own repos ships
