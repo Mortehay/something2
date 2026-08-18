@@ -2,7 +2,9 @@
 set -e
 
 # verify-routing.sh: Integration test that Caddy routing reaches the correct upstreams.
-# This tests actual HTTP behavior, not just syntax or regex matching.
+# This tests actual HTTP behavior, not just syntax or regex matching -- including
+# that a real websocket upgrade handshake to /authority is forwarded and its 101
+# response relayed back, not just that a plain GET reaches the right path (I3).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
@@ -26,10 +28,25 @@ echo "Setting up test environment..."
 # Create the network
 docker network create "$NETWORK_NAME"
 
-# Create a stub Caddyfile for the upstream that responds with the URI
+# Create a stub Caddyfile for the upstream that responds with the URI, and
+# separately accepts a genuine websocket upgrade handshake (matched on the
+# actual Connection/Upgrade request headers, then answering with a real
+# 101 plus the Connection/Upgrade response headers an upgrade requires --
+# without those response headers, Caddy's reverse_proxy does NOT treat the
+# backend's 101 as an upgrade and rewrites it to a plain 200 to the client,
+# which is exactly the silent failure mode this test exists to catch).
 STUB_CADDYFILE="$TMPDIR/stub-Caddyfile"
 cat > "$STUB_CADDYFILE" << 'EOF'
 :3101 {
+	@websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle @websocket {
+		header Connection Upgrade
+		header Upgrade websocket
+		respond "" 101
+	}
 	respond "BACKEND-GOT {uri}" 200
 }
 EOF
@@ -96,6 +113,56 @@ test_route "/api/worlds/12/links" "BACKEND-GOT /api/worlds/12/links" "API multi-
 
 # Test that authority requests reach the backend
 test_route "/authority" "BACKEND-GOT /authority" "Authority endpoint" || failed=1
+
+# Test that a genuine websocket upgrade handshake through Caddy reaches the
+# backend AND that the backend's 101 response is relayed back to the client.
+# A plain GET (the test above) only proves path routing -- it says nothing
+# about upgrade forwarding, and a broken proxy that mangles the upgrade still
+# serves a perfectly good-looking page while the game itself is unplayable.
+# This is the most load-bearing behaviour in the whole stack: the client's
+# WebSocket connection to /authority (frontend/src/js/net/*) IS the game.
+test_websocket_upgrade() {
+	local description="WebSocket upgrade handshake"
+	# A dummy but well-formed Sec-WebSocket-Key: 16 random-looking bytes,
+	# base64-encoded, as RFC 6455 requires. Its actual value doesn't matter
+	# here -- the stub doesn't validate or echo Sec-WebSocket-Accept, it just
+	# has to be present and base64 for a compliant server to accept the
+	# handshake at all.
+	local ws_key
+	ws_key=$(echo -n "verify-routing-dummy-key" | base64)
+
+	# --max-time bounds this: curl correctly keeps the connection open after
+	# a real 101 (there is more raw-protocol data to come on a real upgrade),
+	# and our stub never sends any, so curl would otherwise hang until the
+	# script's own timeout. -D - dumps response headers to stdout, -o
+	# /dev/null discards the (absent) body, so a timeout after headers are
+	# already received is a successful read, not a failure.
+	# `|| true`: curl exits 28 on the --max-time cutoff, which is the EXPECTED
+	# outcome on a real 101 (there's no more data coming from the stub, so
+	# curl times out waiting rather than getting a clean EOF). Under `set -e`
+	# an unguarded failing assignment here would abort the whole script, not
+	# just this check -- the actual pass/fail signal is the header content
+	# grepped below, not curl's own exit code.
+	local headers
+	headers=$(curl -s -D - -o /dev/null --max-time 3 \
+		-H "Connection: Upgrade" \
+		-H "Upgrade: websocket" \
+		-H "Sec-WebSocket-Key: $ws_key" \
+		-H "Sec-WebSocket-Version: 13" \
+		"http://localhost:8080/authority" 2>&1) || true
+
+	if echo "$headers" | grep -qi "^HTTP/1\.1 101"; then
+		echo "  ✓ $description: /authority → 101 Switching Protocols"
+		return 0
+	else
+		echo "  ✗ $description: /authority"
+		echo "    Expected: HTTP/1.1 101 Switching Protocols"
+		echo "    Got:"
+		echo "$headers" | sed 's/^/      /'
+		return 1
+	fi
+}
+test_websocket_upgrade || failed=1
 
 # Test that SPA routes are served the index.html marker
 test_route "/" "SPA-MARKER" "SPA root" || failed=1
