@@ -5,12 +5,21 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
-# VITE_API_URL is baked into the bundle at BUILD time -- it is read in more
-# than twenty modules via import.meta.env, each falling back to
-# http://localhost:13101 (frontend/src/config.js:4). A bundle built without it
-# silently points every player at their own machine, so the build refuses
-# rather than emitting one. On the Pi this value is the tunnel hostname, which
-# changes on every restart while the trycloudflare phase lasts.
+# VITE_API_URL is baked into the bundle at BUILD time -- it is read via the
+# single shared frontend/src/config.js (every one of the twenty-odd modules
+# that talks to the backend imports API_URL from there rather than reading
+# import.meta.env itself). Unset is now a VALID, and the NORMAL, production
+# value: it means same-origin, i.e. relative `/api/...` URLs that go through
+# whatever is serving the page -- Caddy in this stack, which proxies both
+# backend surfaces on the one hostname the tunnel exposes. That is what makes
+# this stack survive a tunnel restart without a rebuild: the hostname is
+# random and changes every time (trycloudflare), so the bundle can no longer
+# afford to have it baked in.
+#
+# Set VITE_API_URL only for a split-origin deployment, where the frontend and
+# backend are served from genuinely different hosts. Whether set or unset,
+# the guard below still refuses a localhost value -- that failure mode (every
+# player silently pointed at their own machine) is unchanged.
 ARG VITE_API_URL
 
 # Opt-out for local workstation verification ONLY (README's "Production stack
@@ -20,10 +29,7 @@ ARG VITE_API_URL
 # host `LocalHost` or `LOCALHOST` instead of asking for the real opt-out.
 ARG ALLOW_LOCALHOST_API_URL
 
-RUN if [ -z "$VITE_API_URL" ]; then \
-      echo "ERROR: VITE_API_URL build-arg is required" >&2; exit 1; \
-    fi; \
-    if [ "$ALLOW_LOCALHOST_API_URL" != "1" ] && echo "$VITE_API_URL" | grep -qiE 'localhost|127\.0\.0\.1'; then \
+RUN if [ -n "$VITE_API_URL" ] && [ "$ALLOW_LOCALHOST_API_URL" != "1" ] && echo "$VITE_API_URL" | grep -qiE 'localhost|127\.0\.0\.1'; then \
       echo "ERROR: VITE_API_URL is still the localhost default: $VITE_API_URL" >&2; \
       echo "ERROR: for LOCAL VERIFICATION ONLY, pass --build-arg ALLOW_LOCALHOST_API_URL=1 to opt out. A real deployment must NOT set this." >&2; \
       exit 1; \

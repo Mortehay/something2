@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
+import { API_URL } from "../../config.js";
 
 // Attack VFX slice E (SOMET-162). Same shape as useBiomes: one read hook plus
 // three mutations that invalidate the shared key.

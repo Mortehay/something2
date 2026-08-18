@@ -20,9 +20,18 @@ services:
       context: .
       dockerfile: compose/orangepi/frontend.Dockerfile
       args:
-        # The public origin players reach. Baked into the bundle at build
-        # time, so changing it REQUIRES a rebuild, not just a restart.
-        VITE_API_URL: ${PUBLIC_URL:?PUBLIC_URL must be set -- the public origin, e.g. https://example.trycloudflare.com}
+        # PUBLIC_URL is NOT required. Left unset, VITE_API_URL is unset too,
+        # and the bundle defaults to same-origin (relative /api,
+        # /authority) -- exactly what this stack wants, since Caddy proxies
+        # both backend surfaces on the one hostname the tunnel exposes. That
+        # also means a tunnel restart (new random trycloudflare hostname)
+        # never invalidates the bundle: nothing about the origin is baked in.
+        #
+        # Set PUBLIC_URL only for the split-origin deployment, where the
+        # frontend and backend are served from different hosts. Baked into
+        # the bundle at build time, so changing it REQUIRES a rebuild, not
+        # just a restart.
+        VITE_API_URL: ${PUBLIC_URL:-}
         # Local-verification-only opt-out for frontend.Dockerfile's localhost
         # guard. Defaulted empty on purpose: a real deployment that never
         # sets it keeps the guard active.

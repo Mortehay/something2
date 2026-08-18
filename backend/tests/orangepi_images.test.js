@@ -59,13 +59,23 @@ test('frontend image builds the bundle rather than serving a dev server', () => 
   assert.doesNotMatch(text, /tail/, 'no dev-idling CMD');
 });
 
-test('frontend build refuses to bake a localhost API url', () => {
+test('frontend build allows VITE_API_URL to be unset (same-origin default)', () => {
   const text = read(FRONTEND_DOCKERFILE);
   assert.match(text, /ARG VITE_API_URL/, 'API url must be a build arg');
-  // VITE_API_URL is read in 20+ modules with a http://localhost:13101
-  // fallback. A bundle built without it points every player at their own
-  // machine and fails silently, so the BUILD must fail loudly instead.
-  //
+  // Same-origin (frontend/src/config.js's API_URL default is now '') means
+  // an unset VITE_API_URL is the NORMAL production case, not an error -- the
+  // build must not reject it. There must be no unconditional
+  // `[ -z "$VITE_API_URL" ]` (or equivalent "is it set at all") check that
+  // fails the build regardless of the opt-out.
+  assert.doesNotMatch(
+    text,
+    /if \[ -z "\$VITE_API_URL" \]/,
+    'an unset VITE_API_URL must be accepted -- it is the same-origin default, not a required value'
+  );
+});
+
+test('frontend build refuses to bake a localhost API url when VITE_API_URL is set', () => {
+  const text = read(FRONTEND_DOCKERFILE);
   // Asserting on the GUARD, not on the bare word "localhost": this file's
   // comments mention localhost too, so a looser check would still pass with
   // the guard deleted -- a test that asserts nothing.
@@ -81,6 +91,15 @@ test('frontend build refuses to bake a localhost API url', () => {
     'the build must actively test VITE_API_URL against localhost, case-insensitively'
   );
   assert.match(text, /exit 1/, 'the guard must fail the build, not warn');
+  // The localhost check itself must be conditioned on VITE_API_URL actually
+  // being set -- otherwise an empty string would need to dodge the
+  // `grep -qiE` pattern by coincidence rather than by being explicitly
+  // exempted, which is fragile.
+  assert.match(
+    text,
+    /\[ -n "\$VITE_API_URL" \] && \[ "\$ALLOW_LOCALHOST_API_URL" != "1" \] && echo "\$VITE_API_URL" \| grep -qiE/,
+    'the localhost check must run only when VITE_API_URL is set'
+  );
 });
 
 test('frontend build has a documented, opt-in-only escape hatch for the localhost guard', () => {
@@ -90,22 +109,11 @@ test('frontend build has a documented, opt-in-only escape hatch for the localhos
   // deployment that never mentions it still gets the guard.
   assert.match(text, /ARG ALLOW_LOCALHOST_API_URL/, 'opt-out must be a build arg');
   // The guard must only skip the localhost check when the opt-out is
-  // exactly "1" -- not merely set, not "true", not any truthy string --
-  // and the empty-VITE_API_URL check must NOT be short-circuited by it.
+  // exactly "1" -- not merely set, not "true", not any truthy string.
   assert.match(
     text,
     /\[ "\$ALLOW_LOCALHOST_API_URL" != "1" \] && echo "\$VITE_API_URL" \| grep -qiE/,
-    'the opt-out must gate only the localhost check, not the required-value check'
-  );
-  // The required-value check must run first and unconditionally -- the
-  // opt-out must never be checked (or able to short-circuit) before it.
-  const emptyCheckIdx = text.indexOf('if [ -z "$VITE_API_URL" ]');
-  const optOutCheckIdx = text.indexOf('$ALLOW_LOCALHOST_API_URL" != "1"');
-  assert.ok(emptyCheckIdx !== -1, 'the required-value check must still exist');
-  assert.ok(optOutCheckIdx !== -1, 'the opt-out condition must exist');
-  assert.ok(
-    emptyCheckIdx < optOutCheckIdx,
-    'the required-value check must precede the opt-out check, so the opt-out cannot bypass it'
+    'the opt-out must gate only the localhost check, by exact match against "1"'
   );
 });
 

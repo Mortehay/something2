@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:13101";
+import { API_URL as API } from "../../config.js";
 
 // Absolute URL for a stored asset served through the backend (not MinIO directly):
 export function assetUrl(key) {

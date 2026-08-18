@@ -20,6 +20,8 @@ import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
+import { authorityWsUrl } from "../net/authorityUrl.js";
+import { API_URL } from "../../../../../config.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
 // frame arrives.
@@ -32,8 +34,6 @@ const DEFAULT_WEAPON_NAME = "dagger";
 // Native Map shadowed by the world Map import above; alias to keep the
 // distinction obvious at the call sites.
 const NativeMap = globalThis.Map;
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
 
 export class Game {
     constructor() {
@@ -376,7 +376,7 @@ export class Game {
         const claims = parseJwt(token);
         if (!claims || claims.user_id == null) throw new Error('invalid session token');
         this.localUserId = String(claims.user_id);
-        const wsUrl = API_URL.replace(/^http/, 'ws') + '/authority';
+        const wsUrl = authorityWsUrl(API_URL, window.location);
         const spawn = await new Promise((resolve, reject) => {
             // Scoped to THIS join attempt. There used to be an
             // `authorityJoined` field here; it was set on join and cleared on

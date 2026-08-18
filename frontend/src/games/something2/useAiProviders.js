@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
+import { API_URL } from "../../config.js";
 const KEY = ["ai-providers"];
 
 // SOMET-330. Follows useBiomes.js: one query hook plus a mutation factory.

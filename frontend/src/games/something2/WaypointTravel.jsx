@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { buildTravelList, REASON } from './waypointTravel.js';
 import { shouldAutoOpen, portalTileOf } from './portalAutoOpen.js';
+import { API_URL } from '../../config.js';
 
 // The waypoint travel popup (SOMET-293), opened with T while playing.
 //
@@ -20,8 +21,6 @@ import { shouldAutoOpen, portalTileOf } from './portalAutoOpen.js';
 // two-loader shape that has shipped inert features in this project before --
 // WaypointTravel.smoke.test.js asserts the absence by literal token, which is
 // why the names are spelled around rather than quoted here.
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
 
 // How often the popup re-reads the player's position while it is open. The
 // player can walk off a waypoint with the panel up, and the enabled/disabled

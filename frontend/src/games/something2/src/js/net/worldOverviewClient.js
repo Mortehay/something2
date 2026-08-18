@@ -1,7 +1,7 @@
 // Dependency-free fetcher + refetch predicate for the minimap's player-centered
 // overview. Kept React/query-free so it is unit-testable in the node vitest env,
 // mirroring worldPreviewClient.js.
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
+import { API_URL } from '../../../../../config.js';
 
 export async function fetchWorldOverview(worldId, centerCol, centerRow) {
   const res = await fetch(`${API_URL}/api/worlds/${worldId}/overview?cx=${centerCol}&cy=${centerRow}`);

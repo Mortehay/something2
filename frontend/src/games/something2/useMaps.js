@@ -1,8 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
+import { API_URL } from "../../config.js";
 
 // F-024/SOMET-204: the entity-type and tile-type mutations used to throw a
 // fixed generic string on a non-ok response and discard the backend's real

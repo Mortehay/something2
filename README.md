@@ -158,8 +158,6 @@ default would call its own machine).
 mounts, no dev server. It is what the Orange Pi runs, and it can be exercised
 on a workstation without any hardware.
 
-    export PUBLIC_URL=http://localhost:8080
-    export ALLOW_LOCALHOST_API_URL=1
     export ORANGEPI_DATA_DIR=/tmp/s2-orangepi-verify
     docker compose --project-directory . --env-file .env \
       -f compose/orangepi/docker-compose.yml up -d --build
@@ -167,17 +165,29 @@ on a workstation without any hardware.
 Then run the migrations and seed a map with `exec -T backend`, as in the
 development stack, and open http://localhost:8080.
 
-Things to know. `PUBLIC_URL` is baked into the frontend bundle at build time,
-so changing it needs `--build`, not just a restart. The build refuses to bake
-in a `localhost`/`127.0.0.1` origin by default — a bundle built without a real
-origin would silently point every player at their own machine — so local
-verification has to opt out with `ALLOW_LOCALHOST_API_URL=1`; a real
-deployment must **not** set it. `ORANGEPI_DATA_DIR` is required (the stack
-refuses to start without it) and must point **outside** this repository,
-because provisioning empties the app directory and would otherwise take
-Postgres's data with it. And `cloudflared` sits behind the `tunnel` profile,
-so starting the stack never opens a public URL by accident — see the Orange
-Pi design doc for the tunnel itself.
+Things to know. The frontend defaults to a **same-origin** API base: the
+bundle calls relative URLs (`/api/...`), and Caddy is what makes that work,
+proxying both `/api/*` and `/authority*` to the backend on the same origin
+the tunnel exposes. That is what lets a `trycloudflare` quick tunnel's
+random hostname change on every restart without ever needing a rebuild —
+nothing about the origin is baked into the bundle. `PUBLIC_URL` is an
+optional escape hatch, not something you normally need to set: pass it only
+for a split-origin deployment, where the frontend and backend are served
+from genuinely different hosts, e.g.
+
+    export PUBLIC_URL=https://api.example.com
+
+Like before, it is baked into the frontend bundle at build time, so changing
+it needs `--build`, not just a restart. If you do set it, the build still
+refuses to bake in a `localhost`/`127.0.0.1` origin by default — a bundle
+built against one would silently point every player at their own machine —
+so local verification of the split-origin path has to opt out with
+`ALLOW_LOCALHOST_API_URL=1`; a real deployment must **not** set it.
+`ORANGEPI_DATA_DIR` is required (the stack refuses to start without it) and
+must point **outside** this repository, because provisioning empties the app
+directory and would otherwise take Postgres's data with it. And `cloudflared`
+sits behind the `tunnel` profile, so starting the stack never opens a public
+URL by accident — see the Orange Pi design doc for the tunnel itself.
 
 After editing `compose/orangepi/caddy/Caddyfile`, check routing with:
 
