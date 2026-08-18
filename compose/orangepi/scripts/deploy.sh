@@ -141,6 +141,20 @@ SERVICES="backend caddy cloudflared"
 run_step "stop the serving containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES stop $SERVICES"
 run_step "start the new containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps db $SERVICES"
 
+# The deploy hook is started, never RESTARTED, and it is deliberately not in
+# $SERVICES above. When a deploy was triggered by the hook, restarting the
+# hook container kills the deploy halfway through -- which presents as a
+# deploy that silently stopped rather than one that was killed. --no-recreate
+# means an absent or stopped hook is started here, and a running one is left
+# exactly as it is. The consequence, stated rather than discovered: a change
+# to the hook's own image reaches the board on `make pi-up`, not on a deploy.
+case "$PROFILES" in
+  *"--profile hook"*)
+    run_step "ensure the deploy hook is running" \
+      pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps --no-recreate deploy-hook"
+    ;;
+esac
+
 # A container that starts and exits still leaves `up -d` exiting 0, so the
 # deploy is not finished until something answers.
 wait_for_health() {
