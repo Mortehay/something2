@@ -2,7 +2,8 @@
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
-        migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing
+        migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
+        pi-status
 
 COMPOSE_FILE = compose/develop/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
@@ -262,3 +263,14 @@ reseed-map:
 # Run this after editing the Caddyfile.
 verify-routing:
 	bash compose/orangepi/scripts/verify-routing.sh
+# --- Orange Pi remote operation (make pi-*) --------------------------------
+# Operate the BOARD the way the local stack is operated. Every target is a
+# single line because compose/orangepi/scripts/lib.sh holds the ssh transport
+# and the step reporting; see the README's "Operating the Orange Pi" section.
+#
+# These targets never touch the local stack: they run compose ON THE BOARD,
+# over ssh, against compose/orangepi/docker-compose.yml there. The local
+# equivalents above are the ones without the pi- prefix.
+
+pi-status:
+	@bash compose/orangepi/scripts/status.sh
