@@ -307,6 +307,11 @@ Point Actions at the board once with:
 make pi-hook-register    # sets DEPLOY_HOOK_SECRET and DEPLOY_HOOK_URL via gh
 ```
 
+Measured on the board rather than estimated: the listener holds about 45 MB
+resident, against 548 MB used of 3.9 GB with the whole stack running. (Note
+that `docker stats` reports 0B on this Armbian kernel, which has no cgroup
+memory accounting -- read `ps` on the board instead.)
+
 The hook verifies an HMAC over the request body, refuses stale requests,
 refuses a second deploy while one is running, and runs `deploy.sh` with
 nothing from the request in it. It exits rather than starting at all when no
