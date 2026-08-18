@@ -301,8 +301,13 @@ pi-up:
 pi-down:
 	@bash compose/orangepi/scripts/remote.sh compose down --remove-orphans
 
+# The GAME containers only. Restarting cloudflared would take a new random
+# trycloudflare hostname -- changing the URL players hold and invalidating
+# the deploy hook's registered URL -- for no benefit, since the tunnel
+# reconnects to the replacement Caddy by name. `pi-down` + `pi-up` is the
+# full cycle when that is genuinely what you want.
 pi-restart:
-	@bash compose/orangepi/scripts/remote.sh compose restart
+	@bash compose/orangepi/scripts/remote.sh compose restart backend caddy
 
 pi-logs:
 	@bash compose/orangepi/scripts/remote.sh compose logs -f --tail 200

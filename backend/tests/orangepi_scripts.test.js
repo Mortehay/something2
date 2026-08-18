@@ -635,3 +635,14 @@ test('a deploy never restarts the tunnel or the hook', () => {
     assert.ok(line, `${service} must be started with --no-recreate`);
   }
 });
+
+test('pi-restart restarts the game, not the tunnel', () => {
+  // Same reason a deploy leaves cloudflared alone: restarting it takes a new
+  // random hostname, which changes the URL players hold and invalidates the
+  // deploy hook's registered URL. Found by running `make pi-restart` and
+  // watching the public URL move.
+  const makefile = fs.readFileSync(path.join(__dirname, '..', '..', 'Makefile'), 'utf8');
+  const body = /^pi-restart:\n((?:\t.*\n)+)/m.exec(makefile)[1];
+  assert.match(body, /restart backend caddy/);
+  assert.doesNotMatch(body, /restart\s*$/m, 'a bare `compose restart` bounces every service');
+});
