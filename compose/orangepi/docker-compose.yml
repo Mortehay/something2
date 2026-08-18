@@ -47,6 +47,12 @@ services:
       # that behaviour is controlled; there is no error handler in the app.
       - NODE_ENV=production
       - PORT=3101
+      # MIGRATE_ON_BOOT is deliberately NOT set here. Migrations are a
+      # separate deploy step for this stack (run `npm run migrate:up` before
+      # `up`/restart), never a side effect of the server booting -- see
+      # backend/src/index.js's shouldMigrateOnBoot and
+      # docs/superpowers/specs/2026-08-17-orangepi-staging-design.md. Its
+      # absence here is deliberate, not forgotten.
       - DATABASE_URL=postgres://user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/game_db
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
       # Object storage is not configured yet (SOMET-379). The MinIO client in

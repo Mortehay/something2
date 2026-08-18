@@ -41,6 +41,10 @@ services:
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
       - SPRITE_GEN_URL=http://sprite-gen:8100
       - SPRITE_GEN_SHARED_SECRET=${SPRITE_GEN_SHARED_SECRET:?SPRITE_GEN_SHARED_SECRET must be set in .env}
+      # Preserves the existing dev experience: `make up` migrates and serves in
+      # one step. compose/orangepi does NOT set this -- there, migrations are
+      # their own deploy stage (see backend/src/index.js's shouldMigrateOnBoot).
+      - MIGRATE_ON_BOOT=true
     depends_on:
       - db
       - minio
