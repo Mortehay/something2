@@ -149,6 +149,25 @@ surfaces the game needs, and `make tunnel` repoints the client's `VITE_API_URL` 
 the public origin (the client calls absolute URLs, so a remote browser left on the
 default would call its own machine).
 
+## Production stack (local verification)
+
+`compose/orangepi/` is the production-shaped stack: built images, no bind
+mounts, no dev server. It is what the Orange Pi runs, and it can be exercised
+on a workstation without any hardware.
+
+    export PUBLIC_URL=http://localhost:8080
+    export ORANGEPI_DATA_DIR=/tmp/s2-orangepi-verify
+    docker compose --project-directory . --env-file .env \
+      -f compose/orangepi/docker-compose.yml up -d --build
+
+Then run the migrations and seed a map with `exec -T backend`, as in the
+development stack, and open http://localhost:8080.
+
+Two things to know. `PUBLIC_URL` is baked into the frontend bundle at build
+time, so changing it needs `--build`, not just a restart. And `cloudflared`
+sits behind the `tunnel` profile, so starting the stack never opens a public
+URL by accident — see the Orange Pi design doc for the tunnel itself.
+
 ## Ubuntu
 
 Tested on 22.04 and 24.04. The `docker.io` package in Ubuntu's own repos ships
