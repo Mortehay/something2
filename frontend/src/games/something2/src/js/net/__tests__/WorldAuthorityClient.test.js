@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { WorldAuthorityClient } from '../WorldAuthorityClient.js';
 
 // Minimal fake WebSocket capturing sent frames.
@@ -179,5 +179,39 @@ describe('WorldAuthorityClient', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0].progression).toEqual(progression);
     expect(seen[0].awarded).toBe(0);
+  });
+
+  // SOMET-372 -- the world-chest protocol. The client had NO branch for
+  // `chests`, so every frame the authority sent (597 of them in one measured
+  // 4-minute session) hit the `default` warn and was discarded.
+  it('routes a chests snapshot to onChests instead of warning about an unknown frame', () => {
+    const seen = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const c = armClient({ onChests: (m) => seen.push(m) });
+    c._handleMessage({ type: 'chests', chests: [{ id: 'c1', x: 10, y: 20, kind: 'vault', state: 'locked' }] });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].chests[0]).toMatchObject({ id: 'c1', kind: 'vault', state: 'locked' });
+    // The frame arrives ~10x/second: one unhandled branch is 750 warnings a
+    // session, which is how a real error gets buried.
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('routes a chestOpened reply to onChestOpened', () => {
+    const seen = [];
+    const c = armClient({ onChestOpened: (m) => seen.push(m) });
+    c._handleMessage({ type: 'chestOpened', chestId: 'c1', items: [{ id: 5, item_type_id: 7, quantity: 1 }], awarded: 30 });
+    expect(seen[0]).toMatchObject({ chestId: 'c1', awarded: 30 });
+    expect(seen[0].items[0].item_type_id).toBe(7);
+  });
+
+  it('sends openchest with no chest id, leaving range to the authority', () => {
+    const c = armClient();
+    FakeWS.last.sent.length = 0;
+    expect(c.sendOpenChest()).toBe(true);
+    // No id and no coordinates on purpose: the server proximity-picks from its
+    // own copy of the player's position, so there is nothing here for a forged
+    // frame to aim at a chest the player is nowhere near.
+    expect(FakeWS.last.sent).toEqual([{ type: 'openchest' }]);
   });
 });

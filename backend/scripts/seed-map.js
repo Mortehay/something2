@@ -123,6 +123,14 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
       out.push({ row: midRow, col: row.width - 2, what: 'arrival via doorway E' });
     }
   }
+  // An authored vault chest sits on GENERATED terrain, exactly like a doorway
+  // arrival tile: the (seed, size) re-roll that came up sealed for three worlds
+  // in SOMET-306/307 could just as easily put a chest under water. A chest a
+  // player cannot walk to is invisible in the worst way -- it broadcasts, it
+  // renders, and nothing explains why the open key does nothing.
+  if (w.chest && Number.isFinite(w.chest.x) && Number.isFinite(w.chest.y)) {
+    out.push({ row: Math.floor(w.chest.y / 100), col: Math.floor(w.chest.x / 100), what: 'vault chest' });
+  }
   for (const l of (spec.links || [])) {
     if (l.kind !== 'portal') continue;
     if (l.from === w.key) {

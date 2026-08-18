@@ -36,6 +36,12 @@
         "gate_edge": "E",
         "spawn_x": 4650,
         "spawn_y": 4550
+      },
+      "chest": {
+        "x": 5650,
+        "y": 4650,
+        "guard_creature_type": "Slime",
+        "level": 2
       }
     },
     {

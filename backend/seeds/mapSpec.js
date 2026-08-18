@@ -591,6 +591,55 @@ function validateMapSpec(spec, {
       }
     }
 
+    // Vault chest (SOMET-244, first authored by SOMET-372). `chest` has been an
+    // ACCEPTED world key since SOMET-244 shipped the seeder, with no shape
+    // check of any kind behind it -- and unlike a mistyped key, which
+    // WORLD_KEYS rejects, a mistyped FIELD inside an accepted key seeds
+    // silently: insertVaultChest would INSERT x/y of `undefined` (Postgres
+    // real, so NaN/null), and the world would come up with a chest at a
+    // position no player can ever stand next to. Nothing downstream would say
+    // so -- the chest broadcasts, the AOI filter never matches, and it reads
+    // exactly like "chests are broken" rather than "this spec is wrong".
+    if (w.chest !== undefined) {
+      if (typeof w.chest !== 'object' || w.chest === null || Array.isArray(w.chest)) {
+        errors.push(`world "${w.key}" chest must be an object (got ${JSON.stringify(w.chest)})`);
+      } else {
+        const c = w.chest;
+        // World PIXELS, like entry_spawn and the village spawn -- NOT tiles.
+        // MAP_TILE_SIZE is 100, so a chest authored in tile units lands within
+        // the first tile of the map, which is why the bound check below is
+        // worth having even for a "small" number.
+        for (const f of ['x', 'y']) {
+          if (!Number.isFinite(c[f])) {
+            errors.push(`world "${w.key}" chest ${f} must be a number in world pixels (got ${JSON.stringify(c[f])})`);
+          }
+        }
+        const maxX = (w.width ?? 0) * 100, maxY = (w.height ?? 0) * 100;
+        if (Number.isFinite(c.x) && (c.x < 0 || c.x >= maxX)) {
+          errors.push(`world "${w.key}" chest x ${c.x} is outside the world (0..${maxX - 1} px)`);
+        }
+        if (Number.isFinite(c.y) && (c.y < 0 || c.y >= maxY)) {
+          errors.push(`world "${w.key}" chest y ${c.y} is outside the world (0..${maxY - 1} px)`);
+        }
+        if (!Number.isInteger(c.level) || c.level < 1) {
+          errors.push(`world "${w.key}" chest level must be a positive integer (got ${JSON.stringify(c.level)})`);
+        }
+        if (typeof c.guard_creature_type !== 'string' || c.guard_creature_type === '') {
+          errors.push(`world "${w.key}" chest guard_creature_type must be a creature type name`);
+        } else if (creatureTypeNames && !creatureTypeNames.has(c.guard_creature_type)) {
+          // insertVaultChest throws on an unknown guard type, but only at
+          // apply time, halfway through a transaction that has already
+          // stamped villages -- the same failure caught here names the spec.
+          errors.push(`world "${w.key}" chest references unknown creature type "${c.guard_creature_type}"`);
+        }
+        for (const k of Object.keys(c)) {
+          if (!['x', 'y', 'level', 'guard_creature_type'].includes(k)) {
+            errors.push(`world "${w.key}" chest has unknown key "${k}"`);
+          }
+        }
+      }
+    }
+
     if (biomeNames) {
       for (const b of w.biomes ?? []) {
         if (!biomeNames.has(b)) errors.push(`world "${w.key}" references unknown biome "${b}"`);

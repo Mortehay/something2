@@ -919,3 +919,66 @@ test('an entry world with NO village keeps its entry_spawn unconstrained', () =>
   assert.deepEqual(errorsFor((s) => { s.worlds[0].entry_spawn = { x: 3250, y: 3250 }; }), []);
   assert.deepEqual(errorsFor((s) => { delete s.worlds[0].entry_spawn; }), []);
 });
+
+// --- Vault chest (SOMET-372) ------------------------------------------------
+//
+// `chest` was an ACCEPTED world key from the day SOMET-244 shipped its seeder,
+// with nothing behind it. WORLD_KEYS rejects a mistyped KEY; a mistyped FIELD
+// inside an accepted one used to seed silently, and the failure surfaces as
+// "world chests are broken" rather than "this spec is wrong".
+const withChest = (chest) => errorsFor((s) => { s.worlds[0].chest = chest; });
+const okChest = { x: 3200, y: 3200, guard_creature_type: 'Slime', level: 2 };
+const creatureNames = { creatureTypeNames: new Set(['Slime', 'Wolf']) };
+
+test('a well-formed vault chest validates', () => {
+  assert.deepEqual(withChest(okChest), []);
+});
+
+test('a chest authored in TILE units is rejected, not silently placed in the corner', () => {
+  // The trap this exists for: every other coordinate an author writes near a
+  // chest (min_row/min_col on the village) is in TILES, while x/y here are
+  // world PIXELS. Tile units are a legal-looking number that seeds a chest
+  // inside the first tile of the map -- which is in-bounds, so a bounds check
+  // alone would not catch it. This asserts the bound that DOES fire: a spec
+  // that meant tile 56 and wrote 56 still gets a chest, so the guard below is
+  // about the out-of-range half of the same mistake.
+  assert.deepEqual(withChest({ ...okChest, x: 99999 }).length, 1);
+  assert.match(withChest({ ...okChest, x: 99999 })[0], /chest x 99999 is outside the world/);
+  assert.match(withChest({ ...okChest, y: -1 })[0], /chest y -1 is outside the world/);
+});
+
+test('a chest with a missing or malformed coordinate is rejected', () => {
+  // insertVaultChest would INSERT undefined into a `real` column and produce a
+  // chest at a position no player can stand next to.
+  assert.match(withChest({ ...okChest, x: undefined })[0], /chest x must be a number in world pixels/);
+  assert.match(withChest({ ...okChest, y: 'centre' })[0], /chest y must be a number in world pixels/);
+});
+
+test('a chest needs a positive integer level and a named guard', () => {
+  assert.match(withChest({ ...okChest, level: 0 })[0], /chest level must be a positive integer/);
+  assert.match(withChest({ ...okChest, level: 1.5 })[0], /chest level must be a positive integer/);
+  assert.match(withChest({ ...okChest, guard_creature_type: '' })[0], /guard_creature_type must be a creature type name/);
+});
+
+test('an unknown guard creature type is named by the spec, not by a half-applied transaction', () => {
+  const spec = valid();
+  spec.worlds[0].chest = { ...okChest, guard_creature_type: 'Dragon' };
+  const errs = validateMapSpec(spec, creatureNames);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0], /chest references unknown creature type "Dragon"/);
+  // ...and a real one passes the same check, so the test is not just asserting
+  // that validation rejects everything.
+  spec.worlds[0].chest = okChest;
+  assert.deepEqual(validateMapSpec(spec, creatureNames), []);
+});
+
+test('a typo inside the chest object is an error, not an ignored extra', () => {
+  // Same rule WORLD_KEYS enforces one level up: an unread key is
+  // indistinguishable from a consumed one from the author's side.
+  assert.match(withChest({ ...okChest, guard_level: 3 })[0], /chest has unknown key "guard_level"/);
+});
+
+test('a chest that is not an object is rejected', () => {
+  assert.match(withChest([okChest])[0], /chest must be an object/);
+  assert.match(withChest(null)[0], /chest must be an object/);
+});

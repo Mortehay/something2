@@ -17,6 +17,7 @@ import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { aimVector } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
+import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
@@ -93,6 +94,13 @@ export class Game {
         // (used only to render the toggle's current state).
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
+
+        // World chests (SOMET-372) -- the guarded, lootable kind authored into
+        // a map spec or spawned by a loot map, NOT the account chest/bank
+        // above. Whole-list mirror of the server's AOI `chests` frame, exactly
+        // like creatures and ground items: never reconciled as a delta, so a
+        // chest that leaves the neighbourhood simply stops being sent.
+        this.worldChests = [];
 
         // Wallet balance (Slice C, gold economy): server-owned, set from
         // `joined.gold` and kept live by `wallet` messages on pickup. Gold
@@ -345,6 +353,11 @@ export class Game {
         this.inventorySelectedItemId = null;
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
+        // SOMET-372. Cleared on join for the same reason merchants/landmarks
+        // are: the first `chests` frame of the new world may be a few ticks
+        // out, and until it lands the previous world's chests would otherwise
+        // still be drawn -- in the new world's coordinates.
+        this.worldChests = [];
         this.gold = 0;
         this.progression = null;
         this.merchants = [];
@@ -468,6 +481,12 @@ export class Game {
                 },
                 onWithdrawn: (msg) => { if (msg.item) addItem(this.inventory, msg.item); },
                 onProgression: (msg) => { if (msg && msg.progression) this.progression = msg.progression; },
+                // SOMET-372. Both handlers are one line each on purpose: the
+                // rules they carry (whole-list replacement, and the item-shape
+                // mapping openChest needs) live in core/worldChests.js, where
+                // they can be tested without a canvas.
+                onChests: (msg) => { this.worldChests = chestsFromFrame(msg); },
+                onChestOpened: (msg) => this._showToast(applyChestOpened(this.inventory, this.worldChests, msg)),
                 // A trade lands its inventory/wallet effect via the existing
                 // item/gold plumbing (addItem/removeItem, wallet frame); what
                 // 'bought'/'sold' add on top is re-issuing `interact` so the
@@ -852,6 +871,7 @@ export class Game {
                 inventoryOpen: this.inventoryOpen,
                 selectedItemId: this.inventorySelectedItemId,
                 groundItems: this.groundItems.all(),
+                worldChests: this.worldChests,
                 autoLoot: this.autoLoot,
                 gold: this.gold,
                 merchants: this.merchants,
@@ -1026,6 +1046,19 @@ export class Game {
             if (isKey('b') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
+                return;
+            }
+
+            // World chest (SOMET-372): 'f' asks the server to open the nearest
+            // chest. Its own key rather than a smarter 'e': range is the
+            // AUTHORITY's call (INTERACT_RADIUS lives there), and a client that
+            // decided "chest or merchant?" locally would need its own copy of
+            // that radius to do it -- a second copy that drifts the first time
+            // one side changes. A refusal comes back as an `error` frame and
+            // is already toasted.
+            if (isKey('f') && this.state === 'playing' && this.chunked && !e.repeat
+                && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+                if (this.authorityClient) this.authorityClient.sendOpenChest();
                 return;
             }
 
