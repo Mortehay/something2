@@ -12,3 +12,10 @@ sprite-gen
 tools
 **/__tests__
 **/*.test.js
+
+# Neither is COPYed by any Dockerfile today, but both would otherwise sit in
+# the build context uploaded to the daemon on the Pi. Excluded now, before
+# .env holds a real secret and before compose/orangepi/secrets/ (the spec's
+# planned home for a generated deploy key) exists.
+.env
+compose/orangepi/secrets/
