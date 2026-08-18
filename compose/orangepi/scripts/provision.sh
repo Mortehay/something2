@@ -177,7 +177,7 @@ run_step "ensure the data directory exists" ensure_data_dir
 #
 # Secrets are generated ON the board and never travel from the workstation.
 ensure_board_env() {
-  pi_ssh "DATA=$(printf '%q' "$DATA") APP_DIR=$(printf '%q' "$APP") bash -s" <<'REMOTE'
+  pi_ssh "DATA=$(printf '%q' "$DATA") APP_DIR=$(printf '%q' "$APP") REPO=$(printf '%q' "$GIT_REPOSITORY") BRANCH=$(printf '%q' "$ORANGEPI_BRANCH") bash -s" <<'REMOTE'
 set -euo pipefail
 ENV_FILE="$DATA/.env"
 umask 077
@@ -200,6 +200,23 @@ ensure_key() {
   fi
 }
 
+# For CONFIGURATION rather than secrets: the workstation is authoritative, so
+# a changed repository or branch must actually propagate. ensure_key would
+# keep the old value forever, which is right for a generated secret and wrong
+# for a setting the operator just edited.
+set_key() {
+  local key="$1" value="$2"
+  if grep -q "^${key}=${value}$" "$ENV_FILE"; then
+    echo "  kept    ${key}"
+  elif grep -q "^${key}=" "$ENV_FILE"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+    echo "  updated ${key}"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+    echo "  added   ${key}"
+  fi
+}
+
 if [ ! -s "$ENV_FILE" ]; then
   {
     echo "# Generated on the board by provision.sh. Never copied from the"
@@ -212,8 +229,15 @@ fi
 ensure_key POSTGRES_PASSWORD "$(openssl rand -hex 24)"
 ensure_key JWT_SECRET "$(openssl rand -hex 32)"
 ensure_key DEPLOY_HOOK_SECRET "$(openssl rand -hex 32)"
-ensure_key ORANGEPI_DATA_DIR "$DATA"
-ensure_key ORANGEPI_APP_DIR "${APP_DIR:-/app}"
+# Configuration the BOARD-SIDE deploy needs. The deploy hook runs deploy.sh
+# inside a container whose only .env is this file, so anything deploy.sh
+# requires has to be here -- the hook's first real deploy failed on a missing
+# GIT_REPOSITORY for exactly this reason, and it failed AFTER verifying the
+# signature, which is the confusing place to fail.
+set_key ORANGEPI_DATA_DIR "$DATA"
+set_key ORANGEPI_APP_DIR "${APP_DIR:-/app}"
+set_key GIT_REPOSITORY "$REPO"
+set_key ORANGEPI_BRANCH "$BRANCH"
 # Same-origin: the bundle calls /api and /authority on whatever host served
 # it, so a changed tunnel hostname needs no rebuild.
 ensure_key PUBLIC_URL ""
