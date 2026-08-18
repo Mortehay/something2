@@ -184,6 +184,19 @@ pi_compose_cmd() {
     "$ORANGEPI_APP_DIR" "$ORANGEPI_DATA_DIR" "$PI_COMPOSE_FILE"
 }
 
+# Which compose profiles the board should run. The tunnel is always part of
+# the deployed stack -- a board nobody can reach is not deployed. The deploy
+# hook joins it only when the board actually has a secret for it, which is
+# what keeps "an internet-reachable deploy trigger" a thing you configure
+# rather than a thing that appears.
+pi_profiles() {
+  local profiles="--profile tunnel"
+  if pi_ssh "grep -qE '^DEPLOY_HOOK_SECRET=.+' $(printf '%q' "$ORANGEPI_DATA_DIR")/.env" 2>/dev/null; then
+    profiles="$profiles --profile hook"
+  fi
+  printf '%s' "$profiles"
+}
+
 # --- Step reporting --------------------------------------------------------
 
 STEP_INDEX=0

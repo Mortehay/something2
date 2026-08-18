@@ -169,32 +169,49 @@ run_step "ensure the data directory exists" ensure_data_dir
 #
 # Secrets are generated ON the board and never travel from the workstation.
 ensure_board_env() {
-  pi_ssh "DATA=$(printf '%q' "$DATA") bash -s" <<'REMOTE'
+  pi_ssh "DATA=$(printf '%q' "$DATA") APP_DIR=$(printf '%q' "$APP") bash -s" <<'REMOTE'
 set -euo pipefail
 ENV_FILE="$DATA/.env"
-if [ -f "$ENV_FILE" ]; then
-  # Never regenerated. A new POSTGRES_PASSWORD against an existing pgdata
-  # volume is an authentication failure that reads like data loss.
-  echo "keeping the existing $ENV_FILE (secrets are never regenerated)"
-  exit 0
-fi
 umask 077
-{
-  echo "# Generated on the board by provision.sh. Never copied from the workstation,"
-  echo "# never committed. Lives in the data directory because provisioning empties"
-  echo "# the app directory."
-  echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
-  echo "JWT_SECRET=$(openssl rand -hex 32)"
-  echo "ORANGEPI_DATA_DIR=$DATA"
-  echo "# Same-origin: the bundle calls /api and /authority on whatever host"
-  echo "# served it, so a changed tunnel hostname needs no rebuild."
-  echo "PUBLIC_URL="
-} > "$ENV_FILE"
+touch "$ENV_FILE"
 chmod 600 "$ENV_FILE"
-echo "generated $ENV_FILE with fresh secrets"
+
+# Key by key, not all-or-nothing. An existing .env is NEVER rewritten -- a new
+# POSTGRES_PASSWORD against an existing pgdata volume is an authentication
+# failure that reads like data loss -- but a key added to this list later must
+# still reach a board that was provisioned before it existed. All-or-nothing
+# would skip the whole file and the missing key would surface much later, as
+# a service that will not start.
+ensure_key() {
+  local key="$1" value="$2"
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    echo "  kept    ${key}"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+    echo "  added   ${key}"
+  fi
+}
+
+if [ ! -s "$ENV_FILE" ]; then
+  {
+    echo "# Generated on the board by provision.sh. Never copied from the"
+    echo "# workstation, never committed. Lives in the data directory because"
+    echo "# provisioning empties the app directory."
+  } > "$ENV_FILE"
+fi
+
+# Secrets are generated HERE and never travel from the workstation.
+ensure_key POSTGRES_PASSWORD "$(openssl rand -hex 24)"
+ensure_key JWT_SECRET "$(openssl rand -hex 32)"
+ensure_key DEPLOY_HOOK_SECRET "$(openssl rand -hex 32)"
+ensure_key ORANGEPI_DATA_DIR "$DATA"
+ensure_key ORANGEPI_APP_DIR "${APP_DIR:-/app}"
+# Same-origin: the bundle calls /api and /authority on whatever host served
+# it, so a changed tunnel hostname needs no rebuild.
+ensure_key PUBLIC_URL ""
 REMOTE
 }
-run_step "ensure the board's .env exists" ensure_board_env
+PI_VERBOSE=1 run_step "ensure the board's .env has every key" ensure_board_env
 
 # --- 6. The app directory --------------------------------------------------
 

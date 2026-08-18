@@ -516,7 +516,7 @@ test('every pi-* make target routes through the orangepi scripts', () => {
     'pi-keygen', 'pi-provision', 'pi-deploy', 'pi-up', 'pi-down', 'pi-restart',
     'pi-logs', 'pi-status', 'pi-tunnel-url', 'pi-migrate-up', 'pi-migrate-status',
     'pi-seed-catalogs', 'pi-seed-map', 'pi-reseed-map', 'pi-shell', 'pi-db-shell',
-    'pi-reset',
+    'pi-hook-secret', 'pi-hook-register', 'pi-reset',
   ];
   const found = targets.map(([, name]) => name);
   for (const name of expected) {

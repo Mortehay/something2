@@ -7,6 +7,7 @@
 #   remote.sh shell                 interactive shell in the backend container
 #   remote.sh db-shell              interactive psql on the board
 #   remote.sh tunnel-url            print the current public URL
+#   remote.sh hook-secret           print the board's deploy-hook secret
 #
 # Why a wrapper rather than each target spelling out its own ssh: the board's
 # compose invocation has three parts that must agree every time -- the app
@@ -24,6 +25,7 @@ set -euo pipefail
 require_pi_env
 
 COMPOSE="$(pi_compose_cmd)"
+PROFILES="$(pi_profiles)"
 
 # Interactive variants need a tty on the far side; pi_ssh is deliberately
 # BatchMode-and-no-tty for everything that runs unattended.
@@ -51,7 +53,7 @@ case "$mode" in
     # --profile tunnel on every lifecycle call, so `pi-up` brings the public
     # URL up with the stack and `pi-down` takes it down with it. Without it,
     # `down` leaves a cloudflared container pointing at a stack that is gone.
-    pi_ssh "$COMPOSE --profile tunnel$(quote_args "$@")"
+    pi_ssh "$COMPOSE $PROFILES$(quote_args "$@")"
     ;;
   backend)
     # -T: no tty, because this is how the seeding and migration targets run,
@@ -63,6 +65,19 @@ case "$mode" in
     ;;
   db-shell)
     pi_ssh_tty "$COMPOSE exec db psql -U user -d game_db"
+    ;;
+  hook-secret)
+    # Printed, deliberately. The secret is generated ON the board and has to
+    # reach GitHub's Actions secrets somehow; `make pi-hook-register` pipes
+    # this straight into `gh secret set` without it passing through a
+    # terminal, and this subcommand is what an operator uses when doing it by
+    # hand instead.
+    secret="$(pi_ssh "sed -n 's/^DEPLOY_HOOK_SECRET=//p' $(printf '%q' "$ORANGEPI_DATA_DIR")/.env" | tail -1)"
+    if [ -z "$secret" ]; then
+      printf 'no DEPLOY_HOOK_SECRET on the board -- run `make pi-provision` to generate one.\n' >&2
+      exit 1
+    fi
+    printf '%s\n' "$secret"
     ;;
   tunnel-url)
     url="$(pi_tunnel_url)"

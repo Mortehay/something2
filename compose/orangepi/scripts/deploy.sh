@@ -28,6 +28,7 @@ require_env GIT_REPOSITORY ORANGEPI_BRANCH
 
 APP="$ORANGEPI_APP_DIR"
 COMPOSE="$(pi_compose_cmd)"
+PROFILES="$(pi_profiles)"
 
 # ghcr.io/<owner>/<repo>-<service>, derived from the clone url so there is one
 # place to change it. Overridable for a fork or a different registry.
@@ -137,8 +138,8 @@ fi
 # leaves the database up, which has no reason to bounce for an application
 # release.
 SERVICES="backend caddy cloudflared"
-run_step "stop the serving containers" pi_ssh "$IMAGE_ENV $COMPOSE --profile tunnel stop $SERVICES"
-run_step "start the new containers" pi_ssh "$IMAGE_ENV $COMPOSE --profile tunnel up -d --no-deps db $SERVICES"
+run_step "stop the serving containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES stop $SERVICES"
+run_step "start the new containers" pi_ssh "$IMAGE_ENV $COMPOSE $PROFILES up -d --no-deps db $SERVICES"
 
 # A container that starts and exits still leaves `up -d` exiting 0, so the
 # deploy is not finished until something answers.
