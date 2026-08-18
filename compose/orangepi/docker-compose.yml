@@ -40,6 +40,12 @@ services:
       context: .
       dockerfile: compose/orangepi/backend.Dockerfile
     environment:
+      # Without this, Express's default error handler (finalhandler) puts
+      # err.stack in the HTTP response body -- reachable by e.g. POSTing
+      # malformed JSON to any endpoint -- leaking container paths and module
+      # versions to anyone who can reach the tunnel. This is the only place
+      # that behaviour is controlled; there is no error handler in the app.
+      - NODE_ENV=production
       - PORT=3101
       - DATABASE_URL=postgres://user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/game_db
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
@@ -90,7 +96,14 @@ services:
   # ngrok: starting the stack must NEVER open a public URL as a side effect.
   # Wiring and verifying the tunnel is SOMET-431.
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    # Pinned, consistent with every other image in this stack
+    # (postgres:15-alpine, caddy:2-alpine, node:20-alpine): `latest` was the
+    # only floating tag here, and combined with restart: unless-stopped it
+    # could jump versions unattended on a Pi reboot. cloudflared does not
+    # publish a rolling major-version tag the way the others do (its tags are
+    # dated releases, e.g. 2026.8.2), so this needs a manual bump occasionally
+    # -- but a manual, reviewed bump instead of an automatic, unattended one.
+    image: cloudflare/cloudflared:2026.8.2
     profiles: ["tunnel"]
     command: tunnel --no-autoupdate --url http://caddy:80
     depends_on:
