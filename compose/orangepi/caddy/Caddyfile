@@ -1,0 +1,22 @@
+# Plain HTTP on :80. TLS is deliberately absent: cloudflared dials OUT to
+# Cloudflare, which presents the certificate at the edge, so this origin needs
+# no certificate, no ACME client and no renewal timer.
+:80 {
+	encode gzip
+
+	# Both backend surfaces are one upstream. The authority websocket is
+	# attached to the same http server as the REST API
+	# (backend/src/authority/server.js), and the client derives its url from
+	# the API url (Game.js:379), so they can never be on different hosts.
+	#
+	# Caddy v2 forwards websocket upgrades natively -- no Upgrade/Connection
+	# header dance is needed here, unlike nginx.
+	reverse_proxy /api/* backend:3101
+	reverse_proxy /authority* backend:3101
+
+	# Everything else is the built bundle. try_files sends unknown paths to
+	# index.html so a hard reload on a react-router route still works.
+	root * /srv
+	try_files {path} /index.html
+	file_server
+}
