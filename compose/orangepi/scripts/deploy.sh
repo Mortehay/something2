@@ -82,19 +82,23 @@ try_pull() {
        && docker pull $(printf '%q' "${IMAGE_PREFIX}-caddy:${SHA}")"
 }
 
-if run_step "pull images for ${SHA:0:7} from the registry" try_pull; then
+# Run first, described afterwards. A missing image is NOT a failure -- it is
+# the documented fallback (a commit that never went through CI, a manual
+# dispatch, a build still running) -- so the step is reported for what it
+# actually was rather than as a failure the summary then contradicts.
+pull_start=$(date +%s%N)
+if try_pull >/dev/null 2>&1; then
   IMAGE_SOURCE="registry"
   export ORANGEPI_BACKEND_IMAGE="${IMAGE_PREFIX}-backend:${SHA}"
   export ORANGEPI_FRONTEND_IMAGE="${IMAGE_PREFIX}-caddy:${SHA}"
+fi
+pull_elapsed=$(awk "BEGIN{printf \"%.1f\", ($(date +%s%N) - $pull_start)/1000000000}")
+
+if [ "$IMAGE_SOURCE" = "registry" ]; then
+  record_step "images for ${SHA:0:7}: pulled from the registry" ok "$pull_elapsed"
 else
-  # Not a failure. No image exists for this commit -- a fallback build, a
-  # manual dispatch, a commit that never went through CI -- and building is
-  # the documented fallback. Reset the failure bookkeeping so the summary is
-  # not red for something that is working as designed.
-  STEP_FAILED=$((STEP_FAILED - 1))
-  STEP_STATUS[$((STEP_INDEX - 1))]="ok"
-  STEP_NAMES[$((STEP_INDEX - 1))]="pull images for ${SHA:0:7} (none published -- building on the board)"
-  printf '  %sno published image for this commit; building on the board (this takes 10-20 minutes)%s\n' \
+  record_step "images for ${SHA:0:7}: none published, building on the board" ok "$pull_elapsed"
+  printf '  %sa board build takes 10-20 minutes on four A53 cores; a pull takes under one%s\n' \
     "$C_YELLOW" "$C_OFF"
 fi
 

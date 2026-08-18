@@ -255,6 +255,28 @@ run_step_soft() {
   run_step "$@" || true
 }
 
+# Records a step whose OUTCOME had to be known before it could be described.
+# The pull-or-build decision is the case: "pulled from the registry" and "none
+# published, building here" are different steps, not one step that failed --
+# and run_step prints its label before it runs, so it cannot say which.
+#
+# Without this the pull was run through run_step and its bookkeeping patched
+# up afterwards, which printed a red FAILED and then a green summary. An
+# operator reading that has to know the script to know which half to believe.
+record_step() {
+  local label="$1" status="$2" seconds="$3"
+  STEP_INDEX=$((STEP_INDEX + 1))
+  STEP_NAMES+=("$label")
+  STEP_STATUS+=("$status")
+  STEP_TIMES+=("$seconds")
+  if [ "$status" = "ok" ]; then
+    printf '%s▶%s %s ... %sok%s %s(%ss)%s\n' "$C_BOLD" "$C_OFF" "$label" "$C_GREEN" "$C_OFF" "$C_DIM" "$seconds" "$C_OFF"
+  else
+    STEP_FAILED=$((STEP_FAILED + 1))
+    printf '%s▶%s %s ... %s%s%s\n' "$C_BOLD" "$C_OFF" "$label" "$C_RED" "$status" "$C_OFF"
+  fi
+}
+
 # Prints every step with its status and duration, then exits non-zero if any
 # step failed -- so `make pi-deploy && something-else` and a CI gate both do
 # the right thing without parsing output.
