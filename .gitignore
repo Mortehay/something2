@@ -58,3 +58,8 @@ frontend/.vite/
 
 # SOMET-336: pgmigrations ledger backups written by scripts/repair-migration-order.js
 backend/.migration-backups/
+
+# SOMET-423: default Postgres data dir for the orangepi production stack when
+# ORANGEPI_DATA_DIR is unset. Docker creates missing bind-mount sources as
+# root, so this must never be committed.
+.orangepi-data/

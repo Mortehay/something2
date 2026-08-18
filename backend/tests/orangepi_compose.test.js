@@ -38,3 +38,56 @@ test('caddy serves the SPA with a history fallback', () => {
   assert.match(text, /handle \{[\s\S]*?try_files \{path\} \/index\.html/);
   assert.match(text, /handle \{[\s\S]*?file_server/);
 });
+
+const COMPOSE = path.join(ORANGEPI, 'docker-compose.yml');
+
+test('production composition excludes the development-only services', () => {
+  const text = read(COMPOSE);
+  // Redis has no reference anywhere in backend/src -- it belonged to the
+  // frozen Go engine. sprite-gen is a multi-GB CPU Stable Diffusion image
+  // that no small board will run.
+  for (const service of ['redis:', 'game-engine:', 'sprite-gen:']) {
+    assert.ok(
+      !text.includes(`\n  ${service}`),
+      `${service} must not be in the production composition`
+    );
+  }
+});
+
+test('production composition bind-mounts no application source', () => {
+  const text = read(COMPOSE);
+  // The container IS the service here. A source bind mount would silently
+  // reintroduce the development stack's behaviour.
+  for (const mount of ['./backend:/app', './frontend:/app', './engine:/app']) {
+    assert.ok(!text.includes(mount), `source bind mount ${mount} defeats the production image`);
+  }
+});
+
+test('postgres data lives outside the app directory', () => {
+  const text = read(COMPOSE);
+  // Provisioning empties the app dir; data under it would be destroyed on
+  // every re-provision, and would present as corruption rather than as
+  // operator error.
+  assert.match(text, /\$\{ORANGEPI_DATA_DIR[^}]*\}\/pgdata:\/var\/lib\/postgresql\/data/);
+});
+
+test('the tunnel never opens as a side effect of starting the stack', () => {
+  const text = read(COMPOSE);
+  // Same rule the development stack applies to ngrok: `up` must never
+  // publish the game to the internet without being asked.
+  const idx = text.indexOf('\n  cloudflared:');
+  assert.ok(idx !== -1, 'cloudflared service must exist');
+  // Slice past the leading newline, then cut at the next 2-space-indented
+  // service so the assertion runs against this block and no other.
+  const rest = text.slice(idx + 1);
+  const end = rest.search(/\n {2}\S/);
+  const block = end === -1 ? rest : rest.slice(0, end);
+  assert.match(block, /profiles: \["tunnel"\]/);
+});
+
+test('exactly one backend instance is configured', () => {
+  const text = read(COMPOSE);
+  // The authority holds an in-memory tick loop per live world; two instances
+  // would disagree about the same world.
+  assert.ok(!/replicas:/.test(text), 'no replica count may be set');
+});

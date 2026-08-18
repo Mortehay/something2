@@ -1,0 +1,90 @@
+# Production stack for the Orange Pi (SOMET-423). Sibling to
+# compose/develop/docker-compose.yml, which stays the development stack and is
+# not affected by anything here.
+#
+# Run it the same way as the development stack, from the repository root:
+#   docker compose --project-directory . --env-file .env \
+#     -f compose/orangepi/docker-compose.yml up -d
+#
+# A distinct project name so it can never collide with the development stack's
+# containers or volumes on the same machine.
+name: something2-orangepi
+
+services:
+  # Named for what it runs; built from frontend.Dockerfile, which bakes the
+  # vite bundle into a caddy image. This is the only service the tunnel talks
+  # to -- it serves the bundle and proxies both backend surfaces, so one origin
+  # covers the whole game.
+  caddy:
+    build:
+      context: .
+      dockerfile: compose/orangepi/frontend.Dockerfile
+      args:
+        # The public origin players reach. Baked into the bundle at build
+        # time, so changing it REQUIRES a rebuild, not just a restart.
+        VITE_API_URL: ${PUBLIC_URL:?PUBLIC_URL must be set -- the public origin, e.g. https://example.trycloudflare.com}
+    ports:
+      # Loopback only. The public path is the tunnel; publishing on 0.0.0.0
+      # would expose the game to the LAN as a side effect.
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: compose/orangepi/backend.Dockerfile
+    environment:
+      - PORT=3101
+      - DATABASE_URL=postgres://user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/game_db
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
+      # Object storage is not configured yet (SOMET-379). The MinIO client in
+      # backend/src/services/assetStore.js is built lazily inside getClient()
+      # and nothing calls it at startup, so the backend boots fine without it;
+      # sprite requests fail individually and render as placeholder boxes.
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-sprites}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # /api/health (backend/src/index.js:367) is LIVENESS ONLY -- it returns
+      # ok without touching the database. Making it a readiness check is
+      # SOMET-376.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3101/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      - POSTGRES_DB=game_db
+    volumes:
+      # OUTSIDE the app directory, always. Provisioning empties the app dir,
+      # and data underneath it would be destroyed on every re-provision.
+      - ${ORANGEPI_DATA_DIR:-./.orangepi-data}/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d game_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Behind a profile deliberately, exactly as the development stack does with
+  # ngrok: starting the stack must NEVER open a public URL as a side effect.
+  # Wiring and verifying the tunnel is SOMET-431.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate --url http://caddy:80
+    depends_on:
+      - caddy
+    restart: unless-stopped
