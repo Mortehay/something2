@@ -39,9 +39,12 @@ where they matter:
 POSTGRES_PASSWORD  JWT_SECRET  MINIO_ROOT_PASSWORD  SPRITE_GEN_SHARED_SECRET
 ```
 
-Change them if you like; any values work locally. The ngrok keys are only needed
-for [Playing over the internet](#playing-over-the-internet), and the stack starts
-fine with them left as-is.
+Change them if you like; any values work locally **except `JWT_SECRET`**: the
+backend refuses to boot with the shipped placeholder (it is deliberately
+rejected, not just too short) — generate a real one with `openssl rand -hex 32`
+and put it in `.env`. The ngrok keys are only needed for [Playing over the
+internet](#playing-over-the-internet), and the stack starts fine with them
+left as-is.
 
 **2. Build and start the containers.**
 
