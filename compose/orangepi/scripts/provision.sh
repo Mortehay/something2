@@ -285,6 +285,23 @@ run_step "wipe and re-clone the app directory" clone_app_dir
 # Images, migrations and start are deploy.sh's job, and it is the path a CI
 # deploy takes every time. Duplicating it here would mean a provisioning run
 # exercising code no deploy ever runs.
+# A container's environment is fixed when it is CREATED, and deploy.sh
+# deliberately never recreates the hook (it would kill a hook-triggered
+# deploy halfway through). Provisioning is the safe place to do it: it is
+# always workstation-initiated, so nothing is running inside the container
+# that this can interrupt. Without this, a hook created before a
+# configuration change goes on using the old values indefinitely.
+recreate_hook() {
+  local profiles; profiles="$(pi_profiles)"
+  case "$profiles" in
+    *"--profile hook"*)
+      pi_ssh "$(pi_compose_cmd) $profiles up -d --no-deps --force-recreate deploy-hook"
+      ;;
+    *) echo "no deploy hook configured on this board (no DEPLOY_HOOK_SECRET)" ;;
+  esac
+}
+run_step "recreate the deploy hook with current configuration" recreate_hook
+
 printf '\n%s--- handing over to deploy.sh (images, migrations, start) ---%s\n\n' "$C_DIM" "$C_OFF"
 if ! bash "$(dirname "${BASH_SOURCE[0]}")/deploy.sh"; then
   STEP_NAMES+=("deploy (images, migrations, start)")

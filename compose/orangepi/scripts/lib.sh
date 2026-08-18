@@ -64,6 +64,20 @@ load_env_file() {
 
 load_env_file "$REPO_ROOT/.env"
 
+# On the BOARD, the authoritative configuration is the .env in the data
+# directory -- the app directory is emptied on every provision, so it has no
+# .env at all. Without this the deploy hook, which runs here with PI_LOCAL=1,
+# depends entirely on the environment baked into its container when it was
+# created -- and that container is deliberately never recreated, so it went
+# on failing with "missing GIT_REPOSITORY" long after the value had been
+# written to the board. Observed exactly that way.
+#
+# Guarded on PI_LOCAL because ORANGEPI_DATA_DIR names a path on the BOARD; a
+# workstation that happened to have that path would otherwise read a stranger.
+if [ -n "${PI_LOCAL:-}" ] && [ -n "${ORANGEPI_DATA_DIR:-}" ]; then
+  load_env_file "$ORANGEPI_DATA_DIR/.env"
+fi
+
 : "${ORANGEPI_APP_DIR:=/app}"
 : "${ORANGEPI_BRANCH:=orangepi}"
 : "${ORANGEPI_SSH_KEY:=compose/orangepi/secrets/orangepi_ed25519}"
