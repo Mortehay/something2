@@ -595,24 +595,33 @@ test('an image prefix that cannot be derived is reported, not guessed', () => {
   assert.match(result.stderr, /ORANGEPI_IMAGE_PREFIX/);
 });
 
-test('step durations survive a shell without nanosecond date', () => {
-  // `date +%s%N` is a GNU extension. The deploy-hook container runs busybox,
-  // where it returns the seconds with a literal "N" appended -- so the
-  // arithmetic treated seconds as nanoseconds and every step in every
-  // CI-triggered deploy reported 0.0s. Durations are the point of the step
-  // reporting, and they were wrong in exactly the path nobody watches.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-busybox-'));
-  // A `date` that behaves like busybox: %N is not expanded.
-  fs.writeFileSync(
-    path.join(dir, 'date'),
-    '#!/usr/bin/env bash\nif [ "$1" = "+%s%N" ]; then printf "%sN\\n" "$(/bin/date +%s)"; else exec /bin/date "$@"; fi\n'
-  );
-  fs.chmodSync(path.join(dir, 'date'), 0o755);
-
-  const result = runWithLib('run_step "one second" sleep 1', { env: { PATH: `${dir}:${process.env.PATH}` } });
-  assert.doesNotMatch(result.stdout, /\(0\.0s\)/, 'a one-second step must not report 0.0s');
-  assert.match(result.stdout, /\(1(\.\d+)?s\)/);
-  fs.rmSync(dir, { recursive: true, force: true });
+test('step durations survive both shapes of missing nanosecond support', () => {
+  // `date +%s%N` is a GNU extension, and busybox handles its absence in two
+  // different ways. The deploy-hook container -- what every CI deploy runs in
+  // -- SILENTLY DROPS %N and returns a plain seconds stamp, which is all
+  // digits and therefore looks valid; other builds append a literal "N".
+  //
+  // Both are stubbed here because the first version of this test stubbed only
+  // the "N" case, passed, and left the board still reporting every step as
+  // 0.0s. A fix verified against the wrong failure mode is not a fix.
+  const variants = {
+    'drops %N (returns seconds)': 'printf "%s\\n" "$(/bin/date +%s)"',
+    'appends a literal N': 'printf "%sN\\n" "$(/bin/date +%s)"',
+  };
+  for (const [label, body] of Object.entries(variants)) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-busybox-'));
+    fs.writeFileSync(
+      path.join(dir, 'date'),
+      `#!/usr/bin/env bash\nif [ "$1" = "+%s%N" ]; then ${body}; else exec /bin/date "$@"; fi\n`
+    );
+    fs.chmodSync(path.join(dir, 'date'), 0o755);
+    const result = runWithLib('run_step "one second" sleep 1', {
+      env: { PATH: `${dir}:${process.env.PATH}` },
+    });
+    assert.doesNotMatch(result.stdout, /\(0\.0s\)/, `${label}: a one-second step reported 0.0s`);
+    assert.match(result.stdout, /\(1(\.\d+)?s\)/, `${label}: expected roughly one second`);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('a deploy never restarts the tunnel or the hook', () => {

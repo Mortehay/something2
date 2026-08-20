@@ -211,20 +211,32 @@ pi_profiles() {
   printf '%s' "$profiles"
 }
 
-# Monotonic-ish nanoseconds, with a fallback for busybox.
+# Monotonic-ish nanoseconds, with a fallback for shells whose date lacks %N.
 #
-# `date +%s%N` is a GNU extension. On busybox -- which is what the deploy-hook
-# container runs, and therefore what every CI-triggered deploy runs -- it
-# returns the seconds followed by a literal "N", so the arithmetic treated
-# SECONDS as nanoseconds and every step reported 0.0s. Durations are the whole
-# point of the step reporting, and they were quietly wrong in exactly the path
-# nobody watches.
+# `date +%s%N` is a GNU extension, and busybox handles its absence in more
+# than one way. The deploy-hook container -- which is what every CI-driven
+# deploy runs in -- SILENTLY DROPS the %N and returns a plain seconds stamp
+# (`1787250806`), while other builds emit the seconds with a literal "N"
+# glued on. The first is the dangerous one: the result is all digits, so it
+# looks valid, and treating seconds as nanoseconds made every step report
+# 0.0s -- including one that took thirteen.
+#
+# So the test is LENGTH, not shape: a nanosecond epoch stamp is 19 digits, a
+# seconds stamp is 10. Anything short is seconds, whatever it looks like.
+#
+# (An earlier version of this checked only for the literal "N" -- and its
+# test stubbed exactly that. Both passed; the board still reported 0.0s. A
+# fix verified against a stub of the wrong failure mode is not a fix.)
 now_ns() {
   local stamp; stamp="$(date +%s%N 2>/dev/null || true)"
   case "$stamp" in
-    *[!0-9]*|'') printf '%s000000000' "$(date +%s)" ;;
-    *) printf '%s' "$stamp" ;;
+    ''|*[!0-9]*) stamp='' ;;
   esac
+  if [ -n "$stamp" ] && [ "${#stamp}" -ge 16 ]; then
+    printf '%s' "$stamp"
+  else
+    printf '%s000000000' "$(date +%s)"
+  fi
 }
 
 # Where to probe the stack from, which is NOT the same address in both
