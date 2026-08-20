@@ -387,6 +387,13 @@ them into one manifest under the commit sha, and only then calls the board's
 deploy hook — a push webhook would fire before any image existed, and the
 board would fall back to a twenty-minute on-board build.
 
+**A deploy runs the deploy script that was already on the board**, not the one
+belonging to the commit being deployed: bash has read `deploy.sh` and `lib.sh`
+before the first step resets the clone. So a change to the deploy machinery
+itself lands one deploy later than the change that carries it — normal for any
+self-updating deployer, but worth knowing before concluding a fix did not
+work.
+
 Point Actions at the board once with:
 
 ```bash
