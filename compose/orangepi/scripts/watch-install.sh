@@ -20,7 +20,18 @@ set -euo pipefail
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 SERVICE="something2-pi-reconcile.service"
 TIMER="something2-pi-reconcile.timer"
-INTERVAL="${PI_WATCH_INTERVAL:-10min}"
+# Minutes between passes. Kept to whole minutes that divide an hour because the
+# schedule below is a wall-clock one; "10min" is accepted for the old spelling.
+INTERVAL="${PI_WATCH_INTERVAL:-10}"
+INTERVAL="${INTERVAL%min}"
+case "$INTERVAL" in
+  ''|*[!0-9]*) echo "PI_WATCH_INTERVAL must be a whole number of minutes" >&2; exit 2 ;;
+esac
+if [ "$INTERVAL" -lt 1 ] || [ "$INTERVAL" -gt 30 ]; then
+  echo "PI_WATCH_INTERVAL must be between 1 and 30 minutes" >&2
+  exit 2
+fi
+CALENDAR="*:0/${INTERVAL}"
 
 command -v systemctl >/dev/null 2>&1 || {
   echo "systemd is not available here, so there is no timer to install." >&2
@@ -130,16 +141,23 @@ UNIT
 
 cat > "$UNIT_DIR/$TIMER" <<UNIT
 [Unit]
-Description=Check every ${INTERVAL} whether the something2 board's public URL has moved
+Description=Check every ${INTERVAL}min whether the something2 board's public URL has moved
 
 [Timer]
+# A WALL-CLOCK schedule, not OnUnitActiveSec=. A monotonic timer has nothing to
+# count from until its service has run once under it, so a freshly installed or
+# reinstalled timer can sit at NextElapseUSecMonotonic=infinity -- enabled,
+# listed, and never firing again. Observed, not theorised: uninstall/reinstall
+# left the previous version with no next elapse at all.
+OnCalendar=${CALENDAR}
+# Only has an effect on an OnCalendar timer (man systemd.timer), which is the
+# other half of why this is one: a laptop that slept through a pass runs it on
+# wake instead of skipping it.
+Persistent=true
 # A first run shortly after login catches the overnight case: the board
 # rebooted while this machine was off, and the published address is already
 # wrong by the time anyone sits down.
 OnStartupSec=2min
-OnUnitActiveSec=${INTERVAL}
-# Without this a suspended laptop silently skips every run it slept through.
-Persistent=true
 AccuracySec=1min
 
 [Install]
@@ -149,7 +167,7 @@ UNIT
 systemctl --user daemon-reload
 systemctl --user enable --now "$TIMER" >/dev/null
 
-echo "installed $TIMER (every ${INTERVAL})"
+echo "installed $TIMER (every ${INTERVAL}min)"
 echo "running from $INSTALL_ROOT"
 if [ "$INSTALL_ROOT" != "$REPO_ROOT" ]; then
   # Pinned, not self-updating: a timer that pulls and runs new code on its

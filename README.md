@@ -357,6 +357,14 @@ make pi-reconcile         # or run one pass by hand
 make pi-watch-uninstall   # remove it again
 ```
 
+The schedule is a wall-clock `OnCalendar=*:0/10` (`PI_WATCH_INTERVAL` sets the
+minutes, 1&ndash;30). That is deliberate on both counts: a monotonic
+`OnUnitActiveSec=` timer was observed sitting at
+`NextElapseUSecMonotonic=infinity` after a reinstall &mdash; enabled, listed and
+never firing again &mdash; and `Persistent=`, which runs a pass a sleeping
+laptop missed, has no effect at all except on an `OnCalendar` timer. Check it
+with `systemctl --user list-timers`: a `NEXT` of `-` means it is not scheduled.
+
 The reconciler repairs **both** things a hostname change breaks — the
 published page and CI's `DEPLOY_HOOK_URL` — and is silent when there is
 nothing to do, because a timer that talks every ten minutes is a timer nobody

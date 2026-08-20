@@ -852,9 +852,15 @@ test('the reconciler leaves an unpublished front door alone', () => {
 test('the timer unit runs the reconciler and survives a suspended laptop', () => {
   const text = fs.readFileSync(path.join(SCRIPTS, 'watch-install.sh'), 'utf8');
   assert.match(text, /ExecStart=.*reconcile-url\.sh/);
-  // Without Persistent, a laptop that was asleep silently skips every run it
-  // slept through -- which is exactly the window this exists to cover.
+  // Persistent= catches up a pass a sleeping laptop missed -- but ONLY on an
+  // OnCalendar timer (man systemd.timer). Asserting the line alone is what let
+  // a monotonic timer ship claiming a catch-up it never performed.
   assert.match(text, /^Persistent=true$/m);
+  assert.match(text, /^OnCalendar=\$\{CALENDAR\}$/m);
+  // OnUnitActiveSec= has nothing to count from until the service has run once
+  // under the timer, which left a freshly reinstalled timer with no next
+  // elapse at all. It must not come back as the schedule.
+  assert.doesNotMatch(text, /^OnUnitActiveSec=/m);
   // A user timer: this needs the workstation's own gh credentials and ssh
   // key, and nothing here should touch root or /etc.
   assert.match(text, /systemctl --user/);
@@ -920,4 +926,26 @@ test('watch-install refuses an ephemeral install root instead of installing a do
   assert.notStrictEqual(result.status, 0);
   assert.match(result.stderr, /does not survive a reboot/);
   assert.deepStrictEqual(units, [], 'no unit may be written when the root is doomed');
+});
+
+test('the timer schedule is a calendar spec systemd can actually parse', () => {
+  // A malformed OnCalendar= is not rejected at install time by anything else
+  // here; systemd simply never fires the unit.
+  const text = fs.readFileSync(path.join(SCRIPTS, 'watch-install.sh'), 'utf8');
+  const spec = /^CALENDAR="(.+)"$/m.exec(text)[1].replace('${INTERVAL}', '10');
+  const parsed = spawnSync('systemd-analyze', ['calendar', spec], { encoding: 'utf8' });
+  if (parsed.error) return; // no systemd-analyze here; the assertions above still hold
+  assert.strictEqual(parsed.status, 0, parsed.stderr);
+  assert.match(parsed.stdout, /Next elapse:/);
+});
+
+test('an interval that cannot divide an hour is refused, not silently mangled', () => {
+  for (const bad of ['0', '45', 'hourly', '-5']) {
+    const result = spawnSync('bash', [path.join(SCRIPTS, 'watch-install.sh')], {
+      encoding: 'utf8',
+      env: { ...process.env, PI_WATCH_INTERVAL: bad, XDG_CONFIG_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'pi-int-')) },
+    });
+    assert.notStrictEqual(result.status, 0, `PI_WATCH_INTERVAL=${bad} should be refused`);
+    assert.match(result.stderr, /PI_WATCH_INTERVAL must be/);
+  }
 });
