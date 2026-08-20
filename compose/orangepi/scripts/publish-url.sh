@@ -64,7 +64,20 @@ publish() {
       find "$tmp" -mindepth 1 -maxdepth 1 -not -name .git -exec rm -rf {} +
       echo "created the $PAGES_BRANCH branch"
     }
-  render_page "$url" "$(date -u '+%Y-%m-%d %H:%M UTC')" > "$tmp/index.html"
+  render_front_door_page "$url" "$(date -u '+%Y-%m-%d %H:%M UTC')" > "$tmp/index.html"
+  # Check what was actually produced before committing it. This is not
+  # defensive padding: a rename left the call above pointing at a function
+  # that no longer existed, bash created the file by redirection and then
+  # failed to run the command, and the empty result was committed and pushed
+  # over a working page -- with a commit message that still said it pointed
+  # at the hostname. `set -e` did not stop it, because run_step invokes step
+  # functions inside a `|| rc=$?` list, which disables errexit for
+  # everything they call.
+  if ! front_door_page_is_sane "$tmp/index.html" "$url"; then
+    echo "refusing to publish: the rendered page is empty or does not contain $url" >&2
+    rm -rf "$tmp"
+    return 1
+  fi
   # Pages runs Jekyll by default, which ignores files it does not understand
   # and would silently drop anything starting with an underscore later.
   : > "$tmp/.nojekyll"

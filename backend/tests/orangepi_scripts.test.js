@@ -764,3 +764,42 @@ test('a failed health wait shows the backend log, not just a verdict', () => {
   assert.match(waitBlock, /docker logs --tail \d+ something2-orangepi-backend-1/);
   assert.match(waitBlock, /docker ps --filter name=something2-orangepi/);
 });
+
+test('a broken or empty front door page is never published', () => {
+  // This is the exact failure that reached production: a rename left the
+  // render call pointing at a function that no longer existed, bash created
+  // the file by redirection, the command then failed, and the EMPTY result
+  // was committed and pushed over a working page -- reporting success,
+  // because run_step disables errexit for the step function it calls.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-page-'));
+  const url = 'https://live.trycloudflare.com';
+  const check = (file) =>
+    runWithLib(`front_door_page_is_sane ${JSON.stringify(file)} ${JSON.stringify(url)} && echo SANE || echo REJECTED`).stdout.trim();
+
+  const empty = path.join(dir, 'empty.html');
+  fs.writeFileSync(empty, '');
+  assert.strictEqual(check(empty), 'REJECTED');
+
+  const stale = path.join(dir, 'stale.html');
+  fs.writeFileSync(stale, '<html><body><a href="https://old.trycloudflare.com">go</a></body></html>');
+  assert.strictEqual(check(stale), 'REJECTED', 'a page pointing somewhere else is not this page');
+
+  const notHtml = path.join(dir, 'junk.html');
+  fs.writeFileSync(notHtml, `some error text mentioning ${url}`);
+  assert.strictEqual(check(notHtml), 'REJECTED');
+
+  const good = path.join(dir, 'good.html');
+  fs.writeFileSync(good, `<!doctype html><html><body><a href="${url}">play</a></body></html>`);
+  assert.strictEqual(check(good), 'SANE');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('the publisher checks the page before committing it', () => {
+  const text = fs.readFileSync(path.join(SCRIPTS, 'publish-url.sh'), 'utf8');
+  const sanityIndex = text.indexOf('front_door_page_is_sane');
+  const commitIndex = text.indexOf('commit --quiet');
+  assert.ok(sanityIndex > 0 && commitIndex > sanityIndex, 'the check must come before the commit');
+  // And it must render through the function that actually exists.
+  assert.match(text, /render_front_door_page "\$url"/);
+  assert.doesNotMatch(text, /^\s*render_page /m);
+});

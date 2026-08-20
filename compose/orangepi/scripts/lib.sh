@@ -269,6 +269,15 @@ STEP_TIMES=()
 
 # run_step "label" cmd...
 #
+# NOTE FOR ANYONE WRITING A STEP FUNCTION: `set -e` does NOT apply inside the
+# command this runs. It is invoked as part of a `|| rc=$?` list below, and
+# bash disables errexit for the whole of such a construct -- so a step
+# function keeps going after a failed command instead of aborting, and only
+# its FINAL exit status is reported. A step that publishes, commits or
+# deploys must therefore check its own intermediate results explicitly. That
+# is not hypothetical: a step here once wrote an empty file, committed it,
+# pushed it over a working page and reported ok.
+#
 # Output is captured rather than streamed, on purpose: a dozen steps each
 # spilling docker's progress output buries the one line that matters. A step
 # that FAILS prints everything it captured; a step that succeeds prints its
@@ -609,6 +618,16 @@ render_front_door_page() {
 HTML
 }
 
+
+# Would this file actually work as the front door? Checked before publishing,
+# because the failure that prompted it published an EMPTY page over a working
+# one and reported success.
+front_door_page_is_sane() {
+  local file="$1" url="$2"
+  [ -s "$file" ] || return 1
+  grep -qF "$url" "$file" || return 1
+  grep -qi '<html' "$file" || return 1
+}
 
 # Given what the published page currently points at and what the board is
 # actually serving, which of the three states are we in? Extracted so the
