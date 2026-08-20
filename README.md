@@ -346,9 +346,31 @@ reboot; the tunnel hostname does not.
 It runs from **this machine**, using the `gh` credentials already here. The
 board deliberately holds no credential of any kind, and putting a GitHub
 token on an internet-reachable box to solve a convenience problem would
-trade a real security property for one. The cost of that choice, stated
-plainly: **if the board reboots while this machine is off, the page is stale
-until someone runs the command.** `make pi-status` will tell you:
+trade a real security property for one.
+
+**Make it heal itself**, so a board reboot does not quietly leave every link
+dead:
+
+```bash
+make pi-watch-install     # a user timer, every 10 minutes; no root, no new secrets
+make pi-reconcile         # or run one pass by hand
+make pi-watch-uninstall   # remove it again
+```
+
+The reconciler repairs **both** things a hostname change breaks — the
+published page and CI's `DEPLOY_HOOK_URL` — and is silent when there is
+nothing to do, because a timer that talks every ten minutes is a timer nobody
+reads. It does nothing at all when the board is off, never publishes a
+hostname it has not confirmed is serving, and will not create a front door
+you never asked for. `PI_VERBOSE=1 make pi-reconcile` makes it explain itself;
+`journalctl --user -u something2-pi-reconcile.service -f` follows the timer.
+
+The remaining gap, stated plainly: **a user timer runs only while you have a
+session, so nothing heals while this machine is off or logged out.**
+`loginctl enable-linger $USER` lifts the logged-out half. A named tunnel on a
+domain you own removes the problem instead of narrowing it.
+
+`make pi-status` shows the same picture on demand:
 
 ```
 tunnel     https://estimate-absolutely-beaches-fired.trycloudflare.com (held 1d 22h)

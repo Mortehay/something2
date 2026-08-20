@@ -803,3 +803,62 @@ test('the publisher checks the page before committing it', () => {
   assert.match(text, /render_front_door_page "\$url"/);
   assert.doesNotMatch(text, /^\s*render_page /m);
 });
+
+// --- Self-healing the public URL (SOMET-441) --------------------------------
+
+test('the reconciler does nothing, quietly, when the board is unreachable', () => {
+  // A board that is off is the normal state of a machine at home, not a fault
+  // to report. A timer that complains nightly gets masked, and then it is not
+  // there on the morning it matters.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-reconcile-'));
+  fs.writeFileSync(path.join(dir, '.env'), '');
+  const result = spawnSync('bash', [path.join(SCRIPTS, 'reconcile-url.sh')], {
+    encoding: 'utf8',
+    timeout: 90000,
+    env: {
+      ...process.env,
+      REPO_ROOT: dir,
+      ORANGEPI_ADDRESS: '192.0.2.1',
+      ORANGEPI_LOGIN: 'nobody',
+      ORANGEPI_DATA_DIR: '/srv/something2',
+      GIT_REPOSITORY: 'https://github.com/example/repo.git',
+    },
+  });
+  assert.strictEqual(result.status, 0, 'an absent board is not an error');
+  assert.strictEqual(result.stdout.trim(), '', `expected silence, got: ${result.stdout}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('the reconciler never publishes a hostname it has not confirmed', () => {
+  // Cloudflare answers for a hostname whose origin is down, so "the tunnel
+  // exists" is not the same as "the game is there". Pointing players at a
+  // URL that does not serve looks like a broken game rather than a moved one.
+  const text = fs.readFileSync(path.join(SCRIPTS, 'reconcile-url.sh'), 'utf8');
+  const healthCheck = text.indexOf('/api/health');
+  const publishCall = text.indexOf('publish-url.sh');
+  assert.ok(healthCheck > 0 && publishCall > healthCheck, 'health must be confirmed before publishing');
+  assert.match(text, /not publishing it/);
+});
+
+test('the reconciler leaves an unpublished front door alone', () => {
+  // Publishing opens a public address. A background timer doing that unasked
+  // is a surprise of exactly the wrong kind.
+  const text = fs.readFileSync(path.join(SCRIPTS, 'reconcile-url.sh'), 'utf8');
+  const missingBranch = /missing\)([\s\S]*?);;/.exec(text)[1];
+  assert.doesNotMatch(missingBranch, /publish-url\.sh/);
+  assert.match(missingBranch, /leaving it alone/);
+});
+
+test('the timer unit runs the reconciler and survives a suspended laptop', () => {
+  const text = fs.readFileSync(path.join(SCRIPTS, 'watch-install.sh'), 'utf8');
+  assert.match(text, /ExecStart=.*reconcile-url\.sh/);
+  // Without Persistent, a laptop that was asleep silently skips every run it
+  // slept through -- which is exactly the window this exists to cover.
+  assert.match(text, /^Persistent=true$/m);
+  // A user timer: this needs the workstation's own gh credentials and ssh
+  // key, and nothing here should touch root or /etc.
+  assert.match(text, /systemctl --user/);
+  assert.doesNotMatch(text, /sudo|\/etc\/systemd/);
+  // And it must be removable.
+  assert.match(text, /uninstall\)/);
+});

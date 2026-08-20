@@ -6,7 +6,7 @@
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
         pi-migrate-up pi-migrate-status pi-seed-catalogs pi-seed-map pi-reseed-map \
         pi-shell pi-db-shell pi-tunnel-url pi-hook-secret pi-hook-register \
-        pi-publish-url pi-reset
+        pi-publish-url pi-reconcile pi-watch-install pi-watch-uninstall pi-reset
 
 COMPOSE_FILE = compose/develop/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
@@ -334,6 +334,19 @@ pi-hook-register:
 # Runs from THIS machine, using its gh credentials -- the board holds none.
 pi-publish-url:
 	@bash compose/orangepi/scripts/publish-url.sh
+
+# One idempotent pass: if the board's tunnel hostname has moved, repair the
+# published page and the CI hook URL. Silent when there is nothing to do.
+pi-reconcile:
+	@bash compose/orangepi/scripts/reconcile-url.sh
+
+# Run that on a timer, so a hostname change after a board reboot heals itself.
+# A systemd USER timer -- no root, no new secrets.
+pi-watch-install:
+	@bash compose/orangepi/scripts/watch-install.sh install
+
+pi-watch-uninstall:
+	@bash compose/orangepi/scripts/watch-install.sh uninstall
 
 # --- Remote migrations -----------------------------------------------------
 # Migrations are a deploy STEP on this stack, never a side effect of the
