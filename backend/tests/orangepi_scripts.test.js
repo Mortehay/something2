@@ -646,3 +646,80 @@ test('pi-restart restarts the game, not the tunnel', () => {
   assert.match(body, /restart backend caddy/);
   assert.doesNotMatch(body, /restart\s*$/m, 'a bare `compose restart` bounces every service');
 });
+
+// --- The stable front door (SOMET-440) -------------------------------------
+//
+// A quick tunnel takes a new random hostname whenever cloudflared starts, and
+// the old one is gone for good. The page these tests cover is the one address
+// players are given, so what matters is that it points somewhere real and
+// says so even when the redirect fails.
+
+function renderFrontDoor(target, stamp = '2026-08-20 12:00 UTC') {
+  return runWithLib(`render_front_door_page ${JSON.stringify(target)} ${JSON.stringify(stamp)}`);
+}
+
+test('the front door redirects three ways and shows the address', () => {
+  const target = 'https://example-tunnel.trycloudflare.com';
+  const page = renderFrontDoor(target).stdout;
+  // Meta refresh for a browser with JavaScript disabled...
+  assert.match(page, new RegExp(`<meta http-equiv="refresh" content="0; url=${target}">`));
+  // ...script for an immediate hop...
+  assert.match(page, /location\.replace\(/);
+  // ...and a visible link plus the raw address, so a visitor whose redirect
+  // is blocked can still get there by hand instead of staring at a blank page.
+  assert.match(page, new RegExp(`href="${target}"`));
+  assert.match(page, new RegExp(`<code>${target}</code>`));
+});
+
+test('the front door is not offered to search engines', () => {
+  // It points at a staging box with open registration. Being reachable by
+  // anyone with the link is the accepted trade; being indexed is not.
+  assert.match(renderFrontDoor('https://x.trycloudflare.com').stdout, /name="robots" content="noindex, nofollow"/);
+});
+
+test('the front door page cannot be broken out of by the hostname', () => {
+  // The hostname comes from a log line on the board rather than from a
+  // person, but it lands inside a <script> tag, and "it came from our own
+  // machine" is exactly the reasoning that puts injections into production.
+  const page = renderFrontDoor(`https://evil.example.com'); alert('x`).stdout;
+  assert.doesNotMatch(page, /\); alert\('x'\);/);
+  assert.match(page, /location\.replace\('https:\/\/evil\.example\.com'\\''\); alert\('\\''x'\)/);
+});
+
+test('front_door_state names all three cases', () => {
+  const state = (published, live) =>
+    runWithLib(`front_door_state ${JSON.stringify(published)} ${JSON.stringify(live)}`).stdout.trim();
+  assert.strictEqual(state('', 'https://a.trycloudflare.com'), 'missing');
+  assert.strictEqual(state('https://a.trycloudflare.com', 'https://a.trycloudflare.com'), 'current');
+  // The case that matters: everything else still reports healthy while every
+  // link anyone holds points at a hostname that no longer exists.
+  assert.strictEqual(state('https://old.trycloudflare.com', 'https://new.trycloudflare.com'), 'stale');
+});
+
+test('durations are readable at a glance', () => {
+  const fmt = (seconds) => runWithLib(`format_duration ${seconds}`).stdout.trim();
+  assert.strictEqual(fmt(45), '45s');
+  assert.strictEqual(fmt(600), '10m');
+  assert.strictEqual(fmt(4 * 3600 + 12 * 60), '4h 12m');
+  assert.strictEqual(fmt(2 * 86400 + 3 * 3600), '2d 3h');
+});
+
+test('a deploy publishes the front door only when one already exists', () => {
+  // Same rule as the CI hook URL: a deploy keeps working what is already set
+  // up, and never opens a public address for a board whose operator never
+  // asked for one.
+  const text = fs.readFileSync(path.join(SCRIPTS, 'deploy.sh'), 'utf8');
+  assert.match(text, /ls-remote --exit-code --heads origin/);
+  const guarded = /ls-remote --exit-code --heads origin[\s\S]{0,400}?publish-url\.sh/.test(text);
+  assert.ok(guarded, 'publish-url.sh must run inside the branch-exists guard');
+  // And only from the workstation: the board has no gh and no credentials,
+  // which is a property worth keeping.
+  assert.match(text, /if \[ -z "\$\{PI_LOCAL:-\}" \][\s\S]*publish-url\.sh/);
+});
+
+test('publishing refuses when there is no tunnel to point at', () => {
+  // A page pointing at a dead hostname looks like a broken game; a page that
+  // is not updated at least still names the last address that worked.
+  const text = fs.readFileSync(path.join(SCRIPTS, 'publish-url.sh'), 'utf8');
+  assert.match(text, /no tunnel is running on the board, so there is nothing to publish/);
+});

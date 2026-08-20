@@ -330,6 +330,46 @@ restarts; after any of those, re-run `make pi-hook-register`, because the
 hook's URL is one of the two Actions secrets. A hostname that survives *that*
 needs a named tunnel on a domain you own, which is phase 2.
 
+### A stable address for players
+
+The hostname problem in one command:
+
+```bash
+make pi-publish-url
+```
+
+That publishes a small redirect page to GitHub Pages —
+`https://<you>.github.io/something2/` — pointing at the board's current
+tunnel hostname. **That is the link to give people.** It survives a board
+reboot; the tunnel hostname does not.
+
+It runs from **this machine**, using the `gh` credentials already here. The
+board deliberately holds no credential of any kind, and putting a GitHub
+token on an internet-reachable box to solve a convenience problem would
+trade a real security property for one. The cost of that choice, stated
+plainly: **if the board reboots while this machine is off, the page is stale
+until someone runs the command.** `make pi-status` will tell you:
+
+```
+tunnel     https://estimate-absolutely-beaches-fired.trycloudflare.com (held 1d 22h)
+front door https://mortehay.github.io/something2/ -> current
+ci hook    reachable on the live hostname
+```
+
+`front door` reads **STALE** when the published page points at a hostname the
+board is no longer serving — the failure that otherwise stays silent, because
+every other line still says healthy while every link anyone holds is dead.
+A workstation deploy refreshes the page automatically, and only if it has
+been published once: a deploy never opens a public address for a board whose
+operator did not ask for one.
+
+Two things worth knowing. The page is `noindex, nofollow`, which keeps it out
+of search results — it does **not** keep out anyone who has the link, and
+this staging box has open registration. And there is **no TTL to read**: a
+quick tunnel has no published lifetime and nothing exposes an expiry, so
+`(held 1d 22h)` is the honest answer to "how long do I have" — how long this
+hostname has already lasted, not how long it will.
+
 ### Delivery from a push
 
 ```

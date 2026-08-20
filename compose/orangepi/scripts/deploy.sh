@@ -241,4 +241,17 @@ if [ -z "${PI_LOCAL:-}" ] && [ -n "$url" ] && command -v gh >/dev/null 2>&1; the
         "$C_YELLOW" "$C_OFF" >&2
     fi
   fi
+
+  # Same rule as the hook URL above: refresh the published front door only if
+  # one already exists. A deploy must never publish a public address for a
+  # board whose operator never asked for one.
+  if git -C "$REPO_ROOT" ls-remote --exit-code --heads origin \
+       "${ORANGEPI_PAGES_BRANCH:-gh-pages}" >/dev/null 2>&1; then
+    if bash "$(dirname "${BASH_SOURCE[0]}")/publish-url.sh" >/dev/null 2>&1; then
+      printf '%sfront door%s the published page now points here\n' "$C_BOLD" "$C_OFF"
+    else
+      printf '%sfront door%s could not update the published page -- run `make pi-publish-url`\n' \
+        "$C_YELLOW" "$C_OFF" >&2
+    fi
+  fi
 fi

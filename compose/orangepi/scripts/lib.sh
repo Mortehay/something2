@@ -405,6 +405,33 @@ render_status() {
   [ "$STATUS_HEALTH_CODE" = "200" ]
 }
 
+# How long the current quick-tunnel hostname has been in service, in seconds.
+#
+# There is no TTL to read: nothing in the protocol exposes an expiry, and a
+# quick tunnel has no published lifetime. What CAN be answered is how long
+# this one has held -- and since the hostname only changes when cloudflared
+# restarts, its age is the age of the banner line that announced it. Empty
+# when there is no tunnel.
+pi_tunnel_age_seconds() {
+  local banner now
+  banner="$(pi_ssh "docker logs --timestamps something2-orangepi-cloudflared-1 2>&1 \
+    | grep -F 'trycloudflare.com  ' | tail -1 | cut -d' ' -f1" 2>/dev/null || true)"
+  [ -n "$banner" ] || return 0
+  banner="$(date -u -d "$banner" +%s 2>/dev/null || true)"
+  [ -n "$banner" ] || return 0
+  now="$(date -u +%s)"
+  printf '%s' "$((now - banner))"
+}
+
+# "2d 3h", "4h 12m", "45s" -- an age is read at a glance or not at all.
+format_duration() {
+  local total="$1"
+  if [ "$total" -ge 86400 ]; then printf '%dd %dh' "$((total / 86400))" "$(((total % 86400) / 3600))"
+  elif [ "$total" -ge 3600 ]; then printf '%dh %dm' "$((total / 3600))" "$(((total % 3600) / 60))"
+  elif [ "$total" -ge 60 ]; then printf '%dm' "$((total / 60))"
+  else printf '%ds' "$total"; fi
+}
+
 # --- The data-safety rule --------------------------------------------------
 #
 # Provisioning EMPTIES the app directory. That is only safe because game data
@@ -490,4 +517,74 @@ MSG
     return 1
   fi
   printf '%s (app) and %s (data) are separate\n' "$app_real" "$data_real"
+}
+
+# --- The stable front door (SOMET-440) -------------------------------------
+#
+# Rendering lives here rather than in publish-url.sh for the same reason
+# render_status does: the page is what a player actually sees, and it should
+# be checkable without publishing anything to the internet to look at it.
+
+render_front_door_page() {
+  local target="$1" stamp="$2"
+  # Three redirect mechanisms, deliberately: the meta refresh works with
+  # JavaScript disabled, the script tag fires immediately, and the link is
+  # there when both are blocked or the redirect is simply wrong -- in which
+  # case a visitor can still see and copy the address rather than staring at
+  # a blank page.
+  #
+  # noindex/nofollow because this points at a staging box whose registration
+  # is open to anyone. A stable address is convenient for players and equally
+  # convenient for a crawler; being in a search index is a different thing
+  # from being reachable, and only the first is chosen here.
+  cat <<HTML
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>something2 — play</title>
+<meta http-equiv="refresh" content="0; url=${target}">
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.6 system-ui, sans-serif; margin: 0; min-height: 100vh;
+         display: grid; place-items: center; text-align: center; padding: 2rem; }
+  main { max-width: 34rem; }
+  a.play { display: inline-block; margin: 1.5rem 0 1rem; padding: .8rem 1.6rem;
+           border-radius: .5rem; background: #6d28d9; color: #fff;
+           text-decoration: none; font-weight: 600; }
+  code { word-break: break-all; opacity: .75; font-size: .9em; }
+  p.note { opacity: .65; font-size: .9em; margin-top: 2rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>something2</h1>
+  <p>Taking you to the server&hellip;</p>
+  <a class="play" href="${target}">Play</a>
+  <p><code>${target}</code></p>
+  <p class="note">
+    The server runs on a small board at home behind a Cloudflare tunnel, and
+    the tunnel takes a new address whenever it restarts. This page is updated
+    to match, so this link is the one worth bookmarking. Last updated
+    ${stamp}.
+  </p>
+</main>
+<script>location.replace(${target@Q});</script>
+</body>
+</html>
+HTML
+}
+
+
+# Given what the published page currently points at and what the board is
+# actually serving, which of the three states are we in? Extracted so the
+# STALE case -- the one that matters, and the one you cannot conjure on a
+# live board without breaking the front door to do it -- is testable.
+front_door_state() {
+  local published="$1" live="$2"
+  if [ -z "$published" ]; then printf 'missing'
+  elif [ "$published" = "$live" ]; then printf 'current'
+  else printf 'stale'; fi
 }

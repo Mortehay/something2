@@ -70,7 +70,48 @@ set -e
 url="$(pi_tunnel_url)"
 printf '%stunnel%s     ' "$C_BOLD" "$C_OFF"
 if [ -n "$url" ]; then
-  printf '%s\n' "$url"
+  age="$(pi_tunnel_age_seconds)"
+  if [ -n "$age" ]; then
+    # The age answers the question people actually ask about a quick tunnel
+    # ("how long have I got?") as honestly as it can be answered: there is no
+    # expiry to read, only how long this hostname has already held.
+    printf '%s %s(held %s)%s\n' "$url" "$C_DIM" "$(format_duration "$age")" "$C_OFF"
+  else
+    printf '%s\n' "$url"
+  fi
+
+  # Drift. The hostname changes on any cloudflared restart -- a reboot, a
+  # power cut -- and everything else keeps reporting healthy while every
+  # published link points somewhere dead. That silence is the failure mode
+  # worth naming, so the two places the hostname is recorded are compared
+  # against the live one.
+  slug=""
+  if [ -n "${GIT_REPOSITORY:-}" ]; then
+    slug="$(printf '%s' "${GIT_REPOSITORY%.git}" | sed -E 's#.*github\.com[:/]##')"
+  fi
+  if [ -n "$slug" ] && command -v gh >/dev/null 2>&1; then
+    pages_url="https://$(printf '%s' "${slug%%/*}" | tr '[:upper:]' '[:lower:]').github.io/${slug##*/}/"
+    published="$(curl -s --max-time 10 "$pages_url" 2>/dev/null \
+      | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1 || true)"
+    printf '%sfront door%s ' "$C_BOLD" "$C_OFF"
+    case "$(front_door_state "$published" "$url")" in
+      missing) printf '%s(not published)%s -- `make pi-publish-url` gives players an address that survives a reboot\n' "$C_DIM" "$C_OFF" ;;
+      current) printf '%s -> current\n' "$pages_url" ;;
+      stale)   printf '%sSTALE%s %s still points at %s -- run `make pi-publish-url`\n' "$C_YELLOW" "$C_OFF" "$pages_url" "$published" ;;
+    esac
+    if gh secret list --repo "$slug" 2>/dev/null | grep -q '^DEPLOY_HOOK_URL'; then
+      # The secret's value cannot be read back, so this checks the only thing
+      # that can be checked without it: whether the hook answers on the live
+      # hostname. A stale secret shows up as CI failing with a Cloudflare 530.
+      hook_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url/deploy-hook/health" || true)"
+      printf '%sci hook%s    ' "$C_BOLD" "$C_OFF"
+      case "$hook_code" in
+        200) printf 'reachable on the live hostname\n' ;;
+        *) printf '%sHTTP %s%s on %s/deploy-hook/health -- delivery may be pointing elsewhere; `make pi-hook-register`\n' \
+             "$C_YELLOW" "$hook_code" "$C_OFF" "$url" ;;
+      esac
+    fi
+  fi
 else
   printf '%s(no tunnel running)%s -- start it with `make pi-up`, which includes the tunnel profile\n' "$C_DIM" "$C_OFF"
 fi

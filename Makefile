@@ -5,7 +5,8 @@
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
         pi-migrate-up pi-migrate-status pi-seed-catalogs pi-seed-map pi-reseed-map \
-        pi-shell pi-db-shell pi-tunnel-url pi-hook-secret pi-hook-register pi-reset
+        pi-shell pi-db-shell pi-tunnel-url pi-hook-secret pi-hook-register \
+        pi-publish-url pi-reset
 
 COMPOSE_FILE = compose/develop/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
@@ -327,6 +328,12 @@ pi-hook-secret:
 # changes every time.
 pi-hook-register:
 	@bash compose/orangepi/scripts/hook-register.sh
+
+# Publish a stable address for players that forwards to the board's current
+# tunnel hostname, so a reboot does not invalidate every link you handed out.
+# Runs from THIS machine, using its gh credentials -- the board holds none.
+pi-publish-url:
+	@bash compose/orangepi/scripts/publish-url.sh
 
 # --- Remote migrations -----------------------------------------------------
 # Migrations are a deploy STEP on this stack, never a side effect of the
