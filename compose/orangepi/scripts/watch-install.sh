@@ -42,6 +42,77 @@ esac
 
 mkdir -p "$UNIT_DIR"
 
+# --- The unit must point somewhere that survives a reboot (SOMET-442) -------
+#
+# This script is often run from a throwaway worktree under /tmp. Installing
+# from there produces a timer that works today and, after the next reboot,
+# fails every ten minutes against a path that no longer exists -- the quietest
+# possible way for a self-healer to stop healing. So: never install from an
+# ephemeral root. Use a durable checkout if there is one, otherwise keep a
+# small clone of our own and install from that.
+DURABLE_HOME="${PI_WATCH_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/something2-pi}"
+RECONCILER_REL="compose/orangepi/scripts/reconcile-url.sh"
+
+# The clone carries code only. Configuration stays in ONE place -- a symlink,
+# not a copy, so editing .env keeps working and there is no second board
+# address to forget about.
+link_env() {
+  local root="$1" src="$2"
+  if [ -L "$root/.env" ] || [ ! -e "$root/.env" ]; then
+    ln -sfn "$src" "$root/.env"
+  fi
+}
+
+ensure_durable_checkout() {
+  local origin src_env root="$DURABLE_HOME/repo"
+  origin="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null)" || origin=""
+  [ -n "$origin" ] || { echo "no origin remote to clone from" >&2; return 1; }
+
+  # Config must already live somewhere permanent; a copy of it here would be a
+  # second source of truth for the board's address and password.
+  src_env="$(durable_repo_root)/.env"
+  [ -f "$src_env" ] || { echo "no durable .env at $src_env" >&2; return 1; }
+
+  if [ -d "$root/.git" ]; then
+    git -C "$root" fetch --quiet --depth 1 origin HEAD
+  else
+    mkdir -p "$DURABLE_HOME"
+    git clone --quiet --depth 1 --filter=blob:none "$origin" "$root"
+    git -C "$root" fetch --quiet --depth 1 origin HEAD
+  fi
+  git -C "$root" checkout --quiet --detach FETCH_HEAD
+  link_env "$root" "$src_env"
+  printf '%s\n' "$root"
+}
+
+INSTALL_ROOT="${PI_WATCH_REPO:-}"
+if [ -z "$INSTALL_ROOT" ]; then
+  INSTALL_ROOT="$(durable_repo_root)"
+  if [ -z "$INSTALL_ROOT" ] || [ ! -f "$INSTALL_ROOT/$RECONCILER_REL" ]; then
+    echo "installing from a durable clone: $REPO_ROOT will not survive a reboot" >&2
+    INSTALL_ROOT="$(ensure_durable_checkout)" || exit 1
+  fi
+fi
+
+if path_is_ephemeral "$INSTALL_ROOT"; then
+  echo "refusing to install a timer from $INSTALL_ROOT -- that path does not survive a reboot" >&2
+  exit 1
+fi
+[ -f "$INSTALL_ROOT/$RECONCILER_REL" ] || {
+  echo "no reconciler at $INSTALL_ROOT/$RECONCILER_REL" >&2
+  echo "update that checkout, or point PI_WATCH_REPO at one that has it" >&2
+  exit 1
+}
+# The key is what the timer will actually authenticate with, and it is just as
+# capable of living in a directory that vanishes.
+KEY_PATH="$(pi_key_path)"
+[ -f "$KEY_PATH" ] || { echo "no ssh key at $KEY_PATH" >&2; exit 1; }
+if path_is_ephemeral "$KEY_PATH"; then
+  echo "refusing: the board key at $KEY_PATH does not survive a reboot" >&2
+  echo "move it somewhere permanent (~/.ssh/) and set ORANGEPI_SSH_KEY to point there" >&2
+  exit 1
+fi
+
 # WorkingDirectory is the repository, because the scripts resolve .env and
 # their own paths relative to it.
 cat > "$UNIT_DIR/$SERVICE" <<UNIT
@@ -51,8 +122,8 @@ Documentation=https://github.com/Mortehay/something2#operating-the-orange-pi
 
 [Service]
 Type=oneshot
-WorkingDirectory=${REPO_ROOT}
-ExecStart=/usr/bin/env bash ${REPO_ROOT}/compose/orangepi/scripts/reconcile-url.sh
+WorkingDirectory=${INSTALL_ROOT}
+ExecStart=/usr/bin/env bash ${INSTALL_ROOT}/compose/orangepi/scripts/reconcile-url.sh
 # The reconciler exits 0 when there is nothing to do and when the board is
 # simply off, so a non-zero status here means something it could not repair.
 UNIT

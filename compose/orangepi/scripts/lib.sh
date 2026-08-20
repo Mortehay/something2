@@ -639,3 +639,31 @@ front_door_state() {
   elif [ "$published" = "$live" ]; then printf 'current'
   else printf 'stale'; fi
 }
+
+# --- Where an installed timer may point (SOMET-442) -------------------------
+#
+# Agent sessions work in a throwaway git worktree under /tmp. A systemd unit
+# whose ExecStart points into one keeps working perfectly until the machine
+# reboots, and then fails every ten minutes forever -- silently, because the
+# thing it was watching over is exactly the thing nobody looks at. Worse, the
+# board's ssh key lived there too, so a reboot took the only way in with it.
+path_is_ephemeral() {
+  case "$1" in
+    /tmp/*|/var/tmp/*|/dev/shm/*|/run/*|*/scratchpad/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The repository root that survives a reboot: this one if it already does,
+# otherwise the main checkout this worktree hangs off (git-common-dir's
+# parent). Prints nothing when neither qualifies -- callers must treat that as
+# "refuse", never as "use the current directory anyway".
+durable_repo_root() {
+  local root="${1:-$REPO_ROOT}" common
+  if ! path_is_ephemeral "$root"; then printf '%s\n' "$root"; return 0; fi
+  common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  [ -n "$common" ] || return 0
+  common="$(dirname "$common")"
+  path_is_ephemeral "$common" && return 0
+  printf '%s\n' "$common"
+}

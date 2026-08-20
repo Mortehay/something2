@@ -862,3 +862,62 @@ test('the timer unit runs the reconciler and survives a suspended laptop', () =>
   // And it must be removable.
   assert.match(text, /uninstall\)/);
 });
+
+// SOMET-442. The timer above was installed from an agent's throwaway worktree
+// under /tmp, and so was the board's ssh key. Both work perfectly until the
+// machine reboots; then the self-healer fails every ten minutes against a path
+// that is gone, and the only way onto the board is gone with it. These pin the
+// guards, because the failure is invisible exactly when it starts.
+
+test('path_is_ephemeral knows which paths a reboot takes away', () => {
+  const cases = [
+    ['/tmp/claude-1000/x/scratchpad/wt/pi', true],
+    ['/var/tmp/build', true],
+    ['/home/someone/worker/repo/scratchpad/wt/pi', true],
+    ['/home/someone/worker/repo', false],
+    ['/srv/something2', false],
+  ];
+  for (const [candidate, ephemeral] of cases) {
+    const result = runWithLib(`path_is_ephemeral ${JSON.stringify(candidate)} && echo yes || echo no`);
+    assert.strictEqual(result.stdout.trim(), ephemeral ? 'yes' : 'no', candidate);
+  }
+});
+
+test('durable_repo_root refuses rather than falling back to the temporary one', () => {
+  // A real worktree under /tmp whose main checkout is ALSO under /tmp: there
+  // is no durable answer, and inventing one would reinstate the bug.
+  const result = runWithLib(
+    'out="$(durable_repo_root "$REPO_ROOT")"; echo "[${out}]"',
+    { env: { TMPDIR: os.tmpdir() } },
+  );
+  assert.strictEqual(result.status, 0);
+  assert.strictEqual(result.stdout.trim(), '[]');
+});
+
+test('durable_repo_root keeps a root that already survives a reboot', () => {
+  const result = runWithLib(`durable_repo_root ${JSON.stringify(os.homedir())}`);
+  assert.strictEqual(result.stdout.trim(), os.homedir());
+});
+
+test('watch-install refuses an ephemeral install root instead of installing a doomed unit', (t) => {
+  if (spawnSync('command', ['-v', 'systemctl'], { shell: true }).status !== 0) {
+    t.skip('no systemd here');
+    return;
+  }
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-watch-'));
+  const doomed = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-repo-'));
+  fs.mkdirSync(path.join(doomed, 'compose', 'orangepi', 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(doomed, 'compose', 'orangepi', 'scripts', 'reconcile-url.sh'), '');
+  const result = spawnSync('bash', [path.join(SCRIPTS, 'watch-install.sh')], {
+    encoding: 'utf8',
+    env: { ...process.env, PI_WATCH_REPO: doomed, XDG_CONFIG_HOME: home },
+  });
+  fs.rmSync(doomed, { recursive: true, force: true });
+  const units = fs.existsSync(path.join(home, 'systemd', 'user'))
+    ? fs.readdirSync(path.join(home, 'systemd', 'user'))
+    : [];
+  fs.rmSync(home, { recursive: true, force: true });
+  assert.notStrictEqual(result.status, 0);
+  assert.match(result.stderr, /does not survive a reboot/);
+  assert.deepStrictEqual(units, [], 'no unit may be written when the root is doomed');
+});
