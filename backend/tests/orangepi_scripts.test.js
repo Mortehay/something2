@@ -723,3 +723,35 @@ test('publishing refuses when there is no tunnel to point at', () => {
   const text = fs.readFileSync(path.join(SCRIPTS, 'publish-url.sh'), 'utf8');
   assert.match(text, /no tunnel is running on the board, so there is nothing to publish/);
 });
+
+test('the health probe targets a different address in each transport', () => {
+  // This cost five CI deploys a false failure. Over ssh, 127.0.0.1:8080 is
+  // the BOARD's loopback, where Caddy publishes. Under PI_LOCAL the same
+  // script runs inside the deploy-hook container, where 127.0.0.1 is that
+  // container's own loopback and nothing is listening -- so the probe could
+  // never succeed, and reported a working deploy as broken. Caddy is
+  // reachable by service name on the compose network instead.
+  const overSsh = runWithLib('pi_health_url').stdout.trim();
+  const onBoard = runWithLib('pi_health_url', { env: { PI_LOCAL: '1' } }).stdout.trim();
+  assert.strictEqual(overSsh, 'http://127.0.0.1:8080/api/health');
+  assert.strictEqual(onBoard, 'http://caddy:80/api/health');
+  assert.notStrictEqual(overSsh, onBoard);
+});
+
+test('the deploy health wait uses the transport-aware url', () => {
+  const text = fs.readFileSync(path.join(SCRIPTS, 'deploy.sh'), 'utf8');
+  assert.match(text, /pi_health_url/);
+  // A hardcoded loopback anywhere in the wait is the bug returning.
+  const waitBlock = /wait_for_health\(\) \{[\s\S]*?\n\}/.exec(text)[0];
+  assert.doesNotMatch(waitBlock, /127\.0\.0\.1:8080/);
+});
+
+test('a failed health wait shows the backend log, not just a verdict', () => {
+  // "the stack did not answer" is a verdict. What broke is in the container
+  // output, and fetching it by hand means another ssh round trip at the
+  // worst moment.
+  const text = fs.readFileSync(path.join(SCRIPTS, 'deploy.sh'), 'utf8');
+  const waitBlock = /wait_for_health\(\) \{[\s\S]*?\nREMOTE\n\}/.exec(text)[0];
+  assert.match(waitBlock, /docker logs --tail \d+ something2-orangepi-backend-1/);
+  assert.match(waitBlock, /docker ps --filter name=something2-orangepi/);
+});

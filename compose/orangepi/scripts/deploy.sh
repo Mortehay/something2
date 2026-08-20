@@ -199,14 +199,23 @@ esac
 # A container that starts and exits still leaves `up -d` exiting 0, so the
 # deploy is not finished until something answers.
 wait_for_health() {
-  pi_ssh 'for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:8080/api/health || true)
-            [ "$code" = "200" ] && { echo "healthy after ${i}0s at most"; exit 0; }
-            sleep 2
-          done
-          echo "the stack did not answer on 127.0.0.1:8080 within 60s" >&2
-          docker ps --filter name=something2-orangepi --format "{{.Names}} {{.Status}}" >&2
-          exit 1'
+  local url; url="$(pi_health_url)"
+  pi_ssh "URL=$(printf '%q' "$url") bash -s" <<'REMOTE'
+set -u
+for i in $(seq 1 45); do
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$URL" || true)
+  if [ "$code" = "200" ]; then
+    echo "answered after ~$((i * 2))s at $URL"
+    exit 0
+  fi
+  sleep 2
+done
+echo "the stack did not answer on $URL within 90s" >&2
+docker ps --filter name=something2-orangepi --format "{{.Names}} {{.Status}}" >&2
+echo "--- last backend output ---" >&2
+docker logs --tail 20 something2-orangepi-backend-1 >&2 2>&1 || true
+exit 1
+REMOTE
 }
 run_step "wait for the stack to answer" wait_for_health
 

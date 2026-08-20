@@ -227,6 +227,26 @@ now_ns() {
   esac
 }
 
+# Where to probe the stack from, which is NOT the same address in both
+# transports and cost five CI deploys a false failure before it was noticed.
+#
+#   over ssh      the board's own loopback, where Caddy publishes 8080
+#   PI_LOCAL      inside the deploy-hook CONTAINER, where 127.0.0.1 is the
+#                 container's own loopback and nothing is listening on it.
+#                 Caddy is reachable by service name on the compose network.
+#
+# The backend was healthy six seconds after every one of those deploys. The
+# probe simply could not see it, and reported a working deploy as broken --
+# which is worse than not checking, because it teaches an operator to ignore
+# the one step that would tell them a deploy really did fail.
+pi_health_url() {
+  if [ -n "${PI_LOCAL:-}" ]; then
+    printf 'http://caddy:80/api/health'
+  else
+    printf 'http://127.0.0.1:8080/api/health'
+  fi
+}
+
 # --- Step reporting --------------------------------------------------------
 
 STEP_INDEX=0

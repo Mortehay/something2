@@ -30,7 +30,7 @@ fi
 # is delimited so the workstation can present it without a second connection --
 # on a link with 5ms latency that hardly matters, but each round trip is also
 # another chance to hang.
-report="$(pi_ssh "APP_DIR=$(printf %q "$ORANGEPI_APP_DIR") bash -s" <<'REMOTE' || true
+report="$(pi_ssh "APP_DIR=$(printf %q "$ORANGEPI_APP_DIR") HEALTH_URL=$(printf %q "$(pi_health_url)") bash -s" <<'REMOTE' || true
 set -u
 compose_ps() {
   docker ps --filter 'name=something2-orangepi' \
@@ -42,7 +42,7 @@ echo "###HEALTH"
 # Straight at Caddy's published loopback port, which is the same path the
 # tunnel takes into the stack -- so this checks the routing, not just the
 # backend. --max-time keeps a wedged container from hanging the report.
-curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8080/api/health 2>/dev/null || echo 000
+curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$HEALTH_URL" 2>/dev/null || echo 000
 echo
 echo "###DISK"
 df -h / | tail -1
