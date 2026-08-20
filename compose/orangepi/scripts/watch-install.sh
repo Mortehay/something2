@@ -150,6 +150,12 @@ systemctl --user daemon-reload
 systemctl --user enable --now "$TIMER" >/dev/null
 
 echo "installed $TIMER (every ${INTERVAL})"
+echo "running from $INSTALL_ROOT"
+if [ "$INSTALL_ROOT" != "$REPO_ROOT" ]; then
+  # Pinned, not self-updating: a timer that pulls and runs new code on its
+  # own is a different and much larger promise than this one makes.
+  echo "(a pinned copy -- re-run this target to pick up later changes)"
+fi
 systemctl --user list-timers "$TIMER" --no-pager | sed -n '1,2p'
 
 cat <<MSG

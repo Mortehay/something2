@@ -365,6 +365,17 @@ hostname it has not confirmed is serving, and will not create a front door
 you never asked for. `PI_VERBOSE=1 make pi-reconcile` makes it explain itself;
 `journalctl --user -u something2-pi-reconcile.service -f` follows the timer.
 
+Where it installs from matters more than it looks. The timer refuses to run
+from a path a reboot would take away — a `/tmp` worktree, or a key sitting in
+one — because that unit keeps working right up until the machine restarts and
+then fails every ten minutes with nobody watching. Run from such a checkout it
+installs from a small pinned clone under `~/.local/share/something2-pi/`
+instead, symlinking your existing `.env` so there is still one board address
+and one password. That copy does not update itself: re-run
+`make pi-watch-install` after changing the reconciler. Keep the board key
+somewhere permanent (`~/.ssh/`) and point `ORANGEPI_SSH_KEY` at it — it is the
+only way onto the board, and a lost key means reprovisioning.
+
 The remaining gap, stated plainly: **a user timer runs only while you have a
 session, so nothing heals while this machine is off or logged out.**
 `loginctl enable-linger $USER` lifts the logged-out half. A named tunnel on a
