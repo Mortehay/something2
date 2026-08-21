@@ -35,7 +35,7 @@ test('POST /api/tile-types sends prompt as INSERT param $7 and echoes it', async
   assert.equal(res.body.prompt, 'molten glowing lava');
 });
 
-test('PUT /api/tile-types/:id sends prompt as UPDATE param $7, wall_height/place_order as $8/$9, and id as $10', async () => {
+test('PUT /api/tile-types/:id sends prompt, wall_height and place_order, and points WHERE at the id', async () => {
   const pool = mockPool([
     // name is unchanged ('grass' -> 'grass'), so the rename guard's reference
     // checks are skipped entirely.
@@ -53,7 +53,14 @@ test('PUT /api/tile-types/:id sends prompt as UPDATE param $7, wall_height/place
   assert.equal(call.params[6], 'edited meadow grass', 'prompt must be UPDATE $7');
   assert.equal(call.params[7], 40, 'wall_height must be UPDATE $8');
   assert.equal(call.params[8], 1, 'place_order must be UPDATE $9');
-  assert.equal(String(call.params[9]), '9', 'id must be UPDATE $10');
+  // The id is read out of the WHERE clause rather than pinned to a fixed
+  // position. SOMET-342 added the two pin columns and moved it from $10 to
+  // $13, and the ONLY thing that assertion ever needed to protect is that the
+  // row this UPDATE matches is the one in the URL -- a hardcoded index says
+  // that by coincidence, and fails whenever a column is added.
+  const wherePlaceholder = Number(/WHERE id = \$(\d+)/.exec(call.sql)[1]);
+  assert.equal(String(call.params[wherePlaceholder - 1]), '9', 'WHERE id must carry the id from the URL');
+  assert.equal(wherePlaceholder, call.params.length, 'the id stays the last param');
   assert.equal(res.body.prompt, 'edited meadow grass');
 });
 
