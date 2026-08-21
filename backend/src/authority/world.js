@@ -681,6 +681,13 @@ class World {
     for (const p of this.players.values()) {
       if (p.hp <= 0) {
         died.push(p.userId);
+        // WHERE THE DEATH HAPPENED, kept because the snap on the next line
+        // destroys it (SOMET-443). server.js's onPlayerDeath needs it to pick
+        // the nearest village, and "nearest" has to be measured from the place
+        // that killed them -- measuring from p.spawn, which they are about to
+        // be moved to, would pick the village nearest their JOIN point and
+        // quietly answer a different question.
+        p.deathAt = { x: p.x, y: p.y };
         p.x = p.spawn.x; p.y = p.spawn.y;
         // Every resource is restored together. Leaving stamina out would
         // respawn a player fully healed but unable to swing a heavy weapon.

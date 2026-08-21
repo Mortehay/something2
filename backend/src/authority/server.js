@@ -227,6 +227,37 @@ function nearestMerchantVillage(villages, cx, cy, radius) {
   return nearestVillagePost(villages, cx, cy, radius, 'merchantX', 'merchantY');
 }
 
+// SOMET-443: the village a death should return an UNBOUND player to.
+//
+// No radius: a bind is earned by standing in a village, so a player without one
+// may be anywhere on the map, and "the nearest village unless it is far away"
+// would leave exactly the players this exists for standing on the tile that
+// killed them. Distance decides which village, never whether there is one.
+function nearestVillageSpawn(villages, cx, cy) {
+  return nearestVillagePost(villages, cx, cy, Infinity, 'spawnX', 'spawnY');
+}
+
+// The fallback home for a death in a world that has no village of its own
+// (SOMET-443). The ENTRY world's village, because that is the one place the
+// game already guarantees is reachable and safe for a character with no
+// history -- joinPolicy's first-join rule rests on the same fact.
+//
+// Returns null rather than throwing when there is no such village: a database
+// with no entry world, or an entry world with no village, is a seeding problem
+// that must not turn every dungeon death into an unhandled rejection. The
+// caller leaves the player where resolveDeaths() put them, which is today's
+// behaviour.
+async function entryVillage(db) {
+  const r = await db.query(
+    `SELECT v.world_id, v.spawn_x, v.spawn_y
+       FROM villages v JOIN worlds w ON w.id = v.world_id
+      WHERE w.is_entry = true
+      ORDER BY v.created_at ASC LIMIT 1`,
+  );
+  const row = r.rows[0];
+  return row ? { worldId: row.world_id, x: Number(row.spawn_x), y: Number(row.spawn_y) } : null;
+}
+
 // SOMET-310. Deliberately a SEPARATE proximity pick from the merchant's rather
 // than one "nearest interactable" resolver: the two posts sit one tile apart
 // and are both usually inside INTERACT_RADIUS at once, so a shared picker would
@@ -843,16 +874,47 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // may already be gone. The arrival stays enqueued either way, so a player
     // who reconnects later still lands at their village rather than where they
     // died -- exactly how an un-consumed doorway arrival already behaves.
-    if (p.bind && p.bind.worldId !== entry.worldId) {
-      pendingArrivals.set(characterId, { worldId: p.bind.worldId, x: p.bind.x, y: p.bind.y });
+    // Relocating to ANOTHER world: the doorway/portal machinery, reused whole.
+    const relocate = (worldId, x, y) => {
+      pendingArrivals.set(characterId, { worldId, x, y });
       const sock = entry.sockets.get(userId);
-      if (sock) {
-        send(sock, {
-          type: 'transition', toWorldId: p.bind.worldId, arriveX: p.bind.x, arriveY: p.bind.y,
-        });
-      }
-      recordVisit(pool, characterId, p.bind.worldId)
+      if (sock) send(sock, { type: 'transition', toWorldId: worldId, arriveX: x, arriveY: y });
+      recordVisit(pool, characterId, worldId)
         .catch((e) => console.error('recordVisit (death respawn)', e));
+    };
+
+    if (p.bind && p.bind.worldId !== entry.worldId) {
+      relocate(p.bind.worldId, p.bind.x, p.bind.y);
+    } else if (!p.bind) {
+      // SOMET-443. No bind at all -- a character that has never stood in a
+      // village. resolveDeaths() has just snapped them to p.spawn, which for
+      // this player is the point they JOINED at, so without this they get up
+      // inside whatever killed them and die again. Send them to the nearest
+      // village instead, measured from where they actually died.
+      //
+      // Same world is the common case and is handled synchronously: they are
+      // already alive and healed, so moving them is one assignment plus a
+      // persist. No transition frame is needed or wanted -- the client stays in
+      // the world it is already in and the next state broadcast carries the new
+      // position, exactly as it does for the bind-here case.
+      const from = p.deathAt || { x: p.x, y: p.y };
+      const village = nearestVillageSpawn(entry.villages, from.x, from.y);
+      if (village) {
+        p.x = village.spawnX;
+        p.y = village.spawnY;
+        persist(entry.worldId, characterId, p)
+          .catch((e) => console.error('persist (death respawn)', e));
+      } else {
+        // A world with no village at all -- every dungeon. Fall back to the
+        // entry world's village, through the same authorized relocation the
+        // bind case uses. Asynchronous, deliberately: the player is already
+        // healed and standing somewhere safe-ish, and an un-consumed arrival
+        // behaves exactly like an un-consumed doorway (they land there on the
+        // next connect), so nothing is lost if the socket has gone.
+        entryVillage(pool)
+          .then((home) => { if (home) relocate(home.worldId, home.x, home.y); })
+          .catch((e) => console.error('entryVillage (death respawn)', e));
+      }
     }
 
     return applyDeath(pool, characterId, { rng })
