@@ -1,5 +1,6 @@
 import { landmarkPulse, landmarkColor } from "./landmarkRenderer.js";
 import { MAP_TILE_SIZE } from "../core/constants.js";
+import { diamond, terrainBlit } from "./minimapTerrainLayer.js";
 
 // Pure Canvas-2D drawing for the in-game minimap. Player-centered iso window:
 // the player's (fractional) global tile maps to the box center and everything
@@ -19,22 +20,17 @@ export function worldTileToView(col, row, view) {
   };
 }
 
-function diamond(ctx, x, y, hw, hh) {
-  ctx.beginPath();
-  ctx.moveTo(x, y - hh);
-  ctx.lineTo(x + hw, y);
-  ctx.lineTo(x, y + hh);
-  ctx.lineTo(x - hw, y);
-  ctx.closePath();
-}
-
 // Iso screen angle of a world-tile movement vector, for the player facing arrow.
 function isoAngle(dx, dy) {
   return Math.atan2((dx + dy) * 0.5, dx - dy);
 }
 
 export function drawMinimap(ctx, {
-  overview, tileColors, player, creatures, doorways, villages, view,
+  overview, player, creatures, doorways, villages, view,
+  // SOMET-444. The terrain window as a pre-rendered bitmap -- see
+  // minimapTerrainLayer.js for why it is cached rather than redrawn. Shaped
+  // { canvas, geom, dpr }, or null before the first overview arrives.
+  terrainLayer,
   // SOMET-298. World-pixel points from the join frame (Game's snapshot), NOT
   // from the overview payload. The overview is a cached terrain window; a
   // landmark is per-character state (a waypoint is lit or not) that already
@@ -43,22 +39,22 @@ export function drawMinimap(ctx, {
   // landmarkRenderer for why a renderer must never read its own clock.
   landmarks, phase,
 }) {
-  const cellW = view.cellW, hw = cellW / 2, hh = cellW / 4;
-
-  // 1) Terrain
-  if (overview) {
-    for (let r = 0; r < overview.rows; r++) {
-      const row = overview.tiles[r];
-      if (!row) continue;
-      for (let c = 0; c < overview.cols; c++) {
-        const name = row[c];
-        if (!name) continue;
-        const { x, y } = worldTileToView(overview.originCol + c * overview.step, overview.originRow + r * overview.step, view);
-        if (x < -cellW || x > view.boxW + cellW || y < -cellW || y > view.boxH + cellW) continue;
-        ctx.fillStyle = (tileColors && tileColors[name]) || '#334155';
-        diamond(ctx, x, y, hw, hh);
-        ctx.fill();
-      }
+  // 1) Terrain -- one blit of the cached window bitmap.
+  //
+  // Only the part of the bitmap that lands inside the box is copied. That
+  // matters: the bitmap for a 64x64 window is far larger than the box, and
+  // handing drawImage the WHOLE source (the 5-argument form) makes it scale
+  // the entire quad -- measured SLOWER than the per-cell loop it replaced.
+  // The 9-argument form with a clipped source rect is the whole win.
+  //
+  // Source and destination are both snapped to whole DEVICE pixels so the copy
+  // is 1:1 and never resampled; resampling blurs the diamonds and costs more
+  // again. The error is under one device pixel, so terrain and markers cannot
+  // visibly disagree.
+  if (overview && terrainLayer) {
+    const blit = terrainBlit(overview, view, terrainLayer);
+    if (blit) {
+      ctx.drawImage(terrainLayer.canvas, blit.sx, blit.sy, blit.sw, blit.sh, blit.dx, blit.dy, blit.dw, blit.dh);
     }
   }
 
