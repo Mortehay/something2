@@ -9,7 +9,7 @@
     "dev": "nodemon src/index.js --inspect",
     "migrate": "node-pg-migrate --ignore-pattern '(?!.*\\.js$).*'",
     "migrate:up": "node-pg-migrate up --ignore-pattern '(?!.*\\.js$).*'",
-    "test": "node --test --test-timeout=60000",
+    "test": "node --test --test-timeout=180000",
     "sprites:gen": "node scripts/gen-sprites.js"
   },
   "dependencies": {

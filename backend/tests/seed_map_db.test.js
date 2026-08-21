@@ -279,7 +279,14 @@ test('a spec that fails validation writes nothing', async (t) => {
 // Other tests in this file clean up with cleanup() in a finally, so they are
 // safe against any database. This one must be gated: it only runs if
 // TEST_DATABASE_URL is explicitly set.
-test('every shipped spec applies cleanly', async (t) => {
+// SLOW ON PURPOSE, AND THE REASON npm test ALLOWS 180s. This applies EVERY
+// checked-in spec for real -- 86 worlds across vale-region and p5-descent,
+// terrain, creatures and all -- and takes ~80s on a developer machine. Under
+// the old 60s cap it timed out, and a timeout CANCELS THE WHOLE FILE, so the
+// other fifteen tests here silently stopped running in every full-suite run.
+// The per-test timeout below documents the need; the cap that actually
+// governs a file is the runner's, in package.json.
+test('every shipped spec applies cleanly', { timeout: 300000 }, async (t) => {
   // Gate ABOVE the CI check, not below it: a CI environment that sets
   // DATABASE_URL (so pool.unreachable would be false) but not
   // TEST_DATABASE_URL must still fail loudly here, not skip. The old order
