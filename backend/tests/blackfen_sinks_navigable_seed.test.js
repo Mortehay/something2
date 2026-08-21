@@ -105,7 +105,7 @@ assert.ok(LIVE_DOORWAYS.length > 0,
 // hardcoded 64 here kept this offline leg green while asserting a fact about
 // a size the world no longer has (SOMET-301 final review, finding 1).
 
-function checkSeed(seed, width, height) {
+function checkSeed(seed, width, height, tileTypes = TILE_TYPES) {
   const w = {
     key: 'mire', name: 'Blackfen Sinks',
     width, height, chunk_size: 32, biome_cell: 16,
@@ -118,16 +118,48 @@ function checkSeed(seed, width, height) {
   };
   const biomes = w.biomes.map((n) => BIOMES_BY_NAME.get(n)).filter(Boolean);
   assert.equal(biomes.length, w.biomes.length, 'Blackfen Sinks references a biome not in STARTER_BIOMES');
-  const cfg = buildWorldGenConfig({ row, tileTypes: TILE_TYPES, doorways: LIVE_DOORWAYS, villages: [], biomes });
+  const cfg = buildWorldGenConfig({ row, tileTypes, doorways: LIVE_DOORWAYS, villages: [], biomes });
   const required = requiredTilesFor(w, { worlds: [w], links: [] }, row, LIVE_DOORWAYS);
   return assertNavigable(cfg, required);
 }
 
-test('the OLD seed (2005) is sealed with the real doorways, at the world\'s real size -- pins the regression', () => {
-  const problems = checkSeed(OLD_SEED, MIRE_SPEC.width, MIRE_SPEC.height);
+// THE OLD PIN IS GONE, AND THIS IS WHAT REPLACED IT (SOMET-349 review).
+//
+// It used to assert that seed 2005 still REPRODUCES the sealed-pocket defect,
+// on the reasoning that a regression fix is only proven by a failing case. It
+// went red on main, and the cause is real rather than environmental: bisected
+// to 8cec970, where the road network started drawing a continuous highway
+// between doorways. A corridor from doorway to doorway is exactly what a
+// sealed pocket is the absence of, so the defect cannot reproduce -- and
+// terrain changes after it (4ba093d takes the road tile out of the terrain
+// palette) opened the world further. A scan of 400 seeds at the world's real
+// size finds NO sealed one, with or without the road network.
+//
+// Reproducing that with a hand-picked seed would mean hunting for one the
+// generator no longer produces, so the guard is re-aimed at the property that
+// replaced it: worlds come out navigable, and the checker that says so can
+// still fail. The second half is not optional -- an "everything is navigable"
+// assertion over a blind checker is the most comfortable kind of vacuous test.
+test('the navigability checker can still fail -- otherwise the checks below are vacuous', () => {
+  const blocked = Object.fromEntries(
+    Object.keys(TILE_TYPES).map((n, i) => [n, { walkable: i === 0 }]),
+  );
+  const problems = checkSeed(OLD_SEED, MIRE_SPEC.width, MIRE_SPEC.height, blocked);
   assert.notEqual(problems.length, 0,
-    'expected seed 2005 to reproduce the sealed-pocket defect against the live doorways; ' +
-    'if this now passes, the defect this migration fixes may already be gone and the migration should be reconsidered');
+    'a world whose tiles are almost all unwalkable must be reported as sealed; '
+    + 'if this passes, assertNavigable has stopped detecting anything');
+});
+
+test('the road network leaves no sealed world across a sample of seeds', () => {
+  // The invariant the highway network buys. Sampled rather than exhaustive so
+  // the file stays offline and quick; 12 seeds is enough that a generator
+  // change reintroducing pockets fails here rather than in someone's game.
+  const sealed = [];
+  for (let seed = OLD_SEED; seed < OLD_SEED + 12; seed++) {
+    if (checkSeed(seed, MIRE_SPEC.width, MIRE_SPEC.height).length > 0) sealed.push(seed);
+  }
+  assert.deepEqual(sealed, [],
+    `seeds producing a sealed world at ${MIRE_SPEC.width}x${MIRE_SPEC.height}: ${sealed.join(', ')}`);
 });
 
 // NOT a check of NEW_SEED (2011): that seed was hand-picked for the OLD

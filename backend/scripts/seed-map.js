@@ -733,8 +733,24 @@ async function applyMapSpec(pool, spec) {
       const villages = await fetchVillages(client, worldId);
       const cfg = buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes });
 
+      // JUDGE THE TERRAIN, NOT THE ROADS (SOMET-349 review).
+      //
+      // generateConnectingRoads draws a continuous walkable highway between
+      // every pair of doorways, which makes ANY world navigable -- including
+      // one whose biome admits nothing but cave_wall. That is precisely the
+      // authoring mistake this check exists to refuse, and after SOMET-349 it
+      // stopped refusing it: seed_map_db's sealed-world fixture seeds cleanly,
+      // and a 400-seed scan of Blackfen Sinks finds nothing sealed either.
+      //
+      // So the check runs against terrain alone. Roads remain a convenience
+      // laid ON a world you could already cross, never the thing that makes it
+      // crossable. Verified backward-compatible before this landed: all 86
+      // worlds across both checked-in specs pass with the road network
+      // stripped, so no authored map depended on roads for connectivity.
+      const terrainOnly = { ...cfg, generatedRoads: [] };
+
       const required = requiredTilesFor(w, spec, row, doorways);
-      const problems = assertNavigable(cfg, required);
+      const problems = assertNavigable(terrainOnly, required);
       if (problems.length) {
         throw new Error(
           `world "${w.key}" is not navigable:\n  - ${problems.join('\n  - ')}`);

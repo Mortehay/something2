@@ -637,7 +637,14 @@ test('seeding refuses a world sealed by its own terrain', async (t) => {
     spec.worlds.forEach((w) => { w.biomes = ['zzSealed']; });
     await assert.rejects(
       () => withEntryPreserved(pool, () => applyMapSpec(pool, spec)),
-      /unreachable|outside the map/,
+      // Three wordings, one refusal. assertNavigable reports a doorway it
+      // cannot reach ("unreachable"), a required tile off the map ("outside
+      // the map"), or a world whose reachable share falls under
+      // MIN_REACHABLE_FRACTION ("effectively sealed") -- which is the one this
+      // all-cave_wall fixture produces now that the doorway carve leaves a
+      // small pocket behind. Matching only the first two let SOMET-349 turn
+      // this test red for the right reason and look like the wrong one.
+      /unreachable|outside the map|effectively sealed/,
     );
   } finally {
     await cleanup(pool);
