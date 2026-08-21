@@ -278,7 +278,17 @@ function worldConfig(world = {}) {
     authoredRoads: normalizeAuthoredRoads(world.authoredRoads),
     generatedRoads: [],
   };
-  cfg.generatedRoads = generateConnectingRoads(cfg, pathTile);
+  // SOMET-366. `noGeneratedRoads` is an EXPLICIT opt-out because a caller
+  // cannot strip the road network by spreading `{ ...world, generatedRoads: [] }`:
+  // this function never reads world.generatedRoads, it recomputes the network
+  // from scratch every call. That is exactly how seeding's "judge the terrain,
+  // not the roads" check (SOMET-349) came to be inert -- it passed that spread,
+  // worldConfig threw the empty array away, and the guard went on measuring a
+  // world with a walkable highway between every doorway. A flag the function
+  // actually reads cannot fail that way.
+  if (world.noGeneratedRoads !== true) {
+    cfg.generatedRoads = generateConnectingRoads(cfg, pathTile);
+  }
   return cfg;
 }
 
