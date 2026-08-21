@@ -123,6 +123,20 @@ async function main() {
   const characterId = charRow.rows[0].id;
   log('created test user', userId, 'character', characterId);
 
+  // Granted BEFORE the socket opens, deliberately. `use` resolves the item id
+  // against the inventory the authority loaded AT JOIN, so a row inserted
+  // afterwards is genuinely not owned as far as this session is concerned --
+  // which is what "you do not own that item" meant when this script granted it
+  // mid-session. The check is right; the grant was in the wrong place.
+  // player_items is keyed by CHARACTER since SOMET-257/260, not by account.
+  const lm = await pool.query("SELECT id FROM item_types WHERE name = 'loot_map'");
+  const piRow = await pool.query(
+    'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1,$2,1) RETURNING id',
+    [characterId, lm.rows[0].id],
+  );
+  const lootMapItemId = piRow.rows[0].id;
+  log('granted a loot_map before join, item', lootMapItemId);
+
   // SOMET-266 authorizes every join server-side. A brand-new character has no
   // history, so the only worlds it may enter are the entry world and any world
   // flagged for fast travel -- rule 5 in joinPolicy. Flagging this throwaway
@@ -169,14 +183,8 @@ async function main() {
     ws.send(JSON.stringify({ type: 'openchest' }));
     log('received:', JSON.stringify(await nextMsg(ws)));
 
-    log('--- granting a loot_map item directly, then sending: use ---');
-    const lm = await pool.query("SELECT id FROM item_types WHERE name = 'loot_map'");
-    // player_items is keyed by CHARACTER since SOMET-257/260, not by account.
-    const piRow = await pool.query(
-      'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1,$2,1) RETURNING id',
-      [characterId, lm.rows[0].id],
-    );
-    ws.send(JSON.stringify({ type: 'use', itemId: piRow.rows[0].id }));
+    log('--- sending: use, on the loot_map granted before join ---');
+    ws.send(JSON.stringify({ type: 'use', itemId: lootMapItemId }));
     log('received:', JSON.stringify(await nextMsg(ws)));
   } finally {
     ws.close();
