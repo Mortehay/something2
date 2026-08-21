@@ -279,13 +279,20 @@ test('a spec that fails validation writes nothing', async (t) => {
 // Other tests in this file clean up with cleanup() in a finally, so they are
 // safe against any database. This one must be gated: it only runs if
 // TEST_DATABASE_URL is explicitly set.
-// SLOW ON PURPOSE, AND THE REASON npm test ALLOWS 180s. This applies EVERY
+// SLOW ON PURPOSE, AND THE REASON npm test ALLOWS 420s. This applies EVERY
 // checked-in spec for real -- 86 worlds across vale-region and p5-descent,
-// terrain, creatures and all -- and takes ~80s on a developer machine. Under
-// the old 60s cap it timed out, and a timeout CANCELS THE WHOLE FILE, so the
-// other fifteen tests here silently stopped running in every full-suite run.
-// The per-test timeout below documents the need; the cap that actually
-// governs a file is the runner's, in package.json.
+// terrain, creatures and all. Under the old 60s cap it timed out, and a
+// timeout CANCELS THE WHOLE FILE, so the other fifteen tests here silently
+// stopped running in every full-suite run.
+//
+// THE CAP HAS HEADROOM BECAUSE THE RUNTIME SWINGS. Measured 95s on an idle
+// machine and 181s on a busy one -- same database, same 87 worlds, nothing
+// accumulated between them. A cap sized to the idle number turns a loaded CI
+// agent into a cancelled file, which is the failure mode this comment exists
+// to prevent, so it is sized to the slow observation with room to spare.
+//
+// The per-test timeout below documents the need; the cap that actually governs
+// a file is the runner's, in package.json.
 test('every shipped spec applies cleanly', { timeout: 300000 }, async (t) => {
   // Gate ABOVE the CI check, not below it: a CI environment that sets
   // DATABASE_URL (so pool.unreachable would be false) but not
