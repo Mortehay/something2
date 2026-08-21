@@ -111,15 +111,21 @@ test('re-seeding the catalog does not duplicate a row', { skip: !TEST_DB && 'TES
   // The same item legitimately appears in several bands, so the guard is on
   // (band, item) rather than on the item -- a guard on the item alone would
   // quietly drop the later bands' rows on a fresh database.
+  //
+  // Asserted as "no duplicate rows exist", NOT as "the second pass inserted
+  // zero". The count version passed alone and failed in a full suite run:
+  // chest_loot cascades off item_types, so a peer test deleting an item type
+  // between the two passes legitimately removes rows and the second pass
+  // legitimately restores them. That is the seeder working, and a test that
+  // calls it a failure is measuring the neighbours rather than the code.
   const pool = new Pool({ connectionString: TEST_DB });
   try {
     for (const d of CHEST_LOOT) await seedOneChestLoot(pool, d);
-    const before = (await pool.query('SELECT count(*)::int AS n FROM chest_loot')).rows[0].n;
-    let inserted = 0;
-    for (const d of CHEST_LOOT) inserted += await seedOneChestLoot(pool, d);
-    const after = (await pool.query('SELECT count(*)::int AS n FROM chest_loot')).rows[0].n;
-    assert.strictEqual(inserted, 0, 'a steady-state re-seed must insert nothing');
-    assert.strictEqual(after, before);
+    for (const d of CHEST_LOOT) await seedOneChestLoot(pool, d);
+    const dupes = await pool.query(
+      `SELECT level_min, level_max, item_type_id, count(*)::int AS n
+         FROM chest_loot GROUP BY 1, 2, 3 HAVING count(*) > 1`);
+    assert.deepStrictEqual(dupes.rows, [], 'a (band, item) pair appears more than once');
     // Multi-band items are the reason that guard is composite; if the catalog
     // ever loses them this test still passes, so assert they are there.
     const multi = CHEST_LOOT.filter((r) => r.item === 'bolt').length;
