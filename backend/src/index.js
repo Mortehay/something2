@@ -259,6 +259,7 @@ const aiProviders = require('./services/aiProviders');
 const providerDiscovery = require('./services/providerDiscovery');
 const remoteImageProvider = require('./services/remoteImageProvider');
 const { resolveGenerationTarget, loadTypeOverride } = require('./services/generationTarget');
+const { pinProvided, providerPinError, providerPinValues } = require('./services/providerPin.js');
 
 // SOMET-328: the three /api/*-jobs/:jobId routes serve jobs from two different
 // engines now. The id prefix says which, so a caller polling a job never has
@@ -709,6 +710,13 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
   }
   const fieldErr = entityTypeFieldError(req.body);
   if (fieldErr) return res.status(400).json({ error: fieldErr });
+  // SOMET-342: the per-type generation pin. Validated here rather than left to
+  // the DB CHECK, which would surface a bad mode as a 500 with a constraint
+  // name in it, and cannot see the two states it does not constrain.
+  const pinErr = providerPinError(req.body);
+  if (pinErr) return res.status(400).json({ error: pinErr });
+  const pinSent = pinProvided(req.body);
+  const pin = pinSent ? providerPinValues(req.body) : { mode: null, id: null };
 
   // SOMET-254 follow-up: `behavior_id ?? null` alone can't tell "field
   // omitted from the request" (must COALESCE against the existing row,
@@ -841,8 +849,13 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         prompt = COALESCE($23, prompt), place_order = $24,
         behavior_id = CASE WHEN $27::boolean THEN $25 ELSE entity_types.behavior_id END,
         attack_element = COALESCE($26, entity_types.attack_element),
+        -- SOMET-342: both pin columns move together or not at all. A PUT that
+        -- omits them leaves the stored pin alone; one that sends them writes
+        -- the normalized pair, so mode and id can never disagree.
+        ai_provider_mode = CASE WHEN $28::boolean THEN $29 ELSE entity_types.ai_provider_mode END,
+        ai_provider_id = CASE WHEN $28::boolean THEN $30 ELSE entity_types.ai_provider_id END,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $28 RETURNING *`,
+      WHERE id = $31 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
@@ -863,7 +876,12 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         // last element of this array -- entityTypes.test.js asserts
         // `params[params.length - 1]` is the id on this exact route.
         prompt ?? null, Number(place_order) || 0, behavior_id ?? null, attack_element ?? null,
-        behaviorIdProvided, id
+        // The three pin params sit BEFORE id for the same reason
+        // behaviorIdProvided does: entityTypes.test.js asserts that the id is
+        // `params[params.length - 1]` on this exact route, and that assertion
+        // is worth keeping -- an id landing anywhere else in this array is a
+        // WHERE clause pointed at the wrong value.
+        behaviorIdProvided, pinSent, pin.mode, pin.id, id
       ]
     );
     if (result.rows.length === 0) {
@@ -1553,6 +1571,13 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
+    // SOMET-342: same pin, same rules, same validator as the entity route --
+    // two copies of a three-state rule is how these two editors come to
+    // disagree about what "default" means.
+    const pinErr = providerPinError(req.body);
+    if (pinErr) return res.status(400).json({ error: pinErr });
+    const pinSent = pinProvided(req.body);
+    const pin = pinSent ? providerPinValues(req.body) : { mode: null, id: null };
 
     // tile_types.name is referenced by entity_types.spawn_tiles and
     // biomes.terrain_tiles, both jsonb name arrays with no FK (F-027 /
@@ -1583,8 +1608,16 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
     // just-approved texture back to ''. COALESCE(NULLIF(...)) preserves the stored
     // image when the form sends '' or nothing; an explicit key still updates it.
     const result = await pool.query(
-      "UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4, image = COALESCE(NULLIF($5, ''), image), valid_neighbors = $6, prompt = $7, wall_height = $8, place_order = $9, updated_at = CURRENT_TIMESTAMP WHERE id = $10 RETURNING *",
-      [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '', Number(wall_height) || 0, Number(place_order) || 0, id]
+      `UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4,
+        image = COALESCE(NULLIF($5, ''), image), valid_neighbors = $6, prompt = $7,
+        wall_height = $8, place_order = $9,
+        ai_provider_mode = CASE WHEN $10::boolean THEN $11 ELSE tile_types.ai_provider_mode END,
+        ai_provider_id = CASE WHEN $10::boolean THEN $12 ELSE tile_types.ai_provider_id END,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = $13 RETURNING *`,
+      [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '',
+        Number(wall_height) || 0, Number(place_order) || 0,
+        pinSent, pin.mode, pin.id, id]
     );
     
     if (result.rows.length === 0) {

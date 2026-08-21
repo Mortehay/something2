@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { useGenerateTileJob, useTileJob, useApproveTileImage, useApproveTileSprite, assetUrl } from './useTileSprites.js';
 import { useSpriteCapability } from './useSprites.js';
 import { useBiomes } from './useBiomes.js';
+import { ProviderPinField, pinToSelectValue, selectValueToPin } from './ProviderPinField.jsx';
 import { validateTileType } from './catalogValidation.js';
 import { entityTypesReferencingTile } from './catalogReferences.js';
 import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
@@ -429,7 +430,10 @@ function TileTypesAdmin() {
         place_order: editingTile.place_order || 0,
         image: editingTile.image || '',
         prompt: editingTile.prompt || '',
-        valid_neighbors: editingTile.valid_neighbors || []
+        valid_neighbors: editingTile.valid_neighbors || [],
+        // SOMET-342: the stored pin as one <select> value; split back into
+        // ai_provider_mode/ai_provider_id on submit.
+        provider_pin: pinToSelectValue(editingTile.ai_provider_mode, editingTile.ai_provider_id)
       });
     } else {
       setFormData({
@@ -441,7 +445,8 @@ function TileTypesAdmin() {
         place_order: 0,
         image: '',
         prompt: '',
-        valid_neighbors: []
+        valid_neighbors: [],
+        provider_pin: ''
       });
     }
   }, [editingTile, isModalOpen]);
@@ -467,12 +472,17 @@ function TileTypesAdmin() {
       return;
     }
 
+    // SOMET-342: provider_pin is form-only; the API takes the two columns.
+    // Sent on every save including '', which is how a type gets unpinned.
+    const { provider_pin, ...rest } = formData;
+    const body = { ...rest, ...selectValueToPin(provider_pin) };
+
     if (editingTile) {
-      updateMutation.mutate({ id: editingTile.id, ...formData }, {
+      updateMutation.mutate({ id: editingTile.id, ...body }, {
         onSuccess: () => setIsModalOpen(false)
       });
     } else {
-      createMutation.mutate(formData, {
+      createMutation.mutate(body, {
         onSuccess: () => setIsModalOpen(false)
       });
     }
@@ -655,6 +665,13 @@ function TileTypesAdmin() {
                   />
                 </FormGroup>
               </div>
+
+              <FormGroup>
+                <ProviderPinField
+                  value={formData.provider_pin ?? ''}
+                  onChange={(v) => setFormData({ ...formData, provider_pin: v })}
+                />
+              </FormGroup>
 
               <FormGroup>
                 <label>Valid Neighbors</label>
