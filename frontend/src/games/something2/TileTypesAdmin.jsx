@@ -9,7 +9,7 @@ import { useBiomes } from './useBiomes.js';
 import { validateTileType } from './catalogValidation.js';
 import { entityTypesReferencingTile } from './catalogReferences.js';
 import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
-import { ProviderChoice, ProviderAnimationNote } from './ProviderChoice.jsx';
+import { ProviderChoice, ProviderAnimationNote, TypeProviderPinChoice } from './ProviderChoice.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -429,7 +429,9 @@ function TileTypesAdmin() {
         place_order: editingTile.place_order || 0,
         image: editingTile.image || '',
         prompt: editingTile.prompt || '',
-        valid_neighbors: editingTile.valid_neighbors || []
+        valid_neighbors: editingTile.valid_neighbors || [],
+        ai_provider_mode: editingTile.ai_provider_mode || 'default',
+        ai_provider_id: editingTile.ai_provider_id ?? null
       });
     } else {
       setFormData({
@@ -441,7 +443,9 @@ function TileTypesAdmin() {
         place_order: 0,
         image: '',
         prompt: '',
-        valid_neighbors: []
+        valid_neighbors: [],
+        ai_provider_mode: 'default',
+        ai_provider_id: null
       });
     }
   }, [editingTile, isModalOpen]);
@@ -606,6 +610,12 @@ function TileTypesAdmin() {
                   placeholder="e.g. molten glowing lava, cracked crust"
                 />
               </FormGroup>
+
+              <TypeProviderPinChoice
+                mode={formData.ai_provider_mode}
+                providerId={formData.ai_provider_id}
+                onChange={updates => setFormData(prev => ({ ...prev, ...updates }))}
+              />
 
               {editingTile && <TileSpritePanel tile={editingTile} />}
 

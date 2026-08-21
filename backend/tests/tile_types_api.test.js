@@ -35,12 +35,12 @@ test('POST /api/tile-types sends prompt as INSERT param $7 and echoes it', async
   assert.equal(res.body.prompt, 'molten glowing lava');
 });
 
-test('PUT /api/tile-types/:id sends prompt as UPDATE param $7, wall_height/place_order as $8/$9, and id as $10', async () => {
+test('PUT /api/tile-types/:id sends prompt as UPDATE param $7, wall_height/place_order as $8/$9, and id as $13', async () => {
   const pool = mockPool([
     // name is unchanged ('grass' -> 'grass'), so the rename guard's reference
     // checks are skipped entirely.
     [/SELECT name FROM tile_types WHERE id/i, () => ({ rows: [{ name: 'grass' }] })],
-    [/UPDATE tile_types/i, (p) => ({ rows: [{ id: Number(p[9]), name: p[0], prompt: p[6] }] })],
+    [/UPDATE tile_types/i, (p) => ({ rows: [{ id: Number(p[p.length - 1]), name: p[0], prompt: p[6] }] })],
   ]);
   __setPool(pool);
   const res = await request(app).put('/api/tile-types/9').set(...AUTH).send({
@@ -53,8 +53,37 @@ test('PUT /api/tile-types/:id sends prompt as UPDATE param $7, wall_height/place
   assert.equal(call.params[6], 'edited meadow grass', 'prompt must be UPDATE $7');
   assert.equal(call.params[7], 40, 'wall_height must be UPDATE $8');
   assert.equal(call.params[8], 1, 'place_order must be UPDATE $9');
-  assert.equal(String(call.params[9]), '9', 'id must be UPDATE $10');
+  assert.equal(String(call.params[call.params.length - 1]), '9', 'id must be last param');
   assert.equal(res.body.prompt, 'edited meadow grass');
+});
+
+test('POST /api/tile-types rejects invalid ai_provider_mode', async () => {
+  const res = await request(app).post('/api/tile-types').set(...AUTH).send({
+    name: 'plain', color: '#111', ai_provider_mode: 'invalid_mode',
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /ai_provider_mode/);
+});
+
+test('PUT /api/tile-types/:id rejects non-integer ai_provider_id', async () => {
+  const res = await request(app).put('/api/tile-types/1').set(...AUTH).send({
+    name: 'plain', color: '#111', ai_provider_mode: 'provider', ai_provider_id: 'not-a-number',
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /ai_provider_id/);
+});
+
+test('POST /api/tile-types persists ai_provider_mode and ai_provider_id', async () => {
+  let captured = null;
+  __setPool(mockPool([
+    [/INSERT INTO tile_types/i, (p) => { captured = p; return { rows: [{ id: 1, ai_provider_mode: p[9], ai_provider_id: p[10] }] }; }],
+  ]));
+  const res = await request(app).post('/api/tile-types').set(...AUTH).send({
+    name: 'plain', color: '#111', ai_provider_mode: 'provider', ai_provider_id: 3,
+  });
+  assert.equal(res.status, 201);
+  assert.equal(captured[9], 'provider');
+  assert.equal(captured[10], 3);
 });
 
 test('POST defaults prompt to empty string when omitted', async () => {

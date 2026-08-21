@@ -100,3 +100,25 @@ test('still rejects a non-integer behavior_id alongside valid display fields', (
   const err = entityTypeFieldError({ ...VALID, display_height: 64, behavior_id: 'two' });
   assert.match(err, /behavior_id/);
 });
+
+test('rejects an invalid ai_provider_mode', () => {
+  const err = entityTypeFieldError({ ...VALID, ai_provider_mode: 'gemini' });
+  assert.match(err, /ai_provider_mode/);
+});
+
+test('accepts valid ai_provider_mode values (default, local, provider, null)', () => {
+  assert.equal(entityTypeFieldError({ ...VALID, ai_provider_mode: 'default' }), null);
+  assert.equal(entityTypeFieldError({ ...VALID, ai_provider_mode: 'local' }), null);
+  assert.equal(entityTypeFieldError({ ...VALID, ai_provider_mode: 'provider' }), null);
+  assert.equal(entityTypeFieldError({ ...VALID, ai_provider_mode: null }), null);
+});
+
+test('rejects a non-integer ai_provider_id', () => {
+  const err = entityTypeFieldError({ ...VALID, ai_provider_id: 'two' });
+  assert.match(err, /ai_provider_id/);
+});
+
+test('accepts integer and null ai_provider_id', () => {
+  assert.equal(entityTypeFieldError({ ...VALID, ai_provider_id: 1 }), null);
+  assert.equal(entityTypeFieldError({ ...VALID, ai_provider_id: null }), null);
+});

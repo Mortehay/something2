@@ -151,20 +151,40 @@ test('POST /api/entity-types passes an explicit prompt', async () => {
   assert.equal(paramFor(sql, params, 'prompt'), 'a tall oak tree');
 });
 
-test('PUT /api/entity-types/:id leaves prompt untouched when the body omits it', async () => {
+test('POST /api/entity-types defaults ai_provider_mode to default and ai_provider_id to null', async () => {
+  let params = null, sql = null;
+  __setPool({ query: withAuth(async (s, p) => { sql = s; params = p; return { rows: [{ id: 1 }] }; }) });
+
+  const res = await request(app).post('/api/entity-types').set(...AUTH).send({ name: 'Bush', color: '#0f0' });
+  assert.equal(res.status, 201);
+  assert.equal(paramFor(sql, params, 'ai_provider_mode'), 'default');
+  assert.equal(paramFor(sql, params, 'ai_provider_id'), null);
+});
+
+test('POST /api/entity-types passes explicit ai_provider_mode and ai_provider_id', async () => {
+  let params = null, sql = null;
+  __setPool({ query: withAuth(async (s, p) => { sql = s; params = p; return { rows: [{ id: 1 }] }; }) });
+
+  const res = await request(app).post('/api/entity-types').set(...AUTH).send({
+    name: 'Bush', color: '#0f0', ai_provider_mode: 'provider', ai_provider_id: 2,
+  });
+  assert.equal(res.status, 201);
+  assert.equal(paramFor(sql, params, 'ai_provider_mode'), 'provider');
+  assert.equal(paramFor(sql, params, 'ai_provider_id'), 2);
+});
+
+test('PUT /api/entity-types/:id updates ai_provider_mode and ai_provider_id', async () => {
   let params = null, sql = null;
   __setPool(putMock('Tree', async (s, p) => { sql = s; params = p; return { rows: [{ id: 5 }] }; }));
 
-  // The UPDATE uses COALESCE($n, prompt), so a null parameter must mean "keep
-  // the stored prompt" — otherwise saving the form from an older client would
-  // wipe a prompt the admin had already written.
   const res = await request(app)
     .put('/api/entity-types/5')
     .set(...AUTH)
-    .send({ name: 'Tree', color: '#0f0' });
+    .send({ name: 'Tree', color: '#0f0', ai_provider_mode: 'local', ai_provider_id: null });
 
   assert.equal(res.status, 200);
-  assert.equal(paramFor(sql, params, 'prompt'), null);
+  assert.equal(paramFor(sql, params, 'ai_provider_mode'), 'local');
+  assert.equal(params[params.length - 1], '5'); // id is always last
 });
 
 // SOMET-228 (was F-005/SOMET-185): worlds.allowed_creature_types,

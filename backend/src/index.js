@@ -591,12 +591,30 @@ function entityTypeFieldError(body) {
       && (typeof body.behavior_id !== 'number' || !Number.isInteger(body.behavior_id))) {
     return 'behavior_id must be an integer';
   }
+  if (body.ai_provider_mode != null && !['default', 'local', 'provider'].includes(body.ai_provider_mode)) {
+    return 'ai_provider_mode must be one of default, local, provider';
+  }
+  if (body.ai_provider_id != null
+      && (typeof body.ai_provider_id !== 'number' || !Number.isInteger(body.ai_provider_id))) {
+    return 'ai_provider_id must be an integer';
+  }
   for (const field of ['display_width', 'display_height']) {
     const v = body[field];
     if (v == null) continue; // omitted or explicitly null -> renderer default
     if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > MAX_ENTITY_DISPLAY_PX) {
       return `${field} must be an integer between 1 and ${MAX_ENTITY_DISPLAY_PX}`;
     }
+  }
+  return null;
+}
+
+function tileTypeFieldError(body) {
+  if (body.ai_provider_mode != null && !['default', 'local', 'provider'].includes(body.ai_provider_mode)) {
+    return 'ai_provider_mode must be one of default, local, provider';
+  }
+  if (body.ai_provider_id != null
+      && (typeof body.ai_provider_id !== 'number' || !Number.isInteger(body.ai_provider_id))) {
+    return 'ai_provider_id must be an integer';
   }
   return null;
 }
@@ -619,7 +637,7 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
       display_width, display_height, render_mode, is_creature, prompt, place_order,
-      behavior_id, attack_element
+      behavior_id, attack_element, ai_provider_mode, ai_provider_id
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
     if (catalogNameTooLong(name)) {
@@ -634,14 +652,14 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode, is_creature, prompt, place_order,
-        behavior_id, attack_element
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26) RETURNING *`,
+        behavior_id, attack_element, ai_provider_mode, ai_provider_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0,
-        behavior_id ?? null, attack_element || 'physical'
+        behavior_id ?? null, attack_element || 'physical', ai_provider_mode || 'default', ai_provider_id ?? null
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -658,7 +676,7 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     strength, dexterity, constitution, intelligence, wisdom, charisma,
     hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
     display_width, display_height, render_mode, is_creature, prompt, place_order,
-    behavior_id, attack_element
+    behavior_id, attack_element, ai_provider_mode, ai_provider_id
   } = req.body;
   if (catalogNameTooLong(name)) {
     return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
@@ -788,6 +806,7 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       }
     }
 
+    const aiProviderIdProvided = 'ai_provider_id' in req.body;
     const result = await client.query(
       `UPDATE entity_types SET
         name = $1, color = $2, walkable = $3, spawn_tiles = $4, chance = $5,
@@ -797,29 +816,17 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         prompt = COALESCE($23, prompt), place_order = $24,
         behavior_id = CASE WHEN $27::boolean THEN $25 ELSE entity_types.behavior_id END,
         attack_element = COALESCE($26, entity_types.attack_element),
+        ai_provider_mode = COALESCE($28, entity_types.ai_provider_mode),
+        ai_provider_id = CASE WHEN $30::boolean THEN $29 ELSE entity_types.ai_provider_id END,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $28 RETURNING *`,
+      WHERE id = $31 RETURNING *`,
       [
         name, color, walkable, JSON.stringify(spawn_tiles), chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false,
-        // behavior_id/attack_element: SOMET-254 -- a PUT that omits either
-        // field must leave the existing value alone (COALESCE against the
-        // current row above), same posture prompt already has on this same
-        // line and for the same reason: `?? null`/`?? null` here, not
-        // `?? null`/`|| 'physical'`, so an omitted field passes NULL and
-        // never reaches the fallback-to-default branch that used to silently
-        // demote the creature's profile or reset its element on a partial
-        // write. behavior_id additionally needs $27 (behaviorIdProvided) in
-        // the CASE above so an *explicit* null (the "clear to none" action)
-        // isn't swallowed by the same COALESCE that protects an omitted one
-        // -- see the comment above entityTypeFieldError's call site.
-        // behaviorIdProvided sits before id, not after, so `id` stays the
-        // last element of this array -- entityTypes.test.js asserts
-        // `params[params.length - 1]` is the id on this exact route.
         prompt ?? null, Number(place_order) || 0, behavior_id ?? null, attack_element ?? null,
-        behaviorIdProvided, id
+        behaviorIdProvided, ai_provider_mode ?? null, ai_provider_id ?? null, aiProviderIdProvided, id
       ]
     );
     if (result.rows.length === 0) {
@@ -1481,7 +1488,7 @@ app.get('/api/tile-types', async (req, res) => {
 
 app.post('/api/tile-types', adminGuard, async (req, res) => {
   try {
-    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order } = req.body;
+    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order, ai_provider_mode, ai_provider_id } = req.body;
 
     // Simple validation
     if (!name || !color) {
@@ -1490,10 +1497,12 @@ app.post('/api/tile-types', adminGuard, async (req, res) => {
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
+    const fieldErr = tileTypeFieldError(req.body);
+    if (fieldErr) return res.status(400).json({ error: fieldErr });
 
     const result = await pool.query(
-      'INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
-      [name, color, walkable ?? true, speed ?? 1.0, image || '', JSON.stringify(valid_neighbors || []), prompt || '', Number(wall_height) || 0, Number(place_order) || 0]
+      'INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order, ai_provider_mode, ai_provider_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
+      [name, color, walkable ?? true, speed ?? 1.0, image || '', JSON.stringify(valid_neighbors || []), prompt || '', Number(wall_height) || 0, Number(place_order) || 0, ai_provider_mode || 'default', ai_provider_id ?? null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1505,10 +1514,12 @@ app.post('/api/tile-types', adminGuard, async (req, res) => {
 app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order } = req.body;
+    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order, ai_provider_mode, ai_provider_id } = req.body;
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
+    const fieldErr = tileTypeFieldError(req.body);
+    if (fieldErr) return res.status(400).json({ error: fieldErr });
 
     // tile_types.name is referenced by entity_types.spawn_tiles and
     // biomes.terrain_tiles, both jsonb name arrays with no FK (F-027 /
@@ -1538,9 +1549,20 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
     // before the user approves a texture), so writing it verbatim would clobber a
     // just-approved texture back to ''. COALESCE(NULLIF(...)) preserves the stored
     // image when the form sends '' or nothing; an explicit key still updates it.
+    const aiProviderIdProvided = 'ai_provider_id' in req.body;
     const result = await pool.query(
-      "UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4, image = COALESCE(NULLIF($5, ''), image), valid_neighbors = $6, prompt = $7, wall_height = $8, place_order = $9, updated_at = CURRENT_TIMESTAMP WHERE id = $10 RETURNING *",
-      [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '', Number(wall_height) || 0, Number(place_order) || 0, id]
+      `UPDATE tile_types SET
+        name = $1, color = $2, walkable = $3, speed = $4, image = COALESCE(NULLIF($5, ''), image),
+        valid_neighbors = $6, prompt = $7, wall_height = $8, place_order = $9,
+        ai_provider_mode = COALESCE($10, tile_types.ai_provider_mode),
+        ai_provider_id = CASE WHEN $11::boolean THEN $12 ELSE tile_types.ai_provider_id END,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $13 RETURNING *`,
+      [
+        name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '',
+        Number(wall_height) || 0, Number(place_order) || 0,
+        ai_provider_mode ?? null, aiProviderIdProvided, ai_provider_id ?? null, id
+      ]
     );
     
     if (result.rows.length === 0) {
@@ -3469,5 +3491,5 @@ if (require.main === module) {
 module.exports = {
   app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, boundedCacheSet,
   apiRateLimiter, behaviorFieldError, abilityFieldError, behaviorAbilitiesError,
-  entityTypeFieldError,
+  entityTypeFieldError, tileTypeFieldError,
 };

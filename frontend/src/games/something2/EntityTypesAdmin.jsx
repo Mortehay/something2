@@ -13,7 +13,7 @@ import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
 import { orphanedSpawnTiles } from './catalogReferences.js';
 import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
-import { ProviderChoice, ProviderAnimationNote, useWillUseLocal } from './ProviderChoice.jsx';
+import { ProviderChoice, ProviderAnimationNote, useWillUseLocal, TypeProviderPinChoice } from './ProviderChoice.jsx';
 import { HiOutlineMagnifyingGlass } from "react-icons/hi2";
 import {
   buildBiomeIndex, biomesWithEntities, filterByBiomeTab, filterBySearch, paginate,
@@ -976,7 +976,9 @@ function EntityTypesAdmin() {
         // null means "no behavior profile assigned" and must survive as null,
         // not fall back to a truthy default -- same rule as damage_override.
         behavior_id: editingEntity.behavior_id ?? null,
-        attack_element: editingEntity.attack_element || 'physical'
+        attack_element: editingEntity.attack_element || 'physical',
+        ai_provider_mode: editingEntity.ai_provider_mode || 'default',
+        ai_provider_id: editingEntity.ai_provider_id ?? null
       });
     } else {
       setFormData({
@@ -1005,7 +1007,9 @@ function EntityTypesAdmin() {
         display_height: 64,
         place_order: 0,
         behavior_id: null,
-        attack_element: 'physical'
+        attack_element: 'physical',
+        ai_provider_mode: 'default',
+        ai_provider_id: null
       });
     }
   }, [editingEntity, isModalOpen]);
@@ -1328,6 +1332,12 @@ function EntityTypesAdmin() {
                   placeholder={`e.g. a tall broadleaf tree with a thick trunk`}
                 />
               </FormGroup>
+
+              <TypeProviderPinChoice
+                mode={formData.ai_provider_mode}
+                providerId={formData.ai_provider_id}
+                onChange={updates => setFormData(prev => ({ ...prev, ...updates }))}
+              />
 
               {/* Generation needs a saved row to attach the result to, so it
                   only appears once the entity exists. */}
