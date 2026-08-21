@@ -62,6 +62,21 @@ function walk(dir, out = []) {
 const MODIFIED = /\bkey === '([a-z])'\s*&&\s*e\.shiftKey/g;
 const GAME_PLAIN = /\bkey === '([a-z])'(?!\s*&&\s*e\.shiftKey)/g;
 const PANEL_PLAIN = /e\.key\.toLowerCase\(\)\s*!==\s*'([a-z])'\s*\|\|\s*e\.shiftKey/g;
+// THE THIRD SHAPE (bfd67ab, SOMET-349). The panels moved to a layout-independent
+// test -- `(e.key || '').toLowerCase() === 'm' || e.code === 'KeyM'` -- so a
+// Cyrillic or AZERTY layout, where e.key is not the letter printed on the key,
+// still opens the panel. PANEL_PLAIN stopped matching any of them, which is
+// exactly the "no hotkey shape was recognised" failure this file promises to
+// raise rather than pass quietly. Taught, not relaxed: the claim is still the
+// letter, read here off e.code.
+const PANEL_CODE = /e\.code === 'Key([A-Z])'/g;
+// THE FOURTH SHAPE, same commit. Game.js folded its two reads into one helper,
+// `const isKey = (target) => key === target || codeKey === target`, so its
+// claims now read `isKey('g')` instead of `key === 'g'`. Without this the file
+// with the MOST hotkeys in the codebase claimed none of them, and the
+// collision check below was comparing the panels against an empty set.
+const GAME_ISKEY_MODIFIED = /isKey\('([a-z])'\)\s*&&\s*e\.shiftKey/g;
+const GAME_ISKEY_PLAIN = /isKey\('([a-z])'\)(?!\s*&&\s*e\.shiftKey)/g;
 
 // Letters a second handler may legitimately claim, each with the reason it is
 // exclusive of the first. Empty today; adding to it is a review decision.
@@ -71,8 +86,11 @@ function claimsIn(source) {
   const plain = new Set();
   const modified = new Set();
   for (const m of source.matchAll(MODIFIED)) modified.add(m[1]);
+  for (const m of source.matchAll(GAME_ISKEY_MODIFIED)) modified.add(m[1]);
   for (const m of source.matchAll(GAME_PLAIN)) plain.add(m[1]);
+  for (const m of source.matchAll(GAME_ISKEY_PLAIN)) plain.add(m[1]);
   for (const m of source.matchAll(PANEL_PLAIN)) plain.add(m[1]);
+  for (const m of source.matchAll(PANEL_CODE)) plain.add(m[1].toLowerCase());
   // A letter matched by both regexes is modified-only: GAME_PLAIN's lookahead
   // handles `&& e.shiftKey` written immediately after, but not a longer form.
   for (const k of modified) plain.delete(k);
