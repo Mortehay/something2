@@ -18,6 +18,7 @@ const { BESTIARY_P4_CREATURES, BESTIARY_P4_DROPS } = require('../seeds/data/best
 const { CREATURE_BEHAVIORS } = require('../seeds/data/creatureBehaviors.js');
 const { CREATURE_ABILITIES } = require('../seeds/data/creatureAbilities.js');
 const { BEHAVIOR_DROPS } = require('../seeds/data/behaviorDrops.js');
+const { CHEST_LOOT } = require('../seeds/data/chestLoot.js');
 
 // COALESCE, not plain EXCLUDED, for the four columns below.
 //
@@ -234,6 +235,24 @@ async function seedOneAbility(client, a) {
 // cross-join in the same guarded style as 1714440086000_behavior_drops.js: a
 // missing behaviour or item type inserts nothing rather than failing the
 // seed.
+// One chest_loot row (SOMET-438). Keyed on (band, item) rather than on the
+// item alone: the same item legitimately appears in several bands, and the
+// NOT EXISTS has to let that through while still refusing a duplicate of the
+// row it is inserting.
+async function seedOneChestLoot(db, d) {
+  const r = await db.query(
+    `INSERT INTO chest_loot (level_min, level_max, item_type_id, chance, min_qty, max_qty)
+     SELECT $1, $2, it.id, $4, $5, $6
+       FROM item_types it
+      WHERE it.name = $3
+        AND NOT EXISTS (
+              SELECT 1 FROM chest_loot cl
+               WHERE cl.level_min = $1 AND cl.level_max = $2 AND cl.item_type_id = it.id)`,
+    [d.level_min, d.level_max, d.item, d.chance, d.min_qty, d.max_qty],
+  );
+  return r.rowCount;
+}
+
 async function seedOneBehaviorDrop(db, d) {
   const r = await db.query(
     `INSERT INTO behavior_drops (behavior_id, item_type_id, chance, min_qty, max_qty)
@@ -450,6 +469,11 @@ async function seedCatalogs(pool) {
     behaviorDrops += await seedOneBehaviorDrop(pool, d);
   }
 
+  let chestLoot = 0;
+  for (const d of CHEST_LOOT) {
+    chestLoot += await seedOneChestLoot(pool, d);
+  }
+
   // Playable classes, then their starting gear. Ordered that way because the
   // loadout rows resolve their class by name and insert nothing if it is
   // absent -- seeding gear first would silently no-op on a wiped volume.
@@ -464,12 +488,13 @@ async function seedCatalogs(pool) {
 
   return {
     tiles, biomes, decorations, creatures, drops, abilities, behaviorDrops,
-    classes, classLoadouts,
+    chestLoot, classes, classLoadouts,
   };
 }
 
 module.exports = {
   seedCatalogs, seedOneTile, seedOneBiome, seedOneBehavior, seedOneAbility, seedOneBehaviorDrop,
+  seedOneChestLoot,
   seedOneCreatureType, seedOneCreatureDrop, seedOnePlayableClass, seedOneClassLoadout,
 };
 
@@ -488,6 +513,7 @@ if (require.main === module) {
       console.log(`restored ${n.creatures} missing creature types, ${n.drops} missing drop rules, `
         + `${n.behaviorDrops} missing rung drop rules`);
       console.log(`restored ${n.classes} missing playable classes, ${n.classLoadouts} missing class loadout rows`);
+      console.log(`restored ${n.chestLoot} missing chest loot rows`);
     })
     .catch((e) => { console.error(e.message); process.exitCode = 1; })
     .finally(() => pool.end());
