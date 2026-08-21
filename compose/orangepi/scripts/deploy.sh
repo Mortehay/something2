@@ -149,6 +149,24 @@ MSG
   exit 1
 fi
 
+# --- Catalogs, right after the schema they live in ------------------------
+#
+# seed-catalogs RESTORES WHAT IS MISSING and writes nothing otherwise, so it
+# is safe on every deploy and reports 0 in the steady state. It belongs here
+# because a migration creates a catalog TABLE while the rows come from
+# checked-in seed data -- exactly the split that let chest_loot exist empty in
+# production for months (SOMET-438): every layer worked, the content was
+# simply never carried over. Without this, each new catalog needs somebody to
+# remember a manual step on the board.
+#
+# Soft: a catalog that fails to seed leaves the game playable (the previous
+# rows are still there), so it must not abort a deploy that has already
+# migrated. It is reported as a failed step either way.
+seed_catalogs() {
+  pi_ssh "$IMAGE_ENV $COMPOSE run --rm --no-deps backend node scripts/seed-catalogs.js"
+}
+run_step_soft "restore any missing catalog rows" seed_catalogs
+
 # --- Restart ---------------------------------------------------------------
 
 # Stop then start, never an overlap: the authority holds an in-memory tick
