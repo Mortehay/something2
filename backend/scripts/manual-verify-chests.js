@@ -109,7 +109,26 @@ async function main() {
     [`zz-manual-verify-chest-${Date.now()}`],
   );
   const userId = userRow.rows[0].id;
-  log('created test user', userId);
+  // SOMET-257/260 re-keyed player state onto CHARACTERS, and `join` now
+  // refuses a frame whose character_id is not one of the token holder's --
+  // deliberately, with no "first character" fallback. This script predates
+  // that and stopped at "unknown character"; a character of its own is all it
+  // needs to reach the chest again (SOMET-438).
+  const charRow = await pool.query(
+    `INSERT INTO characters (user_id, slot, name, entity_type_id)
+     SELECT $1, 1, $2, (SELECT id FROM entity_types WHERE is_playable = true ORDER BY id LIMIT 1)
+     RETURNING id`,
+    [userId, `zz-manual-verify-chest-char-${Date.now()}`],
+  );
+  const characterId = charRow.rows[0].id;
+  log('created test user', userId, 'character', characterId);
+
+  // SOMET-266 authorizes every join server-side. A brand-new character has no
+  // history, so the only worlds it may enter are the entry world and any world
+  // flagged for fast travel -- rule 5 in joinPolicy. Flagging this throwaway
+  // world is the legal path in (and leaves is_entry alone, which the live
+  // region needs); without it the exercise stops at "you cannot travel there".
+  await pool.query('UPDATE worlds SET allows_fast_travel = true WHERE id = $1', [worldId]);
 
   const server = http.createServer();
   const handle = attachAuthority(server, pool, {
@@ -126,7 +145,7 @@ async function main() {
 
   try {
     log('--- sending: join ---');
-    ws.send(JSON.stringify({ type: 'join', world_id: worldId }));
+    ws.send(JSON.stringify({ type: 'join', world_id: worldId, character_id: characterId }));
     const joined = await nextMsg(ws);
     log('received:', JSON.stringify(joined));
 
@@ -152,9 +171,10 @@ async function main() {
 
     log('--- granting a loot_map item directly, then sending: use ---');
     const lm = await pool.query("SELECT id FROM item_types WHERE name = 'loot_map'");
+    // player_items is keyed by CHARACTER since SOMET-257/260, not by account.
     const piRow = await pool.query(
-      'INSERT INTO player_items (user_id, item_type_id, quantity) VALUES ($1,$2,1) RETURNING id',
-      [userId, lm.rows[0].id],
+      'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1,$2,1) RETURNING id',
+      [characterId, lm.rows[0].id],
     );
     ws.send(JSON.stringify({ type: 'use', itemId: piRow.rows[0].id }));
     log('received:', JSON.stringify(await nextMsg(ws)));
