@@ -20,7 +20,7 @@ function renderFrame(ctx, dpr, box, cellW, { gameRef, overviewRef, tileColors, l
     ? gameRef.current.getMinimapSnapshot() : null;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, box, box);
-  if (!snap) return false;
+  if (!snap || !snap.player || !Number.isFinite(snap.player.x) || !Number.isFinite(snap.player.y)) return false;
   const pCol = snap.player.x / MAP_TILE_SIZE;
   const pRow = snap.player.y / MAP_TILE_SIZE;
   let overview = overviewRef.current;
@@ -33,8 +33,11 @@ function renderFrame(ctx, dpr, box, cellW, { gameRef, overviewRef, tileColors, l
     // cost the expand modal half its frame rate now runs once per refetch.
     terrainLayer: layerCache.get(overview, tileColors, cellW, dpr),
     player: { col: pCol, row: pRow, dir: snap.player.dir },
-    creatures: snap.creatures.map((c) => ({ col: c.x / MAP_TILE_SIZE, row: c.y / MAP_TILE_SIZE, color: c.color })),
-    doorways: overview ? overview.doorways : [],
+    creatures: snap.creatures || [],
+    doorways: (overview ? overview.doorways : (snap.doorways || [])).map((d) => {
+      const live = (snap.doorways || []).find((sd) => sd.edge === d.edge);
+      return live ? { ...d, toName: live.toName || d.toName } : d;
+    }),
     villages: overview ? overview.villages : [],
     // SOMET-298. From the join-frame snapshot, not the overview: a waypoint's
     // lit/unlit state is per character, and the overview is a shared cached

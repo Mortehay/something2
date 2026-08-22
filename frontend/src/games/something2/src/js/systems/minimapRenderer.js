@@ -69,6 +69,14 @@ export function drawMinimap(ctx, {
     ctx.fillStyle = '#c084fc';
     diamond(ctx, x, y, 4, 4);
     ctx.fill();
+    if (d.toName && view.cellW > 14 && ctx.fillText) {
+      ctx.save();
+      ctx.font = '9px sans-serif';
+      ctx.fillStyle = '#f3e8ff';
+      ctx.textAlign = 'center';
+      ctx.fillText(d.toName, x, y - 8);
+      ctx.restore();
+    }
   }
 
   // 3.5) Landmarks (pulsing diamond): waypoints and portals.
@@ -101,6 +109,14 @@ export function drawMinimap(ctx, {
         diamond(ctx, x, y, 5, 5);
         ctx.fill();
       }
+      if (l.kind === 'portal' && l.name && view.cellW > 14 && ctx.fillText) {
+        ctx.save();
+        ctx.font = '9px sans-serif';
+        ctx.fillStyle = '#fbcfe8';
+        ctx.textAlign = 'center';
+        ctx.fillText(l.name, x, y - 8);
+        ctx.restore();
+      }
     }
     ctx.restore();
   }
@@ -115,22 +131,24 @@ export function drawMinimap(ctx, {
   }
 
   // 5) Player: centered dot + facing triangle
-  const { x, y } = worldTileToView(player.col, player.row, view);
-  const dir = player.dir || { dx: 0, dy: 1 };
-  const ang = isoAngle(dir.dx, dir.dy);
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(ang);
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.moveTo(7, 0);
-  ctx.lineTo(-4, -4);
-  ctx.lineTo(-4, 4);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-  ctx.fillStyle = '#4a9eff';
-  ctx.beginPath();
-  ctx.arc(x, y, 3, 0, Math.PI * 2);
-  ctx.fill();
+  if (player && Number.isFinite(player.col) && Number.isFinite(player.row)) {
+    const { x, y } = worldTileToView(player.col, player.row, view);
+    const dir = player.dir || { dx: 0, dy: 1 };
+    const ang = isoAngle(dir.dx, dir.dy);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(ang);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(7, 0);
+    ctx.lineTo(-4, -4);
+    ctx.lineTo(-4, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = '#4a9eff';
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }

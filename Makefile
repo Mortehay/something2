@@ -238,7 +238,7 @@ seed-map:
 	$(COMPOSE) exec -T backend sh -c "SPEC=$(SPEC) node scripts/seed-map.js"
 
 clear-maps:
-	$(COMPOSE) exec -T backend node scripts/clear-maps.js
+	$(COMPOSE) exec backend node scripts/clear-maps.js
 
 # Specs plus what is currently seeded in `worlds` (needs the stack up).
 list-maps:
