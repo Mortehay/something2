@@ -61,7 +61,10 @@ const GENERATED_SPEC = 'p5-descent.map.json';
 // declared on one shared grid instead of living only as hand-drawn map_links
 // rows. 20 is their sum -- a pin that still fails loudly if a world is dropped.
 const EXPECTED_WORLD_COUNTS = {
-  'vale-region.map.json': 20,
+  // 34 = the 20 merged-region worlds plus SOMET-446's three dungeons: the 7
+  // catacombs rooms (upgraded in place, not added), 8 in The Sunscar Hollows
+  // and 6 in The Rimevault.
+  'vale-region.map.json': 34,
 };
 
 const specFiles = () => fs.readdirSync(MAPS_DIR)
