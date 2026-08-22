@@ -1233,7 +1233,7 @@ export class RenderSystem {
     ctx.fillStyle = "#e5e7eb";
     ctx.font = "14px monospace";
     ctx.textBaseline = "top";
-    ctx.fillText("Inventory — [i] to close", px + 16, py + 14);
+    ctx.fillText("Inventory — [i] / [Esc] to close", px + 16, py + 14);
 
     // Auto-loot toggle — top-right of the header row. Renders the server-
     // owned flag mirrored locally; clicking it only requests the flip.

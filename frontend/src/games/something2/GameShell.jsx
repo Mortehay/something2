@@ -230,10 +230,21 @@ export default function GameShell() {
     // requestFullscreen must run within the user gesture that started the game.
     // The auto-join path has no gesture, so the promise rejects harmlessly and
     // the game just plays windowed until the player clicks the toggle button.
-    if (el?.requestFullscreen) el.requestFullscreen().catch(() => {});
+    if (el?.requestFullscreen) {
+      el.requestFullscreen()
+        .then(() => {
+          if (navigator.keyboard?.lock) {
+            navigator.keyboard.lock(['Escape']).catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }
   };
 
   const exitGameFullscreen = () => {
+    if (navigator.keyboard?.unlock) {
+      navigator.keyboard.unlock();
+    }
     if (document.fullscreenElement && document.exitFullscreen) {
       document.exitFullscreen().catch(() => {});
     }
@@ -247,9 +258,26 @@ export default function GameShell() {
   // Keep the toggle button in sync with the real fullscreen state — including the
   // user pressing Esc, which exits fullscreen without going through our button.
   useEffect(() => {
-    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    const onChange = () => {
+      const inFs = !!document.fullscreenElement;
+      setIsFullscreen(inFs);
+      if (inFs) {
+        if (navigator.keyboard?.lock) {
+          navigator.keyboard.lock(['Escape']).catch(() => {});
+        }
+      } else {
+        if (navigator.keyboard?.unlock) {
+          navigator.keyboard.unlock();
+        }
+      }
+    };
     document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      if (navigator.keyboard?.unlock) {
+        navigator.keyboard.unlock();
+      }
+    };
   }, []);
 
   // Enter fullscreen when the game starts. Driven off the isPlaying transition so

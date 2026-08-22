@@ -1017,15 +1017,15 @@ export class Game {
             }
 
             if (isKey('escape')) {
+                if (typeof e.preventDefault === 'function') e.preventDefault();
                 console.log("Escape pressed, current state:", this.state);
                 if (this.shopOpen) {
                     this.shopOpen = false;
                 } else if (this.bankOpen) {
                     this.bankOpen = false;
-                } else if(this.state === 'playing'){
-                    this.pause();
-                } else if(this.state === 'paused'){
-                    this.resume();
+                } else if (this.inventoryOpen) {
+                    this.inventoryOpen = false;
+                    this.inventorySelectedItemId = null;
                 }
             }
 
