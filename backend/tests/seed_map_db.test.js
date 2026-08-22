@@ -337,9 +337,25 @@ test('every shipped spec applies cleanly', { timeout: 300000 }, async (t) => {
     // idempotency check then correctly reports 0 new villages, not 1. Check
     // what's there BEFORE applying so the assertion below is correct whether
     // this is the very first run against this database or the fiftieth.
-    const villageAlreadyExisted = (await pool.query(
-      `SELECT 1 FROM villages v JOIN worlds w ON w.id = v.world_id WHERE w.name = 'Vale Crossing'`,
-    )).rowCount > 0;
+    //
+    // Derived from the spec, not hardcoded, and counted over EVERY village it
+    // declares rather than probing for 'Vale Crossing' alone. Both shortcuts
+    // were correct only while vale-region declared exactly one village; it now
+    // declares five, so on a fresh database the assertion below read 5 and
+    // expected 1, and on an already-seeded one it read 0, expected 0, and
+    // never noticed the drift (SOMET-454).
+    const valeSpec = JSON.parse(
+      fs.readFileSync(path.join(dir, 'vale-region.map.json'), 'utf8'));
+    const declaredVillages = valeSpec.worlds.flatMap((w) =>
+      (w.village ? [w.village] : w.villages || []).map((v) => [w.name, v.key]));
+    assert.ok(declaredVillages.length > 0,
+      'vale-region declares no villages -- this assertion has lost its subject');
+    const villagesAlreadyPresent = (await pool.query(
+      `SELECT count(*)::int AS n FROM villages v JOIN worlds w ON w.id = v.world_id
+        WHERE (w.name, v.spec_key) IN (${
+          declaredVillages.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ')})`,
+      declaredVillages.flat(),
+    )).rows[0].n;
 
     const results = {};
     for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.map.json'))) {
@@ -362,8 +378,38 @@ test('every shipped spec applies cleanly', { timeout: 300000 }, async (t) => {
       // a given database reports a non-zero -- which is exactly the case this
       // assertion used to get wrong, silently, because it had only ever run
       // against a database whose pens already existed (SOMET-355).
-      assert.deepEqual(second, { ...first, villages: 0, penCreatures: 0 },
-        `${s.name}: re-applying should not re-create villages, pens, worlds, or links`);
+      //
+      // SOMET-454 generalised that from a list of exceptions into the actual
+      // rule: A RE-APPLY CREATES NOTHING AND DESTROYS NOTHING. Every field
+      // below is either call-site-guarded against a second write --
+      // portalGuards on blocks_portal_id (seed-map.js), vaultChests on one
+      // authored chest per world, villages and penCreatures as described above
+      // -- or is a convergence count with nothing left to converge once the
+      // first apply has run: linksRemoved, villagesMoved, waypointsRemoved.
+      // All of them are therefore non-zero ONLY on the first-ever apply
+      // against a given database.
+      //
+      // Pinning them is a STRENGTHENING, not a carve-out. `...first` would
+      // wave through a re-apply that doubled a guard pack, re-stocked a chest,
+      // moved a village that had not moved, or pruned a doorway the spec still
+      // declares -- each of which is a real regression, and the last two
+      // cascade into player binds and character_waypoints. Naming them makes
+      // the second apply prove it was a no-op.
+      //
+      // Only penCreatures and villages were pinned before, so the assertion
+      // was red on every fresh database and green only on one it had already
+      // seeded. That is backwards: the fresh run is the one that actually
+      // exercises the first apply, and it was the only run being rejected.
+      assert.deepEqual(second, {
+        ...first,
+        villages: 0,
+        villagesMoved: 0,
+        penCreatures: 0,
+        portalGuards: 0,
+        vaultChests: 0,
+        linksRemoved: [],
+        waypointsRemoved: 0,
+      }, `${s.name}: re-applying must create nothing and remove nothing`);
     }
 
     // hub-vale is the one shipped spec with a village AND all four compass
@@ -375,8 +421,9 @@ test('every shipped spec applies cleanly', { timeout: 300000 }, async (t) => {
     // compass edges, so this paragraph checks exactly what it always did.
     const valeRegion = results['vale-region'];
     assert.ok(valeRegion, 'expected backend/seeds/maps/vale-region.map.json to exist and be named "vale-region"');
-    assert.equal(valeRegion.first.villages, villageAlreadyExisted ? 0 : 1,
-      'vale-region declares one village; applyMapSpec must report creating it exactly once, ever');
+    assert.equal(valeRegion.first.villages, declaredVillages.length - villagesAlreadyPresent,
+      `vale-region declares ${declaredVillages.length} villages; applyMapSpec must report `
+      + 'creating each of them exactly once, ever');
 
     const villageRow = await pool.query(
       `SELECT v.id FROM villages v JOIN worlds w ON w.id = v.world_id WHERE w.name = 'Vale Crossing'`);
