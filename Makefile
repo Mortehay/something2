@@ -6,7 +6,8 @@
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
         pi-migrate-up pi-migrate-status pi-seed-catalogs pi-seed-map pi-reseed-map \
         pi-shell pi-db-shell pi-tunnel-url pi-hook-secret pi-hook-register \
-        pi-publish-url pi-reconcile pi-watch-install pi-watch-uninstall pi-reset
+        pi-publish-url pi-reconcile pi-watch-install pi-watch-uninstall pi-reset \
+        pi-backup pi-backup-status pi-restore pi-backup-install pi-backup-uninstall
 
 COMPOSE_FILE = compose/develop/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
@@ -378,6 +379,34 @@ pi-reseed-map:
 	@bash compose/orangepi/scripts/remote.sh backend sh -c "SPEC=$(SPEC) node scripts/seed-map.js"
 
 # --- Interactive -----------------------------------------------------------
+
+# --- Backups (SOMET-400) ---------------------------------------------------
+#
+# A PULL, from here. The board never needs a credential for this machine, and
+# nothing has to reach inward: it is the same ssh path every other pi-* target
+# already uses, in the direction it already goes.
+
+pi-backup:
+	@bash compose/orangepi/scripts/backup.sh
+
+# Age and content, not merely presence -- a directory full of three-week-old
+# dumps looks healthy in a listing and is exactly the failure this guards.
+# Non-zero when stale, so it can gate a deploy or drive an alert.
+pi-backup-status:
+	@bash compose/orangepi/scripts/backup.sh --status
+
+pi-backup-install:
+	@bash compose/orangepi/scripts/backup-install.sh install
+
+pi-backup-uninstall:
+	@bash compose/orangepi/scripts/backup-install.sh uninstall
+
+# DUMP= a file from the backup directory. Restoring onto the board replaces
+# live data and refuses without the explicit flag; --into-local DB= is the safe
+# way to inspect a dump first, and is the path the tests exercise.
+pi-restore:
+	$(if $(DUMP),,$(error DUMP=<file.sql.gz> is required. See: make pi-backup-status))
+	@bash compose/orangepi/scripts/restore.sh "$(DUMP)" $(if $(DB),--into-local "$(DB)",--into-board --yes-really-replace-live-data)
 
 pi-shell:
 	@bash compose/orangepi/scripts/remote.sh shell
