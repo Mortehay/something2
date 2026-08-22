@@ -9,7 +9,7 @@ Claude and Codex follow the same rules. This file is the source of truth for bot
 - [backend/](backend/) — Node + Express REST API, Postgres persistence, MinIO. See [backend/package.json](backend/package.json).
 - [frontend/](frontend/) — Vite + React 19 client. See [frontend/package.json](frontend/package.json).
 - [engine/](engine/) — Go game engine: JWT-authed WebSocket hub, 60Hz tick loop, grid-based collisions, Postgres + Redis stores, 5-min batch flush. See [engine/README.md](engine/README.md).
-- [compose/](compose/) — Docker Compose dev stack: frontend, backend, game-engine, db, redis, minio.
+- [compose/](compose/) — Docker build files. [compose/develop/](compose/develop/) is the dev stack: frontend, backend, game-engine, db, redis, minio.
 
 ## Project context
 
@@ -72,5 +72,8 @@ commit_convention: branch `feat/<slug>` or `fix/<slug>`; commit subject
 project had no review state, so work jumped from In Progress straight to Done
 with nowhere to record evidence.
 
-**Modules are disabled in this workspace** — group work with a parent work item
-plus labels, not modules.
+**Modules are enabled** as of 2026-08-17, verified with `project get_features`
+(`modules: true`), and the hosting backlog uses them. This file previously said
+they were disabled, which was true when it was written; check the feature flags
+rather than trusting either statement. Grouping by a parent work item plus
+labels still works and is what the older epics use.

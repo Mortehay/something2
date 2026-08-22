@@ -2,8 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
+import { API_URL } from "../../config.js";
 
 // F-023: a caller that destructures only {worlds, isLoadingWorlds} and skips
 // worldsError sees a failed fetch render as an indistinguishable-from-empty

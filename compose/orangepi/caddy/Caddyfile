@@ -1,0 +1,48 @@
+# Plain HTTP on :80. TLS is deliberately absent: cloudflared dials OUT to
+# Cloudflare, which presents the certificate at the edge, so this origin needs
+# no certificate, no ACME client and no renewal timer.
+:80 {
+	encode gzip
+
+	# Route /api/* to the backend. Both backend surfaces are one upstream.
+	# The authority websocket is attached to the same http server as the REST API
+	# (backend/src/authority/server.js), and the client derives its url from
+	# the API url (Game.js:379), so they can never be on different hosts.
+	#
+	# Caddy v2 forwards websocket upgrades natively -- no Upgrade/Connection
+	# header dance is needed here, unlike nginx.
+	#
+	# Using handle blocks is crucial: handle directives match paths before
+	# applying their directives, so reverse_proxy sees the original path.
+	# Without handle, an unscoped try_files would rewrite every path to
+	# /index.html BEFORE reverse_proxy evaluates, making all paths unreachable.
+	handle /api/* {
+		reverse_proxy backend:3101
+	}
+
+	# Route /authority* to the same backend upstream.
+	handle /authority* {
+		reverse_proxy backend:3101
+	}
+
+	# The CI deploy hook (SOMET-401). Reaching it from GitHub is the whole
+	# point -- GitHub cannot open a connection to the board, so the tunnel
+	# carries it inbound. Everything about its safety is in the listener:
+	# an HMAC over the body, a timestamp window, and a process that runs one
+	# fixed script with nothing from the request in it.
+	#
+	# The route exists whether or not the hook container is running (it is
+	# behind a compose profile); with it stopped, Caddy answers 502, which is
+	# the correct answer to "deploy me" when no deploy endpoint is enabled.
+	handle /deploy-hook* {
+		reverse_proxy deploy-hook:9000
+	}
+
+	# Everything else is the built bundle. try_files sends unknown paths to
+	# index.html so a hard reload on a react-router route still works.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

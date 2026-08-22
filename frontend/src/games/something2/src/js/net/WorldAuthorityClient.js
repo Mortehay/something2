@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onChests, onChestOpened, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -28,6 +28,14 @@ export class WorldAuthorityClient {
     this.onBank = onBank || (() => {});
     this.onDeposited = onDeposited || (() => {});
     this.onWithdrawn = onWithdrawn || (() => {});
+    // SOMET-372 -- WORLD chests, not the account chest above. `onChests` is
+    // the AOI snapshot the server pushes on the creature/item cadence (whole
+    // list, never a delta, same rule as onCreatures/onItems); `onChestOpened`
+    // is the one-off reply to sendOpenChest and carries the loot rows. XP does
+    // NOT come through it -- the server sends a separate `progression` frame
+    // for chest XP precisely so it lands on the handler kills already use.
+    this.onChests = onChests || (() => {});
+    this.onChestOpened = onChestOpened || (() => {});
     this.onNoAmmo = onNoAmmo || (() => {});
     this.onAmmo = onAmmo || (() => {});
     this.onTransition = onTransition || (() => {});
@@ -127,6 +135,8 @@ export class WorldAuthorityClient {
       case 'transition': this.onTransition(msg); break;
       case 'waypointActivated': this.onWaypointActivated(msg); break;
       case 'progression': this.onProgression(msg); break;
+      case 'chests': this.onChests(msg); break;
+      case 'chestOpened': this.onChestOpened(msg); break;
       case 'error': {
         // Tag so callers can tell a server-issued protocol rejection (e.g.
         // "unequip it first") apart from a raw transport failure below —
@@ -180,6 +190,14 @@ export class WorldAuthorityClient {
   sendOpenBank() { return this._send({ type: 'openbank' }); }
   sendDeposit(itemId) { return this._send({ type: 'deposit', itemId }); }
   sendWithdraw(itemId) { return this._send({ type: 'withdraw', itemId }); }
+
+  // World chests (SOMET-372). No chest id, for the same reason `interact` and
+  // the bank sends carry no target: the server proximity-picks the nearest
+  // chest within its own INTERACT_RADIUS from its own copy of the player's
+  // position, so there is nothing here for a forged frame to point at a chest
+  // the player is nowhere near. A refusal comes back as a normal `error`
+  // frame ("no chest nearby"), which the caller already surfaces as a toast.
+  sendOpenChest() { return this._send({ type: 'openchest' }); }
 
   // Waypoint travel (SOMET-293). A destination id and nothing else: the server
   // works out where the player is standing from its own copy of the position,

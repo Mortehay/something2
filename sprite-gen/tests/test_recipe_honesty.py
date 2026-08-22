@@ -22,7 +22,7 @@ client = TestClient(app)
 @pytest.fixture
 def force_sd_turbo_env(monkeypatch, no_real_work):
     # Mirrors the deployed container's permanent SPRITE_BACKEND=sd-turbo
-    # override (compose/docker-compose.yml).
+    # override (compose/develop/docker-compose.yml).
     monkeypatch.setenv("SPRITE_BACKEND", "sd-turbo")
     return no_real_work
 

@@ -2,8 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { authHeaders, apiFetch } from "./src/js/net/auth.js";
 import { liveWarningFromBody, liveWarningFromHeader, LIVE_WARNING_TOAST_OPTS } from "./liveWarning.js";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
+import { API_URL } from "../../config.js";
 
 // A plain toast.success would tell the admin an edit fully landed when a
 // connected player kept it from reaching the live simulation -- surface

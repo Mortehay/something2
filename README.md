@@ -25,16 +25,26 @@ cd something2
 ```
 
 **1. Create `.env`.** It is gitignored, so a fresh clone has none, and compose
-refuses to start without these four. Any values will do for local dev:
+refuses to start without four of the values. Copy the template:
 
 ```bash
-cat > .env <<'EOF'
-POSTGRES_PASSWORD=devpassword
-JWT_SECRET=dev-jwt-secret-change-me
-MINIO_ROOT_PASSWORD=devminiopassword
-SPRITE_GEN_SHARED_SECRET=dev-sprite-secret
-EOF
+cp .env.example .env
 ```
+
+[.env.example](.env.example) ships working local-dev defaults and explains every
+variable. Only these four are required — the rest are optional and documented
+where they matter:
+
+```
+POSTGRES_PASSWORD  JWT_SECRET  MINIO_ROOT_PASSWORD  SPRITE_GEN_SHARED_SECRET
+```
+
+Change them if you like; any values work locally **except `JWT_SECRET`**: the
+backend refuses to boot with the shipped placeholder (it is deliberately
+rejected, not just too short) — generate a real one with `openssl rand -hex 32`
+and put it in `.env`. The ngrok keys are only needed for [Playing over the
+internet](#playing-over-the-internet), and the stack starts fine with them
+left as-is.
 
 **2. Build and start the containers.**
 
@@ -95,6 +105,372 @@ make migrate-status  # what has actually run
 ```
 
 Full command reference: [.ai/commands.md](.ai/commands.md).
+
+## Playing over the internet
+
+This is the **development** stack's route to the internet, for handing someone a
+URL for an hour. The Orange Pi does not use it — it has its own tunnel, no
+account and no assigned domain; see [Operating the Orange
+Pi](#operating-the-orange-pi).
+
+`make tunnel` publishes the running stack through ngrok so someone else can log
+in and play; `make tunnel-stop` closes it again and puts local dev back.
+
+```bash
+make tunnel       # public URL + dev servers, prints the address
+make tunnel-stop  # close the tunnel, restore the localhost origin
+```
+
+Set both keys in `.env` first (they are in [.env.example](.env.example) with
+placeholder values):
+
+```
+NGROK_AUTHTOKEN=...   # dashboard.ngrok.com → Your Authtoken
+NGROK_DOMAIN=...      # the domain ngrok ASSIGNED you, e.g. foo-bar-baz.ngrok-free.dev
+```
+
+`make tunnel` checks both are set and stops with a readable message if not, so a
+missing key never produces a half-open tunnel.
+
+`NGROK_DOMAIN` must be a domain the account actually owns. On the free plan it is
+auto-assigned and cannot be chosen — inventing a name fails with `ERR_NGROK_313`
+("only paid plans may create endpoints with custom subdomains"). If you do not
+know yours, run the agent with no domain and read it from the log:
+
+```bash
+docker compose --project-directory . --env-file .env -f compose/develop/docker-compose.yml \
+  --profile tunnel run --rm --no-deps ngrok http frontend:5173 --log=stdout | grep url=
+```
+
+**The URL is open to anyone who has it** — registration and the admin panel
+included. There is no gate in front of it, so bring it up only while someone is
+playing and take it down afterwards.
+
+Free-plan limits worth knowing: one online agent per account (a second tunnel on
+the same token fails with `ERR_NGROK_334`), one assigned domain, and a warning
+page on the first visit — each player clicks "Visit Site" once per browser, and
+the cookie it sets carries through to the API and WebSocket traffic.
+
+How it works: the tunnel points at vite, not the backend. Vite proxies `/api` and
+the `/authority` websocket through to the backend, so one tunnel covers all three
+surfaces the game needs, and `make tunnel` repoints the client's `VITE_API_URL` at
+the public origin (the client calls absolute URLs, so a remote browser left on the
+default would call its own machine).
+
+## Three stacks, and which command drives which
+
+There are three, and every command below belongs to exactly one of them:
+
+| Stack | Compose file | Driven by | What it is |
+|---|---|---|---|
+| **development** | `compose/develop/` | `make up`, `make dev`, `make logs`, … | bind-mounted source, vite + nodemon, on this machine |
+| **production, locally** | `compose/orangepi/` | `docker compose … -f compose/orangepi/…` | the production images on this machine, for verifying them |
+| **production, on the board** | `compose/orangepi/` | `make pi-*` | the same stack, running on the Orange Pi, over ssh |
+
+The `pi-` prefix is the whole distinction: a target with it acts on the board
+and never on this machine, and a target without it never touches the board.
+
+## Production stack (local verification)
+
+`compose/orangepi/` is the production-shaped stack: built images, no bind
+mounts, no dev server. It is what the Orange Pi runs, and it can be exercised
+on a workstation without any hardware.
+
+    export ORANGEPI_DATA_DIR=/tmp/s2-orangepi-verify
+    docker compose --project-directory . --env-file .env \
+      -f compose/orangepi/docker-compose.yml up -d --build
+
+Then run the migrations and seed a map with `exec -T backend`, as in the
+development stack, and open http://localhost:8080.
+
+Things to know. The frontend defaults to a **same-origin** API base: the
+bundle calls relative URLs (`/api/...`), and Caddy is what makes that work,
+proxying both `/api/*` and `/authority*` to the backend on the same origin
+the tunnel exposes. That is what lets a `trycloudflare` quick tunnel's
+random hostname change on every restart without ever needing a rebuild —
+nothing about the origin is baked into the bundle. `PUBLIC_URL` is an
+optional escape hatch, not something you normally need to set: pass it only
+for a split-origin deployment, where the frontend and backend are served
+from genuinely different hosts, e.g.
+
+    export PUBLIC_URL=https://api.example.com
+
+Like before, it is baked into the frontend bundle at build time, so changing
+it needs `--build`, not just a restart. If you do set it, the build still
+refuses to bake in a `localhost`/`127.0.0.1` origin by default — a bundle
+built against one would silently point every player at their own machine —
+so local verification of the split-origin path has to opt out with
+`ALLOW_LOCALHOST_API_URL=1`; a real deployment must **not** set it.
+`ORANGEPI_DATA_DIR` is required (the stack refuses to start without it) and
+must point **outside** this repository, because provisioning empties the app
+directory and would otherwise take Postgres's data with it. And `cloudflared`
+sits behind the `tunnel` profile, so starting the stack never opens a public
+URL by accident — see the Orange Pi design doc for the tunnel itself.
+
+After editing `compose/orangepi/caddy/Caddyfile`, check routing with:
+
+```bash
+make verify-routing
+```
+
+This starts real throwaway containers (its own network, its own stub
+backend) against the actual Caddyfile and asserts both plain HTTP routing
+and a genuine websocket upgrade handshake on `/authority` — a broken proxy
+still serves a good-looking page while leaving the game unplayable, so
+this is worth running before every deploy, not just after a routing
+change.
+
+## Operating the Orange Pi
+
+The board is treated as a production server, not a second development
+machine: no bind mounts, no dev server, no `make dev` equivalent. Everything
+is driven from the workstation over ssh, and every target reports the steps
+it performed, their status and their duration, then exits non-zero if any
+step failed.
+
+### First time
+
+Fill in the `Orange Pi REMOTE OPERATION` block in `.env` — it is the whole
+configuration surface, and every script fails with the **name** of the first
+missing variable rather than a bare error:
+
+| Variable | Meaning |
+|---|---|
+| `ORANGEPI_ADDRESS` | host or IP of the board |
+| `ORANGEPI_LOGIN` | a sudo-capable user on it |
+| `ORANGEPI_PASSWORD` | used by **one step of one script** — installing the workstation key — then blank it |
+| `ORANGEPI_SSH_KEY` | where the workstation keypair lives; generated by `pi-keygen` if absent |
+| `ORANGEPI_APP_DIR` | the clone on the board, default `/app`. **Emptied on every provision** |
+| `ORANGEPI_DATA_DIR` | Postgres's volume and the board's own `.env`, default `/srv/something2`. Never touched |
+| `ORANGEPI_BRANCH` | the deployment branch, default `orangepi` |
+| `GIT_REPOSITORY` | the **public** https clone url; the board holds no credential |
+| `DEPLOY_HOOK_SECRET` | only for CI delivery, and generated on the board — leave it empty here |
+
+Nothing on the board is a secret you have to invent: `pi-provision` generates
+`POSTGRES_PASSWORD`, `JWT_SECRET` and `DEPLOY_HOOK_SECRET` **on the board**, and
+never rewrites one that already exists. Then:
+
+```bash
+make pi-keygen      # workstation key -> the board's authorized_keys
+make pi-provision   # bare board -> running, publicly reachable stack
+```
+
+`pi-keygen` never regenerates an existing key — doing that silently would
+lock you out of the board — and it verifies a password-free login actually
+works rather than trusting that `ssh-copy-id` exited 0. After it succeeds,
+`ORANGEPI_PASSWORD` can be blanked; nothing else reads it.
+
+`pi-provision` is idempotent. Everything that can refuse happens before
+anything changes: reachability, the data-safety rule, and whether the board
+can reach the repository anonymously. So a wrong `.env` costs a ten-second
+refusal instead of a half-provisioned board.
+
+### The data-safety rule
+
+Two directories, and the difference between them is load-bearing:
+
+| | |
+|---|---|
+| `ORANGEPI_APP_DIR` (default `/app`) | the clone, and nothing else. **Emptied on every provision.** |
+| `ORANGEPI_DATA_DIR` (default `/srv/something2`) | Postgres's volume and the board's own `.env`. **Never touched by provisioning.** |
+
+`provision.sh` refuses to run when the data directory resolves *inside* the
+app directory, after symlinks are resolved on the board. Without that check a
+second `make pi-provision` would silently destroy every account and world on
+the box — and it would present as database corruption rather than as the
+operator error it is.
+
+The board's `.env` lives in the data directory for the same reason. Its
+secrets are generated **on the board** and never travel from the workstation,
+and an existing value is never rewritten: a regenerated `POSTGRES_PASSWORD`
+against an existing volume is an authentication failure that reads like data
+loss.
+
+### Day to day
+
+```bash
+make pi-status                  # containers, health, disk, memory, tunnel URL
+make pi-deploy                  # reset to the branch tip, migrate, restart
+make pi-logs                    # follow the board's logs
+make pi-up / pi-down / pi-restart
+make pi-migrate-up / pi-migrate-status
+make pi-seed-catalogs
+make pi-seed-map SPEC=vale-region
+make pi-shell / pi-db-shell
+make pi-tunnel-url              # the current public URL
+make pi-hook-secret             # the board's deploy-hook secret
+make pi-hook-register           # point GitHub Actions at the board
+make pi-reset CONFIRM=<address> # wipe and re-seed the board's database
+```
+
+The seeding targets reuse the same `require-spec` guard as their local twins,
+so a misspelled `SPEC` is rejected on the workstation before anything reaches
+the network.
+
+`make pi-reset CONFIRM=<the board's address>` wipes and re-seeds the board's
+database. It requires the address rather than a yes/no answer — a prompt is
+answered by reflex, an address is not — and every command in it runs through
+the remote transport, so it cannot reach the local development database
+whatever you pass it.
+
+### The public URL changes on every tunnel restart
+
+Phase 1 uses a `trycloudflare` quick tunnel: no account, no domain, no
+certificate on the board, and it works behind CGNAT because `cloudflared`
+dials outward. The cost is that **the hostname is random and changes every
+time the tunnel restarts**, and Cloudflare offers it without guarantees.
+
+That is survivable because the bundle addresses the API on the same origin
+that served it, so a new hostname never needs a rebuild.
+
+A deploy does **not** restart the tunnel — only the game containers — so the
+hostname survives deploys and stays put for as long as the board does. It
+changes on a reboot, on `make pi-down`/`pi-up`, and if cloudflared itself
+restarts; after any of those, re-run `make pi-hook-register`, because the
+hook's URL is one of the two Actions secrets. A hostname that survives *that*
+needs a named tunnel on a domain you own, which is phase 2.
+
+### A stable address for players
+
+The hostname problem in one command:
+
+```bash
+make pi-publish-url
+```
+
+That publishes a small redirect page to GitHub Pages —
+`https://<you>.github.io/something2/` — pointing at the board's current
+tunnel hostname. **That is the link to give people.** It survives a board
+reboot; the tunnel hostname does not.
+
+It runs from **this machine**, using the `gh` credentials already here. The
+board deliberately holds no credential of any kind, and putting a GitHub
+token on an internet-reachable box to solve a convenience problem would
+trade a real security property for one.
+
+**Make it heal itself**, so a board reboot does not quietly leave every link
+dead:
+
+```bash
+make pi-watch-install     # a user timer, every 10 minutes; no root, no new secrets
+make pi-reconcile         # or run one pass by hand
+make pi-watch-uninstall   # remove it again
+```
+
+The schedule is a wall-clock `OnCalendar=*:0/10` (`PI_WATCH_INTERVAL` sets the
+minutes, 1&ndash;30). That is deliberate on both counts: a monotonic
+`OnUnitActiveSec=` timer was observed sitting at
+`NextElapseUSecMonotonic=infinity` after a reinstall &mdash; enabled, listed and
+never firing again &mdash; and `Persistent=`, which runs a pass a sleeping
+laptop missed, has no effect at all except on an `OnCalendar` timer. Check it
+with `systemctl --user list-timers`: a `NEXT` of `-` means it is not scheduled.
+
+The reconciler repairs **both** things a hostname change breaks — the
+published page and CI's `DEPLOY_HOOK_URL` — and is silent when there is
+nothing to do, because a timer that talks every ten minutes is a timer nobody
+reads. It does nothing at all when the board is off, never publishes a
+hostname it has not confirmed is serving, and will not create a front door
+you never asked for. `PI_VERBOSE=1 make pi-reconcile` makes it explain itself;
+`journalctl --user -u something2-pi-reconcile.service -f` follows the timer.
+
+Where it installs from matters more than it looks. The timer refuses to run
+from a path a reboot would take away — a `/tmp` worktree, or a key sitting in
+one — because that unit keeps working right up until the machine restarts and
+then fails every ten minutes with nobody watching. Run from such a checkout it
+installs from a small pinned clone under `~/.local/share/something2-pi/`
+instead, symlinking your existing `.env` so there is still one board address
+and one password. That copy does not update itself: re-run
+`make pi-watch-install` after changing the reconciler. Keep the board key
+somewhere permanent (`~/.ssh/`) and point `ORANGEPI_SSH_KEY` at it — it is the
+only way onto the board, and a lost key means reprovisioning.
+
+The remaining gap, stated plainly: **a user timer runs only while you have a
+session, so nothing heals while this machine is off or logged out.**
+`loginctl enable-linger $USER` lifts the logged-out half. A named tunnel on a
+domain you own removes the problem instead of narrowing it.
+
+`make pi-status` shows the same picture on demand:
+
+```
+tunnel     https://estimate-absolutely-beaches-fired.trycloudflare.com (held 1d 22h)
+front door https://mortehay.github.io/something2/ -> current
+ci hook    reachable on the live hostname
+```
+
+`front door` reads **STALE** when the published page points at a hostname the
+board is no longer serving — the failure that otherwise stays silent, because
+every other line still says healthy while every link anyone holds is dead.
+A workstation deploy refreshes the page automatically, and only if it has
+been published once: a deploy never opens a public address for a board whose
+operator did not ask for one.
+
+Two things worth knowing. The page is `noindex, nofollow`, which keeps it out
+of search results — it does **not** keep out anyone who has the link, and
+this staging box has open registration. And there is **no TTL to read**: a
+quick tunnel has no published lifetime and nothing exposes an expiry, so
+`(held 1d 22h)` is the honest answer to "how long do I have" — how long this
+hostname has already lasted, not how long it will.
+
+### Delivery from a push
+
+```
+main  --(promotion PR)-->  orangepi  --(push)-->  Actions  -->  GHCR  -->  hook  -->  the board
+```
+
+Measured on this board: pulling the published arm64 image takes **11
+seconds**, against ten to twenty minutes to build the same commit on four
+A53 cores. That gap is why the pipeline exists.
+
+`orangepi` is the deployment branch and is never developed on directly; the
+promotion PR is the human gate in front of a publicly reachable machine. The
+workflow builds `linux/amd64` and `linux/arm64` natively in parallel, joins
+them into one manifest under the commit sha, and only then calls the board's
+deploy hook — a push webhook would fire before any image existed, and the
+board would fall back to a twenty-minute on-board build.
+
+**A deploy runs the deploy script that was already on the board**, not the one
+belonging to the commit being deployed: bash has read `deploy.sh` and `lib.sh`
+before the first step resets the clone. So a change to the deploy machinery
+itself lands one deploy later than the change that carries it — normal for any
+self-updating deployer, but worth knowing before concluding a fix did not
+work.
+
+Point Actions at the board once with:
+
+```bash
+make pi-hook-register    # sets DEPLOY_HOOK_SECRET and DEPLOY_HOOK_URL via gh
+```
+
+Measured on the board rather than estimated: the listener holds about 45 MB
+resident, against 548 MB used of 3.9 GB with the whole stack running. (Note
+that `docker stats` reports 0B on this Armbian kernel, which has no cgroup
+memory accounting -- read `ps` on the board instead.)
+
+The hook verifies an HMAC over the request body, refuses stale requests,
+refuses a second deploy while one is running, and runs `deploy.sh` with
+nothing from the request in it. It exits rather than starting at all when no
+secret is configured.
+
+### When something goes wrong
+
+Each of these was hit while standing the board up, and each has a
+one-line answer rather than an investigation:
+
+| Symptom | What it means |
+|---|---|
+| the Actions **deploy** step fails with a Cloudflare **530** | the registered hook URL points at a tunnel hostname that no longer exists. `make pi-hook-register` |
+| a deploy takes **twenty minutes** and says *"none published, building on the board"* | no image exists for that commit — the workflow failed, or the commit never reached the `orangepi` branch. Normal and correct; just slow |
+| `make pi-status` prints **BOARD UNREACHABLE** | the board is off, on another address, or the workstation key is not installed. `make pi-keygen` fixes the third |
+| `make pi-status` prints **STACK DOWN** but the board answers | containers are not running: `make pi-up`, then `make pi-logs` |
+| health shows **HTTP 502** | Caddy is up and the backend is not — look at `make pi-logs`, not at the tunnel |
+| trees and stones render as **flat coloured boxes** | expected. No object storage is configured on the board yet, so sprites have nowhere to load from. Character sprites are bundled and do render |
+| players get *"Connection lost — reload to reconnect"* | a deploy restarted the backend. Deploys are stop-then-start, roughly thirty seconds; that is the accepted trade at this player count |
+| the public URL stopped working after a reboot | a quick tunnel takes a new hostname on every start. `make pi-tunnel-url` for the new one, then `make pi-hook-register` |
+
+`make pi-logs` follows the board's own container logs, and every `pi-*` target
+prints the board's stderr for any step that failed rather than only an exit
+code — so the first move for anything not in this table is to re-run the
+target and read what the board actually said.
 
 ## Ubuntu
 
@@ -182,6 +558,22 @@ http://localhost:15173 in your normal Windows browser — WSL2 forwards the port
 | Redis | `127.0.0.1:16379` | |
 | MinIO | http://localhost:19001 | console; API on `19000` |
 | sprite-gen | http://localhost:18100 | local Stable Diffusion, optional |
+| ngrok inspector | http://localhost:14040 | only while `make tunnel` is running; loopback-only |
+
+The public tunnel URL is the one `make tunnel` prints — it is not in this table
+because it belongs to your ngrok account, not to this project.
+
+The **production** stack (`compose/orangepi/`) publishes a different set, and
+deliberately publishes almost nothing:
+
+| Service | Where | Notes |
+|---|---|---|
+| Caddy | `127.0.0.1:8080` | **loopback only.** Serves the built bundle and proxies `/api/*` and `/authority*`. The public path is the tunnel; binding `0.0.0.0` would expose the game to the LAN as a side effect |
+| backend, db, deploy-hook | not published at all | reachable only on the compose network |
+| `/deploy-hook` | through the tunnel | HMAC-verified; `GET /deploy-hook/health` is unauthenticated and read-only |
+
+Postgres is not published either, which is why `make pi-db-shell` goes through
+ssh rather than connecting to a port.
 
 ## Layout
 
@@ -189,7 +581,13 @@ http://localhost:15173 in your normal Windows browser — WSL2 forwards the port
   (`src/authority/`), Postgres persistence, migrations
 - `frontend/` — Vite + React 19 client, canvas game under
   `src/games/something2/`
-- `compose/` — Docker Compose dev stack
+- `compose/develop/` — the development stack: bind-mounted source, vite and
+  nodemon, images that idle on `tail -f /dev/null`
+- `compose/orangepi/` — the production stack: `backend.Dockerfile` and
+  `frontend.Dockerfile` (real images that run the app), `caddy/Caddyfile`
+  (single-origin routing), `docker-compose.yml`, `deploy-hook/` (the CI
+  listener), and `scripts/` — `keygen.sh`, `provision.sh`, `deploy.sh`,
+  `remote.sh`, `reset.sh`, `hook-register.sh` and the `lib.sh` they share
 - `engine/` — **frozen.** An earlier Go implementation of the game server,
   superseded by the Node authority in `backend/src/authority/`. Nothing in the
   running game uses it. `make up` still starts its container because it remains

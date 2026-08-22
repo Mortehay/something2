@@ -13,7 +13,8 @@ import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
 import { orphanedSpawnTiles } from './catalogReferences.js';
 import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
-import { ProviderChoice, ProviderAnimationNote, useWillUseLocal, TypeProviderPinChoice } from './ProviderChoice.jsx';
+import { ProviderChoice, ProviderAnimationNote, useWillUseLocal } from './ProviderChoice.jsx';
+import { ProviderPinField, pinToSelectValue, selectValueToPin } from './ProviderPinField.jsx';
 import { HiOutlineMagnifyingGlass } from "react-icons/hi2";
 import {
   buildBiomeIndex, biomesWithEntities, filterByBiomeTab, filterBySearch, paginate,
@@ -977,8 +978,9 @@ function EntityTypesAdmin() {
         // not fall back to a truthy default -- same rule as damage_override.
         behavior_id: editingEntity.behavior_id ?? null,
         attack_element: editingEntity.attack_element || 'physical',
-        ai_provider_mode: editingEntity.ai_provider_mode || 'default',
-        ai_provider_id: editingEntity.ai_provider_id ?? null
+        // SOMET-342: the stored pin, flattened to the single string a <select>
+        // can hold. Split back into the two columns on submit.
+        provider_pin: pinToSelectValue(editingEntity.ai_provider_mode, editingEntity.ai_provider_id)
       });
     } else {
       setFormData({
@@ -1008,8 +1010,7 @@ function EntityTypesAdmin() {
         place_order: 0,
         behavior_id: null,
         attack_element: 'physical',
-        ai_provider_mode: 'default',
-        ai_provider_id: null
+        provider_pin: ''
       });
     }
   }, [editingEntity, isModalOpen]);
@@ -1047,12 +1048,18 @@ function EntityTypesAdmin() {
       return;
     }
 
+    // SOMET-342: `provider_pin` is a form-only field -- the API takes the two
+    // columns it splits into. Sent on every save, including when it is '',
+    // because that IS how an admin unpins a type.
+    const { provider_pin, ...rest } = formData;
+    const body = { ...rest, ...selectValueToPin(provider_pin) };
+
     if (editingEntity) {
-      updateMutation.mutate({ id: editingEntity.id, ...formData }, {
+      updateMutation.mutate({ id: editingEntity.id, ...body }, {
         onSuccess: () => setIsModalOpen(false)
       });
     } else {
-      createMutation.mutate(formData, {
+      createMutation.mutate(body, {
         onSuccess: () => setIsModalOpen(false)
       });
     }
@@ -1303,6 +1310,13 @@ function EntityTypesAdmin() {
               )}
 
               <FormGroup>
+                <ProviderPinField
+                  value={formData.provider_pin ?? ''}
+                  onChange={(v) => setFormData({ ...formData, provider_pin: v })}
+                />
+              </FormGroup>
+
+              <FormGroup>
                 <label>Image Asset Path/URL</label>
                 <input
                   value={formData.image}
@@ -1332,12 +1346,6 @@ function EntityTypesAdmin() {
                   placeholder={`e.g. a tall broadleaf tree with a thick trunk`}
                 />
               </FormGroup>
-
-              <TypeProviderPinChoice
-                mode={formData.ai_provider_mode}
-                providerId={formData.ai_provider_id}
-                onChange={updates => setFormData(prev => ({ ...prev, ...updates }))}
-              />
 
               {/* Generation needs a saved row to attach the result to, so it
                   only appears once the entity exists. */}

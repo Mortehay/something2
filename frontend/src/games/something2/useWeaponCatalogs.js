@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "./src/js/net/auth.js";
 import { emptyCatalogs } from "./itemTypeForm.js";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:13101";
+import { API_URL } from "../../config.js";
 
 // SOMET-329. The four weapon-option catalogs, read as ONE query because the
 // Items form needs all of them to render — four separate queries would let the

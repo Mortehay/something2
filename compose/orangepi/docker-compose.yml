@@ -1,0 +1,190 @@
+# Production stack for the Orange Pi (SOMET-423). Sibling to
+# compose/develop/docker-compose.yml, which stays the development stack and is
+# not affected by anything here.
+#
+# Run it the same way as the development stack, from the repository root:
+#   docker compose --project-directory . --env-file .env \
+#     -f compose/orangepi/docker-compose.yml up -d
+#
+# A distinct project name so it can never collide with the development stack's
+# containers or volumes on the same machine.
+name: something2-orangepi
+
+services:
+  # Named for what it runs; built from frontend.Dockerfile, which bakes the
+  # vite bundle into a caddy image. This is the only service the tunnel talks
+  # to -- it serves the bundle and proxies both backend surfaces, so one origin
+  # covers the whole game.
+  caddy:
+    # Tagged so a deploy can PULL this image instead of building it. The Pi
+    # builds in ten to twenty minutes on four A53 cores and competes with the
+    # running game for memory while it does; pulling the same SHA from GHCR
+    # takes under a minute. deploy.sh sets these to a ghcr.io/...:<sha> when
+    # an image exists for the commit and builds locally when it does not, so
+    # the default here is what a purely local `docker compose up --build`
+    # produces.
+    image: ${ORANGEPI_FRONTEND_IMAGE:-something2-orangepi-caddy:local}
+    build:
+      context: .
+      dockerfile: compose/orangepi/frontend.Dockerfile
+      args:
+        # PUBLIC_URL is NOT required. Left unset, VITE_API_URL is unset too,
+        # and the bundle defaults to same-origin (relative /api,
+        # /authority) -- exactly what this stack wants, since Caddy proxies
+        # both backend surfaces on the one hostname the tunnel exposes. That
+        # also means a tunnel restart (new random trycloudflare hostname)
+        # never invalidates the bundle: nothing about the origin is baked in.
+        #
+        # Set PUBLIC_URL only for the split-origin deployment, where the
+        # frontend and backend are served from different hosts. Baked into
+        # the bundle at build time, so changing it REQUIRES a rebuild, not
+        # just a restart.
+        VITE_API_URL: ${PUBLIC_URL:-}
+        # Local-verification-only opt-out for frontend.Dockerfile's localhost
+        # guard. Defaulted empty on purpose: a real deployment that never
+        # sets it keeps the guard active.
+        ALLOW_LOCALHOST_API_URL: ${ALLOW_LOCALHOST_API_URL:-}
+    ports:
+      # Loopback only. The public path is the tunnel; publishing on 0.0.0.0
+      # would expose the game to the LAN as a side effect.
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    image: ${ORANGEPI_BACKEND_IMAGE:-something2-orangepi-backend:local}
+    build:
+      context: .
+      dockerfile: compose/orangepi/backend.Dockerfile
+    environment:
+      # Without this, Express's default error handler (finalhandler) puts
+      # err.stack in the HTTP response body -- reachable by e.g. POSTing
+      # malformed JSON to any endpoint -- leaking container paths and module
+      # versions to anyone who can reach the tunnel. This is the only place
+      # that behaviour is controlled; there is no error handler in the app.
+      - NODE_ENV=production
+      - PORT=3101
+      # MIGRATE_ON_BOOT is deliberately NOT set here. Migrations are a
+      # separate deploy step for this stack (run `npm run migrate:up` before
+      # `up`/restart), never a side effect of the server booting -- see
+      # backend/src/index.js's shouldMigrateOnBoot and
+      # docs/superpowers/specs/2026-08-17-orangepi-staging-design.md. Its
+      # absence here is deliberate, not forgotten.
+      # SOMET-437/439. The backend keys BOTH rate limiters (the global
+      # 300/min and the credential-aware auth one) on the client address, and
+      # in this stack the connection it sees is always Caddy's -- cloudflared
+      # dials out to the edge, Caddy proxies to us, and req.ip is the same
+      # container address for every player. Without these two lines that is
+      # one shared bucket for the whole playerbase: ten players on a busy
+      # screen can 429 each other out of the API.
+      #
+      # Defaulted HERE rather than required in .env because the hop count is a
+      # property of THIS composition's topology (cloudflared -> caddy ->
+      # backend), not of whoever is operating it -- a fresh board is correct
+      # without anyone remembering to set it, and .env still overrides.
+      #
+      # CF-Connecting-IP is the one address in the chain a client cannot
+      # choose: Cloudflare sets and overwrites it at its edge. Blanket
+      # TRUST_PROXY=true is refused at startup by backend/src/clientIp.js --
+      # it would trust a client-supplied X-Forwarded-For and hand anyone a
+      # fresh bucket per request.
+      - TRUST_PROXY=${TRUST_PROXY:-2}
+      - TRUST_CF_CONNECTING_IP=${TRUST_CF_CONNECTING_IP:-1}
+      - DATABASE_URL=postgres://user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/game_db
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
+      # Object storage is not configured yet (SOMET-379). The MinIO client in
+      # backend/src/services/assetStore.js is built lazily inside getClient()
+      # and nothing calls it at startup, so the backend boots fine without it;
+      # sprite requests fail individually and render as placeholder boxes.
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-sprites}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # /api/health (backend/src/index.js:367) is LIVENESS ONLY -- it returns
+      # ok without touching the database. Making it a readiness check is
+      # SOMET-376.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3101/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      - POSTGRES_DB=game_db
+    volumes:
+      # OUTSIDE the app directory, always. Provisioning empties the app dir,
+      # and data underneath it would be destroyed on every re-provision. This
+      # is REQUIRED rather than defaulted for exactly that reason: a default
+      # under the app directory would work fine today and silently lose every
+      # account and world on the next re-provision, presenting as database
+      # corruption rather than as the operator error it actually is.
+      - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d game_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Behind a profile deliberately, exactly as the development stack does with
+  # ngrok: starting the stack must NEVER open a public URL as a side effect.
+  # Wiring and verifying the tunnel is SOMET-431.
+  cloudflared:
+    # Pinned, consistent with every other image in this stack
+    # (postgres:15-alpine, caddy:2-alpine, node:20-alpine): `latest` was the
+    # only floating tag here, and combined with restart: unless-stopped it
+    # could jump versions unattended on a Pi reboot. cloudflared does not
+    # publish a rolling major-version tag the way the others do (its tags are
+    # dated releases, e.g. 2026.8.2), so this needs a manual bump occasionally
+    # -- but a manual, reviewed bump instead of an automatic, unattended one.
+    image: cloudflare/cloudflared:2026.8.2
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate --url http://caddy:80
+    depends_on:
+      - caddy
+    restart: unless-stopped
+
+  # The CI-to-board deploy hook (SOMET-401). Behind its own profile: an
+  # internet-reachable deploy trigger must be something you turn on
+  # deliberately, not something that appears because you started the stack.
+  # `make pi-up` includes it only when DEPLOY_HOOK_SECRET is configured.
+  deploy-hook:
+    build:
+      context: .
+      dockerfile: compose/orangepi/deploy-hook/Dockerfile
+    image: ${ORANGEPI_HOOK_IMAGE:-something2-orangepi-deploy-hook:local}
+    profiles: ["hook"]
+    environment:
+      # Passed through with an empty default, NOT with `${VAR:?...}` like the
+      # required variables above. Compose interpolates every service whatever
+      # profile is active, so a required marker here would stop the whole
+      # stack -- game included -- on a board that simply has no deploy hook
+      # configured. The refusal belongs one layer in: server.js exits rather
+      # than starting an unauthenticated deploy endpoint.
+      - DEPLOY_HOOK_SECRET=${DEPLOY_HOOK_SECRET:-}
+      - ORANGEPI_DATA_DIR=${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}
+      - ORANGEPI_APP_DIR=/app
+      - ORANGEPI_BRANCH=${ORANGEPI_BRANCH:-orangepi}
+      - GIT_REPOSITORY=${GIT_REPOSITORY:-}
+      # PI_LOCAL makes lib.sh run commands here instead of over ssh, so the
+      # hook runs the SAME deploy.sh an operator runs from the workstation.
+      - PI_LOCAL=1
+    volumes:
+      # The board's clone: the deploy operates on it and reads deploy.sh from
+      # it, so the script that runs is the one belonging to the commit.
+      - ${ORANGEPI_APP_DIR:-/app}:/app
+      # Driving compose on the board means driving the board's docker.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The board's .env, which the compose commands inside a deploy read.
+      - ${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}:${ORANGEPI_DATA_DIR:?ORANGEPI_DATA_DIR must be set -- an absolute path OUTSIDE the app directory, which provisioning empties}:ro
+    restart: unless-stopped

@@ -19,10 +19,14 @@ describe("Player.update chunked branch", () => {
     const m = chunkedMapWith(0, 0, allGrass());
     const p = new Player();
     p.x = 50; p.y = 50; p.width = 20; p.height = 20; p.speed = 100; p.speedMultiplier = 1;
-    const before = p.x;
-    p.update(0.1, { d: true }, m); // move east
-    expect(p.x).toBeGreaterThan(before);
-    expect(p.y).toBe(50);
+    const beforeX = p.x;
+    const beforeY = p.y;
+    // D is right-ACROSS-THE-SCREEN, which in this isometric world is +x AND -y
+    // (894fd21). The old assertion here read `p.y).toBe(50)` -- a cartesian
+    // "east moves only along x" -- and went red when movement turned iso.
+    p.update(0.1, { d: true }, m);
+    expect(p.x).toBeGreaterThan(beforeX);
+    expect(p.y).toBeLessThan(beforeY);
   });
 
   it("is blocked at an unloaded chunk frontier", () => {

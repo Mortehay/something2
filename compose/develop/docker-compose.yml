@@ -4,21 +4,29 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: compose/frontend.Dockerfile
+      dockerfile: compose/develop/frontend.Dockerfile
     ports:
       - "15173:5173"
     volumes:
       - ./frontend:/app
     environment:
-      - VITE_API_URL=http://localhost:13101
+      # SOMET-370. The client calls the backend at this ABSOLUTE url (and derives
+      # the authority ws url from it), so a remote player needs it to be the
+      # public origin, not their own machine. `make tunnel` overrides it;
+      # everything else gets the localhost default it always had.
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:13101}
       - VITE_ENGINE_WS_URL=ws://localhost:18080/ws
+      # SOMET-369. Set by `make tunnel` only -- vite.config.js switches on it to
+      # allow the tunnel Host and to aim HMR at :443. NOT ${NGROK_DOMAIN}, which
+      # is always present in .env and would put local dev in tunnel mode.
+      - TUNNEL_HOST=${TUNNEL_HOST:-}
     depends_on:
       - backend
 
   backend:
     build:
       context: .
-      dockerfile: compose/backend.Dockerfile
+      dockerfile: compose/develop/backend.Dockerfile
     ports:
       - "13101:3101"
     volumes:
@@ -33,6 +41,10 @@ services:
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
       - SPRITE_GEN_URL=http://sprite-gen:8100
       - SPRITE_GEN_SHARED_SECRET=${SPRITE_GEN_SHARED_SECRET:?SPRITE_GEN_SHARED_SECRET must be set in .env}
+      # Preserves the existing dev experience: `make up` migrates and serves in
+      # one step. compose/orangepi does NOT set this -- there, migrations are
+      # their own deploy stage (see backend/src/index.js's shouldMigrateOnBoot).
+      - MIGRATE_ON_BOOT=true
     depends_on:
       - db
       - minio
@@ -40,7 +52,7 @@ services:
   game-engine:
     build:
       context: .
-      dockerfile: compose/engine.Dockerfile
+      dockerfile: compose/develop/engine.Dockerfile
     ports:
       - "18080:8080"
     volumes:
@@ -80,6 +92,34 @@ services:
       - sprite-models:/root/.cache/huggingface
     depends_on:
       - minio
+
+  # SOMET-368 -- public tunnel so someone outside this machine can play.
+  # It points at the *frontend*, not the backend: vite proxies /api and the
+  # /authority websocket through to backend:3101 (frontend/vite.config.js), so
+  # one tunnel covers all three surfaces the game needs.
+  #
+  # Behind the `tunnel` profile deliberately: `make up` must never open a public
+  # URL as a side effect. Start it with `make tunnel`, stop it with
+  # `make tunnel-stop`. NGROK_DOMAIN/NGROK_AUTHTOKEN are read bare rather than
+  # with the `${VAR:?}` idiom the other services use, because compose
+  # interpolates the whole file whatever profile is active -- `:?` here would
+  # break plain `make up` for anyone whose .env has no ngrok keys. `make tunnel`
+  # does that check instead.
+  #
+  # Free tier allows ONE online agent per account: if another ngrok container is
+  # up on the same authtoken, this one fails to bind and says so. That is the
+  # correct behaviour, not something to work around.
+  ngrok:
+    image: ngrok/ngrok:3
+    profiles: ["tunnel"]
+    command: http frontend:5173 --url=https://${NGROK_DOMAIN}
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    ports:
+      # Request inspector, loopback-only -- the tunnel itself is the public part.
+      - "127.0.0.1:14040:4040"
+    depends_on:
+      - frontend
 
   db:
     image: postgres:15-alpine

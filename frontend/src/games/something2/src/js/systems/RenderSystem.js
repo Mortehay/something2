@@ -19,6 +19,14 @@ import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffe
 // label will appear at a different range than looting actually works.
 const PICKUP_RADIUS = 80;
 
+// SOMET-372: how close (world px) the player must be for a chest to show its
+// "[f] open" hint. Approximates the authority's own INTERACT_RADIUS (120) and
+// is deliberately a SEPARATE, slightly tighter number rather than an imported
+// copy of it: this one decides whether a hint is drawn, the server one decides
+// whether the chest opens. Being a little conservative here means the hint
+// never appears for a press the server would refuse.
+const WORLD_CHEST_PROMPT_R = 110;
+
 // Radius (world px) around an actor within which an occluding wall fades to
 // let the player see themselves/nearby creatures behind it.
 const WALL_REVEAL_R = 150;
@@ -143,6 +151,12 @@ export class RenderSystem {
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
     banks = [], bank = null, bankOpen = false, bankView = null,
+    // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
+    // `banks` marks. These arrive on a live AOI frame rather than the join
+    // payload, so the list changes as the player walks; each entry is
+    // {id, x, y, kind, state} in world-pixel space, x/y a real stored
+    // position (not a derived centre), so it depth-sorts on the point.
+    worldChests = [],
     // SOMET-297. Fixed world points from the join frame, exactly like
     // `merchants` above -- not entities, so they carry no stored top-left
     // corner and need no half-extent adjustment.
@@ -239,6 +253,12 @@ export class RenderSystem {
     for (const b of banks) {
       drawables.push({ kind: "bank", ref: b, order: 0, depth: depthKey(b.x, b.y) });
     }
+    // Same fixed-world-point treatment as merchants and bank posts above. A
+    // world chest is a thing a player walks around and behind, so it belongs
+    // in the sort rather than in a flat pass over the top of everything.
+    for (const c of worldChests) {
+      drawables.push({ kind: "worldchest", ref: c, order: 0, depth: depthKey(c.x, c.y) });
+    }
     for (const w of wallDrawables) drawables.push(w);
     for (const d of RenderSystem.collectDecorations(chunkedMap, camera, decoTypes)) drawables.push(d);
     drawables.sort(compareDrawables);
@@ -253,6 +273,7 @@ export class RenderSystem {
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
       else if (d.kind === "merchant") this.drawMerchant(d.ref);
       else if (d.kind === "bank") this.drawBank(d.ref);
+      else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
       else this.drawEntity(d.ref);
     }
@@ -770,6 +791,78 @@ export class RenderSystem {
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
     this.ctx.fillText("Chest", dx, dy - r - 6);
+    this.ctx.restore();
+  }
+
+  // SOMET-372 -- a WORLD chest: guarded, lootable, and a different object from
+  // the account chest drawBank marks (that one is a village service and is
+  // always amber; this one changes with its state, and a player must be able
+  // to tell "still guarded" from "ready to open" from across a clearing).
+  //
+  // The three states come straight off the server frame and are never derived
+  // here: `locked` means its guard is alive, `unlocked` means the guard is
+  // dead and the loot is waiting, `opened` means it has been looted (a field
+  // chest relocks later; a vault chest never does).
+  //
+  // `player` is passed only for the prompt distance, which is COSMETIC. Range
+  // is the authority's decision -- it proximity-picks the nearest chest within
+  // its own INTERACT_RADIUS and answers "no chest nearby" when there is none.
+  // Deliberately not importing that constant: a second copy in the client is a
+  // second thing to keep in step, and being wrong here costs a hint, not an
+  // action.
+  drawWorldChest(c, player) {
+    const state = c.state || "locked";
+    const s = worldToScreen(c.x, c.y);
+    const dx = s.x, dy = s.y;
+    const r = 13;
+    const body = state === "opened" ? "#4a4033" : state === "unlocked" ? "#e0b64e" : "#8a8f98";
+    this.ctx.save();
+    this.ctx.fillStyle = body;
+    this.ctx.strokeStyle = "rgba(0,0,0,0.65)";
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(dx - r, dy - r * 0.6);
+    this.ctx.lineTo(dx + r, dy - r * 0.6);
+    this.ctx.lineTo(dx + r, dy + r * 0.6);
+    this.ctx.lineTo(dx - r, dy + r * 0.6);
+    this.ctx.closePath();
+    this.ctx.fill();
+    this.ctx.stroke();
+    // An opened chest gets its lid seam drawn ABOVE the body (a raised lid)
+    // rather than across it, so a looted chest is distinguishable from an
+    // unlooted one even in greyscale or at the edge of the screen.
+    this.ctx.beginPath();
+    if (state === "opened") {
+      this.ctx.moveTo(dx - r, dy - r * 0.6);
+      this.ctx.lineTo(dx + r * 0.2, dy - r * 1.25);
+    } else {
+      this.ctx.moveTo(dx - r, dy - r * 0.15);
+      this.ctx.lineTo(dx + r, dy - r * 0.15);
+    }
+    this.ctx.stroke();
+    // Keyhole, on a closed chest only -- it is what reads as "there is
+    // something to open here" at a glance.
+    if (state !== "opened") {
+      this.ctx.fillStyle = "rgba(0,0,0,0.65)";
+      this.ctx.beginPath();
+      this.ctx.arc(dx, dy + r * 0.1, 2.5, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
+    this.ctx.fillStyle = "#fff";
+    this.ctx.font = "12px sans-serif";
+    this.ctx.textAlign = "center";
+    const label = state === "opened" ? "Looted" : state === "unlocked" ? "Treasure" : "Treasure (guarded)";
+    this.ctx.fillText(label, dx, dy - r - 6);
+    // The hint, only when the player is plausibly close enough for the key to
+    // do something, and never on a chest with nothing left in it.
+    if (state !== "opened" && player) {
+      const pxc = player.x + (player.width || 0) / 2;
+      const pyc = player.y + (player.height || 0) / 2;
+      if (Math.hypot(pxc - c.x, pyc - c.y) <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.fillStyle = "#ffe9a8";
+        this.ctx.fillText("[f] open", dx, dy + r + 14);
+      }
+    }
     this.ctx.restore();
   }
 

@@ -264,11 +264,16 @@ describe('CharacterSheet keyboard toggle (source-text, not behavioural)', () => 
   );
 
   it("source-text: the toggle guard checks for 'c', not 'm'", () => {
-    expect(source).toMatch(/e\.key\.toLowerCase\(\)\s*!==\s*'c'/);
+    // bfd67ab made this layout-independent: the letter from e.key, or the
+    // physical key from e.code. Asserting the old `!== 'c'` shape is what went
+    // red -- the guard is still there, written differently.
+    expect(source).toMatch(/\(e\.key \|\| ''\)\.toLowerCase\(\) === 'c'/);
+    expect(source).toMatch(/e\.code === 'KeyC'/);
   });
 
   it("source-text: the toggle guard does not also fire on 'm' (the minimap's key)", () => {
-    expect(source).not.toMatch(/e\.key\.toLowerCase\(\)\s*!==\s*'m'/);
+    expect(source).not.toMatch(/toLowerCase\(\) === 'm'/);
+    expect(source).not.toMatch(/e\.code === 'KeyM'/);
   });
 });
 

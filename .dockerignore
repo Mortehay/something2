@@ -1,3 +1,21 @@
 **/node_modules
 frontend/node_modules
 backend/node_modules
+
+# Everything below is context the images never COPY. Excluding it keeps the
+# tarball sent to the daemon small, which barely matters on a workstation and
+# matters a great deal on the Pi's fallback build path over four A53 cores.
+.git
+docs
+engine
+sprite-gen
+tools
+**/__tests__
+**/*.test.js
+
+# Neither is COPYed by any Dockerfile today, but both would otherwise sit in
+# the build context uploaded to the daemon on the Pi. Excluded now, before
+# .env holds a real secret and before compose/orangepi/secrets/ (the spec's
+# planned home for a generated deploy key) exists.
+.env
+compose/orangepi/secrets/

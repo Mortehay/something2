@@ -2,9 +2,13 @@
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
-        migrate-up migrate-status migrate-repair
+        migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
+        pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
+        pi-migrate-up pi-migrate-status pi-seed-catalogs pi-seed-map pi-reseed-map \
+        pi-shell pi-db-shell pi-tunnel-url pi-hook-secret pi-hook-register \
+        pi-publish-url pi-reconcile pi-watch-install pi-watch-uninstall pi-reset
 
-COMPOSE_FILE = compose/docker-compose.yml
+COMPOSE_FILE = compose/develop/docker-compose.yml
 COMPOSE = docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE)
 
 # --- Map specs -------------------------------------------------------------
@@ -37,7 +41,7 @@ up:
 	@echo "Containers are up, but the app is NOT serving yet -- run 'make dev'."
 
 # The frontend/backend/engine images all end in `CMD ["tail","-f","/dev/null"]`
-# (compose/*.Dockerfile), so `make up` gives you idle containers with the
+# (compose/develop/*.Dockerfile), so `make up` gives you idle containers with the
 # source bind-mounted and nothing listening on :15173 or :13101. That is
 # deliberate -- it lets you restart a dev server without bouncing the
 # container -- but the "now start the servers" half was never written down or
@@ -56,7 +60,7 @@ dev:
 	@echo "check with 'make dev-status', follow output with 'make logs'."
 
 # `npm install` above is not busywork. Both services mount an ANONYMOUS volume
-# over /app/node_modules (compose/docker-compose.yml) purely to stop the host
+# over /app/node_modules (compose/develop/docker-compose.yml) purely to stop the host
 # checkout's node_modules from shadowing the image's. An anonymous volume is
 # populated once, when it is first created, and then survives `docker compose
 # build` and `up` untouched -- so adding a dependency to package.json and
@@ -76,6 +80,50 @@ dev-stop:
 dev-status:
 	@printf 'backend  :13101  '; c=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:13101/api/health 2>/dev/null); [ "$$c" = "000" ] && echo "DOWN (nothing listening)" || echo "HTTP $$c"
 	@printf 'frontend :15173  '; c=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:15173/ 2>/dev/null); [ "$$c" = "000" ] && echo "DOWN (nothing listening)" || echo "HTTP $$c"
+
+# --- Public tunnel (SOMET-370) ---------------------------------------------
+# `make tunnel` puts the stack in TUNNEL MODE: an ngrok agent published on the
+# reserved domain, plus a frontend rebuilt to speak to that public origin.
+#
+# The second half is the part that is easy to miss. The client calls the backend
+# at an ABSOLUTE url (VITE_API_URL, ~20 call sites) and derives the authority ws
+# url from it, so a remote browser left on the default would call ITS OWN
+# localhost and fail at login. Tunnel mode repoints that at https://<domain>,
+# which comes back through the tunnel and lands on vite's /api + /authority
+# proxy (frontend/vite.config.js).
+#
+# Why a target instead of just reading NGROK_DOMAIN: that var lives permanently
+# in .env, so anything keyed off "is it set" would drag ordinary local dev onto
+# the public origin with no tunnel even running. Tunnel mode is opt-in per
+# invocation, and `make tunnel-stop` puts it back.
+#
+# --force-recreate is load-bearing: a container's environment is fixed when it
+# is CREATED, so restarting vite alone would keep serving the old origin while
+# looking like it worked.
+NGROK_DOMAIN := $(shell sed -n 's/^NGROK_DOMAIN=//p' .env 2>/dev/null | tail -1)
+
+tunnel:
+	@[ -n "$(NGROK_DOMAIN)" ] || { echo "NGROK_DOMAIN is not set in .env -- add your reserved ngrok domain first."; exit 1; }
+	@grep -qE '^NGROK_AUTHTOKEN=.+' .env || { echo "NGROK_AUTHTOKEN is not set in .env -- get one from dashboard.ngrok.com."; exit 1; }
+	@echo "==> tunnel mode: client origin https://$(NGROK_DOMAIN)"
+	TUNNEL_HOST=$(NGROK_DOMAIN) VITE_API_URL=https://$(NGROK_DOMAIN) \
+	  $(COMPOSE) --profile tunnel up -d --force-recreate frontend ngrok
+	@$(MAKE) --no-print-directory dev
+	@echo
+	@echo "public URL: https://$(NGROK_DOMAIN)"
+	@echo "  * OPEN TO ANYONE who has it -- registration and the admin panel included."
+	@echo "  * free tier shows a warning page on first load; click 'Visit Site' once."
+	@echo "  * request inspector: http://localhost:14040"
+	@echo "  * close it again with 'make tunnel-stop'."
+
+# Takes the agent offline and puts the frontend back on the localhost origin.
+# Both halves matter: leaving the container on the public origin would break
+# local dev the moment the tunnel is gone.
+tunnel-stop:
+	@$(COMPOSE) --profile tunnel rm -sf ngrok
+	@echo "==> restoring local origin (http://localhost:13101)"
+	$(COMPOSE) up -d --force-recreate frontend
+	@$(MAKE) --no-print-directory dev
 
 down:
 	docker compose --project-directory . --env-file .env -f $(COMPOSE_FILE) down --remove-orphans
@@ -205,3 +253,139 @@ reseed-map:
 	RESEED_SPEC=$(SPEC) $(MAKE) clear-maps
 	$(MAKE) seed-catalogs
 	$(MAKE) seed-map SPEC=$(SPEC)
+
+# --- Orange Pi production stack (SOMET-423) --------------------------------
+# compose/orangepi/ is the production-shaped stack: see the README's
+# "Production stack (local verification)" section for how to bring it up.
+
+# Behavioral test of compose/orangepi/caddy/Caddyfile against real throwaway
+# containers -- its own network, its own stub backend, cleaned up on exit
+# either way. Proves actual HTTP routing AND websocket upgrade forwarding,
+# not just that the Caddyfile's text looks right (that half is
+# backend/tests/orangepi_compose.test.js, which runs on every `node --test`).
+# Run this after editing the Caddyfile.
+verify-routing:
+	bash compose/orangepi/scripts/verify-routing.sh
+# --- Orange Pi remote operation (make pi-*) --------------------------------
+# Operate the BOARD the way the local stack is operated. Every target is a
+# single line because compose/orangepi/scripts/lib.sh holds the ssh transport
+# and the step reporting; see the README's "Operating the Orange Pi" section.
+#
+# These targets never touch the local stack: they run compose ON THE BOARD,
+# over ssh, against compose/orangepi/docker-compose.yml there. The local
+# equivalents above are the ones without the pi- prefix.
+
+# Run FIRST, before pi-provision. Generates the workstation key if absent --
+# never if present -- installs its public half on the board and proves a
+# password-free login actually works.
+pi-keygen:
+	@bash compose/orangepi/scripts/keygen.sh
+
+# Bare board to a running, publicly reachable stack. Idempotent: a second run
+# changes nothing and destroys nothing -- the data directory is never touched.
+pi-provision:
+	@bash compose/orangepi/scripts/provision.sh
+
+# The update path, and what the CI deploy hook calls: reset to the branch tip,
+# pull the SHA-tagged image or build on the board, migrate, restart.
+pi-deploy:
+	@bash compose/orangepi/scripts/deploy.sh
+
+# --- Remote lifecycle ------------------------------------------------------
+# The tunnel profile is included, so `pi-up` opens the public URL and
+# `pi-down` closes it. Every one of these acts on the BOARD; the local
+# equivalents are the same names without the pi- prefix.
+
+pi-up:
+	@bash compose/orangepi/scripts/remote.sh compose up -d
+
+pi-down:
+	@bash compose/orangepi/scripts/remote.sh compose down --remove-orphans
+
+# The GAME containers only. Restarting cloudflared would take a new random
+# trycloudflare hostname -- changing the URL players hold and invalidating
+# the deploy hook's registered URL -- for no benefit, since the tunnel
+# reconnects to the replacement Caddy by name. `pi-down` + `pi-up` is the
+# full cycle when that is genuinely what you want.
+pi-restart:
+	@bash compose/orangepi/scripts/remote.sh compose restart backend caddy
+
+pi-logs:
+	@bash compose/orangepi/scripts/remote.sh compose logs -f --tail 200
+
+pi-status:
+	@bash compose/orangepi/scripts/status.sh
+
+pi-tunnel-url:
+	@bash compose/orangepi/scripts/remote.sh tunnel-url
+
+# The board's deploy-hook secret, generated on the board by provisioning.
+pi-hook-secret:
+	@bash compose/orangepi/scripts/remote.sh hook-secret
+
+# Point GitHub Actions at this board: sets DEPLOY_HOOK_SECRET and
+# DEPLOY_HOOK_URL. Re-run after a tunnel restart -- a quick tunnel's hostname
+# changes every time.
+pi-hook-register:
+	@bash compose/orangepi/scripts/hook-register.sh
+
+# Publish a stable address for players that forwards to the board's current
+# tunnel hostname, so a reboot does not invalidate every link you handed out.
+# Runs from THIS machine, using its gh credentials -- the board holds none.
+pi-publish-url:
+	@bash compose/orangepi/scripts/publish-url.sh
+
+# One idempotent pass: if the board's tunnel hostname has moved, repair the
+# published page and the CI hook URL. Silent when there is nothing to do.
+pi-reconcile:
+	@bash compose/orangepi/scripts/reconcile-url.sh
+
+# Run that on a timer, so a hostname change after a board reboot heals itself.
+# A systemd USER timer -- no root, no new secrets.
+pi-watch-install:
+	@bash compose/orangepi/scripts/watch-install.sh install
+
+pi-watch-uninstall:
+	@bash compose/orangepi/scripts/watch-install.sh uninstall
+
+# --- Remote migrations -----------------------------------------------------
+# Migrations are a deploy STEP on this stack, never a side effect of the
+# server booting (MIGRATE_ON_BOOT is unset in compose/orangepi). These are for
+# running one by hand between deploys.
+
+pi-migrate-up:
+	@bash compose/orangepi/scripts/remote.sh backend npm run migrate:up
+
+pi-migrate-status:
+	@bash compose/orangepi/scripts/remote.sh compose exec -T db psql -U user -d game_db -c "SELECT name, run_on FROM pgmigrations ORDER BY id DESC LIMIT 20;"
+
+# --- Remote seeding --------------------------------------------------------
+# require-spec is the SAME guard the local seed targets use, so a missing or
+# misspelled SPEC is rejected on the workstation, before anything reaches the
+# network -- and the spec list it prints is read from the host checkout.
+
+pi-seed-catalogs:
+	@bash compose/orangepi/scripts/remote.sh backend node scripts/seed-catalogs.js
+
+pi-seed-map:
+	$(require-spec)
+	@bash compose/orangepi/scripts/remote.sh backend sh -c "SPEC=$(SPEC) node scripts/seed-map.js"
+
+pi-reseed-map:
+	$(require-spec)
+	@bash compose/orangepi/scripts/remote.sh backend sh -c "RESEED_SPEC=$(SPEC) node scripts/clear-maps.js"
+	@bash compose/orangepi/scripts/remote.sh backend node scripts/seed-catalogs.js
+	@bash compose/orangepi/scripts/remote.sh backend sh -c "SPEC=$(SPEC) node scripts/seed-map.js"
+
+# --- Interactive -----------------------------------------------------------
+
+pi-shell:
+	@bash compose/orangepi/scripts/remote.sh shell
+
+pi-db-shell:
+	@bash compose/orangepi/scripts/remote.sh db-shell
+
+# --- Destructive -----------------------------------------------------------
+# Requires CONFIRM=<the board's address>. See compose/orangepi/scripts/reset.sh.
+pi-reset:
+	@bash compose/orangepi/scripts/reset.sh

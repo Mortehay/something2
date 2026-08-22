@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { rateLimit } = require('express-rate-limit');
 const { attachAuthority } = require('./authority/server');
+const { applyTrustProxy, clientIpKey } = require('./clientIp');
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
@@ -26,6 +27,11 @@ require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3101;
+
+// Who a request came from, when something else terminated the connection
+// (SOMET-437). Off unless TRUST_PROXY says what is in front -- see
+// clientIp.js for why blanket trust is refused rather than defaulted.
+applyTrustProxy(app);
 
 // Helper to get tile types in the format expected by the game engine.
 // One-line adapter over services/tileTypes.js's loadTileTypes so the ~dozen
@@ -55,7 +61,18 @@ app.use(cors({ exposedHeaders: ['X-Live-World-Pending'] }));
 // applied below) so a test can build a much lower-ceiling instance on a
 // scratch app instead of firing 300 real requests to prove it works.
 function apiRateLimiter(limit = 300, windowMs = 60 * 1000) {
-  return rateLimit({ windowMs, limit, standardHeaders: true, legacyHeaders: false });
+  return rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: true,
+    legacyHeaders: false,
+    // SOMET-437. The default key is req.ip, which behind cloudflared -> caddy
+    // is the Caddy container for every player, making this one ceiling shared
+    // by everybody. clientIpKey resolves the real client where the deployment
+    // has said it is safe to. Wrapped in an arrow because the library calls
+    // keyGenerator(req, res) and clientIpKey's second parameter is `env`.
+    keyGenerator: (req) => clientIpKey(req),
+  });
 }
 app.use(apiRateLimiter());
 
@@ -242,6 +259,7 @@ const aiProviders = require('./services/aiProviders');
 const providerDiscovery = require('./services/providerDiscovery');
 const remoteImageProvider = require('./services/remoteImageProvider');
 const { resolveGenerationTarget, loadTypeOverride } = require('./services/generationTarget');
+const { pinProvided, providerPinError, providerPinValues } = require('./services/providerPin.js');
 
 // SOMET-328: the three /api/*-jobs/:jobId routes serve jobs from two different
 // engines now. The id prefix says which, so a caller polling a job never has
@@ -272,7 +290,11 @@ let spriteGen = require('./services/spriteGen');
 const __setSpriteGen = (impl) => { spriteGen = impl; };
 const assetStore = require('./services/assetStore');
 
-const runner = require('node-pg-migrate').default;
+// DI seam, same shape as __setPool/__setSpriteGen above: tests inject a fake
+// runner to exercise runMigrations()'s success/failure paths without hitting
+// a real database or requiring `require.main === module`.
+let migrationRunner = require('node-pg-migrate').default;
+const __setMigrationRunner = (impl) => { migrationRunner = impl; };
 
 // node-pg-migrate require()s EVERY file in the migrations directory. With no
 // ignorePattern it filters nothing at all (migration.js: `ignorePattern ===
@@ -288,30 +310,53 @@ const runner = require('node-pg-migrate').default;
 // the container disagree about what a migration is.
 const MIGRATION_IGNORE_PATTERN = '(?!.*\\.js$).*';
 
-// Run migrations
-async function runMigrations() {
-  try {
-    await runner({
-      databaseUrl: process.env.DATABASE_URL,
-      dir: path.join(__dirname, '..', 'migrations'),
-      direction: 'up',
-      migrationsTable: 'pgmigrations',
-      ignorePattern: MIGRATION_IGNORE_PATTERN,
-      verbose: true,
-    });
-    console.log('Migrations completed successfully');
-  } catch (err) {
-    console.error('Migration error:', err);
-  }
+// Whether boot should run migrations itself, vs. treating them as a
+// separate deploy step. Strict equality against the literal 'true' -- not
+// JS truthiness -- because the STRING 'false' (and '0', and '') are all
+// truthy, and that class of bug is exactly what this repo keeps shipping
+// (see SEED_TEST_USER's "1" check in .env.example / the seed migration for
+// the same defensiveness). Only an explicit opt-in counts.
+//
+// compose/develop/docker-compose.yml sets MIGRATE_ON_BOOT=true on the
+// backend service, preserving the existing developer experience.
+// compose/orangepi/docker-compose.yml deliberately does NOT set it --
+// migrations there are their own deploy stage (see
+// docs/superpowers/specs/2026-08-17-orangepi-staging-design.md), not a
+// side effect of the server starting.
+function shouldMigrateOnBoot(env = process.env) {
+  return env.MIGRATE_ON_BOOT === 'true';
 }
 
-// Only run migrations (and later, app.listen) when this file is executed
-// directly, not when it's required (e.g. by tests importing `app`). Same
-// guard protects the JWT_SECRET boot check: tests import `app` with their
-// own short, deterministic secret and must not trip it.
+// Run migrations. Deliberately does NOT catch: a failed migration must
+// abort boot rather than leave a half-migrated schema serving traffic. The
+// caller (the require.main block below) is responsible for turning a
+// rejection here into a non-zero process exit before app.listen(...) runs.
+async function runMigrations() {
+  await migrationRunner({
+    databaseUrl: process.env.DATABASE_URL,
+    dir: path.join(__dirname, '..', 'migrations'),
+    direction: 'up',
+    migrationsTable: 'pgmigrations',
+    ignorePattern: MIGRATION_IGNORE_PATTERN,
+    verbose: true,
+  });
+  console.log('Migrations completed successfully');
+}
+
+// The JWT guard must run on every boot, unconditionally, before the server
+// accepts a single connection -- see assertJwtSecret.js. Guarded by
+// `require.main === module` (not run at plain `require()` time) because
+// tests import `app` from this file with their own short, deterministic
+// secret and must not trip it.
+//
+// Migrations are decided and (when enabled) awaited further down, in the
+// same require.main block that calls app.listen(...), so a disabled or
+// failed migration step can never race the server accepting requests. See
+// that block for why this can't just be inlined here: it runs before every
+// route is registered, but route registration order doesn't matter for
+// migrations -- only completing (or aborting) before listen() does.
 if (require.main === module) {
   assertJwtSecretOrExit();
-  runMigrations();
 }
 
 // Decoration defs for GET /chunk's generateChunkDecorations call. Shared with
@@ -591,30 +636,12 @@ function entityTypeFieldError(body) {
       && (typeof body.behavior_id !== 'number' || !Number.isInteger(body.behavior_id))) {
     return 'behavior_id must be an integer';
   }
-  if (body.ai_provider_mode != null && !['default', 'local', 'provider'].includes(body.ai_provider_mode)) {
-    return 'ai_provider_mode must be one of default, local, provider';
-  }
-  if (body.ai_provider_id != null
-      && (typeof body.ai_provider_id !== 'number' || !Number.isInteger(body.ai_provider_id))) {
-    return 'ai_provider_id must be an integer';
-  }
   for (const field of ['display_width', 'display_height']) {
     const v = body[field];
     if (v == null) continue; // omitted or explicitly null -> renderer default
     if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > MAX_ENTITY_DISPLAY_PX) {
       return `${field} must be an integer between 1 and ${MAX_ENTITY_DISPLAY_PX}`;
     }
-  }
-  return null;
-}
-
-function tileTypeFieldError(body) {
-  if (body.ai_provider_mode != null && !['default', 'local', 'provider'].includes(body.ai_provider_mode)) {
-    return 'ai_provider_mode must be one of default, local, provider';
-  }
-  if (body.ai_provider_id != null
-      && (typeof body.ai_provider_id !== 'number' || !Number.isInteger(body.ai_provider_id))) {
-    return 'ai_provider_id must be an integer';
   }
   return null;
 }
@@ -637,7 +664,7 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
       strength, dexterity, constitution, intelligence, wisdom, charisma,
       hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
       display_width, display_height, render_mode, is_creature, prompt, place_order,
-      behavior_id, attack_element, ai_provider_mode, ai_provider_id
+      behavior_id, attack_element
     } = req.body;
     if (!name || !color) return res.status(400).json({ error: 'Name and color are required' });
     if (catalogNameTooLong(name)) {
@@ -652,14 +679,14 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode, is_creature, prompt, place_order,
-        behavior_id, attack_element, ai_provider_mode, ai_provider_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28) RETURNING *`,
+        behavior_id, attack_element
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0,
-        behavior_id ?? null, attack_element || 'physical', ai_provider_mode || 'default', ai_provider_id ?? null
+        behavior_id ?? null, attack_element || 'physical'
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -676,13 +703,20 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
     strength, dexterity, constitution, intelligence, wisdom, charisma,
     hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
     display_width, display_height, render_mode, is_creature, prompt, place_order,
-    behavior_id, attack_element, ai_provider_mode, ai_provider_id
+    behavior_id, attack_element
   } = req.body;
   if (catalogNameTooLong(name)) {
     return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
   }
   const fieldErr = entityTypeFieldError(req.body);
   if (fieldErr) return res.status(400).json({ error: fieldErr });
+  // SOMET-342: the per-type generation pin. Validated here rather than left to
+  // the DB CHECK, which would surface a bad mode as a 500 with a constraint
+  // name in it, and cannot see the two states it does not constrain.
+  const pinErr = providerPinError(req.body);
+  if (pinErr) return res.status(400).json({ error: pinErr });
+  const pinSent = pinProvided(req.body);
+  const pin = pinSent ? providerPinValues(req.body) : { mode: null, id: null };
 
   // SOMET-254 follow-up: `behavior_id ?? null` alone can't tell "field
   // omitted from the request" (must COALESCE against the existing row,
@@ -806,7 +840,6 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
       }
     }
 
-    const aiProviderIdProvided = 'ai_provider_id' in req.body;
     const result = await client.query(
       `UPDATE entity_types SET
         name = $1, color = $2, walkable = $3, spawn_tiles = $4, chance = $5,
@@ -816,8 +849,11 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         prompt = COALESCE($23, prompt), place_order = $24,
         behavior_id = CASE WHEN $27::boolean THEN $25 ELSE entity_types.behavior_id END,
         attack_element = COALESCE($26, entity_types.attack_element),
-        ai_provider_mode = COALESCE($28, entity_types.ai_provider_mode),
-        ai_provider_id = CASE WHEN $30::boolean THEN $29 ELSE entity_types.ai_provider_id END,
+        -- SOMET-342: both pin columns move together or not at all. A PUT that
+        -- omits them leaves the stored pin alone; one that sends them writes
+        -- the normalized pair, so mode and id can never disagree.
+        ai_provider_mode = CASE WHEN $28::boolean THEN $29 ELSE entity_types.ai_provider_mode END,
+        ai_provider_id = CASE WHEN $28::boolean THEN $30 ELSE entity_types.ai_provider_id END,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $31 RETURNING *`,
       [
@@ -825,8 +861,27 @@ app.put('/api/entity-types/:id', adminGuard, async (req, res) => {
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false,
+        // behavior_id/attack_element: SOMET-254 -- a PUT that omits either
+        // field must leave the existing value alone (COALESCE against the
+        // current row above), same posture prompt already has on this same
+        // line and for the same reason: `?? null`/`?? null` here, not
+        // `?? null`/`|| 'physical'`, so an omitted field passes NULL and
+        // never reaches the fallback-to-default branch that used to silently
+        // demote the creature's profile or reset its element on a partial
+        // write. behavior_id additionally needs $27 (behaviorIdProvided) in
+        // the CASE above so an *explicit* null (the "clear to none" action)
+        // isn't swallowed by the same COALESCE that protects an omitted one
+        // -- see the comment above entityTypeFieldError's call site.
+        // behaviorIdProvided sits before id, not after, so `id` stays the
+        // last element of this array -- entityTypes.test.js asserts
+        // `params[params.length - 1]` is the id on this exact route.
         prompt ?? null, Number(place_order) || 0, behavior_id ?? null, attack_element ?? null,
-        behaviorIdProvided, ai_provider_mode ?? null, ai_provider_id ?? null, aiProviderIdProvided, id
+        // The three pin params sit BEFORE id for the same reason
+        // behaviorIdProvided does: entityTypes.test.js asserts that the id is
+        // `params[params.length - 1]` on this exact route, and that assertion
+        // is worth keeping -- an id landing anywhere else in this array is a
+        // WHERE clause pointed at the wrong value.
+        behaviorIdProvided, pinSent, pin.mode, pin.id, id
       ]
     );
     if (result.rows.length === 0) {
@@ -1488,7 +1543,7 @@ app.get('/api/tile-types', async (req, res) => {
 
 app.post('/api/tile-types', adminGuard, async (req, res) => {
   try {
-    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order, ai_provider_mode, ai_provider_id } = req.body;
+    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order } = req.body;
 
     // Simple validation
     if (!name || !color) {
@@ -1497,12 +1552,10 @@ app.post('/api/tile-types', adminGuard, async (req, res) => {
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
-    const fieldErr = tileTypeFieldError(req.body);
-    if (fieldErr) return res.status(400).json({ error: fieldErr });
 
     const result = await pool.query(
-      'INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order, ai_provider_mode, ai_provider_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *',
-      [name, color, walkable ?? true, speed ?? 1.0, image || '', JSON.stringify(valid_neighbors || []), prompt || '', Number(wall_height) || 0, Number(place_order) || 0, ai_provider_mode || 'default', ai_provider_id ?? null]
+      'INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
+      [name, color, walkable ?? true, speed ?? 1.0, image || '', JSON.stringify(valid_neighbors || []), prompt || '', Number(wall_height) || 0, Number(place_order) || 0]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1514,12 +1567,17 @@ app.post('/api/tile-types', adminGuard, async (req, res) => {
 app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order, ai_provider_mode, ai_provider_id } = req.body;
+    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order } = req.body;
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
-    const fieldErr = tileTypeFieldError(req.body);
-    if (fieldErr) return res.status(400).json({ error: fieldErr });
+    // SOMET-342: same pin, same rules, same validator as the entity route --
+    // two copies of a three-state rule is how these two editors come to
+    // disagree about what "default" means.
+    const pinErr = providerPinError(req.body);
+    if (pinErr) return res.status(400).json({ error: pinErr });
+    const pinSent = pinProvided(req.body);
+    const pin = pinSent ? providerPinValues(req.body) : { mode: null, id: null };
 
     // tile_types.name is referenced by entity_types.spawn_tiles and
     // biomes.terrain_tiles, both jsonb name arrays with no FK (F-027 /
@@ -1549,20 +1607,17 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
     // before the user approves a texture), so writing it verbatim would clobber a
     // just-approved texture back to ''. COALESCE(NULLIF(...)) preserves the stored
     // image when the form sends '' or nothing; an explicit key still updates it.
-    const aiProviderIdProvided = 'ai_provider_id' in req.body;
     const result = await pool.query(
-      `UPDATE tile_types SET
-        name = $1, color = $2, walkable = $3, speed = $4, image = COALESCE(NULLIF($5, ''), image),
-        valid_neighbors = $6, prompt = $7, wall_height = $8, place_order = $9,
-        ai_provider_mode = COALESCE($10, tile_types.ai_provider_mode),
-        ai_provider_id = CASE WHEN $11::boolean THEN $12 ELSE tile_types.ai_provider_id END,
+      `UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4,
+        image = COALESCE(NULLIF($5, ''), image), valid_neighbors = $6, prompt = $7,
+        wall_height = $8, place_order = $9,
+        ai_provider_mode = CASE WHEN $10::boolean THEN $11 ELSE tile_types.ai_provider_mode END,
+        ai_provider_id = CASE WHEN $10::boolean THEN $12 ELSE tile_types.ai_provider_id END,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $13 RETURNING *`,
-      [
-        name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '',
+       WHERE id = $13 RETURNING *`,
+      [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '',
         Number(wall_height) || 0, Number(place_order) || 0,
-        ai_provider_mode ?? null, aiProviderIdProvided, ai_provider_id ?? null, id
-      ]
+        pinSent, pin.mode, pin.id, id]
     );
     
     if (result.rows.length === 0) {
@@ -3475,21 +3530,40 @@ if (require.main === module) {
     console.error('unhandledRejection (backstopped, process kept alive):', reason);
   });
 
-  // SOMET-329: prime the element/attack-origin validation lists from the
-  // catalogs. Fire-and-forget — it degrades to the seeded lists on failure,
-  // and blocking boot on a cache warm-up would trade a stale dropdown for an
-  // unreachable server.
-  refreshWeaponCatalogCache();
+  // Boot sequence, wrapped in an IIFE so migrations (when enabled) can be
+  // awaited before app.listen(...) starts accepting connections -- an
+  // un-awaited runMigrations() would let the server serve requests against a
+  // schema that is still mid-migration, or one that failed outright.
+  (async () => {
+    if (shouldMigrateOnBoot()) {
+      try {
+        await runMigrations();
+      } catch (err) {
+        // Fail loudly and stop. Continuing here is exactly the bug this
+        // fixes: logging and carrying on leaves a half-migrated schema
+        // serving live traffic.
+        console.error('Migration failed -- aborting boot rather than serving a half-migrated schema:', err);
+        process.exit(1);
+        return;
+      }
+    }
 
-  const server = app.listen(port, () => {
-    console.log(`Backend server running on port ${port}`);
-  });
-  authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
-  console.log('Authority WS attached at /authority');
+    // SOMET-329: prime the element/attack-origin validation lists from the
+    // catalogs. Fire-and-forget — it degrades to the seeded lists on failure,
+    // and blocking boot on a cache warm-up would trade a stale dropdown for an
+    // unreachable server.
+    refreshWeaponCatalogCache();
+
+    const server = app.listen(port, () => {
+      console.log(`Backend server running on port ${port}`);
+    });
+    authorityHandle = attachAuthority(server, pool, { jwtSecret: process.env.JWT_SECRET });
+    console.log('Authority WS attached at /authority');
+  })();
 }
 
 module.exports = {
   app, __setSpriteGen, __setPool, __setAuthorityHandle, validateItemType, boundedCacheSet,
   apiRateLimiter, behaviorFieldError, abilityFieldError, behaviorAbilitiesError,
-  entityTypeFieldError, tileTypeFieldError,
+  entityTypeFieldError, shouldMigrateOnBoot, runMigrations, __setMigrationRunner,
 };

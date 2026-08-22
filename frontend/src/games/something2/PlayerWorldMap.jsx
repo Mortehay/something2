@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { authHeaders, apiFetch } from './src/js/net/auth.js';
 import { toCytoscapeElements } from './playerWorldMap.js';
 import { PULSE_PERIOD_MS } from './src/js/systems/landmarkRenderer.js';
+import { API_URL } from '../../config.js';
 
 // The player's read-only fog-of-war map (SOMET-263).
 //
@@ -32,8 +33,6 @@ import { PULSE_PERIOD_MS } from './src/js/systems/landmarkRenderer.js';
 // It reads the player endpoint below. The admin one returns every world
 // unconditionally; pointing this component at it would render a complete map
 // and defeat the whole feature while every other test still passed.
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
 
 const Page = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1400px; margin: 0 auto;

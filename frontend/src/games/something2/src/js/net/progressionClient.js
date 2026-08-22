@@ -6,8 +6,7 @@
 // so a 401 (dead/revoked token) is handled the same way everywhere.
 import { authHeaders, apiFetch } from './auth.js';
 import { readActiveCharacterId } from '../../../characterSession.js';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
+import { API_URL } from '../../../../../config.js';
 
 // SOMET-257 made progression per CHARACTER, so all three of these endpoints
 // now require a character_id -- without one they answer 400 and the character

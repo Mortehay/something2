@@ -1,5 +1,6 @@
 const express = require('express');
-const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const { rateLimit } = require('express-rate-limit');
+const { clientIpKey } = require('../clientIp.js');
 const { hashPassword, verifyPassword } = require('./passwords.js');
 const { signToken } = require('./tokens.js');
 const { requireAuth, requireAdmin } = require('./middleware.js');
@@ -8,8 +9,9 @@ const VALID_ROLES = ['player', 'admin'];
 
 // Rate limiter for register/login. Keyed on IP + username so that flooding one
 // username cannot lock a DIFFERENT username out from the same IP. The IP portion
-// is normalized via ipKeyGenerator (IPv6-subnet aware) as express-rate-limit
-// requires whenever a custom key embeds the client IP.
+// comes from clientIp.js (SOMET-437), which normalizes via ipKeyGenerator as
+// express-rate-limit requires and, behind a configured proxy, resolves the real
+// client instead of the reverse proxy every player shares.
 function authRateLimiter() {
   return rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -17,7 +19,7 @@ function authRateLimiter() {
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => {
-      const ip = ipKeyGenerator(req.ip || '');
+      const ip = clientIpKey(req);
       const username = req.body && req.body.username ? String(req.body.username).toLowerCase() : '';
       return `${ip}:${username}`;
     },

@@ -1,6 +1,6 @@
 // Plain fetcher for a world's downsampled biome preview grid. Kept dependency-
 // free (no React/query) so it is unit-testable in the node vitest env.
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:13101';
+import { API_URL } from '../../../../../config.js';
 
 export async function fetchWorldPreview(worldId) {
   const res = await fetch(`${API_URL}/api/worlds/${worldId}/preview`);

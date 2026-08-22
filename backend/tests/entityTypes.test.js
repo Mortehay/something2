@@ -47,6 +47,17 @@ function paramFor(sql, params, column) {
     return params[i];
   }
   // UPDATE: find `<column> = $N`, tolerating a COALESCE wrapper.
+  //
+  // Also the CASE form, `<column> = CASE WHEN $A::boolean THEN $B ELSE ... END`,
+  // which is how a column whose ABSENCE from the body must be distinguished
+  // from an explicit null is written on these routes -- behavior_id since
+  // SOMET-254, both pin columns since SOMET-342. The value under test is $B;
+  // $A is the was-it-sent flag, which a caller that cares about it can read
+  // out of the SQL itself.
+  const caseRe = new RegExp(`\\b${column}\\s*=\\s*CASE WHEN \\$\\d+::boolean THEN \\$(\\d+)`, 'i');
+  const caseMatch = caseRe.exec(sql);
+  if (caseMatch) return params[Number(caseMatch[1]) - 1];
+
   const re = new RegExp(`\\b${column}\\s*=\\s*(?:COALESCE\\()?\\$(\\d+)`, 'i');
   const m = re.exec(sql);
   assert.ok(m, `UPDATE does not assign '${column}' from a parameter`);
@@ -485,4 +496,69 @@ test('DELETE /api/entity-types/:id 404s when the row does not exist', async () =
   const res = await request(app).delete('/api/entity-types/999').set(...AUTH);
 
   assert.equal(res.status, 404);
+});
+
+// SOMET-342: the per-type generation pin, written through this route for the
+// first time. `paramFor` reads a value out by matching the placeholder in the
+// SQL, so these assert what the DB would actually receive rather than what the
+// handler happened to build.
+
+test('PUT /api/entity-types/:id writes the pin when one is sent', async () => {
+  let params = null, sql = null;
+  __setPool(putMock('Tree', async (s, p) => { sql = s; params = p; return { rows: [{ id: 5 }] }; }));
+
+  const res = await request(app)
+    .put('/api/entity-types/5')
+    .set(...AUTH)
+    .send({ name: 'Tree', color: '#0f0', ai_provider_mode: 'provider', ai_provider_id: 7 });
+
+  assert.equal(res.status, 200);
+  assert.equal(paramFor(sql, params, 'ai_provider_mode'), 'provider');
+  assert.equal(paramFor(sql, params, 'ai_provider_id'), 7);
+  assert.equal(params[params.length - 1], '5');
+});
+
+test('PUT /api/entity-types/:id leaves the pin alone when the body omits it', async () => {
+  // The guard that keeps every older client, script and test safe: a save that
+  // says nothing about the pin must not reset it. The CASE in the UPDATE is
+  // driven by this boolean, so it is the value worth asserting.
+  let params = null, sql = null;
+  __setPool(putMock('Tree', async (s, p) => { sql = s; params = p; return { rows: [{ id: 5 }] }; }));
+
+  const res = await request(app)
+    .put('/api/entity-types/5')
+    .set(...AUTH)
+    .send({ name: 'Tree', color: '#0f0' });
+
+  assert.equal(res.status, 200);
+  const pinSentIdx = Number(/ai_provider_mode = CASE WHEN \$(\d+)/.exec(sql)[1]) - 1;
+  assert.equal(params[pinSentIdx], false, 'an omitted pin must not be written');
+});
+
+test('PUT /api/entity-types/:id refuses an unknown mode with a 400, not a 500', async () => {
+  __setPool(putMock('Tree', async () => {
+    throw new Error('the UPDATE must not run for an invalid pin');
+  }));
+
+  const res = await request(app)
+    .put('/api/entity-types/5')
+    .set(...AUTH)
+    .send({ name: 'Tree', color: '#0f0', ai_provider_mode: 'sideways' });
+
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /ai_provider_mode must be one of/);
+});
+
+test('PUT /api/entity-types/:id refuses a provider pin with no target', async () => {
+  __setPool(putMock('Tree', async () => {
+    throw new Error('the UPDATE must not run for an invalid pin');
+  }));
+
+  const res = await request(app)
+    .put('/api/entity-types/5')
+    .set(...AUTH)
+    .send({ name: 'Tree', color: '#0f0', ai_provider_mode: 'provider' });
+
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /needs an ai_provider_id/);
 });

@@ -32,10 +32,15 @@ describe('getMinimapSnapshot', () => {
       state: 'playing', chunked: true, worldId: 'w1',
       chunkedMap: { chunkSize: 64 },
       player: { x: 0, y: 0, width: 0, height: 0 },
-      keys: { d: true },              // moving east
+      keys: { d: true },              // moving right across the screen
       creatures: { all: () => [] },
     });
+    // Isometric (894fd21): right-screen is +x and -y in the world, and the
+    // marker's facing is the normalized movement vector, so both components
+    // are non-zero. Asserting dy === 0 was the cartesian assumption.
     expect(snap.player.dir.dx).toBeGreaterThan(0);
-    expect(snap.player.dir.dy).toBe(0);
+    expect(snap.player.dir.dy).toBeLessThan(0);
+    const len = Math.hypot(snap.player.dir.dx, snap.player.dir.dy);
+    expect(len).toBeCloseTo(1, 5);
   });
 });

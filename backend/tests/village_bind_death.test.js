@@ -90,6 +90,12 @@ const VILLAGE_B = {
 // A point whose PLAYER CENTRE (top-left + 32) lands on an interior tile of the
 // given village. The tick loop matches villages on the centre tile, so a
 // fixture built off the top-left corner would silently miss the footprint.
+// The entry world's village, used by the SOMET-443 fallback when the world a
+// player died in has none of its own. A DIFFERENT world id from w1 on purpose:
+// the fallback must relocate, and a fixture sharing w1's id would let a
+// same-world move masquerade as one.
+const ENTRY_VILLAGE = { world_id: 'wEntry', spawn_x: 5150, spawn_y: 5150 };
+
 const insideA = { x: 1118, y: 1118 };   // centre (1150,1150) -> tile row 11, col 11
 const insideB = { x: 2118, y: 2118 };   // centre (2150,2150) -> tile row 21, col 21
 
@@ -99,7 +105,7 @@ const insideB = { x: 2118, y: 2118 };   // centre (2150,2150) -> tile row 21, co
 // PORTAL rows, exactly as the real query returns them together). `bounded`
 // gives w1 a width/height, which is what makes its edge tiles map_doorway tiles
 // at all. `bindWriteFails` makes the first N player_binds writes reject.
-function fakePool({ bind = null, villages = {}, links = {}, bounded = false, bindWriteFails = 0 } = {}) {
+function fakePool({ bind = null, villages = {}, links = {}, bounded = false, bindWriteFails = 0, entryVillage = ENTRY_VILLAGE } = {}) {
   const binds = [];      // every SUCCESSFUL INSERT INTO player_binds, in order
   let bindFailsLeft = bindWriteFails;
   function route(sql, params) {
@@ -132,6 +138,12 @@ function fakePool({ bind = null, villages = {}, links = {}, bounded = false, bin
       if (bindFailsLeft > 0) { bindFailsLeft--; throw new Error('bind write failed'); }
       binds.push(params);
       return { rows: [] };
+    }
+    // SOMET-443's entry-village fallback. Matched before the by-world route
+    // below because both mention `villages` -- this one is the join against
+    // worlds.is_entry, and it takes no parameters.
+    if (/FROM villages v JOIN worlds w/i.test(sql)) {
+      return { rows: entryVillage ? [entryVillage] : [] };
     }
     if (/FROM villages WHERE world_id/i.test(sql)) return { rows: villages[params[0]] || [] };
     if (/FROM item_types/i.test(sql)) {
@@ -233,24 +245,73 @@ test('a bind in the CURRENT world respawns you at it, with no world change', asy
 });
 
 // ---------------------------------------------------------------------------
-// 2. No bind at all -- today's behaviour, unchanged.
+// 2. No bind at all -- CHANGED by SOMET-443.
+//
+// This block used to assert the opposite: "a character with NO bind respawns at
+// its join spawn, exactly as before". That was deliberate at the time and it is
+// now the reported bug -- an unbound player gets up on the tile that killed
+// them, inside the same pack, and dies again. It is every new character, and
+// every character in a dungeon (dungeons have no villages, so no bind can be
+// earned there). The assertions are re-aimed rather than deleted so the change
+// of intent is visible in the history.
 // ---------------------------------------------------------------------------
 
-test('a character with NO bind respawns at its join spawn, exactly as before', async () => {
-  const pool = fakePool({ bind: null, villages: { w1: [VILLAGE_A] } });
+test('a character with NO bind respawns at the NEAREST village, not where it died', async () => {
+  // Two villages, and the player dies closer to B. Picking A would still look
+  // like "respawns at a village" -- the distance is the whole point.
+  const pool = fakePool({ bind: null, villages: { w1: [VILLAGE_A, VILLAGE_B] } });
   const { handle, ws } = await joinedSession(pool, {});
 
   const p = livePlayer(handle, 'w1');
   const joinX = p.x, joinY = p.y;
-  p.x = 3000; p.y = 3000; // walk somewhere, then die there
+  p.x = 2400; p.y = 2400;   // near VILLAGE_B (2150,2150), far from A (1150,1150)
 
   const transitions = collectMsgs(ws, 'transition', 300);
   kill(handle, 'w1');
-  assert.deepStrictEqual(await transitions, [], 'no bind means nothing to travel to');
+  assert.deepStrictEqual(await transitions, [],
+    'the village is in THIS world, so nothing may move the player between worlds');
 
-  assert.strictEqual(p.x, joinX, 'respawned at the join spawn');
-  assert.strictEqual(p.y, joinY);
-  assert.strictEqual(p.hp, p.maxHp);
+  assert.strictEqual(p.x, VILLAGE_B.spawn_x, 'respawned at the nearer village');
+  assert.strictEqual(p.y, VILLAGE_B.spawn_y);
+  assert.notStrictEqual(p.x, joinX, 'and NOT at the join spawn, which is the old behaviour');
+  assert.strictEqual(p.hp, p.maxHp, 'still healed to full');
+});
+
+test('nearest is measured from where you DIED, not from where you joined', async () => {
+  // The same two villages, the same join point, a different death point -- and
+  // the answer has to change. Measuring from the join spawn would pick the same
+  // village both times and pass the test above by luck.
+  const pool = fakePool({ bind: null, villages: { w1: [VILLAGE_A, VILLAGE_B] } });
+  const { handle } = await joinedSession(pool, {});
+
+  const p = livePlayer(handle, 'w1');
+  p.x = 1200; p.y = 1200;   // this time, near VILLAGE_A
+  kill(handle, 'w1');
+  await sleep(100);          // resolveDeaths runs on the tick, not on the assignment
+
+  assert.strictEqual(p.x, VILLAGE_A.spawn_x, 'a death near A returns you to A');
+  assert.strictEqual(p.y, VILLAGE_A.spawn_y);
+});
+
+test('a death in a world with NO village falls back to the entry world village', async () => {
+  // Every dungeon. There is nowhere in this world to send them, so the entry
+  // world's village is the fallback -- through the same authorized relocation
+  // the cross-world bind case uses, not a client-supplied destination.
+  const pool = fakePool({ bind: null, villages: {} });   // w1 has none
+  const { handle, ws } = await joinedSession(pool, {});
+
+  const p = livePlayer(handle, 'w1');
+  p.x = 3000; p.y = 3000;
+
+  const transitions = collectMsgs(ws, 'transition', 400);
+  kill(handle, 'w1');
+  const sent = await transitions;
+
+  assert.strictEqual(sent.length, 1, 'exactly one transition, to the entry village');
+  assert.strictEqual(sent[0].toWorldId, ENTRY_VILLAGE.world_id);
+  assert.strictEqual(sent[0].arriveX, ENTRY_VILLAGE.spawn_x);
+  assert.strictEqual(sent[0].arriveY, ENTRY_VILLAGE.spawn_y);
+  assert.strictEqual(p.hp, p.maxHp, 'healed here first, as the cross-world path already does');
 });
 
 // ---------------------------------------------------------------------------
@@ -520,11 +581,18 @@ test('dying ON a doorway tile sends ONE transition, to the bound village', async
 });
 
 test('a death on a doorway tile does not wedge that doorway shut', async () => {
-  // No bind: the player respawns HERE, so they are still around to use the
+  // The player respawns IN THIS WORLD, so they are still around to use the
   // doorway afterwards. The skip must last exactly as long as hp<=0 does --
   // which is the remainder of one tick, since resolveDeaths runs at the end of
   // the same one.
-  const pool = fakePool({ bind: null, links: { w1: [DOORWAY_LINK] }, bounded: true });
+  //
+  // w1 is given a village (SOMET-443): an unbound death now goes to the nearest
+  // one, and a world with NO village relocates to the entry world instead --
+  // which would move the player out of w1 and make this test measure the
+  // relocation rather than the doorway. A village here keeps the subject the
+  // doorway.
+  const pool = fakePool({ bind: null, villages: { w1: [VILLAGE_A] },
+    links: { w1: [DOORWAY_LINK] }, bounded: true });
   const { handle, ws } = await joinedSession(pool, {});
 
   const p = livePlayer(handle, 'w1');

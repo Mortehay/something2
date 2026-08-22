@@ -123,6 +123,14 @@ function requiredTilesFor(w, spec, row, doorwayEdges) {
       out.push({ row: midRow, col: row.width - 2, what: 'arrival via doorway E' });
     }
   }
+  // An authored vault chest sits on GENERATED terrain, exactly like a doorway
+  // arrival tile: the (seed, size) re-roll that came up sealed for three worlds
+  // in SOMET-306/307 could just as easily put a chest under water. A chest a
+  // player cannot walk to is invisible in the worst way -- it broadcasts, it
+  // renders, and nothing explains why the open key does nothing.
+  if (w.chest && Number.isFinite(w.chest.x) && Number.isFinite(w.chest.y)) {
+    out.push({ row: Math.floor(w.chest.y / 100), col: Math.floor(w.chest.x / 100), what: 'vault chest' });
+  }
   for (const l of (spec.links || [])) {
     if (l.kind !== 'portal') continue;
     if (l.from === w.key) {
@@ -725,8 +733,24 @@ async function applyMapSpec(pool, spec) {
       const villages = await fetchVillages(client, worldId);
       const cfg = buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes });
 
+      // JUDGE THE TERRAIN, NOT THE ROADS (SOMET-349 review).
+      //
+      // generateConnectingRoads draws a continuous walkable highway between
+      // every pair of doorways, which makes ANY world navigable -- including
+      // one whose biome admits nothing but cave_wall. That is precisely the
+      // authoring mistake this check exists to refuse, and after SOMET-349 it
+      // stopped refusing it: seed_map_db's sealed-world fixture seeds cleanly,
+      // and a 400-seed scan of Blackfen Sinks finds nothing sealed either.
+      //
+      // So the check runs against terrain alone. Roads remain a convenience
+      // laid ON a world you could already cross, never the thing that makes it
+      // crossable. Verified backward-compatible before this landed: all 86
+      // worlds across both checked-in specs pass with the road network
+      // stripped, so no authored map depended on roads for connectivity.
+      const terrainOnly = { ...cfg, generatedRoads: [] };
+
       const required = requiredTilesFor(w, spec, row, doorways);
-      const problems = assertNavigable(cfg, required);
+      const problems = assertNavigable(terrainOnly, required);
       if (problems.length) {
         throw new Error(
           `world "${w.key}" is not navigable:\n  - ${problems.join('\n  - ')}`);
