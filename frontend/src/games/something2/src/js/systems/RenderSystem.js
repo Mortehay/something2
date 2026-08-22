@@ -161,6 +161,7 @@ export class RenderSystem {
     // `merchants` above -- not entities, so they carry no stored top-left
     // corner and need no half-extent adjustment.
     landmarks = [],
+    doorways = [],
     // Slice D: the effect LIBRARY, needed by the projectile trail. Effects in
     // `vfx` already carry their own resolved `def`; a projectile is a
     // persistent object that only carries a NAME, so the lookup happens here.
@@ -221,6 +222,7 @@ export class RenderSystem {
     // legible. The pulse phase is this frame's timestamp, set above -- the
     // renderer never reads a clock itself.
     drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH });
+    this.drawDoorways(doorways, chunkedMap, player);
 
     // Players + creatures + ground items + walls, all depth-sorted together
     // (Pass B) — ground items must join the same sort rather than being
@@ -866,6 +868,66 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // Draw doorway map transitions with destination names so players see where edges lead
+  drawDoorways(doorways, chunkedMap, player) {
+    if (!Array.isArray(doorways) || doorways.length === 0 || !chunkedMap) return;
+    const W = chunkedMap.width, H = chunkedMap.height;
+    if (!W || !H) return;
+    const midW = Math.floor(W / 2), midH = Math.floor(H / 2);
+    const at = {
+      N: { col: midW, row: 0, label: 'North' },
+      S: { col: midW, row: H - 1, label: 'South' },
+      W: { col: 0, row: midH, label: 'West' },
+      E: { col: W - 1, row: midH, label: 'East' },
+    };
+
+    for (const d of doorways) {
+      const edge = d.edge;
+      const pos = at[edge];
+      if (!pos) continue;
+      const wx = (pos.col + 0.5) * 100;
+      const wy = (pos.row + 0.5) * 100;
+      const s = worldToScreen(wx, wy);
+
+      const toName = d.toName || 'Next Map';
+      const text = `🚪 To ${toName} (${pos.label})`;
+
+      this.ctx.save();
+      this.ctx.font = 'bold 12px sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+
+      const metrics = this.ctx.measureText ? this.ctx.measureText(text) : { width: text.length * 7.5 };
+      const padX = 8;
+      const boxW = (metrics.width || 80) + padX * 2;
+      const boxH = 22;
+      const labelY = s.y - 45;
+
+      // Glow / border pill
+      this.ctx.fillStyle = 'rgba(18, 18, 31, 0.88)';
+      this.ctx.strokeStyle = '#c084fc';
+      this.ctx.lineWidth = 2;
+
+      if (this.ctx.roundRect) {
+        this.ctx.beginPath();
+        this.ctx.roundRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH, 5);
+        this.ctx.fill();
+        this.ctx.stroke();
+      } else if (this.ctx.strokeRect) {
+        this.ctx.fillRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
+        this.ctx.strokeRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
+      } else {
+        this.ctx.fillRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
+      }
+
+      this.ctx.fillStyle = '#f3e8ff';
+      if (this.ctx.fillText) {
+        this.ctx.fillText(text, s.x, labelY);
+      }
+      this.ctx.restore();
+    }
+  }
+
   // Status-effect rings at an affected actor's feet, one per active effect,
   // coloured from the SAME element palette the projectiles and blast rings use
   // (see statusEffects.js) so a burn reads as belonging to the fire bolt that
@@ -1171,7 +1233,7 @@ export class RenderSystem {
     ctx.fillStyle = "#e5e7eb";
     ctx.font = "14px monospace";
     ctx.textBaseline = "top";
-    ctx.fillText("Inventory — [i] to close", px + 16, py + 14);
+    ctx.fillText("Inventory — [i] / [Esc] to close", px + 16, py + 14);
 
     // Auto-loot toggle — top-right of the header row. Renders the server-
     // owned flag mirrored locally; clicking it only requests the flip.

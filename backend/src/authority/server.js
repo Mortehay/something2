@@ -622,6 +622,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const mapGenConfig = buildWorldGenConfig({
           row, tileTypes, doorways: [...links.keys()], villages, biomes,
         });
+        const compassDoorways = compassRows.map((l) => ({ edge: l.edge, toWorldId: l.to_world_id, toName: l.to_name || l.to_world_id }));
         const map = new ServerMap({ ...mapGenConfig, decorationDefs });
         const entry = {
           worldId: canonicalId, world: new World(map, itemTypes, defaultWeaponId, row.chunk_size), row, sockets: new Map(),
@@ -629,7 +630,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // palette without a second query per player.
           catalogs,
           tileTypes, creatureTypes, creatureTypeIds, creatureGold, behaviorGold, behaviorDrops,
-          goldItemTypeId, links, portalLinks, villages, waypoints, chests, mapGenConfig,
+          goldItemTypeId, links, portalLinks, compassDoorways, villages, waypoints, chests, mapGenConfig,
           activeChunks: new Set(),   // chunk keys currently in the union of player neighborhoods
           chunkLoads: new Set(),     // in-flight activation guard per chunk key
           loadedChunks: new Set(),   // chunk keys whose creatures have been successfully loaded
@@ -1550,6 +1551,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
             portalLinks: entry.portalLinks,
             activatedIds: activatedWaypointIds,
           }),
+          doorways: entry.compassDoorways || [],
         });
         // Fog of war (SOMET-263). Fire-and-forget: a failed bookkeeping write
         // must never break a join. Call site 1 of 2 -- the other is the

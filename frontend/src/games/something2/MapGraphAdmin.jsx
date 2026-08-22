@@ -196,6 +196,27 @@ function MapGraphAdmin() {
     return (names) => (names || []).map((n) => map.get(n) || '');
   }, [biomes]);
 
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
+
+  const dungeonInfoByWorld = useMemo(() => {
+    const map = new Map();
+    for (const w of linkable) {
+      const portalLinks = (links || []).filter(
+        (l) => l.edge === 'PORTAL' && (l.from_world_id === w.id || l.to_world_id === w.id)
+      );
+      const isPartOrHas = portalLinks.length > 0;
+      const destinations = portalLinks
+        .map((l) => (l.from_world_id === w.id ? l.to_world_id : l.from_world_id))
+        .map((id) => (worlds.find((x) => x.id === id) || {}).name || id);
+      map.set(w.id, {
+        hasDungeon: isPartOrHas,
+        portalCount: portalLinks.length,
+        destinations: [...new Set(destinations)],
+      });
+    }
+    return map;
+  }, [linkable, links, worlds]);
+
   const warnings = useMemo(
     () => lintGraph({ worlds: linkable, links, positions }),
     [linkable, links, positions],
@@ -204,14 +225,19 @@ function MapGraphAdmin() {
   const elements = useMemo(() => {
     const nodes = linkable
       .filter((w) => positions[w.id])
-      .map((w) => ({
-        data: {
-          id: w.id,
-          label: w.is_entry ? `★ ${w.name}` : w.name,
-          ring: biomeRingSvg(colourOf(w.biomes)),
-        },
-        position: positions[w.id],
-      }));
+      .map((w) => {
+        const dInfo = dungeonInfoByWorld.get(w.id) || { hasDungeon: false, portalCount: 0 };
+        const dungeonTag = dInfo.hasDungeon ? '🏰 [Dungeon]' : '🌿 [No Dungeon]';
+        return {
+          data: {
+            id: w.id,
+            label: `${w.is_entry ? '★ ' : ''}${w.name}\n${dungeonTag}`,
+            hasDungeon: String(dInfo.hasDungeon),
+            ring: biomeRingSvg(colourOf(w.biomes)),
+          },
+          position: positions[w.id],
+        };
+      });
     // Filtered against the node ids actually emitted above, not against
     // `positions` directly: with a synchronously-derived `positions` the two
     // sets agree in steady state, but deriving edges from the SAME set the
@@ -231,7 +257,7 @@ function MapGraphAdmin() {
         },
       }));
     return [...nodes, ...edges];
-  }, [linkable, links, positions, colourOf]);
+  }, [linkable, links, positions, colourOf, dungeonInfoByWorld]);
 
   /* s2-theme-exempt:start — cytoscape renders to canvas and cannot read CSS custom
      properties; theming it needs a getComputedStyle bridge plus forced re-render.
@@ -246,9 +272,25 @@ function MapGraphAdmin() {
         'border-color': '#444',
         width: 64, height: 64,
         color: '#eee',
-        'font-size': 11,
+        'font-size': 10,
         'text-valign': 'bottom',
         'text-margin-y': 6,
+        'text-wrap': 'wrap',
+        'text-max-width': 110,
+      },
+    },
+    {
+      selector: 'node[hasDungeon = "true"]',
+      style: {
+        'border-color': '#f472b6',
+        'border-width': 3,
+      },
+    },
+    {
+      selector: 'node[hasDungeon = "false"]',
+      style: {
+        'border-color': '#475569',
+        'border-width': 1,
       },
     },
     // The `data(...)` mappers live in their own rule, scoped to elements
@@ -426,20 +468,30 @@ function MapGraphAdmin() {
     };
     const onSelect = (evt) => {
       const id = evt.target.id();
+      if (evt.target.isNode()) {
+        setSelectedNodeId(id);
+        return;
+      }
       if (!id.includes('|')) return;
       const [fromId, edge] = id.split('|');
       setSelectedEdge({ fromId, edge });
     };
-    const onUnselect = () => setSelectedEdge(null);
+    const onUnselect = (evt) => {
+      if (evt.target.isNode()) {
+        setSelectedNodeId(null);
+      } else {
+        setSelectedEdge(null);
+      }
+    };
     cy.on('dragfree', 'node', onDragFree);
     cy.on('ehcomplete', onComplete);
-    cy.on('select', 'edge', onSelect);
-    cy.on('unselect', 'edge', onUnselect);
+    cy.on('select', 'edge, node', onSelect);
+    cy.on('unselect', 'edge, node', onUnselect);
     return () => {
       cy.off('dragfree', 'node', onDragFree);
       cy.off('ehcomplete', onComplete);
-      cy.off('select', 'edge', onSelect);
-      cy.off('unselect', 'edge', onUnselect);
+      cy.off('select', 'edge, node', onSelect);
+      cy.off('unselect', 'edge, node', onUnselect);
       ehInstance.destroy();
       ehRef.current = null;
       // destroy() leaves draw mode's autoungrabify set -- see the comment
@@ -497,6 +549,24 @@ function MapGraphAdmin() {
   };
 
   const nameOf = (id) => (worlds.find((w) => w.id === id) || {}).name || id;
+
+  const worldsWithDungeon = useMemo(
+    () => linkable.filter((w) => dungeonInfoByWorld.get(w.id)?.hasDungeon),
+    [linkable, dungeonInfoByWorld]
+  );
+  const worldsWithoutDungeon = useMemo(
+    () => linkable.filter((w) => !dungeonInfoByWorld.get(w.id)?.hasDungeon),
+    [linkable, dungeonInfoByWorld]
+  );
+  const selectedWorld = useMemo(
+    () => (selectedNodeId ? worlds.find((w) => w.id === selectedNodeId) : null),
+    [selectedNodeId, worlds]
+  );
+  const selectedWorldDungeon = useMemo(
+    () => (selectedNodeId ? dungeonInfoByWorld.get(selectedNodeId) : null),
+    [selectedNodeId, dungeonInfoByWorld]
+  );
+
   const replaced = pending
     ? linksReplacedBy({ links, fromId: pending.fromId, edge: pending.edge, toId: pending.toId })
     : [];
@@ -667,6 +737,50 @@ function MapGraphAdmin() {
                 ? 'Drag from one world to another to propose a link. Nodes cannot be repositioned while this is on.'
                 : 'Drag a world to reposition it. Turn on link mode to draw a new link instead.'}
             </Dim>
+          </Card>
+          {selectedWorld && (
+            <Card>
+              <strong style={{ color: 'var(--s2-text-muted)' }}>Selected World</strong>
+              <div style={{ fontWeight: 600, fontSize: '1.05em', margin: '0.2rem 0' }}>
+                {selectedWorld.is_entry ? '★ ' : ''}{selectedWorld.name}
+              </div>
+              <Dim>Size: {selectedWorld.width && selectedWorld.height ? `${selectedWorld.width}×${selectedWorld.height}` : 'Unbounded'}</Dim>
+              <Dim>Biomes: {(selectedWorld.biomes || []).join(', ') || 'None'}</Dim>
+              <div style={{ marginTop: '0.4rem', fontWeight: 600, color: selectedWorldDungeon?.hasDungeon ? 'var(--s2-tab-items)' : 'var(--s2-text-muted)' }}>
+                {selectedWorldDungeon?.hasDungeon
+                  ? `🏰 Dungeon: Yes (${selectedWorldDungeon.portalCount / 2 || selectedWorldDungeon.portalCount} portal${selectedWorldDungeon.portalCount > 1 ? 's' : ''})`
+                  : '🌿 Dungeon: None'}
+              </div>
+              {selectedWorldDungeon?.destinations?.length > 0 && (
+                <Dim style={{ fontSize: '0.85em', color: 'var(--s2-tab-items)', marginTop: '0.2rem' }}>
+                  Portal to: {selectedWorldDungeon.destinations.join(', ')}
+                </Dim>
+              )}
+            </Card>
+          )}
+          <Card>
+            <strong style={{ color: 'var(--s2-text-muted)' }}>Dungeons & Entrances</strong>
+            <Row style={{ justifyContent: 'space-between', margin: '0.2rem 0' }}>
+              <span style={{ color: 'var(--s2-tab-items)', fontWeight: 600 }}>🏰 With Dungeon:</span>
+              <span style={{ fontWeight: 600 }}>{worldsWithDungeon.length}</span>
+            </Row>
+            <Row style={{ justifyContent: 'space-between', margin: '0.2rem 0' }}>
+              <span style={{ color: 'var(--s2-text-dim)' }}>🌿 No Dungeon:</span>
+              <span>{worldsWithoutDungeon.length}</span>
+            </Row>
+            {worldsWithDungeon.length > 0 && (
+              <div style={{ marginTop: '0.5rem', maxHeight: '140px', overflowY: 'auto' }}>
+                {worldsWithDungeon.map((w) => {
+                  const info = dungeonInfoByWorld.get(w.id);
+                  return (
+                    <Dim key={w.id} style={{ fontSize: '0.85em', margin: '0.25rem 0' }}>
+                      🏰 <strong style={{ color: 'var(--s2-tab-items)' }}>{w.name}</strong>
+                      {info?.destinations?.length > 0 ? ` → ${info.destinations.join(', ')}` : ''}
+                    </Dim>
+                  );
+                })}
+              </div>
+            )}
           </Card>
           <Card>
             <strong style={{ color: 'var(--s2-text-muted)' }}>Consistency</strong>

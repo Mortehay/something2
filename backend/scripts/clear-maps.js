@@ -47,8 +47,9 @@ if (require.main === module) {
     // `make clear-maps < /dev/null`) is not a TTY. Without this check
     // rl.question(...) below waits forever for input that will never come --
     // it does NOT default to deleting, but a hang is still a broken script.
-    if (!process.stdin.isTTY) {
-      console.error('stdin is not a TTY -- refusing to prompt for confirmation. Aborting without deleting anything.');
+    const autoConfirm = process.env.CONFIRM === 'yes' || process.env.FORCE === '1' || process.argv.includes('-y') || process.argv.includes('--yes');
+    if (!autoConfirm && !process.stdin.isTTY) {
+      console.error('stdin is not a TTY -- refusing to prompt for confirmation. Aborting without deleting anything (use CONFIRM=yes or FORCE=1 to bypass).');
       process.exitCode = 1;
       return;
     }
@@ -65,14 +66,17 @@ if (require.main === module) {
     for (const t of CASCADES) console.log(`  - ${t}`);
     console.log('Kept: user accounts, inventory, equipment, and every catalog.');
 
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    // rl.question's callback never fires on EOF/'close' (e.g. Ctrl+D mid-
-    // prompt in an interactive session) -- only the 'close' event does. Race
-    // the two so a closed stdin aborts instead of hanging forever.
-    const closed = new Promise((res) => rl.once('close', () => res(null)));
-    const questioned = new Promise((res) => rl.question("Type 'yes' to confirm: ", res));
-    const answer = await Promise.race([questioned, closed]);
-    rl.close();
+    let answer = autoConfirm ? 'yes' : null;
+    if (!autoConfirm) {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      // rl.question's callback never fires on EOF/'close' (e.g. Ctrl+D mid-
+      // prompt in an interactive session) -- only the 'close' event does. Race
+      // the two so a closed stdin aborts instead of hanging forever.
+      const closed = new Promise((res) => rl.once('close', () => res(null)));
+      const questioned = new Promise((res) => rl.question("Type 'yes' to confirm: ", res));
+      answer = await Promise.race([questioned, closed]);
+      rl.close();
+    }
     if (answer === null) {
       console.error('stdin closed before confirmation was given. Aborting without deleting anything.');
       process.exitCode = 1;

@@ -97,3 +97,65 @@ export function ProviderAnimationNote({ provider }) {
     </div>
   );
 }
+
+// Pure helper for mapping a stored type's (ai_provider_mode, ai_provider_id) to
+// the select value. If pinned to a provider that was deleted or unknown, it
+// degrades to 'default'.
+export function resolveProviderPinChoice(mode, providerId, providers = []) {
+  if (mode === 'local') return 'local';
+  if (mode === 'provider' && providerId) {
+    const exists = providers.some((p) => Number(p.id) === Number(providerId));
+    return exists ? String(providerId) : 'default';
+  }
+  return 'default';
+}
+
+// Pure helper for converting the select value back into the two type columns.
+export function providerPinToState(val) {
+  if (val === 'local') return { ai_provider_mode: 'local', ai_provider_id: null };
+  if (val === 'default' || !val) return { ai_provider_mode: 'default', ai_provider_id: null };
+  return { ai_provider_mode: 'provider', ai_provider_id: Number(val) };
+}
+
+// SOMET-342: persistent provider pin in the type's own edit form.
+// Saved with the rest of the type row (ai_provider_mode and ai_provider_id).
+export function TypeProviderPinChoice({ mode, providerId, onChange, disabled }) {
+  const { providers, activeProvider, isLoadingProviders } = useAiProviders();
+
+  if (!isLoadingProviders && providers.length === 0) return null;
+
+  const enabled = providers.filter((p) => p.enabled !== false);
+  const defaultLabel = activeProvider
+    ? `Default (${activeProvider.name})`
+    : 'Default (local sprite-gen)';
+
+  const selectValue = resolveProviderPinChoice(mode, providerId, providers);
+
+  const handleChange = (newVal) => {
+    onChange(providerPinToState(newVal));
+  };
+
+  return (
+    <div style={{ marginBottom: '1rem' }}>
+      <label style={{ display: 'block', fontSize: '1.2rem', color: 'var(--s2-tab-entity, var(--s2-accent))', marginBottom: '0.4rem' }}>
+        Default AI Generation Service
+      </label>
+      <select
+        value={selectValue}
+        onChange={(e) => handleChange(e.target.value)}
+        disabled={disabled || isLoadingProviders}
+        style={selectStyle}
+        aria-label="Default AI Generation Service"
+      >
+        <option value="default">{defaultLabel}</option>
+        <option value="local">Local sprite-gen</option>
+        {enabled.map((p) => (
+          <option key={p.id} value={String(p.id)}>{p.name}</option>
+        ))}
+      </select>
+      <div style={{ fontSize: '1rem', opacity: 0.6, marginTop: '0.25rem' }}>
+        Which service generates images for this type by default. Saved with the type.
+      </div>
+    </div>
+  );
+}

@@ -123,6 +123,7 @@ export class Game {
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
+        this.doorways = [];
         this.shop = null;
         this.shopOpen = false;
         // Which stock list the shop panel shows and which page of it. The
@@ -364,6 +365,7 @@ export class Game {
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
+        this.doorways = [];
         this.shop = null;
         this.shopOpen = false;
         this.shopView = { tab: 'catalog', page: 0 };
@@ -411,16 +413,8 @@ export class Game {
                     this.autoLoot = msg.autoLoot === true;
                     this.gold = Number(msg.gold) || 0;
                     this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
-                    // SOMET-297. Same shape as merchants above. Replaced whole
-                    // on every join, so a world change cannot leave the previous
-                    // world's markers on the ground -- transitions re-join
-                    // (GameShell routes onTransition into enterWorld), so this
-                    // assignment is the only thing that has to be right.
                     this.landmarks = Array.isArray(msg.landmarks) ? msg.landmarks : [];
-                    // SOMET-310. Same whole-replacement rule as merchants and
-                    // landmarks: bank posts are static village geometry, so the
-                    // join frame is their only delivery and a stale list from
-                    // the previous world must not survive the transition.
+                    this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
                     this.banks = Array.isArray(msg.banks) ? msg.banks : [];
                     this.progression = msg.progression || null;
                     resolve(msg.spawn);
@@ -630,6 +624,7 @@ export class Game {
             // to lit, the minimap changes on the very next frame with no
             // refetch and no second copy to keep in step.
             landmarks: this.landmarks || [],
+            doorways: this.doorways || [],
             player: {
                 x: this.player.x + (this.player.width || 0) / 2,
                 y: this.player.y + (this.player.height || 0) / 2,
@@ -876,6 +871,7 @@ export class Game {
                 gold: this.gold,
                 merchants: this.merchants,
                 landmarks: this.landmarks,
+                doorways: this.doorways,
                 shop: this.shop,
                 shopOpen: this.shopOpen,
                 shopView: this.shopView,
@@ -1021,15 +1017,15 @@ export class Game {
             }
 
             if (isKey('escape')) {
+                if (typeof e.preventDefault === 'function') e.preventDefault();
                 console.log("Escape pressed, current state:", this.state);
                 if (this.shopOpen) {
                     this.shopOpen = false;
                 } else if (this.bankOpen) {
                     this.bankOpen = false;
-                } else if(this.state === 'playing'){
-                    this.pause();
-                } else if(this.state === 'paused'){
-                    this.resume();
+                } else if (this.inventoryOpen) {
+                    this.inventoryOpen = false;
+                    this.inventorySelectedItemId = null;
                 }
             }
 

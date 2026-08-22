@@ -169,32 +169,6 @@ const RecoveryPanel = styled.div`
   line-height: 1.5;
 `;
 
-const PauseOverlay = styled.div`
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: var(--s2-scrim);
-  backdrop-filter: blur(4px);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  z-index: 100;
-`;
-
-const PausePanel = styled(Panel)`
-  min-width: 300px;
-  text-align: center;
-  animation: slideUp 0.3s ease-out;
-
-  @keyframes slideUp {
-    from { transform: translateY(20px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-  }
-`;
-
 const Input = styled.input`
   background: var(--s2-surface-subtle);
   border: 1px solid var(--s2-border-strong);
@@ -414,22 +388,6 @@ export default function GameView() {
               )}
             </Panel>
         </UIOverlay>
-      )}
-
-      {isPaused && (
-        <PauseOverlay>
-          <PausePanel>
-            <h2 style={{ color: 'var(--s2-text-strong)', marginBottom: '20px' }}>Game Paused</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              <Button onClick={resume} style={{ background: 'var(--s2-success-alt)', fontSize: '16px', padding: '12px' }}>
-                Resume Game
-              </Button>
-              <Button onClick={exitToMenu} style={{ background: 'var(--s2-danger)', fontSize: '16px', padding: '12px' }}>
-                Exit to Main Menu
-              </Button>
-            </div>
-          </PausePanel>
-        </PauseOverlay>
       )}
 
       {/* SOMET-262: a player's way OUT of a failed join.

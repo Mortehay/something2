@@ -104,6 +104,42 @@ export function drawLandmarks(ctx, { landmarks, phase, halfW, halfH } = {}) {
     ctx.fillStyle = color;
     ctx.fillRect(s.x - 2, s.y - halfH - 46, 4, 46);
 
+    // Draw destination label for portal / landmark so players see where it leads
+    if (l.name && ctx.fillText) {
+      const text = l.kind === 'portal' ? `🌀 ${l.name}` : l.name;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0.75, alpha);
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const labelY = s.y - halfH - 58;
+
+      const metrics = ctx.measureText ? ctx.measureText(text) : { width: text.length * 7 };
+      const padX = 8;
+      const boxW = (metrics.width || 60) + padX * 2;
+      const boxH = 18;
+
+      // Background pill
+      ctx.fillStyle = 'rgba(18, 18, 31, 0.85)';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH, 4);
+        ctx.fill();
+        ctx.stroke();
+      } else if (ctx.strokeRect) {
+        ctx.fillRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
+        ctx.strokeRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
+      } else {
+        ctx.fillRect(s.x - boxW / 2, labelY - boxH / 2, boxW, boxH);
+      }
+
+      ctx.fillStyle = '#fdfdfd';
+      ctx.fillText(text, s.x, labelY);
+      ctx.restore();
+    }
+
     ctx.restore();
   }
 }

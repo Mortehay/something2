@@ -97,11 +97,23 @@ function MapCard({ world, creatureTypes, allMaps, biomes, biomesLoading }) {
     });
   };
 
+  const portalLinks = (links || []).filter(l => l.edge === 'PORTAL');
+  const hasDungeon = portalLinks.length > 0;
+
   return (
     <Card $entry={world.is_entry}>
       <Row>
         <Input value={name} onChange={e => setName(e.target.value)} />
         <span style={{ color: 'var(--s2-text-dim)' }}>{world.width}×{world.height} tiles</span>
+        {hasDungeon ? (
+          <span style={{ color: 'var(--s2-tab-items)', fontWeight: 600, fontSize: '0.85em', background: 'var(--s2-surface-raised)', border: '1px solid var(--s2-tab-items)', padding: '2px 8px', borderRadius: '4px' }}>
+            🏰 Dungeon: Yes ({portalLinks.length} portal{portalLinks.length > 1 ? 's' : ''})
+          </span>
+        ) : (
+          <span style={{ color: 'var(--s2-text-dim)', fontSize: '0.85em', background: 'var(--s2-surface-raised)', padding: '2px 8px', borderRadius: '4px' }}>
+            🌿 No Dungeon
+          </span>
+        )}
         {world.is_entry && <HiOutlineStar style={{ color: 'var(--s2-selected)' }} title="Player entry" />}
         <HiOutlineTrash style={{ color: 'var(--s2-danger)', cursor: 'pointer', marginLeft: 'auto' }}
           onClick={() => window.confirm('Delete this map?') && del.mutate(world.id)} />

@@ -234,7 +234,9 @@ function worldConfig(world = {}) {
       height: world.height,
       wallTile: world.wallTile || 'map_wall',
       doorwayTile: world.doorwayTile || 'map_doorway',
-      doorways: world.doorways instanceof Set ? world.doorways : new Set(world.doorways || []),
+      doorways: world.doorways instanceof Set
+        ? world.doorways
+        : new Set((world.doorways || []).map((d) => (typeof d === 'object' && d ? d.edge : d))),
     } : null,
     villages: Array.isArray(world.villages) && world.villages.length
       ? world.villages.map((v) => ({
@@ -480,7 +482,14 @@ function overviewDoorwayMarkers(world) {
   const W = world.width, H = world.height;
   const midW = Math.floor(W / 2), midH = Math.floor(H / 2);
   const at = { N: { col: midW, row: 0 }, S: { col: midW, row: H - 1 }, W: { col: 0, row: midH }, E: { col: W - 1, row: midH } };
-  return (world.doorways || []).filter((e) => at[e]).map((e) => ({ edge: e, ...at[e] }));
+  return (world.doorways || [])
+    .map((e) => {
+      const edge = typeof e === 'object' && e ? e.edge : e;
+      const toName = typeof e === 'object' && e ? e.toName : undefined;
+      if (!at[edge]) return null;
+      return { edge, ...(toName ? { toName } : {}), ...at[edge] };
+    })
+    .filter(Boolean);
 }
 
 function overviewVillageMarkers(world) {

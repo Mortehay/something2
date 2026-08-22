@@ -3481,7 +3481,9 @@ app.get('/api/worlds/:id/overview', async (req, res) => {
     if (!world) return res.status(404).json({ error: 'world not found' });
 
     const tileTypes = await getTileTypesMap();
-    const doorways = (await fetchLinks(pool, world.id)).map((l) => l.edge);
+    const doorways = (await fetchLinks(pool, world.id))
+      .filter((l) => l.edge !== 'PORTAL')
+      .map((l) => ({ edge: l.edge, toName: l.to_name }));
     const villages = await fetchVillages(pool, world.id);
     const biomes = await loadBiomes(pool, world.biomes);
     const data = generateWorldOverview(
