@@ -562,3 +562,43 @@ test('PUT /api/entity-types/:id refuses a provider pin with no target', async ()
   assert.equal(res.status, 400);
   assert.match(res.body.error, /needs an ai_provider_id/);
 });
+
+// SOMET-453. The POST route gained the pin, and with it the cross-field rule
+// that PUT already enforced. These cover the half of that behaviour the
+// existing tests do not: what POST must REFUSE.
+//
+// The split matters and is easy to get backwards, so it is asserted from both
+// sides. `providerPinFieldError` answers "is each value a thing this column
+// can hold" and must ACCEPT mode 'provider' with no id yet -- a form mid-edit
+// is well-formed. `providerPinError` adds "is this a complete pin" and must
+// REJECT it, because a stored 'provider' with no target silently resolves to
+// whichever provider happens to be active, which is not what the admin asked
+// for.
+test('POST /api/entity-types rejects ai_provider_mode "provider" with no id', async () => {
+  __setPool({ query: withAuth(async () => { throw new Error('must not reach the INSERT'); }) });
+
+  const res = await request(app).post('/api/entity-types').set(...AUTH).send({
+    name: 'Bush', color: '#0f0', ai_provider_mode: 'provider',
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /needs an ai_provider_id/);
+});
+
+test('POST /api/entity-types rejects an invalid mode with a 400, not a database 500', async () => {
+  // Before this, the mode reached the INSERT and the column CHECK answered --
+  // a 500 with a constraint name in it.
+  __setPool({ query: withAuth(async () => { throw new Error('must not reach the INSERT'); }) });
+
+  const res = await request(app).post('/api/entity-types').set(...AUTH).send({
+    name: 'Bush', color: '#0f0', ai_provider_mode: 'gemini',
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /ai_provider_mode/);
+});
+
+test('the field-level and write-level pin checks disagree about a bare "provider", on purpose', () => {
+  const { providerPinFieldError, providerPinError } = require('../src/services/providerPin.js');
+  const bare = { ai_provider_mode: 'provider' };
+  assert.equal(providerPinFieldError(bare), null, 'a form mid-edit is well-formed');
+  assert.match(providerPinError(bare), /needs an ai_provider_id/, 'but it may not be stored');
+});
