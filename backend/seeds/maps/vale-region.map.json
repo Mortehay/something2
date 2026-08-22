@@ -555,7 +555,7 @@
     {
       "key": "cata_entry",
       "name": "Catacomb Threshold",
-      "allows_fast_travel": true,
+      "allows_fast_travel": false,
       "grid": [
         1,
         2
@@ -574,6 +574,11 @@
         "Undead Line"
       ],
       "is_entry": false,
+      "level_band": [
+        3,
+        6
+      ],
+      "density": "sparse",
       "entry_spawn": {
         "x": 6450,
         "y": 6450
@@ -582,7 +587,7 @@
     {
       "key": "cata_crypt",
       "name": "Sealed Mausoleum",
-      "allows_fast_travel": true,
+      "allows_fast_travel": false,
       "grid": [
         0,
         2
@@ -604,12 +609,17 @@
         "Bonelord Skirmisher",
         "Bonelord Line"
       ],
-      "is_entry": false
+      "is_entry": false,
+      "level_band": [
+        4,
+        7
+      ],
+      "density": "sparse"
     },
     {
       "key": "cata_eastwing",
       "name": "Sunken Eastwing",
-      "allows_fast_travel": true,
+      "allows_fast_travel": false,
       "grid": [
         2,
         2
@@ -627,12 +637,17 @@
         "Drowned Skirmisher",
         "Drowned Line"
       ],
-      "is_entry": false
+      "is_entry": false,
+      "level_band": [
+        5,
+        9
+      ],
+      "density": "normal"
     },
     {
       "key": "cata_southwing",
       "name": "Drowned Southwing",
-      "allows_fast_travel": true,
+      "allows_fast_travel": false,
       "grid": [
         1,
         3
@@ -654,12 +669,17 @@
         "Drowned Skirmisher",
         "Drowned Line"
       ],
-      "is_entry": false
+      "is_entry": false,
+      "level_band": [
+        5,
+        9
+      ],
+      "density": "normal"
     },
     {
       "key": "cata_farhall",
       "name": "Farrow Hall",
-      "allows_fast_travel": true,
+      "allows_fast_travel": false,
       "grid": [
         3,
         2
@@ -677,12 +697,17 @@
         "Hive Skirmisher",
         "Hive Line"
       ],
-      "is_entry": false
+      "is_entry": false,
+      "level_band": [
+        7,
+        12
+      ],
+      "density": "dense"
     },
     {
       "key": "cata_deepvault",
       "name": "Deepvault Row",
-      "allows_fast_travel": true,
+      "allows_fast_travel": false,
       "grid": [
         2,
         3
@@ -700,12 +725,17 @@
         "Construct Skirmisher",
         "Construct Line"
       ],
-      "is_entry": false
+      "is_entry": false,
+      "level_band": [
+        8,
+        14
+      ],
+      "density": "dense"
     },
     {
       "key": "cata_heart",
       "name": "Frozen Ossuary Heart",
-      "allows_fast_travel": true,
+      "allows_fast_travel": false,
       "grid": [
         3,
         3
@@ -727,7 +757,12 @@
         "Rime Skirmisher",
         "Rime Line"
       ],
-      "is_entry": false
+      "is_entry": false,
+      "level_band": [
+        10,
+        16
+      ],
+      "density": "horde"
     }
   ],
   "links": [
@@ -827,14 +862,17 @@
       "to": "spine_entry"
     },
     {
+      "kind": "portal",
       "from": "vale_mire",
-      "edge": "S",
-      "to": "cata_crypt"
-    },
-    {
-      "from": "cata_farhall",
-      "edge": "N",
-      "to": "spine_elite"
+      "from_x": 4650,
+      "from_y": 4650,
+      "to": "cata_entry",
+      "to_x": 6450,
+      "to_y": 6450,
+      "guard": {
+        "creature_type": "Undead Line",
+        "count": 1
+      }
     }
   ]
 }
