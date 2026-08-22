@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import styled from 'styled-components';
 import { fetchWorldOverview, needsRefetch } from './src/js/net/worldOverviewClient.js';
 import { drawMinimap } from './src/js/systems/minimapRenderer.js';
+import { createTerrainLayerCache, domCanvasFactory } from './src/js/systems/minimapTerrainLayer.js';
 import { MAP_TILE_SIZE } from './src/js/core/constants.js';
 
 const SIZE = 180;         // minimap box (css px)
@@ -14,7 +15,7 @@ const LS_KEY = 'something2:minimapVisible';
 
 // Draw one frame into `ctx` for a box of `box` css px at `cellW` diamond size.
 // Returns true if it drew live content (a snapshot existed).
-function renderFrame(ctx, dpr, box, cellW, { gameRef, overviewRef, tileColors }) {
+function renderFrame(ctx, dpr, box, cellW, { gameRef, overviewRef, tileColors, layerCache }) {
   const snap = gameRef.current && gameRef.current.getMinimapSnapshot
     ? gameRef.current.getMinimapSnapshot() : null;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -26,7 +27,11 @@ function renderFrame(ctx, dpr, box, cellW, { gameRef, overviewRef, tileColors })
   if (overview && overview.world_id !== snap.worldId) overview = null;
   drawMinimap(ctx, {
     overview,
-    tileColors,
+    // SOMET-444. The terrain arrives as a pre-rendered bitmap. `layerCache`
+    // rebuilds it only when the overview window, the palette, the diamond size
+    // or the device pixel ratio changes -- so the per-cell loop that used to
+    // cost the expand modal half its frame rate now runs once per refetch.
+    terrainLayer: layerCache.get(overview, tileColors, cellW, dpr),
     player: { col: pCol, row: pRow, dir: snap.player.dir },
     creatures: snap.creatures.map((c) => ({ col: c.x / MAP_TILE_SIZE, row: c.y / MAP_TILE_SIZE, color: c.color })),
     doorways: overview ? overview.doorways : [],
@@ -151,6 +156,7 @@ export default function Minimap({ gameRef, tileColors }) {
     canvas.width = SIZE * dpr;
     canvas.height = SIZE * dpr;
     let raf = 0;
+    const layerCache = createTerrainLayerCache(domCanvasFactory);
 
     const maybeFetch = (worldId, pCol, pRow) => {
       const cached = overviewRef.current;
@@ -173,7 +179,7 @@ export default function Minimap({ gameRef, tileColors }) {
         const pRow = snap.player.y / MAP_TILE_SIZE;
         maybeFetch(snap.worldId, pCol, pRow);
       }
-      renderFrame(ctx, dpr, SIZE, CELL_PX, { gameRef, overviewRef, tileColors: tileColorsRef.current });
+      renderFrame(ctx, dpr, SIZE, CELL_PX, { gameRef, overviewRef, tileColors: tileColorsRef.current, layerCache });
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
@@ -207,9 +213,13 @@ export default function Minimap({ gameRef, tileColors }) {
     canvas.width = box * dpr; canvas.height = box * dpr;
     canvas.style.width = `${box}px`; canvas.style.height = `${box}px`;
     let raf = 0;
+    // Its own cache, not the docked map's: the two draw at different cellW, so
+    // one shared cache would rebuild the bitmap on every alternating frame --
+    // strictly worse than no cache at all. This one dies with the modal.
+    const layerCache = createTerrainLayerCache(domCanvasFactory);
     const frame = () => {
       raf = requestAnimationFrame(frame);
-      renderFrame(ctx, dpr, box, CELL_PX * 1.6, { gameRef, overviewRef, tileColors: tileColorsRef.current });
+      renderFrame(ctx, dpr, box, CELL_PX * 1.6, { gameRef, overviewRef, tileColors: tileColorsRef.current, layerCache });
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);

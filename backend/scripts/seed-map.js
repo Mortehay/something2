@@ -747,7 +747,10 @@ async function applyMapSpec(pool, spec) {
       // crossable. Verified backward-compatible before this landed: all 86
       // worlds across both checked-in specs pass with the road network
       // stripped, so no authored map depended on roads for connectivity.
-      const terrainOnly = { ...cfg, generatedRoads: [] };
+      // NOT `{ ...cfg, generatedRoads: [] }` -- worldConfig ignores that key
+      // and regenerates the network, which left this check inert from the day
+      // it was written (SOMET-366).
+      const terrainOnly = { ...cfg, noGeneratedRoads: true };
 
       const required = requiredTilesFor(w, spec, row, doorways);
       const problems = assertNavigable(terrainOnly, required);
