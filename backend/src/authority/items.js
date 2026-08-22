@@ -69,6 +69,11 @@ async function loadItemTypes(pool, catalogs = null) {
       // once had an aoe_radius would leave it silently still exploding, which
       // is the exact "the dropdown lied" failure this slice exists to stop.
       aoe_radius: behavior && !behavior.detonates ? null : num(row.aoe_radius),
+      // SOMET-343: WHERE a detonating shot goes off. 'contact' (the default,
+      // and today's behaviour for every existing weapon) means the first
+      // contact of any kind; 'max_range' means it flies through contacts and
+      // detonates only when its distance runs out. Null = contact.
+      detonate_at: behavior && behavior.detonates ? behavior.detonateAt : null,
       // Effect-name bindings per moment, e.g. { attack: 'sweep_arc' }.
       // Normalized to null so `weapon.vfx` is never undefined downstream.
       vfx: row.vfx || null,

@@ -629,6 +629,12 @@ class World {
       // more: the shooter can be dead or out of view before this lands, so
       // there would be no body left to measure against later.
       originLift,
+      // SOMET-343: the ammunition this shot consumed. server.js has already
+      // spent it by the time attack() runs; this is the catalog row, so an
+      // explosive arrow can make an ordinary bow detonate. null when the
+      // weapon needs no ammo (staves, darts) or the row is missing from the
+      // in-memory catalog.
+      ammo: w.ammo_type_id != null ? (this.weapons.get(w.ammo_type_id) || null) : null,
     });
     applyAttackCooldown(p, w);
     // Projectiles already render as a moving dot; their trail effects are

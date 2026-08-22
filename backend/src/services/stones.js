@@ -14,17 +14,18 @@ function stoneKind(itemTypeRow) {
 // needed only by the augment rule below. Optional so existing callers that
 // pass two arguments keep their exact behaviour.
 function isCompatible(kind, hostCategory, hostKind = null) {
-  // SOMET-332: an augment's bonus packet is currently applied on the MELEE
-  // damage paths only (world.js's player branch and CreatureSim.applyMeleeArc).
-  // The four projectile damage sites in projectiles.js do not read it yet.
+  // SOMET-343 LIFTED the melee-only restriction SOMET-332 imposed here.
   //
-  // So this refuses the socket rather than accepting it and doing nothing.
-  // A stone that visibly socketets into a bow and then adds no damage is the
-  // silent-inertness failure this whole epic exists to remove; an explicit
-  // refusal is a rule a player can see. Lift this the moment projectiles.js
-  // applies the packet -- and the test that pins it will fail loudly, which is
-  // the reminder.
-  if (kind === 'augment') return hostCategory === 'weapon' && hostKind === 'melee';
+  // That restriction existed because the four projectile damage sites in
+  // projectiles.js did not read the augment packet, so a stone socketed into a
+  // bow would have added nothing -- and an explicit refusal beats silent
+  // inertness. All four now apply it (see applyCreatureAugment /
+  // applyPlayerAugment there), so an augment is compatible with any weapon.
+  //
+  // `hostKind` is retained in the signature: it is what a future kind-specific
+  // rule would key on, and removing it would silently change every caller's
+  // arity back.
+  if (kind === 'augment') return hostCategory === 'weapon';
   if (kind === 'spell') return hostCategory === 'weapon';
   return hostCategory === 'weapon' || hostCategory === 'armor';
 }
