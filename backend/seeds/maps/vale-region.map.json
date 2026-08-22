@@ -763,6 +763,266 @@
         16
       ],
       "density": "horde"
+    },
+    {
+      "key": "hollow_entry",
+      "name": "The Sunscar Hollows: Threshold",
+      "allows_fast_travel": false,
+      "grid": [
+        20,
+        0
+      ],
+      "seed": 4101,
+      "width": 96,
+      "height": 96,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Fungal Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line",
+        "Fungal Swarm",
+        "Fungal Skirmisher",
+        "Fungal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        5,
+        9
+      ],
+      "density": "sparse",
+      "entry_spawn": {
+        "x": 4850,
+        "y": 4850
+      }
+    },
+    {
+      "key": "hollow_pass",
+      "name": "The Sunscar Hollows: Chokestone",
+      "allows_fast_travel": false,
+      "grid": [
+        21,
+        0
+      ],
+      "seed": 4102,
+      "width": 128,
+      "height": 128,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Fungal Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line",
+        "Fungal Swarm",
+        "Fungal Skirmisher",
+        "Fungal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        6,
+        11
+      ],
+      "density": "normal"
+    },
+    {
+      "key": "hollow_cache",
+      "name": "The Sunscar Hollows: Dry Cache",
+      "allows_fast_travel": false,
+      "grid": [
+        21,
+        -1
+      ],
+      "seed": 4103,
+      "width": 128,
+      "height": 128,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Fungal Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line",
+        "Fungal Swarm",
+        "Fungal Skirmisher",
+        "Fungal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        7,
+        13
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "hollow_elite",
+      "name": "The Sunscar Hollows: Spore Den",
+      "allows_fast_travel": false,
+      "grid": [
+        21,
+        1
+      ],
+      "seed": 4104,
+      "width": 128,
+      "height": 128,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Fungal Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line",
+        "Fungal Swarm",
+        "Fungal Skirmisher",
+        "Fungal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        7,
+        13
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "hollow_gorge",
+      "name": "The Sunscar Hollows: Sinkgorge",
+      "allows_fast_travel": false,
+      "grid": [
+        22,
+        0
+      ],
+      "seed": 4105,
+      "width": 160,
+      "height": 160,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Fungal Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line",
+        "Fungal Swarm",
+        "Fungal Skirmisher",
+        "Fungal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        8,
+        14
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "hollow_shrine",
+      "name": "The Sunscar Hollows: Buried Shrine",
+      "allows_fast_travel": false,
+      "grid": [
+        22,
+        1
+      ],
+      "seed": 4106,
+      "width": 160,
+      "height": 160,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Fungal Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line",
+        "Fungal Swarm",
+        "Fungal Skirmisher",
+        "Fungal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        10,
+        16
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "hollow_deep",
+      "name": "The Sunscar Hollows: The Long Dark",
+      "allows_fast_travel": false,
+      "grid": [
+        23,
+        0
+      ],
+      "seed": 4107,
+      "width": 192,
+      "height": 192,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Fungal Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line",
+        "Fungal Swarm",
+        "Fungal Skirmisher",
+        "Fungal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        10,
+        16
+      ],
+      "density": "horde"
+    },
+    {
+      "key": "hollow_end",
+      "name": "The Sunscar Hollows: Mycelian Vault",
+      "allows_fast_travel": false,
+      "grid": [
+        24,
+        0
+      ],
+      "seed": 4108,
+      "width": 192,
+      "height": 192,
+      "chunk_size": 32,
+      "biomes": [
+        "Cavern",
+        "Fungal Deep"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Cave Swarm",
+        "Cave Skirmisher",
+        "Cave Line",
+        "Fungal Swarm",
+        "Fungal Skirmisher",
+        "Fungal Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        14,
+        20
+      ],
+      "density": "horde"
     }
   ],
   "links": [
@@ -871,6 +1131,54 @@
       "to_y": 6450,
       "guard": {
         "creature_type": "Undead Line",
+        "count": 1
+      }
+    },
+    {
+      "from": "hollow_entry",
+      "edge": "E",
+      "to": "hollow_pass"
+    },
+    {
+      "from": "hollow_pass",
+      "edge": "N",
+      "to": "hollow_cache"
+    },
+    {
+      "from": "hollow_pass",
+      "edge": "S",
+      "to": "hollow_elite"
+    },
+    {
+      "from": "hollow_pass",
+      "edge": "E",
+      "to": "hollow_gorge"
+    },
+    {
+      "from": "hollow_gorge",
+      "edge": "S",
+      "to": "hollow_shrine"
+    },
+    {
+      "from": "hollow_gorge",
+      "edge": "E",
+      "to": "hollow_deep"
+    },
+    {
+      "from": "hollow_deep",
+      "edge": "E",
+      "to": "hollow_end"
+    },
+    {
+      "kind": "portal",
+      "from": "vale_dunes",
+      "from_x": 4850,
+      "from_y": 4850,
+      "to": "hollow_entry",
+      "to_x": 4850,
+      "to_y": 4850,
+      "guard": {
+        "creature_type": "Cave Line",
         "count": 1
       }
     }
