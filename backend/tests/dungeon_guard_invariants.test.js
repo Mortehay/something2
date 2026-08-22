@@ -69,27 +69,23 @@ const behindAGuard = (spec) => {
   return spec.worlds.filter((w) => !free.has(w.key));
 };
 
-// PRE-EXISTING violations, pinned rather than hidden (SOMET-450 → SOMET-451).
+// Worlds that violate the invariant below but are knowingly tolerated.
 //
-// Each of these five is compass-attached to a d2_* room, and every d2_* room
-// sits behind the d1_end → d2_hub Fungal Line guard. So a character with no
-// history can first-join one of these surface worlds and walk into The
-// Underdeep without ever meeting that guard.
+// EMPTY, and that is the point: p5-descent's 5 surface worlds were pinned here
+// when this file landed (SOMET-450) and were fixed by SOMET-451, which taught
+// gen-p5-map-content.js to DERIVE allows_fast_travel from the graph instead of
+// asserting it on all 10 surface worlds.
 //
-// They are listed, not excluded by narrowing this file's scope to vale-region:
-// scoping the test away from the spec that fails it is how a guard gets
-// disarmed. Enumerating them keeps the invariant running over p5-descent, so
-// a SIXTH violation fails this test. Removing an entry as it is fixed is the
-// intended direction of travel; adding one requires deciding to.
-const KNOWN_UNGUARDED = new Map([
-  ['p5-descent.map.json', [
-    'surface_highlands_1',
-    'surface_verdant_jungle_0',
-    'surface_storm_coast_1',
-    'surface_sunken_ruins_0',
-    'surface_ashfields_1',
-  ]],
-]);
+// Kept rather than deleted, because it records how a violation is meant to be
+// handled: pin it and raise a ticket, so the invariant keeps running over the
+// offending spec and a SECOND violation still fails the build. The wrong move
+// -- and the one this whole file exists to prevent -- is narrowing the test's
+// scope to exclude the spec that fails it.
+//
+// The list cannot rot in either direction: a new violation fails, and a pinned
+// world that stops violating also fails, which is exactly how the p5 entries
+// announced they were ready to be removed.
+const KNOWN_UNGUARDED = new Map([]);
 
 test('no world behind a guarded portal is a first-join target', () => {
   let specsWithGuards = 0;

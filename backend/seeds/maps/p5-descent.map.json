@@ -1657,8 +1657,7 @@
         4,
         12
       ],
-      "density": "normal",
-      "allows_fast_travel": true
+      "density": "normal"
     },
     {
       "key": "surface_verdant_jungle_0",
@@ -1685,8 +1684,7 @@
         1,
         8
       ],
-      "density": "sparse",
-      "allows_fast_travel": true
+      "density": "sparse"
     },
     {
       "key": "surface_verdant_jungle_1",
@@ -1769,8 +1767,7 @@
         4,
         12
       ],
-      "density": "normal",
-      "allows_fast_travel": true
+      "density": "normal"
     },
     {
       "key": "surface_sunken_ruins_0",
@@ -1797,8 +1794,7 @@
         1,
         8
       ],
-      "density": "sparse",
-      "allows_fast_travel": true
+      "density": "sparse"
     },
     {
       "key": "surface_sunken_ruins_1",
@@ -1881,8 +1877,7 @@
         4,
         12
       ],
-      "density": "normal",
-      "allows_fast_travel": true
+      "density": "normal"
     }
   ],
   "links": [

@@ -40,13 +40,35 @@ function portalCenterPx(size) {
 // for this box, and far enough in that the whole 64px player square lands
 // inside the interior. It also avoids the merchant post and both gate-guard
 // posts. At size 64 this reproduces the hand-written literal it replaces.
-function entryVillageBox(size) {
+function entryVillageBox(size, key) {
   const c = size / 2;                       // centre tile index
   return {
+    // REQUIRED since SOMET-312, and first emitted here by SOMET-451. `key` is
+    // the village's identity: it is what lets a re-seed MOVE a village instead
+    // of leaving it where it was, and validateMapSpec rejects a village
+    // without one. It reached the checked-in spec as a hand patch and the
+    // generator never learned it, so regenerating p5-descent silently dropped
+    // all three village keys and produced a spec that no longer validated --
+    // the same shape of bug as the allows_fast_travel hand patch this file
+    // already carries a comment about (SOMET-306). Generated, not hand-held.
+    key,
     min_row: c - 4, min_col: c - 4, width: 6, height: 4, gate_edge: 'S',
     spawn_x: (c - 2) * 100 + 50,
     spawn_y: (c - 3) * 100 + 50,
   };
+}
+
+// "The Underdeep: Hub" -> "underdeep-hub". The dungeon's own name, minus a
+// leading article and its room suffix, slugified. Reproduces the three keys
+// that were hand-written into the spec, so this is not a rename.
+function villageKeyFor(worldName) {
+  return worldName
+    .split(':')[0]
+    .replace(/^The\s+/i, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') + '-hub';
 }
 
 const DUNGEON_GRID_SPACING = 12; // cells between each dungeon's local grid origin -- wider than any skeleton's own bounding box (max 5x3)
@@ -388,10 +410,15 @@ function buildSurfaceWorlds(dungeonBuilds) {
       is_entry: false,
       level_band: variant === 0 ? [1, 8] : [4, 12],
       density: variant === 0 ? 'sparse' : 'normal',
-      // The 10 surface worlds are fast-travel destinations. This was a hand
-      // patch on the checked-in spec that the generator did not know about,
-      // so any regeneration silently dropped it (SOMET-306).
-      allows_fast_travel: true,
+      // allows_fast_travel is NOT set here -- see applyFirstJoinFlags below,
+      // which derives it from the assembled graph. Setting it unconditionally
+      // (which is what this line used to do) flagged 5 surface worlds that sit
+      // BEHIND the d1_end -> d2_hub guard, so a character with no history could
+      // first-join one and walk into The Underdeep without meeting it
+      // (SOMET-451). The flag was originally a hand patch on the checked-in
+      // spec that the generator did not know about and silently dropped on
+      // regeneration (SOMET-306) -- it belongs in the generator, but derived,
+      // not asserted.
     });
     links.push({ from: graft.worldKey, edge: graft.edge, to: key });
   });
@@ -504,7 +531,7 @@ function generateSpec() {
   for (const w of allWorlds) {
     if (!w._needsVillage) continue;
     delete w._needsVillage;
-    w.village = entryVillageBox(w.width);
+    w.village = entryVillageBox(w.width, villageKeyFor(w.name));
   }
 
   // The sole is_entry world spawns new characters at its centre.
@@ -550,12 +577,74 @@ function generateSpec() {
     }
   }
 
+  const finalLinks = [...allLinks, ...portalLinks];
+  applyFirstJoinFlags(finalWorlds, finalLinks);
+
   return {
     name: 'p5-descent',
     topology: 'chained-dungeons-plus-surface',
     worlds: finalWorlds,
-    links: [...allLinks, ...portalLinks],
+    links: finalLinks,
   };
+}
+
+// SOMET-451. Which worlds may a character with NO HISTORY join?
+//
+// `allows_fast_travel` no longer authorizes travel -- SOMET-293 retired that
+// leg -- but it is still the sole input to joinPolicy's `first-join`
+// (src/services/joinPolicy.js:157): `!hasHistory && (isEntry ||
+// allowsFastTravel)`. So a flagged world is a world a brand-new character can
+// be created directly into.
+//
+// The rule that has to hold: never flag a world that sits behind a portal
+// guard, or the guard is skippable by making a new character. Derived from the
+// graph rather than hand-listed, because the hand-listed version is what went
+// wrong -- the old code flagged all 10 surface worlds unconditionally, and 5 of
+// them hang off d2_* rooms, which are only reachable through the
+// d1_end -> d2_hub Fungal Line.
+//
+// The remaining 5 keep the flag, which matters: the `first-join` leg exists so
+// that a new character is not locked out if `is_entry` is lost from live data,
+// as it was in SOMET-265. Those 5 are reachable without passing any guard, so
+// the safety net survives at full strength.
+//
+// Pinned from the other side by tests/dungeon_guard_invariants.test.js, which
+// asserts the same property over every shipped spec.
+function applyFirstJoinFlags(worlds, links) {
+  const entry = worlds.find((w) => w.is_entry === true);
+  if (!entry) throw new Error('applyFirstJoinFlags: no entry world');
+
+  // Adjacency WITHOUT guarded portals: what a character can reach on foot
+  // from the entry without ever defeating a guard.
+  const adjacency = new Map(worlds.map((w) => [w.key, []]));
+  for (const l of links) {
+    if (l.kind === 'portal' && l.guard) continue;
+    adjacency.get(l.from).push(l.to);
+    adjacency.get(l.to).push(l.from);
+  }
+  const free = new Set([entry.key]);
+  const queue = [entry.key];
+  while (queue.length) {
+    for (const next of adjacency.get(queue.shift()) ?? []) {
+      if (!free.has(next)) { free.add(next); queue.push(next); }
+    }
+  }
+
+  // Surface worlds only. A dungeon room is never a first-join target even
+  // when it is guard-free (D1's rooms are), because dropping a new character
+  // into a dungeon is not what the safety net is for.
+  let flagged = 0;
+  for (const w of worlds) {
+    if (!w.key.startsWith('surface_')) continue;
+    if (!free.has(w.key)) continue;
+    w.allows_fast_travel = true;
+    flagged++;
+  }
+  if (flagged === 0) {
+    throw new Error('applyFirstJoinFlags: no world is a valid first-join target -- '
+      + 'a new character would be locked out if is_entry were ever lost');
+  }
+  return flagged;
 }
 
 function writeOutput() {
@@ -565,5 +654,5 @@ function writeOutput() {
   console.log(`Wrote ${spec.worlds.length} worlds, ${spec.links.length} links to ${outPath}`);
 }
 
-module.exports = { generateSpec, portalCenterPx, entryVillageBox };
+module.exports = { generateSpec, portalCenterPx, entryVillageBox, villageKeyFor };
 if (require.main === module) writeOutput();
