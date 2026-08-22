@@ -42,9 +42,18 @@ test('every world in vale-region is reachable from the entry over DECLARED links
 
   // Undirected: setLink writes the mirror row, so a declared link is walkable
   // both ways whether or not the spec restates it.
+  //
+  // PORTALS COUNT (SOMET-446). This walk excluded `kind: 'portal'` when it was
+  // written, which was a no-op then -- vale-region declared no portals, so
+  // "compass links" and "declared links" were the same set. They are not any
+  // more: 21 of this spec's worlds now sit behind guarded portals. Excluding
+  // them would fail this test for content that is perfectly well declared,
+  // which is the opposite of what it is for. A portal is spec-declared and
+  // applyMapSpec applies it (scripts/seed-map.js's setPortalLink pass, plus a
+  // guard pass), so a portal-reached world is NOT stranded by a re-seed --
+  // which is the actual claim being made here.
   const adjacency = new Map(spec.worlds.map((w) => [w.key, []]));
   for (const l of spec.links) {
-    if (l.kind === 'portal') continue;
     adjacency.get(l.from).push(l.to);
     adjacency.get(l.to).push(l.from);
   }
@@ -60,8 +69,9 @@ test('every world in vale-region is reachable from the entry over DECLARED links
   assert.deepEqual(unreachable, [],
     'these worlds are only reachable through links no spec declares -- a re-seed would strand them');
   // Non-vacuity: an empty or single-world spec would satisfy the check above
-  // while proving nothing. 20 is the merged spec's pinned size.
-  assert.equal(seen.size, 20, 'expected the merged region to be 20 worlds');
+  // while proving nothing. 34 = the 20 merged-region worlds plus SOMET-446's
+  // three dungeons (7 catacombs, 8 Sunscar Hollows, 6 Rimevault).
+  assert.equal(seen.size, 34, 'expected the merged region to be 34 worlds');
 });
 
 // The three regions were merged precisely so their connections could be
@@ -72,13 +82,24 @@ test('the three regions are actually connected to each other by declared links',
   const spec = readSpec('vale-region');
   const regionOf = (key) => key.split('_')[0];
   const cross = spec.links
-    .filter((l) => l.kind !== 'portal' && regionOf(l.from) !== regionOf(l.to))
-    .map((l) => `${l.from} --${l.edge}--> ${l.to}`)
+    .filter((l) => regionOf(l.from) !== regionOf(l.to))
+    .map((l) => (l.kind === 'portal'
+      ? `${l.from} --PORTAL--> ${l.to}`
+      : `${l.from} --${l.edge}--> ${l.to}`))
     .sort();
+  // SOMET-446 changed the KIND of two of these, not their existence. The two
+  // doorways into the catacombs became one guarded portal, because a dungeon
+  // you can stroll into through a compass edge is not gated by anything:
+  //   cata_farhall --N--> spine_elite  (deleted; a level 4-6 spine world
+  //     opened straight into a level 7-12 dungeon room)
+  //   vale_mire --S--> cata_crypt      (became vale_mire --PORTAL--> cata_entry)
+  // Portals are listed here alongside doorways because the claim this test
+  // makes is about DECLARED connections, not about doorways specifically.
   assert.deepEqual(cross, [
-    'cata_farhall --N--> spine_elite',
+    'vale_dunes --PORTAL--> hollow_entry',
     'vale_forest --E--> spine_entry',
-    'vale_mire --S--> cata_crypt',
+    'vale_frozen --PORTAL--> rime_hub',
+    'vale_mire --PORTAL--> cata_entry',
   ]);
 });
 

@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { generateSpec, portalCenterPx, entryVillageBox } = require('../scripts/dungeon/gen-p5-map-content');
+const {
+  generateSpec, portalCenterPx, entryVillageBox, villageKeyFor,
+} = require('../scripts/dungeon/gen-p5-map-content');
 
 test('generates a spec with exactly one is_entry world', () => {
   const spec = generateSpec();
@@ -76,17 +78,40 @@ test('portalCenterPx scales to the centre tile of any world size', () => {
 });
 
 test('entryVillageBox(64) reproduces the old hand-written village literal', () => {
-  assert.deepEqual(entryVillageBox(64), {
+  assert.deepEqual(entryVillageBox(64, 'underdeep-hub'), {
+    key: 'underdeep-hub',
     min_row: 28, min_col: 28, width: 6, height: 4, gate_edge: 'S',
     spawn_x: 3050, spawn_y: 2950,
   });
 });
 
 test('entryVillageBox stays centred as the world grows', () => {
-  assert.deepEqual(entryVillageBox(128), {
+  assert.deepEqual(entryVillageBox(128, 'abyss-hub'), {
+    key: 'abyss-hub',
     min_row: 60, min_col: 60, width: 6, height: 4, gate_edge: 'S',
     spawn_x: 6250, spawn_y: 6150,
   });
+});
+
+// SOMET-451. The generator had never emitted village `key`, so regenerating
+// p5-descent dropped all three and produced a spec validateMapSpec rejects
+// (`key` is REQUIRED since SOMET-312 -- it is what lets a re-seed MOVE a
+// village). These three strings are the ones that were hand-written into the
+// checked-in spec, so this pins that deriving them is not a rename.
+test('villageKeyFor reproduces the hand-written village keys', () => {
+  assert.equal(villageKeyFor('The Underdeep: Hub'), 'underdeep-hub');
+  assert.equal(villageKeyFor('The Frozen Vaults: Hub'), 'frozen-vaults-hub');
+  assert.equal(villageKeyFor('The Abyss: Hub'), 'abyss-hub');
+});
+
+test('every generated village declares a non-empty key', () => {
+  const spec = generateSpec();
+  const villages = spec.worlds.filter((w) => w.village);
+  assert.ok(villages.length >= 3, `expected the hub dungeons to carry villages, found ${villages.length}`);
+  for (const w of villages) {
+    assert.equal(typeof w.village.key, 'string', `world "${w.key}" village key is not a string`);
+    assert.ok(w.village.key.length > 0, `world "${w.key}" village key is empty`);
+  }
 });
 
 test('world size varies with depth instead of being uniformly 64', () => {
