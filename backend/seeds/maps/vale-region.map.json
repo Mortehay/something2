@@ -1023,6 +1023,212 @@
         20
       ],
       "density": "horde"
+    },
+    {
+      "key": "rime_hub",
+      "name": "The Rimevault: Hold",
+      "allows_fast_travel": false,
+      "grid": [
+        20,
+        12
+      ],
+      "seed": 4201,
+      "width": 160,
+      "height": 160,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line",
+        "Construct Swarm",
+        "Construct Skirmisher",
+        "Construct Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        12,
+        18
+      ],
+      "density": "normal",
+      "village": {
+        "key": "rimevault-hold",
+        "min_row": 76,
+        "min_col": 76,
+        "width": 6,
+        "height": 4,
+        "gate_edge": "S",
+        "spawn_x": 7850,
+        "spawn_y": 7750
+      },
+      "entry_spawn": {
+        "x": 7850,
+        "y": 7750
+      }
+    },
+    {
+      "key": "rime_spokeN",
+      "name": "The Rimevault: Hoarfrost Gallery",
+      "allows_fast_travel": false,
+      "grid": [
+        20,
+        11
+      ],
+      "seed": 4202,
+      "width": 192,
+      "height": 192,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line",
+        "Construct Swarm",
+        "Construct Skirmisher",
+        "Construct Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        14,
+        22
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "rime_spokeE",
+      "name": "The Rimevault: Coldforge",
+      "allows_fast_travel": false,
+      "grid": [
+        21,
+        12
+      ],
+      "seed": 4203,
+      "width": 192,
+      "height": 192,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line",
+        "Construct Swarm",
+        "Construct Skirmisher",
+        "Construct Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        14,
+        22
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "rime_spokeS",
+      "name": "The Rimevault: Shatterfloor",
+      "allows_fast_travel": false,
+      "grid": [
+        20,
+        13
+      ],
+      "seed": 4204,
+      "width": 192,
+      "height": 192,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line",
+        "Construct Swarm",
+        "Construct Skirmisher",
+        "Construct Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        14,
+        22
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "rime_spokeW",
+      "name": "The Rimevault: Still Wing",
+      "allows_fast_travel": false,
+      "grid": [
+        19,
+        12
+      ],
+      "seed": 4205,
+      "width": 192,
+      "height": 192,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line",
+        "Construct Swarm",
+        "Construct Skirmisher",
+        "Construct Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        14,
+        22
+      ],
+      "density": "dense"
+    },
+    {
+      "key": "rime_subBranch",
+      "name": "The Rimevault: Sealed Core",
+      "allows_fast_travel": false,
+      "grid": [
+        21,
+        11
+      ],
+      "seed": 4206,
+      "width": 192,
+      "height": 192,
+      "chunk_size": 32,
+      "biomes": [
+        "Frostvault",
+        "Deepvault"
+      ],
+      "biome_cell": 16,
+      "allowed_creature_types": [
+        "Rime Swarm",
+        "Rime Skirmisher",
+        "Rime Line",
+        "Construct Swarm",
+        "Construct Skirmisher",
+        "Construct Line"
+      ],
+      "is_entry": false,
+      "level_band": [
+        18,
+        28
+      ],
+      "density": "swarm"
     }
   ],
   "links": [
@@ -1179,6 +1385,44 @@
       "to_y": 4850,
       "guard": {
         "creature_type": "Cave Line",
+        "count": 1
+      }
+    },
+    {
+      "from": "rime_hub",
+      "edge": "N",
+      "to": "rime_spokeN"
+    },
+    {
+      "from": "rime_hub",
+      "edge": "E",
+      "to": "rime_spokeE"
+    },
+    {
+      "from": "rime_hub",
+      "edge": "S",
+      "to": "rime_spokeS"
+    },
+    {
+      "from": "rime_hub",
+      "edge": "W",
+      "to": "rime_spokeW"
+    },
+    {
+      "from": "rime_spokeE",
+      "edge": "N",
+      "to": "rime_subBranch"
+    },
+    {
+      "kind": "portal",
+      "from": "vale_frozen",
+      "from_x": 4850,
+      "from_y": 4850,
+      "to": "rime_hub",
+      "to_x": 7950,
+      "to_y": 7950,
+      "guard": {
+        "creature_type": "Rime Line",
         "count": 1
       }
     }
