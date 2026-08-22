@@ -39,6 +39,13 @@ services:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set in .env}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
+      # SOMET-381. Dev really is cross-origin -- vite serves :15173 and the API
+      # answers on :13101 -- so the allowlist must name it or every browser call
+      # fails preflight. Production needs no entries at all: Caddy fronts both
+      # on one origin there. `make tunnel` adds its public origin on top.
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:15173,http://127.0.0.1:15173}
+      # Registration stays open on a workstation; production chooses explicitly.
+      - REGISTRATION_MODE=${REGISTRATION_MODE:-open}
       - SPRITE_GEN_URL=http://sprite-gen:8100
       - SPRITE_GEN_SHARED_SECRET=${SPRITE_GEN_SHARED_SECRET:?SPRITE_GEN_SHARED_SECRET must be set in .env}
       # Preserves the existing dev experience: `make up` migrates and serves in

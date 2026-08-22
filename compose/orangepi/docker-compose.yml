@@ -93,6 +93,15 @@ services:
       - TRUST_CF_CONNECTING_IP=${TRUST_CF_CONNECTING_IP:-1}
       - DATABASE_URL=postgres://user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/game_db
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set in .env}
+      # SOMET-381. Caddy fronts the frontend and the API on ONE origin here, so
+      # browser calls are same-origin and never preflight -- an empty allowlist
+      # is the correct value, not an oversight. Set it only if something genuinely
+      # cross-origin ever needs in.
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      # Invite-gated: a code is required to register. Mint them with
+      # `node scripts/invite-codes.js mint`. Explicit because the boot guard
+      # refuses to start in production when this is unset.
+      - REGISTRATION_MODE=${REGISTRATION_MODE:-invite}
       # Object storage is not configured yet (SOMET-379). The MinIO client in
       # backend/src/services/assetStore.js is built lazily inside getClient()
       # and nothing calls it at startup, so the backend boots fine without it;
