@@ -769,8 +769,8 @@
       "name": "The Sunscar Hollows: Threshold",
       "allows_fast_travel": false,
       "grid": [
-        20,
-        0
+        24,
+        11
       ],
       "seed": 4101,
       "width": 96,
@@ -805,8 +805,8 @@
       "name": "The Sunscar Hollows: Chokestone",
       "allows_fast_travel": false,
       "grid": [
-        21,
-        0
+        25,
+        11
       ],
       "seed": 4102,
       "width": 128,
@@ -837,8 +837,8 @@
       "name": "The Sunscar Hollows: Dry Cache",
       "allows_fast_travel": false,
       "grid": [
-        21,
-        -1
+        25,
+        10
       ],
       "seed": 4103,
       "width": 128,
@@ -869,8 +869,8 @@
       "name": "The Sunscar Hollows: Spore Den",
       "allows_fast_travel": false,
       "grid": [
-        21,
-        1
+        25,
+        12
       ],
       "seed": 4104,
       "width": 128,
@@ -901,8 +901,8 @@
       "name": "The Sunscar Hollows: Sinkgorge",
       "allows_fast_travel": false,
       "grid": [
-        22,
-        0
+        26,
+        11
       ],
       "seed": 4105,
       "width": 160,
@@ -933,8 +933,8 @@
       "name": "The Sunscar Hollows: Buried Shrine",
       "allows_fast_travel": false,
       "grid": [
-        22,
-        1
+        26,
+        12
       ],
       "seed": 4106,
       "width": 160,
@@ -965,8 +965,8 @@
       "name": "The Sunscar Hollows: The Long Dark",
       "allows_fast_travel": false,
       "grid": [
-        23,
-        0
+        27,
+        11
       ],
       "seed": 4107,
       "width": 192,
@@ -997,8 +997,8 @@
       "name": "The Sunscar Hollows: Mycelian Vault",
       "allows_fast_travel": false,
       "grid": [
-        24,
-        0
+        28,
+        11
       ],
       "seed": 4108,
       "width": 192,

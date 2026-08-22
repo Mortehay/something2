@@ -171,3 +171,51 @@ test('vale-region has one guarded entrance per dungeon', () => {
     'expected 21 gated rooms (7 catacombs + 8 hollows + 6 rimevault); '
     + `found ${behind.length}: ${behind.join(', ')}`);
 });
+
+// SOMET-452. Grid cells must be unique ACROSS specs, not just within one.
+//
+// seed-map.js derives graph_x/graph_y straight from a world's grid cell
+// (GRID_SPACING = 220), and the frontend's seedPositions never recomputes a
+// position that is already stored. So two worlds sharing a cell are drawn on
+// top of each other in the World Map tab, whichever specs they came from.
+//
+// validateMapSpec already rejects two worlds in the SAME spec sharing a cell.
+// It cannot see this case: it is handed one spec and has no idea another
+// exists. That blind spot shipped -- SOMET-448 parked The Sunscar Hollows at
+// origin [20,0], copying gen-p5-map-content.js's "dungeons live at x >= 20"
+// convention without noticing p5-descent ITSELF occupies x 20..105, and 8
+// Hollows rooms landed exactly on 8 Catacombs rooms.
+//
+// "One spec per database" is the documented supported workflow, and this test
+// does not contradict it: it costs one number to keep the shipped specs
+// mutually consistent, the dev database has carried both for a long time, and
+// before SOMET-448 they did not collide at all.
+test('no grid cell is claimed by two worlds, across all shipped specs', () => {
+  const byCell = new Map();
+  let placed = 0;
+
+  for (const file of specFiles()) {
+    for (const w of readSpec(file).worlds) {
+      // A portal-only world legitimately has no grid (mapSpec.js:264) and is
+      // never drawn from one, so it cannot collide.
+      if (!Array.isArray(w.grid)) continue;
+      placed++;
+      const cell = w.grid.join(',');
+      if (!byCell.has(cell)) byCell.set(cell, []);
+      byCell.get(cell).push(`${file}:${w.key}`);
+    }
+  }
+
+  const collisions = [...byCell.entries()]
+    .filter(([, claimants]) => claimants.length > 1)
+    .map(([cell, claimants]) => `cell (${cell}) claimed by ${claimants.join(' and ')}`)
+    .sort();
+
+  assert.deepEqual(collisions, [],
+    'these worlds would be drawn on top of each other in the World Map tab');
+
+  // Non-vacuity: a spec that stopped parsing, or a `grid` key renamed out from
+  // under the guard above, would leave byCell empty and pass silently.
+  assert.ok(placed >= 90,
+    `expected to check the grid of most shipped worlds, checked ${placed}`);
+});
