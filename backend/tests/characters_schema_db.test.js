@@ -138,14 +138,33 @@ test('characters schema', { skip: !url ? 'no database URL' : false }, async (t) 
     }
   });
 
-  await t.test('every backfilled character is named after its account', async () => {
-    // Slot 1 is the only slot the backfill writes. A slot-1 character whose
-    // name is not its username was created by the API, which is legitimate --
-    // so this only checks the ones that still carry the backfill's signature
-    // (created_at equal to the migration's, i.e. the oldest slot-1 rows).
+  await t.test('no slot-1 character is named after a DIFFERENT account', async () => {
+    // This subtest used to assert that at least one backfilled character still
+    // existed. That is a property of the environment, not of the schema: the
+    // backfill (migration 1714440092000) only gave a character to users that
+    // already held player state, so a database with no such users legitimately
+    // has zero of them. The assertion passed on the long-lived dev database and
+    // failed on every fresh one -- backwards, and it checked nothing on either,
+    // since the WHERE clause already forced name = username (SOMET-455).
+    //
+    // It cannot be rewritten as a fixture that re-runs the backfill: that
+    // migration re-keyed every state table to character_id and dropped user_id,
+    // so "a user holding state with no character" is no longer constructible.
+    //
+    // What IS checkable on any database is the collision the migration's own
+    // comment calls impossible by construction -- a slot-1 character wearing
+    // some OTHER account's username. characters_name_unique does not prevent
+    // it: an account that never made a character leaves its username free for
+    // someone else's character to take, and a future backfill over these rows
+    // would then hand that account a name it cannot have.
     const r = await pool.query(
-      `SELECT c.name, u.username FROM characters c JOIN users u ON u.id = c.user_id
-        WHERE c.slot = 1 AND c.name = u.username`);
-    assert.ok(r.rows.length > 0, 'expected at least one backfilled character to still exist');
+      `SELECT c.name AS character_name, owner.username AS owner, u.username AS impersonated
+         FROM characters c
+         JOIN users owner ON owner.id = c.user_id
+         JOIN users u ON u.username = c.name AND u.id <> c.user_id
+        WHERE c.slot = 1
+        ORDER BY c.name`);
+    assert.deepEqual(r.rows, [],
+      'a slot-1 character carries another account\'s username');
   });
 });
