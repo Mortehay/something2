@@ -5,6 +5,12 @@ import { drawLandmarks } from "./landmarkRenderer.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual } from "./spriteAtlas.js";
 import { TileDiamondCache } from "./tileTexture.js";
+import { createTextLabelCache, drawCachedLabel } from "./textLabelCache.js";
+// domCanvasFactory lives in minimapTerrainLayer because that is where the
+// first offscreen-canvas cache needed it; it is a plain DOM helper with
+// nothing minimap-specific about it, and duplicating it here to avoid the
+// odd-looking import would be the worse trade.
+import { domCanvasFactory } from "./minimapTerrainLayer.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
@@ -31,6 +37,17 @@ const WORLD_CHEST_PROMPT_R = 110;
 // let the player see themselves/nearby creatures behind it.
 const WALL_REVEAL_R = 150;
 
+// SOMET-445. The level tag's full visual identity, in one place: it is both
+// what gets drawn and what the label cache keys on, so the two cannot drift.
+// Stroke-then-fill because the tag sits over arbitrary terrain colours and
+// plain white text vanishes on snow.
+const LEVEL_TAG_STYLE = {
+  font: "bold 12px monospace",
+  fillStyle: "#ffd166",
+  strokeStyle: "rgba(0,0,0,0.85)",
+  lineWidth: 2,
+};
+
 export class RenderSystem {
   constructor(canvas, imageManager) {
     this.canvas = canvas;
@@ -42,6 +59,11 @@ export class RenderSystem {
     this.renderModeOverride = null;
     this.tileTexturesOff = false;
     this._tileCache = new TileDiamondCache();
+    // SOMET-445: creature level tags, rasterised once per distinct string.
+    // strokeText + fillText were the 3rd and 4th costliest entries in the
+    // whole render trace -- together ~3x the entire minimap -- redrawing a
+    // dozen identical strings once per creature per frame.
+    this._labelCache = createTextLabelCache({ createCanvas: domCanvasFactory });
     // Hit-test rects for the inventory panel, recorded while drawing it and
     // read back by Game on click. Empty whenever the panel isn't open.
     this._invHitAreas = [];
@@ -1069,18 +1091,24 @@ export class RenderSystem {
     // Stroke-then-fill because the label sits over arbitrary terrain colours
     // and plain white text vanishes on snow.
     if (e.level > 1) {
-      this.ctx.save();
-      this.ctx.font = "bold 12px monospace";
-      this.ctx.textAlign = "center";
-      this.ctx.lineWidth = 2;
-      this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
-      this.ctx.fillStyle = "#ffd166";
-      const label = `L${e.level}`;
       const lx = drawX + w / 2;
       const ly = drawY - 18;
-      this.ctx.strokeText(label, lx, ly);
-      this.ctx.fillText(label, lx, ly);
-      this.ctx.restore();
+      const entry = this._labelCache.get(`L${e.level}`, LEVEL_TAG_STYLE);
+      if (!drawCachedLabel(this.ctx, entry, lx, ly)) {
+        // The cache returns null for a label with no drawable extent, which
+        // is also what a stub context that cannot measure produces. Draw it
+        // directly in that case, so a test double or an exotic context still
+        // gets the tag rather than silently losing it.
+        this.ctx.save();
+        this.ctx.font = LEVEL_TAG_STYLE.font;
+        this.ctx.textAlign = "center";
+        this.ctx.lineWidth = LEVEL_TAG_STYLE.lineWidth;
+        this.ctx.strokeStyle = LEVEL_TAG_STYLE.strokeStyle;
+        this.ctx.fillStyle = LEVEL_TAG_STYLE.fillStyle;
+        this.ctx.strokeText(`L${e.level}`, lx, ly);
+        this.ctx.fillText(`L${e.level}`, lx, ly);
+        this.ctx.restore();
+      }
     }
     this._drawEffectPips(drawX, drawY, e.effects);
   }
