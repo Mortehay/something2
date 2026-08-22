@@ -982,3 +982,28 @@ test('a chest that is not an object is rejected', () => {
   assert.match(withChest([okChest])[0], /chest must be an object/);
   assert.match(withChest(null)[0], /chest must be an object/);
 });
+
+test('a portal located inside a village is rejected', () => {
+  const spec = valid();
+  spec.worlds[0].village = {
+    key: 'alpha-village',
+    min_row: 20, min_col: 20, width: 6, height: 4, gate_edge: 'S',
+    spawn_x: 2250, spawn_y: 2150,
+  };
+  spec.worlds[0].entry_spawn = { x: 2250, y: 2150 };
+  spec.links = [
+    {
+      kind: 'portal',
+      from: 'a', from_x: 2150, from_y: 2150, // inside village box (rows 20..23, cols 20..25)
+      to: 'b', to_x: 3250, to_y: 3250,
+    },
+  ];
+  const errs = validateMapSpec(spec);
+  assert.ok(errs.some((e) => /portal link a->b departure point \(2150,2150\) is inside village "alpha-village"/i.test(e)), errs.join('; '));
+
+  // Portal placed outside village box passes cleanly
+  spec.links[0].from_x = 2250;
+  spec.links[0].from_y = 2850; // row 28, outside village
+  assert.deepEqual(validateMapSpec(spec), []);
+});
+
