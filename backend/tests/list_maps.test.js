@@ -29,7 +29,9 @@ test('listSpecs() returns the shipped specs with name/topology/world-count', () 
 
   const byName = Object.fromEntries(specs.map((s) => [s.name, s]));
   assert.equal(byName['vale-region'].topology, 'region');
-  assert.equal(byName['vale-region'].worlds, 20);
+  // 34 = the 20 merged-region worlds plus SOMET-446's three dungeons
+  // (7 catacombs upgraded in place, 8 Sunscar Hollows, 6 Rimevault).
+  assert.equal(byName['vale-region'].worlds, 34);
   assert.equal(byName['p5-descent'].topology, 'chained-dungeons-plus-surface');
 });
 
