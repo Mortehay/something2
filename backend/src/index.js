@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { corsOptions, describePolicy } = require('./corsPolicy.js');
 const { rateLimit } = require('express-rate-limit');
 const { attachAuthority } = require('./authority/server');
 const { applyTrustProxy, clientIpKey } = require('./clientIp');
@@ -52,7 +53,13 @@ const getTileTypesMap = () => loadTileTypes(pool);
 // even though the server demonstrably sent it -- silently dropping the
 // warning that a village-delete/link-clear edit did not reach a connected
 // player's live session.
-app.use(cors({ exposedHeaders: ['X-Live-World-Pending'] }));
+// SOMET-381: the origin is now an allowlist from CORS_ORIGINS, because a
+// public URL means "every origin" is no longer an acceptable answer. Empty
+// means deny cross-origin, which is CORRECT in production -- Caddy fronts the
+// frontend and the API on one origin there, so nothing preflights. See
+// corsPolicy.js for why empty must never be read as "allow all".
+app.use(cors(corsOptions()));
+console.log(describePolicy(process.env.CORS_ORIGINS));
 
 // A modest global rate limit in front of the whole router (SOMET-189 /
 // F-009). /api/auth already has its own tighter, credential-aware limiter
@@ -111,6 +118,7 @@ const guardPool = {
 };
 const { requireAdmin, requireAuth } = require('./auth/middleware.js');
 const { assertJwtSecretOrExit } = require('./auth/assertJwtSecret.js');
+const { assertProductionSafety } = require('./productionSafety.js');
 const authRouter = require('./auth/routes.js');
 const progressionRoutes = require('./api/progressionRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
@@ -357,6 +365,11 @@ async function runMigrations() {
 // migrations -- only completing (or aborting) before listen() does.
 if (require.main === module) {
   assertJwtSecretOrExit();
+  // SOMET-381. The rest of the public-deployment configuration, checked at the
+  // same moment and for the same reason: a workstation setting that reaches
+  // production should stop the release, not ship quietly. JWT_SECRET is NOT
+  // rechecked here -- assertJwtSecretOrExit above owns it.
+  assertProductionSafety();
 }
 
 // Decoration defs for GET /chunk's generateChunkDecorations call. Shared with

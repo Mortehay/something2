@@ -131,11 +131,13 @@ export async function apiFetch(url, options) {
   return noteAuthFailure(await fetch(url, options));
 }
 
-async function postAuth(apiUrl, path, username, password) {
+async function postAuth(apiUrl, path, username, password, extra) {
   const res = await fetch(`${apiUrl}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+    // `extra` carries the invite code on register (SOMET-381). Spread last but
+    // never allowed to overwrite the credentials.
+    body: JSON.stringify({ ...(extra || {}), username, password }),
   });
   let data = {};
   try { data = await res.json(); } catch { /* non-JSON body */ }
@@ -144,8 +146,14 @@ async function postAuth(apiUrl, path, username, password) {
 }
 
 // Both return { token, user }. Callers store the token via storeToken().
-export function register(apiUrl, username, password) {
-  return postAuth(apiUrl, "/api/auth/register", username, password);
+//
+// `inviteCode` is optional and only meaningful when the server runs with
+// REGISTRATION_MODE=invite (SOMET-381); an open server ignores it entirely,
+// so the client does not need to know which mode it is talking to.
+export function register(apiUrl, username, password, inviteCode) {
+  const trimmed = (inviteCode || "").trim();
+  return postAuth(apiUrl, "/api/auth/register", username, password,
+    trimmed ? { inviteCode: trimmed } : undefined);
 }
 export function login(apiUrl, username, password) {
   return postAuth(apiUrl, "/api/auth/login", username, password);
