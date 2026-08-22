@@ -267,7 +267,9 @@ const aiProviders = require('./services/aiProviders');
 const providerDiscovery = require('./services/providerDiscovery');
 const remoteImageProvider = require('./services/remoteImageProvider');
 const { resolveGenerationTarget, loadTypeOverride } = require('./services/generationTarget');
-const { pinProvided, providerPinError, providerPinValues } = require('./services/providerPin.js');
+const {
+  pinProvided, providerPinFieldError, providerPinError, providerPinValues,
+} = require('./services/providerPin.js');
 
 // SOMET-328: the three /api/*-jobs/:jobId routes serve jobs from two different
 // engines now. The id prefix says which, so a caller polling a job never has
@@ -642,6 +644,13 @@ app.get('/api/map/tiles', async (req, res) => {
 const MAX_ENTITY_DISPLAY_PX = 400;
 
 function entityTypeFieldError(body) {
+  // SOMET-453. The pin rule lives in ONE place (services/providerPin.js) and is
+  // reached from here, so every caller that asks "is this entity-type body
+  // valid" gets the same answer. It used to be consulted only by the PUT route,
+  // which is how POST came to accept an invalid ai_provider_mode -- and how a
+  // unit test calling this function directly got null and threw on assert.match.
+  const pinErr = providerPinFieldError(body);
+  if (pinErr) return pinErr;
   if (body.attack_element != null && !ELEMENTS.includes(body.attack_element)) {
     return `attack_element must be one of ${ELEMENTS.join(', ')}`;
   }
@@ -686,20 +695,34 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
     const fieldErr = entityTypeFieldError(req.body);
     if (fieldErr) return res.status(400).json({ error: fieldErr });
 
+    // The write-level rule on top of the field-level one entityTypeFieldError
+    // already ran -- same call PUT makes, so 'provider' with no id is a 400
+    // here rather than a stored half-state.
+    const pinErr = providerPinError(req.body);
+    if (pinErr) return res.status(400).json({ error: pinErr });
+
+    // A new row has no existing pin to preserve, so an absent one means the
+    // DEFAULT -- unlike the PUT below, where absent means "leave it alone" and
+    // the values are null. Same helper, different meaning for "not sent",
+    // which is exactly why this is spelled out rather than shared.
+    const pin = pinProvided(req.body)
+      ? providerPinValues(req.body)
+      : { mode: 'default', id: null };
+
     const result = await pool.query(
       `INSERT INTO entity_types (
         name, color, walkable, spawn_tiles, chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode, is_creature, prompt, place_order,
-        behavior_id, attack_element
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26) RETURNING *`,
+        behavior_id, attack_element, ai_provider_mode, ai_provider_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0,
-        behavior_id ?? null, attack_element || 'physical'
+        behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id
       ]
     );
     res.status(201).json(result.rows[0]);
