@@ -117,7 +117,7 @@ export class Game {
         this.gold = 0;
 
         // Progression (SOMET-242): the raw player_progression row (level,
-        // experience, stat_points, six stats) -- set from `joined.progression`
+        // experience, passive_points, six stats) -- set from `joined.progression`
         // and refreshed by `progression` push messages (kill XP, level-up,
         // death). null until the first join lands. Nothing here derives HUD
         // numbers from it directly; CharacterSheet.jsx is the sole reader.
