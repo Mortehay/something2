@@ -19,10 +19,6 @@ const { getSettings } = require('./gameSettings.js');
 function progressionStore() { return require('./progressionStore.js'); }
 
 let cache = null;
-// The adjacency map is derived from `cache.edges` and rebuilt with it rather
-// than on every allocation: buildAdjacency over 2142 edges on each click is
-// pure waste for a graph that only the seeder and the admin editor change.
-let adjacencyCache = null;
 
 async function loadTree(pool) {
   if (cache) return cache;
@@ -46,15 +42,21 @@ async function loadTree(pool) {
     })),
     edges: e.rows.map((r) => [r.a_id, r.b_id]),
   };
+  // byId and adjacency hang off the SAME object the caller is handed, not off
+  // module-scope siblings: invalidateTreeCache() drops the whole snapshot at
+  // once, so a caller holding a reference cannot observe a half-cleared graph.
+  // Rebuilt with the cache rather than per call -- buildAdjacency over 2142
+  // edges on every click is pure waste for a graph only the seeder and the
+  // admin editor change.
   cache.byId = new Map(cache.nodes.map((x) => [x.id, x]));
-  adjacencyCache = buildAdjacency(cache.edges);
+  cache.adjacency = buildAdjacency(cache.edges);
   return cache;
 }
 
 // Called by the admin editor after a write. Not a TTL: a stale tree in a
 // running world is invisible (the node just grants the old thing), so it has
 // to be invalidated by the write rather than waited out.
-function invalidateTreeCache() { cache = null; adjacencyCache = null; }
+function invalidateTreeCache() { cache = null; }
 
 // Resolved from characters.entity_type_id -> entity_types.name ->
 // passive_nodes.start_class. Deliberately NOT via entity_types.main_stat:
@@ -136,7 +138,7 @@ async function allocateNode(pool, characterId, nodeId) {
       await client.query('ROLLBACK');
       return { ok: false, reason: 'already allocated' };
     }
-    if (!isAllocatable(id, allocated, adjacencyCache, startNodeId)) {
+    if (!isAllocatable(id, allocated, tree.adjacency, startNodeId)) {
       await client.query('ROLLBACK');
       return { ok: false, reason: 'node is not reachable yet' };
     }
