@@ -60,3 +60,205 @@ test('the requirement columns reject nonsense values', async (t) => {
     /item_types_req_stats_check/,
   );
 });
+
+// ---------------------------------------------------------------------------
+// THE ANTI-INERTNESS GUARD. Everything below drives the gate THROUGH
+// world.setEquipment / world.clearEquipment rather than through canEquip
+// directly. canEquip's `req` argument is optional, so a gate that exists but
+// is never handed a context would pass every canEquip-level test while being
+// completely inert in the running game. These are the tests that fail if the
+// thread from world.js is ever dropped.
+// ---------------------------------------------------------------------------
+
+const { World } = require('../src/authority/world.js');
+const { loadItemTypes } = require('../src/authority/items.js');
+
+async function createCharacter(pool, tag, level, stats = {}) {
+  const username = `reqtest-${tag}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const u = await pool.query(
+    'INSERT INTO users (username, password_hash, role) VALUES ($1, \'x\', \'player\') RETURNING id', [username],
+  );
+  const c = await pool.query(
+    `INSERT INTO characters (user_id, slot, name, entity_type_id)
+     SELECT $1, 1, $2, e.id FROM entity_types e WHERE e.name = 'Warrior' RETURNING id`,
+    [u.rows[0].id, `req-char-${tag}-${process.pid}-${Date.now()}`],
+  );
+  const characterId = c.rows[0].id;
+  await pool.query(
+    `INSERT INTO player_progression (character_id, level, strength, dexterity, constitution,
+                                     intelligence, wisdom, charisma)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (character_id) DO UPDATE SET level = $2, strength = $3, dexterity = $4,
+       constitution = $5, intelligence = $6, wisdom = $7, charisma = $8`,
+    [characterId, level, stats.strength ?? 5, stats.dexterity ?? 5, stats.constitution ?? 5,
+      stats.intelligence ?? 5, stats.wisdom ?? 5, stats.charisma ?? 5],
+  );
+  return { userId: u.rows[0].id, characterId };
+}
+
+async function makeItemType(pool, name, extra) {
+  const cols = { category: 'armor', slot: 'chest', kind: null, damage: 0, cooldown: 0, defense: 1, ...extra };
+  const r = await pool.query(
+    `INSERT INTO item_types (name, category, slot, kind, damage, cooldown, defense,
+                             req_level, req_strength, item_level, tier)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+    [name, cols.category, cols.slot, cols.kind, cols.damage, cols.cooldown, cols.defense,
+      cols.req_level ?? 1, cols.req_strength ?? 0, cols.item_level ?? 1, cols.tier ?? 1],
+  );
+  return r.rows[0].id;
+}
+
+function armWorld(itemTypes) {
+  const map = { chunkSize: 8, isWalkable: () => true, speedAt: () => 1, getChunk: () => [] };
+  return new World(map, itemTypes, null, 8);
+}
+
+test('world.setEquipment refuses an item whose level requirement the character does not meet', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  t.after(async () => { await pool.end().catch(() => {}); });
+
+  const tag = `lvl-${Date.now()}`;
+  const { characterId } = await createCharacter(pool, tag, 3);
+  const typeId = await makeItemType(pool, `req-plate-${tag}`, { req_level: 40 });
+  const ins = await pool.query(
+    'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1,$2,1) RETURNING id',
+    [characterId, typeId],
+  );
+  const itemId = ins.rows[0].id;
+
+  const itemTypes = await loadItemTypes(pool);
+  const world = armWorld(itemTypes);
+  world.addPlayer('u-req', { x: 0, y: 0 }, {
+    items: [{ id: itemId, typeId, quantity: 1 }], equipment: {},
+  }, { x: 0, y: 0 }, 0, undefined, characterId);
+
+  const r = await world.setEquipment(pool, 'u-req', itemId, 'chest');
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'requires level 40');
+
+  const eq = await pool.query('SELECT count(*)::int AS n FROM player_equipment WHERE character_id = $1', [characterId]);
+  assert.strictEqual(eq.rows[0].n, 0, 'a refused equip must write nothing');
+  assert.strictEqual(world.getPlayer('u-req').inv.equipment.chest, undefined,
+    'a refused equip must not mutate the in-memory paper doll either');
+});
+
+// The positive half. Without this, "setEquipment refuses everything" would
+// also pass the test above, and the gate could be refusing legal gear too.
+test('world.setEquipment still equips an item whose requirements ARE met', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  t.after(async () => { await pool.end().catch(() => {}); });
+
+  const tag = `okeq-${Date.now()}`;
+  const { characterId } = await createCharacter(pool, tag, 40);
+  const typeId = await makeItemType(pool, `ok-plate-${tag}`, { req_level: 40 });
+  const itemId = (await pool.query(
+    'INSERT INTO player_items (character_id, item_type_id, quantity) VALUES ($1,$2,1) RETURNING id',
+    [characterId, typeId],
+  )).rows[0].id;
+
+  const itemTypes = await loadItemTypes(pool);
+  const world = armWorld(itemTypes);
+  world.addPlayer('u-ok', { x: 0, y: 0 }, {
+    items: [{ id: itemId, typeId, quantity: 1 }], equipment: {},
+  }, { x: 0, y: 0 }, 0, undefined, characterId);
+
+  const r = await world.setEquipment(pool, 'u-ok', itemId, 'chest');
+  assert.deepStrictEqual(r, { ok: true });
+  const eq = await pool.query('SELECT slot FROM player_equipment WHERE character_id = $1', [characterId]);
+  assert.deepStrictEqual(eq.rows.map((x) => x.slot), ['chest']);
+  assert.strictEqual(world.getPlayer('u-ok').mit.defense, 1, 'mitigation is recomputed on success');
+});
+
+test('world.clearEquipment refuses an unequip that would orphan another item, naming it', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  t.after(async () => { await pool.end().catch(() => {}); });
+
+  const tag = `dep-${Date.now()}`;
+  const { characterId } = await createCharacter(pool, tag, 50);
+  const plateId = await makeItemType(pool, `dep-plate-${tag}`, { req_strength: 20 });
+  const helmId = await makeItemType(pool, `dep-helm-${tag}`, { slot: 'head' });
+  const stoneTypeId = (await pool.query(
+    `INSERT INTO item_types (name, category, slot, kind, damage, cooldown,
+                             stat_bonus_stat, stat_bonus_amount)
+     VALUES ($1,'stone',NULL,NULL,0,0,'strength',20) RETURNING id`,
+    [`dep-stone-${tag}`],
+  )).rows[0].id;
+
+  const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateId])).rows[0].id;
+  const helm = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, helmId])).rows[0].id;
+  const stone = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, stoneTypeId])).rows[0].id;
+  await pool.query('INSERT INTO stone_instances (player_item_id, socketed_into_id) VALUES ($1,$2)', [stone, helm]);
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'chest', plate]);
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'head', helm]);
+
+  const itemTypes = await loadItemTypes(pool);
+  const world = armWorld(itemTypes);
+  world.addPlayer('u-dep', { x: 0, y: 0 }, {
+    items: [
+      { id: plate, typeId: plateId, quantity: 1 },
+      { id: helm, typeId: helmId, quantity: 1, socketedStoneTypeId: stoneTypeId, socketedStoneItemId: stone },
+      { id: stone, typeId: stoneTypeId, quantity: 1 },
+    ],
+    equipment: { chest: plate, head: helm },
+  }, { x: 0, y: 0 }, 0, undefined, characterId);
+
+  const r = await world.clearEquipment(pool, 'u-dep', 'head');
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, new RegExp(`dep-plate-${tag}`));
+
+  const still = await pool.query(
+    'SELECT slot FROM player_equipment WHERE character_id = $1 ORDER BY slot', [characterId],
+  );
+  assert.deepStrictEqual(still.rows.map((x) => x.slot), ['chest', 'head']);
+  assert.strictEqual(world.getPlayer('u-dep').inv.equipment.head, helm,
+    'a refused unequip must leave the in-memory paper doll intact');
+});
+
+// The dependent item leaves first, then the one it depended on comes off
+// freely. Without this, a gate that refused EVERY unequip would still satisfy
+// the test above.
+test('world.clearEquipment allows the unequip once nothing depends on it', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  t.after(async () => { await pool.end().catch(() => {}); });
+
+  const tag = `free-${Date.now()}`;
+  const { characterId } = await createCharacter(pool, tag, 50);
+  const plateId = await makeItemType(pool, `free-plate-${tag}`, { req_strength: 20 });
+  const helmId = await makeItemType(pool, `free-helm-${tag}`, { slot: 'head' });
+  const stoneTypeId = (await pool.query(
+    `INSERT INTO item_types (name, category, slot, kind, damage, cooldown,
+                             stat_bonus_stat, stat_bonus_amount)
+     VALUES ($1,'stone',NULL,NULL,0,0,'strength',20) RETURNING id`,
+    [`free-stone-${tag}`],
+  )).rows[0].id;
+
+  const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateId])).rows[0].id;
+  const helm = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, helmId])).rows[0].id;
+  const stone = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, stoneTypeId])).rows[0].id;
+  await pool.query('INSERT INTO stone_instances (player_item_id, socketed_into_id) VALUES ($1,$2)', [stone, helm]);
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'chest', plate]);
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'head', helm]);
+
+  const itemTypes = await loadItemTypes(pool);
+  const world = armWorld(itemTypes);
+  world.addPlayer('u-free', { x: 0, y: 0 }, {
+    items: [
+      { id: plate, typeId: plateId, quantity: 1 },
+      { id: helm, typeId: helmId, quantity: 1, socketedStoneTypeId: stoneTypeId, socketedStoneItemId: stone },
+      { id: stone, typeId: stoneTypeId, quantity: 1 },
+    ],
+    equipment: { chest: plate, head: helm },
+  }, { x: 0, y: 0 }, 0, undefined, characterId);
+
+  // The plate is the dependent one; it comes off with nothing depending on IT.
+  assert.deepStrictEqual(await world.clearEquipment(pool, 'u-free', 'chest'), { ok: true });
+  // Now the helm (and its stone) are free to leave too.
+  assert.deepStrictEqual(await world.clearEquipment(pool, 'u-free', 'head'), { ok: true });
+
+  const still = await pool.query('SELECT slot FROM player_equipment WHERE character_id = $1', [characterId]);
+  assert.deepStrictEqual(still.rows, []);
+});

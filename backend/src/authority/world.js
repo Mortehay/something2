@@ -11,6 +11,8 @@ const {
   BURN, CHILL, SHOCK, SHOCK_MANA_DRAIN,
 } = require('./effects');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
+const { unequipBlockers } = require('./equipRequirements.js');
+const { loadProgression } = require('../services/progressionStore.js');
 const { GroundItemSim } = require('./groundItems');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerStats.js');
 
@@ -370,10 +372,44 @@ class World {
     return activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
   }
 
+  // SOMET-478 (T10). The requirement context is read from the DATABASE here,
+  // once per equip action, rather than cached on the player object.
+  //
+  // Two reasons. (1) The spec's own risk table says requirements are validated
+  // on equip only, never per attack -- so one read on a player-initiated
+  // action is affordable, and the combat hot path is untouched. (2) A cached
+  // copy would have to be invalidated by every level-up, respec, passive
+  // allocation and buff-stone socket; the second one of those anybody forgets
+  // is a player wearing gear they no longer qualify for, silently.
+  //
+  // A player with no characterId is not a real session (addPlayer's default,
+  // used by pure fixtures -- server.js always passes character.id). It gets
+  // the level-1 base-stat context rather than a skipped gate: falling back to
+  // "no requirements" would make the gate inert for exactly the callers least
+  // likely to be noticed.
+  async _requirementContext(pool, characterId) {
+    if (characterId == null) {
+      return { level: DEFAULT_PROGRESSION.level, base: { ...DEFAULT_PROGRESSION } };
+    }
+    const progression = await loadProgression(pool, characterId);
+    return {
+      level: progression.level,
+      base: {
+        strength: progression.strength,
+        dexterity: progression.dexterity,
+        constitution: progression.constitution,
+        intelligence: progression.intelligence,
+        wisdom: progression.wisdom,
+        charisma: progression.charisma,
+      },
+    };
+  }
+
   async setEquipment(pool, userId, itemId, slot) {
     const p = this.players.get(userId);
     if (!p) return { ok: false, reason: 'no player' };
-    const r = await equipItem(pool, p.characterId, p.inv, this.weapons, itemId, slot);
+    const req = await this._requirementContext(pool, p.characterId);
+    const r = await equipItem(pool, p.characterId, p.inv, this.weapons, itemId, slot, req);
     if (r.ok) p.mit = mitigation(p.inv, this.weapons);
     return r;
   }
@@ -381,6 +417,16 @@ class World {
   async clearEquipment(pool, userId, slot) {
     const p = this.players.get(userId);
     if (!p) return { ok: false, reason: 'no player' };
+    // Refused BEFORE unequipItem's in-memory mutation, so the SOMET-77
+    // ordering inside it is never entered on a refusal and there is nothing to
+    // roll back. Naming B is the whole point: "unequip it first" with no
+    // subject is unactionable when eight slots could be the cause.
+    const req = await this._requirementContext(pool, p.characterId);
+    const blockers = unequipBlockers(p.inv, this.weapons, req.base, req.level, slot);
+    if (blockers.length > 0) {
+      const names = blockers.map((b) => b.name).join(', ');
+      return { ok: false, reason: `${names} would no longer meet its requirements` };
+    }
     const r = await unequipItem(pool, p.characterId, p.inv, slot);
     if (r.ok) p.mit = mitigation(p.inv, this.weapons);
     return r;

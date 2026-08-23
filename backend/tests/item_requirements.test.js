@@ -2,7 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   gearStatGrants, effectiveStatsFor, meetsRequirements, illegalEquipped, unequipBlockers,
+  REQ_STATS,
 } = require('../src/authority/equipRequirements.js');
+
+const REQ_KEYS = REQ_STATS.map((s) => `req_${s}`);
 
 // A catalog with exactly the pieces the circularity rule needs:
 //  - 20: a chest piece that DEMANDS 20 strength
@@ -162,10 +165,15 @@ test('a slot/category refusal outranks a requirement refusal', () => {
 });
 
 // Acceptance criterion 5, asserted against the REAL catalog rather than a
-// fixture: with the migration's identity defaults, every item type currently
-// in the database must stay equippable by a level-1 base-stat character, so
-// this change is a no-op for every item that exists today.
-test('every catalog row behaves identically with and without the gate', async (t) => {
+// fixture: the migration's defaults are the identity values, so every item
+// that exists today must behave under the gate exactly as it did before it.
+//
+// Scoped to rows whose requirements ARE the identity, deliberately. Sibling DB
+// test files insert probe rows with real requirements (req_level 40 and the
+// like) into this same database and never remove them, so an unscoped "every
+// row" sweep asserts something false about rows that are supposed to be gated.
+// The floor below is what keeps the scoping from hollowing the test out.
+test('every identity-requirement catalog row behaves identically with and without the gate', async (t) => {
   const url = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
   if (!url) { t.skip('no TEST_DATABASE_URL / DATABASE_URL'); return; }
   // eslint-disable-next-line global-require
@@ -183,9 +191,13 @@ test('every catalog row behaves identically with and without the gate', async (t
   const types = await loadItemTypes(pool);
   assert.ok(types.size > 0, 'the catalog must not be empty, or this test proves nothing');
 
+  const isIdentity = (ty) => Number(ty.req_level) === 1
+    && REQ_KEYS.every((k) => Number(ty[k]) === 0);
+
   const req = { level: 1, base: BASE };
   let checked = 0;
   for (const type of types.values()) {
+    if (!isIdentity(type)) continue;
     // Only equippable categories have a paper-doll slot to be gated on.
     const slot = type.category === 'weapon' ? 'main_hand' : type.slot;
     if (!slot) continue;
@@ -196,5 +208,17 @@ test('every catalog row behaves identically with and without the gate', async (t
       `${type.name} (id ${type.id}) must behave identically with and without a requirement context`);
     checked += 1;
   }
-  assert.ok(checked > 0, 'no equippable catalog rows were checked -- the assertion would be vacuous');
+  // The migrated base catalog carries well over twenty equippable rows and
+  // this migration touched none of them. A floor rather than an exact count:
+  // the number grows as the catalog is authored, but it must never collapse,
+  // which is what would happen if the columns silently stopped being identity.
+  assert.ok(checked >= 20,
+    `only ${checked} identity-requirement equippable rows were checked -- the base catalog should supply far more`);
+
+  // The named default weapon is the one row whose identity is load-bearing:
+  // activeWeaponType falls back to it for every player with an empty main
+  // hand, so a requirement on it would gate players out of attacking at all.
+  const dagger = [...types.values()].find((ty) => ty.name === 'dagger');
+  assert.ok(dagger, 'the default weapon must exist in the catalog');
+  assert.ok(isIdentity(dagger), 'the default weapon must carry no requirements');
 });

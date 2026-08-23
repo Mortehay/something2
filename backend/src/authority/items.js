@@ -24,7 +24,9 @@ async function loadItemTypes(pool, catalogs = null) {
             range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element,
             defense, resistances, stackable, ammo_type_id, aoe_radius, vfx, knockback,
             stat_bonus_stat, stat_bonus_amount, attack_origin,
-            projectile_shape_id, impact_behavior_id, stone_mode, bonus_damage
+            projectile_shape_id, impact_behavior_id, stone_mode, bonus_damage,
+            req_level, req_strength, req_dexterity, req_constitution,
+            req_intelligence, req_wisdom, req_charisma, item_level, tier
      FROM item_types ORDER BY id ASC`,
   );
   const shapes = catalogs && catalogs.projectileShapes ? catalogs.projectileShapes : null;
@@ -115,6 +117,26 @@ async function loadItemTypes(pool, catalogs = null) {
       // host weapon, which is the exact behaviour augment exists to avoid.
       stone_mode: row.stone_mode === 'augment' ? 'augment' : 'replace',
       bonus_damage: num(row.bonus_damage),
+      // SOMET-478: the FOURTH instance of the trap the three comments above
+      // document, and this one was caught by a red test rather than in review.
+      // The migration and equipRequirements.js were both correct while the
+      // gate stayed completely inert, because req_level never made it out of
+      // this SELECT list and every in-memory type read `undefined`.
+      //
+      // Defaulted to the IDENTITY values (the same ones the migration gives
+      // the columns), not to 0/null: this loader is also fed by fixtures and
+      // by catalog snapshots predating the migration, and an item whose
+      // requirements read as undefined must be equippable by everyone rather
+      // than by nobody.
+      req_level: Number(row.req_level ?? 1),
+      req_strength: Number(row.req_strength ?? 0),
+      req_dexterity: Number(row.req_dexterity ?? 0),
+      req_constitution: Number(row.req_constitution ?? 0),
+      req_intelligence: Number(row.req_intelligence ?? 0),
+      req_wisdom: Number(row.req_wisdom ?? 0),
+      req_charisma: Number(row.req_charisma ?? 0),
+      item_level: Number(row.item_level ?? 1),
+      tier: Number(row.tier ?? 1),
     });
   }
   return m;
