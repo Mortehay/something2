@@ -308,10 +308,17 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
     // an item granted with its rarity but silently stripped of its affixes.
     //
     // `aff` reads d.affixes with ORDINALITY and writes (ord - 1) into idx, so
-    // the affix order dropItem snapshotted is the order that comes back. The
-    // CTE has no output anything downstream reads; Postgres executes a
-    // writable CTE for its side effects regardless (the same guarantee
-    // dropItem's `eject` already relies on).
+    // the affix order dropItem snapshotted is the order that comes back. Its
+    // RETURNING is then re-read by the outer projection (joined to affix_types
+    // for `key` and `effect`) so the caller can hydrate the in-memory item
+    // WITHOUT a second query -- see the push below for why a bare push would
+    // make a just-picked-up affixed item inert until the next reconnect.
+    //
+    // `value` survives jsonb intact because both the column and the cast are
+    // double precision: Postgres renders a float8 into jsonb with its
+    // shortest round-tripping representation, so the number that went onto the
+    // ground is the number that comes back. A `real` column would not have
+    // that property (see the migration's note on the column type).
     const r = await pool.query(
       `WITH d AS (DELETE FROM world_items WHERE id = $1
                   RETURNING item_type_id, quantity, rarity, item_level, affixes, soulbound),
