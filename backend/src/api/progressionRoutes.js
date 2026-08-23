@@ -1,19 +1,22 @@
 // The authenticated character-sheet API: GET the current progression bundle,
-// POST an allocation, POST a respec. Thin by design -- every guard (unknown
-// stat, insufficient points, insufficient gold, atomicity under concurrent
-// requests) already lives in services/progressionStore.js and is already
-// tested there. This file's only job is auth, request shape, and translating
-// the store's { ok, reason } into an HTTP status.
+// POST a respec. Thin by design -- every guard (insufficient gold, atomicity
+// under concurrent requests) already lives in services/progressionStore.js and
+// is already tested there. This file's only job is auth, request shape, and
+// translating the store's { ok, reason } into an HTTP status.
+//
+// POST /allocate is GONE (SOMET-470): stat points no longer exist, and the
+// passive tree is the only source of stat growth. POST /respec survives with
+// its refund stripped out; T7 replaces its body with the tree respec.
 //
 // Every route acts on req.user.id -- set by requireAuth from the verified,
 // revocation-checked token -- and NEVER on a user id read from the request
 // body, path or query. That is the entire security property this file
-// exists to enforce: without it, POST /api/progression/allocate with a
-// body-supplied userId would let any authenticated account spend points (or
-// respec) on someone else's character.
+// exists to enforce: without it, POST /api/progression/respec with a
+// body-supplied userId would let any authenticated account respec someone
+// else's character.
 const express = require('express');
 const { requireAuth } = require('../auth/middleware.js');
-const { loadProgression, allocateStat, respec } = require('../services/progressionStore.js');
+const { loadProgression, respec } = require('../services/progressionStore.js');
 const { derivePlayerStats, xpFloor, xpToNext } = require('../services/playerStats.js');
 const { ownedCharacter } = require('../services/characters.js');
 const C = require('../services/progressionConstants.js');
@@ -68,29 +71,6 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
     } catch (err) {
       console.error('progression fetch failed:', err);
       res.status(500).json({ error: 'failed to load progression' });
-    }
-  });
-
-  router.post('/allocate', guard, async (req, res) => {
-    try {
-      // stat/count are handed to allocateStat exactly as received -- it
-      // whitelists the stat key and validates the count itself (statKey
-      // reaches it from an HTTP body, per its own comment). Re-validating
-      // here would just be a second, driftable copy of the same guard.
-      const character = await resolveCharacter(req, res);
-      if (!character) return undefined;
-      const { stat, count } = req.body || {};
-      const r = await allocateStat(pool, character.id, stat, count);
-      if (!r.ok) return res.status(400).json({ error: r.reason });
-      const stats = derivePlayerStats(r.progression);
-      // Best-effort: refuses/no-ops silently (no live session, no authority
-      // attached, player at hp<=0) — the write above already succeeded and
-      // the HTTP response below reflects it regardless.
-      refreshLivePlayerStats(req.user.id, r.progression, stats);
-      return res.status(200).json({ progression: r.progression, stats });
-    } catch (err) {
-      console.error('allocate failed:', err);
-      return res.status(500).json({ error: 'allocate failed' });
     }
   });
 
