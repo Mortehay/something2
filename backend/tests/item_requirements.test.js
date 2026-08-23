@@ -222,3 +222,59 @@ test('every identity-requirement catalog row behaves identically with and withou
   assert.ok(dagger, 'the default weapon must exist in the catalog');
   assert.ok(isIdentity(dagger), 'the default weapon must carry no requirements');
 });
+
+// The two tests below are the ONLY coverage of requirementGate's and
+// illegalEquipped's `excludeItemId` argument, and they exist because a
+// mutation check found that argument was untested.
+//
+// The subtlety: gearStatGrants walks inv.equipment, so an UNEQUIPPED candidate
+// contributes nothing to its own gate whether it is excluded or not. Every
+// "self-granting plate" test that equips from the backpack therefore passes
+// with the exclusion deleted. The exclusion only bites where the candidate is
+// ALREADY equipped -- re-validation, and a weapon moving between hands.
+
+test('an equipped self-granting item reads as illegal -- it cannot hold itself up', () => {
+  const inv = {
+    items: [
+      { id: 'plate', typeId: 20, socketedStoneTypeId: 21, socketedStoneItemId: 'stone' },
+      { id: 'stone', typeId: 21 },
+    ],
+    equipment: { chest: 'plate' },      // needs 20 STR, grants 20 STR, base is 5
+  };
+  const bad = illegalEquipped(inv, TYPES, BASE, 1);
+  assert.deepStrictEqual(bad.map((b) => b.slot), ['chest']);
+  assert.match(bad[0].reason, /20 strength/);
+});
+
+test('a self-granting weapon cannot move hands on the strength it supplies itself', () => {
+  // 24 is a one-handed weapon demanding 20 STR; the stone in it grants 20.
+  const types = new Map(TYPES);
+  types.set(24, {
+    id: 24, name: 'might-blade', category: 'weapon', slot: 'main_hand', two_handed: false,
+    kind: 'melee', req_level: 1, req_strength: 20, req_dexterity: 0, req_constitution: 0,
+    req_intelligence: 0, req_wisdom: 0, req_charisma: 0,
+  });
+  const inv = {
+    items: [
+      { id: 'blade', typeId: 24, socketedStoneTypeId: 21, socketedStoneItemId: 'stone' },
+      { id: 'stone', typeId: 21 },
+    ],
+    equipment: { main_hand: 'blade' },
+  };
+  // Moving it to the off hand: it is equipped RIGHT NOW, so without the
+  // exclusion its own +20 would satisfy its own 20-STR gate.
+  const r = canEquip(inv, types, 'blade', 'off_hand', { level: 1, base: BASE });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'requires 20 strength');
+
+  // A DIFFERENT equipped item supplying the same +20 does let it move.
+  const helped = {
+    items: [
+      { id: 'blade', typeId: 24 },
+      { id: 'helm', typeId: 22, socketedStoneTypeId: 21, socketedStoneItemId: 'stone' },
+      { id: 'stone', typeId: 21 },
+    ],
+    equipment: { main_hand: 'blade', head: 'helm' },
+  };
+  assert.deepStrictEqual(canEquip(helped, types, 'blade', 'off_hand', { level: 1, base: BASE }), { ok: true });
+});

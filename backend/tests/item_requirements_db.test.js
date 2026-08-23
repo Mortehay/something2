@@ -408,3 +408,66 @@ test('a respec at EXACTLY the carry limit still proceeds', async (t) => {
   assert.strictEqual(result.ok, true, 'at capacity is not over capacity');
   assert.deepStrictEqual(result.unequipped.map((u) => u.slot), ['chest']);
 });
+
+// ACCEPTANCE CRITERION 1, closed end-to-end through the real path: the real
+// loader, the real stone_instances row, the real world.setEquipment.
+//
+// The canEquip-level test of this lives in item_requirements.test.js against a
+// fixture catalog. This one exists because that fixture hand-writes req_level
+// and req_strength onto the type objects, so it would keep passing even if
+// loadItemTypes never read the columns -- which is exactly the bug that was
+// live until the world-threading tests above caught it.
+test('a plate carrying its own +20 STR stone cannot satisfy its own 20-STR gate', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  t.after(async () => { await pool.end().catch(() => {}); });
+
+  const tag = `circ-${Date.now()}`;
+  const { characterId } = await createCharacter(pool, tag, 60);   // base 5 STR
+  const plateTypeId = await makeItemType(pool, `circ-plate-${tag}`, { req_strength: 20 });
+  const helmTypeId = await makeItemType(pool, `circ-helm-${tag}`, { slot: 'head' });
+  const stoneTypeId = (await pool.query(
+    `INSERT INTO item_types (name, category, slot, kind, damage, cooldown,
+                             stat_bonus_stat, stat_bonus_amount)
+     VALUES ($1,'stone',NULL,NULL,0,0,'strength',20) RETURNING id`,
+    [`circ-stone-${tag}`],
+  )).rows[0].id;
+
+  const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateTypeId])).rows[0].id;
+  const helm = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, helmTypeId])).rows[0].id;
+  const stone = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, stoneTypeId])).rows[0].id;
+  // The stone goes into the PLATE -- the very item it would be qualifying.
+  await pool.query('INSERT INTO stone_instances (player_item_id, socketed_into_id) VALUES ($1,$2)', [stone, plate]);
+
+  const itemTypes = await loadItemTypes(pool);
+  const world = armWorld(itemTypes);
+  world.addPlayer('u-circ', { x: 0, y: 0 }, {
+    items: [
+      { id: plate, typeId: plateTypeId, quantity: 1, socketedStoneTypeId: stoneTypeId, socketedStoneItemId: stone },
+      { id: helm, typeId: helmTypeId, quantity: 1 },
+      { id: stone, typeId: stoneTypeId, quantity: 1 },
+    ],
+    equipment: {},
+  }, { x: 0, y: 0 }, 0, undefined, characterId);
+
+  const r = await world.setEquipment(pool, 'u-circ', plate, 'chest');
+  assert.strictEqual(r.ok, false, 'the plate must not bootstrap itself past its own gate');
+  assert.match(r.reason, /20 strength/);
+  const eq = await pool.query('SELECT count(*)::int AS n FROM player_equipment WHERE character_id = $1', [characterId]);
+  assert.strictEqual(eq.rows[0].n, 0);
+
+  // Move the SAME stone into the helm, equip the helm, and the plate now
+  // qualifies -- proving the refusal above was the circularity rule and not
+  // simply "stones never count".
+  await pool.query('UPDATE stone_instances SET socketed_into_id = $1 WHERE player_item_id = $2', [helm, stone]);
+  const p = world.getPlayer('u-circ');
+  const plateRec = p.inv.items.find((it) => it.id === plate);
+  delete plateRec.socketedStoneTypeId;
+  delete plateRec.socketedStoneItemId;
+  const helmRec = p.inv.items.find((it) => it.id === helm);
+  helmRec.socketedStoneTypeId = stoneTypeId;
+  helmRec.socketedStoneItemId = stone;
+
+  assert.deepStrictEqual(await world.setEquipment(pool, 'u-circ', helm, 'head'), { ok: true });
+  assert.deepStrictEqual(await world.setEquipment(pool, 'u-circ', plate, 'chest'), { ok: true });
+});
