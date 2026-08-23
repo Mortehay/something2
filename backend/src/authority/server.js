@@ -1420,6 +1420,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // has never been granted anything.
         const granted = await grantStartingLoadout(pool, character, entry.world.weapons);
         if (granted) inv = await loadInventory(pool, character.id);
+        // Attached AFTER the possible re-load above, or the grant would drop
+        // it. Every capacity check reads inv.capacity, so the value has to
+        // ride the same object the rules already hold.
+        inv.capacity = character.inventorySlots;
         // Gold stays per-ACCOUNT (SOMET-257 left it on users), so this is the
         // one lookup in the join path still keyed by user rather than character.
         const gr = await pool.query('SELECT gold FROM users WHERE id = $1', [ws.userId]);
@@ -1519,6 +1523,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
           elements: elementsForWire(entry.catalogs),
           items: inv.items,
           equipment: inv.equipment,
+          // The panel renders used/capacity in its title bar. Nothing in play
+          // changes the cap, so it rides the join frame only. DISPLAY ONLY:
+          // the rule that refuses an item runs server-side, against this same
+          // number, in authority/items.js.
+          inventorySlots: inv.capacity,
           // Server-authoritative: addPlayer always resets this to false, but
           // read it back off the player rather than hardcoding — the wire
           // value must always reflect whatever World actually holds, not an

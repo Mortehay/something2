@@ -90,3 +90,17 @@ it('addItem appends and removeItem deletes by id', () => {
   expect(inv.items).toHaveLength(0);
   removeItem(inv, 'nope'); // must not throw
 });
+
+describe('capacity mirror', () => {
+  it('mirrors the server capacity from the join frame', () => {
+    const inv = createInventory();
+    applyJoined(inv, { itemTypes: [], items: [], equipment: {}, inventorySlots: 96 });
+    expect(inv.capacity).toBe(96);
+  });
+
+  it('leaves capacity null when the server sends none, rather than inventing one', () => {
+    const inv = createInventory();
+    applyJoined(inv, { itemTypes: [], items: [], equipment: {} });
+    expect(inv.capacity).toBeNull();
+  });
+});
