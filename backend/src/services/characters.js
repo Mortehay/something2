@@ -4,6 +4,8 @@
 // one piece here with real logic worth testing on its own, and because the
 // authority -- which has no Express request -- needs ownedCharacter too.
 
+const { BASE_STAT } = require('./progressionConstants.js');
+
 const MAX_CHARACTERS = 8;
 const MAX_NAME_LENGTH = 32;
 
@@ -118,6 +120,33 @@ async function createCharacter(pool, userId, name, entityTypeId) {
        RETURNING id, slot, name`,
       [userId, trimmed, typeId]);
     if (!r.rows.length) throw new CharacterError('no_free_slot', 'all character slots are used');
+
+    // The class-base stat SNAPSHOT (design doc 3.3, contract 6.1), written
+    // once here and never mutated again. progressionStore.loadProgression
+    // still lazily creates a row for characters that predate this write, so
+    // this is not the only path -- but it is the one that decides what a
+    // character's base IS, and it must be an explicit write rather than a
+    // reliance on the column defaults, because T3 changes THIS statement when
+    // per-class bases arrive.
+    //
+    // Every class bases at 5 on all six stats today, deliberately. Reading
+    // entity_types' stats here instead -- Warrior 10s, Ranger DEX 12 -- would
+    // silently rebalance every new character: every formula in playerStats.js
+    // is an identity at BASE_STAT, so a snapshot CON of 10 is +50 max HP.
+    // Class identity comes from the tree start position and the starting
+    // loadout, not from different base stats.
+    //
+    // ON CONFLICT DO NOTHING for the same reason loadProgression has it: the
+    // insert must be idempotent and must never be the thing that fails a
+    // character creation that already succeeded.
+    await pool.query(
+      `INSERT INTO player_progression
+         (character_id, strength, dexterity, constitution, intelligence, wisdom, charisma)
+       VALUES ($1, $2, $2, $2, $2, $2, $2)
+       ON CONFLICT (character_id) DO NOTHING`,
+      [r.rows[0].id, BASE_STAT],
+    );
+
     return { id: r.rows[0].id, slot: r.rows[0].slot, name: r.rows[0].name };
   } catch (err) {
     if (err instanceof CharacterError) throw err;

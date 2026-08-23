@@ -74,9 +74,23 @@
 // `Number.isFinite(toNext)` directly against whatever levelInfo.xpToNext
 // holds (a number, or `null`), never coercing it through `Number(...)` first
 // (that would turn `null` into `0` and silently divide by it).
+//
+// --- T2 (SOMET-470): the stat-point system is gone ---
+//
+// The +STR/+DEX buttons, the allocate call and the respec button are removed:
+// player_progression.stat_points no longer exists, and the passive tree is
+// the only source of stat growth (design doc 2 and 3.3). This panel is now
+// read-only. POST /api/progression/respec still exists server-side and T7
+// replaces its body with the tree respec; there is deliberately no UI for it
+// in the meantime, because a respec that resets six columns nothing can raise
+// would charge gold for nothing.
+//
+// The single-writer rule in F1 above is UNCHANGED and still binding. Removing
+// the HTTP writers does not make a second writer safe; the websocket
+// `progression` frame is still the only thing that sets Game.progression.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import styled from 'styled-components';
-import { fetchProgression, allocateStat, respec as respecRequest } from './src/js/net/progressionClient.js';
+import { fetchProgression } from './src/js/net/progressionClient.js';
 
 const LS_KEY = 'something2:characterSheetVisible';
 const POLL_MS = 500; // live-push poll cadence; see the module header above
@@ -113,19 +127,9 @@ export function xpProgress(progression, levelInfo) {
   return { into, need, pct };
 }
 
-// Pure predicate for the respec button: disabled whenever gold can't cover
-// cost. Kept as a standalone export so it's testable at exact boundaries
-// without mounting anything. `cost` must come from levelInfo.respecCost (the
-// API's number) -- see F2 above; this function itself doesn't know or care
-// where its `cost` argument came from, which is exactly why the bug was in
-// the CALLER (a local RESPEC_BASE formula), not here.
-export function respecDisabled(gold, cost) {
-  return !(Number(gold) >= Number(cost));
-}
-
 // The fields a 'progression' row can actually change across a poll tick.
 // Anything else on the object (user_id, ...) is not display-relevant here.
-const PROGRESSION_FIELDS = ['experience', 'level', 'stat_points', ...STAT_KEYS];
+const PROGRESSION_FIELDS = ['experience', 'level', 'passive_points', ...STAT_KEYS];
 
 // True when `next` differs from `prev` in any field that matters to this
 // panel. A fresh object with IDENTICAL values (the zero-XP no-op push) must
@@ -247,37 +251,10 @@ const StatValue = styled.span`
   text-align: right;
 `;
 
-const PlusButton = styled.button`
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  border: 1px solid #2e2e3e;
-  background: #3b82f6;
-  color: #fff;
-  font-weight: 700;
-  cursor: pointer;
-  &:hover { filter: brightness(1.1); }
-  &:disabled { background: #555; cursor: not-allowed; }
-`;
-
-const PointsLine = styled.div`
-  margin: 10px 0 6px 0;
+const PointsNote = styled.div`
+  margin: 10px 0 0 0;
   color: #facc15;
   font-size: 12px;
-`;
-
-const RespecButton = styled.button`
-  width: 100%;
-  margin-top: 8px;
-  padding: 8px;
-  border-radius: 6px;
-  border: none;
-  background: #ef4444;
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-  &:hover { filter: brightness(1.1); }
-  &:disabled { background: #555; cursor: not-allowed; }
 `;
 
 const ErrorLine = styled.div`
@@ -293,8 +270,6 @@ export default function CharacterSheet({ gameRef }) {
   // CURRENTLY at -- see the F2 header block. null until the first fetch
   // resolves.
   const [levelInfo, setLevelInfo] = useState(null);
-  const [gold, setGold] = useState(0);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
   // Which level `levelInfo` was fetched for, so the level-change effect
@@ -372,7 +347,7 @@ export default function CharacterSheet({ gameRef }) {
   }, [visible, currentLevel]);
 
   // Poll the game's live snapshot for websocket-pushed updates (kill XP,
-  // level-up, death, AND now allocate/respec -- see F1). Deliberately NOT a
+  // level-up, death -- see F1). Deliberately NOT a
   // refetch: Game already holds the latest pushed row locally (onProgression
   // is its only writer), so this just reads it back. progressionChanged
   // gates the setState so a stream of no-op pushes (zero-XP kills still push
@@ -383,7 +358,10 @@ export default function CharacterSheet({ gameRef }) {
       const snap = gameRef.current && gameRef.current.getProgressionSnapshot
         ? gameRef.current.getProgressionSnapshot() : null;
       if (!snap) return;
-      setGold((g) => (g === snap.gold ? g : snap.gold));
+      // snap.gold is deliberately ignored: this panel stopped displaying gold
+      // when the respec button went (SOMET-470), and the canvas HUD draws it
+      // from Game's own cache. Mirroring it into React state here would be a
+      // second copy nothing renders.
       setProgression((prev) => (progressionChanged(prev, snap.progression) ? snap.progression : prev));
     };
     tick();
@@ -391,53 +369,12 @@ export default function CharacterSheet({ gameRef }) {
     return () => clearInterval(id);
   }, [visible, gameRef]);
 
-  const handleAllocate = (statKey) => {
-    if (busy || !progression || (progression.stat_points || 0) < 1) return;
-    setBusy(true);
-    setError(null);
-    // F1: the response's `progression` is intentionally NOT applied to
-    // anything here -- Game.onProgression (fed by the WS push
-    // refreshLivePlayerStats now sends, e77d929/bbab966) is the sole writer,
-    // and the poll effect above will pick the change up from there.
-    allocateStat(statKey, 1)
-      .catch((err) => setError(err.message || 'allocate failed'))
-      .finally(() => setBusy(false));
-  };
-
-  const handleRespec = () => {
-    if (busy || !progression || !levelInfo) return;
-    const cost = levelInfo.respecCost;
-    if (respecDisabled(gold, cost)) return;
-    setBusy(true);
-    setError(null);
-    respecRequest()
-      .then((bundle) => {
-        // gold has no WS echo for a respec (refreshPlayerStats doesn't carry
-        // it, and a respec never sends a `wallet` message) -- this is the
-        // one field still applied directly from the HTTP response, both to
-        // this component's own state AND (via applyGoldResult) to Game's
-        // cache so the canvas-drawn gold HUD updates too. See the module
-        // header for the residual, out-of-scope race this leaves against a
-        // concurrent item-pickup wallet push.
-        if (bundle && typeof bundle.gold === 'number') {
-          setGold(bundle.gold);
-          if (gameRef.current && gameRef.current.applyGoldResult) {
-            gameRef.current.applyGoldResult(bundle.gold);
-          }
-        }
-      })
-      .catch((err) => setError(err.message || 'respec failed'))
-      .finally(() => setBusy(false));
-  };
-
   if (!visible) {
     return <ShowButton type="button" title="Show character sheet (C)" aria-label="Show character sheet" onClick={() => persistVisible(true)}>📜</ShowButton>;
   }
 
   const level = progression ? progression.level : 1;
   const { into, need, pct } = xpProgress(progression, levelInfo);
-  const cost = levelInfo ? levelInfo.respecCost : null;
-  const points = progression ? (progression.stat_points || 0) : 0;
 
   return (
     <Frame>
@@ -454,24 +391,10 @@ export default function CharacterSheet({ gameRef }) {
         <StatRow key={key}>
           <StatLabel>{STAT_LABELS[key]}</StatLabel>
           <StatValue>{progression ? progression[key] : '-'}</StatValue>
-          <PlusButton
-            type="button"
-            aria-label={`Allocate ${STAT_LABELS[key]}`}
-            disabled={busy || points < 1}
-            onClick={() => handleAllocate(key)}
-          >+</PlusButton>
         </StatRow>
       ))}
 
-      <PointsLine>Unspent points: {points}</PointsLine>
-
-      <RespecButton
-        type="button"
-        disabled={busy || !progression || !levelInfo || respecDisabled(gold, cost)}
-        onClick={handleRespec}
-      >
-        {levelInfo ? `Respec (${cost}g)` : 'Respec'}
-      </RespecButton>
+      <PointsNote>Passive points: {progression ? (progression.passive_points || 0) : 0}</PointsNote>
 
       {error && <ErrorLine>{error}</ErrorLine>}
     </Frame>

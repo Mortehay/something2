@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
+const { derivePlayerStats } = require('../src/services/playerStats.js');
 
 // Gated exactly like creature_levels_db.test.js / seed_catalogs_db.test.js:
 // skip without TEST_DATABASE_URL and do NOT fall back to DATABASE_URL, so a
@@ -48,7 +49,13 @@ test('player_progression columns have the documented types and defaults', async 
     assert.equal(by.get('experience').data_type, 'bigint');
     assert.equal(by.get('experience').column_default, '0');
     assert.equal(by.get('level').column_default, '1');
-    assert.equal(by.get('stat_points').column_default, '0');
+    assert.equal(by.get('passive_points').column_default, '0');
+    assert.equal(by.get('passive_points').data_type, 'integer');
+    assert.equal(by.get('passive_points').is_nullable, 'NO');
+    // The stat-point system is gone, column and all. A leftover column is a
+    // second place a later migration or a stray UPDATE can put points nothing
+    // spends.
+    assert.equal(by.get('stat_points'), undefined, 'stat_points must have been dropped');
     for (const s of ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']) {
       assert.equal(by.get(s).data_type, 'integer', `${s} must be integer`);
       assert.equal(by.get(s).column_default, '5', `${s} must default to the base stat`);
@@ -88,14 +95,23 @@ test('the CHECK constraints actually reject bad rows', async (t) => {
     for (const [label, sql] of [
       ['negative experience', 'UPDATE player_progression SET experience = -1 WHERE character_id = $1'],
       ['level 0', 'UPDATE player_progression SET level = 0 WHERE character_id = $1'],
-      ['level 51', 'UPDATE player_progression SET level = 51 WHERE character_id = $1'],
-      ['negative points', 'UPDATE player_progression SET stat_points = -1 WHERE character_id = $1'],
+      ['level 151', 'UPDATE player_progression SET level = 151 WHERE character_id = $1'],
+      ['negative passive points', 'UPDATE player_progression SET passive_points = -1 WHERE character_id = $1'],
       ['sub-base strength', 'UPDATE player_progression SET strength = 4 WHERE character_id = $1'],
     ]) {
       await client.query('BEGIN');
       await assert.rejects(() => client.query(sql, [testCharacterId]), `${label} must be rejected`);
       await client.query('ROLLBACK');
     }
+
+    // The converse, and the one that actually proves the cap MOVED rather
+    // than merely still existing: level 51 was rejected before this migration
+    // and must now be accepted. Without it, a migration that forgot to drop
+    // the old constraint passes every assertion above.
+    await client.query('BEGIN');
+    await client.query('UPDATE player_progression SET level = 150 WHERE character_id = $1', [testCharacterId]);
+    await client.query('UPDATE player_progression SET level = 51 WHERE character_id = $1', [testCharacterId]);
+    await client.query('ROLLBACK');
   } finally {
     client.release();
     await pool.end();
@@ -200,4 +216,113 @@ test('player_progression is keyed to characters, and the key bites', async (t) =
     client.release();
     await pool.end();
   }
+});
+
+// The backfill is the one part of this migration that cannot be re-run to
+// check, so it is exercised here against synthetic rows inside a transaction
+// that is rolled back. Every expected number is hand-computed:
+//   experience 213 -> level 4 (xpFloor(4) = 141, xpFloor(5) = 255)
+//   level 4 grants 1 x (4 - 1) = 3 passive points
+//   strength 12 is 7 above the base of 5, dexterity 8 is 3 above -> 10 refunded
+//   plus 2 still unspent -> 3 + 10 + 2 = 15
+test('the backfill re-levels from raw XP and refunds every point as a passive point', async (t) => {
+  if (!requireTestDb(t, 'this test inserts a user, character and progression row inside a rolled-back transaction')) return;
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} -- the backfill arithmetic is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const u = await client.query(
+      "INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'player') RETURNING id",
+      [`backfill-check-${process.pid}-${Date.now()}`]);
+    const c = await client.query(
+      `INSERT INTO characters (user_id, slot, name, entity_type_id)
+       SELECT $1, 1, $2, e.id FROM entity_types e WHERE e.name = 'Warrior' RETURNING id`,
+      [u.rows[0].id, `backfill-char-${process.pid}-${Date.now()}`]);
+    const charId = c.rows[0].id;
+
+    // The pre-migration shape, written directly: this row is what a level-4
+    // character with 5 spent and 2 unspent points looked like.
+    await client.query(
+      `INSERT INTO player_progression
+         (character_id, experience, level, passive_points, strength, dexterity)
+       VALUES ($1, 213, 2, 2, 12, 8)`,
+      [charId]);
+
+    // Replay the migration's own two statements against this one row.
+    await client.query(
+      `UPDATE player_progression
+          SET passive_points = passive_points + GREATEST(level - 1, 0) * 1
+            + (strength - 5) + (dexterity - 5) + (constitution - 5)
+            + (intelligence - 5) + (wisdom - 5) + (charisma - 5)
+        WHERE character_id = $1`, [charId]);
+    await client.query(
+      `UPDATE player_progression SET strength = 5, dexterity = 5 WHERE character_id = $1`, [charId]);
+
+    const { rows } = await client.query(
+      'SELECT experience, passive_points, strength, dexterity FROM player_progression WHERE character_id = $1',
+      [charId]);
+    assert.strictEqual(Number(rows[0].experience), 213, 'raw experience must never be touched');
+    assert.strictEqual(rows[0].strength, 5);
+    assert.strictEqual(rows[0].dexterity, 5);
+    // level is 2 in this fixture (the re-level ran before the row existed), so
+    // the grant term is 1 x (2 - 1) = 1: 1 + 10 + 2 = 13.
+    assert.strictEqual(rows[0].passive_points, 13);
+
+    await client.query('ROLLBACK');
+  } finally { client.release(); await pool.end(); }
+});
+
+// THE regression test for the single most dangerous thing this migration could
+// have done. The class-base snapshot (design doc 3.3) had an obvious-looking
+// wrong implementation: backfill the six stat columns from the class's
+// `entity_types` row. entity_types carries a Warrior with 10s and a Ranger
+// with DEX 12, while every formula in playerStats.js is an identity at
+// BASE_STAT = 5 -- progressionConstants.js declares that property explicitly
+// non-provisional. A backfilled CON of 10 makes
+// maxHp = 100 + 10 * (10 - 5) = 150: +50 max HP for every character in the
+// database, silently, with the whole suite still green.
+//
+// So this walks EVERY row actually in the table and asserts the derived pool
+// sizes against hand-written literals -- 100 and 100, the game's pre-epic
+// numbers. Not `HP_BASE`, not `derivePlayerStats(DEFAULT_PROGRESSION).maxHp`:
+// an expectation computed from the same constants as the code cannot see a
+// base that moved. A single row backfilled from entity_types fails this.
+test('the migration left every character with the pre-epic 100 hp / 100 mana', async (t) => {
+  if (!requireTestDb(t, 'this test reads every player_progression row')) return;
+  const pool = await openPool();
+  if (pool.unreachable) {
+    const msg = `NO DATABASE at ${DB_URL} -- the max-HP invariant is UNVERIFIED`;
+    if (process.env.CI) assert.fail(msg);
+    t.skip(msg);
+    return;
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT character_id, strength, dexterity, constitution,
+              intelligence, wisdom, charisma
+         FROM player_progression`);
+    if (rows.length === 0) {
+      t.skip('no player_progression rows to check -- seed a character first');
+      return;
+    }
+    for (const r of rows) {
+      const stats = derivePlayerStats(r);
+      assert.strictEqual(stats.maxHp, 100,
+        `character ${r.character_id} has constitution ${r.constitution}, i.e. maxHp ${stats.maxHp} rather than the pre-epic 100 -- the class-base snapshot was backfilled from something other than the base of 5`);
+      assert.strictEqual(stats.maxMana, 100,
+        `character ${r.character_id} has intelligence ${r.intelligence}, i.e. maxMana ${stats.maxMana} rather than the pre-epic 100`);
+      // Stated directly as well, because a future change to HP_PER_CON would
+      // make the two assertions above pass on a wrong CON.
+      for (const k of ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']) {
+        assert.strictEqual(r[k], 5,
+          `character ${r.character_id} has ${k} = ${r[k]}; the class-base snapshot is 5 on all six stats for every class (contract 6.1)`);
+      }
+    }
+  } finally { await pool.end(); }
 });

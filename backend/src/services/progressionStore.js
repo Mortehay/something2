@@ -1,13 +1,12 @@
 // Every read and write of player_progression. Nothing outside this file and
 // playerStats.js touches the raw stat columns.
 
-const {
-  levelForXp, applyDeathPenalty, refundedPoints, DEFAULT_PROGRESSION,
-} = require('./playerStats.js');
+const { levelForXp, applyDeathPenalty, DEFAULT_PROGRESSION } = require('./playerStats.js');
+const { getSetting } = require('./gameSettings.js');
 const C = require('./progressionConstants.js');
 
 const XP_SOURCES = ['kill', 'chest', 'dungeon_clear'];
-const COLUMNS = `character_id, experience, level, stat_points,
+const COLUMNS = `character_id, experience, level, passive_points,
                  strength, dexterity, constitution, intelligence, wisdom, charisma`;
 
 // experience is bigint, which node-postgres returns as a STRING to avoid
@@ -18,7 +17,7 @@ function mapRow(r) {
     character_id: r.character_id,
     experience: Number(r.experience) || 0,
     level: Number(r.level) || 1,
-    stat_points: Number(r.stat_points) || 0,
+    passive_points: Number(r.passive_points) || 0,
     strength: Number(r.strength),
     dexterity: Number(r.dexterity),
     constitution: Number(r.constitution),
@@ -61,7 +60,7 @@ async function loadProgression(db, characterId, { forUpdate = false } = {}) {
 // overlapping transactions can call awardXp for the SAME user before any of
 // them commits. Without a lock, every one of those reads the same starting
 // experience and the last UPDATE to commit wins, silently discarding every
-// other award -- and since level and stat_points are derived from that same
+// other award -- and since level and passive_points are derived from that same
 // stale read, a level-up can be lost (or double-granted) right along with
 // the XP. The row lock forces the second-and-later transactions to block
 // until the first commits, so each one re-reads the just-committed value
@@ -79,10 +78,18 @@ async function awardXp(db, characterId, amount, source) {
   }
   const experience = before.experience + amt;
   const newLevel = levelForXp(experience);
-  const pointsGained = Math.max(0, newLevel - before.level) * C.STAT_POINTS_PER_LEVEL;
+  const levelsGained = Math.max(0, newLevel - before.level);
+  // The settings read happens ONLY on an actual level-up, so the common case
+  // (a kill that does not level anyone) still issues exactly the two queries
+  // it always did. `db` may be a client mid-transaction; getSetting is a plain
+  // SELECT and is safe on either.
+  const perLevel = levelsGained > 0
+    ? Number(await getSetting(db, 'passive_points_per_level')) || 0
+    : 0;
+  const pointsGained = levelsGained * perLevel;
   const r = await db.query(
     `UPDATE player_progression
-        SET experience = $2, level = $3, stat_points = stat_points + $4, updated_at = now()
+        SET experience = $2, level = $3, passive_points = passive_points + $4, updated_at = now()
       WHERE character_id = $1
       RETURNING ${COLUMNS}`,
     [characterId, experience, newLevel, pointsGained],
@@ -94,27 +101,6 @@ async function awardXp(db, characterId, amount, source) {
     pointsGained,
     awarded: amt,
   };
-}
-
-async function allocateStat(pool, characterId, statKey, count) {
-  // Whitelist, not interpolation. statKey reaches this from an HTTP body.
-  if (!C.STAT_KEYS.includes(statKey)) return { ok: false, reason: 'unknown stat' };
-  const n = Number(count);
-  if (!Number.isInteger(n) || n < 1) return { ok: false, reason: 'invalid count' };
-
-  await loadProgression(pool, characterId);
-  // The guard is in the WHERE clause, not in a read-then-write pair: two
-  // concurrent requests both pass a read-first check and both spend the same
-  // points. Postgres serialises the UPDATE, so exactly one matches.
-  const r = await pool.query(
-    `UPDATE player_progression
-        SET ${statKey} = ${statKey} + $2, stat_points = stat_points - $2, updated_at = now()
-      WHERE character_id = $1 AND stat_points >= $2
-      RETURNING ${COLUMNS}`,
-    [characterId, n],
-  );
-  if (r.rowCount !== 1) return { ok: false, reason: 'not enough points' };
-  return { ok: true, progression: mapRow(r.rows[0]) };
 }
 
 // Takes BOTH ids, and they are not interchangeable: the stat reset is
@@ -139,15 +125,18 @@ async function respec(pool, userId, characterId) {
       await client.query('ROLLBACK');
       return { ok: false, reason: 'not enough gold', cost };
     }
-    const refund = refundedPoints(before);
+    // The stat columns are a class-base snapshot now (design doc 3.3) and
+    // nothing raises them, so this reset is a safety net rather than the
+    // point of the operation. T7 replaces this body with the passive-tree
+    // respec, which is what a player actually pays for.
     const r = await client.query(
       `UPDATE player_progression
           SET strength = $2, dexterity = $2, constitution = $2,
               intelligence = $2, wisdom = $2, charisma = $2,
-              stat_points = stat_points + $3, updated_at = now()
+              updated_at = now()
         WHERE character_id = $1
         RETURNING ${COLUMNS}`,
-      [characterId, C.BASE_STAT, refund],
+      [characterId, C.BASE_STAT],
     );
     await client.query('COMMIT');
     return {
@@ -206,5 +195,5 @@ async function applyDeath(pool, characterId, { rng = Math.random } = {}) {
 }
 
 module.exports = {
-  loadProgression, awardXp, allocateStat, respec, applyDeath, XP_SOURCES,
+  loadProgression, awardXp, respec, applyDeath, XP_SOURCES,
 };

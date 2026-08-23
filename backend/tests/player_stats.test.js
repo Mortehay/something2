@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   derivePlayerStats, xpFloor, xpToNext, levelForXp, xpForKill,
-  applyDeathPenalty, refundedPoints, DEFAULT_PROGRESSION,
+  applyDeathPenalty, DEFAULT_PROGRESSION,
 } = require('../src/services/playerStats.js');
 
 const at = (over) => ({ ...DEFAULT_PROGRESSION, ...over });
@@ -61,23 +61,80 @@ test('a malformed progression falls back to base rather than NaN', () => {
   assert.equal(derivePlayerStats({ constitution: 'seven' }).maxHp, 100);
 });
 
-test('the XP curve has the documented floors', () => {
-  assert.equal(xpFloor(1), 0);
-  assert.equal(xpFloor(2), 100);
-  assert.equal(xpFloor(3), 300);
-  assert.equal(xpFloor(4), 600);
-  assert.equal(xpFloor(5), 1000);
-  assert.equal(xpToNext(1), 100);
-  assert.equal(xpToNext(4), 400);
+
+// Every number below is a hand-computed literal for
+// xpToNext(L) = round(18 * L^1.33), verified with `node -e` before being
+// written here. NOT one of them is produced by calling xpToNext or by
+// re-implementing the formula: an XP-curve test that builds its own
+// expectation from the code's own constants proves nothing, and this repo's
+// dominant test failure is exactly that.
+//
+// The spec's own table is wrong at two rows -- it printed 8240 for level 100
+// and 14123 for level 150. The correct values are 8228 and 14108.
+test('the XP curve costs the documented amount at every checked level', () => {
+  assert.equal(xpToNext(1), 18);
+  assert.equal(xpToNext(2), 45);
+  assert.equal(xpToNext(3), 78);
+  assert.equal(xpToNext(4), 114);
+  assert.equal(xpToNext(5), 153);
+  assert.equal(xpToNext(7), 239);
+  assert.equal(xpToNext(10), 385);
+  assert.equal(xpToNext(50), 3273);
+  assert.equal(xpToNext(100), 8228);
+  // MAX_LEVEL: there is no next level to buy.
+  assert.equal(xpToNext(150), Infinity);
+  assert.equal(xpToNext(151), Infinity);
 });
 
+// The cumulative table. Also literals: xpFloor has no closed form with a
+// fractional exponent, so there is no formula to write inline the way the old
+// triangular-sum version did -- which makes a direct equality check against
+// hand-computed numbers the ONLY thing that can catch a floor that is too
+// high, since every downstream clamp trivially satisfies a >= assertion.
+test('the cumulative floors are the documented literals', () => {
+  assert.equal(xpFloor(1), 0);
+  assert.equal(xpFloor(2), 18);
+  assert.equal(xpFloor(3), 63);
+  assert.equal(xpFloor(4), 141);
+  assert.equal(xpFloor(5), 255);
+  assert.equal(xpFloor(7), 603);
+  assert.equal(xpFloor(10), 1463);
+  assert.equal(xpFloor(50), 68598);
+  assert.equal(xpFloor(100), 349010);
+  assert.equal(xpFloor(150), 901212);
+  // Out of range clamps rather than returning NaN or undefined.
+  assert.equal(xpFloor(0), 0);
+  assert.equal(xpFloor(999), 901212);
+});
+
+// The floors must be strictly increasing across all 150 levels. A binary
+// search over a table that is not sorted returns a plausible wrong answer
+// silently, and no single-point assertion above can see that.
+test('the floor table is strictly increasing for all 150 levels', () => {
+  for (let level = 2; level <= 150; level++) {
+    assert.ok(xpFloor(level) > xpFloor(level - 1),
+      `xpFloor(${level}) = ${xpFloor(level)} is not above xpFloor(${level - 1}) = ${xpFloor(level - 1)}`);
+  }
+});
+
+// The exact-boundary cases the binary search has to get right. An off-by-one
+// in the search puts an exact total on the wrong side and a player one level
+// behind for the rest of their life.
 test('levelForXp inverts the curve exactly at the boundaries', () => {
   assert.equal(levelForXp(0), 1);
-  assert.equal(levelForXp(99), 1);
-  assert.equal(levelForXp(100), 2);   // exactly on the boundary
-  assert.equal(levelForXp(299), 2);
-  assert.equal(levelForXp(300), 3);
-  assert.equal(levelForXp(999999999), 50); // clamped at MAX_LEVEL
+  assert.equal(levelForXp(17), 1);
+  assert.equal(levelForXp(18), 2);   // exactly on the boundary
+  assert.equal(levelForXp(62), 2);
+  assert.equal(levelForXp(63), 3);
+  assert.equal(levelForXp(140), 3);
+  assert.equal(levelForXp(141), 4);
+  assert.equal(levelForXp(254), 4);
+  assert.equal(levelForXp(255), 5);
+  assert.equal(levelForXp(68597), 49);
+  assert.equal(levelForXp(68598), 50);
+  assert.equal(levelForXp(901211), 149);
+  assert.equal(levelForXp(901212), 150);
+  assert.equal(levelForXp(999999999), 150); // clamped at MAX_LEVEL
 });
 
 test('kill XP rewards a harder creature and decays to zero on a trivial one', () => {
@@ -88,68 +145,57 @@ test('kill XP rewards a harder creature and decays to zero on a trivial one', ()
   assert.equal(xpForKill(1, 10), 0);    // never negative
 });
 
-// Level 3 is worth xpToNext(3) = 300 XP and its floor is 300. Every expected
-// number below is hand-computed from those two facts and written as a literal.
+// Level 3 is worth xpToNext(3) = 78 and its floor is 63. Every expected
+// number below is hand-computed from those two literals.
 test('death costs a random slice of what the level is worth', () => {
-  // Draw 0 -> the 0.5% floor of the range: floor(0.005 * 300) = 1.
-  assert.deepStrictEqual(applyDeathPenalty(500, 3, 0), { experience: 499, lost: 1 });
-  // Draw 1 -> the 10% ceiling: floor(0.10 * 300) = 30.
-  assert.deepStrictEqual(applyDeathPenalty(500, 3, 1), { experience: 470, lost: 30 });
-  // Draw 0.5 -> 5.25%: floor(0.0525 * 300) = floor(15.75) = 15.
-  assert.deepStrictEqual(applyDeathPenalty(500, 3, 0.5), { experience: 485, lost: 15 });
+  // Draw 0 -> the 0.5% floor: floor(0.005 * 78) = floor(0.39) = 0.
+  assert.deepStrictEqual(applyDeathPenalty(500, 3, 0), { experience: 500, lost: 0 });
+  // Draw 1 -> the 10% ceiling: floor(0.10 * 78) = floor(7.8) = 7.
+  assert.deepStrictEqual(applyDeathPenalty(500, 3, 1), { experience: 493, lost: 7 });
+  // Draw 0.5 -> 5.25%: floor(0.0525 * 78) = floor(4.095) = 4.
+  assert.deepStrictEqual(applyDeathPenalty(500, 3, 0.5), { experience: 496, lost: 4 });
 });
 
+// Level 10 is worth 385, which is large enough that all five draws land on
+// distinct values -- a formula that ignored `unit`, or used the wrong end of
+// the range, would collapse this list.
 test('the roll spans the whole 0.5%-10% band and never leaves it', () => {
-  // Sweep the draw and confirm the loss is monotonic in it and bounded by the
-  // two literals above -- a formula that ignored `unit`, or that used the
-  // wrong end of the range, would collapse this to a single value.
-  const losses = [0, 0.25, 0.5, 0.75, 1].map((u) => applyDeathPenalty(100000, 3, u).lost);
-  assert.deepStrictEqual(losses, [1, 8, 15, 22, 30]);
+  const losses = [0, 0.25, 0.5, 0.75, 1].map((u) => applyDeathPenalty(100000, 10, u).lost);
+  assert.deepStrictEqual(losses, [1, 11, 20, 29, 38]);
   for (const u of [-5, 2, NaN, undefined, 'half']) {
-    const { lost } = applyDeathPenalty(100000, 3, u);
-    assert.ok(lost >= 1 && lost <= 30, `draw ${String(u)} escaped the band: ${lost}`);
+    const { lost } = applyDeathPenalty(100000, 10, u);
+    assert.ok(lost >= 1 && lost <= 38, `draw ${String(u)} escaped the band: ${lost}`);
   }
 });
 
 test('death never de-levels, and the clamp reports the real loss', () => {
-  // Exactly at the floor there is nothing to lose, at ANY draw.
-  assert.deepStrictEqual(applyDeathPenalty(300, 3, 1), { experience: 300, lost: 0 });
-  // Barely into the level: the 10% roll wants 30 but only 4 exist. `lost` must
-  // report 4, not 30 -- an over-reported loss would lie to the player and to
+  // Exactly at the floor there is nothing to lose, at ANY draw. xpFloor(3) is
+  // the literal 63 from the table above.
+  assert.deepStrictEqual(applyDeathPenalty(63, 3, 1), { experience: 63, lost: 0 });
+  // Barely into the level: the 10% roll wants 7 but only 4 exist. `lost` must
+  // report 4, not 7 -- an over-reported loss would lie to the player and to
   // the wire message the sheet renders.
-  assert.deepStrictEqual(applyDeathPenalty(304, 3, 1), { experience: 300, lost: 4 });
+  assert.deepStrictEqual(applyDeathPenalty(67, 3, 1), { experience: 63, lost: 4 });
 
-  // MAX_LEVEL is the case a naive implementation gets wrong: xpToNext(50) is
+  // MAX_LEVEL is the case a naive implementation gets wrong: xpToNext(150) is
   // Infinity by design, so deriving the loss from it would wipe out every
-  // point of progress above the floor. Level 50 is worth 100*50 = 5000, so a
-  // full-strength roll costs floor(0.10 * 5000) = 500.
-  assert.deepStrictEqual(applyDeathPenalty(xpFloor(50) + 900, 50, 1),
-    { experience: xpFloor(50) + 400, lost: 500 });
+  // point of progress above the floor. Level 150 is WORTH 14108, so a
+  // full-strength roll costs floor(0.10 * 14108) = 1410.
+  assert.deepStrictEqual(applyDeathPenalty(901212 + 2000, 150, 1),
+    { experience: 901212 + 590, lost: 1410 });
 
-  // The invariant, stated directly: for every level and every XP inside it,
-  // the result never falls below the level's floor. The floor used here is
-  // the closed form written out inline -- NOT a call into xpFloor -- so a bug
-  // confined to xpFloor cannot corrupt both the input and the expectation
-  // identically and cancel itself out. xpFloor is also checked directly
-  // against that same closed form for every level, because the >= invariant
-  // below is structurally unable to catch a floor that is too HIGH: the
-  // clamp in applyDeathPenalty guarantees out.experience >= whatever floor
-  // it was given, so an over-reporting xpFloor still trivially satisfies the
-  // inequality. Only a direct equality check on xpFloor's own output can
-  // catch that.
-  for (let level = 1; level <= 50; level++) {
-    const expectedFloor = 50 * (level - 1) * level;
-    assert.equal(xpFloor(level), expectedFloor,
-      `xpFloor(${level}) diverged from the closed form: ${xpFloor(level)} !== ${expectedFloor}`);
+  // The invariant, stated directly, across the whole range: for every level
+  // and every XP inside it, the result never falls below the level's floor.
+  // The floors themselves are pinned above as literals, so a bug confined to
+  // xpFloor cannot corrupt both the input and the expectation identically.
+  for (let level = 1; level <= 150; level++) {
+    const floor = xpFloor(level);
     for (const offset of [0, 1, 7, 50, 999]) {
-      const xp = expectedFloor + offset;
-      // Both ends of the roll, because the loss now derives from the level's
-      // total worth rather than from progress made, so the strongest draw is
-      // the one most able to punch through the floor.
+      const xp = floor + offset;
       for (const unit of [0, 1]) {
         const out = applyDeathPenalty(xp, level, unit);
-        assert.ok(out.experience >= expectedFloor,
-          `level ${level} +${offset} at draw ${unit} de-levelled: ${out.experience} < ${expectedFloor}`);
+        assert.ok(out.experience >= floor,
+          `level ${level} +${offset} at draw ${unit} de-levelled: ${out.experience} < ${floor}`);
         assert.equal(out.experience, xp - out.lost,
           `level ${level} +${offset} at draw ${unit}: reported loss ${out.lost} does not match the XP actually removed`);
       }
@@ -157,7 +203,12 @@ test('death never de-levels, and the clamp reports the real loss', () => {
   }
 });
 
-test('refundedPoints returns every point ever spent', () => {
-  assert.equal(refundedPoints(DEFAULT_PROGRESSION), 0);
-  assert.equal(refundedPoints(at({ strength: 10, wisdom: 8 })), 8);
+// The stat-point system is gone: DEFAULT_PROGRESSION must not carry a
+// stat_points field, and refundedPoints must not be exported at all. A test
+// that only checked passive_points was present would still pass with a
+// vestigial stat_points riding along into every INSERT.
+test('the stat-point system leaves no trace on the default progression', () => {
+  assert.ok(!('stat_points' in DEFAULT_PROGRESSION), 'stat_points must be gone entirely');
+  assert.equal(DEFAULT_PROGRESSION.passive_points, 0);
+  assert.equal(require('../src/services/playerStats.js').refundedPoints, undefined);
 });
