@@ -344,3 +344,41 @@ export function drawInventory(ctx, layout, state) {
 
   ctx.restore();
 }
+
+// Resolve a finished drag against the layout it started on. PURE, so every
+// outcome is a unit test rather than a mouse gesture. The caller (Game) turns
+// the returned action into a wire message; nothing here talks to the server,
+// and canEquipClient is used only to suppress a request the server would
+// refuse anyway -- it authorizes nothing.
+export function resolveDrop(layout, drag, point, inventory) {
+  if (!drag || !drag.from) return { action: "none" };
+  const { x, y } = point || {};
+  if (typeof x !== "number" || typeof y !== "number") return { action: "none" };
+
+  const onSlot = layout.slots.find((s) => inside(s, x, y)) || null;
+  const onCell = layout.cells.find((c) => inside(c, x, y)) || null;
+  const onPanel = inside(layout.panel, x, y);
+
+  if (drag.from.kind === "item") {
+    if (onSlot) {
+      if (drag.itemId == null) return { action: "none" };
+      if (!canEquipClient(inventory, drag.itemId, onSlot.slot)) return { action: "none" };
+      return { action: "equip", itemId: drag.itemId, slot: onSlot.slot };
+    }
+    // Cell-to-cell is deliberately inert: player_items carries no slot index,
+    // so a rearrangement would vanish on the next join. Refusing is honest;
+    // animating a change the server forgets is not. Anywhere else INSIDE the
+    // panel (tabs, title bar, footer) is equally inert -- only leaving the
+    // panel entirely means "drop this on the ground".
+    if (onCell || onPanel) return { action: "none" };
+    return { action: "drop", itemId: drag.itemId };
+  }
+
+  if (drag.from.kind === "slot") {
+    if (drag.itemId == null) return { action: "none" };  // dragging an empty slot
+    if (onCell) return { action: "unequip", slot: drag.from.id };
+    return { action: "none" };
+  }
+
+  return { action: "none" };
+}
