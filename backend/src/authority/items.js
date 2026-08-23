@@ -335,7 +335,19 @@ const HAND_SLOTS = ['main_hand', 'off_hand'];
 function findItem(inv, itemId) { return inv.items.find((it) => it.id === itemId) || null; }
 
 // Pure legality check. Returns {ok:true} or {ok:false, reason}.
-function canEquip(inv, itemTypes, itemId, slot) {
+//
+// `req` (SOMET-478, T10) is the requirement context: { level, base } where
+// `base` is the character's non-gear stat bundle. It is OPTIONAL and null
+// means "skip the level/stat gate" -- canEquip is also called from pure
+// fixtures and from the client-side mirror, neither of which holds a
+// progression row. world.setEquipment ALWAYS supplies a real one, and
+// item_requirements_db.test.js asserts a refusal THROUGH setEquipment so a
+// dropped thread fails loudly rather than silently ungating every item.
+//
+// The gate runs LAST, after the slot/category rules, so the message a player
+// sees names the first thing actually wrong with the request rather than a
+// stat requirement on an item that could never go in that slot anyway.
+function canEquip(inv, itemTypes, itemId, slot, req = null) {
   if (!SLOTS.includes(slot)) return { ok: false, reason: 'unknown slot' };
   const item = findItem(inv, itemId);
   if (!item) return { ok: false, reason: 'you do not own that item' };
@@ -350,12 +362,27 @@ function canEquip(inv, itemTypes, itemId, slot) {
       const mhType = mh ? itemTypes.get((findItem(inv, mh) || {}).typeId) : null;
       if (mhType && mhType.two_handed) return { ok: false, reason: 'a two-handed weapon is equipped' };
     }
-    return { ok: true };
+    return requirementGate(inv, itemTypes, itemId, type, req);
   }
 
   // armor: must go in its own slot
   if (type.slot !== slot) return { ok: false, reason: `that item goes in ${type.slot}` };
-  return { ok: true };
+  return requirementGate(inv, itemTypes, itemId, type, req);
+}
+
+// Split out so the two branches above cannot drift on WHICH stats the gate
+// runs against. `excludeItemId: itemId` is the circularity rule: the candidate
+// contributes nothing to the stats its own requirements are judged against.
+//
+// The require is INSIDE the function on purpose. equipRequirements.js requires
+// SLOTS from this module, so a top-level require here would be a cycle
+// resolved to a half-initialised module.
+function requirementGate(inv, itemTypes, itemId, type, req) {
+  if (!req) return { ok: true };
+  // eslint-disable-next-line global-require
+  const { effectiveStatsFor, meetsRequirements } = require('./equipRequirements.js');
+  const stats = effectiveStatsFor(inv, itemTypes, req.base, { excludeItemId: itemId });
+  return meetsRequirements(type, req.level, stats);
 }
 
 // Sum equipped ARMOR defense and merge resistances per element.
@@ -525,8 +552,11 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
 
 // Equip with write-through. Clears any slot the instance currently occupies and,
 // for a two-handed weapon, the off hand.
-async function equip(pool, characterId, inv, itemTypes, itemId, slot) {
-  const check = canEquip(inv, itemTypes, itemId, slot);
+async function equip(pool, characterId, inv, itemTypes, itemId, slot, req = null) {
+  // SOMET-478: the requirement gate rides inside canEquip, so it is refused
+  // BEFORE the in-memory mutation below -- the SOMET-77 snapshot/write-through
+  // ordering is entered only on a legal equip and is otherwise untouched.
+  const check = canEquip(inv, itemTypes, itemId, slot, req);
   if (!check.ok) return check;
 
   const type = itemTypes.get(findItem(inv, itemId).typeId);

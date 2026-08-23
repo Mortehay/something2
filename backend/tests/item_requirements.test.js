@@ -121,3 +121,80 @@ test('an item that is ALREADY illegal does not block unrelated unequips', () => 
   // about it, so the helm must come off freely.
   assert.deepStrictEqual(unequipBlockers(inv, TYPES, BASE, 1, 'head'), []);
 });
+
+const { canEquip } = require('../src/authority/items.js');
+
+test('canEquip with no requirement context behaves exactly as before', () => {
+  const inv = { items: [{ id: 'blade', typeId: 23 }], equipment: {} };
+  assert.deepStrictEqual(canEquip(inv, TYPES, 'blade', 'main_hand'), { ok: true });
+});
+
+test('canEquip refuses an item whose level requirement is unmet', () => {
+  const inv = { items: [{ id: 'blade', typeId: 23 }], equipment: {} };
+  const r = canEquip(inv, TYPES, 'blade', 'main_hand', { level: 39, base: BASE });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'requires level 40');
+});
+
+test('canEquip refuses the self-granting plate and accepts it once the stone moves', () => {
+  const self = selfGrantingInv();
+  assert.strictEqual(canEquip(self, TYPES, 'plate', 'chest', { level: 1, base: BASE }).ok, false);
+
+  const helped = {
+    items: [
+      { id: 'plate', typeId: 20 },
+      { id: 'helm', typeId: 22, socketedStoneTypeId: 21, socketedStoneItemId: 'stone' },
+      { id: 'stone', typeId: 21 },
+    ],
+    equipment: { head: 'helm' },
+  };
+  assert.deepStrictEqual(canEquip(helped, TYPES, 'plate', 'chest', { level: 1, base: BASE }), { ok: true });
+});
+
+// The slot/category rules must still be the ones that answer, and must answer
+// FIRST: a player told "requires 20 strength" about a helm they tried to put
+// in the chest slot would go hunting for strength instead of fixing the slot.
+test('a slot/category refusal outranks a requirement refusal', () => {
+  const inv = { items: [{ id: 'plate', typeId: 20 }], equipment: {} };
+  const r = canEquip(inv, TYPES, 'plate', 'head', { level: 1, base: BASE });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'that item goes in chest');
+});
+
+// Acceptance criterion 5, asserted against the REAL catalog rather than a
+// fixture: with the migration's identity defaults, every item type currently
+// in the database must stay equippable by a level-1 base-stat character, so
+// this change is a no-op for every item that exists today.
+test('every catalog row behaves identically with and without the gate', async (t) => {
+  const url = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+  if (!url) { t.skip('no TEST_DATABASE_URL / DATABASE_URL'); return; }
+  // eslint-disable-next-line global-require
+  const { Pool } = require('pg');
+  const pool = new Pool({ connectionString: url, connectionTimeoutMillis: 2000, max: 2 });
+  try { await pool.query('SELECT 1'); } catch (err) {
+    await pool.end().catch(() => {});
+    t.skip(`NO DATABASE at ${url} (${err.message})`);
+    return;
+  }
+  t.after(async () => { await pool.end().catch(() => {}); });
+
+  // eslint-disable-next-line global-require
+  const { loadItemTypes } = require('../src/authority/items.js');
+  const types = await loadItemTypes(pool);
+  assert.ok(types.size > 0, 'the catalog must not be empty, or this test proves nothing');
+
+  const req = { level: 1, base: BASE };
+  let checked = 0;
+  for (const type of types.values()) {
+    // Only equippable categories have a paper-doll slot to be gated on.
+    const slot = type.category === 'weapon' ? 'main_hand' : type.slot;
+    if (!slot) continue;
+    const inv = { items: [{ id: 'probe', typeId: type.id }], equipment: {} };
+    const withReq = canEquip(inv, types, 'probe', slot, req);
+    const without = canEquip(inv, types, 'probe', slot, null);
+    assert.deepStrictEqual(withReq, without,
+      `${type.name} (id ${type.id}) must behave identically with and without a requirement context`);
+    checked += 1;
+  }
+  assert.ok(checked > 0, 'no equippable catalog rows were checked -- the assertion would be vacuous');
+});
