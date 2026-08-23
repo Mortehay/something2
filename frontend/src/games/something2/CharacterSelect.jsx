@@ -179,7 +179,12 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
                   checked={chosenClass === cls.id}
                   onChange={() => setEntityTypeId(cls.id)}
                 />
-                {cls.name} <span className="why">({cls.hp} hp)</span>
+                {/* SOMET-486: these are the class's real base pools, straight
+                    off the same entity_types columns the authority derives a
+                    joining character's maxHp/maxMana from. They were decoration
+                    until 486 -- the game handed every class 100/100. Mana is
+                    shown as well as HP now that it actually differs. */}
+                {cls.name} <span className="why">({cls.hp} hp / {cls.mana} mana)</span>
               </label>
             ))}
           </fieldset>

@@ -73,6 +73,28 @@ test('no progression frame recomputes stats from an unbuffed row', () => {
     'derivePlayerStats must be called on a stone-buffed row inside the authority');
 });
 
+// SOMET-486. The authority now has TWO per-player inputs to fold in before
+// deriving -- the socketed buff stones and the class base pools -- and it had
+// four hand-inlined copies of the fold. Adding a second input to four copies
+// is how a Ranger joins at 85 hp and snaps back to 100 on its first level-up,
+// which is the same shape of defect as the buff-stone overwrite SOMET-245
+// Task 6 fixed. There is now exactly ONE derive in the file, and this pins it.
+test('the authority derives stats in exactly one place', () => {
+  const calls = [...src.matchAll(/derivePlayerStats\(/g)];
+  assert.strictEqual(calls.length, 1,
+    `derivePlayerStats is called ${calls.length} times in the authority; it must be called only inside framedStats, or a new per-player input will be folded into some call sites and not others`);
+});
+
+// The class pools have to reach that one derive, and they have to reach it as
+// a per-player value rather than a constant. A second argument that was
+// hardcoded, or omitted, would leave every class on HP_BASE/MANA_BASE again.
+test('the one derive folds in the class base pools as well as the stones', () => {
+  assert.match(src, /derivePlayerStats\(withStoneBonuses\(progression, buffs\), classPools\)/,
+    'framedStats must pass classPools into derivePlayerStats');
+  assert.match(src, /addPlayer\([^)]*character\.classPools\)/,
+    'the join must hand the class pools to addPlayer, or every later re-derive recomputes them class-blind');
+});
+
 // Contract §4 / the Group C contract addition: Game.js's onProgression keeps
 // `msg.progression` and DISCARDS every sibling field. The composed fields
 // therefore have to be inside the object, and `stats` is the single documented

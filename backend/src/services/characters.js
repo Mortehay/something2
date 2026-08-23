@@ -7,7 +7,33 @@
 const { BASE_STAT } = require('./progressionConstants.js');
 
 const MAX_CHARACTERS = 8;
+
 const MAX_NAME_LENGTH = 32;
+
+// SOMET-486. The ONE place entity_types' pool columns become a class's base
+// pools, and the ONE column list every reader of them uses.
+//
+// It matters that both readers below -- listPlayableClasses (what character
+// select ADVERTISES) and ownedCharacter (what a joining character GETS) --
+// take their numbers from this same pair of columns through this same
+// function. The defect this fixes survived since SOMET-242 precisely because
+// the advertised number and the played number came from different places, and
+// reading `hp` on one side and `max_hp` on the other would rebuild that split
+// out of two columns that merely happen to agree today.
+const CLASS_POOL_COLUMNS = 'max_hp, max_mana';
+
+// -> { maxHp, maxMana }, each possibly null. derivePlayerStats substitutes
+// HP_BASE/MANA_BASE for a null rather than producing NaN; the null is passed
+// through rather than defaulted here so there is exactly one fallback, in the
+// one function that owns the formula.
+function classPoolsFromRow(row) {
+  const hp = row == null ? NaN : Number(row.max_hp);
+  const mana = row == null ? NaN : Number(row.max_mana);
+  return {
+    maxHp: Number.isFinite(hp) ? hp : null,
+    maxMana: Number.isFinite(mana) ? mana : null,
+  };
+}
 
 class CharacterError extends Error {
   constructor(code, message) {
@@ -19,13 +45,20 @@ class CharacterError extends Error {
 
 async function listPlayableClasses(pool) {
   const r = await pool.query(
-    `SELECT id, name, color, hp, strength, dexterity, constitution, intelligence, wisdom, charisma
+    `SELECT id, name, color, ${CLASS_POOL_COLUMNS},
+            strength, dexterity, constitution, intelligence, wisdom, charisma
        FROM entity_types WHERE is_playable = true ORDER BY id ASC`);
+  // SOMET-486: `hp` (and the new `mana`) are the class's BASE POOLS, read
+  // through classPoolsFromRow -- the same function and the same columns the
+  // join path uses. `hp` used to come from entity_types.hp, a DIFFERENT column
+  // that nothing in the running game ever consulted. The key stays named `hp`
+  // because CharacterSelect.jsx already renders it.
   return r.rows.map((x) => ({
     id: x.id,
     name: x.name,
     color: x.color,
-    hp: Number(x.hp),
+    hp: classPoolsFromRow(x).maxHp,
+    mana: classPoolsFromRow(x).maxMana,
     strength: Number(x.strength),
     dexterity: Number(x.dexterity),
     constitution: Number(x.constitution),
@@ -79,17 +112,29 @@ async function listCharacters(pool, userId) {
 async function ownedCharacter(pool, userId, characterId) {
   const id = Number(characterId);
   if (!Number.isInteger(id)) return null;
+  // LEFT JOIN, not JOIN: a character whose class row has vanished must still
+  // resolve (the ownership answer is about `characters`, not `entity_types`).
+  // classPoolsFromRow then yields nulls and derivePlayerStats falls back to
+  // HP_BASE/MANA_BASE -- a pool-less join, not a refused one.
   const r = await pool.query(
-    'SELECT id, entity_type_id, inventory_slots FROM characters WHERE id = $1 AND user_id = $2',
+    `SELECT c.id, c.entity_type_id, c.inventory_slots, e.max_hp, e.max_mana
+       FROM characters c
+       LEFT JOIN entity_types e ON e.id = c.entity_type_id
+      WHERE c.id = $1 AND c.user_id = $2`,
     [id, userId]);
   if (!r.rows.length) return null;
   // inventory_slots rides the ownership lookup rather than getting its own
   // query: the join path already needs this row, and the carry limit must be
   // in hand before the first grant path runs (see authority/items.js).
+  //
+  // classPools rides it for the same reason (SOMET-486): every path that
+  // derives a character's stats already resolves ownership first, so this is
+  // where the class's base pools are cheapest to obtain and hardest to forget.
   return {
     id: r.rows[0].id,
     entityTypeId: r.rows[0].entity_type_id,
     inventorySlots: Number(r.rows[0].inventory_slots),
+    classPools: classPoolsFromRow(r.rows[0]),
   };
 }
 
@@ -176,6 +221,8 @@ async function deleteCharacter(pool, userId, characterId) {
 module.exports = {
   MAX_CHARACTERS,
   MAX_NAME_LENGTH,
+  CLASS_POOL_COLUMNS,
+  classPoolsFromRow,
   CharacterError,
   listCharacters,
   listPlayableClasses,

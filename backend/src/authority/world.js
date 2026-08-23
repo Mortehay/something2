@@ -33,10 +33,14 @@ const PLAYER_MANA_REGEN = 10; // per second
 const PLAYER_MAX_STAMINA = 100;
 const PLAYER_STAMINA_REGEN = 10; // per second
 
-// A level-1 (all-base-stat) character's derived bundle. playerStats.js
-// guarantees this is an identity on the pre-A2 constants above -- maxHp 100,
-// maxMana 100, manaRegen 10, x1.0 damage, x1.0 cooldown -- so a player who
-// joins with no progression behaves exactly as before A2.
+// A level-1 (all-base-stat, NO CLASS) character's derived bundle.
+// playerStats.js guarantees this is an identity on the pre-A2 constants above
+// -- maxHp 100, maxMana 100, manaRegen 10, x1.0 damage, x1.0 cooldown -- so a
+// player who joins with no progression behaves exactly as before A2.
+//
+// Deliberately class-blind (SOMET-486 passes no classPools here): this is the
+// addPlayer default for callers that have no character at all, i.e. tests and
+// synthetic players. The real join path always passes a class-derived bundle.
 const BASE_STATS = derivePlayerStats(DEFAULT_PROGRESSION);
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -157,7 +161,16 @@ class World {
   // disagree, server.js's onPlayerDeath is what notices and relocates. Defaulted
   // to null so every existing caller -- and every test that builds a player --
   // keeps behaving exactly as before.
-  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null, bind = null) {
+  //
+  // `classPools` (SOMET-486) is `{ maxHp, maxMana }` -- this character's
+  // CLASS base pools, carried on the player so every later re-derive
+  // (level-up, chest XP, socket, respec) starts from the same base the join
+  // did. Without it those paths would recompute pools class-blind and quietly
+  // snap a Ranger back to 100/100 on its first level-up: the same shape of
+  // defect as the buff-stone overwrite SOMET-245 Task 6 fixed. Defaults to
+  // null so a test that builds a player unchanged still gets HP_BASE/
+  // MANA_BASE via derivePlayerStats' own fallback.
+  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null, bind = null, classPools = null) {
     this.players.set(userId, {
       userId,
       characterId,
@@ -203,6 +216,11 @@ class World {
       // every damage, cooldown and regen site -- see weaponDamage,
       // applyAttackCooldown and tick()'s mana-regen line.
       stats,
+      // The class base pools `stats` was derived FROM. Read only by
+      // server.js's liveStats() when it re-derives; nothing in this file
+      // consults it, because every pool number this file needs is already
+      // baked into `stats`.
+      classPools,
     });
   }
 

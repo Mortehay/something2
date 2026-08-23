@@ -11,14 +11,20 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
   const pool = new Pool({ connectionString: url });
   t.after(() => pool.end());
 
+  // SOMET-486 removed mana/max_mana from this list. Warrior's mana is no
+  // longer Player's: the legacy Player row says 50, the game has always given
+  // 100, and Warrior is now authored at the 100 the game plays with. Every
+  // other column still has to match, because 1714440092000's backfill put
+  // every pre-existing player on a Warrior character and a drift in a STAT
+  // still rebalances all of them.
   const STAT_COLUMNS = [
     'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma',
-    'hp', 'max_hp', 'hp_regen_rate', 'mana', 'max_mana', 'mana_regen_rate',
+    'hp', 'max_hp', 'hp_regen_rate', 'mana_regen_rate',
   ];
 
-  await t.test('Warrior is an exact stat clone of Player', async () => {
+  await t.test('Warrior is an exact stat clone of Player, pools aside', async () => {
     const r = await pool.query(
-      `SELECT name, ${STAT_COLUMNS.join(', ')} FROM entity_types
+      `SELECT name, ${STAT_COLUMNS.join(', ')}, mana, max_mana FROM entity_types
         WHERE name IN ('Player', 'Warrior')`);
     const by = new Map(r.rows.map((x) => [x.name, x]));
     assert.ok(by.get('Player'), 'the Player entity type must still exist');
@@ -28,6 +34,37 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
         Number(by.get('Warrior')[col]), Number(by.get('Player')[col]),
         `Warrior.${col} must equal Player.${col} -- a drift here rebalances every backfilled character`);
     }
+    // The divergence is asserted, not merely permitted: dropping mana from
+    // STAT_COLUMNS above would otherwise let Warrior's mana be ANY value, and
+    // 486's whole point is that this one is pinned.
+    assert.equal(Number(by.get('Warrior').max_mana), 100,
+      'Warrior mana is FROZEN at 100 (SOMET-486) -- every live character is a Warrior with 100 mana');
+  });
+
+  // The three classes' base pools, written out literally. These are the
+  // numbers the authority hands a joining character (playerStats.js's
+  // classPools) AND the numbers character select advertises -- one pair of
+  // columns, two readers, which is the split SOMET-486 closed.
+  await t.test('each class carries its authored base pools', async () => {
+    const r = await pool.query(
+      `SELECT name, max_hp, max_mana FROM entity_types WHERE is_playable = true`);
+    const by = new Map(r.rows.map((x) => [x.name, x]));
+    const expected = {
+      Warrior: { hp: 100, mana: 100 },
+      Ranger: { hp: 85, mana: 115 },
+      Mage: { hp: 75, mana: 150 },
+    };
+    for (const [name, want] of Object.entries(expected)) {
+      assert.ok(by.get(name), `${name} must exist`);
+      assert.deepEqual(
+        { hp: Number(by.get(name).max_hp), mana: Number(by.get(name).max_mana) }, want,
+        `${name}'s base pools`);
+    }
+    // A Mage with less mana than a Warrior is the shape of the dead pre-486
+    // data (Mage 70 vs Warrior 50-that-was-really-100). Asserted as a property
+    // as well as a literal so a future retune cannot quietly reinstate it.
+    assert.ok(Number(by.get('Mage').max_mana) > Number(by.get('Warrior').max_mana),
+      'a Mage must have MORE mana than a Warrior');
   });
 
   await t.test('Ranger and Mage carry their own literal stats', async () => {
@@ -40,7 +77,7 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       { hp: 85, dex: 12 });
     assert.deepEqual(
       { hp: Number(by.get('Mage').hp), int: Number(by.get('Mage').intelligence), mana: Number(by.get('Mage').max_mana) },
-      { hp: 75, int: 12, mana: 70 });
+      { hp: 75, int: 12, mana: 150 });
   });
 
   await t.test('exactly the three classes are playable', async () => {

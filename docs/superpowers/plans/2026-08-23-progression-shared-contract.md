@@ -427,3 +427,36 @@ which would pass for any typo.
 re-authored pools for the three existing classes, pinned by tests. B1 then adds
 the four new classes' pools and all six start-node grants on top. 486 must also
 land AFTER C2, because both touch `derivePlayerStats`' inputs.
+
+**The pools SOMET-486 actually authored** (migration `1714440509000`, mirrored
+in `seeds/data/entityTypes.js` — a database that lost its class rows gets them
+back from the seeder, so the two must agree):
+
+| Class | HP | Mana | Total | Was |
+|---|---|---|---|---|
+| Warrior | 100 | 100 | 200 | 100 / 50 |
+| Ranger | 85 | 115 | 200 | 85 / 50 |
+| Mage | 75 | 150 | 225 | 75 / 70 |
+
+Warrior is FROZEN, not tuned: every character that predates 486 is a Warrior
+and already has exactly 100/100. HP keeps the ladder character select has shown
+since SOMET-258. Ranger trades its 15 HP for exactly 15 mana, holding Warrior's
+total budget, because its identity is DEX and range rather than casting. Mage
+sits 25 above that budget on purpose: mana is SPENT TO ACT, so a Mage burns its
+pool every fight regardless of incoming damage, while HP is only lost on being
+hit — a pool you must spend to function is worth less per point than one you
+only lose under pressure.
+
+**B1 authors its four classes against these**, not against the pre-486
+`entity_types` values, and holds Warrior at 100/100.
+
+**Where the number lives.** `entity_types.max_hp` / `max_mana`, read in exactly
+one place — `characters.js`'s `classPoolsFromRow`, through the shared
+`CLASS_POOL_COLUMNS` — by both `listPlayableClasses` (what character select
+advertises) and `ownedCharacter` (what the join path plays). One pair of
+columns, two readers, one function: reading `hp` on one side and `max_hp` on
+the other is how the original split was built out of columns that merely happen
+to agree. `authority/server.js` now has exactly ONE `derivePlayerStats` call
+(`framedStats`), which folds in both the socketed buff stones and the class
+pools; the four hand-inlined copies it replaced are how a Ranger would have
+joined at 85 HP and snapped back to 100 on its first level-up.
