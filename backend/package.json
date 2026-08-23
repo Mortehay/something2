@@ -10,7 +10,8 @@
     "migrate": "node-pg-migrate --ignore-pattern '(?!.*\\.js$).*'",
     "migrate:up": "node-pg-migrate up --ignore-pattern '(?!.*\\.js$).*'",
     "test": "node --test --test-timeout=420000",
-    "sprites:gen": "node scripts/gen-sprites.js"
+    "sprites:gen": "node scripts/gen-sprites.js",
+    "seed:gear": "node scripts/seed-gear-ladder.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
