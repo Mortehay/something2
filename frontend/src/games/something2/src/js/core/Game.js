@@ -1,4 +1,5 @@
 import { GAME_WIDTH, GAME_HEIGHT } from "./constants.js";
+import { fitCanvasBox } from "./canvasFit.js";
 import { RenderSystem } from "../systems/RenderSystem.js";
 import { Player } from "../entities/Player.js";
 import { ImageManager } from "../managers/ImageManager.js";
@@ -325,6 +326,7 @@ export class Game {
             window.removeEventListener('resize', this._resizeHandler);
             this._resizeHandler = null;
         }
+        this._disconnectCanvasContainerObserver();
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId);
         }
@@ -709,6 +711,7 @@ export class Game {
 
     destroy() {
         if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
+        this._disconnectCanvasContainerObserver();
         if (this._keydownHandler) window.removeEventListener('keydown', this._keydownHandler);
         if (this._keyupHandler) window.removeEventListener('keyup', this._keyupHandler);
         if (this._contextMenuHandler) window.removeEventListener('contextmenu', this._contextMenuHandler);
@@ -1309,28 +1312,79 @@ export class Game {
         this.setState('menu');
     }
 
+    // The box the canvas has to fit inside. Its own parent element -- NOT the
+    // window: the canvas is a child of GameShell's content area, which is the
+    // window minus the sidebar and the header, and it clips what overflows.
+    // See canvasFit.js for the failure this measurement is fixing (SOMET-489).
+    _canvasContainerBox(){
+        const parent = this.canvas ? this.canvas.parentElement : null;
+        if (parent && typeof parent.getBoundingClientRect === 'function') {
+            const rect = parent.getBoundingClientRect();
+            // Returned even when it measures zero (a hidden container, or one
+            // read before first layout). resizeCanvas() then leaves the last
+            // good box alone -- falling back to the window HERE would restore
+            // the very overflow this method exists to prevent, at exactly the
+            // moment the container cannot contradict it.
+            return { width: rect.width, height: rect.height };
+        }
+        // No parent at all: a detached canvas (unit tests, or a node not yet
+        // inserted). The viewport is then the only box on offer.
+        return { width: window.innerWidth, height: window.innerHeight };
+    }
+
+    // A window `resize` is not the only thing that changes the box: the
+    // sidebar, the fullscreen transition and any panel around the canvas
+    // resize the container while the window stands still. Observing the
+    // container covers both, so this is the primary signal and the window
+    // listener is only the fallback for browsers without ResizeObserver.
+    // Re-attached from resizeCanvas() whenever the canvas is rebound to a new
+    // node (bindGameCanvas), so the observer can never be left watching the
+    // previous parent.
+    _observeCanvasContainer(){
+        const parent = this.canvas ? this.canvas.parentElement : null;
+        if (parent === this._observedContainer) return;
+        if (this._containerObserver) {
+            this._containerObserver.disconnect();
+            this._containerObserver = null;
+        }
+        this._observedContainer = parent || null;
+        if (!parent || typeof ResizeObserver === 'undefined') return;
+        this._containerObserver = new ResizeObserver(() => this.resizeCanvas());
+        this._containerObserver.observe(parent);
+    }
+
+    _disconnectCanvasContainerObserver(){
+        if (this._containerObserver) {
+            this._containerObserver.disconnect();
+            this._containerObserver = null;
+        }
+        this._observedContainer = null;
+    }
+
     resizeCanvas(){
         if (!this.canvas) return;
-        const ratio = 16/9;
-        let h,w;
-        const margin = 15;
+        this._observeCanvasContainer();
 
-        const availableWidth = window.innerWidth - 2 * margin;
-        const availableHeight = window.innerHeight - 2 * margin;
+        const box = this._canvasContainerBox();
+        const fit = fitCanvasBox(box.width, box.height);
+        // A container measured at zero (hidden, or pre-layout) would otherwise
+        // collapse the element to 0x0 with nothing to resize it back.
+        if (fit.width <= 0 || fit.height <= 0) return;
 
-        if(availableWidth/availableHeight > ratio){
-            h = availableHeight;
-            w = h * ratio;
-        }else{
-            w = availableWidth;
-            h = w / ratio;
-        }
+        // Guarded because assigning to width/height resets the backing store
+        // AND the 2d context state, and this now runs on every container
+        // resize rather than only on a window one.
+        if (this.canvas.width !== GAME_WIDTH) this.canvas.width = GAME_WIDTH;
+        if (this.canvas.height !== GAME_HEIGHT) this.canvas.height = GAME_HEIGHT;
 
-        this.canvas.width = GAME_WIDTH;
-        this.canvas.height = GAME_HEIGHT;
-
-        this.canvas.style.width = `${w}px`;
-        this.canvas.style.height = `${h}px`;
-        this.canvas.style.margin = `${margin}px`;
+        // Centred by absolute offsets inside the (position:relative) content
+        // area rather than by a margin: a margin box is part of the flow the
+        // container clips, which is what overflowed before.
+        this.canvas.style.position = 'absolute';
+        this.canvas.style.left = `${fit.left}px`;
+        this.canvas.style.top = `${fit.top}px`;
+        this.canvas.style.margin = '0';
+        this.canvas.style.width = `${fit.width}px`;
+        this.canvas.style.height = `${fit.height}px`;
     }
 }

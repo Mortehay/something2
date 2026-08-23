@@ -597,9 +597,17 @@ export default function GameShell() {
             mounted a fresh (blank) one — the game view came back empty.
             Hiding it is enough; the rAF loop and authority socket keep running,
             so returning to /game resumes the live world instead of reloading. */}
+        {/* Geometry is owned by Game.resizeCanvas(), which letterboxes the fixed
+            1280x720 backing store into THIS element's container and centres it
+            with absolute offsets. What is declared here is only the pre-fit
+            fallback: absolute + inset 0 keeps the element inside the content
+            area (which clips) instead of overflowing it, the way a
+            window-sized box did until SOMET-489 and cut the HUD orbs off. */}
         <canvas
           ref={canvasRef}
           style={{
+            position: 'absolute',
+            inset: 0,
             width: '100%',
             height: '100%',
             display: isGameRoute && isPlaying ? 'block' : 'none',
