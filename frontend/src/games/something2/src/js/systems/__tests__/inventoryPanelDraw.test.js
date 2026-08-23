@@ -121,3 +121,21 @@ describe("Game click routing for the new controls", () => {
     expect(g.inventorySelectedItemId).toBeNull();
   });
 });
+
+describe("character preview fallback", () => {
+  it("draws a placeholder glyph when the player image has not loaded", () => {
+    const i = inv({ types: [SWORD], items: [] });
+    const ctx = stubCtx();
+    drawInventory(ctx, layoutInventory({ inventory: i }), { inventory: i, playerImage: null });
+    expect(ctx.images).toHaveLength(0);
+    expect(ctx.texts.some((t) => t.text === "?")).toBe(true);
+  });
+
+  it("draws the sprite, and no placeholder, once the image is available", () => {
+    const i = inv({ types: [SWORD], items: [] });
+    const ctx = stubCtx();
+    drawInventory(ctx, layoutInventory({ inventory: i }), { inventory: i, playerImage: {} });
+    expect(ctx.images).toHaveLength(1);
+    expect(ctx.texts.some((t) => t.text === "?")).toBe(false);
+  });
+});

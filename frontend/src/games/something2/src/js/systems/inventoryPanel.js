@@ -241,7 +241,16 @@ export function drawInventory(ctx, layout, state) {
   ctx.fillRect(p.x, p.y, p.w, p.h);
   ctx.strokeStyle = "#3a3a4e";
   ctx.strokeRect(p.x, p.y, p.w, p.h);
-  if (playerImage) ctx.drawImage(playerImage, p.x + 8, p.y + 8, p.w - 16, p.h - 16);
+  if (playerImage) {
+    ctx.drawImage(playerImage, p.x + 8, p.y + 8, p.w - 16, p.h - 16);
+  } else {
+    // The sprite sheet loads asynchronously and can also fail outright
+    // (ImageManager.get returns null in both cases). An empty frame reads as a
+    // broken panel, so the box says "no portrait yet" rather than nothing.
+    ctx.fillStyle = "#4b5563";
+    ctx.font = "48px monospace";
+    ctx.fillText("?", p.x + p.w / 2 - 14, p.y + p.h / 2 - 26);
+  }
 
   // Paperdoll.
   ctx.font = "11px monospace";
