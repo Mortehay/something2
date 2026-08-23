@@ -14,7 +14,7 @@ import { getStoredToken, parseJwt } from "../net/auth.js";
 import { reconcile } from "../net/reconcile.js";
 import { inputVector, movementKeys } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
-import { aimVector } from "./aim.js";
+import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
@@ -911,6 +911,7 @@ export class Game {
                 // The local player's own effects, for the HUD line. The rings
                 // at their feet come from this.player.effects via drawCreature.
                 effects: this.player.effects || null,
+                progression: this.progression,
             });
         }
     }
@@ -1041,6 +1042,57 @@ export class Game {
         if (hit.kind === 'bankpage') { this.bankView = { tab: this.bankView.tab, page: hit.id }; return; }
     }
 
+    _interactClosest() {
+        if (!this.authorityClient) return;
+        const pcx = this.player.x + (this.player.width || 0) / 2;
+        const pcy = this.player.y + (this.player.height || 0) / 2;
+        const INTERACT_R = 140;
+
+        let bestKind = null;
+        let bestDist = Infinity;
+
+        // Check banks (account chest)
+        if (Array.isArray(this.banks)) {
+            for (const b of this.banks) {
+                const d = Math.hypot(b.x - pcx, b.y - pcy);
+                if (d <= INTERACT_R && d < bestDist) {
+                    bestDist = d;
+                    bestKind = 'bank';
+                }
+            }
+        }
+
+        // Check merchants
+        if (Array.isArray(this.merchants)) {
+            for (const m of this.merchants) {
+                const d = Math.hypot(m.x - pcx, m.y - pcy);
+                if (d <= INTERACT_R && d < bestDist) {
+                    bestDist = d;
+                    bestKind = 'merchant';
+                }
+            }
+        }
+
+        // Check world chests
+        if (Array.isArray(this.worldChests)) {
+            for (const c of this.worldChests) {
+                const d = Math.hypot(c.x - pcx, c.y - pcy);
+                if (d <= INTERACT_R && d < bestDist) {
+                    bestDist = d;
+                    bestKind = 'worldchest';
+                }
+            }
+        }
+
+        if (bestKind === 'bank') {
+            this.authorityClient.sendOpenBank();
+        } else if (bestKind === 'merchant') {
+            this.authorityClient.sendInteract();
+        } else if (bestKind === 'worldchest') {
+            this.authorityClient.sendOpenChest();
+        }
+    }
+
     setupInput(){
         if (this._inputAttached) return;
         this._inputAttached = true;
@@ -1048,7 +1100,8 @@ export class Game {
         const CODE_TO_KEY = {
             KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd',
             KeyI: 'i', KeyE: 'e', KeyB: 'b', KeyG: 'g',
-            KeyM: 'm', KeyT: 't', KeyC: 'c',
+            KeyF: 'f', KeyM: 'm', KeyT: 't', KeyC: 'c',
+            KeyR: 'r', KeyQ: 'q', Space: ' ',
             ArrowUp: 'arrowup', ArrowDown: 'arrowdown', ArrowLeft: 'arrowleft', ArrowRight: 'arrowright',
             Escape: 'escape',
         };
@@ -1082,32 +1135,18 @@ export class Game {
                 }
             }
 
-            // Merchant interact (Slice D): 'e' either closes an already-open
-            // shop panel or asks the server whether a merchant is in range
-            if (isKey('e') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
+            // Universal interact ('e' or 'f'): opens whichever interactable (chest, merchant, bank) is closest
+            if ((isKey('e') || isKey('f')) && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen) {
                 if (this.shopOpen) { this.shopOpen = false; return; }
-                if (this.authorityClient) this.authorityClient.sendInteract();
+                if (this.bankOpen) { this.bankOpen = false; return; }
+                this._interactClosest();
                 return;
             }
 
-            // Account chest (SOMET-310): 'b' either closes an open bank panel
-            // or asks the server whether a bank post is in range
+            // Account chest ('b'):
             if (isKey('b') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
-                return;
-            }
-
-            // World chest (SOMET-372): 'f' asks the server to open the nearest
-            // chest. Its own key rather than a smarter 'e': range is the
-            // AUTHORITY's call (INTERACT_RADIUS lives there), and a client that
-            // decided "chest or merchant?" locally would need its own copy of
-            // that radius to do it -- a second copy that drifts the first time
-            // one side changes. A refusal comes back as an `error` frame and
-            // is already toasted.
-            if (isKey('f') && this.state === 'playing' && this.chunked && !e.repeat
-                && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
-                if (this.authorityClient) this.authorityClient.sendOpenChest();
                 return;
             }
 
@@ -1200,6 +1239,36 @@ export class Game {
             }
             const pcx = this.player.x + this.player.width / 2;
             const pcy = this.player.y + this.player.height / 2;
+
+            // Direct click on world interactables (chest, bank, merchant)
+            if (this.camera) {
+                const w = cursorToWorld(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera);
+                if (Array.isArray(this.banks)) {
+                    for (const b of this.banks) {
+                        if (Math.hypot(b.x - w.x, b.y - w.y) <= 50 && Math.hypot(b.x - pcx, b.y - pcy) <= 150) {
+                            if (this.authorityClient) this.authorityClient.sendOpenBank();
+                            return;
+                        }
+                    }
+                }
+                if (Array.isArray(this.merchants)) {
+                    for (const m of this.merchants) {
+                        if (Math.hypot(m.x - w.x, m.y - w.y) <= 50 && Math.hypot(m.x - pcx, m.y - pcy) <= 150) {
+                            if (this.authorityClient) this.authorityClient.sendInteract();
+                            return;
+                        }
+                    }
+                }
+                if (Array.isArray(this.worldChests)) {
+                    for (const c of this.worldChests) {
+                        if (Math.hypot(c.x - w.x, c.y - w.y) <= 50 && Math.hypot(c.x - pcx, c.y - pcy) <= 150) {
+                            if (this.authorityClient) this.authorityClient.sendOpenChest();
+                            return;
+                        }
+                    }
+                }
+            }
+
             const { nx, ny } = aimVector(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera, pcx, pcy);
             this.authorityClient.sendAttack(nx, ny);
         };

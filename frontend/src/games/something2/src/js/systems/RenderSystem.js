@@ -169,6 +169,7 @@ export class RenderSystem {
     // Passed per frame rather than stashed at construction because the library
     // arrives asynchronously, after the renderer exists.
     vfxDefs = null,
+    progression = null,
   }) {
     if (vfxDefs) this.vfxDefs = vfxDefs;
     this.ctx.fillStyle = "#0f3460";
@@ -274,8 +275,8 @@ export class RenderSystem {
       } else if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
       else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
-      else if (d.kind === "merchant") this.drawMerchant(d.ref);
-      else if (d.kind === "bank") this.drawBank(d.ref);
+      else if (d.kind === "merchant") this.drawMerchant(d.ref, player);
+      else if (d.kind === "bank") this.drawBank(d.ref, player);
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
       else this.drawEntity(d.ref);
@@ -305,7 +306,7 @@ export class RenderSystem {
     this.drawVfx(vfx);
 
     camera.reset(this.ctx);
-    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash, effects, gold });
+    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash, effects, gold, progression });
     if (toast) this.renderToast(toast);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
@@ -741,7 +742,7 @@ export class RenderSystem {
   // A village's merchant: a fixed marker (no facing/animation) at the
   // village's merchantX/Y from the join frame. Distinct color + always-on
   // label distinguish it from a transient ground-item drop at a glance.
-  drawMerchant(m) {
+  drawMerchant(m, player = null) {
     const s = worldToScreen(m.x, m.y);
     const dx = s.x, dy = s.y;
     const r = 11;
@@ -761,6 +762,22 @@ export class RenderSystem {
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
     this.ctx.fillText("Merchant", dx, dy - r - 6);
+
+    // Show prompt when player is within interact range
+    if (player) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      const d = Math.hypot(m.x - pcx, m.y - pcy);
+      if (d <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.font = "bold 11px sans-serif";
+        this.ctx.fillStyle = "#c084fc";
+        this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeText("[e] / [f] Talk", dx, dy + r + 14);
+        this.ctx.fillText("[e] / [f] Talk", dx, dy + r + 14);
+      }
+    }
+
     this.ctx.restore();
   }
 
@@ -769,7 +786,7 @@ export class RenderSystem {
   // drawMerchant above so the two read as a matched pair of village services;
   // amber rather than violet, and squatter, so which one a player is walking
   // toward is legible at a glance without reading the label.
-  drawBank(b) {
+  drawBank(b, player = null) {
     const s = worldToScreen(b.x, b.y);
     const dx = s.x, dy = s.y;
     const r = 11;
@@ -794,6 +811,22 @@ export class RenderSystem {
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
     this.ctx.fillText("Chest", dx, dy - r - 6);
+
+    // Show prompt when player is within interact range
+    if (player) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      const d = Math.hypot(b.x - pcx, b.y - pcy);
+      if (d <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.font = "bold 11px sans-serif";
+        this.ctx.fillStyle = "#fbbf24";
+        this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeText("[e] / [f] Open", dx, dy + r + 14);
+        this.ctx.fillText("[e] / [f] Open", dx, dy + r + 14);
+      }
+    }
+
     this.ctx.restore();
   }
 
@@ -1148,62 +1181,254 @@ export class RenderSystem {
     this._drawEffectPips(drawX, drawY, e.effects);
   }
 
-  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null, gold = null }) {
-    const remoteCount = remotePlayers ? remotePlayers.size : 0;
-    const lines = [
-      `Players online: ${1 + remoteCount}`,
-      `You: #${localUserId ?? "?"}  pos=(${Math.round(player.x)}, ${Math.round(player.y)})`,
-      // Rounded like MP/SP below. HP used to be integral in practice, so the raw
-      // value read fine; resistances, shock's +25% vulnerability and AoE falloff
-      // now all produce fractions, and the HUD was printing
-      // `HP: 23.199992642145737 / 100`. Round for display only — the authority's
-      // value stays exact.
-      `HP: ${player.hp != null ? Math.round(player.hp) : "-"} / ${player.maxHp != null ? Math.round(player.maxHp) : "-"}`,
-    ];
-    if (mana != null && maxMana != null) {
-      lines.push(`MP: ${Math.round(mana)} / ${Math.round(maxMana)}`);
+  _drawPoEOrb(cx, cy, radius, current, max, label, colorType) {
+    const ctx = this.ctx;
+    const curVal = current != null ? Number(current) : 0;
+    const maxVal = max != null && Number(max) > 0 ? Number(max) : 100;
+    const pct = Math.max(0, Math.min(1, curVal / maxVal));
+    const rInner = radius - 4;
+
+    ctx.save();
+
+    // 1. Dark translucent backdrop for empty glass container (becomes transparent when empty)
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(10, 12, 22, 0.6)";
+    ctx.fill();
+
+    // 2. Liquid fill (bottom to top, clipped to inner circle)
+    if (pct > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+      ctx.clip();
+
+      const liquidHeight = 2 * rInner * pct;
+      const liquidTopY = (cy + rInner) - liquidHeight;
+
+      const grad = ctx.createLinearGradient(cx, liquidTopY, cx, cy + rInner);
+      if (colorType === "life") {
+        grad.addColorStop(0, "#ff3355");
+        grad.addColorStop(0.2, "#e11d48");
+        grad.addColorStop(0.6, "#991b1b");
+        grad.addColorStop(1, "#450a0a");
+      } else {
+        grad.addColorStop(0, "#38bdf8");
+        grad.addColorStop(0.2, "#2563eb");
+        grad.addColorStop(0.6, "#1d4ed8");
+        grad.addColorStop(1, "#0f172a");
+      }
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(cx - rInner - 2, liquidTopY, 2 * rInner + 4, liquidHeight + 4);
+
+      // Glowing liquid surface edge (meniscus)
+      if (pct > 0.02 && pct < 0.98) {
+        const halfWidth = Math.sqrt(Math.max(0, rInner * rInner - Math.pow(liquidTopY - cy, 2)));
+        ctx.beginPath();
+        ctx.ellipse(cx, liquidTopY, halfWidth, 3, 0, 0, Math.PI * 2);
+        ctx.fillStyle = colorType === "life" ? "rgba(255, 200, 210, 0.85)" : "rgba(200, 240, 255, 0.85)";
+        ctx.fill();
+      }
+
+      // Inner orb depth vignette
+      const vignette = ctx.createRadialGradient(cx, cy, rInner * 0.4, cx, cy, rInner);
+      vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+      vignette.addColorStop(0.8, "rgba(0, 0, 0, 0.15)");
+      vignette.addColorStop(1, "rgba(0, 0, 0, 0.6)");
+      ctx.fillStyle = vignette;
+      ctx.fillRect(cx - rInner, cy - rInner, 2 * rInner, 2 * rInner);
+
+      ctx.restore();
     }
-    if (stamina != null && maxStamina != null) {
-      lines.push(`SP: ${Math.round(stamina)} / ${Math.round(maxStamina)}`);
+
+    // 3. Glass specular reflection highlight (top-left 3D dome)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+    ctx.clip();
+
+    const specGrad = ctx.createLinearGradient(cx, cy - rInner, cx, cy);
+    specGrad.addColorStop(0, "rgba(255, 255, 255, 0.45)");
+    specGrad.addColorStop(0.5, "rgba(255, 255, 255, 0.08)");
+    specGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - rInner * 0.45, rInner * 0.6, rInner * 0.3, 0, 0, Math.PI * 2);
+    ctx.fillStyle = specGrad;
+    ctx.fill();
+    ctx.restore();
+
+    // 4. Outer metallic bezel ring
+    const bezelGrad = ctx.createLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius);
+    bezelGrad.addColorStop(0, "#94a3b8");
+    bezelGrad.addColorStop(0.3, "#475569");
+    bezelGrad.addColorStop(0.7, "#1e293b");
+    bezelGrad.addColorStop(1, "#0f172a");
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius - 2, 0, Math.PI * 2);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = bezelGrad;
+    ctx.stroke();
+
+    // Outer edge rim
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+    ctx.stroke();
+
+    // Inner rim
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
+    ctx.stroke();
+
+    // 5. Centered Label & Value readout
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    // Small category label
+    ctx.font = "bold 11px sans-serif";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
+    ctx.fillStyle = colorType === "life" ? "#fca5a5" : "#93c5fd";
+    ctx.strokeText(label, cx, cy - 9);
+    ctx.fillText(label, cx, cy - 9);
+
+    // Number value "100/100"
+    const displayCur = current != null ? Math.round(current) : "-";
+    const displayMax = max != null ? Math.round(max) : "-";
+    const valString = `${displayCur}/${displayMax}`;
+
+    ctx.font = "bold 12px monospace";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeText(valString, cx, cy + 9);
+    ctx.fillText(valString, cx, cy + 9);
+
+    ctx.restore();
+  }
+
+  _drawXpBar(progression) {
+    const ctx = this.ctx;
+    const level = (progression && progression.level) ? Number(progression.level) : 1;
+    const experience = (progression && progression.experience != null) ? Number(progression.experience) : 0;
+
+    // XP curve calculations: base 100 per level
+    const xpFloor = 100 * (level - 1) * level / 2;
+    const xpToNext = 100 * level;
+    const into = Math.max(0, experience - xpFloor);
+    const pct = xpToNext > 0 ? Math.min(1, Math.max(0, into / xpToNext)) : 1;
+
+    const orbRadius = 48;
+    const barStartX = orbRadius * 2 + 36;
+    const barEndX = GAME_WIDTH - (orbRadius * 2 + 36);
+    const barW = barEndX - barStartX;
+    const barH = 10;
+    const barY = GAME_HEIGHT - 22;
+
+    ctx.save();
+
+    // 1. Dark background track
+    ctx.fillStyle = "rgba(10, 12, 22, 0.85)";
+    ctx.fillRect(barStartX, barY, barW, barH);
+    ctx.strokeStyle = "#334155";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(barStartX, barY, barW, barH);
+
+    // 2. XP progress fill
+    const fillW = Math.max(0, Math.min(barW - 2, (barW - 2) * pct));
+    if (fillW > 0) {
+      const grad = ctx.createLinearGradient(barStartX, barY, barStartX, barY + barH);
+      grad.addColorStop(0, "#fbbf24");
+      grad.addColorStop(0.5, "#f59e0b");
+      grad.addColorStop(1, "#b45309");
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(barStartX + 1, barY + 1, fillW, barH - 2);
+
+      // Top specular glow line on the fill
+      ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+      ctx.fillRect(barStartX + 1, barY + 1, fillW, 2);
     }
-    if (gold != null) lines.push(`Gold: ${gold}`);
-    if (weaponName) {
-      lines.push(`Weapon: ${weaponName}`);
-    }
-    // The player's OWN active effects, right under the resource bars they
-    // affect (chill slows, shock drains MP, burn drains HP). Drawn in its
-    // effect colour rather than the HUD grey, matching the ring at their feet.
-    // effectHudLine returns null when nothing is active, so no blank row is
-    // pushed and the panel does not jump a row taller on every hit.
-    const effectsLine = effectHudLine(effects);
-    let effectsLineIdx = -1;
-    if (effectsLine) {
-      effectsLineIdx = lines.length;
-      lines.push(effectsLine);
-    }
-    // Ammo line only when the equipped weapon actually consumes ammo — `ammo`
-    // is null for every ammo-free weapon (the server's ammo_type_id == null),
-    // and nothing at all should be drawn for those.
-    let ammoLine = -1;
-    if (ammo) {
-      ammoLine = lines.length;
-      lines.push(`${ammo.name}: ${ammo.count}${noAmmoFlash ? "  OUT OF AMMO" : ""}`);
-    }
-    lines.push(`[i] Inventory`);
-    this.ctx.save();
-    this.ctx.fillStyle = "rgba(0,0,0,0.55)";
-    this.ctx.fillRect(10, 10, 260, 18 * lines.length + 12);
-    this.ctx.font = "13px monospace";
-    this.ctx.textBaseline = "top";
-    lines.forEach((t, i) => {
-      // The ammo line turns red while the flash is up, or whenever the stack
-      // is empty, so the player sees why a shot did nothing.
-      const alarm = i === ammoLine && (noAmmoFlash || ammo.count <= 0);
-      const fx = i === effectsLineIdx ? effectColor(normalizeEffects(effects)[0]) : null;
-      this.ctx.fillStyle = alarm ? "#ef4444" : (fx || "#e5e7eb");
-      this.ctx.fillText(t, 18, 16 + i * 18);
-    });
-    this.ctx.restore();
+
+    // 3. Central Level Emblem Circle
+    const centerX = barStartX + barW / 2;
+    const centerY = barY + barH / 2;
+    const levelR = 15;
+
+    // Dark backdrop for the circle
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, levelR, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(15, 17, 28, 0.95)";
+    ctx.fill();
+
+    // Golden / metallic bezel
+    const lvlBezel = ctx.createLinearGradient(centerX - levelR, centerY - levelR, centerX + levelR, centerY + levelR);
+    lvlBezel.addColorStop(0, "#fbbf24");
+    lvlBezel.addColorStop(0.5, "#78350f");
+    lvlBezel.addColorStop(1, "#f59e0b");
+
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = lvlBezel;
+    ctx.stroke();
+
+    // Subtle inner ring
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, levelR - 2.5, 0, Math.PI * 2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+    ctx.stroke();
+
+    // Level number inside circle
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "bold 12px sans-serif";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeText(`${level}`, centerX, centerY);
+    ctx.fillText(`${level}`, centerX, centerY);
+
+    // 4. Subtle XP numbers readout above the bar
+    ctx.font = "10px monospace";
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
+    ctx.fillStyle = "#cbd5e1";
+    ctx.textBaseline = "bottom";
+
+    const leftLabel = `${into} / ${xpToNext} XP (${Math.round(pct * 100)}%)`;
+    ctx.strokeText(leftLabel, (barStartX + centerX) / 2, barY - 3);
+    ctx.fillText(leftLabel, (barStartX + centerX) / 2, barY - 3);
+
+    const rightLabel = `Level ${level}`;
+    ctx.strokeText(rightLabel, (centerX + barEndX) / 2, barY - 3);
+    ctx.fillText(rightLabel, (centerX + barEndX) / 2, barY - 3);
+
+    ctx.restore();
+  }
+
+  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null, gold = null, progression = null }) {
+    if (!player) return;
+
+    const orbRadius = 48;
+
+    // Bottom-left Life / HP Orb (Path of Exile style)
+    const hpX = orbRadius + 16;
+    const hpY = GAME_HEIGHT - orbRadius - 16;
+    this._drawPoEOrb(hpX, hpY, orbRadius, player.hp, player.maxHp, "HP", "life");
+
+    // Bottom-right Mana / MP Orb (Path of Exile style)
+    const mpX = GAME_WIDTH - orbRadius - 16;
+    const mpY = GAME_HEIGHT - orbRadius - 16;
+    this._drawPoEOrb(mpX, mpY, orbRadius, mana, maxMana, "MP", "mana");
+
+    // Bottom XP bar connecting HP and MP orbs, with central level emblem
+    this._drawXpBar(progression);
   }
 
   // Canvas-drawn inventory window. Delegates to systems/inventoryPanel.js:
@@ -1512,7 +1737,7 @@ export class RenderSystem {
     ctx.fillStyle = "#e5e7eb";
     ctx.font = "14px monospace";
     ctx.textBaseline = "top";
-    ctx.fillText("Account Chest — [b] to close", px + 16, py + 14);
+    ctx.fillText("Account Chest — [f] or [esc] to close", px + 16, py + 14);
 
     const closeW = 70, closeH = 26;
     const closeX = px + panelW - 16 - closeW;

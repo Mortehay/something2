@@ -821,6 +821,26 @@ function validateMapSpec(spec, {
         usedPortalTiles.set(c.slot, c.leadsTo);
       }
 
+      // A portal (departure or arrival) must not be located inside any village.
+      const ends = [
+        { worldKey: l.from, world: from, x: l.from_x, y: l.from_y, side: 'departure' },
+        { worldKey: l.to, world: to, x: l.to_x, y: l.to_y, side: 'arrival' },
+      ];
+      for (const end of ends) {
+        if (!end.world) continue;
+        const villages = villagesOf(end.world);
+        const row = Math.floor(end.y / SPEC_TILE_SIZE);
+        const col = Math.floor(end.x / SPEC_TILE_SIZE);
+        for (const v of villages) {
+          if (!v || typeof v !== 'object') continue;
+          if (row >= v.min_row && row < v.min_row + v.height
+              && col >= v.min_col && col < v.min_col + v.width) {
+            errors.push(`portal link ${l.from}->${l.to} ${end.side} point (${end.x},${end.y}) is inside `
+              + `village "${v.key}" in world "${end.worldKey}" — dungeon portals cannot be located inside a city/village`);
+          }
+        }
+      }
+
       if (l.guard) {
         if (!Number.isInteger(l.guard.count) || l.guard.count < 1) {
           errors.push(`portal link ${l.from}->${l.to} guard count must be a positive integer`);

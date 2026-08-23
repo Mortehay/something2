@@ -249,16 +249,16 @@ describe('CharacterSheet placement (source-text, not behavioural)', () => {
     fileURLToPath(new URL('../../../CharacterSheet.jsx', import.meta.url)), 'utf8',
   );
 
-  it('source-text: the panel is anchored to the bottom, not the top, of the play area', () => {
+  it('source-text: the panel is anchored to the top of the play area', () => {
     const frameBlock = source.slice(source.indexOf('const Frame = styled.div`'), source.indexOf('const Header'));
-    expect(frameBlock).toMatch(/bottom:\s*20px/);
-    expect(frameBlock).not.toMatch(/\btop:\s*20px/);
+    expect(frameBlock).toMatch(/top:\s*20px/);
+    expect(frameBlock).not.toMatch(/\bbottom:\s*20px/);
   });
 
   it('source-text: the collapsed show-button is anchored to the same corner as the panel', () => {
     const showBlock = source.slice(source.indexOf('const ShowButton = styled.button`'), source.indexOf('const BarTrack'));
-    expect(showBlock).toMatch(/bottom:\s*20px/);
-    expect(showBlock).not.toMatch(/\btop:\s*20px/);
+    expect(showBlock).toMatch(/top:\s*20px/);
+    expect(showBlock).not.toMatch(/\bbottom:\s*20px/);
   });
 });
 

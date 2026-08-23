@@ -75,29 +75,20 @@ const DUNGEON_GRID_SPACING = 12; // cells between each dungeon's local grid orig
 
 const OPPOSITE_EDGE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
-// Pixel arrival point at a hub-topology dungeon's village gate cell, computed
-// the same way mapService.js's villageGateCell() selects the gate tile: gate
-// row = minRow + height - 1, gate col = minCol + floor(width/2), for
-// gate_edge 'S' (the only edge any hub dungeon's village uses in this plan).
-// A fixed world-center portal arrival (PORTAL_TILE_PX) lands on the village's
-// south wall -- always a wooden_wall tile, one column off from the gate --
-// for every hub dungeon, since they all share this identical village
-// geometry (SOMET-251). Grafting an inbound portal onto a hub dungeon must
-// land here instead, so arriving players hit the (walkable) gate, not the
-// wall next to it.
-function villageGateArrival(village) {
-  const { min_row, min_col, width, height, gate_edge } = village;
-  const midCol = min_col + Math.floor(width / 2);
-  const midRow = min_row + Math.floor(height / 2);
-  const rMax = min_row + height - 1;
-  const cMax = min_col + width - 1;
-  let row, col;
-  if (gate_edge === 'N') { row = min_row; col = midCol; }
-  else if (gate_edge === 'S') { row = rMax; col = midCol; }
-  else if (gate_edge === 'W') { row = midRow; col = min_col; }
-  else if (gate_edge === 'E') { row = midRow; col = cMax; }
-  else throw new Error(`villageGateArrival: unsupported gate_edge ${gate_edge}`);
-  return { x: col * 100 + 50, y: row * 100 + 50 };
+// Portal placement: when a world has a village, the portal must sit OUTSIDE
+// the village (not on the gate, wall, or interior), so it does not block the
+// city entrance or spawn inside the city. For a south-facing village gate,
+// place the portal outside the village south wall.
+function portalPlacement(world) {
+  if (world && world.village) {
+    const v = world.village;
+    const midCol = v.min_col + Math.floor(v.width / 2);
+    // 4 tiles south of the village south wall, outside the city
+    const row = v.min_row + v.height + 4;
+    const col = midCol;
+    return { x: col * 100 + 50, y: row * 100 + 50 };
+  }
+  return { x: portalCenterPx(world.width), y: portalCenterPx(world.width) };
 }
 
 // A "{Line} {Rung}" name, exactly gen-p4-bestiary.js's convention -- every
@@ -542,18 +533,16 @@ function generateSpec() {
   };
 
   // Portal coordinates. Hub-topology destinations have a village stamped at
-  // their entry room -- arrive at the village's gate cell, not the fixed
-  // world-centre tile, or the arrival lands on the village's south wall
-  // (SOMET-251). Spine/loop destinations have no village at their entry room,
-  // so they keep the centre-tile convention.
+  // their entry room -- portals sit outside the village so they never spawn
+  // inside the city or block the village gate. Spine/loop destinations have no
+  // village at their entry room, so they keep the centre-tile convention.
   for (const l of portalLinks) {
     const from = sizedByKey.get(l.from);
     const to = sizedByKey.get(l.to);
-    l.from_x = portalCenterPx(from.width);
-    l.from_y = portalCenterPx(from.width);
-    const arrival = to.village
-      ? villageGateArrival(to.village)
-      : { x: portalCenterPx(to.width), y: portalCenterPx(to.width) };
+    const departure = portalPlacement(from);
+    const arrival = portalPlacement(to);
+    l.from_x = departure.x;
+    l.from_y = departure.y;
     l.to_x = arrival.x;
     l.to_y = arrival.y;
   }
