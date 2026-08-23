@@ -773,8 +773,8 @@ export class RenderSystem {
         this.ctx.fillStyle = "#c084fc";
         this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
         this.ctx.lineWidth = 2;
-        this.ctx.strokeText("[e] / [f] Talk", dx, dy + r + 14);
-        this.ctx.fillText("[e] / [f] Talk", dx, dy + r + 14);
+        this.ctx.strokeText("[e] Trade", dx, dy + r + 14);
+        this.ctx.fillText("[e] Trade", dx, dy + r + 14);
       }
     }
 
@@ -822,8 +822,8 @@ export class RenderSystem {
         this.ctx.fillStyle = "#fbbf24";
         this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
         this.ctx.lineWidth = 2;
-        this.ctx.strokeText("[e] / [f] Open", dx, dy + r + 14);
-        this.ctx.fillText("[e] / [f] Open", dx, dy + r + 14);
+        this.ctx.strokeText("[b] Open", dx, dy + r + 14);
+        this.ctx.fillText("[b] Open", dx, dy + r + 14);
       }
     }
 
@@ -1737,7 +1737,7 @@ export class RenderSystem {
     ctx.fillStyle = "#e5e7eb";
     ctx.font = "14px monospace";
     ctx.textBaseline = "top";
-    ctx.fillText("Account Chest — [f] or [esc] to close", px + 16, py + 14);
+    ctx.fillText("Account Chest — [b] or [esc] to close", px + 16, py + 14);
 
     const closeW = 70, closeH = 26;
     const closeX = px + panelW - 16 - closeW;
