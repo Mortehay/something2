@@ -45,12 +45,35 @@ export function usedSlotsClient(inventory) {
   return n;
 }
 
+// `categories: null` means "everything not hidden" — an item whose category
+// is new server-side lands under All rather than becoming invisible.
+export const TABS = [
+  { key: "all", label: "All", categories: null },
+  { key: "equip", label: "Equip", categories: ["weapon", "armor"] },
+  { key: "supply", label: "Supply", categories: ["ammo", "consumable"] },
+  { key: "stones", label: "Stones", categories: ["stone"] },
+];
+
+export function visibleItems(inventory, tabKey) {
+  const tab = TABS.find((t) => t.key === tabKey) || TABS[0];
+  const types = (inventory && inventory.types) || new Map();
+  return ((inventory && inventory.items) || []).filter((it) => {
+    const t = types.get(it.typeId);
+    const category = t ? t.category : null;
+    if (category != null && HIDDEN_CATEGORIES.has(category)) return false;
+    if (tab.categories === null) return true;
+    return category != null && tab.categories.includes(category);
+  });
+}
+
 export function layoutInventory(state) {
   const {
     inventory,
     selectedItemId = null,
     gold = 0,
     autoLoot = false,
+    tab = "all",
+    page = 0,
   } = state;
 
   const px = (GAME_WIDTH - PANEL_W) / 2;
@@ -85,6 +108,47 @@ export function layoutInventory(state) {
   });
   for (const s of slots) hitAreas.push({ x: s.x, y: s.y, w: s.w, h: s.h, kind: "slot", id: s.slot });
 
+  const rightX = px + PAD + LEFT_W + PAD;
+  const tabsY = py + TITLE_H + PAD;
+  const tabW = 84, tabH = 24;
+  const activeTab = TABS.some((x) => x.key === tab) ? tab : "all";
+  const tabs = TABS.map((t, i) => ({
+    key: t.key, label: t.label,
+    x: rightX + i * (tabW + 6), y: tabsY, w: tabW, h: tabH,
+    active: t.key === activeTab,
+  }));
+  for (const t of tabs) hitAreas.push({ x: t.x, y: t.y, w: t.w, h: t.h, kind: "invtab", id: t.key });
+
+  const shown = visibleItems(inventory, activeTab);
+  const pageCount = Math.max(1, Math.ceil(shown.length / CELLS_PER_PAGE));
+  // Clamped rather than trusted: the page survives a tab switch and an item
+  // list that shrank under it (sold, dropped, stored), and an unclamped index
+  // would render a blank grid the player cannot page back out of.
+  const pageIdx = Math.min(Math.max(0, Math.floor(Number(page) || 0)), pageCount - 1);
+  const gridTop = tabsY + tabH + 10;
+  const cells = [];
+  for (let i = 0; i < CELLS_PER_PAGE; i += 1) {
+    const col = i % GRID_COLS;
+    const row = Math.floor(i / GRID_COLS);
+    const item = shown[pageIdx * CELLS_PER_PAGE + i] || null;
+    const type = item ? inventory.types.get(item.typeId) || null : null;
+    const cell = {
+      x: rightX + col * (CELL + GUTTER),
+      y: gridTop + row * (CELL + GUTTER),
+      w: CELL, h: CELL,
+      item, type,
+      selected: item != null && item.id === selectedItemId,
+    };
+    cells.push(cell);
+    if (item) hitAreas.push({ x: cell.x, y: cell.y, w: cell.w, h: cell.h, kind: "item", id: item.id });
+  }
+
+  const arrowY = gridTop + GRID_ROWS * (CELL + GUTTER) + 8;
+  const prev = pageIdx > 0 ? { x: rightX, y: arrowY, w: 32, h: 24 } : null;
+  const next = pageIdx < pageCount - 1 ? { x: rightX + 40, y: arrowY, w: 32, h: 24 } : null;
+  if (prev) hitAreas.push({ ...prev, kind: "invpage", id: pageIdx - 1 });
+  if (next) hitAreas.push({ ...next, kind: "invpage", id: pageIdx + 1 });
+
   const footerY = py + PANEL_H - PAD - FOOTER_H;
   const autoLootRect = { x: colX, y: footerY, w: 150, h: 26 };
   hitAreas.push({ ...autoLootRect, kind: "autoloot", id: null });
@@ -96,9 +160,9 @@ export function layoutInventory(state) {
 
   return {
     panel, title, close, preview, slots,
-    tabs: [],
-    cells: [],
-    pages: { count: 1, page: 0, prev: null, next: null },
+    tabs,
+    cells,
+    pages: { count: pageCount, page: pageIdx, prev, next, arrowY, x: rightX },
     footer: { gold, autoLoot: autoLootRect, autoLootOn: autoLoot === true, drop },
     used: usedSlotsClient(inventory),
     capacity: capacityOf(inventory),
