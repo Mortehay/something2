@@ -911,6 +911,7 @@ export class Game {
                 // The local player's own effects, for the HUD line. The rings
                 // at their feet come from this.player.effects via drawCreature.
                 effects: this.player.effects || null,
+                progression: this.progression,
             });
         }
     }

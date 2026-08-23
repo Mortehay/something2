@@ -148,7 +148,7 @@ export function progressionChanged(prev, next) {
 // visible while open.
 const Frame = styled.div`
   position: absolute;
-  bottom: 20px;
+  top: 20px;
   left: 20px;
   z-index: 20;
   width: 260px;
@@ -190,7 +190,7 @@ const HideButton = styled.button`
 
 const ShowButton = styled.button`
   position: absolute;
-  bottom: 20px;
+  top: 20px;
   left: 20px;
   z-index: 20;
   width: 40px;
@@ -442,13 +442,10 @@ export default function CharacterSheet({ gameRef }) {
   return (
     <Frame>
       <Header>
-        <Title>Level {level}</Title>
+        <Title>Character Stats</Title>
         <HideButton type="button" title="Hide character sheet (C)" aria-label="Hide character sheet"
           onClick={() => persistVisible(false)}>×</HideButton>
       </Header>
-
-      <BarTrack><BarFill $pct={pct} /></BarTrack>
-      <XpLabel>{!levelInfo ? 'Loading…' : (need > 0 ? `${into} / ${need} XP` : 'MAX LEVEL')}</XpLabel>
 
       {STAT_KEYS.map((key) => (
         <StatRow key={key}>
