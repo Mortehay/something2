@@ -301,11 +301,37 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
   if (entry.claiming.has(groundItemId)) return null;
   entry.claiming.add(groundItemId);
   try {
+    // SOMET-480: one statement still, and it now rebuilds the whole instance
+    // -- the world row's deletion, the new player_items row AND its affix rows
+    // commit or roll back together. A separate affix INSERT would reopen the
+    // window claimItem's original CTE was written to close, in a nastier form:
+    // an item granted with its rarity but silently stripped of its affixes.
+    //
+    // `aff` reads d.affixes with ORDINALITY and writes (ord - 1) into idx, so
+    // the affix order dropItem snapshotted is the order that comes back. The
+    // CTE has no output anything downstream reads; Postgres executes a
+    // writable CTE for its side effects regardless (the same guarantee
+    // dropItem's `eject` already relies on).
     const r = await pool.query(
-      `WITH d AS (DELETE FROM world_items WHERE id = $1 RETURNING item_type_id, quantity)
-       INSERT INTO player_items (character_id, item_type_id, quantity)
-       SELECT $2, item_type_id, quantity FROM d
-       RETURNING id, item_type_id, quantity`,
+      `WITH d AS (DELETE FROM world_items WHERE id = $1
+                  RETURNING item_type_id, quantity, rarity, item_level, affixes, soulbound),
+            ins AS (INSERT INTO player_items
+                      (character_id, item_type_id, quantity, rarity, item_level, soulbound)
+                    SELECT $2, item_type_id, quantity, rarity, item_level, soulbound FROM d
+                    RETURNING id, item_type_id, quantity, rarity, item_level, soulbound),
+            aff AS (INSERT INTO player_item_affixes (player_item_id, idx, affix_type_id, value)
+                    SELECT ins.id, (a.ord - 1)::smallint,
+                           (a.elem->>'affixTypeId')::int, (a.elem->>'value')::double precision
+                      FROM ins, d, LATERAL jsonb_array_elements(d.affixes)
+                                     WITH ORDINALITY AS a(elem, ord)
+                    RETURNING idx, affix_type_id, value)
+       SELECT ins.id, ins.item_type_id, ins.quantity, ins.rarity, ins.item_level, ins.soulbound,
+              COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                                 'affixTypeId', aff.affix_type_id, 'key', at.key,
+                                 'value', aff.value, 'effect', at.effect) ORDER BY aff.idx)
+                          FROM aff JOIN affix_types at ON at.id = aff.affix_type_id),
+                       '[]'::jsonb) AS affixes
+         FROM ins`,
       [groundItemId, characterId],
     );
     if (r.rowCount !== 1) {
@@ -317,7 +343,10 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
       entry.claiming.delete(groundItemId);
       return null;
     }
-    const { id: instanceId, item_type_id: typeId, quantity } = r.rows[0];
+    const {
+      id: instanceId, item_type_id: typeId, quantity,
+      rarity, item_level: itemLevel, soulbound, affixes,
+    } = r.rows[0];
     // `quantity` is ALWAYS present and always a number. world_items.quantity is
     // NOT NULL DEFAULT 1, so the `?? 1` is a floor for callers with partial
     // rows (tests), not a real production branch. Deliberately NOT conditional:
@@ -328,7 +357,28 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
     const qty = Number(quantity ?? 1);
     entry.world.groundItems.remove(groundItemId);
     const p = entry.world.getPlayer(userId);
-    if (p && p.inv) p.inv.items.push({ id: instanceId, typeId, quantity: qty }); // so a later equip validates without a reload
+    // SOMET-480: the in-memory copy carries the rolled identity too, INCLUDING
+    // the affix list with its `effect` payloads. The statement above returns it
+    // from the very INSERT that wrote the rows, so this costs no extra query.
+    //
+    // Populating it here is not cosmetic. equipRequirements#gearStatGrants
+    // reads THIS object, not the database, so an entry pushed without its
+    // affixes would make a just-picked-up item grant nothing until the next
+    // loadInventory (a reconnect) -- a feature that is live in the schema and
+    // inert in play, which is exactly the failure D1, D2 and C2 each shipped.
+    // Defaults are supplied for callers with partial rows (the scripted pools
+    // in authorityLoot.test.js), never as a production branch.
+    if (p && p.inv) {
+      p.inv.items.push({
+        id: instanceId,
+        typeId,
+        quantity: qty,
+        rarity: rarity || 'white',
+        itemLevel: Number(itemLevel ?? 1),
+        soulbound: soulbound === true,
+        affixes: Array.isArray(affixes) ? affixes : [],
+      });
+    }
     entry.claiming.delete(groundItemId);
     return { id: instanceId, typeId, quantity: qty };
   } catch (err) {
@@ -472,43 +522,33 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 6000
     return { ok: false, reason: 'unsocket it first' };
   }
 
-  // SOMET-277: soulbound instances (the starting loadout, marked at grant
-  // time by items.js's grantStartingLoadout) cannot be dropped either.
+  // SOMET-277 / SOMET-480: soulbound instances USED to be refused here. The
+  // refusal existed for exactly one reason, stated verbatim in the original
+  // comment: "world_items carries no soulbound column ... claimItem then
+  // INSERTs a BRAND NEW player_items row which takes the column default
+  // (false), so drop-then-pick-it-back-up would launder a bound item in two
+  // keystrokes". T12's migration (1714440507000) adds that column. The flag
+  // now RIDES the drop and is restored on the claim, so the item stays bound
+  // through the round trip and the drop no longer has to be refused.
   //
-  // This is NOT a separate policy decision from the sell refusal in
-  // trade.js -- it is what makes that refusal mean anything. The statement
-  // below moves the row OUT of player_items and into world_items, and
-  // world_items carries no soulbound column; claimItem then INSERTs a BRAND
-  // NEW player_items row from it, which takes the column default (false).
-  // So drop-then-pick-it-back-up would launder a bound item into an unbound
-  // one in two keystrokes and hand the whole faucet straight back. The
-  // alternatives were carrying the flag through world_items and claimItem
-  // (a wider change to the ground-item path for an item the player is not
-  // allowed to monetize anyway) or leaving the hole open; refusing the drop
-  // is the smallest change that actually binds the instance.
+  // That is strictly better than the refusal, not merely equivalent: starting
+  // gear becomes droppable again (a player who outgrows their granted vest can
+  // put it down) without becoming sellable. The sell refusal in trade.js is
+  // untouched and is still the whole of what `soulbound` means.
   //
-  // Consumption is deliberately NOT blocked: ammo.js decrements/deletes
-  // player_items rows when a Ranger fires their granted arrows, and that
-  // must keep working -- soulbound restricts TRANSFER (sell, drop, and
-  // therefore any hand-off to another character), not use.
+  // Consumption was never blocked and still isn't: ammo.js decrements/deletes
+  // player_items rows when a Ranger fires their granted arrows. soulbound
+  // restricts MONETIZATION, not use.
   //
-  // Joined on character_id, the same ownership predicate the DELETE below
-  // uses and the same reason spelled out for stoneCheck above: an unowned
-  // id must fall through to the generic 'you do not own that item' rather
-  // than leaking whether it happens to be someone's bound gear. Checked
-  // before the write rather than off a RETURNING (which is how sellItem
-  // does it) because this path has no transaction to roll back -- the CTE
-  // is a single autocommitted statement. Safe as a pre-check because
-  // soulbound is monotonic: nothing in the codebase ever clears it, so
-  // there is no window in which it can flip to false between here and the
-  // DELETE.
-  const boundCheck = await pool.query(
-    'SELECT 1 FROM player_items WHERE id = $1 AND character_id = $2 AND soulbound = true',
-    [itemId, characterId],
-  );
-  if (boundCheck.rowCount > 0) {
-    return { ok: false, reason: 'starting gear cannot be dropped' };
-  }
+  // `a soulbound instance is now DROPPABLE and comes back still bound` in
+  // affixes_db.test.js is the replacement for the old refusal's test -- it
+  // pins the property that refusal was protecting, through the real
+  // dropItem -> claimItem path, rather than pinning the refusal itself.
+  //
+  // The stone refusal above is NOT relaxed the same way: stone_instances
+  // carries xp and level that world_items has no column for, and
+  // unsocketStone remains the only sanctioned way to part a stone from its
+  // host.
 
   const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
   // One statement does the DELETE ... RETURNING and the world_items INSERT
@@ -537,12 +577,40 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 6000
   // here, nothing downstream reads its output (verified directly against
   // Postgres, including this exact WITH-DELETE-then-INSERT shape, before
   // relying on it).
+  //
+  // SOMET-480: the statement now also carries the instance's ROLLED IDENTITY
+  // -- rarity, item_level, its affixes and soulbound -- onto the ground row.
+  // Without that, dropItem's DELETE + claimItem's fresh INSERT silently
+  // converts a rolled foxy item into a plain white one, because the only
+  // thing world_items used to carry was item_type_id.
+  //
+  // `snap` reads player_item_affixes for the row `d` is deleting. Every CTE in
+  // one statement sees the SAME snapshot taken at statement start, so the
+  // ON DELETE CASCADE that removes those affix rows does not race this read --
+  // the rows are still visible to `snap` even though `d` has removed their
+  // parent. That is a load-bearing Postgres guarantee, not an accident of
+  // ordering, and affixes_db.test.js's round-trip test is what pins it.
+  //
+  // ORDER BY pia.idx inside the aggregate, not merely a stable-looking scan:
+  // the affix ORDER is what claimItem reconstructs idx from, so an unordered
+  // aggregate would reshuffle a player's affix indices on every drop.
   const r = await pool.query(
-    `WITH d AS (DELETE FROM player_items WHERE id = $1 AND character_id = $2 RETURNING item_type_id, quantity),
+    `WITH d AS (DELETE FROM player_items WHERE id = $1 AND character_id = $2
+                RETURNING id, item_type_id, quantity, rarity, item_level, soulbound),
+          snap AS (SELECT d.id,
+                          COALESCE(jsonb_agg(
+                            jsonb_build_object('affixTypeId', pia.affix_type_id, 'value', pia.value)
+                            ORDER BY pia.idx
+                          ) FILTER (WHERE pia.player_item_id IS NOT NULL), '[]'::jsonb) AS affixes
+                     FROM d LEFT JOIN player_item_affixes pia ON pia.player_item_id = d.id
+                    GROUP BY d.id),
           eject AS (UPDATE stone_instances SET socketed_into_id = NULL FROM d WHERE stone_instances.socketed_into_id = $1)
-     INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
-     SELECT $3, item_type_id, $4, $5, now() + ($6::int * interval '1 millisecond'), quantity FROM d
-     RETURNING id, item_type_id, x, y, expires_at, quantity`,
+     INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity,
+                              rarity, item_level, affixes, soulbound)
+     SELECT $3, d.item_type_id, $4, $5, now() + ($6::int * interval '1 millisecond'), d.quantity,
+            d.rarity, d.item_level, snap.affixes, d.soulbound
+       FROM d JOIN snap ON snap.id = d.id
+     RETURNING id, item_type_id, x, y, expires_at, quantity, rarity, item_level, affixes, soulbound`,
     [itemId, characterId, entry.worldId, cx, cy, ttlMs],
   );
   if (r.rowCount !== 1) return { ok: false, reason: 'you do not own that item' };

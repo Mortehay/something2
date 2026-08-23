@@ -174,8 +174,30 @@ function resolveGoldItemTypeId(itemTypes) {
 // this character via the host_pi join predicate, matching every other
 // ownership check in this file.
 async function loadInventory(pool, characterId) {
+  // SOMET-480: rarity, item_level and the rolled affixes are hydrated HERE, in
+  // the one loader, and NOT in a second query somewhere on the equip path.
+  // `effect` rides along with each affix because a stat affix is identified by
+  // its effect payload, not by its key -- equipRequirements#gearStatGrants
+  // reads exactly that.
+  //
+  // The GROUP BY makes this one round trip rather than one per item. The
+  // FILTER is load-bearing: a plain jsonb_agg over a LEFT JOIN emits
+  // [{"affixTypeId":null,...}] for an unaffixed item, and that null-bearing
+  // entry would then be summed as 0 by every consumer instead of being absent.
   const ir = await pool.query(
-    'SELECT id, item_type_id, quantity, soulbound FROM player_items WHERE character_id = $1 ORDER BY created_at ASC, id ASC',
+    `SELECT pi.id, pi.item_type_id, pi.quantity, pi.soulbound, pi.rarity, pi.item_level,
+            pi.created_at,
+            COALESCE(jsonb_agg(
+              jsonb_build_object('affixTypeId', pia.affix_type_id, 'key', at.key,
+                                 'value', pia.value, 'effect', at.effect)
+              ORDER BY pia.idx
+            ) FILTER (WHERE pia.player_item_id IS NOT NULL), '[]'::jsonb) AS affixes
+       FROM player_items pi
+       LEFT JOIN player_item_affixes pia ON pia.player_item_id = pi.id
+       LEFT JOIN affix_types at ON at.id = pia.affix_type_id
+      WHERE pi.character_id = $1
+      GROUP BY pi.id
+      ORDER BY pi.created_at ASC, pi.id ASC`,
     [characterId],
   );
   const er = await pool.query(
@@ -213,6 +235,12 @@ async function loadInventory(pool, characterId) {
     typeId: r.item_type_id,
     quantity: Number(r.quantity ?? 1),
     soulbound: r.soulbound === true,
+    // SOMET-480. Carried so the panel can colour the item and so
+    // equipRequirements#gearStatGrants can read affix stat grants without a
+    // second query on the equip path.
+    rarity: r.rarity || 'white',
+    itemLevel: Number(r.item_level ?? 1),
+    affixes: Array.isArray(r.affixes) ? r.affixes : [],
   }));
   const byId = new Map(items.map((it) => [it.id, it]));
   for (const row of sr.rows) {

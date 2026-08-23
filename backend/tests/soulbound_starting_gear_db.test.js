@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { Pool } = require('pg');
 const { loadItemTypes, grantStartingLoadout } = require('../src/authority/items.js');
 const { sellItem } = require('../src/authority/trade.js');
-const { dropItem } = require('../src/authority/loot.js');
+const { dropItem, claimItem } = require('../src/authority/loot.js');
 
 // SOMET-277 (P0) regression suite, against a REAL database.
 //
@@ -125,8 +125,22 @@ function mkPlayer(userId, items) {
   };
 }
 
+// `claiming` and groundItems.remove exist because SOMET-480 makes the bound
+// item DROPPABLE, so this file now also drives the pickup half of the round
+// trip through the real claimItem.
 function mkEntry(worldId, player) {
-  return { worldId, world: { getPlayer: () => player, groundItems: { add: () => {} } } };
+  return {
+    worldId,
+    claiming: new Set(),
+    world: {
+      getPlayer: () => player,
+      // `weapons` is the catalog claimItem's capacity pre-check passes to
+      // hasFreeSlot; an empty Map means "no row is currency", which is right
+      // for the two gear instances this file creates.
+      weapons: new Map(),
+      groundItems: { add: () => {}, remove: () => {} },
+    },
+  };
 }
 
 async function goldOf(pool, userId) {
@@ -200,11 +214,19 @@ test('SOMET-277: a GRANTED starting-loadout instance cannot be sold, and the ide
   }
 });
 
-test('SOMET-277: a GRANTED instance cannot be DROPPED either, and the identical LOOTED instance can', async (t) => {
-  // Without this half, the sell refusal is decorative: dropping moves the row
-  // into world_items (which has no soulbound column) and claimItem inserts a
-  // BRAND NEW player_items row from it, taking the default false. Drop, pick
-  // back up, sell -- the whole faucet, reopened in two keystrokes.
+test('SOMET-277/SOMET-480: a GRANTED instance survives a drop-and-repick still BOUND', async (t) => {
+  // SOMET-277 closed this hole by REFUSING the drop outright, and its own
+  // comment said why that was the shape chosen: "world_items carries no
+  // soulbound column ... claimItem then INSERTs a BRAND NEW player_items row
+  // which takes the default false. Drop, pick back up, sell -- the whole
+  // faucet, reopened in two keystrokes."
+  //
+  // SOMET-480 (T12) adds world_items.soulbound, so the flag now RIDES the
+  // ground row and the drop no longer has to be refused. The invariant is
+  // unchanged and is what this test asserts: a granted instance can never
+  // become a sellable one. Only the mechanism moved -- from a refusal to a
+  // carried flag -- and the item became droppable, which it should always
+  // have been.
   const pool = await openPool();
   if (pool.unreachable) {
     const msg = skipMsg('the SOMET-277 drop guard', pool.unreachable);
@@ -238,10 +260,26 @@ test('SOMET-277: a GRANTED instance cannot be DROPPED either, and the identical 
     const player = mkPlayer(fx.userId, items);
     const entry = mkEntry(village.worldId, player);
 
-    const refused = await dropItem(pool, entry, fx.userId, fx.character.id, granted.id, { ttlMs: 60000 });
-    assert.equal(refused.ok, false, 'dropping granted starting gear must be refused');
-    assert.match(refused.reason, /cannot be dropped/i, 'the refusal must be a clear, player-readable reason');
-    assert.equal(await itemExists(pool, granted.id), true, 'the bound instance must still be owned');
+    const droppedBound = await dropItem(pool, entry, fx.userId, fx.character.id, granted.id, { ttlMs: 60000 });
+    assert.equal(droppedBound.ok, true,
+      `granted gear is now droppable, not refused (got: ${droppedBound.reason})`);
+    groundItemId = droppedBound.item.id;
+    const ground = await pool.query('SELECT soulbound FROM world_items WHERE id = $1', [groundItemId]);
+    assert.equal(ground.rows[0].soulbound, true,
+      'the ground row must carry the flag -- without it the drop IS the laundering exploit');
+
+    // THE INVARIANT: picked back up, it is still bound, so it still cannot be
+    // sold. Asserting the flag alone would not prove that; asserting the
+    // refusal is what makes this test about the exploit rather than a column.
+    const back = await claimItem(pool, entry, fx.userId, fx.character.id, groundItemId);
+    assert.ok(back && back.id, 'the dropped bound item must be re-claimable');
+    groundItemId = null; // consumed by the claim
+    const reBound = await pool.query('SELECT soulbound FROM player_items WHERE id = $1', [back.id]);
+    assert.equal(reBound.rows[0].soulbound, true,
+      'drop-then-pick-up must NOT launder a bound instance into an unbound one');
+    const resold = await sellItem(pool, entry, fx.userId, fx.character.id, village.villageId, back.id);
+    assert.equal(resold.ok, false, 'the laundered instance must still refuse to become gold');
+    assert.match(resold.reason, /cannot be sold/i);
 
     const dropped = await dropItem(pool, entry, fx.userId, fx.character.id, looted.id, { ttlMs: 60000 });
     assert.equal(dropped.ok, true,

@@ -327,7 +327,35 @@ test('a successful claim adds the instance to the in-memory inventory', async ()
     [CLAIM_RE, { rows: [{ id: 'inst-1', item_type_id: 7 }], rowCount: 1 }],
   ]);
   await claimItem(pool, entry, 'u1', 31, 'g1');
-  assert.deepStrictEqual(entry.world.getPlayer('u1').inv.items, [{ id: 'inst-1', typeId: 7, quantity: 1 }]);
+  // SOMET-480: the pushed entry now also carries the rolled identity, because
+  // equipRequirements#gearStatGrants reads THIS object rather than the row --
+  // an entry pushed bare would make a just-picked-up affixed item grant
+  // nothing until the player reconnected. This scripted row omits every new
+  // column, so the values below are the defaults a partial row falls back to.
+  assert.deepStrictEqual(entry.world.getPlayer('u1').inv.items, [{
+    id: 'inst-1', typeId: 7, quantity: 1, rarity: 'white', itemLevel: 1, soulbound: false, affixes: [],
+  }]);
+});
+
+// The identity has to come off the ROW, not be defaulted away: a RETURNING
+// that stopped selecting these columns would otherwise turn every reclaimed
+// foxy item white with nothing failing.
+test('a successful claim carries the ground row\'s rarity, level, bound flag and affixes into memory', async () => {
+  const entry = armClaimEntry();
+  const rolled = [{ affixTypeId: 3, key: 'of_might', value: 7.5, effect: { type: 'stat', stat: 'strength' } }];
+  const pool = scriptedPool([
+    [CLAIM_RE, {
+      rows: [{
+        id: 'inst-9', item_type_id: 7, quantity: 1,
+        rarity: 'foxy', item_level: 88, soulbound: true, affixes: rolled,
+      }],
+      rowCount: 1,
+    }],
+  ]);
+  await claimItem(pool, entry, 'u1', 31, 'g1');
+  assert.deepStrictEqual(entry.world.getPlayer('u1').inv.items, [{
+    id: 'inst-9', typeId: 7, quantity: 1, rarity: 'foxy', itemLevel: 88, soulbound: true, affixes: rolled,
+  }]);
 });
 
 function armDropEntry(equipment = {}) {

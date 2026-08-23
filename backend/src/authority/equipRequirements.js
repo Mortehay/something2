@@ -25,9 +25,11 @@ function zeroStats() {
 // backpack must contribute nothing, or a player stacks every buff stone they
 // own by socketing each into a spare item and equipping none of them.
 //
-// Today the only gear-borne stat grant is a socketed buff stone. T12 adds
-// per-instance affixes and extends THIS function -- there must never be a
-// second place that answers "what do my items give me".
+// Gear-borne stat grants come from TWO sources: a socketed buff stone, and
+// (SOMET-480 / T12) the instance's rolled affixes. Both are read HERE, in the
+// one function that answers "what do my items give me" -- a second
+// implementation is how the requirement gate and the character sheet end up
+// disagreeing about a player's strength.
 function gearStatGrants(inv, itemTypes, excludeItemId = null) {
   const out = zeroStats();
   if (!inv || !inv.equipment || !Array.isArray(inv.items)) return out;
@@ -42,6 +44,15 @@ function gearStatGrants(inv, itemTypes, excludeItemId = null) {
           && Object.prototype.hasOwnProperty.call(out, stoneType.stat_bonus_stat)) {
         out[stoneType.stat_bonus_stat] += Number(stoneType.stat_bonus_amount) || 0;
       }
+    }
+    // SOMET-480: rolled affixes. Only {type:'stat'} affixes move these six
+    // numbers; a resource/damage/resist/status affix is read elsewhere and
+    // must NOT silently land on a stat here.
+    for (const a of item.affixes || []) {
+      const eff = a && a.effect;
+      if (!eff || eff.type !== 'stat') continue;
+      if (!Object.prototype.hasOwnProperty.call(out, eff.stat)) continue;
+      out[eff.stat] += Number(a.value) || 0;
     }
   }
   return out;
