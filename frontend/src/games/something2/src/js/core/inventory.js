@@ -65,6 +65,12 @@ export function applyJoined(inv, msg) {
   // A join snapshot is the whole truth about every stack the player holds, so
   // every cached ammo count is now stale by definition.
   inv.ammoCounts = new Map();
+  // Mirrors the server cap for DISPLAY and nothing else: every rejection is
+  // the server's (authority/items.js), and a forged value here can authorize
+  // no extra item. Null rather than a default when absent, so "no cap known"
+  // stays distinguishable from a real cap of 48.
+  inv.capacity = Number.isInteger(msg.inventorySlots) && msg.inventorySlots > 0
+    ? msg.inventorySlots : null;
   return inv;
 }
 

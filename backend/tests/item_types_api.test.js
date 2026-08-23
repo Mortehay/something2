@@ -368,6 +368,9 @@ test('validateItemType accepts an absent value (defaults server-side to 0)', () 
 
 test('POST /api/players/:userId/items grants an item instance', async () => {
   const pool = mockPool([
+    // SOMET-464: the grant is now preceded by a free-slot count. Reported
+    // here as room to spare, so this test still covers the grant itself.
+    [/FROM characters c/i, () => ({ rowCount: 1, rows: [{ free: 12 }] })],
     [/INSERT INTO player_items/i, (p) => ({ rows: [{ id: 'pi1', user_id: p[0], item_type_id: p[1] }] })],
   ]);
   __setPool(pool);
@@ -375,4 +378,30 @@ test('POST /api/players/:userId/items grants an item instance', async () => {
   assert.equal(res.status, 201);
   assert.equal(res.body.item_type_id, 3);
   assert.ok(pool.calls.some((c) => /INSERT INTO player_items/i.test(c.sql)));
+});
+
+test('POST /api/players/:userId/items refuses a grant into a full inventory', async () => {
+  const pool = mockPool([
+    [/FROM characters c/i, () => ({ rowCount: 1, rows: [{ free: 0 }] })],
+    [/INSERT INTO player_items/i, () => { throw new Error('must not insert into a full inventory'); }],
+  ]);
+  __setPool(pool);
+  const res = await request(app).post('/api/players/user-1/items').set(...AUTH).send({ item_type_id: 3 });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.error, 'inventory full');
+  assert.ok(!pool.calls.some((c) => /INSERT INTO player_items/i.test(c.sql)));
+});
+
+test('POST /api/players/:userId/items still grants when the character row is missing', async () => {
+  // rowCount 0 means the character does not exist. The grant is allowed
+  // through so the INSERT's foreign key produces the same failure it always
+  // did, rather than this route inventing a "full" answer for a character
+  // that has no capacity at all.
+  const pool = mockPool([
+    [/FROM characters c/i, () => ({ rowCount: 0, rows: [] })],
+    [/INSERT INTO player_items/i, (p) => ({ rows: [{ id: 'pi1', item_type_id: p[1] }] })],
+  ]);
+  __setPool(pool);
+  const res = await request(app).post('/api/players/user-1/items').set(...AUTH).send({ item_type_id: 3 });
+  assert.equal(res.status, 201);
 });

@@ -82,6 +82,7 @@ export default function Login({ apiUrl, onAuthed }) {
   const [mode, setMode] = useState("login"); // 'login' | 'register'
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -93,8 +94,10 @@ export default function Login({ apiUrl, onAuthed }) {
     setError(null);
     setSubmitting(true);
     try {
-      const fn = isRegister ? register : login;
-      const { token } = await fn(apiUrl, username, password);
+      // Registering passes the invite code; signing in never does.
+      const { token } = isRegister
+        ? await register(apiUrl, username, password, inviteCode)
+        : await login(apiUrl, username, password);
       if (!token) throw new Error("no token returned");
       storeToken(token);
       onAuthed();
@@ -124,6 +127,20 @@ export default function Login({ apiUrl, onAuthed }) {
           autoComplete={isRegister ? "new-password" : "current-password"}
           onChange={(e) => setPassword(e.target.value)}
         />
+
+        {/* SOMET-381. Shown only when registering, and optional: a server with
+            REGISTRATION_MODE=open ignores it, so the client does not have to
+            know the server's mode, and an invite-gated server answers with a
+            clear error if it is missing. */}
+        {isRegister && (
+          <Field
+            type="text"
+            placeholder="Invite code (if you have one)"
+            value={inviteCode}
+            autoComplete="off"
+            onChange={(e) => setInviteCode(e.target.value)}
+          />
+        )}
 
         {error && <ErrorText>{error}</ErrorText>}
 

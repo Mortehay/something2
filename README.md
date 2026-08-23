@@ -286,6 +286,50 @@ and an existing value is never rewritten: a regenerated `POSTGRES_PASSWORD`
 against an existing volume is an authentication failure that reads like data
 loss.
 
+### Backups (SOMET-400)
+
+The card wears out and the power cuts are unannounced; both are *when*, not
+*if*. The dump therefore has to live somewhere the card cannot take with it.
+
+```bash
+make pi-backup                  # take one now
+make pi-backup-status           # is a recent, non-empty backup actually there?
+make pi-backup-install          # nightly, 03:30, as a systemd user timer
+make pi-restore DUMP=~/something2-backups/something2-20260822-033000.sql.gz DB=scratch
+```
+
+**It is a pull, not a push.** The acceptance criterion said "pushed off the
+device", and the outcome is the same, but a push needs the board to hold a
+credential for your workstation and needs inbound access here. The pull runs
+over the SSH path every other `pi-*` target already uses, in the direction it
+already goes, and adds no secret to the box being backed up.
+
+**`pg_dump` runs inside the container, and that is load-bearing.** It is the
+only way its major version matches the server's. A dump taken with a newer
+client can be unrestorable to the server it came from — `pg_dump` 18 emits
+`SET transaction_timeout`, which a 15 server rejects, and the restore dies
+partway. Anyone reaching for `pg_dump` on their workstation hits this.
+
+**Presence is not success.** `make pi-backup-status` checks the newest dump's
+*age* and that it has content, and exits non-zero on either. A directory of
+three-week-old files looks healthy in a listing and is trusted precisely
+because it is there — which is why a silently broken backup is worse than
+none.
+
+**The restore is tested, not documented.** `backend/tests/pi_backup_restore_db.test.js`
+drives the real round trip — dump, drop, restore, compare — and also checks
+that a corrupt or non-dump file is refused *before* anything is dropped, since
+restoring rubbish over a working database turns a recoverable situation into
+an unrecoverable one.
+
+**Two limits, stated rather than discovered later:**
+
+- The timer is a *user* timer on this workstation, so nothing runs on a night
+  this machine is off. That is what `pi-backup-status` is for.
+- A nightly backup bounds the loss to a day. It does not prevent corruption —
+  **a UPS does**, by allowing a clean shutdown, and one was accepted on
+  SOMET-400 for that reason.
+
 ### Day to day
 
 ```bash

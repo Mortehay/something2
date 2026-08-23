@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { corsOptions, describePolicy } = require('./corsPolicy.js');
 const { rateLimit } = require('express-rate-limit');
 const { attachAuthority } = require('./authority/server');
 const { applyTrustProxy, clientIpKey } = require('./clientIp');
@@ -52,7 +53,13 @@ const getTileTypesMap = () => loadTileTypes(pool);
 // even though the server demonstrably sent it -- silently dropping the
 // warning that a village-delete/link-clear edit did not reach a connected
 // player's live session.
-app.use(cors({ exposedHeaders: ['X-Live-World-Pending'] }));
+// SOMET-381: the origin is now an allowlist from CORS_ORIGINS, because a
+// public URL means "every origin" is no longer an acceptable answer. Empty
+// means deny cross-origin, which is CORRECT in production -- Caddy fronts the
+// frontend and the API on one origin there, so nothing preflights. See
+// corsPolicy.js for why empty must never be read as "allow all".
+app.use(cors(corsOptions()));
+console.log(describePolicy(process.env.CORS_ORIGINS));
 
 // A modest global rate limit in front of the whole router (SOMET-189 /
 // F-009). /api/auth already has its own tighter, credential-aware limiter
@@ -111,6 +118,7 @@ const guardPool = {
 };
 const { requireAdmin, requireAuth } = require('./auth/middleware.js');
 const { assertJwtSecretOrExit } = require('./auth/assertJwtSecret.js');
+const { assertProductionSafety } = require('./productionSafety.js');
 const authRouter = require('./auth/routes.js');
 const progressionRoutes = require('./api/progressionRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
@@ -259,7 +267,9 @@ const aiProviders = require('./services/aiProviders');
 const providerDiscovery = require('./services/providerDiscovery');
 const remoteImageProvider = require('./services/remoteImageProvider');
 const { resolveGenerationTarget, loadTypeOverride } = require('./services/generationTarget');
-const { pinProvided, providerPinError, providerPinValues } = require('./services/providerPin.js');
+const {
+  pinProvided, providerPinFieldError, providerPinError, providerPinValues,
+} = require('./services/providerPin.js');
 
 // SOMET-328: the three /api/*-jobs/:jobId routes serve jobs from two different
 // engines now. The id prefix says which, so a caller polling a job never has
@@ -357,6 +367,11 @@ async function runMigrations() {
 // migrations -- only completing (or aborting) before listen() does.
 if (require.main === module) {
   assertJwtSecretOrExit();
+  // SOMET-381. The rest of the public-deployment configuration, checked at the
+  // same moment and for the same reason: a workstation setting that reaches
+  // production should stop the release, not ship quietly. JWT_SECRET is NOT
+  // rechecked here -- assertJwtSecretOrExit above owns it.
+  assertProductionSafety();
 }
 
 // Decoration defs for GET /chunk's generateChunkDecorations call. Shared with
@@ -629,6 +644,13 @@ app.get('/api/map/tiles', async (req, res) => {
 const MAX_ENTITY_DISPLAY_PX = 400;
 
 function entityTypeFieldError(body) {
+  // SOMET-453. The pin rule lives in ONE place (services/providerPin.js) and is
+  // reached from here, so every caller that asks "is this entity-type body
+  // valid" gets the same answer. It used to be consulted only by the PUT route,
+  // which is how POST came to accept an invalid ai_provider_mode -- and how a
+  // unit test calling this function directly got null and threw on assert.match.
+  const pinErr = providerPinFieldError(body);
+  if (pinErr) return pinErr;
   if (body.attack_element != null && !ELEMENTS.includes(body.attack_element)) {
     return `attack_element must be one of ${ELEMENTS.join(', ')}`;
   }
@@ -673,20 +695,34 @@ app.post('/api/entity-types', adminGuard, async (req, res) => {
     const fieldErr = entityTypeFieldError(req.body);
     if (fieldErr) return res.status(400).json({ error: fieldErr });
 
+    // The write-level rule on top of the field-level one entityTypeFieldError
+    // already ran -- same call PUT makes, so 'provider' with no id is a 400
+    // here rather than a stored half-state.
+    const pinErr = providerPinError(req.body);
+    if (pinErr) return res.status(400).json({ error: pinErr });
+
+    // A new row has no existing pin to preserve, so an absent one means the
+    // DEFAULT -- unlike the PUT below, where absent means "leave it alone" and
+    // the values are null. Same helper, different meaning for "not sent",
+    // which is exactly why this is spelled out rather than shared.
+    const pin = pinProvided(req.body)
+      ? providerPinValues(req.body)
+      : { mode: 'default', id: null };
+
     const result = await pool.query(
       `INSERT INTO entity_types (
         name, color, walkable, spawn_tiles, chance,
         strength, dexterity, constitution, intelligence, wisdom, charisma,
         hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate, image,
         display_width, display_height, render_mode, is_creature, prompt, place_order,
-        behavior_id, attack_element
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26) RETURNING *`,
+        behavior_id, attack_element, ai_provider_mode, ai_provider_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28) RETURNING *`,
       [
         name, color, walkable ?? false, JSON.stringify(spawn_tiles || []), chance ?? 0.1,
         strength ?? 0, dexterity ?? 0, constitution ?? 0, intelligence ?? 0, wisdom ?? 0, charisma ?? 0,
         hp ?? 0, max_hp ?? 0, hp_regen_rate ?? 0, mana ?? 0, max_mana ?? 0, mana_regen_rate ?? 0, image,
         display_width, display_height, render_mode ?? 'rect', is_creature ?? false, prompt ?? '', Number(place_order) || 0,
-        behavior_id ?? null, attack_element || 'physical'
+        behavior_id ?? null, attack_element || 'physical', pin.mode, pin.id
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -1318,6 +1354,24 @@ app.post('/api/players/:characterId/items', adminGuard, async (req, res) => {
   try {
     const { item_type_id } = req.body;
     if (item_type_id == null) return res.status(400).json({ error: 'item_type_id is required' });
+    // Admin grants obey the same carry cap as gameplay (SOMET-464). Counted
+    // in SQL rather than from an in-memory player, because this route can be
+    // called for a character who is offline and therefore has no world entry
+    // to read. Currency is excluded exactly as authority/items.js usedSlots
+    // excludes it -- gold is a wallet number, not a carried stack.
+    const room = await pool.query(
+      `SELECT c.inventory_slots
+              - count(pi.id) FILTER (WHERE it.category IS DISTINCT FROM 'currency') AS free
+         FROM characters c
+         LEFT JOIN player_items pi ON pi.character_id = c.id
+         LEFT JOIN item_types it ON it.id = pi.item_type_id
+        WHERE c.id = $1
+        GROUP BY c.inventory_slots`,
+      [req.params.characterId],
+    );
+    if (room.rowCount === 1 && Number(room.rows[0].free) <= 0) {
+      return res.status(409).json({ error: 'inventory full' });
+    }
     const result = await pool.query(
       'INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING *',
       [req.params.characterId, item_type_id],

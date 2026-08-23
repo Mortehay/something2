@@ -1,4 +1,5 @@
 // SOMET-310 -- the account chest ("bank"). Item storage shared by every
+const { hasFreeSlot } = require('../authority/items');
 // character on ONE account, reachable from the bank post beside every village
 // merchant.
 //
@@ -201,8 +202,12 @@ async function depositItem(pool, entry, userId, characterId, itemId) {
 // The exact mirror of depositItem, minus the guards -- none of them have an
 // analogue on the way out. A stored item cannot be equipped (it is not on any
 // character), cannot be a stone (deposit refuses them, so none can be in
-// there), and cannot host one. There is no capacity check either: player_items
-// has no cap today, which is precisely why the chest needed one.
+// there), and cannot host one.
+//
+// SOMET-463: there IS a carry cap now (characters.inventory_slots), so a
+// withdrawal into a full inventory is refused below, before the transaction
+// opens. This comment previously said the opposite -- that player_items had
+// no cap -- which was true when it was written and is not any more.
 //
 // The account_items row is DELETED and a fresh player_items row INSERTed, so
 // the withdrawn instance has a new id. Nothing depends on the old one --
@@ -211,6 +216,12 @@ async function depositItem(pool, entry, userId, characterId, itemId) {
 async function withdrawItem(pool, entry, userId, characterId, accountItemId) {
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
+
+  // Refused before the transaction: the account_items row would otherwise be
+  // DELETEd and re-INSERTed into a character that has nowhere to put it.
+  if (!hasFreeSlot(p.inv, entry.world.weapons)) {
+    return { ok: false, reason: 'Inventory full' };
+  }
 
   const client = await pool.connect();
   try {

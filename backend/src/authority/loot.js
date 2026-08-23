@@ -2,6 +2,7 @@
 // test; the caller supplies the rows and performs the INSERTs.
 
 const { CREATURE_SIZE } = require('./creatures');
+const { hasFreeSlot } = require('./items');
 const { awardXp, loadProgression } = require('../services/progressionStore.js');
 const { xpForKill } = require('../services/playerStats.js');
 const { RESPAWN_DELAY_MS } = require('../services/creatureRespawn');
@@ -234,6 +235,26 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
   }
 }
 
+// Put a bare list of item TYPE ids on the ground at (x, y). The one thing
+// spawnDrops cannot do: it rolls a dead creature's drop table, whereas this
+// takes ids the caller already decided on -- today, chest loot that would not
+// fit in the opener's inventory (SOMET-464). Same INSERT shape and the same
+// straight-into-the-sim add as spawnDrops, so the items appear in the next AOI
+// broadcast rather than waiting for a chunk reload.
+async function spawnGroundItemTypes(pool, entry, itemTypeIds, x, y, { ttlMs = 600000 } = {}) {
+  const ids = (itemTypeIds || []).filter((id) => Number.isInteger(Number(id)));
+  if (ids.length === 0) return [];
+  const ins = await pool.query(
+    `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
+     SELECT $1, t.item_type_id, $2, $3, now() + ($4::int * interval '1 millisecond'), 1
+       FROM unnest($5::int[]) AS t(item_type_id)
+     RETURNING id, item_type_id, x, y, expires_at, quantity`,
+    [entry.worldId, x, y, ttlMs, ids.map(Number)],
+  );
+  entry.world.groundItems.add(ins.rows);
+  return ins.rows;
+}
+
 // The single claim path, shared by the keypress and auto-loot. One
 // statement does the DELETE ... RETURNING and the player_items INSERT
 // together via a CTE, so Postgres commits or rolls back both as a unit —
@@ -258,6 +279,15 @@ const CLAIM_BACKOFF_MS = 1000;
 
 // `now` is injectable so the backoff is testable without timers or sleeping.
 async function claimItem(pool, entry, userId, characterId, groundItemId, { now = Date.now } = {}) {
+  // Capacity is checked BEFORE the claim statement below, which DELETEs the
+  // world_items row in the same breath as it grants: a post-hoc check would
+  // have to put the item back on the ground. The item simply stays where it
+  // is, and the CALLER decides what the player sees -- a toast for a
+  // deliberate pickup, silence for the 20Hz auto-loot sweep.
+  const holder = entry.world.getPlayer(userId);
+  if (holder && holder.inv && !hasFreeSlot(holder.inv, entry.world.weapons)) {
+    return { full: true };
+  }
   // Lazily created so every existing hand-built `entry` fixture keeps working
   // -- there are many, in tests and in server.js's own world entries.
   if (!entry.claimRetryAt) entry.claimRetryAt = new Map();
@@ -533,5 +563,5 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 6000
 }
 
 module.exports = {
-  rollDrops, rollGold, commitCreatureDeath, spawnDrops, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
+  rollDrops, rollGold, commitCreatureDeath, spawnDrops, spawnGroundItemTypes, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
 };

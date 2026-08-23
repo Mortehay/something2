@@ -28,7 +28,12 @@ function pinProvided(body) {
 // Returns an error string for a 400, or null. The DB CHECK would reject a bad
 // mode too, but as a 500 with a constraint name in it -- this is the readable
 // version, and it also catches the two cases the CHECK cannot see.
-function providerPinError(body) {
+// SOMET-453 split this in two. PER-FIELD validity only: is each value a thing
+// this column can hold. Deliberately does NOT enforce the cross-field rule
+// below, because a body carrying mode 'provider' and no id yet is a perfectly
+// well-formed body -- the id may be arriving in the same form, and the type
+// editor legitimately holds that state mid-edit.
+function providerPinFieldError(body) {
   if (!pinProvided(body)) return null;
 
   const mode = body.ai_provider_mode;
@@ -41,10 +46,22 @@ function providerPinError(body) {
     return 'ai_provider_id must be an integer';
   }
 
+  return null;
+}
+
+// Everything providerPinFieldError checks, PLUS the cross-field rule. This is
+// what a WRITE must satisfy; the field-level half is what a generic
+// "is this body valid" check consults.
+function providerPinError(body) {
+  if (!pinProvided(body)) return null;
+
+  const fieldErr = providerPinFieldError(body);
+  if (fieldErr) return fieldErr;
+
   // A 'provider' pin with no target is the half-state that would silently
   // resolve to the global default -- the admin asked for a specific service
   // and would get whichever one happens to be active.
-  if (mode === 'provider' && id == null) {
+  if (body.ai_provider_mode === 'provider' && body.ai_provider_id == null) {
     return 'ai_provider_mode "provider" needs an ai_provider_id';
   }
 
@@ -64,4 +81,6 @@ function providerPinValues(body) {
   return { mode, id };
 }
 
-module.exports = { PIN_MODES, pinProvided, providerPinError, providerPinValues };
+module.exports = {
+  PIN_MODES, pinProvided, providerPinFieldError, providerPinError, providerPinValues,
+};

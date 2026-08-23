@@ -78,10 +78,17 @@ async function ownedCharacter(pool, userId, characterId) {
   const id = Number(characterId);
   if (!Number.isInteger(id)) return null;
   const r = await pool.query(
-    'SELECT id, entity_type_id FROM characters WHERE id = $1 AND user_id = $2',
+    'SELECT id, entity_type_id, inventory_slots FROM characters WHERE id = $1 AND user_id = $2',
     [id, userId]);
   if (!r.rows.length) return null;
-  return { id: r.rows[0].id, entityTypeId: r.rows[0].entity_type_id };
+  // inventory_slots rides the ownership lookup rather than getting its own
+  // query: the join path already needs this row, and the carry limit must be
+  // in hand before the first grant path runs (see authority/items.js).
+  return {
+    id: r.rows[0].id,
+    entityTypeId: r.rows[0].entity_type_id,
+    inventorySlots: Number(r.rows[0].inventory_slots),
+  };
 }
 
 // Allocation and insert are ONE statement. A read-then-write ("SELECT the free
