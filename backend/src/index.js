@@ -1354,6 +1354,24 @@ app.post('/api/players/:characterId/items', adminGuard, async (req, res) => {
   try {
     const { item_type_id } = req.body;
     if (item_type_id == null) return res.status(400).json({ error: 'item_type_id is required' });
+    // Admin grants obey the same carry cap as gameplay (SOMET-464). Counted
+    // in SQL rather than from an in-memory player, because this route can be
+    // called for a character who is offline and therefore has no world entry
+    // to read. Currency is excluded exactly as authority/items.js usedSlots
+    // excludes it -- gold is a wallet number, not a carried stack.
+    const room = await pool.query(
+      `SELECT c.inventory_slots
+              - count(pi.id) FILTER (WHERE it.category IS DISTINCT FROM 'currency') AS free
+         FROM characters c
+         LEFT JOIN player_items pi ON pi.character_id = c.id
+         LEFT JOIN item_types it ON it.id = pi.item_type_id
+        WHERE c.id = $1
+        GROUP BY c.inventory_slots`,
+      [req.params.characterId],
+    );
+    if (room.rowCount === 1 && Number(room.rows[0].free) <= 0) {
+      return res.status(409).json({ error: 'inventory full' });
+    }
     const result = await pool.query(
       'INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING *',
       [req.params.characterId, item_type_id],

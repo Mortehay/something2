@@ -293,6 +293,43 @@ async function grantStartingLoadout(pool, character, itemTypes) {
   }
 }
 
+// Carry limit. ONE definition of "how full is this inventory", called by every
+// path that inserts into player_items; a second implementation is exactly how
+// two paths end up disagreeing about whether a player is full.
+//
+// Counts ROWS (stacks), not summed quantity: a stack of 40 arrows occupies one
+// slot, which is what the panel draws. Currency is excluded -- gold is a wallet
+// number, not a carried stack. An item whose type is missing from the in-memory
+// catalog still counts: the row exists in the database, and skipping it would
+// turn an unknown type into free carrying capacity.
+const DEFAULT_INVENTORY_SLOTS = 48;
+
+function usedSlots(inv, itemTypes) {
+  let n = 0;
+  for (const it of (inv && inv.items) || []) {
+    const t = itemTypes ? itemTypes.get(it.typeId) : null;
+    if (t && t.category === 'currency') continue;
+    n += 1;
+  }
+  return n;
+}
+
+// The cap rides the inventory object (server.js attaches it from the character
+// row at join). The fallback is for a caller holding an inventory that predates
+// that attach -- a missing cap must read as the default, never as unlimited.
+function capacityOf(inv) {
+  const c = Number(inv && inv.capacity);
+  return Number.isInteger(c) && c > 0 ? c : DEFAULT_INVENTORY_SLOTS;
+}
+
+function freeSlots(inv, itemTypes) {
+  return Math.max(0, capacityOf(inv) - usedSlots(inv, itemTypes));
+}
+
+function hasFreeSlot(inv, itemTypes) {
+  return freeSlots(inv, itemTypes) > 0;
+}
+
 const HAND_SLOTS = ['main_hand', 'off_hand'];
 
 function findItem(inv, itemId) { return inv.items.find((it) => it.id === itemId) || null; }
@@ -698,4 +735,5 @@ async function unsocketStone(pool, characterId, inv, stonePlayerItemId, { confir
 module.exports = {
   loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory,
   grantStartingLoadout, canEquip, mitigation, activeWeaponType, equip, unequip, socketStone, unsocketStone,
+  DEFAULT_INVENTORY_SLOTS, usedSlots, capacityOf, freeSlots, hasFreeSlot,
 };

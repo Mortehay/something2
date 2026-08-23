@@ -4,7 +4,7 @@ const { WebSocketServer } = require('ws');
 const { currentUserForToken } = require('../auth/tokens.js');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
-const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout, socketStone, unsocketStone } = require('./items');
+const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout, socketStone, unsocketStone, freeSlots } = require('./items');
 const { loadCatalogs, elementsForWire } = require('./catalogs');
 const { configureAttackOrigins } = require('./attackOrigin.js');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
@@ -30,7 +30,7 @@ const { fetchChest, depositItem, withdrawItem } = require('../services/accountCh
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
-const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive } = require('./loot');
+const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
@@ -1420,6 +1420,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // has never been granted anything.
         const granted = await grantStartingLoadout(pool, character, entry.world.weapons);
         if (granted) inv = await loadInventory(pool, character.id);
+        // Attached AFTER the possible re-load above, or the grant would drop
+        // it. Every capacity check reads inv.capacity, so the value has to
+        // ride the same object the rules already hold.
+        inv.capacity = character.inventorySlots;
         // Gold stays per-ACCOUNT (SOMET-257 left it on users), so this is the
         // one lookup in the join path still keyed by user rather than character.
         const gr = await pool.query('SELECT gold FROM users WHERE id = $1', [ws.userId]);
@@ -1519,6 +1523,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
           elements: elementsForWire(entry.catalogs),
           items: inv.items,
           equipment: inv.equipment,
+          // The panel renders used/capacity in its title bar. Nothing in play
+          // changes the cap, so it rides the join frame only. DISPLAY ONLY:
+          // the rule that refuses an item runs server-side, against this same
+          // number, in authority/items.js.
+          inventorySlots: inv.capacity,
           // Server-authoritative: addPlayer always resets this to false, but
           // read it back off the player rather than hardcoding — the wire
           // value must always reflect whatever World actually holds, not an
@@ -1858,7 +1867,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
           if (got) send(ws, { type: 'wallet', gold: got.gold });
         } else {
           const got = await claimItem(pool, entry, ws.userId, ws.characterId, target.id);
-          if (got) send(ws, { type: 'picked', item: got });
+          // A DELIBERATE pickup gets told why nothing happened; the auto-loot
+          // sweep below stays silent for the same condition.
+          if (got && got.full) send(ws, { type: 'error', message: 'Inventory full' });
+          else if (got) send(ws, { type: 'picked', item: got });
         }
       }, { notify: false });
     },
@@ -2015,7 +2027,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const chest = nearestChest(entry.chests, cx, cy, INTERACT_RADIUS);
         if (!chest) { send(ws, { type: 'error', message: 'no chest nearby' }); return; }
 
-        const result = await openChest(pool, chest.id, ws.characterId);
+        // The opener's remaining room decides how much of the roll can be
+        // granted; whatever does not fit comes back as overflowTypeIds and is
+        // spawned on the ground below rather than lost.
+        const room = freeSlots(p.inv, entry.world.weapons);
+        const result = await openChest(pool, chest.id, ws.characterId, { freeSlots: room });
         if (!result.ok) { send(ws, { type: 'error', message: result.reason }); return; }
 
         // Final-review fix (SOMET-244 Important #2): openChest now returns
@@ -2027,6 +2043,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // dropItem/sellItem all validate against p.inv.items).
         for (const it of result.items) {
           p.inv.items.push({ id: it.id, typeId: it.item_type_id, quantity: Number(it.quantity) || 1 });
+        }
+
+        // Overflow: one toast, not one per item, and the loot lands where the
+        // player is standing so it can be collected after making room.
+        if (result.overflowTypeIds && result.overflowTypeIds.length) {
+          await spawnGroundItemTypes(pool, entry, result.overflowTypeIds, cx, cy, { ttlMs: groundItemTtlMs });
+          send(ws, { type: 'error', message: 'Inventory full - some loot dropped on the ground' });
         }
 
         // openedAt/respawnAt (undefined for a vault chest -- openChest
@@ -2524,6 +2547,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
           if (!sock) return;
           for (const r of results) {
             if (r.status === 'fulfilled' && r.value) {
+              // A full inventory is SILENT here, and skipped before the shape
+              // test below -- otherwise `{full:true}` would fall through to
+              // the else and be sent as a `picked` item the player never got.
+              // The sweep re-runs at 20Hz for as long as the player stands
+              // near the item, so a toast per result would be a stream of
+              // them; the panel's used/capacity counter is where a player
+              // learns they are full.
+              if (r.value.full) continue;
               // claimGold resolves { gold }; claimItem resolves { id, typeId, quantity }.
               // Distinguishing by shape (rather than tagging each push) keeps this
               // loop untouched for the non-gold path.

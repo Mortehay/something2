@@ -76,4 +76,41 @@ describe('Game Escape key handling', () => {
     expect(g.pause).not.toHaveBeenCalled();
     expect(g.state).toBe('playing');
   });
+
+  it('closeInventory clears the panel, the selection and any in-flight drag', () => {
+    const g = makeGame();
+    g.inventoryOpen = true;
+    g.inventorySelectedItemId = 'item-123';
+    g.inventoryDrag = { itemId: 'item-123', from: { kind: 'item', id: 'item-123' }, x: 10, y: 10 };
+
+    g.closeInventory();
+
+    expect(g.inventoryOpen).toBe(false);
+    expect(g.inventorySelectedItemId).toBeNull();
+    expect(g.inventoryDrag).toBeNull();
+  });
+
+  it('Escape closes through closeInventory, dropping an in-flight drag', () => {
+    const g = makeGame();
+    g.inventoryOpen = true;
+    g.inventoryDrag = { itemId: 'item-9', from: { kind: 'item', id: 'item-9' }, x: 1, y: 2 };
+
+    g._keydownHandler({ key: 'Escape', code: 'Escape', preventDefault: () => {} });
+
+    expect(g.inventoryOpen).toBe(false);
+    expect(g.inventoryDrag).toBeNull();
+  });
+
+  it('the i toggle closes through the same path', () => {
+    const g = makeGame();
+    g.inventoryOpen = true;
+    g.inventorySelectedItemId = 'item-5';
+    g.inventoryDrag = { itemId: 'item-5', from: { kind: 'item', id: 'item-5' }, x: 0, y: 0 };
+
+    g._keydownHandler({ key: 'i', code: 'KeyI', preventDefault: () => {} });
+
+    expect(g.inventoryOpen).toBe(false);
+    expect(g.inventorySelectedItemId).toBeNull();
+    expect(g.inventoryDrag).toBeNull();
+  });
 });
