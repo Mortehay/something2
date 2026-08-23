@@ -231,3 +231,35 @@ describe("paging", () => {
     expect(l.cells[0].item.id).toBe("i0");
   });
 });
+
+describe("slot affordance during a drag", () => {
+  // Browser-found (SOMET-467): clicking an item greyed the slots it could not
+  // go in, but DRAGGING one did not — the player got the affordance for the
+  // weaker interaction and nothing for the stronger one.
+  const i = inv({
+    types: [SWORD, HELM],
+    items: [{ id: "w", typeId: 1, quantity: 1 }, { id: "h", typeId: 2, quantity: 1 }],
+  });
+
+  it("greys the slots an armed drag payload cannot go into", () => {
+    const l = layoutInventory({
+      inventory: i,
+      drag: { itemId: "w", from: { kind: "item", id: "w" }, armed: true },
+    });
+    expect(l.slots.find((s) => s.slot === "head").disabled).toBe(true);
+    expect(l.slots.find((s) => s.slot === "main_hand").disabled).toBe(false);
+  });
+
+  it("leaves every slot enabled while the drag is only a candidate", () => {
+    const l = layoutInventory({
+      inventory: i,
+      drag: { itemId: "w", from: { kind: "item", id: "w" }, armed: false },
+    });
+    expect(l.slots.every((s) => s.disabled === false)).toBe(true);
+  });
+
+  it("still greys from a plain selection when nothing is being dragged", () => {
+    const l = layoutInventory({ inventory: i, selectedItemId: "w" });
+    expect(l.slots.find((s) => s.slot === "head").disabled).toBe(true);
+  });
+});

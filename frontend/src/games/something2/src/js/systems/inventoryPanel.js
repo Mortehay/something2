@@ -77,7 +77,15 @@ export function layoutInventory(state) {
     autoLoot = false,
     tab = "all",
     page = 0,
+    drag = null,
   } = state;
+
+  // What the paperdoll's greying answers "can THIS go here?" about. An ARMED
+  // drag wins over a click-selection: it is the item under the cursor right
+  // now, and the affordance has to describe where the player can actually
+  // drop. An un-armed candidate is still just a click, so it changes nothing.
+  const candidateItemId = (drag && drag.armed && drag.itemId != null)
+    ? drag.itemId : selectedItemId;
 
   const px = (GAME_WIDTH - PANEL_W) / 2;
   const py = (GAME_HEIGHT - PANEL_H) / 2;
@@ -102,7 +110,7 @@ export function layoutInventory(state) {
     const y = slotsTop + row * (SLOT_H + 6);
     const equippedId = inventory.equipment[slot];
     const equippedType = equippedId != null ? typeOf(inventory, equippedId) : null;
-    const disabled = selectedItemId != null && !canEquipClient(inventory, selectedItemId, slot);
+    const disabled = candidateItemId != null && !canEquipClient(inventory, candidateItemId, slot);
     return {
       slot, x, y, w: SLOT_W, h: SLOT_H,
       equippedName: equippedType ? equippedType.name : null,
