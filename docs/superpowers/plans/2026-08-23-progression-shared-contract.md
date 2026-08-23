@@ -342,3 +342,49 @@ keeps the route, strips the refund, and removes the button — a respec that
 charges gold to reset six columns nothing can raise is a pure gold sink.
 Accepted, stated gap: the endpoint stays callable by hand until T7 replaces its
 body.
+
+### 6.11 Class pools are real again (SOMET-486) — decided 2026-08-24
+
+`world.js:175` sets a joining player's pools from `derivePlayerStats`, which is
+class-blind, so every class has had **100 hp / 100 mana** since SOMET-242 while
+character select advertised 100/85/75. The advertised numbers were a lie.
+
+**Decision: options 1 and 3 together, with a strict division of labour.**
+
+**Option 1 — pools come from the class base.** The formulas become:
+
+```
+maxHp   = classBaseHp   + HP_PER_CON   * (constitution - BASE_STAT)
+maxMana = classBaseMana + MANA_PER_INT * (intelligence - BASE_STAT)
+```
+
+`derivePlayerStats` therefore needs the class's base pools as an input. This is
+the ONE place pools are computed; `world.js` keeps reading it.
+
+**The `entity_types` mana values are re-authored, not adopted.** They currently
+read 50/50/70 while the live game gives everyone 100 — they have been dead code
+since SOMET-242, so adopting them would not be "restoring" a working system, it
+would be activating numbers that have never run. Applying them as-is would halve
+every existing character's mana. **Warrior stays at 100/100**, and the six
+classes are balanced against each other deliberately in B1.
+
+This keeps A2's guard true: no existing character's pools move. All 8 live
+characters are Warriors, and Warrior's `entity_types` HP is already 100.
+
+**Option 3 — start nodes carry class identity, as RULES not numbers.** A class's
+tree start node grants its mechanical identity (the Cultist's life-cost
+affinity, the Druid's charm affinity), never a raw pool bonus. Pools are option
+1's job. Keeping the split strict is what stops class identity being counted
+twice.
+
+**This reverses a rule already merged in C1.** `passive_tree_generator.test.js`
+asserts *"a start node grants nothing — it is free, so it must also be inert"*.
+That test and the generator's start-node handling must change together, and the
+new test must assert the grants are the intended per-class ones rather than
+merely non-empty — otherwise it degrades into "a start node grants something",
+which would pass for any typo.
+
+**Sequencing.** SOMET-486 lands FIRST and alone: the formula change plus
+re-authored pools for the three existing classes, pinned by tests. B1 then adds
+the four new classes' pools and all six start-node grants on top. 486 must also
+land AFTER C2, because both touch `derivePlayerStats`' inputs.
