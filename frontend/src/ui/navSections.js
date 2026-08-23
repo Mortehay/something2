@@ -1,7 +1,7 @@
 import {
   HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker,
   HiOutlineCube, HiOutlineMap, HiOutlineGlobeAlt, HiOutlineShare, HiOutlineBolt, HiOutlineSparkles,
-  HiOutlineCpuChip,
+  HiOutlineCpuChip, HiOutlineChartBar,
 } from "react-icons/hi2";
 
 // One source of truth for the sidebar: label, route, icon and the admin colour
@@ -38,6 +38,11 @@ export const NAV_SECTIONS = [
       // Relabelled, not moved: the id is referenced elsewhere and the path is
       // the admin route. See the player entry in the section above.
       { id: 'worldmap', label: 'World Map Editor', path: '/game/world-map', Icon: HiOutlineShare, adminType: 'maps' },
+      // Progression epic T1 (SOMET-469): the game_settings editor, plus the
+      // mount points the affix (T12) and passive-node (T9) admin sections
+      // land in. Content rather than configuration, so it sits above the
+      // AI Providers entry.
+      { id: 'progression', label: 'Progression', path: '/game/admin/progression', Icon: HiOutlineChartBar, adminType: 'entity' },
       // SOMET-330: registered remote image-generation services. Sits last
       // because it is configuration rather than content -- an admin opens it
       // once to point the game at a machine, not every session.

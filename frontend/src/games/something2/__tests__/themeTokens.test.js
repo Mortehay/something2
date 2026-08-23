@@ -104,7 +104,7 @@ describe('--s2-* theme tokens', () => {
 const IN_SCOPE = [
   'GameShell.jsx', 'GameView.jsx', 'TileTypesAdmin.jsx', 'EntityTypesAdmin.jsx',
   'ItemTypesAdmin.jsx', 'BiomesAdmin.jsx', 'MapsAdmin.jsx', 'MapGraphAdmin.jsx',
-  'CreatureBehaviorsAdmin.jsx',
+  'CreatureBehaviorsAdmin.jsx', 'ProgressionAdmin.jsx',
 ];
 
 // Files not yet swept. Each sweep task deletes its own entry. Must reach [].
