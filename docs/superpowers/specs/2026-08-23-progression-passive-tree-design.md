@@ -217,12 +217,16 @@ xpToNext(L) = Math.round(XP_BASE * Math.pow(L, XP_EXPONENT))
 | 2 | 100 | 45 |
 | 10 | 1,000 | 385 |
 | 50 | 5,000 | 3,273 |
-| 100 | — | 8,240 |
-| 150 | — | 14,123 |
+| 100 | — | 8,228 |
+| 150 | — | 14,108 |
 
-Cumulative XP to level 50 falls from 122,500 to ~70,000 (about 1.75× cheaper
+Cumulative XP to level 50 falls from 122,500 to 68,598 (about 1.79× cheaper
 overall; early levels are ~2.5× cheaper, which is where the "levelling should
-be cheaper" ask actually bites). Cumulative to 150 is ~900,000.
+be cheaper" ask actually bites). Cumulative to 150 is 901,212.
+
+All six figures above are computed values, not estimates — verify any change
+with `node -e` before editing them, and never let a test derive them by calling
+`xpToNext`.
 
 `xpFloor` has no closed form with a fractional exponent, so a 150-entry
 cumulative table is precomputed at module load and `levelForXp` binary-searches

@@ -10,23 +10,37 @@ it must add it here in the same commit.
 
 ## 1. Migration timestamp allocation
 
-The block `1714440400000`–`1714440430000` is reserved for this epic. Migration
-timestamps have collided across concurrent branches in this repo before, so
-each task gets exactly one slot and may not take another.
+The block `1714440500000`–`1714440530000` is reserved for this epic.
+
+**CORRECTION 2026-08-23.** This contract originally reserved
+`1714440400000`–`1714440430000`. That block is **already occupied on main** by
+`1714440400000_biome_path_tile.js`, `1714440410000_invite_codes.js` and
+`1714440420000_inventory_slots.js` — the original reservation was made from a
+directory listing truncated at 100 of 109 files. Any plan still naming a
+`14400400xx`–`14400420xx` slot is wrong and must be re-pointed at the table
+below. The highest timestamp on main is `1714440420000`.
+
+Migration timestamps have collided across concurrent branches in this repo
+before, so each task gets exactly one slot and may not take another.
 
 | Slot | Task | Content |
 |---|---|---|
-| `1714440400000` | T1 | `game_settings` table + default rows |
-| `1714440401000` | T2 | level CHECK 1..150, drop `stat_points` |
-| `1714440402000` | T3 | `entity_types.main_stat`, four new playable rows, loadouts |
-| `1714440403000` | T5 | `world_creatures` charm columns, `character_summons` |
-| `1714440404000` | T6 | `passive_nodes`, `passive_edges`, `character_passives` |
-| `1714440405000` | T10 | `item_types` `req_level` + six `req_*` + `item_level` + `tier` |
-| `1714440406000` | T11 | base gear ladder seed |
-| `1714440407000` | T12 | `affix_types`, `player_item_affixes`, `player_items` + `world_items` columns |
-| `1714440408000` | T13 | `rarity_weights` default setting row |
+| `1714440500000` | T1 | `game_settings` table + default rows |
+| `1714440501000` | T2 | level CHECK 1..150, drop `stat_points`, class-base snapshot backfill |
+| `1714440502000` | T3 | `entity_types.main_stat`, four new playable rows, loadouts |
+| `1714440503000` | T5 | `world_creatures` charm columns, `character_summons` |
+| `1714440504000` | T6 | `passive_nodes`, `passive_edges`, `character_passives` |
+| `1714440505000` | T10 | `item_types` `req_level` + six `req_*` + `item_level` + `tier` |
+| `1714440506000` | T11 | base gear ladder seed |
+| `1714440507000` | T12 | `affix_types`, `player_item_affixes`, `player_items` + `world_items` columns |
+| `1714440508000` | T13 | `rarity_weights` default setting row |
 
 T4, T7, T8, T9, T14 and T15 add **no** migration.
+
+Note: main already carries two duplicate-timestamp pairs (`1714440360000` and
+`1714440370000` each appear twice). Do not add a third — if `migrate:up`
+reports "Not run migration X is preceding Y", use
+`backend/scripts/repair-migration-order.js`, never `--no-check-order`.
 
 ## 2. Module contracts
 
@@ -206,3 +220,125 @@ Presentation only. No damage, no knockback, no collision.
   working directory. Stage by explicit path.
 - **Commits:** branch `feat/<slug>`; subject `type(scope): summary (SOMET-NNN)`;
   end the message with the `Co-Authored-By: Claude Opus 5 (1M context)` trailer.
+
+## 6. Amendments
+
+Recorded after the five plans were drafted. These override anything above that
+contradicts them.
+
+### 6.1 T2 owns the class-base stat snapshot (spec §3.3) — and every base stays 5
+
+Spec §3.3 freezes the six stat columns into a snapshot written once at
+character creation. No task owned that writer, which would have left
+`composeStats`'s `base` input with no source.
+
+**T2 owns it**, both halves: the migration backfills existing characters, and
+`createCharacter` writes the snapshot at creation. T2 also owns the new
+`player_progression.passive_points` column (see §6.7).
+
+**CORRECTION — do NOT backfill from `entity_types`.** An earlier revision of
+this amendment said to copy the class's `entity_types` stats into
+`player_progression`. That is wrong and would silently rebalance every
+character in the database. `entity_types` carries stats of 10 (Warrior) and
+DEX 12 (Ranger), while `player_progression` bases everything on
+`BASE_STAT = 5`, and every formula in `playerStats.js` is an identity at 5 —
+`progressionConstants.js` declares that property explicitly non-provisional.
+Copying a CON of 10 across makes `maxHp = 100 + 10×(10−5) = 150`, i.e. +50 max
+HP for every existing character, with no test noticing.
+
+**Every class therefore bases at 5 on all six stats.** Class identity comes
+from the tree start position and the starting loadout, not from different base
+stats. This keeps a level-1 character of every class reproducing the game's
+pre-epic numbers exactly (100 hp, 100 mana, ×1.0 damage), which is the one
+property `progressionConstants.js` forbids changing.
+
+The snapshot column still exists and is still written once — it is what lets a
+future revision differentiate class bases without retroactively changing
+characters that already exist.
+
+### 6.2 Composed stat totals travel on the wire
+
+The `progression` websocket frame and `GET /api/progression` both carry the
+**composed effective totals**, not the raw columns. Once §3.3 lands,
+`progression.strength` is a class-base snapshot and is no longer the effective
+value, so a client reading it would silently show the wrong number.
+
+T7 adds `effective: {strength, dexterity, constitution, intelligence, wisdom,
+charisma}` to both payloads, alongside `sources` and `modifiers`.
+
+Consumers must render `effective`, never re-sum `sources` client-side and never
+read the raw columns.
+
+### 6.3 `stats` is not on every `progression` frame
+
+Verified against `server.js`: `stats` rides only the `refreshPlayerStats` push.
+The kill-XP push, the death push and the `joined` frame omit it.
+
+T7 puts `stats` on **every** `progression` frame. Until it does, a client must
+seed from `GET /api/progression` (which already returns `stats`) and let later
+frames overwrite — that is what T15 does.
+
+### 6.4 T8 owns the `respecDisabled` predicate
+
+Respec is a passive-tree action, not a character-sheet one, so T15 deletes the
+sheet's respec control and its tests. **T8 must reprovide the predicate** (can
+this character afford a respec, and is one in flight) in the tree overlay, or
+the affordability gate is silently lost and every unaffordable click 402s.
+
+### 6.5 Values the spec left open, now fixed
+
+| Thing | Value | Chosen by |
+|---|---|---|
+| Creature charm range | 200px | T5 plan |
+| Creature charm duration | 120s | T5 plan |
+| `treeCharmBonus` before T6 lands | literal `0` at the call site | T5 plan |
+| `lifeCostMultiplier` before T6 lands | literal `1` at the call site | T4 plan |
+
+### 6.6 Known landmines in existing tests
+
+- `hotkeyRegistry.test.js:109` asserts **at least four** keydown-listener files
+  and exactly four exist. Deleting the level popup (T15) turns it red. T15
+  lowers the bound to 3 with the reason inline and adds a positive assertion
+  that `Game.js` is the sole claimant of `c`.
+- `ownedCharacter` gains a JOIN in T3. Test doubles that regex-match on
+  `/FROM characters/` may break; T3 carries a named remediation step.
+
+### 6.7 `passive_points` needs a column
+
+`GET /api/progression` "gains `passivePoints`" and T2 must grant them, but no
+migration slot declared storage for them.
+
+T2's slot `1714440501000` adds
+`player_progression.passive_points integer NOT NULL DEFAULT 0 CHECK (passive_points >= 0)`.
+It is the only migration in this epic that touches that table.
+
+### 6.8 `applyDeathPenalty` breaks silently under the new curve
+
+`applyDeathPenalty` hardcodes `XP_BASE * level` as "the level's worth" — a
+deliberate stand-in for `xpToNext`, which returns `Infinity` at MAX_LEVEL. Under
+a non-linear curve that expression is simply wrong.
+
+T2 extracts a private `levelWorth(level)` that both `xpToNext` and the death
+penalty call, so the two cannot diverge again.
+
+### 6.9 Corrected XP curve literals
+
+The spec originally carried two wrong values. Verified with `node -e`:
+
+| level | xpToNext |
+|---|---|
+| 2 | 45 |
+| 10 | 385 |
+| 50 | 3273 |
+| 100 | **8228** (spec first said 8240) |
+| 150 | **14108** (spec first said 14123) |
+
+Cumulative to 50: **68,598**. Cumulative to 150: **901,212**.
+
+### 6.10 `POST /api/progression/respec` between T2 and T7
+
+With `stat_points` gone, respec has nothing to refund until the tree lands. T2
+keeps the route, strips the refund, and removes the button — a respec that
+charges gold to reset six columns nothing can raise is a pure gold sink.
+Accepted, stated gap: the endpoint stays callable by hand until T7 replaces its
+body.
