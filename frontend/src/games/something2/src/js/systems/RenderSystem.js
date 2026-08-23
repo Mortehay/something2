@@ -275,8 +275,8 @@ export class RenderSystem {
       } else if (d.kind === "player") this.drawCreature(d.ref, "player", 1);
       else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
-      else if (d.kind === "merchant") this.drawMerchant(d.ref);
-      else if (d.kind === "bank") this.drawBank(d.ref);
+      else if (d.kind === "merchant") this.drawMerchant(d.ref, player);
+      else if (d.kind === "bank") this.drawBank(d.ref, player);
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
       else this.drawEntity(d.ref);
@@ -742,7 +742,7 @@ export class RenderSystem {
   // A village's merchant: a fixed marker (no facing/animation) at the
   // village's merchantX/Y from the join frame. Distinct color + always-on
   // label distinguish it from a transient ground-item drop at a glance.
-  drawMerchant(m) {
+  drawMerchant(m, player = null) {
     const s = worldToScreen(m.x, m.y);
     const dx = s.x, dy = s.y;
     const r = 11;
@@ -762,6 +762,22 @@ export class RenderSystem {
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
     this.ctx.fillText("Merchant", dx, dy - r - 6);
+
+    // Show prompt when player is within interact range
+    if (player) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      const d = Math.hypot(m.x - pcx, m.y - pcy);
+      if (d <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.font = "bold 11px sans-serif";
+        this.ctx.fillStyle = "#c084fc";
+        this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeText("[e] / [f] Talk", dx, dy + r + 14);
+        this.ctx.fillText("[e] / [f] Talk", dx, dy + r + 14);
+      }
+    }
+
     this.ctx.restore();
   }
 
@@ -770,7 +786,7 @@ export class RenderSystem {
   // drawMerchant above so the two read as a matched pair of village services;
   // amber rather than violet, and squatter, so which one a player is walking
   // toward is legible at a glance without reading the label.
-  drawBank(b) {
+  drawBank(b, player = null) {
     const s = worldToScreen(b.x, b.y);
     const dx = s.x, dy = s.y;
     const r = 11;
@@ -795,6 +811,22 @@ export class RenderSystem {
     this.ctx.font = "12px sans-serif";
     this.ctx.textAlign = "center";
     this.ctx.fillText("Chest", dx, dy - r - 6);
+
+    // Show prompt when player is within interact range
+    if (player) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      const d = Math.hypot(b.x - pcx, b.y - pcy);
+      if (d <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.font = "bold 11px sans-serif";
+        this.ctx.fillStyle = "#fbbf24";
+        this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeText("[e] / [f] Open", dx, dy + r + 14);
+        this.ctx.fillText("[e] / [f] Open", dx, dy + r + 14);
+      }
+    }
+
     this.ctx.restore();
   }
 
@@ -1705,7 +1737,7 @@ export class RenderSystem {
     ctx.fillStyle = "#e5e7eb";
     ctx.font = "14px monospace";
     ctx.textBaseline = "top";
-    ctx.fillText("Account Chest — [b] to close", px + 16, py + 14);
+    ctx.fillText("Account Chest — [f] or [esc] to close", px + 16, py + 14);
 
     const closeW = 70, closeH = 26;
     const closeX = px + panelW - 16 - closeW;
