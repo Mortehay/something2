@@ -154,6 +154,17 @@ test('GET /api/characters/classes lists the three playable classes', async (t) =
     const res = await request(app).get('/api/characters/classes').set(auth(userId));
     assert.equal(res.status, 200, 'must not be captured by the /:id route');
     assert.deepEqual(res.body.classes.map((c) => c.name).sort(), ['Mage', 'Ranger', 'Warrior']);
+    // SOMET-486: the pools have to survive the HTTP boundary, because
+    // CharacterSelect.jsx renders `{cls.hp} hp / {cls.mana} mana` straight off
+    // this body. class_pools_db.test.js proves these numbers match what a
+    // character actually joins with; this proves the screen is given them at
+    // all -- a route that dropped `mana` would render "85 hp / undefined mana"
+    // with every other test still green.
+    const byName = Object.fromEntries(res.body.classes.map((c) => [c.name, c]));
+    assert.deepEqual(
+      ['Warrior', 'Ranger', 'Mage'].map((n) => [n, byName[n].hp, byName[n].mana]),
+      [['Warrior', 100, 100], ['Ranger', 85, 115], ['Mage', 75, 150]],
+      'the advertised pools must reach the client, as numbers');
   } finally {
     await dropUser(dbPool, userId);
   }
