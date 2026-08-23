@@ -32,7 +32,7 @@ function progressionRouteLayers() {
   assert.ok(appStack, 'could not locate the app router stack');
   const mountLayer = appStack.find((l) => l.name === 'router'
     && l.handle && Array.isArray(l.handle.stack)
-    && l.handle.stack.some((rl) => rl.route && ['/', '/respec'].includes(rl.route.path)));
+    && l.handle.stack.some((rl) => rl.route && rl.route.path === '/passives/:nodeId'));
   assert.ok(mountLayer, 'could not locate the mounted progression router');
   return mountLayer.handle.stack.filter((rl) => rl.route);
 }
@@ -40,8 +40,15 @@ function progressionRouteLayers() {
 test('every progression route is behind an auth guard', () => {
   const layers = progressionRouteLayers();
   // A walk that matches zero routes would pass vacuously -- assert the real
-  // surface first (GET / and POST /respec; POST /allocate is gone).
-  assert.equal(layers.length, 2, `expected exactly 2 progression routes, found ${layers.length}`);
+  // surface first. SOMET-475 added POST /passives/:nodeId, so the surface is
+  // GET /, POST /passives/:nodeId and POST /respec; POST /allocate is still
+  // gone. The mount is now located BY that new path rather than by ['/',
+  // '/respec'], which several routers in this app share.
+  assert.deepEqual(
+    layers.map((l) => l.route.path).sort(),
+    ['/', '/passives/:nodeId', '/respec'],
+    'the progression route surface changed',
+  );
   const unguarded = layers
     .filter((l) => !l.route.stack.some((h) => h.handle && h.handle.isAuthGuard))
     .map((l) => `${Object.keys(l.route.methods).join('/').toUpperCase()} ${l.route.path}`);

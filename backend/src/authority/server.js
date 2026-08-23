@@ -740,6 +740,24 @@ function attachAuthority(httpServer, pool, opts = {}) {
     return spawn;
   }
 
+  // Contract §6.3 (SOMET-475): `stats` rides EVERY `progression` frame, not
+  // only the refreshPlayerStats push. A client that seeded from a kill push
+  // and then rendered derived numbers otherwise showed pre-level-up values
+  // with nothing to correct them.
+  //
+  // Named once here so the six send sites cannot drift into deriving from
+  // DIFFERENTLY-buffed rows. It is always the stone-buffed derive: an unbuffed
+  // one reports numbers the live world does not use, which is the same silent
+  // overwrite SOMET-245 Task 6 fixed inside applyDerivedStats. A player who
+  // has already disconnected has no inventory to read, so the buff list is
+  // empty and the frame carries the unbuffed bundle -- there is no live
+  // session left for it to disagree with.
+  const framedStats = (entry, userId, progression) => {
+    const p = entry.world.getPlayer(userId);
+    const buffs = p ? socketedBuffStones(p.inv, entry.world.weapons) : [];
+    return derivePlayerStats(withStoneBonuses(progression, buffs));
+  };
+
   // Single fire-and-forget entry point for a killed creature: named once here
   // so every kill site (melee attack handler, burn tick, guard tick,
   // projectile tick) shares the same options instead of repeating them. The
@@ -793,7 +811,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // undefined and send() itself no-ops on a non-OPEN socket, so this
         // never throws either way.
         const sock = entry.sockets.get(result.killerUserId);
-        if (sock) send(sock, { type: 'progression', progression, leveledUp, newLevel, awarded });
+        if (sock) {
+          const stats = framedStats(entry, result.killerUserId, progression);
+          send(sock, { type: 'progression', progression, stats, leveledUp, newLevel, awarded });
+        }
       })
       .catch((err) => console.error('death commit failed:', err));
 
@@ -925,7 +946,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // the death and this commit finishing) — entry.sockets.get returns
       // undefined and send() itself no-ops on a non-OPEN socket either way.
       const sock = entry.sockets.get(userId);
-      if (sock) send(sock, { type: 'progression', progression, lost });
+      if (sock) send(sock, { type: 'progression', progression, stats: framedStats(entry, userId, progression), lost });
     })
       .catch((err) => console.error('death penalty commit failed:', err));
   };
@@ -1803,10 +1824,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // push.
           if (isBuffStone && p.hp > 0) {
             const currentProgression = await loadProgression(pool, p.characterId);
-            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
-            entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(currentProgression, buffs)));
+            // ONE derive, used for both the live apply and the frame: two
+            // calls could drift into differently-buffed rows, which is
+            // exactly what contract §6.3 exists to stop.
+            const stats = framedStats(entry, ws.userId, currentProgression);
+            entry.world.applyDerivedStats(ws.userId, stats);
             send(ws, {
-              type: 'progression', progression: currentProgression,
+              type: 'progression', progression: currentProgression, stats,
               leveledUp: false, newLevel: currentProgression.level, awarded: 0,
             });
           }
@@ -1842,10 +1866,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // socketedBuffStones(p.inv, ...) below no longer counts it.
           if (wasBuffStone && p.hp > 0) {
             const currentProgression = await loadProgression(pool, p.characterId);
-            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
-            entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(currentProgression, buffs)));
+            // ONE derive, used for both the live apply and the frame: two
+            // calls could drift into differently-buffed rows, which is
+            // exactly what contract §6.3 exists to stop.
+            const stats = framedStats(entry, ws.userId, currentProgression);
+            entry.world.applyDerivedStats(ws.userId, stats);
             send(ws, {
-              type: 'progression', progression: currentProgression,
+              type: 'progression', progression: currentProgression, stats,
               leveledUp: false, newLevel: currentProgression.level, awarded: 0,
             });
           }
@@ -2094,6 +2121,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // without a second, chest-specific client-side path.
         send(ws, {
           type: 'progression', progression: result.progression,
+          stats: framedStats(entry, ws.userId, result.progression),
           leveledUp: result.leveledUp, newLevel: result.newLevel, awarded: result.awarded,
         });
       });

@@ -2,8 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
 const {
-  loadProgression, awardXp, respec, applyDeath, XP_SOURCES,
+  loadProgression, awardXp, applyDeath, XP_SOURCES,
 } = require('../src/services/progressionStore.js');
+// SOMET-475 moved respec out of progressionStore: it now resets the PASSIVE
+// TREE rather than six columns nothing can raise. The two tests below were
+// retargeted rather than deleted -- they are the only coverage of the
+// zero-allocation respec (a character who has spent nothing still pays, and
+// still keeps every unspent point), which passive_tree_allocation_db.test.js
+// does not exercise.
+const { respecPassives } = require('../src/services/passiveTreeStore.js');
 const C = require('../src/services/progressionConstants.js');
 
 // Same skip-if-unreachable idiom as progression_migration.test.js and the
@@ -501,7 +508,7 @@ async function seedRespecCharacter(pool, user, character, gold) {
   await pool.query('UPDATE users SET gold = $2 WHERE id = $1', [user, gold]);
 }
 
-test('respec moves the gold, resets the stats and credits NO points', async (t) => {
+test('respec moves the gold and credits NO points when nothing was allocated', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user, seeds a level-4 character and respecs it')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('successful respec'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
@@ -510,13 +517,20 @@ test('respec moves the gold, resets the stats and credits NO points', async (t) 
     ({ user, character } = await createTestActor(pool, 'respec-ok'));
     await seedRespecCharacter(pool, user, character, 500);
 
-    const r = await respec(pool, user, character);
+    const r = await respecPassives(pool, user, character);
     assert.equal(r.ok, true);
-    assert.equal(r.cost, 200);              // RESPEC_BASE(50) * level(4)
+    assert.equal(r.cost, 200);              // respec_base_gold(50) * level(4)
     assert.equal(r.gold, 300);              // 500 - 200
-    assert.equal(r.progression.passive_points, 9,
-      'a respec must not mint passive points -- the old stat refund is gone');
-    for (const k of C.STAT_KEYS) assert.equal(r.progression[k], C.BASE_STAT, `${k} must reset to base`);
+    assert.equal(r.refunded, 0, 'nothing was allocated, so nothing is refunded');
+    assert.equal(r.passivePoints, 9,
+      'a respec must not mint passive points -- the refund is exactly what was spent');
+    assert.deepEqual(r.allocatedNodeIds, []);
+
+    // The stat columns are the class-base snapshot (contract §6.1) and respec
+    // no longer touches them at all. Asserted rather than assumed: the old
+    // respec reset them, and a leftover UPDATE would be invisible otherwise.
+    const after = await loadProgression(pool, character);
+    for (const k of C.STAT_KEYS) assert.equal(after[k], C.BASE_STAT, `${k} must still be base`);
 
     const g = await pool.query('SELECT gold FROM users WHERE id = $1', [user]);
     assert.equal(Number(g.rows[0].gold), 300, 'gold in the database must match the returned gold');
@@ -536,7 +550,7 @@ test('respec with insufficient gold changes nothing at all', async (t) => {
     // same character, but 199 gold against a cost of 200
     await seedRespecCharacter(pool, user, character, 199);
 
-    const r = await respec(pool, user, character);
+    const r = await respecPassives(pool, user, character);
     assert.equal(r.ok, false);
     assert.equal(r.reason, 'not enough gold');
     assert.equal(r.cost, 200);
