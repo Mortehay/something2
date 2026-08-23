@@ -1,16 +1,16 @@
 // SOMET-242 Task 10: the in-game character sheet. Frontend vitest runs in a
 // plain node environment (no DOM, no jsdom, no RTL -- see vitest.config.js),
 // so CharacterSheet.jsx cannot be rendered here. What CAN be verified
-// directly: the pure helpers it exports (xpProgress, respecDisabled,
-// progressionChanged) and progressionClient.js against a stubbed fetch.
+// directly: the pure helpers it exports (xpProgress, progressionChanged) and
+// progressionClient.js against a stubbed fetch.
 // The one thing that genuinely cannot be executed -- which key opens the
 // panel -- is asserted against the component's raw source text instead, and
 // is labelled as such in both the test name and the report.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { xpProgress, respecDisabled, progressionChanged, STAT_KEYS } from '../../../CharacterSheet.jsx';
-import { fetchProgression, allocateStat, respec } from '../net/progressionClient.js';
+import { xpProgress, progressionChanged, STAT_KEYS } from '../../../CharacterSheet.jsx';
+import { fetchProgression, respec } from '../net/progressionClient.js';
 import { ACTIVE_CHARACTER_KEY, writeActiveCharacterId, clearActiveCharacterId }
   from '../../../characterSession.js';
 
@@ -40,32 +40,30 @@ writeActiveCharacterId(TEST_CHARACTER_ID);
 // second argument, so there is nothing left in this file that can drift from
 // the backend's constants.
 describe('xpProgress', () => {
-  it('reports the position inside the current level (level 3, floor 300, xpToNext(3) 300)', () => {
-    // Literal floor/xpToNext exactly as GET /api/progression would return
-    // them for a level-3 player (XP_BASE*(3-1)*3/2 = 300 floor,
-    // XP_BASE*3 = 300 xpToNext -- backend/src/services/playerStats.js).
-    // experience 450 is 150 into that 300-wide band -> 50%. Literal expected
-    // values, not a recomputation of the same arithmetic the code under test
-    // performs.
-    const result = xpProgress({ level: 3, experience: 450 }, { xpFloor: 300, xpToNext: 300, respecCost: 150 });
-    expect(result).toEqual({ into: 150, need: 300, pct: 50 });
+  it('reports the position inside the current level (level 3, floor 63, xpToNext(3) 78)', () => {
+    // Literal floor/xpToNext for a level-3 player under the new curve:
+    // xpFloor(3) = 63, xpToNext(3) = round(18 * 3^1.33) = 78. Experience 102
+    // is 39 into that 78-wide band -> 50%. Literal expected values, not a
+    // recomputation of the same arithmetic the code under test performs.
+    const result = xpProgress({ level: 3, experience: 102 }, { xpFloor: 63, xpToNext: 78, respecCost: 150 });
+    expect(result).toEqual({ into: 39, need: 78, pct: 50 });
   });
 
   it('does not divide by null at max level -- xpToNext serialises as null over JSON, not Infinity', () => {
     // JSON.stringify(Infinity) is "null" (JSON has no Infinity literal), so
     // this is the actual wire shape GET /api/progression sends for a
-    // level-50 player, not a synthetic Infinity. xpFloor(50) =
-    // XP_BASE*49*50/2 = 122500.
-    const result = xpProgress({ level: 50, experience: 122500 }, { xpFloor: 122500, xpToNext: null, respecCost: 2500 });
+    // level-150 player, not a synthetic Infinity. xpFloor(150) = 901212, the
+    // hand-computed cumulative total of round(18 * L^1.33).
+    const result = xpProgress({ level: 150, experience: 901212 }, { xpFloor: 901212, xpToNext: null, respecCost: 7500 });
     expect(result).toEqual({ into: 0, need: 0, pct: 100 });
     expect(Number.isFinite(result.into)).toBe(true);
     expect(Number.isFinite(result.need)).toBe(true);
     expect(Number.isFinite(result.pct)).toBe(true);
   });
 
-  it('past max-level floor still returns finite numbers (grinding at level 50)', () => {
-    const result = xpProgress({ level: 50, experience: 999999 }, { xpFloor: 122500, xpToNext: null, respecCost: 2500 });
-    expect(result).toEqual({ into: 877499, need: 0, pct: 100 });
+  it('past max-level floor still returns finite numbers (grinding at level 150)', () => {
+    const result = xpProgress({ level: 150, experience: 999999 }, { xpFloor: 901212, xpToNext: null, respecCost: 7500 });
+    expect(result).toEqual({ into: 98787, need: 0, pct: 100 });
     expect(Number.isFinite(result.into)).toBe(true);
   });
 
@@ -78,46 +76,31 @@ describe('xpProgress', () => {
   });
 });
 
-describe('respecDisabled', () => {
-  // Boundary behaviour at, just below, and just above the cost.
-  const cost = 150;
-  it('is disabled just below the cost', () => {
-    expect(respecDisabled(cost - 1, cost)).toBe(true);
-  });
-  it('is enabled exactly at the cost', () => {
-    expect(respecDisabled(cost, cost)).toBe(false);
-  });
-  it('is enabled just above the cost', () => {
-    expect(respecDisabled(cost + 1, cost)).toBe(false);
-  });
-});
+// F2's lesson, restated for the surface that still exists: the sheet must
+// never re-declare a backend constant locally. xpCurve.js was deleted for
+// exactly that, and the respec button that consumed RESPEC_BASE is now gone
+// too (SOMET-470 -- with stat_points removed there is nothing left for a
+// respec to refund until the passive tree lands, so a respec button would
+// charge gold for nothing). Matches a declaration, not a mention -- the
+// module header talks about all three by name on purpose.
+describe('CharacterSheet holds no local copy of a backend constant', () => {
+  const source = readFileSync(
+    fileURLToPath(new URL('../../../CharacterSheet.jsx', import.meta.url)), 'utf8');
 
-// F2 regression guard, pinning the reviewer's own concrete failure mode:
-// "raise RESPEC_BASE on the backend to 100 and a level-3 player holding 160
-// gold sees an enabled 'Respec (150g)' button that always 402s." 150 is
-// exactly what the OLD deleted local formula (RESPEC_BASE=50 * level 3)
-// would have computed; 300 is what the API actually returns once the
-// backend's RESPEC_BASE is 100. respecDisabled itself was already correct
-// (the reviewer's own framing) -- what was wrong is what fed it. This proves
-// the predicate gives the SAFE answer when fed the bundle's real number, and
-// the UNSAFE one a locally-invented number would have given, side by side.
-describe('respecDisabled fed the API bundle\'s respecCost (F2: no local RESPEC_BASE left to feed it a stale one)', () => {
-  it('160 gold cannot afford the real (bundle) cost of 300 -- correctly disabled', () => {
-    expect(respecDisabled(160, 300)).toBe(true);
+  it('declares neither XP_BASE, MAX_LEVEL nor RESPEC_BASE', () => {
+    expect(source).not.toMatch(/\b(const|let|var)\s+(XP_BASE|MAX_LEVEL|RESPEC_BASE)\b/);
   });
 
-  it('the same 160 gold WOULD have looked affordable against the old formula\'s 150 -- the exact bug', () => {
-    // Not a claim that 150 is ever computed anywhere anymore (RESPEC_BASE is
-    // deleted -- see the source-text section below); this pins what the old,
-    // now-removed local arithmetic used to produce, so the contrast with the
-    // line above is a literal, not an assertion about dead code's behaviour.
-    expect(respecDisabled(160, 150)).toBe(false);
+  it('renders no allocate or respec control', () => {
+    expect(source).not.toContain('PlusButton');
+    expect(source).not.toContain('RespecButton');
+    expect(source).not.toContain('allocateStat');
   });
 });
 
 describe('progressionChanged', () => {
   const p1 = {
-    experience: 450, level: 3, stat_points: 2,
+    experience: 450, level: 3, passive_points: 2,
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
 
@@ -136,8 +119,8 @@ describe('progressionChanged', () => {
     expect(progressionChanged(p1, p2)).toBe(true);
   });
 
-  it('is true when a stat changed (allocate) even if experience did not', () => {
-    const p2 = { ...p1, constitution: 6, stat_points: 1 };
+  it('is true when the passive-point count changed', () => {
+    const p2 = { ...p1, passive_points: 1 };
     expect(progressionChanged(p1, p2)).toBe(true);
   });
 
@@ -172,10 +155,10 @@ describe('STAT_KEYS', () => {
 describe('progressionClient.fetchProgression', () => {
   it('GETs /api/progression and returns the bundle', async () => {
     const body = {
-      progression: { level: 1, experience: 0, stat_points: 0 },
+      progression: { level: 1, experience: 0, passive_points: 0 },
       stats: { maxHp: 100 },
       xpFloor: 0,
-      xpToNext: 100,
+      xpToNext: 18,
       respecCost: 50,
     };
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => body });
@@ -205,35 +188,10 @@ describe('progressionClient.fetchProgression', () => {
   });
 });
 
-describe('progressionClient.allocateStat', () => {
-  it('posts the stat and count, and returns the new bundle', async () => {
-    const body = {
-      progression: { level: 1, experience: 0, stat_points: 1, constitution: 6 },
-      stats: { maxHp: 110 },
-    };
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => body });
-    const res = await allocateStat('constitution', 1, 'http://x');
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe('http://x/api/progression/allocate');
-    expect(opts.method).toBe('POST');
-    expect(JSON.parse(opts.body)).toEqual({
-      stat: 'constitution', count: 1, character_id: TEST_CHARACTER_ID,
-    });
-    expect(res).toEqual(body);
-  });
-
-  it('throws the server error message on a 400 (bad allocation)', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({ error: 'not enough points' }) });
-    await expect(allocateStat('constitution', 5, 'http://x')).rejects.toThrow(/not enough points/);
-  });
-});
-
 describe('progressionClient.respec', () => {
-  it('POSTs /api/progression/respec and returns the refunded bundle', async () => {
+  it('POSTs /api/progression/respec and returns the bundle', async () => {
     const body = {
-      progression: { level: 3, experience: 450, stat_points: 6, strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5 },
+      progression: { level: 3, experience: 450, passive_points: 6, strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5 },
       stats: { maxHp: 100 },
       gold: 50,
     };
@@ -242,8 +200,8 @@ describe('progressionClient.respec', () => {
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('http://x/api/progression/respec');
     expect(opts.method).toBe('POST');
-    // A respec charges the ACCOUNT's gold but refunds the CHARACTER's points,
-    // so the server needs both identities and gets the character one from here.
+    // A respec charges the ACCOUNT's gold but acts on the CHARACTER, so the
+    // server needs both identities and gets the character one from here.
     expect(JSON.parse(opts.body)).toEqual({ character_id: TEST_CHARACTER_ID });
     expect(res).toEqual(body);
   });
