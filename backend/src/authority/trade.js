@@ -5,10 +5,19 @@
 
 const { sellPriceFor, insertBuyback, BUYBACK_DAYS } = require('../services/merchantStock');
 const { ejectSocketedStone } = require('../services/stoneEject');
+const { hasFreeSlot } = require('./items');
 
 async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
+
+  // Before the transaction, so a full inventory never debits gold and never
+  // consumes a buyback row. The ROLLBACK below would undo both, but a check
+  // that relies on rollback to stay correct is one refactor away from not
+  // being -- and this one has to hold in front of a money movement.
+  if (!hasFreeSlot(p.inv, entry.world.weapons)) {
+    return { ok: false, reason: 'Inventory full' };
+  }
 
   const client = await pool.connect();
   try {
