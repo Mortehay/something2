@@ -3,7 +3,11 @@
 
 const { levelForXp, applyDeathPenalty, DEFAULT_PROGRESSION } = require('./playerStats.js');
 const { getSetting } = require('./gameSettings.js');
-const C = require('./progressionConstants.js');
+
+// Required lazily, inside the functions that use it: passiveTreeStore.js
+// requires this module back (for loadProgression's row lock), and a top-level
+// require here would be a cycle that resolves to an empty object at load time.
+function composer() { return require('./passiveTreeStore.js').composeProgression; }
 
 const XP_SOURCES = ['kill', 'chest', 'dungeon_clear'];
 const COLUMNS = `character_id, experience, level, passive_points,
@@ -47,7 +51,12 @@ async function loadProgression(db, characterId, { forUpdate = false } = {}) {
     `SELECT ${COLUMNS} FROM player_progression WHERE character_id = $1${forUpdate ? ' FOR UPDATE' : ''}`,
     [characterId],
   );
-  return r.rows.length ? mapRow(r.rows[0]) : { ...DEFAULT_PROGRESSION, character_id: characterId };
+  const row = r.rows.length ? mapRow(r.rows[0]) : { ...DEFAULT_PROGRESSION, character_id: characterId };
+  // The ONE place the tree is folded in. Every caller of loadProgression --
+  // the join frame, the character-sheet route, awardXp's own pre-read -- gets
+  // the composed row for free, which is what stops a second, drifting composer
+  // appearing at any of the seven `progression` push sites.
+  return composer()(db, characterId, row);
 }
 
 // Takes `db`, not `pool`: the kill path calls this INSIDE its own transaction
@@ -95,59 +104,15 @@ async function awardXp(db, characterId, amount, source) {
     [characterId, experience, newLevel, pointsGained],
   );
   return {
-    progression: mapRow(r.rows[0]),
+    // Composed, like loadProgression's return: a kill push that carried the
+    // raw row would overwrite the client's allocatedNodeIds with undefined and
+    // silently revert every effective stat to the class-base snapshot.
+    progression: await composer()(db, characterId, mapRow(r.rows[0])),
     leveledUp: newLevel > before.level,
     newLevel,
     pointsGained,
     awarded: amt,
   };
-}
-
-// Takes BOTH ids, and they are not interchangeable: the stat reset is
-// per-character (player_progression), while the gold that pays for it is
-// per-ACCOUNT (users.gold stayed on users in SOMET-257). Passing a character id
-// to the gold UPDATE would charge whichever account happens to share that
-// integer, or silently charge nobody.
-async function respec(pool, userId, characterId) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const before = await loadProgression(client, characterId);
-    const cost = C.RESPEC_BASE * before.level;
-    // Gold moves first, guarded in its own WHERE. If it does not move, the
-    // whole transaction rolls back -- a failed payment must never yield a
-    // free respec.
-    const g = await client.query(
-      'UPDATE users SET gold = gold - $2 WHERE id = $1 AND gold >= $2 RETURNING gold',
-      [userId, cost],
-    );
-    if (g.rowCount !== 1) {
-      await client.query('ROLLBACK');
-      return { ok: false, reason: 'not enough gold', cost };
-    }
-    // The stat columns are a class-base snapshot now (design doc 3.3) and
-    // nothing raises them, so this reset is a safety net rather than the
-    // point of the operation. T7 replaces this body with the passive-tree
-    // respec, which is what a player actually pays for.
-    const r = await client.query(
-      `UPDATE player_progression
-          SET strength = $2, dexterity = $2, constitution = $2,
-              intelligence = $2, wisdom = $2, charisma = $2,
-              updated_at = now()
-        WHERE character_id = $1
-        RETURNING ${COLUMNS}`,
-      [characterId, C.BASE_STAT],
-    );
-    await client.query('COMMIT');
-    return {
-      ok: true, progression: mapRow(r.rows[0]), gold: Number(g.rows[0].gold) || 0, cost,
-    };
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
-    client.release();
-  }
 }
 
 // Takes `pool`, not `db`, and opens its OWN transaction -- unlike awardXp,
@@ -184,8 +149,9 @@ async function applyDeath(pool, characterId, { rng = Math.random } = {}) {
         WHERE character_id = $1 RETURNING ${COLUMNS}`,
       [characterId, experience],
     );
+    const composed = await composer()(client, characterId, mapRow(r.rows[0]));
     await client.query('COMMIT');
-    return { progression: mapRow(r.rows[0]), lost };
+    return { progression: composed, lost };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -194,6 +160,7 @@ async function applyDeath(pool, characterId, { rng = Math.random } = {}) {
   }
 }
 
-module.exports = {
-  loadProgression, awardXp, respec, applyDeath, XP_SOURCES,
-};
+// `respec` is GONE, not renamed: T7 moved it to passiveTreeStore.respecPassives,
+// which resets the passive allocations rather than six columns nothing can
+// raise. Leaving a shim here would leave a second, gold-charging reset alive.
+module.exports = { loadProgression, awardXp, applyDeath, XP_SOURCES };
