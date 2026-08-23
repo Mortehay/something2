@@ -262,3 +262,149 @@ test('world.clearEquipment allows the unequip once nothing depends on it', async
   const still = await pool.query('SELECT slot FROM player_equipment WHERE character_id = $1', [characterId]);
   assert.deepStrictEqual(still.rows, []);
 });
+
+const { enforceEquipRequirements } = require('../src/services/equipCompliance.js');
+
+const RESET_BASE = {
+  strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
+};
+
+test('a respec auto-unequips gear that no longer qualifies, leaving it in the backpack', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  t.after(async () => { await pool.end().catch(() => {}); });
+
+  const tag = `resp-${Date.now()}`;
+  const { characterId } = await createCharacter(pool, tag, 60, { strength: 40 });
+  const plateId = await makeItemType(pool, `resp-plate-${tag}`, { req_strength: 30 });
+  const helmId = await makeItemType(pool, `resp-helm-${tag}`, { slot: 'head' });
+  const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateId])).rows[0].id;
+  const helm = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, helmId])).rows[0].id;
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'chest', plate]);
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'head', helm]);
+
+  const itemTypes = await loadItemTypes(pool);
+  const client = await pool.connect();
+  let result;
+  try {
+    await client.query('BEGIN');
+    result = await enforceEquipRequirements(client, characterId, itemTypes, RESET_BASE, 60);
+    await client.query('COMMIT');
+  } finally { client.release(); }
+
+  assert.strictEqual(result.ok, true);
+  assert.deepStrictEqual(result.unequipped.map((u) => u.slot), ['chest']);
+
+  const eq = await pool.query('SELECT slot FROM player_equipment WHERE character_id = $1 ORDER BY slot', [characterId]);
+  assert.deepStrictEqual(eq.rows.map((x) => x.slot), ['head'], 'only the illegal slot is cleared');
+  const owned = await pool.query('SELECT count(*)::int AS n FROM player_items WHERE character_id = $1', [characterId]);
+  assert.strictEqual(owned.rows[0].n, 2, 'nothing is deleted -- the plate is still owned');
+});
+
+// The no-op half. Without it, an implementation that cleared every slot would
+// still satisfy the test above.
+test('a respec that invalidates nothing clears nothing', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  t.after(async () => { await pool.end().catch(() => {}); });
+
+  const tag = `noop-${Date.now()}`;
+  const { characterId } = await createCharacter(pool, tag, 60, { strength: 40 });
+  const plateId = await makeItemType(pool, `noop-plate-${tag}`, { req_strength: 5 });
+  const helmId = await makeItemType(pool, `noop-helm-${tag}`, { slot: 'head' });
+  const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateId])).rows[0].id;
+  const helm = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, helmId])).rows[0].id;
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'chest', plate]);
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'head', helm]);
+
+  const itemTypes = await loadItemTypes(pool);
+  const client = await pool.connect();
+  let result;
+  try {
+    await client.query('BEGIN');
+    result = await enforceEquipRequirements(client, characterId, itemTypes, RESET_BASE, 60);
+    await client.query('COMMIT');
+  } finally { client.release(); }
+
+  assert.deepStrictEqual(result, { ok: true, unequipped: [] });
+  const eq = await pool.query('SELECT slot FROM player_equipment WHERE character_id = $1 ORDER BY slot', [characterId]);
+  assert.deepStrictEqual(eq.rows.map((x) => x.slot), ['chest', 'head']);
+});
+
+// THE REFUSAL CONDITION IS `usedSlots > capacity`, NOT "the backpack is full".
+//
+// Unequipping in this schema is capacity-NEUTRAL: an equipped item is already
+// a player_items row, items.js#usedSlots counts it whether it is equipped or
+// not, and the panel draws it in the same grid. So a "no free slot" refusal
+// could never fire -- its test would be green and vacuous, which is the
+// dominant failure shape in this repo. The reachable state is a backpack that
+// is ALREADY over its cap, which characters.inventory_slots permits (its CHECK
+// is only > 0). That is what this sets up: cap 2, four owned rows.
+test('a respec is refused while the backpack is over its carry limit, and changes nothing', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  t.after(async () => { await pool.end().catch(() => {}); });
+
+  const tag = `over-${Date.now()}`;
+  const { characterId } = await createCharacter(pool, tag, 60, { strength: 40 });
+  await pool.query('UPDATE characters SET inventory_slots = 2 WHERE id = $1', [characterId]);
+  const plateId = await makeItemType(pool, `over-plate-${tag}`, { req_strength: 30 });
+  const helmId = await makeItemType(pool, `over-helm-${tag}`, { slot: 'head' });
+  const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateId])).rows[0].id;
+  const helm = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, helmId])).rows[0].id;
+  await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2)', [characterId, helmId]);
+  await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2)', [characterId, helmId]);
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'chest', plate]);
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'head', helm]);
+
+  const itemTypes = await loadItemTypes(pool);
+  const client = await pool.connect();
+  let result;
+  try {
+    await client.query('BEGIN');
+    result = await enforceEquipRequirements(client, characterId, itemTypes, RESET_BASE, 60);
+    await client.query('ROLLBACK');
+  } finally { client.release(); }
+
+  assert.strictEqual(result.ok, false);
+  assert.match(result.reason, /carry limit/i);
+  assert.deepStrictEqual(result.wouldUnequip.map((u) => u.slot), ['chest']);
+
+  const eq = await pool.query('SELECT slot FROM player_equipment WHERE character_id = $1 ORDER BY slot', [characterId]);
+  assert.deepStrictEqual(eq.rows.map((x) => x.slot), ['chest', 'head'], 'equipment is untouched');
+  const owned = await pool.query('SELECT count(*)::int AS n FROM player_items WHERE character_id = $1', [characterId]);
+  assert.strictEqual(owned.rows[0].n, 4, 'no gear is deleted');
+});
+
+// The refusal must be about being OVER the cap, not about being AT it. Exactly
+// at capacity the unequip is still safe -- it moves nothing into the backpack.
+// Without this, `usedSlots >= capacity` would pass the test above and lock
+// every full-but-legal character out of respeccing.
+test('a respec at EXACTLY the carry limit still proceeds', async (t) => {
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(pool.unreachable); return; }
+  t.after(async () => { await pool.end().catch(() => {}); });
+
+  const tag = `atcap-${Date.now()}`;
+  const { characterId } = await createCharacter(pool, tag, 60, { strength: 40 });
+  const plateId = await makeItemType(pool, `atcap-plate-${tag}`, { req_strength: 30 });
+  const helmId = await makeItemType(pool, `atcap-helm-${tag}`, { slot: 'head' });
+  const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateId])).rows[0].id;
+  const helm = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, helmId])).rows[0].id;
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'chest', plate]);
+  await pool.query('INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)', [characterId, 'head', helm]);
+  // Two owned rows, cap of exactly two.
+  await pool.query('UPDATE characters SET inventory_slots = 2 WHERE id = $1', [characterId]);
+
+  const itemTypes = await loadItemTypes(pool);
+  const client = await pool.connect();
+  let result;
+  try {
+    await client.query('BEGIN');
+    result = await enforceEquipRequirements(client, characterId, itemTypes, RESET_BASE, 60);
+    await client.query('COMMIT');
+  } finally { client.release(); }
+
+  assert.strictEqual(result.ok, true, 'at capacity is not over capacity');
+  assert.deepStrictEqual(result.unequipped.map((u) => u.slot), ['chest']);
+});
