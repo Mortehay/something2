@@ -141,6 +141,47 @@ const SEED_ROWS = [
     reach: null, arc_width: null, range: null, projectile_speed: null, projectile_radius: null,
     pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
     stackable: true, ammo_type_id: null, aoe_radius: null },
+
+  // --- the base gear ladder's 30 weapons, from 1714440506000_base_gear_ladder
+  // (SOMET-479, progression epic T11) ---
+  //
+  // The ladder's other 120 rows are armor, which this fixture deliberately
+  // does not mirror ("SEED_ROWS is weapon+ammo only"). These 30 are here
+  // because they ARE weapons and the live-catalog comparison above reports any
+  // weapon row it cannot find.
+  //
+  // TRANSCRIBED BY HAND from seeds/data/gearLadder.js's two authored tables,
+  // NOT imported from generateGearLadder. Importing the generator would make
+  // this fixture and the migration the same source and the comparison above
+  // would stop being able to notice a difference between them.
+  //
+  //   blade  = 6 x tier power, melee, reach 80,  arc 1.2, cooldown 0.55
+  //   spear  = 8 x tier power, melee, reach 150, arc 0.7, cooldown 0.80
+  //   wand   = 5 x tier power, projectile, range 420, speed 520, radius 6, cooldown 0.70
+  //   powers = 1.0 1.6 2.4 3.4 4.6 6.0 7.8 9.8 12.0 14.5
+  //
+  // The ids are local to this fixture (the mock pool in
+  // 'the seeded catalog has no structurally broken weapon' keys a Map on
+  // them); the live comparison excludes id on purpose.
+  ...[
+    ['crude', 6, 8, 5], ['iron', 9.6, 12.8, 8], ['steel', 14.4, 19.2, 12],
+    ['tempered', 20.4, 27.2, 17], ['runed', 27.6, 36.8, 23], ['obsidian', 36, 48, 30],
+    ['astral', 46.8, 62.4, 39], ['void', 58.8, 78.4, 49], ['dragon', 72, 96, 60],
+    ['mythic', 87, 116, 72.5],
+  ].flatMap(([prefix, blade, spear, wand], i) => [
+    { id: 501 + i * 3, name: `${prefix}-blade`, category: 'weapon', kind: 'melee', damage: blade, cooldown: 0.55,
+      reach: 80, arc_width: 1.2, range: null, projectile_speed: null, projectile_radius: null,
+      pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+      stackable: false, ammo_type_id: null, aoe_radius: null },
+    { id: 502 + i * 3, name: `${prefix}-spear`, category: 'weapon', kind: 'melee', damage: spear, cooldown: 0.80,
+      reach: 150, arc_width: 0.7, range: null, projectile_speed: null, projectile_radius: null,
+      pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+      stackable: false, ammo_type_id: null, aoe_radius: null },
+    { id: 503 + i * 3, name: `${prefix}-wand`, category: 'weapon', kind: 'projectile', damage: wand, cooldown: 0.70,
+      reach: null, arc_width: null, range: 420, projectile_speed: 520, projectile_radius: 6,
+      pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+      stackable: false, ammo_type_id: null, aoe_radius: null },
+  ]),
 ];
 
 // The fastest (lowest) cooldown, in MILLISECONDS, of any weapon carrying
