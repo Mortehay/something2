@@ -72,11 +72,51 @@ test('loadInventory returns owned instances and the equipment map', async () => 
     ] })],
   ]);
   const inv = await loadInventory(pool, 'u1');
+  // SOMET-480: rarity / itemLevel / affixes ride every instance now. These
+  // scripted rows omit the new columns, so the values below are the defaults a
+  // partial row falls back to -- an instance with no rolled identity reads as
+  // a plain white level-1 item, which is what every pre-migration row is.
   assert.deepEqual(inv.items, [
-    { id: 'i1', typeId: 1, quantity: 1, soulbound: false },
-    { id: 'i2', typeId: 5, quantity: 1, soulbound: false },
+    { id: 'i1', typeId: 1, quantity: 1, soulbound: false, rarity: 'white', itemLevel: 1, affixes: [] },
+    { id: 'i2', typeId: 5, quantity: 1, soulbound: false, rarity: 'white', itemLevel: 1, affixes: [] },
   ]);
   assert.deepEqual(inv.equipment, { main_hand: 'i1' });
+});
+
+// SOMET-480. Same reasoning as the soulbound SELECT-list pin above, and the
+// same failure mode: a column the query never asks for reads as undefined and
+// silently degrades every instance to a plain white item, with the whole
+// rarity feature live in the schema and inert in play.
+test('loadInventory selects rarity, item_level and joins the affix rows', async () => {
+  const pool = recordingPool([
+    [/FROM player_items/i, () => ({ rows: [] })],
+    [/FROM player_equipment/i, () => ({ rows: [] })],
+  ]);
+  await loadInventory(pool, 'c1');
+  const itemsQuery = pool.calls.find((c) => /FROM player_items/i.test(c.sql));
+  assert.match(itemsQuery.sql, /\brarity\b/i, 'the SELECT list must ask for rarity');
+  assert.match(itemsQuery.sql, /\bitem_level\b/i, 'the SELECT list must ask for item_level');
+  assert.match(itemsQuery.sql, /JOIN\s+player_item_affixes/i, 'the affix rows must be joined');
+  assert.match(itemsQuery.sql, /JOIN\s+affix_types/i,
+    'affix_types must be joined too -- a stat affix is identified by its effect, not its key');
+});
+
+// The mapper must READ the row, not hardcode a default. A constant-white
+// mapper satisfies the defaults test above and is wrong for every rolled item.
+test('loadInventory reports rarity, item level and affixes per instance', async () => {
+  const rolled = [{ affixTypeId: 3, key: 'of_might', value: 7.5, effect: { type: 'stat', stat: 'strength' } }];
+  const pool = recordingPool([
+    [/FROM player_items/i, () => ({ rows: [
+      { id: 'plain', item_type_id: 10, quantity: 1, soulbound: false, rarity: 'white', item_level: 1, affixes: [] },
+      { id: 'rolled', item_type_id: 10, quantity: 1, soulbound: false, rarity: 'foxy', item_level: 88, affixes: rolled },
+    ] })],
+    [/FROM player_equipment/i, () => ({ rows: [] })],
+  ]);
+  const inv = await loadInventory(pool, 'c1');
+  assert.deepEqual(
+    inv.items.map((i) => [i.id, i.rarity, i.itemLevel, i.affixes]),
+    [['plain', 'white', 1, []], ['rolled', 'foxy', 88, rolled]],
+  );
 });
 
 // Magic-stones Task 5: loadInventory hydrates each host item's

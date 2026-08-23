@@ -278,3 +278,86 @@ test('a self-granting weapon cannot move hands on the strength it supplies itsel
   };
   assert.deepStrictEqual(canEquip(helped, types, 'blade', 'off_hand', { level: 1, base: BASE }), { ok: true });
 });
+
+// SOMET-480 (T12): rolled affixes are the second gear-borne stat source, and
+// they obey the SAME circularity rule as a socketed buff stone -- an item's own
+// affixes never satisfy its own gate. Without this, a +20 STR roll on the plate
+// would let a level-1 character wear a piece that demands 20 STR.
+test('a rolled +20 STR affix on the candidate item does not satisfy its own gate', () => {
+  const inv = {
+    items: [{
+      id: 'plate', typeId: 20,
+      affixes: [{ affixTypeId: 1, key: 'of_might', value: 20, effect: { type: 'stat', stat: 'strength' } }],
+    }],
+    equipment: { chest: 'plate' },
+  };
+  const stats = effectiveStatsFor(inv, TYPES, BASE, { excludeItemId: 'plate' });
+  assert.strictEqual(stats.strength, 5);
+  assert.strictEqual(meetsRequirements(TYPES.get(20), 1, stats).ok, false);
+});
+
+test('the same affix on a DIFFERENT equipped item does satisfy it', () => {
+  const inv = {
+    items: [
+      { id: 'plate', typeId: 20 },
+      { id: 'helm',
+        typeId: 22,
+        affixes: [{ affixTypeId: 1, key: 'of_might', value: 20, effect: { type: 'stat', stat: 'strength' } }] },
+    ],
+    equipment: { head: 'helm' },
+  };
+  const stats = effectiveStatsFor(inv, TYPES, BASE, { excludeItemId: 'plate' });
+  assert.strictEqual(stats.strength, 25);
+  assert.deepStrictEqual(meetsRequirements(TYPES.get(20), 1, stats), { ok: true });
+});
+
+test('an affixed item sitting LOOSE in the backpack grants nothing', () => {
+  // Same rule socketedBuffStones follows: gearStatGrants walks inv.equipment,
+  // never inv.items, or a player stacks every affix they own by carrying it.
+  const inv = {
+    items: [{
+      id: 'helm', typeId: 22,
+      affixes: [{ affixTypeId: 1, key: 'of_might', value: 20, effect: { type: 'stat', stat: 'strength' } }],
+    }],
+    equipment: {},
+  };
+  assert.strictEqual(gearStatGrants(inv, TYPES).strength, 0);
+});
+
+test('a non-stat affix never lands on a stat, and an unknown stat is ignored', () => {
+  const inv = {
+    items: [{
+      id: 'helm',
+      typeId: 22,
+      affixes: [
+        { affixTypeId: 2, key: 'of_the_bear', value: 40, effect: { type: 'resource', pool: 'hp' } },
+        { affixTypeId: 3, key: 'flaming', value: 12, effect: { type: 'damage', element: 'fire' } },
+        { affixTypeId: 4, key: 'cursed', value: 3, effect: { type: 'status', status: 'chill' } },
+        // A stat name no character sheet has -- must be dropped, not crash and
+        // not invent a seventh stat on the output object.
+        { affixTypeId: 5, key: 'of_luck', value: 99, effect: { type: 'stat', stat: 'luck' } },
+      ],
+    }],
+    equipment: { head: 'helm' },
+  };
+  const grants = gearStatGrants(inv, TYPES);
+  assert.deepStrictEqual(grants, {
+    strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0,
+  });
+});
+
+test('a stone and an affix on the SAME item both count, and stack', () => {
+  const inv = {
+    items: [
+      { id: 'helm',
+        typeId: 22,
+        socketedStoneTypeId: 21,
+        socketedStoneItemId: 'stone',
+        affixes: [{ affixTypeId: 1, key: 'of_might', value: 7, effect: { type: 'stat', stat: 'strength' } }] },
+      { id: 'stone', typeId: 21 },
+    ],
+    equipment: { head: 'helm' },
+  };
+  // 20 from the stone + 7 from the affix.
+  assert.strictEqual(gearStatGrants(inv, TYPES).strength, 27);
+});

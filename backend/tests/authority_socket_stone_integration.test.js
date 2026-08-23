@@ -99,7 +99,14 @@ function makePool({ userItems = [], stoneInstances = new Map() } = {}) {
       // exact SELECT means any column added to that query silently disables
       // this branch and hands the authority an EMPTY inventory, which surfaces
       // as bogus ownership failures rather than as a fixture mismatch.
-      if (/^\s*SELECT\b[^;]*\bFROM player_items WHERE character_id/i.test(sql)) {
+      // SOMET-480 added an ALIAS and two LEFT JOINs to loadInventory's read
+      // (`FROM player_items pi LEFT JOIN player_item_affixes ... WHERE
+      // pi.character_id`), which is the SAME class of breakage SOMET-316's
+      // column addition caused and this comment already warns about -- the
+      // branch stopped matching and handed the authority an empty inventory.
+      // Now anchored to the table and the ownership predicate ONLY, tolerating
+      // an alias and any joins between them.
+      if (/^\s*SELECT\b[^;]*\bFROM player_items\b[^;]*\bWHERE\s+(?:\w+\.)?character_id\s*=\s*\$1/i.test(sql)) {
         return { rows: userItems.map((it) => ({ id: it.id, item_type_id: it.item_type_id, quantity: 1 })) };
       }
       if (/FROM player_equipment WHERE character_id/i.test(sql)) return { rows: [] };

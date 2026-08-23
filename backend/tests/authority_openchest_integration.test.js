@@ -234,7 +234,14 @@ function makePool({
       // `pool.inventoryLoads` exists so a test can prove this branch actually
       // fires — "the file still passes" proved nothing here, since it passed
       // throughout the years the branch was dead.
-      if (/^\s*SELECT\b[^;]*\bFROM player_items WHERE character_id/i.test(sql)) {
+      // SOMET-480 added an ALIAS and two LEFT JOINs to loadInventory's read
+      // (`FROM player_items pi LEFT JOIN player_item_affixes ... WHERE
+      // pi.character_id`), which is the SAME class of breakage SOMET-316's
+      // column addition caused and this comment already warns about -- the
+      // branch stopped matching and handed the authority an empty inventory.
+      // Now anchored to the table and the ownership predicate ONLY, tolerating
+      // an alias and any joins between them.
+      if (/^\s*SELECT\b[^;]*\bFROM player_items\b[^;]*\bWHERE\s+(?:\w+\.)?character_id\s*=\s*\$1/i.test(sql)) {
         pool.inventoryLoads += 1;
         return { rows: [] };
       }
