@@ -155,7 +155,7 @@ character_summons                             -- the druid's charmed roster
 | `player_progression` | `level` CHECK becomes `1..150`; `stat_points` column dropped; the six stat columns are **frozen** (see §3.3) |
 | `item_types` | `+req_level int not null default 1`, `+req_strength … +req_charisma int not null default 0`, `+item_level int not null default 1`, `+tier smallint not null default 1` |
 | `player_items` | `+rarity text not null default 'white'` (CHECK in white/blue/yellow/foxy), `+item_level int not null default 1` |
-| `world_items` | `+rarity text not null default 'white'`, `+item_level int not null default 1`, `+affixes jsonb not null default '[]'` (see §3.4) |
+| `world_items` | `+rarity text not null default 'white'`, `+item_level int not null default 1`, `+affixes jsonb not null default '[]'`, `+soulbound boolean not null default false` (see §3.4) |
 | `entity_types` | `+main_stat text` (null for non-playable); four new playable rows: Monk, Cultist, Archer, Druid |
 | `world_creatures` | `+charmed_by_character_id int references characters on delete set null`, `+charm_expires_at timestamptz` |
 
@@ -187,6 +187,13 @@ seconds and nothing else joins to it.
 
 Soulbound (`player_items.soulbound`) is carried through the same way, so a
 granted starter item cannot be laundered into a sellable one by dropping it.
+
+**This requires a `world_items.soulbound` column, which an earlier revision of
+this section omitted.** Without it the flag has nowhere to live for the 180
+seconds the item is on the ground, and soulbound cannot round-trip at all.
+Adding it also retires `dropItem`'s current *refusal* to drop a soulbound item
+(`loot.js:505-511`) — that guard's own comment says it exists only because
+there was nowhere to carry the flag.
 
 ### 3.5 `game_settings` keys
 
@@ -392,9 +399,18 @@ bootstraps a level-1 character into endgame gear.
 
 **Requirements can stop being met** (respec, or unequipping a stat-granting
 item). Policy: on respec, items that no longer qualify are auto-unequipped into
-the backpack. If the backpack has no room, **the respec is refused** with a
-clear message — never silently delete gear, and never leave an illegally
-equipped item live in the combat path.
+the backpack. If there is no room, **the respec is refused** with a clear
+message — never silently delete gear, and never leave an illegally equipped
+item live in the combat path.
+
+**"No room" means `usedSlots > capacity`, not "no free slot".** An earlier
+revision of this section said "if the backpack is full". That condition is
+*unreachable*: equipped items are `player_items` rows, `usedSlots`
+(`items.js:307`) counts them, and `visibleItems` draws them in the same grid,
+so unequipping is capacity-neutral and a full-backpack refusal could never
+fire. Its test would have been green and vacuous — the dominant failure shape
+in this repo. The reachable condition is an over-capacity backpack, which
+`characters.inventory_slots` permits (its CHECK is only `> 0`).
 
 Unequipping item A that another equipped item B depends on is prevented by the
 same evaluation: the unequip is refused while B would become illegal, naming B.
@@ -463,9 +479,15 @@ hpCost = Math.ceil(manaCost * 0.6 * lifeCostMultiplier)   // tree keystones lowe
 of `game_settings.ground_item_ttl_seconds` (default 180) resolved once per
 world tick rather than per drop.
 
-On expiry, `GroundItemSim.removeExpired` already returns the removed ids. The
-server broadcasts a `vfx` event named `item_despawn` at each removed item's
-position. A `vfx_effects` row seeds a small puff — **no damage, no knockback,
+On expiry, `GroundItemSim.removeExpired` returns the removed items. Its
+signature changes from `[id]` to `[{id, x, y}]`: it returned ids alone, and by
+the time it returns the entry is gone from the map, so there is no position
+left to site the puff at.
+
+The server broadcasts a `vfx` event named `item_despawn` at each removed item's
+position. The effect is a **client-side built-in** following `BLOCK_EFFECT_DEF`
+(`core/vfx.js:45`), not a `vfx_effects` row — an admin-undeletable presentation
+cue is already this repo's pattern, and it keeps the task migration-free. A `vfx_effects` row seeds a small puff — **no damage, no knockback,
 no collision**; it is presentation only, and a test asserts that no damage
 event is emitted alongside it.
 
