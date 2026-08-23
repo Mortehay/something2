@@ -214,7 +214,7 @@ function makePool({
       if (/UPDATE player_progression/i.test(sql)) {
         return {
           rows: [progressionAfter || {
-            user_id: '1', experience: 50, level: 1, stat_points: 0,
+            user_id: '1', experience: 50, level: 1, passive_points: 0,
             strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
           }],
           rowCount: 1,
@@ -461,16 +461,18 @@ test('the chest respawn sweep injects the freshly-respawned guard into entry.wor
 // level-up must both raise the running game's derived stats (maxHp here)
 // AND push a `progression` frame, not just persist the new level to the
 // DB. guardLevel 20 vs. a level-1 player guarantees xpForChest's XP-diff
-// factor is capped at its max (guard 19+ levels above the player), so the
-// single chest-open XP award crosses the level-2 (xp>=100) AND level-3
-// (xp>=300) thresholds in one shot.
+// factor is capped at its max (guard 19+ levels above the player), so
+// xpForChest(20, 1) = round(10 * 20 * 2) = 400 -- one award that crosses
+// FOUR level thresholds at once. Under the round(18 * L^1.33) curve
+// xpFloor(5) = 255 and xpFloor(6) = 408 (hand-computed literals), so 400
+// lands the player on level 5.
 test('openchest applies derived stats and sends a progression frame on a level-up', async () => {
   const pool = makePool({
     chestSeed: {
       id: 'chest-1', x: SPAWN.x, y: SPAWN.y, kind: 'vault', state: 'unlocked', guardLevel: 20, guardCreatureIds: [],
     },
     progressionAfter: {
-      user_id: '1', experience: 400, level: 3, stat_points: 6,
+      user_id: '1', experience: 400, level: 5, passive_points: 4,
       strength: 5, dexterity: 5, constitution: 15, intelligence: 5, wisdom: 5, charisma: 5,
     },
   });
@@ -492,11 +494,11 @@ test('openchest applies derived stats and sends a progression frame on a level-u
   ws.send(JSON.stringify({ type: 'openchest' }));
   const opened = await openedP;
   assert.equal(opened.leveledUp, true, 'a guard 19 levels above a level-1 player must level them up');
-  assert.equal(opened.newLevel, 3);
+  assert.equal(opened.newLevel, 5);
 
   const progressionMsg = await progressionMsgP;
   assert.equal(progressionMsg.leveledUp, true);
-  assert.equal(progressionMsg.newLevel, 3);
+  assert.equal(progressionMsg.newLevel, 5);
   assert.equal(progressionMsg.awarded, opened.awarded);
   assert.equal(
     progressionMsg.progression.constitution, 15,

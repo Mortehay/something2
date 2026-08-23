@@ -198,16 +198,17 @@ function kill(handle, userId) {
   world.getPlayer(userId).hp = -5;
 }
 
-// Level 4's floor is xpFloor(4) = 100*3*4/2 = 600, and level 4 is WORTH
-// 100*4 = 400. The roll is pinned at 0.5, i.e. 5.25% of the band, so the loss
-// is floor(0.0525 * 400) = floor(21) = 21 -> 655-21 = 634. Experience starts
-// 55 XP into the level, comfortably above 21, so the never-de-level clamp is
-// not what produces this number. Deliberately non-round so a formula that
-// used the progress instead of the level's worth, the wrong end of the band,
-// or skipped the floor() would land somewhere else.
+// Level 7's floor is the hand-computed literal xpFloor(7) = 603, and level 7
+// is WORTH 239 (round(18 * 7^1.33)). The roll is pinned at 0.5, i.e. 5.25% of
+// the band, so the loss is floor(0.0525 * 239) = floor(12.5475) = 12 ->
+// 700-12 = 688. Experience starts 97 XP into the level, comfortably above 12,
+// so the never-de-level clamp is not what produces this number. Deliberately
+// non-round so a formula that used the progress instead of the level's worth,
+// the wrong end of the band, or skipped the floor() would land somewhere
+// else.
 test('dying costs a rolled fraction of the level\'s worth (literal, live path)', async () => {
   const row = {
-    user_id: '1', experience: 655, level: 4, stat_points: 0,
+    user_id: '1', experience: 700, level: 7, passive_points: 0,
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = fakeDeathPool(row);
@@ -221,9 +222,9 @@ test('dying costs a rolled fraction of the level\'s worth (literal, live path)',
   kill(handle, '1');
   const prog = await progressionP;
 
-  assert.strictEqual(prog.lost, 21, 'floor(0.0525 * 400)');
-  assert.strictEqual(prog.progression.experience, 634);
-  assert.strictEqual(prog.progression.level, 4, 'death never changes level directly');
+  assert.strictEqual(prog.lost, 12, 'floor(0.0525 * 239)');
+  assert.strictEqual(prog.progression.experience, 688);
+  assert.strictEqual(prog.progression.level, 7, 'death never changes level directly');
 
   // Respawn (the unrelated, pre-existing heal-to-full path) still ran too.
   let healed = false;
@@ -247,13 +248,14 @@ test('dying costs a rolled fraction of the level\'s worth (literal, live path)',
 //
 // The assertions here are properties, not literals, because the draw is
 // genuinely unpinned -- the literal coverage lives in the pinned test above
-// and in player_stats.test.js. Level 3 is worth 100*3 = 300, so the band is
-// floor(0.005 * 300) = 1 through floor(0.10 * 300) = 30; starting 200 XP into
-// the level keeps the never-de-level clamp out of the result entirely, so a
+// and in player_stats.test.js. Level 7 is worth 239, so the band is
+// floor(0.005 * 239) = 1 through floor(0.10 * 239) = 23; xpFloor(7) = 603 and
+// xpFloor(8) = 842, so starting at 800 is 197 XP into the level, which keeps
+// the never-de-level clamp out of the result entirely, so a
 // loss of 0 would mean the roll never happened rather than that it was capped.
 test('the unpinned production roll runs and stays inside the band (live path)', async () => {
   const row = {
-    user_id: '1', experience: 500, level: 3, stat_points: 0,
+    user_id: '1', experience: 800, level: 7, passive_points: 0,
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = fakeDeathPool(row);
@@ -267,13 +269,13 @@ test('the unpinned production roll runs and stays inside the band (live path)', 
   kill(handle, '1');
   const prog = await progressionP;
 
-  assert.ok(prog.lost >= 1 && prog.lost <= 30,
-    `the unpinned roll escaped the 0.5%-10% band for a level worth 300: ${prog.lost}`);
-  assert.strictEqual(prog.progression.experience, 500 - prog.lost,
+  assert.ok(prog.lost >= 1 && prog.lost <= 23,
+    `the unpinned roll escaped the 0.5%-10% band for a level worth 239: ${prog.lost}`);
+  assert.strictEqual(prog.progression.experience, 800 - prog.lost,
     'the pushed experience must match the loss the same message reported');
-  assert.strictEqual(Number(row.experience), 500 - prog.lost,
+  assert.strictEqual(Number(row.experience), 800 - prog.lost,
     'the persisted row must match too -- not just the wire message');
-  assert.strictEqual(prog.progression.level, 3, 'death never changes level directly');
+  assert.strictEqual(prog.progression.level, 7, 'death never changes level directly');
 
   ws.close(); handle.close(); server.close();
 });
@@ -284,8 +286,8 @@ test('the unpinned production roll runs and stays inside the band (live path)', 
 // trivially true because level 1 is already the floor of everything.
 test('dying at a level floor costs nothing and never de-levels', async () => {
   const row = {
-    user_id: '1', experience: 300, level: 3, stat_points: 2,
-    strength: 6, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
+    user_id: '1', experience: 63, level: 3, passive_points: 2,
+    strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = fakeDeathPool(row);
   const { url, handle, server } = await bootWith(pool, { rng: () => 0.5 });
@@ -308,7 +310,7 @@ test('dying at a level floor costs nothing and never de-levels', async () => {
 
   const pushes = await collectMsgs(ws, 'progression', 150);
   assert.deepStrictEqual(pushes, [], 'zero loss must not push a progression message at all');
-  assert.strictEqual(row.experience, 300, 'experience must not move');
+  assert.strictEqual(row.experience, 63, 'experience must not move');
   assert.strictEqual(
     pool.matching(/^\s*UPDATE player_progression/i).length, 0,
     'applyDeath must not even issue the UPDATE when lost <= 0',
@@ -317,13 +319,17 @@ test('dying at a level floor costs nothing and never de-levels', async () => {
   ws.close(); handle.close(); server.close();
 });
 
-// Level 5's floor is 1000 and it is worth 100*5 = 500; a pinned 0.5 draw
-// costs floor(0.0525 * 500) = floor(26.25) = 26, against 30 XP of progress.
-// Non-base stats and a nonzero stat_points prove the UPDATE genuinely only
+// Level 5's floor is the hand-computed literal xpFloor(5) = 255 and it is
+// WORTH 153 (round(18 * 5^1.33)); a pinned 0.5 draw costs
+// floor(0.0525 * 153) = floor(8.0325) = 8, against 775 XP of progress.
+// Non-base stats and a nonzero passive_points prove the UPDATE genuinely only
 // ever touches `experience` -- if it touched anything else, these would move.
-test('dying does not change allocated stats or spent points', async () => {
+// The stat columns are a class-base snapshot now and nothing raises them, but
+// the fixture keeps non-base values on purpose: the point is that applyDeath
+// does not write them, and base values would satisfy that vacuously.
+test('dying does not change the stat snapshot or the passive points', async () => {
   const row = {
-    user_id: '1', experience: 1030, level: 5, stat_points: 4,
+    user_id: '1', experience: 1030, level: 5, passive_points: 4,
     strength: 8, dexterity: 6, constitution: 7, intelligence: 9, wisdom: 5, charisma: 5,
   };
   const pool = fakeDeathPool(row);
@@ -337,9 +343,9 @@ test('dying does not change allocated stats or spent points', async () => {
   kill(handle, '1');
   const prog = await progressionP;
 
-  assert.strictEqual(prog.lost, 26);
-  assert.strictEqual(prog.progression.experience, 1004);
-  assert.strictEqual(prog.progression.stat_points, 4, 'spent points must not move');
+  assert.strictEqual(prog.lost, 8);
+  assert.strictEqual(prog.progression.experience, 1022);
+  assert.strictEqual(prog.progression.passive_points, 4, 'passive points must not move');
   assert.strictEqual(prog.progression.strength, 8);
   assert.strictEqual(prog.progression.dexterity, 6);
   assert.strictEqual(prog.progression.constitution, 7);
@@ -356,7 +362,7 @@ test('dying does not change allocated stats or spent points', async () => {
 // would see more than one progression push and more than one UPDATE.
 test('the death penalty fires exactly once per death, not once per tick spent dead', async () => {
   const row = {
-    user_id: '1', experience: 655, level: 4, stat_points: 0,
+    user_id: '1', experience: 700, level: 7, passive_points: 0,
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = fakeDeathPool(row);
@@ -371,12 +377,12 @@ test('the death penalty fires exactly once per death, not once per tick spent de
   const pushes = await collected;
 
   assert.strictEqual(pushes.length, 1, 'exactly one progression push for one death');
-  assert.strictEqual(pushes[0].lost, 21);
+  assert.strictEqual(pushes[0].lost, 12);
   assert.strictEqual(
     pool.matching(/^\s*UPDATE player_progression/i).length, 1,
     'exactly one UPDATE must land, however many ticks the player briefly sat at hp<=0',
   );
-  assert.strictEqual(row.experience, 634, 'the single write must be the one expected value, not applied twice');
+  assert.strictEqual(row.experience, 688, 'the single write must be the one expected value, not applied twice');
 
   ws.close(); handle.close(); server.close();
 });
@@ -391,7 +397,7 @@ test('the death penalty fires exactly once per death, not once per tick spent de
 // afterwards is proof the process (and this world's tick loop) survived.
 test('a death penalty commit finishing after the socket is gone does not throw', async () => {
   const row = {
-    user_id: '1', experience: 655, level: 4, stat_points: 0,
+    user_id: '1', experience: 700, level: 7, passive_points: 0,
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = fakeDeathPool(row);
@@ -408,7 +414,7 @@ test('a death penalty commit finishing after the socket is gone does not throw',
   // Give the tick loop + applyDeath's (instant, mocked) promise time to run.
   await new Promise((r) => setTimeout(r, 150));
 
-  assert.strictEqual(row.experience, 634, 'the death commit must still complete with no socket to push to');
+  assert.strictEqual(row.experience, 688, 'the death commit must still complete with no socket to push to');
   assert.strictEqual(
     pool.matching(/^\s*UPDATE player_progression/i).length, 1,
     'still exactly one write despite the missing socket',
