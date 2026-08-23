@@ -1867,7 +1867,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
           if (got) send(ws, { type: 'wallet', gold: got.gold });
         } else {
           const got = await claimItem(pool, entry, ws.userId, ws.characterId, target.id);
-          if (got) send(ws, { type: 'picked', item: got });
+          // A DELIBERATE pickup gets told why nothing happened; the auto-loot
+          // sweep below stays silent for the same condition.
+          if (got && got.full) send(ws, { type: 'error', message: 'Inventory full' });
+          else if (got) send(ws, { type: 'picked', item: got });
         }
       }, { notify: false });
     },
@@ -2533,6 +2536,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
           if (!sock) return;
           for (const r of results) {
             if (r.status === 'fulfilled' && r.value) {
+              // A full inventory is SILENT here, and skipped before the shape
+              // test below -- otherwise `{full:true}` would fall through to
+              // the else and be sent as a `picked` item the player never got.
+              // The sweep re-runs at 20Hz for as long as the player stands
+              // near the item, so a toast per result would be a stream of
+              // them; the panel's used/capacity counter is where a player
+              // learns they are full.
+              if (r.value.full) continue;
               // claimGold resolves { gold }; claimItem resolves { id, typeId, quantity }.
               // Distinguishing by shape (rather than tagging each push) keeps this
               // loop untouched for the non-gold path.

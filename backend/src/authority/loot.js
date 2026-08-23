@@ -2,6 +2,7 @@
 // test; the caller supplies the rows and performs the INSERTs.
 
 const { CREATURE_SIZE } = require('./creatures');
+const { hasFreeSlot } = require('./items');
 const { awardXp, loadProgression } = require('../services/progressionStore.js');
 const { xpForKill } = require('../services/playerStats.js');
 const { RESPAWN_DELAY_MS } = require('../services/creatureRespawn');
@@ -258,6 +259,15 @@ const CLAIM_BACKOFF_MS = 1000;
 
 // `now` is injectable so the backoff is testable without timers or sleeping.
 async function claimItem(pool, entry, userId, characterId, groundItemId, { now = Date.now } = {}) {
+  // Capacity is checked BEFORE the claim statement below, which DELETEs the
+  // world_items row in the same breath as it grants: a post-hoc check would
+  // have to put the item back on the ground. The item simply stays where it
+  // is, and the CALLER decides what the player sees -- a toast for a
+  // deliberate pickup, silence for the 20Hz auto-loot sweep.
+  const holder = entry.world.getPlayer(userId);
+  if (holder && holder.inv && !hasFreeSlot(holder.inv, entry.world.weapons)) {
+    return { full: true };
+  }
   // Lazily created so every existing hand-built `entry` fixture keeps working
   // -- there are many, in tests and in server.js's own world entries.
   if (!entry.claimRetryAt) entry.claimRetryAt = new Map();
