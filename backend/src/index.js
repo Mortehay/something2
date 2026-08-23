@@ -121,6 +121,7 @@ const { assertJwtSecretOrExit } = require('./auth/assertJwtSecret.js');
 const { assertProductionSafety } = require('./productionSafety.js');
 const authRouter = require('./auth/routes.js');
 const progressionRoutes = require('./api/progressionRoutes.js');
+const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
 const { DEFAULTS: GAME_SETTING_DEFAULTS, getSettings, setSetting } = require('./services/gameSettings.js');
 const { ownedCharacter } = require('./services/characters.js');
@@ -436,6 +437,11 @@ app.use('/api/auth', authRouter(guardPool));
 // an allocation or a respec. Every route is behind requireAuth and acts on
 // req.user.id -- see api/progressionRoutes.js's header comment.
 app.use('/api/progression', progressionRoutes(guardPool, refreshLivePlayerStats));
+
+// The passive tree graph (SOMET-475). Read-only and identical for every
+// player, so it is its own mount rather than a branch of /api/progression --
+// the client fetches it once per session and caches it by `version`.
+app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
 // catalog the creation form reads. Behind requireAuth, scoped to req.user.id.
