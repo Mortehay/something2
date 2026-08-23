@@ -358,15 +358,26 @@ async function seedOneCreatureDrop(pool, d) {
 // default is false, so a restored class that omitted it would come back
 // invisible to the character-creation picker -- present in the catalog,
 // unusable in the game, and silent about it.
+//
+// SOMET-471: it is now READ OFF THE ROW rather than hardcoded `true`. The
+// Ranger entry is in PLAYABLE_CLASSES precisely BECAUSE it must be restorable
+// -- live characters reference it -- but it must come back DEMOTED, and a
+// hardcoded true would re-open a retired class on every volume rebuild.
+// main_stat rides along for the same reason: a restored class with no main
+// stat has no passive-tree sector while still looking fine in the picker.
 async function seedOnePlayableClass(pool, c) {
   const r = await pool.query(
     `INSERT INTO entity_types
-      (name, color, walkable, spawn_tiles, chance, is_playable,
+      (name, color, walkable, spawn_tiles, chance, is_playable, main_stat,
        strength, dexterity, constitution, intelligence, wisdom, charisma,
        hp, max_hp, hp_regen_rate, mana, max_mana, mana_regen_rate)
-     VALUES ($1,$2,$3,$4::jsonb,$5,true,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+     VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      ON CONFLICT (name) DO NOTHING`,
     [c.name, c.color, c.walkable, JSON.stringify(c.spawn_tiles), c.chance,
+     // `!== false`, not a bare truthiness check: a row that simply forgot the
+     // flag stays playable (the pre-471 behaviour), and only an explicit
+     // `is_playable: false` demotes.
+     c.is_playable !== false, c.main_stat || null,
      c.strength, c.dexterity, c.constitution, c.intelligence, c.wisdom, c.charisma,
      c.hp, c.max_hp, c.hp_regen_rate, c.mana, c.max_mana, c.mana_regen_rate],
   );
