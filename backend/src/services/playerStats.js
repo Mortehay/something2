@@ -9,7 +9,7 @@ const C = require('./progressionConstants.js');
 const DEFAULT_PROGRESSION = Object.freeze({
   experience: 0,
   level: 1,
-  stat_points: 0,
+  passive_points: 0,
   strength: C.BASE_STAT,
   dexterity: C.BASE_STAT,
   constitution: C.BASE_STAT,
@@ -59,26 +59,50 @@ function derivePlayerStats(progression) {
   };
 }
 
-// Cumulative XP at which `level` begins. xpToNext is XP_BASE * level, so the
-// floor is the triangular sum XP_BASE * (level-1) * level / 2.
-function xpFloor(level) {
+// What level `level` COSTS to buy. Kept separate from xpToNext because
+// xpToNext deliberately returns Infinity at MAX_LEVEL, and applyDeathPenalty
+// needs the finite number there (see its own comment). One formula, two
+// callers -- not two copies of `18 * L^1.33`.
+function levelWorth(level) {
   const l = clamp(Math.floor(Number(level) || 1), 1, C.MAX_LEVEL);
-  return (C.XP_BASE * (l - 1) * l) / 2;
+  return Math.round(C.XP_BASE * Math.pow(l, C.XP_EXPONENT));
+}
+
+// Cumulative XP at which each level begins, precomputed once at module load.
+// A fractional exponent has no closed-form cumulative sum, so there is
+// nothing to evaluate per call -- and a 150-entry array is cheaper than the
+// old triangular formula anyway. Index 0 is unused; XP_FLOORS[l] is the floor
+// of level l.
+const XP_FLOORS = (() => {
+  const floors = new Array(C.MAX_LEVEL + 1);
+  floors[1] = 0;
+  for (let l = 2; l <= C.MAX_LEVEL; l++) floors[l] = floors[l - 1] + levelWorth(l - 1);
+  return floors;
+})();
+
+function xpFloor(level) {
+  return XP_FLOORS[clamp(Math.floor(Number(level) || 1), 1, C.MAX_LEVEL)];
 }
 
 function xpToNext(level) {
   const l = clamp(Math.floor(Number(level) || 1), 1, C.MAX_LEVEL);
-  return l >= C.MAX_LEVEL ? Infinity : C.XP_BASE * l;
+  return l >= C.MAX_LEVEL ? Infinity : levelWorth(l);
 }
 
-// Inverted by stepping, not by the quadratic formula. The closed form needs a
-// sqrt, and a float sqrt lands on the wrong side of an exact boundary (xp
-// 300 must be level 3, not level 2). MAX_LEVEL bounds this at 50 iterations.
+// Binary search over XP_FLOORS, not a linear walk and never a float inverse.
+// The closed form would need a 1/1.33 power, and a float root lands on the
+// wrong side of an exact boundary (xp 18 must be level 2, not level 1). The
+// search returns the greatest level whose floor is <= xp, which is exact for
+// every integer total.
 function levelForXp(experience) {
   const xp = Math.max(0, Number(experience) || 0);
-  let level = 1;
-  while (level < C.MAX_LEVEL && xp >= xpFloor(level + 1)) level++;
-  return level;
+  let lo = 1;
+  let hi = C.MAX_LEVEL;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (xp >= XP_FLOORS[mid]) lo = mid; else hi = mid - 1;
+  }
+  return lo;
 }
 
 // XP for a kill, scaled by the creature's A1 level relative to the player's.
@@ -100,10 +124,14 @@ function xpForKill(creatureLevel, playerLevel) {
 // this repo's dominant test failure is assertions derived from the same
 // constants as the code. The caller owns the draw; this stays pure.
 //
-// The level's worth is computed as XP_BASE * level rather than by calling
+// The level's worth is taken from levelWorth(level) rather than by calling
 // xpToNext(level), because xpToNext deliberately returns Infinity at
 // MAX_LEVEL -- an infinite raw loss would silently become "everything above
-// the floor", i.e. a flat 100% penalty for max-level players only.
+// the floor", i.e. a flat 100% penalty for max-level players only. levelWorth
+// is the SAME function xpToNext evaluates below MAX_LEVEL, so the two cannot
+// drift; the previous stand-in here was a second, hand-inlined copy of the
+// curve (`XP_BASE * level`) and it became silently wrong the moment the curve
+// stopped being linear.
 //
 // The clamp is what preserves the never-de-level guarantee, and it now does
 // real work: the loss is derived from the level's total cost, so it can
@@ -116,18 +144,13 @@ function applyDeathPenalty(experience, level, unit) {
 
   const u = Number.isFinite(unit) ? clamp(unit, 0, 1) : 0;
   const fraction = C.DEATH_PENALTY_MIN + u * (C.DEATH_PENALTY_MAX - C.DEATH_PENALTY_MIN);
-  const levelWorth = C.XP_BASE * lvl;
+  const worth = levelWorth(lvl);
 
-  const lost = Math.min(Math.floor(fraction * levelWorth), xp - floor);
+  const lost = Math.min(Math.floor(fraction * worth), xp - floor);
   return { experience: xp - lost, lost };
-}
-
-// Every point ever spent above the base, across all six stats.
-function refundedPoints(progression) {
-  return C.STAT_KEYS.reduce((sum, k) => sum + (stat(progression, k) - C.BASE_STAT), 0);
 }
 
 module.exports = {
   derivePlayerStats, xpFloor, xpToNext, levelForXp, xpForKill,
-  applyDeathPenalty, refundedPoints, DEFAULT_PROGRESSION,
+  applyDeathPenalty, DEFAULT_PROGRESSION,
 };

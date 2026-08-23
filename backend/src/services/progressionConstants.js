@@ -14,8 +14,7 @@
 
 const BASE_STAT = 5;
 const STAT_KEYS = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
-const MAX_LEVEL = 50;
-const STAT_POINTS_PER_LEVEL = 3;
+const MAX_LEVEL = 150;
 
 // CON -> max hp. Base matches PLAYER_MAX_HP (authority/world.js:17).
 const HP_BASE = 100;
@@ -53,9 +52,17 @@ const PRICE_PER_CHA = 0.02;
 const SELL_FRACTION_BASE = 0.5;
 const SELL_FRACTION_MAX = 0.9;
 
-// XP curve. xpToNext(level) = XP_BASE * level, so the cumulative floor is
-// XP_BASE * (level-1) * level / 2: 0, 100, 300, 600, 1000, ...
-const XP_BASE = 100;
+// XP curve. xpToNext(level) = round(XP_BASE * level^XP_EXPONENT), so the
+// cumulative floor has NO closed form and is precomputed as a 150-entry table
+// in playerStats.js. Cost of a level: 18 at 1, 45 at 2, 385 at 10, 3273 at 50,
+// 8228 at 100, 14108 at 150. Cumulative to 50 is 68,598 (down from 122,500
+// under the old linear curve) and to 150 is 901,212.
+//
+// THIS IS NOT A game_settings KEY, deliberately (design doc section 3.5).
+// Changing it re-levels every character in the database on the next read; an
+// admin toggling a number in a form must not be able to do that.
+const XP_BASE = 18;
+const XP_EXPONENT = 1.33;
 
 // Kill XP scales with the creature's A1 level RELATIVE to the player's, so
 // farming trivial creatures decays to literally zero (diff <= -5).
@@ -81,11 +88,11 @@ const DEATH_PENALTY_MAX = 0.10;
 const RESPEC_BASE = 50;
 
 module.exports = {
-  BASE_STAT, STAT_KEYS, MAX_LEVEL, STAT_POINTS_PER_LEVEL,
+  BASE_STAT, STAT_KEYS, MAX_LEVEL,
   HP_BASE, HP_PER_CON, MANA_BASE, MANA_PER_INT,
   MELEE_PER_STR, SPELL_PER_INT, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
   MANA_REGEN_BASE, MANA_REGEN_PER_WIS,
   PRICE_PER_CHA, SELL_FRACTION_BASE, SELL_FRACTION_MAX,
-  XP_BASE, XP_KILL_BASE, XP_LEVEL_DIFF_SLOPE, XP_LEVEL_DIFF_MAX,
+  XP_BASE, XP_EXPONENT, XP_KILL_BASE, XP_LEVEL_DIFF_SLOPE, XP_LEVEL_DIFF_MAX,
   DEATH_PENALTY_MIN, DEATH_PENALTY_MAX, RESPEC_BASE,
 };
