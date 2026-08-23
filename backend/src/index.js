@@ -122,6 +122,7 @@ const { assertProductionSafety } = require('./productionSafety.js');
 const authRouter = require('./auth/routes.js');
 const progressionRoutes = require('./api/progressionRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
+const { DEFAULTS: GAME_SETTING_DEFAULTS, getSettings, setSetting } = require('./services/gameSettings.js');
 const { ownedCharacter } = require('./services/characters.js');
 const { listVisited } = require('./services/visitedWorlds.js');
 const { listWaypointsForCharacter } = require('./services/waypoints.js');
@@ -1416,6 +1417,38 @@ app.get('/api/weapon-catalogs', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch weapon catalogs' });
+  }
+});
+
+// --- Admin-tunable game settings (progression epic T1) ---------------------
+//
+// Both verbs are adminGuard'd, reads included: these numbers are live game
+// balance, and the list itself tells a caller which knobs exist. The service
+// owns the whitelist and the value validation so this route and the store can
+// never disagree about what is legal; a thrown error carrying .status = 400
+// is a caller mistake, anything else is a 500.
+app.get('/api/settings', adminGuard, async (req, res) => {
+  try {
+    const values = await getSettings(pool, Object.keys(GAME_SETTING_DEFAULTS));
+    res.json(Object.keys(GAME_SETTING_DEFAULTS).map((key) => ({
+      key,
+      value: values[key],
+      default_value: GAME_SETTING_DEFAULTS[key],
+    })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch game settings' });
+  }
+});
+
+app.put('/api/settings/:key', adminGuard, async (req, res) => {
+  try {
+    const row = await setSetting(pool, req.params.key, (req.body || {}).value);
+    res.json(row);
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to update game setting' });
   }
 });
 

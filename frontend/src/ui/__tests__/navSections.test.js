@@ -43,12 +43,16 @@ describe('visibleSections', () => {
     expect(items.every((i) => !i.adminType)).toBe(true);
   });
 
-  it('shows an admin the two player screens plus all nine admin screens', () => {
+  it('shows an admin the two player screens plus all ten admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(11);
+    expect(items).toHaveLength(12);
     expect(items.map((i) => i.path)).toEqual([
       '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
       '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/world-map',
+      // Progression epic T1: game_settings editor, plus the mount points the
+      // affix (T12) and passive-node (T9) admin sections land in. It is NOT at
+      // /game/settings -- that path is already AI Providers.
+      '/game/admin/progression',
       // SOMET-330: AI Providers, last because it is configuration rather than
       // content -- opened once to point the game at a machine, not per session.
       '/game/settings',
