@@ -4,7 +4,7 @@ const { WebSocketServer } = require('ws');
 const { currentUserForToken } = require('../auth/tokens.js');
 const { ServerMap } = require('./collision');
 const { World } = require('./world');
-const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout, socketStone, unsocketStone } = require('./items');
+const { loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, loadInventory, grantStartingLoadout, socketStone, unsocketStone, freeSlots } = require('./items');
 const { loadCatalogs, elementsForWire } = require('./catalogs');
 const { configureAttackOrigins } = require('./attackOrigin.js');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
@@ -30,7 +30,7 @@ const { fetchChest, depositItem, withdrawItem } = require('../services/accountCh
 const { loadDecorationDefs } = require('../services/decorationDefs');
 const { loadBiomes } = require('../services/biomes');
 const { buildWorldGenConfig } = require('../services/worldGenConfig');
-const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive } = require('./loot');
+const { commitCreatureDeath, claimItem, claimGold, dropItem, dropGraceActive, spawnGroundItemTypes } = require('./loot');
 const { knockbackPosition } = require('./knockback');
 const { buyStock, sellItem } = require('./trade');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
@@ -2027,7 +2027,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const chest = nearestChest(entry.chests, cx, cy, INTERACT_RADIUS);
         if (!chest) { send(ws, { type: 'error', message: 'no chest nearby' }); return; }
 
-        const result = await openChest(pool, chest.id, ws.characterId);
+        // The opener's remaining room decides how much of the roll can be
+        // granted; whatever does not fit comes back as overflowTypeIds and is
+        // spawned on the ground below rather than lost.
+        const room = freeSlots(p.inv, entry.world.weapons);
+        const result = await openChest(pool, chest.id, ws.characterId, { freeSlots: room });
         if (!result.ok) { send(ws, { type: 'error', message: result.reason }); return; }
 
         // Final-review fix (SOMET-244 Important #2): openChest now returns
@@ -2039,6 +2043,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // dropItem/sellItem all validate against p.inv.items).
         for (const it of result.items) {
           p.inv.items.push({ id: it.id, typeId: it.item_type_id, quantity: Number(it.quantity) || 1 });
+        }
+
+        // Overflow: one toast, not one per item, and the loot lands where the
+        // player is standing so it can be collected after making room.
+        if (result.overflowTypeIds && result.overflowTypeIds.length) {
+          await spawnGroundItemTypes(pool, entry, result.overflowTypeIds, cx, cy, { ttlMs: groundItemTtlMs });
+          send(ws, { type: 'error', message: 'Inventory full - some loot dropped on the ground' });
         }
 
         // openedAt/respawnAt (undefined for a vault chest -- openChest

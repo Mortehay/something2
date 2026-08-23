@@ -235,6 +235,26 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
   }
 }
 
+// Put a bare list of item TYPE ids on the ground at (x, y). The one thing
+// spawnDrops cannot do: it rolls a dead creature's drop table, whereas this
+// takes ids the caller already decided on -- today, chest loot that would not
+// fit in the opener's inventory (SOMET-464). Same INSERT shape and the same
+// straight-into-the-sim add as spawnDrops, so the items appear in the next AOI
+// broadcast rather than waiting for a chunk reload.
+async function spawnGroundItemTypes(pool, entry, itemTypeIds, x, y, { ttlMs = 600000 } = {}) {
+  const ids = (itemTypeIds || []).filter((id) => Number.isInteger(Number(id)));
+  if (ids.length === 0) return [];
+  const ins = await pool.query(
+    `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
+     SELECT $1, t.item_type_id, $2, $3, now() + ($4::int * interval '1 millisecond'), 1
+       FROM unnest($5::int[]) AS t(item_type_id)
+     RETURNING id, item_type_id, x, y, expires_at, quantity`,
+    [entry.worldId, x, y, ttlMs, ids.map(Number)],
+  );
+  entry.world.groundItems.add(ins.rows);
+  return ins.rows;
+}
+
 // The single claim path, shared by the keypress and auto-loot. One
 // statement does the DELETE ... RETURNING and the player_items INSERT
 // together via a CTE, so Postgres commits or rolls back both as a unit —
@@ -543,5 +563,5 @@ async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 6000
 }
 
 module.exports = {
-  rollDrops, rollGold, commitCreatureDeath, spawnDrops, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
+  rollDrops, rollGold, commitCreatureDeath, spawnDrops, spawnGroundItemTypes, claimItem, claimGold, dropItem, dropGraceActive, DROP_GRACE_MS,
 };

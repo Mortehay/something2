@@ -40,7 +40,10 @@ function xpForChest(guardLevel, playerLevel) {
 // merge of the two lines is textually clean but semantically wrong -- the
 // INSERT below referenced a player_items.user_id column that no longer exists,
 // so opening a chest threw at runtime rather than granting anything.
-async function openChest(pool, chestId, characterId, { rng = Math.random } = {}) {
+// `freeSlots` is how many player_items rows this character can still take. It
+// defaults to Infinity so every existing caller and fixture behaves exactly as
+// before; server.js passes the real number.
+async function openChest(pool, chestId, characterId, { rng = Math.random, freeSlots = Infinity } = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -101,7 +104,14 @@ async function openChest(pool, chestId, characterId, { rng = Math.random } = {})
 
     const itemTypeIds = await rollChestLoot(client, chest.guard_level, rng);
     const items = [];
+    // The chest has already been CAS'd open above and can never be re-opened,
+    // so refusing here would DESTROY the loot. Grant what fits and hand the
+    // rest back to the caller to spawn on the ground: the player keeps
+    // everything they rolled, and a full inventory costs them a walk instead
+    // of the reward.
+    const overflowTypeIds = [];
     for (const itemTypeId of itemTypeIds) {
+      if (items.length >= freeSlots) { overflowTypeIds.push(itemTypeId); continue; }
       // One row per unit (rollChestLoot/rollDrops already repeats
       // itemTypeId per unit rolled), same one-row-per-unit shape
       // claimItem/spawnDrops use elsewhere in loot.js. `items` reports the
@@ -129,6 +139,7 @@ async function openChest(pool, chestId, characterId, { rng = Math.random } = {})
     return {
       ok: true,
       items,
+      overflowTypeIds,
       awarded: award.awarded,
       leveledUp: award.leveledUp,
       newLevel: award.newLevel,
