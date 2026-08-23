@@ -30,12 +30,12 @@ Copied verbatim from the contract's §5:
 
 | Slot | Task | Content |
 |---|---|---|
-| `1714440402000` | Task 1 (T3) | `entity_types.main_stat`, four new playable rows, Ranger demotion, loadouts |
-| `1714440403000` | Task 3 (T5) | `world_creatures` charm columns, `character_summons` |
+| `1714440502000` | Task 1 (T3) | `entity_types.main_stat`, four new playable rows, Ranger demotion, loadouts |
+| `1714440503000` | Task 3 (T5) | `world_creatures` charm columns, `character_summons` |
 
 Task 2 (T4) adds **no** migration. **Do not take any other timestamp**, including one that "looks free".
 
-> **Contract defect, confirmed against the repo — read before you start.** The contract reserves `1714440400000`–`1714440430000` for this epic, but three migrations in that range are **already on `main`**: `1714440400000_biome_path_tile.js`, `1714440410000_invite_codes.js`, `1714440420000_inventory_slots.js`. The two slots assigned to *this* group (`…402000`, `…403000`) are genuinely free — verify with `ls backend/migrations | grep 1714440402000` and `… 1714440403000` before writing either file, and stop and escalate if either returns a row. Group A's `1714440400000` slot is **taken** and is not this plan's problem to fix, but it will break their run.
+> **Contract defect, confirmed against the repo — read before you start.** The contract reserves `1714440400000`–`1714440430000` for this epic, but three migrations in that range are **already on `main`**: `1714440400000_biome_path_tile.js`, `1714440410000_invite_codes.js`, `1714440420000_inventory_slots.js`. The two slots assigned to *this* group (`…402000`, `…403000`) are genuinely free — verify with `ls backend/migrations | grep 1714440502000` and `… 1714440503000` before writing either file, and stop and escalate if either returns a row. Group A's `1714440400000` slot is **taken** and is not this plan's problem to fix, but it will break their run.
 
 ---
 
@@ -79,8 +79,8 @@ Expected: PASS, and **not** skipped. A "no database URL" skip means neither vari
 
 | File | Created / Modified | The ONE responsibility |
 |---|---|---|
-| `backend/migrations/1714440402000_six_classes_main_stat.js` | Create | Add `entity_types.main_stat`, insert Monk/Cultist/Archer/Druid, demote Ranger, insert their `class_loadouts` |
-| `backend/migrations/1714440403000_charm_and_summons.js` | Create | Add `world_creatures.charmed_by_character_id` + `charm_expires_at`, create `character_summons` |
+| `backend/migrations/1714440502000_six_classes_main_stat.js` | Create | Add `entity_types.main_stat`, insert Monk/Cultist/Archer/Druid, demote Ranger, insert their `class_loadouts` |
+| `backend/migrations/1714440503000_charm_and_summons.js` | Create | Add `world_creatures.charmed_by_character_id` + `charm_expires_at`, create `character_summons` |
 | `backend/seeds/data/entityTypes.js` | Modify | Class catalog data a rebuilt Postgres volume is restored from |
 | `backend/scripts/seed-catalogs.js` | Modify | Write `main_stat` and `is_playable` when restoring a class row |
 | `backend/src/services/characters.js` | Modify | Expose `mainStat` on the class list and `className`/`mainStat` on `ownedCharacter` |
@@ -110,7 +110,7 @@ Expected: PASS, and **not** skipped. A "no database URL" skip means neither vari
 ### Task 1: Six playable classes, `main_stat`, loadouts and the character-select UI
 
 **Files:**
-- Create: `backend/migrations/1714440402000_six_classes_main_stat.js`
+- Create: `backend/migrations/1714440502000_six_classes_main_stat.js`
 - Create: `backend/tests/six_classes_db.test.js`
 - Create: `backend/tests/characters_service_main_stat.test.js`
 - Create: `frontend/src/games/something2/classIdentity.js`
@@ -266,7 +266,7 @@ Expected: FAIL with `error: column "main_stat" does not exist`.
 
 - [ ] **Step 3: Write the migration**
 
-Create `backend/migrations/1714440402000_six_classes_main_stat.js`:
+Create `backend/migrations/1714440502000_six_classes_main_stat.js`:
 
 ```js
 exports.shorthands = undefined;
@@ -411,7 +411,7 @@ Expected: PASS, 6 subtests.
 - [ ] **Step 5: Commit**
 ```bash
 cd /tmp/wt-classes
-git add backend/migrations/1714440402000_six_classes_main_stat.js backend/tests/six_classes_db.test.js
+git add backend/migrations/1714440502000_six_classes_main_stat.js backend/tests/six_classes_db.test.js
 git commit -m "feat(classes): add main_stat and the Monk, Cultist, Archer and Druid rows (SOMET-NNN)"
 ```
 
@@ -1331,7 +1331,7 @@ git commit -m "feat(classes): send usesLifeCost on join and hide the Cultist man
 ### Task 3: Druid charm — creature control transfer, summon budget, player pacify
 
 **Files:**
-- Create: `backend/migrations/1714440403000_charm_and_summons.js`
+- Create: `backend/migrations/1714440503000_charm_and_summons.js`
 - Create: `backend/src/services/charm.js`
 - Create: `backend/tests/charm_budget.test.js`
 - Create: `backend/tests/authority_charm_player.test.js`
@@ -2363,7 +2363,7 @@ Expected: FAIL with `error: column "charmed_by_character_id" of relation "world_
 
 - [ ] **Step 21: Write the migration**
 
-Create `backend/migrations/1714440403000_charm_and_summons.js`:
+Create `backend/migrations/1714440503000_charm_and_summons.js`:
 
 ```js
 exports.shorthands = undefined;
@@ -2441,7 +2441,7 @@ Expected: PASS, 5 subtests.
 - [ ] **Step 23: Commit**
 ```bash
 cd /tmp/wt-classes
-git add backend/migrations/1714440403000_charm_and_summons.js backend/tests/charm_summons_db.test.js
+git add backend/migrations/1714440503000_charm_and_summons.js backend/tests/charm_summons_db.test.js
 git commit -m "feat(classes): charm columns on world_creatures and the character_summons roster (SOMET-NNN)"
 ```
 
