@@ -88,6 +88,7 @@ export class Game {
         this.inventory = createInventory();
         this.inventoryOpen = false;
         this.inventorySelectedItemId = null;
+        this.inventoryDrag = null;
 
         // Ground items (Slice 3b-2b): render-only store of items on the
         // ground, plus a local mirror of the server-owned auto-loot flag
@@ -352,6 +353,7 @@ export class Game {
         this.inventory = createInventory();
         this.inventoryOpen = false;
         this.inventorySelectedItemId = null;
+        this.inventoryDrag = null;
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
         // SOMET-372. Cleared on join for the same reason merchants/landmarks
@@ -905,6 +907,16 @@ export class Game {
         this.animationFrameId = requestAnimationFrame((t) => this.gameLoop(t));
     }
 
+    // The ONE way the inventory panel closes. Escape, the panel's [X] and the
+    // 'i' toggle all land here so they cannot drift: an in-flight drag that
+    // outlived its panel would otherwise resolve against a layout that is no
+    // longer on screen.
+    closeInventory() {
+        this.inventoryOpen = false;
+        this.inventorySelectedItemId = null;
+        this.inventoryDrag = null;
+    }
+
     // Hit-test the slot/item rects RenderSystem recorded while drawing the
     // open panel (canvas-px space, same as _cursorX/_cursorY). Clicking an
     // item selects it (click again to deselect); clicking a slot equips the
@@ -1012,8 +1024,8 @@ export class Game {
             // !shopOpen so the two centred panels can never stack (the shop is
             // closed with 'e' or Escape first).
             if (isKey('i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen) {
-                this.inventoryOpen = !this.inventoryOpen;
-                if (!this.inventoryOpen) this.inventorySelectedItemId = null;
+                if (this.inventoryOpen) this.closeInventory();
+                else this.inventoryOpen = true;
             }
 
             if (isKey('escape')) {
@@ -1024,8 +1036,7 @@ export class Game {
                 } else if (this.bankOpen) {
                     this.bankOpen = false;
                 } else if (this.inventoryOpen) {
-                    this.inventoryOpen = false;
-                    this.inventorySelectedItemId = null;
+                    this.closeInventory();
                 }
             }
 
