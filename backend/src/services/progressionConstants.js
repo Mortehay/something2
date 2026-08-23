@@ -84,7 +84,18 @@ const XP_LEVEL_DIFF_MAX = 2;
 const DEATH_PENALTY_MIN = 0.005;
 const DEATH_PENALTY_MAX = 0.10;
 
-// Respec cost in gold: RESPEC_BASE * level.
+// RETIRED as the live respec cost (SOMET-475). The cost is now
+// gameSettings.respec_base_gold x level -- an ADMIN-TUNABLE setting, read by
+// passiveTreeStore.respecPassives/respecQuote. Nothing in src/ reads the
+// constant below any more.
+//
+// It is kept only because gameSettings.DEFAULTS.respec_base_gold must keep
+// matching it: a fresh database with no game_settings row falls back to that
+// default, and if the two ever disagreed the "unconfigured" cost would
+// silently differ from the documented one. progression_store.test.js's
+// hand-written 200 (50 x level 4) is written against the SETTING, not this.
+// Do not reintroduce a read of it -- that is the RESPEC_BASE drift
+// CharacterSheet.jsx's F2 header describes, from the other side.
 const RESPEC_BASE = 50;
 
 module.exports = {

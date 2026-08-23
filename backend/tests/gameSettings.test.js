@@ -133,3 +133,15 @@ test('no settings key touches the XP curve, which stays in progressionConstants.
     );
   }
 });
+
+// SOMET-475. RESPEC_BASE stopped being the live respec cost when
+// passiveTreeStore started reading gameSettings.respec_base_gold instead, so
+// the constant is now a decoy: editable, exported, and read by nothing. The
+// one property that still has to hold is that the SETTING's fallback default
+// agrees with it, because a database with no game_settings row falls back to
+// that default. Without this, someone "updating the respec cost" in
+// progressionConstants.js changes nothing at all and no test notices.
+test('the retired RESPEC_BASE constant still matches the live setting default', () => {
+  const C = require('../src/services/progressionConstants.js');
+  assert.strictEqual(DEFAULTS.respec_base_gold, C.RESPEC_BASE);
+});
