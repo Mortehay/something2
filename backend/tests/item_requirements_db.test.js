@@ -73,7 +73,18 @@ test('the requirement columns reject nonsense values', async (t) => {
 const { World } = require('../src/authority/world.js');
 const { loadItemTypes } = require('../src/authority/items.js');
 
-async function createCharacter(pool, tag, level, stats = {}) {
+// Only `level` varies. The six stat columns are left at the class-base
+// snapshot of 5, deliberately and non-negotiably: progression_migration.test.js
+// asserts that EVERY character in the database still carries base 5 on all six
+// (shared contract 6.1, "every base stays 5"), so a character written here with
+// strength 40 turns that unrelated file red. An earlier revision of this helper
+// did exactly that and cost a full suite run to diagnose.
+//
+// Nothing is lost by it. enforceEquipRequirements takes the character's stat
+// bundle as a PARAMETER (`base`), so the respec tests below drive the "stats
+// just dropped" scenario by passing RESET_BASE directly -- the column values
+// were never read by any assertion here in the first place.
+async function createCharacter(pool, tag, level) {
   const username = `reqtest-${tag}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const u = await pool.query(
     'INSERT INTO users (username, password_hash, role) VALUES ($1, \'x\', \'player\') RETURNING id', [username],
@@ -85,13 +96,9 @@ async function createCharacter(pool, tag, level, stats = {}) {
   );
   const characterId = c.rows[0].id;
   await pool.query(
-    `INSERT INTO player_progression (character_id, level, strength, dexterity, constitution,
-                                     intelligence, wisdom, charisma)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     ON CONFLICT (character_id) DO UPDATE SET level = $2, strength = $3, dexterity = $4,
-       constitution = $5, intelligence = $6, wisdom = $7, charisma = $8`,
-    [characterId, level, stats.strength ?? 5, stats.dexterity ?? 5, stats.constitution ?? 5,
-      stats.intelligence ?? 5, stats.wisdom ?? 5, stats.charisma ?? 5],
+    `INSERT INTO player_progression (character_id, level) VALUES ($1,$2)
+     ON CONFLICT (character_id) DO UPDATE SET level = $2`,
+    [characterId, level],
   );
   return { userId: u.rows[0].id, characterId };
 }
@@ -275,7 +282,7 @@ test('a respec auto-unequips gear that no longer qualifies, leaving it in the ba
   t.after(async () => { await pool.end().catch(() => {}); });
 
   const tag = `resp-${Date.now()}`;
-  const { characterId } = await createCharacter(pool, tag, 60, { strength: 40 });
+  const { characterId } = await createCharacter(pool, tag, 60);
   const plateId = await makeItemType(pool, `resp-plate-${tag}`, { req_strength: 30 });
   const helmId = await makeItemType(pool, `resp-helm-${tag}`, { slot: 'head' });
   const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateId])).rows[0].id;
@@ -309,7 +316,7 @@ test('a respec that invalidates nothing clears nothing', async (t) => {
   t.after(async () => { await pool.end().catch(() => {}); });
 
   const tag = `noop-${Date.now()}`;
-  const { characterId } = await createCharacter(pool, tag, 60, { strength: 40 });
+  const { characterId } = await createCharacter(pool, tag, 60);
   const plateId = await makeItemType(pool, `noop-plate-${tag}`, { req_strength: 5 });
   const helmId = await makeItemType(pool, `noop-helm-${tag}`, { slot: 'head' });
   const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateId])).rows[0].id;
@@ -346,7 +353,7 @@ test('a respec is refused while the backpack is over its carry limit, and change
   t.after(async () => { await pool.end().catch(() => {}); });
 
   const tag = `over-${Date.now()}`;
-  const { characterId } = await createCharacter(pool, tag, 60, { strength: 40 });
+  const { characterId } = await createCharacter(pool, tag, 60);
   await pool.query('UPDATE characters SET inventory_slots = 2 WHERE id = $1', [characterId]);
   const plateId = await makeItemType(pool, `over-plate-${tag}`, { req_strength: 30 });
   const helmId = await makeItemType(pool, `over-helm-${tag}`, { slot: 'head' });
@@ -386,7 +393,7 @@ test('a respec at EXACTLY the carry limit still proceeds', async (t) => {
   t.after(async () => { await pool.end().catch(() => {}); });
 
   const tag = `atcap-${Date.now()}`;
-  const { characterId } = await createCharacter(pool, tag, 60, { strength: 40 });
+  const { characterId } = await createCharacter(pool, tag, 60);
   const plateId = await makeItemType(pool, `atcap-plate-${tag}`, { req_strength: 30 });
   const helmId = await makeItemType(pool, `atcap-helm-${tag}`, { slot: 'head' });
   const plate = (await pool.query('INSERT INTO player_items (character_id, item_type_id) VALUES ($1,$2) RETURNING id', [characterId, plateId])).rows[0].id;
