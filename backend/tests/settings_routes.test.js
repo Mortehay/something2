@@ -135,3 +135,59 @@ test('PUT writes a valid value and refuses an invalid one with 400', async (t) =
     if (admin != null) await dbPool.query('DELETE FROM users WHERE id = $1', [admin]);
   }
 });
+
+// The admin page's whole job: load the list, edit a value, save it, reload and
+// see the saved value. This exercises that loop through the real routes for
+// EVERY key, not just the one the test above happens to use -- a key whose
+// validator rejects its own default, or whose jsonb round trip loses shape,
+// would otherwise only be found by an admin.
+test('every default key round-trips through GET -> PUT -> GET', async (t) => {
+  if (!dbReady(t, 'this test rewrites every game_settings row and restores it')) return;
+  let admin;
+  // Hand-written edits, one per key -- deliberately NOT derived from DEFAULTS,
+  // so a corrupted default cannot make this test agree with itself.
+  const edits = {
+    passive_points_per_level: 2,
+    ground_item_ttl_seconds: 300,
+    respec_base_gold: 75,
+    rarity_weights: [
+      { item_level: 1, white: 80, blue: 15, yellow: 4, foxy: 1 },
+      { item_level: 60, white: 50, blue: 30, yellow: 15, foxy: 5 },
+    ],
+  };
+  const originals = {};
+  try {
+    admin = await createUser(dbPool, 'admin');
+    const auth = authed(admin, 'admin');
+
+    const load = await request(app).get('/api/settings').set(auth);
+    assert.equal(load.status, 200);
+    for (const row of load.body) originals[row.key] = row.value;
+    assert.deepStrictEqual(Object.keys(originals).sort(), Object.keys(edits).sort());
+
+    for (const [key, value] of Object.entries(edits)) {
+      const put = await request(app).put(`/api/settings/${key}`).set(auth).send({ value });
+      assert.equal(put.status, 200, `PUT ${key} -> ${put.status} ${JSON.stringify(put.body)}`);
+      assert.deepStrictEqual(put.body.value, value, `PUT ${key} echoed the wrong value`);
+    }
+
+    const reload = await request(app).get('/api/settings').set(auth);
+    assert.equal(reload.status, 200);
+    const after = new Map(reload.body.map((r) => [r.key, r.value]));
+    for (const [key, value] of Object.entries(edits)) {
+      assert.deepStrictEqual(after.get(key), value, `${key} did not survive the reload`);
+    }
+    // The defaults column is unaffected by an edit -- it is the coded fallback,
+    // not a copy of the stored row.
+    const defaults = new Map(reload.body.map((r) => [r.key, r.default_value]));
+    assert.strictEqual(defaults.get('ground_item_ttl_seconds'), 180);
+    assert.strictEqual(defaults.get('passive_points_per_level'), 1);
+  } finally {
+    // Put the scratch database back the way it was found.
+    for (const [key, value] of Object.entries(originals)) {
+      await dbPool.query(
+        'UPDATE game_settings SET value = $2::jsonb WHERE key = $1', [key, JSON.stringify(value)]);
+    }
+    if (admin != null) await dbPool.query('DELETE FROM users WHERE id = $1', [admin]);
+  }
+});

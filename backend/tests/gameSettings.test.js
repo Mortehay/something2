@@ -95,3 +95,41 @@ test('rarity weights that do not sum to 100 are accepted; a negative weight is n
     /rarity_weights/,
   );
 });
+
+// --- Design guard: the XP curve is NOT a game setting -----------------------
+//
+// Design doc section 3.5 is explicit: changing the curve re-levels every
+// character in the database on the next read, so it must be a code change with
+// a migration attached, not a number an admin types into a form. This test is
+// the thing that fails if a later task "helpfully" adds xp_base here.
+test('no settings key touches the XP curve, which stays in progressionConstants.js', () => {
+  for (const key of Object.keys(DEFAULTS)) {
+    assert.doesNotMatch(
+      key,
+      /xp|experience|curve|exponent|max_level/i,
+      `${key} looks like an XP-curve knob; the curve belongs in progressionConstants.js`,
+    );
+  }
+
+  // The service must not even read the curve module -- an import is how the
+  // two would start sharing a value.
+  const source = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '../src/services/gameSettings.js'), 'utf8',
+  );
+  assert.doesNotMatch(source, /progressionConstants|xpToNext|xpFloor|levelForXp/);
+
+  // And the curve really does live there, so this guard is not pinning an
+  // empty requirement.
+  const constants = require('../src/services/progressionConstants.js');
+  assert.strictEqual(typeof constants.XP_BASE, 'number');
+  assert.strictEqual(typeof constants.MAX_LEVEL, 'number');
+  // The snake_case names those constants would take as settings keys, spelled
+  // out by hand rather than derived from the exports, so this stays a real
+  // assertion if the constants module is renamed.
+  for (const forbidden of ['xp_base', 'xp_exponent', 'max_level', 'xp_curve']) {
+    assert.strictEqual(
+      Object.prototype.hasOwnProperty.call(DEFAULTS, forbidden), false,
+      `${forbidden} must not be a game setting`,
+    );
+  }
+});
