@@ -1042,57 +1042,6 @@ export class Game {
         if (hit.kind === 'bankpage') { this.bankView = { tab: this.bankView.tab, page: hit.id }; return; }
     }
 
-    _interactClosest() {
-        if (!this.authorityClient) return;
-        const pcx = this.player.x + (this.player.width || 0) / 2;
-        const pcy = this.player.y + (this.player.height || 0) / 2;
-        const INTERACT_R = 140;
-
-        let bestKind = null;
-        let bestDist = Infinity;
-
-        // Check banks (account chest)
-        if (Array.isArray(this.banks)) {
-            for (const b of this.banks) {
-                const d = Math.hypot(b.x - pcx, b.y - pcy);
-                if (d <= INTERACT_R && d < bestDist) {
-                    bestDist = d;
-                    bestKind = 'bank';
-                }
-            }
-        }
-
-        // Check merchants
-        if (Array.isArray(this.merchants)) {
-            for (const m of this.merchants) {
-                const d = Math.hypot(m.x - pcx, m.y - pcy);
-                if (d <= INTERACT_R && d < bestDist) {
-                    bestDist = d;
-                    bestKind = 'merchant';
-                }
-            }
-        }
-
-        // Check world chests
-        if (Array.isArray(this.worldChests)) {
-            for (const c of this.worldChests) {
-                const d = Math.hypot(c.x - pcx, c.y - pcy);
-                if (d <= INTERACT_R && d < bestDist) {
-                    bestDist = d;
-                    bestKind = 'worldchest';
-                }
-            }
-        }
-
-        if (bestKind === 'bank') {
-            this.authorityClient.sendOpenBank();
-        } else if (bestKind === 'merchant') {
-            this.authorityClient.sendInteract();
-        } else if (bestKind === 'worldchest') {
-            this.authorityClient.sendOpenChest();
-        }
-    }
-
     setupInput(){
         if (this._inputAttached) return;
         this._inputAttached = true;
@@ -1135,18 +1084,47 @@ export class Game {
                 }
             }
 
-            // Universal interact ('e' or 'f'): opens whichever interactable (chest, merchant, bank) is closest
-            if ((isKey('e') || isKey('f')) && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen) {
+            // ONE INTENT PER KEY, and range is always the AUTHORITY's call.
+            //
+            // SOMET-471: a "universal interact" key that picked the NEAREST of
+            // merchant/bank/chest client-side made the loser unreachable. The
+            // bank post is derived one tile from the merchant post
+            // (backend/src/services/mapService.js villageBankPost), and the
+            // entry village's spawn point is 82px from the bank against 113px
+            // from the merchant -- both inside the authority's INTERACT_RADIUS
+            // of 120, but "nearest wins" ate every merchant press, so the shop
+            // could not be opened at all. The authority resolves the two posts
+            // with two SEPARATE proximity picks for exactly this reason; see
+            // nearestBankVillage's header in backend/src/authority/server.js.
+            //
+            // Each key therefore NAMES the interaction it wants and the server
+            // decides whether anything of that kind is in range; a refusal
+            // comes back as an `error` frame and is already toasted. Keeping
+            // the radius out of the client is also what stops a second copy of
+            // INTERACT_RADIUS from drifting from the first.
+
+            // Merchant shop ('e'): closes an open shop, or asks the server
+            // whether a merchant is in range.
+            if (isKey('e') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
                 if (this.shopOpen) { this.shopOpen = false; return; }
-                if (this.bankOpen) { this.bankOpen = false; return; }
-                this._interactClosest();
+                if (this.authorityClient) this.authorityClient.sendInteract();
                 return;
             }
 
-            // Account chest ('b'):
+            // Account chest (SOMET-310) ('b'): closes an open bank panel, or
+            // asks the server whether a bank post is in range.
             if (isKey('b') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
+                return;
+            }
+
+            // World chest (SOMET-372) ('f'): asks the server to open the
+            // nearest chest. Its own key rather than a smarter 'e' -- see the
+            // block comment above.
+            if (isKey('f') && this.state === 'playing' && this.chunked && !e.repeat
+                && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+                if (this.authorityClient) this.authorityClient.sendOpenChest();
                 return;
             }
 
@@ -1240,32 +1218,33 @@ export class Game {
             const pcx = this.player.x + this.player.width / 2;
             const pcy = this.player.y + this.player.height / 2;
 
-            // Direct click on world interactables (chest, bank, merchant)
+            // Direct click on a world interactable (merchant, bank, chest).
+            //
+            // Unlike a key, a click carries WHICH ONE in the gesture itself --
+            // the player pointed at a specific marker -- so choosing a kind
+            // here is not the guess the keys must never make. The two radii do
+            // different jobs and neither is a copy of the server's range rule:
+            // MARKER_CLICK_R is a hit-test ("did they point at this marker?"),
+            // and INTERACT_CLICK_R only decides whether the click is spent on
+            // an interaction or on an attack, so it is deliberately TIGHTER
+            // than the authority's INTERACT_RADIUS (120) -- same reasoning as
+            // RenderSystem's WORLD_CHEST_PROMPT_R. A click on a marker the
+            // player is nowhere near stays an attack rather than becoming a
+            // frame the server would only refuse.
+            const MARKER_CLICK_R = 50;
+            const INTERACT_CLICK_R = 110;
             if (this.camera) {
                 const w = cursorToWorld(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera);
-                if (Array.isArray(this.banks)) {
-                    for (const b of this.banks) {
-                        if (Math.hypot(b.x - w.x, b.y - w.y) <= 50 && Math.hypot(b.x - pcx, b.y - pcy) <= 150) {
-                            if (this.authorityClient) this.authorityClient.sendOpenBank();
-                            return;
-                        }
-                    }
+                const pointedAt = (t) => Math.hypot(t.x - w.x, t.y - w.y) <= MARKER_CLICK_R
+                    && Math.hypot(t.x - pcx, t.y - pcy) <= INTERACT_CLICK_R;
+                for (const m of (Array.isArray(this.merchants) ? this.merchants : [])) {
+                    if (pointedAt(m)) { this.authorityClient.sendInteract(); return; }
                 }
-                if (Array.isArray(this.merchants)) {
-                    for (const m of this.merchants) {
-                        if (Math.hypot(m.x - w.x, m.y - w.y) <= 50 && Math.hypot(m.x - pcx, m.y - pcy) <= 150) {
-                            if (this.authorityClient) this.authorityClient.sendInteract();
-                            return;
-                        }
-                    }
+                for (const b of (Array.isArray(this.banks) ? this.banks : [])) {
+                    if (pointedAt(b)) { this.authorityClient.sendOpenBank(); return; }
                 }
-                if (Array.isArray(this.worldChests)) {
-                    for (const c of this.worldChests) {
-                        if (Math.hypot(c.x - w.x, c.y - w.y) <= 50 && Math.hypot(c.x - pcx, c.y - pcy) <= 150) {
-                            if (this.authorityClient) this.authorityClient.sendOpenChest();
-                            return;
-                        }
-                    }
+                for (const c of (Array.isArray(this.worldChests) ? this.worldChests : [])) {
+                    if (pointedAt(c)) { this.authorityClient.sendOpenChest(); return; }
                 }
             }
 
