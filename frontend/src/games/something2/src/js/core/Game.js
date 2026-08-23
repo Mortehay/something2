@@ -89,6 +89,8 @@ export class Game {
         this.inventoryOpen = false;
         this.inventorySelectedItemId = null;
         this.inventoryDrag = null;
+        this.inventoryTab = 'all';
+        this.inventoryPage = 0;
 
         // Ground items (Slice 3b-2b): render-only store of items on the
         // ground, plus a local mirror of the server-owned auto-loot flag
@@ -354,6 +356,8 @@ export class Game {
         this.inventoryOpen = false;
         this.inventorySelectedItemId = null;
         this.inventoryDrag = null;
+        this.inventoryTab = 'all';
+        this.inventoryPage = 0;
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
         // SOMET-372. Cleared on join for the same reason merchants/landmarks
@@ -867,6 +871,14 @@ export class Game {
                 inventory: this.inventory,
                 inventoryOpen: this.inventoryOpen,
                 selectedItemId: this.inventorySelectedItemId,
+                inventoryView: {
+                    tab: this.inventoryTab,
+                    page: this.inventoryPage,
+                    gold: this.gold,
+                    drag: this.inventoryDrag,
+                    hoverX: this._cursorX ?? null,
+                    hoverY: this._cursorY ?? null,
+                },
                 groundItems: this.groundItems.all(),
                 worldChests: this.worldChests,
                 autoLoot: this.autoLoot,
@@ -944,6 +956,17 @@ export class Game {
             }
             return;
         }
+
+        if (hit.kind === 'invclose') { this.closeInventory(); return; }
+        if (hit.kind === 'invtab') {
+            // Page resets with the tab: page 3 of All is very likely past the
+            // end of Stones, and the layout would clamp it to 0 anyway — doing
+            // it here keeps the state and the render agreeing.
+            this.inventoryTab = hit.id;
+            this.inventoryPage = 0;
+            return;
+        }
+        if (hit.kind === 'invpage') { this.inventoryPage = hit.id; return; }
 
         if (hit.kind === 'autoloot') {
             // Only mirror the flip if the intent actually reached the server.

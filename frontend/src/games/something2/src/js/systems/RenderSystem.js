@@ -7,6 +7,7 @@ import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey,
 import { TileDiamondCache } from "./tileTexture.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
+import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
 import { effectProgress, effectAlpha, isoArcAngle, particlesAt } from "../core/vfx.js";
 import { anchorY } from "../core/attackAnchor.js";
@@ -145,7 +146,7 @@ export class RenderSystem {
     player, camera, chunkedMap, remotePlayers, localUserId,
     creatures = [], projectiles = [], mana = null, maxMana = null,
     stamina = null, maxStamina = null,
-    weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null,
+    weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
     groundItems = [], autoLoot = false, gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
@@ -311,7 +312,7 @@ export class RenderSystem {
     // pixel space — same space Game hit-tests clicks against).
     this._invHitAreas = [];
     if (inventoryOpen && inventory) {
-      this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, autoLoot);
+      this._invLayout = this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, autoLoot, inventoryView);
     }
 
     // Shop panel overlay (Slice D) — same overlay convention as the
@@ -1205,131 +1206,28 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
-  // Canvas-drawn inventory / paper-doll overlay — styled consistently with
-  // the HUD box above (same dark translucent panel, monospace HUD font).
-  // Draws:
-  //   - a paper-doll column: one labelled box per SLOTS entry showing the
-  //     equipped item's type name, greyed out when `selectedItemId` cannot
-  //     legally go there (per canEquipClient);
-  //   - an item list: each owned item's type name + a stat line (weapon:
-  //     damage/cooldown; armor: defense/resistances), highlighted when
-  //     selected.
-  // Every drawn slot/item box is pushed into `hitAreas` as
-  // {x, y, w, h, kind: 'slot' | 'item', id} so Game can hit-test clicks
-  // against this same frame's layout.
-  renderInventory(ctx, inventory, hitAreas, selectedItemId = null, autoLoot = false) {
-    const panelW = 760;
-    const panelH = 560;
-    const px = (GAME_WIDTH - panelW) / 2;
-    const py = (GAME_HEIGHT - panelH) / 2;
-
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(px, py, panelW, panelH);
-    ctx.strokeStyle = "#3a3a4e";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, panelW, panelH);
-
-    ctx.fillStyle = "#e5e7eb";
-    ctx.font = "14px monospace";
-    ctx.textBaseline = "top";
-    ctx.fillText("Inventory — [i] / [Esc] to close", px + 16, py + 14);
-
-    // Auto-loot toggle — top-right of the header row. Renders the server-
-    // owned flag mirrored locally; clicking it only requests the flip.
-    const alW = 150, alH = 26;
-    const alX = px + panelW - 16 - alW;
-    const alY = py + 10;
-    ctx.fillStyle = autoLoot ? "rgba(74,158,255,0.28)" : "rgba(40,40,60,0.85)";
-    ctx.fillRect(alX, alY, alW, alH);
-    ctx.strokeStyle = "#4a9eff";
-    ctx.strokeRect(alX, alY, alW, alH);
-    ctx.fillStyle = "#e5e7eb";
-    ctx.font = "12px monospace";
-    ctx.fillText(`Auto-loot: ${autoLoot ? "ON" : "OFF"}`, alX + 8, alY + 7);
-    hitAreas.push({ x: alX, y: alY, w: alW, h: alH, kind: "autoloot", id: null });
-
-    // Paper-doll column (left).
-    const dollX = px + 16;
-    const dollTop = py + 44;
-    const slotW = 320;
-    const slotH = 34;
-    const slotGap = 6;
-    ctx.font = "12px monospace";
-    SLOTS.forEach((slot, i) => {
-      const y = dollTop + i * (slotH + slotGap);
-      const equippedId = inventory.equipment[slot];
-      const equippedType = equippedId != null ? typeOf(inventory, equippedId) : null;
-      const disabled = selectedItemId != null && !canEquipClient(inventory, selectedItemId, slot);
-
-      ctx.fillStyle = disabled ? "rgba(60,60,70,0.5)" : "rgba(40,40,60,0.85)";
-      ctx.fillRect(dollX, y, slotW, slotH);
-      ctx.strokeStyle = disabled ? "#3a3a3a" : "#4a9eff";
-      ctx.strokeRect(dollX, y, slotW, slotH);
-      ctx.fillStyle = disabled ? "#6b7280" : "#e5e7eb";
-      ctx.fillText(`${slot}: ${equippedType ? equippedType.name : "-"}`, dollX + 8, y + 11);
-
-      hitAreas.push({ x: dollX, y, w: slotW, h: slotH, kind: "slot", id: slot });
-    });
-
-    // Drop button — only shown while an item is selected, directly below the
-    // paper-doll column.
-    if (selectedItemId) {
-      const dropW = slotW, dropH = 40;
-      const dropX = dollX;
-      const dropY = dollTop + SLOTS.length * (slotH + slotGap) + 12;
-      ctx.fillStyle = "rgba(74,158,255,0.28)";
-      ctx.fillRect(dropX, dropY, dropW, dropH);
-      ctx.strokeStyle = "#4a9eff";
-      ctx.strokeRect(dropX, dropY, dropW, dropH);
-      ctx.fillStyle = "#e5e7eb";
-      ctx.font = "13px monospace";
-      ctx.fillText("Drop selected item", dropX + 8, dropY + 13);
-      hitAreas.push({ x: dropX, y: dropY, w: dropW, h: dropH, kind: "drop", id: selectedItemId });
-    }
-
-    // Owned-item list (right).
-    const listX = dollX + slotW + 24;
-    const listTop = py + 44;
-    const listW = px + panelW - 16 - listX;
-    const itemH = 40;
-    const itemGap = 6;
-    const listBottom = py + panelH - 16;
-    ctx.font = "12px monospace";
-    let y = listTop;
-    for (const item of inventory.items) {
-      if (y + itemH > listBottom) break; // no scrolling yet; loadouts fit today
-      const type = inventory.types.get(item.typeId);
-      if (!type) continue;
-      const selected = item.id === selectedItemId;
-
-      ctx.fillStyle = selected ? "rgba(74,158,255,0.28)" : "rgba(40,40,60,0.85)";
-      ctx.fillRect(listX, y, listW, itemH);
-      ctx.strokeStyle = selected ? "#4a9eff" : "#3a3a4e";
-      ctx.strokeRect(listX, y, listW, itemH);
-
-      ctx.fillStyle = "#e5e7eb";
-      ctx.fillText(type.name, listX + 8, y + 6);
-
-      const statLine = type.category === "weapon"
-        ? `dmg ${type.damage}  cd ${type.cooldown}s${type.two_handed ? "  (2H)" : ""}`
-        : `def ${type.defense}${
-            Object.keys(type.resistances || {}).length
-              ? "  " + Object.entries(type.resistances).map(([el, v]) => `${el} ${v}`).join(", ")
-              : ""
-          }`;
-      ctx.fillStyle = "#9ca3af";
-      ctx.fillText(statLine, listX + 8, y + 22);
-
-      hitAreas.push({ x: listX, y, w: listW, h: itemH, kind: "item", id: item.id });
-      y += itemH + itemGap;
-    }
-    if (inventory.items.length === 0) {
-      ctx.fillStyle = "#6b7280";
-      ctx.fillText("No items owned.", listX + 8, listTop + 6);
-    }
-
-    ctx.restore();
+  // Canvas-drawn inventory window. Delegates to systems/inventoryPanel.js:
+  // the layout is pure and unit-tested there, and this method only forwards
+  // state, republishes the hit areas the layout produced (so Game can
+  // hit-test this same frame) and returns the layout for the drag handlers.
+  renderInventory(ctx, inventory, hitAreas, selectedItemId = null, autoLoot = false, view = null) {
+    const v = view || {};
+    const state = {
+      inventory,
+      selectedItemId,
+      autoLoot,
+      tab: v.tab || "all",
+      page: v.page || 0,
+      gold: v.gold ?? 0,
+      drag: v.drag || null,
+      hoverX: v.hoverX ?? null,
+      hoverY: v.hoverY ?? null,
+      playerImage: this.imageManager ? this.imageManager.get("player") : null,
+    };
+    const layout = layoutInventory(state);
+    for (const a of layout.hitAreas) hitAreas.push(a);
+    drawInventory(ctx, layout, state);
+    return layout;
   }
 
   // Canvas-drawn merchant shop overlay (Slice D) — same panel/hit-area
