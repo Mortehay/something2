@@ -8,19 +8,30 @@
 //
 // The one property that is NOT provisional: every formula in playerStats.js
 // is an identity at BASE_STAT. A fresh character must reproduce the game's
-// pre-A2 numbers exactly -- 100 hp, 100 mana, 10 mana/s, x1.0 damage, x1.0
-// cooldown, 0.5 sell fraction. Change a growth rate freely; never change a
-// base such that a level-1 character's numbers move.
+// pre-A2 numbers exactly -- 10 mana/s, x1.0 damage, x1.0 cooldown, 0.5 sell
+// fraction, and for a WARRIOR 100 hp / 100 mana. Change a growth rate freely;
+// never change a base such that a level-1 character's numbers move.
+//
+// SOMET-486 narrowed the pool half of that identity from "every class" to
+// "Warrior": at BASE_STAT a character's pools are exactly its class's base
+// pools, and Ranger/Mage are deliberately not 100/100. Every live character
+// predating 486 is a Warrior, so nothing moved.
 
 const BASE_STAT = 5;
 const STAT_KEYS = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 const MAX_LEVEL = 150;
 
-// CON -> max hp. Base matches PLAYER_MAX_HP (authority/world.js:17).
+// CON -> max hp, INT -> max mana.
+//
+// SOMET-486 demoted HP_BASE/MANA_BASE from the UNIVERSAL base to the FALLBACK
+// base. A character whose class row is known contributes entity_types.max_hp /
+// max_mana instead; these two are what derivePlayerStats uses when there is no
+// class row, or its pool columns are NULL. They stay at 100/100 because that
+// is Warrior's base and Warrior is what every character predating 486 is --
+// see the migration 1714440509000 header for the three classes' numbers.
 const HP_BASE = 100;
 const HP_PER_CON = 10;
 
-// INT -> max mana. Base matches PLAYER_MAX_MANA (authority/world.js:18).
 const MANA_BASE = 100;
 const MANA_PER_INT = 10;
 

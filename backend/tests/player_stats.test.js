@@ -48,6 +48,59 @@ test('the sell fraction is capped strictly below 1.0 at any charisma', () => {
     'a sell fraction of 1.0 or more is a buy-low-sell-high money printer');
 });
 
+// SOMET-486. Pools now start from the CLASS's base, and the stat scaling sits
+// on top of it. Every expected value below is hand-computed from the migration
+// 1714440509000 numbers and progressionConstants' growth rates, never by
+// calling the function twice or re-summing its own constants.
+test('class base pools replace the universal base, and stats still scale on top', () => {
+  const WARRIOR = { maxHp: 100, maxMana: 100 };
+  const RANGER = { maxHp: 85, maxMana: 115 };
+  const MAGE = { maxHp: 75, maxMana: 150 };
+
+  // At BASE_STAT a character's pools ARE its class's base pools.
+  assert.deepEqual(
+    [derivePlayerStats(DEFAULT_PROGRESSION, WARRIOR).maxHp, derivePlayerStats(DEFAULT_PROGRESSION, WARRIOR).maxMana],
+    [100, 100], 'Warrior is frozen at the pre-486 numbers -- every live character is one');
+  assert.deepEqual(
+    [derivePlayerStats(DEFAULT_PROGRESSION, RANGER).maxHp, derivePlayerStats(DEFAULT_PROGRESSION, RANGER).maxMana],
+    [85, 115]);
+  assert.deepEqual(
+    [derivePlayerStats(DEFAULT_PROGRESSION, MAGE).maxHp, derivePlayerStats(DEFAULT_PROGRESSION, MAGE).maxMana],
+    [75, 150]);
+
+  // AC4: CON still buys HP and INT still buys mana, ON TOP of the class base
+  // rather than instead of it. CON 15 is 10 above BASE_STAT(5) -> +100 hp;
+  // INT 8 is 3 above -> +30 mana. A Mage: 75+100 = 175 hp, 150+30 = 180 mana.
+  const grown = derivePlayerStats(at({ constitution: 15, intelligence: 8 }), MAGE);
+  assert.equal(grown.maxHp, 175, 'HP_PER_CON must add to the class base, not replace it');
+  assert.equal(grown.maxMana, 180, 'MANA_PER_INT must add to the class base, not replace it');
+
+  // The same growth on a Warrior lands 25 hp higher and 50 mana lower --
+  // the class difference must SURVIVE levelling, not wash out.
+  const warriorGrown = derivePlayerStats(at({ constitution: 15, intelligence: 8 }), WARRIOR);
+  assert.equal(warriorGrown.maxHp - grown.maxHp, 25);
+  assert.equal(grown.maxMana - warriorGrown.maxMana, 50);
+});
+
+// AC5. entity_types.max_hp/max_mana are nullable and default to 0, so both
+// shapes have to fail soft. A NaN pool is an unkillable or instantly-dead
+// player; a 0 pool is a player who is dead on arrival.
+test('a missing, null or zero class pool falls back to HP_BASE/MANA_BASE, never NaN', () => {
+  for (const [label, pools] of [
+    ['omitted', undefined],
+    ['null', null],
+    ['null columns', { maxHp: null, maxMana: null }],
+    ['zero columns (the entity_types default)', { maxHp: 0, maxMana: 0 }],
+    ['non-numeric', { maxHp: 'lots', maxMana: {} }],
+  ]) {
+    const s = derivePlayerStats(DEFAULT_PROGRESSION, pools);
+    assert.equal(s.maxHp, 100, `maxHp with ${label} pools`);
+    assert.equal(s.maxMana, 100, `maxMana with ${label} pools`);
+  }
+  // And the fallback still scales, rather than being a flat constant.
+  assert.equal(derivePlayerStats(at({ constitution: 15 }), null).maxHp, 200);
+});
+
 test('a malformed progression falls back to base rather than NaN', () => {
   const s = derivePlayerStats({});
   assert.equal(s.maxHp, 100);

@@ -222,12 +222,21 @@ const CREATURE_DROPS = [
 // these three rows -- so losing them does not degrade gracefully the way a
 // missing creature does, it orphans every character on the server.
 //
-// WARRIOR'S NUMBERS ARE THE 'Player' ROW'S NUMBERS (1714440006000). The
-// migration derives them with a SELECT so the two cannot drift there; this
-// file has to state them literally, so it IS a second source of truth. That is
-// covered rather than hoped for: playable_classes_db.test.js asserts Warrior
-// equals Player field for field and fails if either side moves. If you change
-// Player, change Warrior here too.
+// WARRIOR'S STATS ARE THE 'Player' ROW'S STATS (1714440006000), except its
+// POOLS. Migration 1714440091000 derives the stats with a SELECT so the two
+// cannot drift there; this file has to state them literally, so it IS a second
+// source of truth. That is covered rather than hoped for:
+// playable_classes_db.test.js asserts Warrior equals Player on every stat
+// column and fails if either side moves.
+//
+// SOMET-486 broke the pools out of that clone. The three classes' base pools
+// below are now the numbers the game actually plays with -- see migration
+// 1714440509000's header for each number and why it is what it is. The pools
+// here MUST equal that migration's CLASS_POOLS: the migration fixes an
+// existing database, this file rebuilds a lost row, and a database that lost
+// its class rows and got them back from a stale seeder would hand every new
+// Mage 70 mana while the migration's databases give 150. The legacy 'Player'
+// row keeps its old 50 mana; nothing in src/ reads it.
 //
 // is_creature is deliberately absent (defaults false): a class is not a
 // spawnable creature, and the wild-spawn pool reads that flag.
@@ -235,17 +244,17 @@ const PLAYABLE_CLASSES = [
   {
     name: 'Warrior', color: '#b03a2e', walkable: true, spawn_tiles: [], chance: 0,
     strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
-    hp: 100, max_hp: 100, hp_regen_rate: 1, mana: 50, max_mana: 50, mana_regen_rate: 0.5,
+    hp: 100, max_hp: 100, hp_regen_rate: 1, mana: 100, max_mana: 100, mana_regen_rate: 0.5,
   },
   {
     name: 'Ranger', color: '#1e8449', walkable: true, spawn_tiles: [], chance: 0,
     strength: 10, dexterity: 12, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
-    hp: 85, max_hp: 85, hp_regen_rate: 1, mana: 50, max_mana: 50, mana_regen_rate: 0.5,
+    hp: 85, max_hp: 85, hp_regen_rate: 1, mana: 115, max_mana: 115, mana_regen_rate: 0.5,
   },
   {
     name: 'Mage', color: '#5b2c94', walkable: true, spawn_tiles: [], chance: 0,
     strength: 10, dexterity: 10, constitution: 10, intelligence: 12, wisdom: 10, charisma: 10,
-    hp: 75, max_hp: 75, hp_regen_rate: 1, mana: 70, max_mana: 70, mana_regen_rate: 0.5,
+    hp: 75, max_hp: 75, hp_regen_rate: 1, mana: 150, max_mana: 150, mana_regen_rate: 0.5,
   },
 ];
 

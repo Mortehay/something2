@@ -3,6 +3,13 @@
 // Every consumer of progression reads derivePlayerStats' bundle. Nothing
 // outside this module and progressionStore.js reads the raw stat columns;
 // that is what keeps six stats from becoming six scattered formulas.
+//
+// SOMET-486: pools now take the CLASS's base as their starting point, passed
+// in as `classPools`. This is still the only place a pool is computed -- the
+// class row supplies a base, not a formula. Anything that puts a second
+// `+ classSomething` on a pool outside this function reintroduces the exact
+// split that let character select advertise 100/85/75 for eleven months while
+// the game handed everyone 100.
 
 const C = require('./progressionConstants.js');
 
@@ -35,12 +42,36 @@ function stat(progression, key) {
   return Number.isFinite(n) && n >= C.BASE_STAT ? n : C.BASE_STAT;
 }
 
+// A class's base pool, or the universal fallback when there is no class row,
+// the column is NULL, or it is not a finite number.
+//
+// SOMET-486: HP_BASE/MANA_BASE stopped being the universal base and became the
+// FALLBACK. Every caller that knows which class a character is must pass
+// classPools -- see characters.js `classPoolsFromRow`, which is the one place
+// the entity_types columns are read. A caller that does not know the class
+// (a pure unit test, a progression row with no character context) still gets
+// the pre-486 numbers, which is what keeps Warrior-only databases unmoved.
+//
+// Fails soft rather than producing NaN, for exactly the reason stat() does: a
+// NaN maxHp is an unkillable or instantly-dead player.
+function poolBase(classPools, key, fallback) {
+  const v = classPools == null ? undefined : classPools[key];
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 // The single source of every number a stat affects.
-function derivePlayerStats(progression) {
+//
+// `classPools` is `{ maxHp, maxMana }` -- the class's BASE pools, before any
+// stat scaling. It is the class's whole mechanical contribution to pools;
+// there is deliberately no second per-class term anywhere else (contract
+// §6.11: start nodes grant RULES, never raw pool bonuses, so class identity
+// cannot be counted twice).
+function derivePlayerStats(progression, classPools = null) {
   const above = (key) => stat(progression, key) - C.BASE_STAT;
   return {
-    maxHp: C.HP_BASE + C.HP_PER_CON * above('constitution'),
-    maxMana: C.MANA_BASE + C.MANA_PER_INT * above('intelligence'),
+    maxHp: poolBase(classPools, 'maxHp', C.HP_BASE) + C.HP_PER_CON * above('constitution'),
+    maxMana: poolBase(classPools, 'maxMana', C.MANA_BASE) + C.MANA_PER_INT * above('intelligence'),
     meleeMult: round4(1 + C.MELEE_PER_STR * above('strength')),
     spellMult: round4(1 + C.SPELL_PER_INT * above('intelligence')),
     // Lower is faster. Floored so attack rate stays bounded.

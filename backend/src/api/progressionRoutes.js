@@ -8,6 +8,13 @@
 // replacement is POST /passives/:nodeId (SOMET-475), which spends one
 // passive point on one tree node; POST /respec now resets the tree.
 //
+// SOMET-486: every derivePlayerStats call below passes `character.classPools`
+// -- the class base pools resolveCharacter already has in hand from
+// ownedCharacter. Omitting it on any one of the three would make the character
+// sheet report a Mage's max HP as 100 while the world it is standing in gives
+// it 75, which is the same advertise-vs-play split 486 exists to close, just
+// moved from character select to the sheet.
+//
 // NOTHING here computes a stat. `loadProgression` returns the row already
 // composed by statComposition.js, so every field below is lifted off that one
 // object -- `effective`, `sources` and `modifiers` are never re-summed, on
@@ -74,7 +81,7 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
       const quote = await respecQuote(pool, req.user.id, progression.level);
       return res.status(200).json({
         progression,
-        stats: derivePlayerStats(progression),
+        stats: derivePlayerStats(progression, character.classPools),
         xpFloor: xpFloor(progression.level),
         xpToNext: xpToNext(progression.level),
         respecCost: quote.respecCost,
@@ -106,7 +113,7 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
       const r = await allocateNode(pool, character.id, req.params.nodeId);
       if (!r.ok) return res.status(400).json({ error: r.reason });
       const progression = await loadProgression(pool, character.id);
-      const stats = derivePlayerStats(progression);
+      const stats = derivePlayerStats(progression, character.classPools);
       // Best-effort, same contract as before: this is what sends the ordered
       // websocket `progression` frame the client treats as its ONLY writer of
       // progression state (CharacterSheet.jsx's F1 header). The HTTP body
@@ -129,7 +136,7 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
       const r = await respecPassives(pool, req.user.id, character.id);
       if (!r.ok) return res.status(402).json({ error: r.reason, cost: r.cost });
       const progression = await loadProgression(pool, character.id);
-      const stats = derivePlayerStats(progression);
+      const stats = derivePlayerStats(progression, character.classPools);
       refreshLivePlayerStats(req.user.id, progression, stats);
       return res.status(200).json({ progression, stats, gold: r.gold });
     } catch (err) {

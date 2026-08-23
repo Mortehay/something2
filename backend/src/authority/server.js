@@ -752,10 +752,23 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // has already disconnected has no inventory to read, so the buff list is
   // empty and the frame carries the unbuffed bundle -- there is no live
   // session left for it to disagree with.
-  const framedStats = (entry, userId, progression) => {
+  // SOMET-486 widened this from "the frame's stats" to THE authority's only
+  // derive. It was already the shape three other sites had each hand-inlined
+  // (kill level-up, chest level-up, refreshPlayerStats), and adding a second
+  // per-player input -- the class base pools -- to four copies is how a
+  // Ranger ends up joining at 85 hp and snapping to 100 on its first
+  // level-up. There is now exactly ONE derivePlayerStats call in this file,
+  // and progression_frame_shape.test.js pins that.
+  //
+  // `over` exists for the join path alone, which derives BEFORE addPlayer:
+  // the player is not in the world yet, so neither its inventory nor its
+  // class pools can be read off it.
+  const framedStats = (entry, userId, progression, over = {}) => {
     const p = entry.world.getPlayer(userId);
-    const buffs = p ? socketedBuffStones(p.inv, entry.world.weapons) : [];
-    return derivePlayerStats(withStoneBonuses(progression, buffs));
+    const inv = over.inv !== undefined ? over.inv : (p ? p.inv : null);
+    const buffs = inv ? socketedBuffStones(inv, entry.world.weapons) : [];
+    const classPools = over.classPools !== undefined ? over.classPools : (p ? p.classPools : null);
+    return derivePlayerStats(withStoneBonuses(progression, buffs), classPools);
   };
 
   // Single fire-and-forget entry point for a killed creature: named once here
@@ -797,13 +810,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // PvP path is the one gap that check does not cover, hence this
           // guard rather than relying on tick timing alone.
           if (p && p.hp > 0) {
-            // Magic Stones (SOMET-245) Task 6: fold in any socketed buff-stone
-            // bonuses before deriving, so a kill-triggered level-up does not
-            // silently drop a buff already reflected in this player's live
-            // stats -- derivePlayerStats(progression) alone would compute the
-            // RAW bundle and overwrite the buffed one applyDerivedStats set.
-            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
-            entry.world.applyDerivedStats(result.killerUserId, derivePlayerStats(withStoneBonuses(progression, buffs)));
+            // framedStats folds in socketed buff-stone bonuses AND the class
+            // base pools, so a kill-triggered level-up drops neither: a raw
+            // derivePlayerStats(progression) here would overwrite the buffed
+            // bundle applyDerivedStats set (SOMET-245 Task 6) and would reset
+            // a Ranger's 85 hp to 100 (SOMET-486).
+            entry.world.applyDerivedStats(result.killerUserId, framedStats(entry, result.killerUserId, progression));
           }
         }
         // Best-effort: the killer's socket may be gone (disconnected between
@@ -1456,7 +1468,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // from a previous session -- fold that bonus in here too, or a
         // rejoining player would sit at the wrong maxHp/maxMana/etc until
         // their next kill, chest, or socket/unsocket action re-derives it.
-        const stats = derivePlayerStats(withStoneBonuses(progression, socketedBuffStones(inv, entry.world.weapons)));
+        //
+        // SOMET-486: `character.classPools` is what finally makes the class
+        // real. Before this, every class joined at HP_BASE/MANA_BASE and
+        // character select's 100/85/75 was decoration. `over` is needed
+        // because addPlayer has not run yet -- there is no player in the world
+        // to read either the inventory or the pools off.
+        const stats = framedStats(entry, ws.userId, progression, {
+          inv, classPools: character.classPools,
+        });
 
         // A newer session for this same account may have won (and kicked
         // us) while we awaited inventory above. If so, our reservation was
@@ -1477,7 +1497,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // spawn.bind (SOMET-294) is the player_binds row as loaded, world id and
         // all -- distinct from spawn.respawn, which is always a point in THIS
         // world. See loadSpawn for why the two are separate facts.
-        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id, spawn.bind);
+        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id, spawn.bind, character.classPools);
 
         // Latch the tile this join landed on, for EVERY join -- not just a
         // doorway arrival. A resume or a map fast-travel spawns the character
@@ -2104,11 +2124,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // max HP in the DB but never in the running game until reconnect --
         // "the exact defect A1's review caught."
         if (result.leveledUp && p.hp > 0) {
-          // Magic Stones (SOMET-245) Task 6: same fold-in as onCreatureDeath's
-          // level-up path above -- a chest-XP level-up must not overwrite an
-          // already-live buff-stone bonus with the unbuffed bundle.
-          const buffs = socketedBuffStones(p.inv, entry.world.weapons);
-          entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(result.progression, buffs)));
+          // Same fold-in as onCreatureDeath's level-up path above -- a chest-XP
+          // level-up must not overwrite an already-live buff-stone bonus, nor a
+          // class's base pools, with the unbuffed class-blind bundle.
+          entry.world.applyDerivedStats(ws.userId, framedStats(entry, ws.userId, result.progression));
         }
         send(ws, {
           type: 'chestOpened', chestId: chest.id, items: result.items,
@@ -2900,8 +2919,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // socketed buff stones folded in, the same way the other three
       // applyDerivedStats call sites do, and push THAT (not the passed-in
       // `stats`) both into the world and onto the wire.
-      const buffs = socketedBuffStones(p.inv, entry.world.weapons);
-      const buffedStats = derivePlayerStats(withStoneBonuses(progression, buffs));
+      //
+      // SOMET-486: framedStats is what makes the class base pools arrive with
+      // the stones rather than being separately remembered here. progression
+      // Routes' own derive IS class-aware, but it cannot see this session's
+      // sockets, so the recompute stays and must not lose the pools doing it.
+      const buffedStats = framedStats(entry, uid, progression);
       entry.world.applyDerivedStats(uid, buffedStats);
       const sock = entry.sockets.get(uid);
       if (sock) send(sock, { type: 'progression', progression, stats: buffedStats });
