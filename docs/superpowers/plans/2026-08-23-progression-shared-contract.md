@@ -163,6 +163,45 @@ module.exports = { generatePassiveTree };
 Deterministic: same `spec` in, byte-identical output. No `Math.random()`, no
 `Date.now()`.
 
+### Additions made by the Group C plan (T7)
+
+`composeStats` returns one more key than §2 originally listed:
+
+```js
+rules: { lifeCostMultiplier: 1, treeCharmBonus: 0, cooldownFloor: null, regenLifeShare: 0 }
+```
+
+Keystone grants of `{ type: 'rule', rule, value }` are aggregated here. Defaults
+are the identity for each rule's combination mode (`product` -> 1, `sum` -> 0,
+`min` -> null meaning "no keystone lowered it"). **`charm.js`'s
+`treeCharmBonus` argument (§2) is `composeStats(...).rules.treeCharmBonus`, and
+`lifeCost.js`'s `lifeCostMultiplier` argument is
+`composeStats(...).rules.lifeCostMultiplier`.**
+
+`passivePoints` on the wire is `player_progression.passive_points` (§6.7),
+read straight off the row. T2 grants into that column; T7 spends from it on
+allocate and refunds into it on respec.
+
+The fields §4 and §6.2 add to the `progression` frame (`passivePoints`,
+`allocatedNodeIds`, `sources`, `modifiers`, `effective`, plus `rules`) live
+**inside** the `progression` object, not beside it: `Game.js`'s
+`onProgression` handler keeps `msg.progression` and discards every sibling
+field. Per §6.3, `stats` is the one exception — it stays a sibling of
+`progression` on every frame, matching the shape `refreshPlayerStats` already
+sends.
+
+`GET /api/progression` additionally carries `respecDisabled` — the §6.4
+predicate T8 needs — plus the `gold` and `respecCost` it is computed from, so
+the tree overlay never has to reproduce the affordability rule client-side
+(that is the `xpCurve.js`/`RESPEC_BASE` drift the F2 header names).
+
+Two admin routes are added to the §3 table:
+
+| Method | Path | Task | Auth |
+|---|---|---|---|
+| `GET` | `/api/passive-nodes` | T9 | admin; `?search=&sector=&kind=&limit=&offset=` |
+| `PUT` | `/api/passive-nodes/:id` | T9 | admin; `label`, `kind`, `grants` only |
+
 ## 3. HTTP routes
 
 | Method | Path | Task | Auth |
