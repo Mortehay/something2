@@ -16,6 +16,7 @@ import { inputVector, movementKeys } from "../entities/Player.js";
 import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { aimVector } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
+import { resolveDrop } from '../systems/inventoryPanel.js';
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
 import { addBlasts, pruneBlasts } from "./blasts.js";
@@ -35,6 +36,11 @@ const DEFAULT_WEAPON_NAME = "dagger";
 // Native Map shadowed by the world Map import above; alias to keep the
 // distinction obvious at the call sites.
 const NativeMap = globalThis.Map;
+
+// A press that never travels this far is a CLICK, not a drag. Without the
+// threshold every click on a cell would arm a drag, and the select-then-click-
+// a-slot flow the panel has always had would stop working.
+const DRAG_THRESHOLD_PX = 4;
 
 export class Game {
     constructor() {
@@ -709,6 +715,7 @@ export class Game {
         if (this._blurHandler) window.removeEventListener('blur', this._blurHandler);
         if (this._mouseMoveHandler) this.canvas.removeEventListener('mousemove', this._mouseMoveHandler);
         if (this._mouseDownHandler) this.canvas.removeEventListener('mousedown', this._mouseDownHandler);
+        if (this._mouseUpHandler) this.canvas.removeEventListener('mouseup', this._mouseUpHandler);
         if (this.authorityClient) this.authorityClient.disconnect();
 
         cancelAnimationFrame(this.animationFrameId);
@@ -923,6 +930,18 @@ export class Game {
     // 'i' toggle all land here so they cannot drift: an in-flight drag that
     // outlived its panel would otherwise resolve against a layout that is no
     // longer on screen.
+    // Canvas-pixel position of a mouse event. mousedown/mouseup use this
+    // rather than the last _cursorX/_cursorY, so a press is located by its own
+    // event: a browser always sends a mousemove first, but depending on that
+    // makes the press silently wrong whenever it does not.
+    _canvasPoint(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        return {
+            x: (e.clientX - rect.left) * (this.canvas.width / rect.width),
+            y: (e.clientY - rect.top) * (this.canvas.height / rect.height),
+        };
+    }
+
     closeInventory() {
         this.inventoryOpen = false;
         this.inventorySelectedItemId = null;
@@ -1132,10 +1151,23 @@ export class Game {
             const rect = this.canvas.getBoundingClientRect();
             this._cursorX = (e.clientX - rect.left) * (this.canvas.width / rect.width);
             this._cursorY = (e.clientY - rect.top) * (this.canvas.height / rect.height);
+            if (this.inventoryDrag) {
+                this.inventoryDrag.x = this._cursorX;
+                this.inventoryDrag.y = this._cursorY;
+                const dx = this._cursorX - this.inventoryDrag.startX;
+                const dy = this._cursorY - this.inventoryDrag.startY;
+                if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) this.inventoryDrag.armed = true;
+            }
         };
         this._mouseDownHandler = (e) => {
             if (e.button !== 0) return;
             if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
+            // Locate the press by its own event and keep the tracked cursor in
+            // step, so every path below (panel hit-tests and the attack aim)
+            // reads the same point.
+            const pt = this._canvasPoint(e);
+            this._cursorX = pt.x;
+            this._cursorY = pt.y;
             // While a panel is open, clicks hit-test it and must NOT also
             // fire an attack. Shop is checked first — the two panels never
             // stack (see the 'e'/'i' key handlers above), but if they ever
@@ -1149,7 +1181,21 @@ export class Game {
                 return;
             }
             if (this.inventoryOpen) {
-                this._handleInventoryClick(this._cursorX ?? 0, this._cursorY ?? 0);
+                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+                const areas = (this.renderSystem && this.renderSystem._invHitAreas) || [];
+                const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
+                // A press on a cell or a slot is a drag CANDIDATE: it arms only
+                // once the pointer travels, and if it never does, mouseup
+                // issues the click it would otherwise have been.
+                if (hit && (hit.kind === 'item' || hit.kind === 'slot')) {
+                    const itemId = hit.kind === 'item' ? hit.id : (this.inventory.equipment[hit.id] ?? null);
+                    this.inventoryDrag = {
+                        itemId, from: { kind: hit.kind, id: hit.id },
+                        x, y, startX: x, startY: y, armed: false,
+                    };
+                    return;
+                }
+                this._handleInventoryClick(x, y);
                 return;
             }
             const pcx = this.player.x + this.player.width / 2;
@@ -1158,12 +1204,43 @@ export class Game {
             this.authorityClient.sendAttack(nx, ny);
         };
 
+        this._mouseUpHandler = (e) => {
+            if (e.button !== 0) return;
+            const drag = this.inventoryDrag;
+            if (!drag) return;
+            this.inventoryDrag = null;
+            // The panel closed while the button was down (Escape, a world
+            // change): there is no layout left on screen to resolve against,
+            // so the gesture is simply dropped.
+            if (!this.inventoryOpen) return;
+            const { x, y } = this._canvasPoint(e);
+
+            if (!drag.armed) {
+                // Never travelled: this was a click all along.
+                this._handleInventoryClick(drag.startX, drag.startY);
+                return;
+            }
+            const layout = this.renderSystem && this.renderSystem._invLayout;
+            if (!layout || !this.authorityClient) return;
+            const r = resolveDrop(layout, drag, { x, y }, this.inventory);
+            if (r.action === 'equip') {
+                this.authorityClient.sendEquip(r.itemId, r.slot);
+                this.inventorySelectedItemId = null;
+            } else if (r.action === 'unequip') {
+                this.authorityClient.sendUnequip(r.slot);
+            } else if (r.action === 'drop') {
+                this.authorityClient.sendDrop(r.itemId);
+                this.inventorySelectedItemId = null;
+            }
+        };
+
         window.addEventListener('keydown', this._keydownHandler);
         window.addEventListener('keyup', this._keyupHandler);
         window.addEventListener('contextmenu', this._contextMenuHandler);
         window.addEventListener('blur', this._blurHandler);
         this.canvas.addEventListener('mousemove', this._mouseMoveHandler);
         this.canvas.addEventListener('mousedown', this._mouseDownHandler);
+        this.canvas.addEventListener('mouseup', this._mouseUpHandler);
     }
 
     startGame(){

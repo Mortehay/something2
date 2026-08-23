@@ -342,6 +342,22 @@ export function drawInventory(ctx, layout, state) {
     }
   }
 
+  // Ghost last so it rides above every panel element it passes over. Drawn
+  // only once ARMED: an un-armed candidate is still just a click.
+  if (drag && drag.armed && drag.itemId != null) {
+    const src = layout.cells.find((c) => c.item && c.item.id === drag.itemId);
+    const label = src && src.type ? initials(src.type.name) : "??";
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = src && src.type ? (CATEGORY_TINT[src.type.category] || "rgba(55,55,70,0.9)") : "rgba(55,55,70,0.9)";
+    ctx.fillRect(drag.x - CELL / 2, drag.y - CELL / 2, CELL, CELL);
+    ctx.strokeStyle = "#4a9eff";
+    ctx.strokeRect(drag.x - CELL / 2, drag.y - CELL / 2, CELL, CELL);
+    ctx.fillStyle = "#e5e7eb";
+    ctx.font = "14px monospace";
+    ctx.fillText(label, drag.x - CELL / 2 + 8, drag.y - 8);
+    ctx.globalAlpha = 1;
+  }
+
   ctx.restore();
 }
 
