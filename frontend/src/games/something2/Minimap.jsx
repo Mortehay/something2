@@ -2,53 +2,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import styled from 'styled-components';
 import { fetchWorldOverview, needsRefetch } from './src/js/net/worldOverviewClient.js';
-import { drawMinimap } from './src/js/systems/minimapRenderer.js';
+import { renderFrame } from './src/js/systems/minimapFrame.js';
 import { createTerrainLayerCache, domCanvasFactory } from './src/js/systems/minimapTerrainLayer.js';
 import { MAP_TILE_SIZE } from './src/js/core/constants.js';
 
 const SIZE = 180;         // minimap box (css px)
 const CELL_PX = 12;       // iso diamond width per coarse cell
 const REFETCH_MARGIN = 40; // tiles from window edge that trigger a refetch
-const FALLBACK_STEP = 4;  // projection step before the first overview lands
 
 const LS_KEY = 'something2:minimapVisible';
-
-// Draw one frame into `ctx` for a box of `box` css px at `cellW` diamond size.
-// Returns true if it drew live content (a snapshot existed).
-function renderFrame(ctx, dpr, box, cellW, { gameRef, overviewRef, tileColors, layerCache }) {
-  const snap = gameRef.current && gameRef.current.getMinimapSnapshot
-    ? gameRef.current.getMinimapSnapshot() : null;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, box, box);
-  if (!snap || !snap.player || !Number.isFinite(snap.player.x) || !Number.isFinite(snap.player.y)) return false;
-  const pCol = snap.player.x / MAP_TILE_SIZE;
-  const pRow = snap.player.y / MAP_TILE_SIZE;
-  let overview = overviewRef.current;
-  if (overview && overview.world_id !== snap.worldId) overview = null;
-  drawMinimap(ctx, {
-    overview,
-    // SOMET-444. The terrain arrives as a pre-rendered bitmap. `layerCache`
-    // rebuilds it only when the overview window, the palette, the diamond size
-    // or the device pixel ratio changes -- so the per-cell loop that used to
-    // cost the expand modal half its frame rate now runs once per refetch.
-    terrainLayer: layerCache.get(overview, tileColors, cellW, dpr),
-    player: { col: pCol, row: pRow, dir: snap.player.dir },
-    creatures: snap.creatures || [],
-    doorways: (overview ? overview.doorways : (snap.doorways || [])).map((d) => {
-      const live = (snap.doorways || []).find((sd) => sd.edge === d.edge);
-      return live ? { ...d, toName: live.toName || d.toName } : d;
-    }),
-    villages: overview ? overview.villages : [],
-    // SOMET-298. From the join-frame snapshot, not the overview: a waypoint's
-    // lit/unlit state is per character, and the overview is a shared cached
-    // terrain window. `phase` is read HERE, in the component, because the
-    // renderer must stay a pure function of its arguments.
-    landmarks: snap.landmarks || [],
-    phase: performance.now(),
-    view: { centerCol: pCol, centerRow: pRow, step: overview ? overview.step : FALLBACK_STEP, cellW, boxW: box, boxH: box },
-  });
-  return true;
-}
 
 const Frame = styled.div`
   position: absolute;
