@@ -219,8 +219,20 @@ const CREATURE_DROPS = [
 // 1714440091000_playable_classes.js for exactly the reason this whole file
 // exists: an entity type the repo cannot rebuild disappears when the Postgres
 // volume is rebuilt, and characters.entity_type_id carries a foreign key to
-// these three rows -- so losing them does not degrade gracefully the way a
-// missing creature does, it orphans every character on the server.
+// these rows -- so losing them does not degrade gracefully the way a missing
+// creature does, it orphans every character on the server.
+//
+// ==> THE OTHER SOURCE OF TRUTH FOR THESE ROWS IS:
+//        backend/migrations/1714440091000_playable_classes.js  (the first three)
+//        backend/migrations/1714440509000_class_base_pools.js  (their pools)
+//        backend/migrations/1714440510000_six_classes_main_stat.js
+//                                        (main_stat, Monk/Cultist/Archer/Druid,
+//                                         the Ranger demotion, their loadouts)
+//     A change made in a migration and NOT here is silently undone. That is not
+//     hypothetical: playable_classes_db.test.js DELETES a class row mid-run and
+//     asserts the seeder puts it back, and seed-catalogs.js restores any class
+//     row that has gone missing. SOMET-486 hit exactly this. Every one of those
+//     migration headers points back at this file.
 //
 // WARRIOR'S STATS ARE THE 'Player' ROW'S STATS (1714440006000), except its
 // POOLS. Migration 1714440091000 derives the stats with a SELECT so the two
@@ -238,23 +250,76 @@ const CREATURE_DROPS = [
 // Mage 70 mana while the migration's databases give 150. The legacy 'Player'
 // row keeps its old 50 mana; nothing in src/ reads it.
 //
+// SOMET-471 added `is_playable` and `main_stat` to every row here. Both are
+// written EXPLICITLY rather than defaulted by the seeder:
+//
+//   * is_playable, because RANGER IS IN THIS LIST PRECISELY BECAUSE IT MUST
+//     STILL BE RESTORABLE -- live characters.entity_type_id values reference it
+//     -- but it must come back DEMOTED. A seeder that hardcoded `true` would
+//     quietly re-open a retired class on every volume rebuild.
+//   * main_stat, because a restored class with a NULL main_stat has no passive
+//     tree sector, and would look like a working class in the picker.
+//
 // is_creature is deliberately absent (defaults false): a class is not a
 // spawnable creature, and the wild-spawn pool reads that flag.
 const PLAYABLE_CLASSES = [
   {
     name: 'Warrior', color: '#b03a2e', walkable: true, spawn_tiles: [], chance: 0,
+    is_playable: true, main_stat: 'strength',
     strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
     hp: 100, max_hp: 100, hp_regen_rate: 1, mana: 100, max_mana: 100, mana_regen_rate: 0.5,
   },
   {
+    // KEPT AND NOT PLAYABLE (SOMET-471). Ranger was NOT renamed into Archer:
+    // characters.entity_type_id is a plain reference with no ON DELETE, so a
+    // rename would leave every existing Ranger playing a class whose pools and
+    // loadout are not the ones they rolled. Its numbers are frozen at what
+    // 1714440091000 and 1714440509000 left -- a demotion must not retune a row.
     name: 'Ranger', color: '#1e8449', walkable: true, spawn_tiles: [], chance: 0,
+    is_playable: false, main_stat: null,
     strength: 10, dexterity: 12, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
     hp: 85, max_hp: 85, hp_regen_rate: 1, mana: 115, max_mana: 115, mana_regen_rate: 0.5,
   },
   {
     name: 'Mage', color: '#5b2c94', walkable: true, spawn_tiles: [], chance: 0,
+    is_playable: true, main_stat: 'intelligence',
     strength: 10, dexterity: 10, constitution: 10, intelligence: 12, wisdom: 10, charisma: 10,
     hp: 75, max_hp: 75, hp_regen_rate: 1, mana: 150, max_mana: 150, mana_regen_rate: 0.5,
+  },
+  {
+    // The four SOMET-471 classes. Their pools are justified line by line in
+    // 1714440510000's header; the short version is that Monk and Cultist trade
+    // HP for mana at par on SOMET-486's 200-point baseline, Archer takes
+    // Ranger's 85/115 unchanged, and Druid takes the Mage's +25 caster premium.
+    //
+    // mana_regen_rate stays at 0.5 for the Monk even though it is the
+    // "regenerates mana fastest" class: playerStats.js derives a player's
+    // manaRegen from MANA_REGEN_BASE and wisdom and has NEVER read this column.
+    // Writing a number into a column nothing consults is how entity_types
+    // .max_mana sat dead from SOMET-242 to SOMET-486. The Monk's regen identity
+    // is a start-node rule grant in seeds/data/passiveTree.js instead.
+    name: 'Monk', color: '#8e6b2f', walkable: true, spawn_tiles: [], chance: 0,
+    is_playable: true, main_stat: 'wisdom',
+    strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 12, charisma: 10,
+    hp: 90, max_hp: 90, hp_regen_rate: 1, mana: 110, max_mana: 110, mana_regen_rate: 0.5,
+  },
+  {
+    name: 'Cultist', color: '#7b1f3a', walkable: true, spawn_tiles: [], chance: 0,
+    is_playable: true, main_stat: 'constitution',
+    strength: 10, dexterity: 10, constitution: 12, intelligence: 10, wisdom: 10, charisma: 10,
+    hp: 110, max_hp: 110, hp_regen_rate: 1, mana: 90, max_mana: 90, mana_regen_rate: 0.5,
+  },
+  {
+    name: 'Archer', color: '#1e8449', walkable: true, spawn_tiles: [], chance: 0,
+    is_playable: true, main_stat: 'dexterity',
+    strength: 10, dexterity: 12, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
+    hp: 85, max_hp: 85, hp_regen_rate: 1, mana: 115, max_mana: 115, mana_regen_rate: 0.5,
+  },
+  {
+    name: 'Druid', color: '#2f7d5b', walkable: true, spawn_tiles: [], chance: 0,
+    is_playable: true, main_stat: 'charisma',
+    strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 12,
+    hp: 90, max_hp: 90, hp_regen_rate: 1, mana: 135, max_mana: 135, mana_regen_rate: 0.5,
   },
 ];
 
@@ -264,6 +329,9 @@ const PLAYABLE_CLASSES = [
 //
 // There is no shield in item_types -- no off_hand item exists at all -- so the
 // Warrior gets a one-handed sword and armour rather than sword-and-board.
+// Ranger keeps its loadout even though it is no longer playable: the rows are
+// restored for a class that already has characters in it, not for one that can
+// be rolled fresh.
 const CLASS_LOADOUTS = [
   { class: 'Warrior', item: 'short sword', quantity: 1 },
   { class: 'Warrior', item: 'leather-vest', quantity: 1 },
@@ -272,6 +340,15 @@ const CLASS_LOADOUTS = [
   { class: 'Ranger', item: 'leather-vest', quantity: 1 },
   { class: 'Mage', item: 'apprentice staff', quantity: 1 },
   { class: 'Mage', item: 'arcane-ward', quantity: 1 },
+  { class: 'Monk', item: 'stick', quantity: 1 },
+  { class: 'Monk', item: 'leather-vest', quantity: 1 },
+  { class: 'Cultist', item: 'apprentice staff', quantity: 1 },
+  { class: 'Cultist', item: 'leather-vest', quantity: 1 },
+  { class: 'Archer', item: 'bow', quantity: 1 },
+  { class: 'Archer', item: 'arrow', quantity: 20 },
+  { class: 'Archer', item: 'leather-vest', quantity: 1 },
+  { class: 'Druid', item: 'club', quantity: 1 },
+  { class: 'Druid', item: 'leather-vest', quantity: 1 },
 ];
 
 module.exports = { HOSTILE_CREATURES, CREATURE_DROPS, PLAYABLE_CLASSES, CLASS_LOADOUTS };

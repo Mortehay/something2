@@ -138,11 +138,20 @@ function generatePassiveTree(spec) {
 
     const startDef = startNodes.find((n) => n.sector === sector);
     const sp = polar(layout.startRadius, axis);
-    // ring 0 means "not in a ring band" -- the core and the six starts. The
-    // start node is GRANTED rather than allocated, so it grants nothing.
+    // ring 0 means "not in a ring band" -- the core and the six starts.
+    //
+    // SOMET-471 (contract 6.11): a start node is GRANTED rather than allocated,
+    // and it now carries its class's MECHANICAL identity -- never a pool bonus,
+    // which is entity_types' job. The grants are copied element-wise, exactly
+    // as the keystone branch below does: sharing the objects would let one
+    // mutation reach through into seeds/data/passiveTree.js's module-level
+    // spec and change what every LATER call to this generator produces, which
+    // would break its determinism guard in a way that only shows up on the
+    // second call in a process.
     const startKey = push({
       key: `start-${sector}`, sector, ring: 0, x: sp.x, y: sp.y,
-      kind: 'start', label: startDef.label, grants: [], start_class: startDef.start_class,
+      kind: 'start', label: startDef.label, start_class: startDef.start_class,
+      grants: (startDef.grants || []).map((g) => ({ ...g })),
     });
     addEdge(startKey, rowB[s * spokeStep]);
 

@@ -219,16 +219,72 @@ const KEYSTONES = {
 // The six rim start positions. A start node is GRANTED, never allocated: it
 // costs no point, never appears in character_passives, and is the seed the
 // allocatability walk starts from. `start_class` matches entity_types.name,
-// NOT entity_types.main_stat — main_stat is Group B's column and Group C must
-// not depend on it. Warrior and Mage exist today; the other four arrive with
-// Group B T3, and their start nodes simply sit unreachable until they do.
+// NOT entity_types.main_stat -- main_stat is Group B's column and Group C must
+// not depend on it. All six classes exist as entity_types rows as of
+// SOMET-471; before that, four of these start nodes sat unreachable.
+//
+// ================= WHY A START NODE NOW GRANTS SOMETHING =================
+//
+// C1 shipped these with `grants: []` and a test asserting "a start node grants
+// nothing -- it is free, so it must also be inert". SOMET-471 REVERSES that,
+// under contract 6.11, which splits class identity in two and keeps the split
+// strict:
+//
+//   OPTION 1 -- NUMBERS. A class's max_hp/max_mana live in entity_types and
+//               reach the game through characters.js's classPoolsFromRow.
+//   OPTION 3 -- RULES.   A class's MECHANICAL identity lives HERE, on its
+//               start node.
+//
+// The whole point of the split is that class identity is paid for ONCE. So:
+//
+//   *** A START NODE MUST NEVER GRANT A RAW POOL BONUS. ***
+//
+// No `{ type: 'resource', pool: 'hp' | 'mana' | 'stamina' }` may appear below,
+// ever. Pools are option 1's job, and granting one here would pay a class
+// twice for being what it is. passive_tree_generator.test.js asserts this
+// directly rather than leaving it to a reader.
+//
+// WHAT THEY GRANT, AND WHY IT IS BALANCED. A start node is FREE -- every
+// character gets exactly one, at no point cost -- so the six must be worth
+// roughly the same as each other, and each must be worth roughly one ring-1
+// minor, the cheapest thing a point can buy. `min_edge` (+3 physical damage)
+// is the yardstick, and the two damage grants below match it exactly. The four
+// rule grants are each the SMALLEST STEP of the rule their own sector's
+// keystones later deepen, so their magnitude is anchored to numbers that were
+// already balanced against a keystone's cost:
+//
+//   Warrior  strength      +3 physical damage       == min_edge, the yardstick
+//   Mage     intelligence  +3 arcane damage         == min_edge, other element
+//   Archer   dexterity     cooldownFloor 0.40->0.38   (ks_dex_fleet goes 0.32)
+//   Monk     wisdom        regenLifeShare 0.1         (ks_wis_clarity gives 0.2)
+//   Cultist  constitution  lifeCostMultiplier 0.9     (ks_con_blood_pact 0.75)
+//   Druid    charisma      treeCharmBonus +1          (ks_cha_pack_leader +3)
+//
+// Each grant is the SECTOR'S OWN identity as declared in SECTORS above:
+// Warrior melee damage, Mage spell damage, Archer attack speed, Monk mana
+// regeneration, Cultist life-cost casting, Druid charm power. The Mage's other
+// declared identity is "maximum mana" -- deliberately NOT granted here,
+// because that is a pool, and pools are option 1's.
+//
+// A NOTE ON THE MONK. Its identity is mana regeneration, and the obvious way
+// to express that is doubling entity_types.mana_regen_rate. That column is
+// DEAD: playerStats.js derives a player's manaRegen from MANA_REGEN_BASE and
+// wisdom and has never read it (see migration 1714440510000's header).
+// `regenLifeShare` is the closest LIVE rule in the vocabulary and it is the
+// wisdom sector's own keystone rule, so the Monk starts with a tenth of
+// Clarity rather than with a number nothing consumes.
+//
+// Every `rule` key below is declared in RULE_KEYS above WITH ITS CONSUMER, and
+// the generator test cross-checks that. A start-node grant naming a rule
+// nobody reads would be a node the player cannot tell apart from a working one
+// -- the failure mode RULE_KEYS' mandatory `consumer` field exists to prevent.
 const START_NODES = [
-  { sector: 'wisdom', start_class: 'Monk', label: 'Monk' },
-  { sector: 'intelligence', start_class: 'Mage', label: 'Mage' },
-  { sector: 'dexterity', start_class: 'Archer', label: 'Archer' },
-  { sector: 'strength', start_class: 'Warrior', label: 'Warrior' },
-  { sector: 'constitution', start_class: 'Cultist', label: 'Cultist' },
-  { sector: 'charisma', start_class: 'Druid', label: 'Druid' },
+  { sector: 'wisdom', start_class: 'Monk', label: 'Monk', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.1 }] },
+  { sector: 'intelligence', start_class: 'Mage', label: 'Mage', grants: [{ type: 'damage', element: 'arcane', value: 3 }] },
+  { sector: 'dexterity', start_class: 'Archer', label: 'Archer', grants: [{ type: 'rule', rule: 'cooldownFloor', value: 0.38 }] },
+  { sector: 'strength', start_class: 'Warrior', label: 'Warrior', grants: [{ type: 'damage', element: 'physical', value: 3 }] },
+  { sector: 'constitution', start_class: 'Cultist', label: 'Cultist', grants: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.9 }] },
+  { sector: 'charisma', start_class: 'Druid', label: 'Druid', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }] },
 ];
 
 const PASSIVE_TREE_SPEC = {

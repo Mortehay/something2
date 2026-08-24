@@ -36,6 +36,16 @@ const { HP_BASE, MANA_BASE } = require('../src/services/progressionConstants.js'
 const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 const SECRET = 'somet486-test-secret';
 
+// SOMET-471 widened this file from three classes to six. The list is written
+// out by hand rather than taken from listPlayableClasses, and the ORDER is
+// load-bearing: userIds[i] is the account created for CLASSES[i], which is how
+// the distinctness check below finds each class's joined player again.
+//
+// Ranger is absent because 471 demoted it. It is NOT replaced by Archer here
+// in the sense of a rename -- Archer is a separate row, and the "Ranger is not
+// advertised" assertion below is what stops a future rename passing quietly.
+const CLASSES = ['Warrior', 'Mage', 'Monk', 'Cultist', 'Archer', 'Druid'];
+
 // Unique per run so a re-run never collides with rows a previous run left
 // behind, and so two branches sharing a database cannot fight over a name.
 const TAG = `s486_${process.pid}_${Date.now().toString(36)}`;
@@ -54,7 +64,7 @@ function nextMsg(ws, type, ms = 15000) {
   });
 }
 
-test('SOMET-486 class pools', { skip: !DB_URL ? 'no database URL' : false }, async (t) => {
+test('class pools (SOMET-486, widened to six classes by SOMET-471)', { skip: !DB_URL ? 'no database URL' : false }, async (t) => {
   const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 3000, max: 6 });
   try {
     await pool.query('SELECT 1');
@@ -101,8 +111,14 @@ test('SOMET-486 class pools', { skip: !DB_URL ? 'no database URL' : false }, asy
     // Literal, so a silent re-tune of the catalog is a failure here rather
     // than a test that quietly follows the data wherever it goes.
     assert.deepEqual(
-      ['Warrior', 'Ranger', 'Mage'].map((n) => [n, byName.get(n).hp, byName.get(n).mana]),
-      [['Warrior', 100, 100], ['Ranger', 85, 115], ['Mage', 75, 150]]);
+      CLASSES.map((n) => [n, byName.get(n).hp, byName.get(n).mana]),
+      [['Warrior', 100, 100], ['Mage', 75, 150], ['Monk', 90, 110],
+        ['Cultist', 110, 90], ['Archer', 85, 115], ['Druid', 90, 135]]);
+    // SOMET-471 demoted Ranger rather than renaming it into Archer. It must
+    // NOT be offered -- and Archer must not be it wearing a new name, which is
+    // what six_classes_db.test.js pins at the row level.
+    assert.equal(byName.get('Ranger'), undefined,
+      'Ranger is not playable any more and must not be advertised');
   });
 
   // ---- SOURCE 2: what a character actually gets, via the real join --------
@@ -144,7 +160,7 @@ test('SOMET-486 class pools', { skip: !DB_URL ? 'no database URL' : false }, asy
   // A fresh character is at BASE_STAT on every stat, so its pools are its
   // class's base pools with nothing added -- which is exactly what makes the
   // advertised number and the played number comparable at all.
-  for (const className of ['Warrior', 'Ranger', 'Mage']) {
+  for (const className of CLASSES) {
     await t.test(`a ${className} joins with the pools character select advertised`, async () => {
       const { cls, player } = await joinAs(className);
       assert.equal(player.maxHp, cls.hp,
@@ -161,17 +177,18 @@ test('SOMET-486 class pools', { skip: !DB_URL ? 'no database URL' : false }, asy
     });
   }
 
-  await t.test('the three classes really do differ once joined', async () => {
+  await t.test('the six classes really do differ once joined', async () => {
     // Guards against the whole file passing because every class happens to
     // advertise, and receive, the same number -- which is precisely the state
-    // the game was in before 486 (100/100 for everyone).
+    // the game was in before 486 (100/100 for everyone). Six classes make that
+    // easier to hit by accident, not harder.
     const world = handle.worlds.get(entryWorldId).world;
-    const pools = ['Warrior', 'Ranger', 'Mage'].map((n) => {
-      const uid = userIds[['Warrior', 'Ranger', 'Mage'].indexOf(n)];
-      const p = world.getPlayer(String(uid));
+    const pools = CLASSES.map((n) => {
+      const p = world.getPlayer(String(userIds[CLASSES.indexOf(n)]));
       return `${p.maxHp}/${p.maxMana}`;
     });
-    assert.equal(new Set(pools).size, 3, `all three classes joined with distinct pools, got ${pools.join(', ')}`);
+    assert.equal(new Set(pools).size, CLASSES.length,
+      `all six classes joined with distinct pools, got ${pools.join(', ')}`);
   });
 
   // ---- AC1: no existing character's pools move ----------------------------

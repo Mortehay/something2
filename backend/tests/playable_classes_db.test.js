@@ -41,18 +41,28 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       'Warrior mana is FROZEN at 100 (SOMET-486) -- every live character is a Warrior with 100 mana');
   });
 
-  // The three classes' base pools, written out literally. These are the
-  // numbers the authority hands a joining character (playerStats.js's
-  // classPools) AND the numbers character select advertises -- one pair of
-  // columns, two readers, which is the split SOMET-486 closed.
+  // Every class's base pools, written out literally. These are the numbers the
+  // authority hands a joining character (playerStats.js's classPools) AND the
+  // numbers character select advertises -- one pair of columns, two readers,
+  // which is the split SOMET-486 closed.
+  //
+  // The query is NOT filtered on is_playable, deliberately: SOMET-471 demoted
+  // Ranger, and Ranger's pools must go on being asserted precisely because
+  // characters are still playing it. Filtering would have made Ranger vanish
+  // from this check the moment it stopped being rollable.
   await t.test('each class carries its authored base pools', async () => {
     const r = await pool.query(
-      `SELECT name, max_hp, max_mana FROM entity_types WHERE is_playable = true`);
+      `SELECT name, max_hp, max_mana FROM entity_types
+        WHERE name IN ('Warrior', 'Ranger', 'Mage', 'Monk', 'Cultist', 'Archer', 'Druid')`);
     const by = new Map(r.rows.map((x) => [x.name, x]));
     const expected = {
       Warrior: { hp: 100, mana: 100 },
       Ranger: { hp: 85, mana: 115 },
       Mage: { hp: 75, mana: 150 },
+      Monk: { hp: 90, mana: 110 },
+      Cultist: { hp: 110, mana: 90 },
+      Archer: { hp: 85, mana: 115 },
+      Druid: { hp: 90, mana: 135 },
     };
     for (const [name, want] of Object.entries(expected)) {
       assert.ok(by.get(name), `${name} must exist`);
@@ -80,10 +90,15 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       { hp: 75, int: 12, mana: 150 });
   });
 
-  await t.test('exactly the three classes are playable', async () => {
+  // SOMET-471 demoted Ranger and added four classes. Ranger is deliberately
+  // absent from this list and deliberately still present in the table -- see
+  // six_classes_db.test.js, which asserts the row survived the demotion
+  // unrenamed and with its numbers untouched.
+  await t.test('exactly the six classes are playable', async () => {
     const r = await pool.query(
       'SELECT name FROM entity_types WHERE is_playable = true ORDER BY name');
-    assert.deepEqual(r.rows.map((x) => x.name), ['Mage', 'Ranger', 'Warrior']);
+    assert.deepEqual(r.rows.map((x) => x.name),
+      ['Archer', 'Cultist', 'Druid', 'Mage', 'Monk', 'Warrior']);
   });
 
   await t.test('the legacy Player row is not playable', async () => {
@@ -100,9 +115,21 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
          JOIN item_types  i ON i.id = l.item_type_id
         ORDER BY e.name, i.name`);
     const got = r.rows.map((x) => `${x.class}:${x.item}x${x.quantity}`);
+    // Ranger is still here after SOMET-471's demotion: characters are wearing
+    // this gear, and a rebuilt volume that restored the class without it would
+    // leave them with nothing.
     assert.deepEqual(got, [
+      'Archer:arrowx20',
+      'Archer:bowx1',
+      'Archer:leather-vestx1',
+      'Cultist:apprentice staffx1',
+      'Cultist:leather-vestx1',
+      'Druid:clubx1',
+      'Druid:leather-vestx1',
       'Mage:apprentice staffx1',
       'Mage:arcane-wardx1',
+      'Monk:leather-vestx1',
+      'Monk:stickx1',
       'Ranger:arrowx20',
       'Ranger:bowx1',
       'Ranger:leather-vestx1',
@@ -168,12 +195,28 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       return;
     }
     const victim = free.rows[0].name;
-    const expectedHp = { Warrior: 100, Ranger: 85, Mage: 75 }[victim];
+    // Ranger cannot be the victim: the query above selects only is_playable
+    // rows and SOMET-471 demoted it. It is left out rather than kept "just in
+    // case", because the restore assertion below requires is_playable = true
+    // and a demoted Ranger would fail it for the wrong reason.
+    const expectedHp = {
+      Warrior: 100, Mage: 75, Monk: 90, Cultist: 110, Archer: 85, Druid: 90,
+    }[victim];
     const expectedLoadout = {
       Warrior: ['leather-vestx1', 'short swordx1'],
-      Ranger: ['arrowx20', 'bowx1', 'leather-vestx1'],
       Mage: ['apprentice staffx1', 'arcane-wardx1'],
+      Monk: ['leather-vestx1', 'stickx1'],
+      Cultist: ['apprentice staffx1', 'leather-vestx1'],
+      Archer: ['arrowx20', 'bowx1', 'leather-vestx1'],
+      Druid: ['clubx1', 'leather-vestx1'],
     }[victim];
+    const expectedMainStat = {
+      Warrior: 'strength', Mage: 'intelligence', Monk: 'wisdom',
+      Cultist: 'constitution', Archer: 'dexterity', Druid: 'charisma',
+    }[victim];
+    assert.ok(expectedHp !== undefined && expectedLoadout !== undefined
+      && expectedMainStat !== undefined,
+      `no expectation is written for ${victim}; a new class must be added here or this test passes vacuously`);
 
     try {
       await pool.query('DELETE FROM entity_types WHERE name = $1', [victim]);
@@ -187,11 +230,18 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       await seedCatalogs(pool);
 
       const back = await pool.query(
-        'SELECT name, is_playable, hp FROM entity_types WHERE name = $1', [victim]);
+        'SELECT name, is_playable, main_stat, hp, max_hp, max_mana FROM entity_types WHERE name = $1',
+        [victim]);
       assert.equal(back.rows.length, 1, `${victim} must be restored by the seeder`);
       assert.equal(back.rows[0].is_playable, true,
         'a restored class that is not playable is invisible to character creation');
       assert.equal(Number(back.rows[0].hp), expectedHp);
+      assert.equal(Number(back.rows[0].max_hp), expectedHp);
+      // SOMET-471. main_stat is the column most likely to come back NULL: the
+      // seeder INSERT has to name it, and a restored class without it has no
+      // passive-tree sector while still looking correct in the picker.
+      assert.equal(back.rows[0].main_stat, expectedMainStat,
+        `${victim} must be restored WITH its main stat, or it has no tree sector`);
 
       const loadout = await pool.query(
         `SELECT i.name AS item, l.quantity
@@ -206,7 +256,10 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       // Idempotent: a second run must not stack duplicate loadout rows.
       await seedCatalogs(pool);
       const after = await pool.query('SELECT count(*)::int AS n FROM class_loadouts');
-      assert.equal(after.rows[0].n, 7, 'a repeat run must not duplicate loadout rows');
+      // 16 = Warrior 2 + Ranger 3 + Mage 2 + Monk 2 + Cultist 2 + Archer 3
+      // + Druid 2. Ranger's three rows are still seeded: it is not playable
+      // any more, but characters are still wearing that gear.
+      assert.equal(after.rows[0].n, 16, 'a repeat run must not duplicate loadout rows');
     } finally {
       await seedCatalogs(pool);
     }

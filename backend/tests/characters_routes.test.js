@@ -146,14 +146,15 @@ test('GET /api/characters returns an empty list and the cap for a fresh account'
   }
 });
 
-test('GET /api/characters/classes lists the three playable classes', async (t) => {
+test('GET /api/characters/classes lists the six playable classes', async (t) => {
   if (!dbReady(t, 'class catalog')) return;
   let userId;
   try {
     userId = await createTestUser(dbPool, 'classes');
     const res = await request(app).get('/api/characters/classes').set(auth(userId));
     assert.equal(res.status, 200, 'must not be captured by the /:id route');
-    assert.deepEqual(res.body.classes.map((c) => c.name).sort(), ['Mage', 'Ranger', 'Warrior']);
+    assert.deepEqual(res.body.classes.map((c) => c.name).sort(),
+      ['Archer', 'Cultist', 'Druid', 'Mage', 'Monk', 'Warrior']);
     // SOMET-486: the pools have to survive the HTTP boundary, because
     // CharacterSelect.jsx renders `{cls.hp} hp / {cls.mana} mana` straight off
     // this body. class_pools_db.test.js proves these numbers match what a
@@ -162,9 +163,17 @@ test('GET /api/characters/classes lists the three playable classes', async (t) =
     // with every other test still green.
     const byName = Object.fromEntries(res.body.classes.map((c) => [c.name, c]));
     assert.deepEqual(
-      ['Warrior', 'Ranger', 'Mage'].map((n) => [n, byName[n].hp, byName[n].mana]),
-      [['Warrior', 100, 100], ['Ranger', 85, 115], ['Mage', 75, 150]],
+      ['Warrior', 'Mage', 'Monk', 'Cultist', 'Archer', 'Druid']
+        .map((n) => [n, byName[n].hp, byName[n].mana]),
+      [['Warrior', 100, 100], ['Mage', 75, 150], ['Monk', 90, 110],
+        ['Cultist', 110, 90], ['Archer', 85, 115], ['Druid', 90, 135]],
       'the advertised pools must reach the client, as numbers');
+    // SOMET-471: mainStat crosses the same boundary. CharacterSelect.jsx maps
+    // it to a STR/DEX/CON label, so a route that dropped it would render every
+    // class with the unknown-stat em dash and stay green everywhere else.
+    assert.deepEqual(
+      ['Warrior', 'Mage', 'Monk', 'Cultist', 'Archer', 'Druid'].map((n) => byName[n].mainStat),
+      ['strength', 'intelligence', 'wisdom', 'constitution', 'dexterity', 'charisma']);
   } finally {
     await dropUser(dbPool, userId);
   }

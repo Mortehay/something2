@@ -29,8 +29,16 @@ test('characters service', { skip: !url ? 'no database URL' : false }, async (t)
     finally { await pool.query('DELETE FROM users WHERE username = $1', [username]); }
   }
 
-  await t.test('exposes exactly the three playable classes', () => {
-    assert.deepEqual(classes.map((c) => c.name).sort(), ['Mage', 'Ranger', 'Warrior']);
+  // SOMET-471: six classes, and Ranger is demoted rather than renamed into
+  // Archer -- the row is still in entity_types, it is just not rollable.
+  await t.test('exposes exactly the six playable classes, each with a main stat', () => {
+    assert.deepEqual(classes.map((c) => c.name).sort(),
+      ['Archer', 'Cultist', 'Druid', 'Mage', 'Monk', 'Warrior']);
+    assert.deepEqual(
+      classes.map((c) => `${c.name}:${c.mainStat}`).sort(),
+      ['Archer:dexterity', 'Cultist:constitution', 'Druid:charisma',
+        'Mage:intelligence', 'Monk:wisdom', 'Warrior:strength'],
+      'mainStat has to survive the service mapping, or the picker shows nothing');
   });
 
 
