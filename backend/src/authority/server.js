@@ -24,6 +24,7 @@ const {
   fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests,
 } = require('../services/chests.js');
 const { openChest } = require('./chestLoot.js');
+const { getSetting } = require('../services/gameSettings.js');
 const { clearOverviewCache } = require('../services/overviewCache.js');
 const { fetchShop } = require('../services/merchantStock');
 const { fetchChest, depositItem, withdrawItem } = require('../services/accountChest');
@@ -637,6 +638,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
           claiming: new Set(),       // ground item ids with a claim in flight (avoids wasted queries)
         };
         worlds.set(canonicalId, entry);
+
+        // SOMET-481: prime the rarity inputs NOW rather than waiting for the
+        // first item sweep. Without this a freshly loaded world drops nothing
+        // but plain white items for up to one sweep interval -- a window a
+        // player can very easily kill something in, and one that would be
+        // invisible in testing because it closes on its own. Awaited (the
+        // world is already in `worlds`, so this fills THIS entry too) but
+        // never fatal: an unpopulated weight table is playable, a failed load
+        // is not.
+        await refreshLootTuning().catch((err) => console.error('loot tuning refresh failed:', err));
 
         // SOMET-309: a player entering a drained world should have it refill,
         // not stay empty forever. Enqueue the deficit ONLY -- do not drain it
@@ -2078,7 +2089,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // granted; whatever does not fit comes back as overflowTypeIds and is
         // spawned on the ground below rather than lost.
         const room = freeSlots(p.inv, entry.world.weapons);
-        const result = await openChest(pool, chest.id, ws.characterId, { freeSlots: room });
+        // SOMET-481: the same weight table and affix pool a creature kill in
+        // this world rolls against, cached on the entry by refreshLootTuning.
+        // Passing entry.world.weapons as the catalog is what lets an affix's
+        // allowed_slots filter apply to a chest grant at all -- without it
+        // every slot-restricted affix would be eligible on every chest item.
+        const result = await openChest(pool, chest.id, ws.characterId, {
+          freeSlots: room,
+          rarityAnchors: entry.rarityAnchors || null,
+          affixPool: entry.affixPool || [],
+          itemTypes: entry.world.weapons,
+        });
         if (!result.ok) { send(ws, { type: 'error', message: result.reason }); return; }
 
         // Final-review fix (SOMET-244 Important #2): openChest now returns
@@ -2088,8 +2109,24 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // without a reload"). Without this a chest-granted item could not
         // be equipped/dropped/sold for the rest of the session (canEquip/
         // dropItem/sellItem all validate against p.inv.items).
+        //
+        // SOMET-481: the push now mirrors claimItem's ENTIRE shape, not just
+        // its id/typeId/quantity. equipRequirements#gearStatGrants reads
+        // `affixes[].effect` off THIS object and silently skips an affix that
+        // has none, so a chest-granted foxy item pushed without them would
+        // grant its stats in the database and nothing at all in play until the
+        // next reconnect -- the same inert-feature shape claimItem's own
+        // comment calls out.
         for (const it of result.items) {
-          p.inv.items.push({ id: it.id, typeId: it.item_type_id, quantity: Number(it.quantity) || 1 });
+          p.inv.items.push({
+            id: it.id,
+            typeId: it.item_type_id,
+            quantity: Number(it.quantity) || 1,
+            rarity: it.rarity || 'white',
+            itemLevel: Number(it.item_level ?? 1),
+            soulbound: it.soulbound === true,
+            affixes: Array.isArray(it.affixes) ? it.affixes : [],
+          });
         }
 
         // Overflow: one toast, not one per item, and the loot lands where the
@@ -2790,8 +2827,37 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
   // sweep by up to itemSweepMs; the two are complementary (DB delete is
   // authoritative across worlds, removeExpired just keeps each sim tidy).
+  // SOMET-481: the two inputs a rarity roll needs -- the admin-editable weight
+  // table and the affix catalog -- resolved on the sweep cadence, NOT per drop.
+  // A query per kill would put game_settings and affix_types on the death
+  // path, and an admin's retune reaching live drops within one sweep is fast
+  // enough for a tuning knob. Cached on each world entry so spawnDrops and
+  // openChest can read them synchronously.
+  //
+  // The SELECT names every column authority/affixes.js#eligibleAffixes and
+  // #affixValue read. A column added to that module and forgotten here comes
+  // back undefined and the filter silently stops applying -- the same
+  // explicit-column trap loadWorld's own world SELECT carries a warning about.
+  async function refreshLootTuning() {
+    if (worlds.size === 0) return;
+    const [anchors, affixes] = await Promise.all([
+      getSetting(pool, 'rarity_weights'),
+      pool.query(`SELECT id, key, kind, effect, min_value, max_value,
+                         min_item_level, max_item_level, allowed_slots, min_rarity, weight
+                    FROM affix_types`),
+    ]);
+    for (const entry of worlds.values()) {
+      entry.rarityAnchors = anchors;
+      entry.affixPool = affixes.rows;
+    }
+  }
+
   const itemSweepTimer = setInterval(() => {
     if (worlds.size === 0) return;
+    // Fire-and-forget, exactly like the ground-item DELETE below: a failed
+    // refresh must not stop the sweep, and the entry keeps its last-known
+    // table (or none, which degrades to plain white drops) until the next one.
+    refreshLootTuning().catch((err) => console.error('loot tuning refresh failed:', err));
     const now = Date.now();
     for (const entry of worlds.values()) entry.world.groundItems.removeExpired(now);
     pool.query('DELETE FROM world_items WHERE expires_at <= now() RETURNING id')

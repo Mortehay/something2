@@ -319,7 +319,11 @@ test('openchest against an unlocked chest in range sends chestOpened with items+
   assert.equal(opened.chestId, 'chest-1');
   // Final-review fix (SOMET-244 Important #2): the full inserted
   // player_items row, not a bare item_type_id -- see chestLoot.test.js.
-  assert.deepEqual(opened.items, [{ id: 'pi1', item_type_id: 7, quantity: 1 }]);
+  // SOMET-481 widened this row: the grant now carries its rolled identity.
+  // The scripted pool returns a row with no rarity/item_level of its own, and
+  // this chest is opened with no weight table, so `affixes` is the empty list
+  // an unrolled (plain white) grant produces.
+  assert.deepEqual(opened.items, [{ id: 'pi1', item_type_id: 7, quantity: 1, affixes: [] }]);
   assert.ok(opened.awarded > 0, 'a guard-level-5 chest opened by a level-1 player must award positive XP');
 
   const entry = handle.worlds.get('w1');

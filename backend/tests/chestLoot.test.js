@@ -82,7 +82,10 @@ test('openChest CAS: only the request that flips locked->opened grants loot and 
   // player_items row ({id, item_type_id, quantity}), matching claimItem's
   // own shape (loot.js:232) -- not a bare item_type_id. The `openchest`
   // handler needs the id/quantity to push each grant onto p.inv.items.
-  assert.deepEqual(result.items, [{ id: 'pi1', item_type_id: 3, quantity: 1 }]);
+  // SOMET-481: the grant carries its rolled identity. This chest is opened
+  // with no weight table, so the roll is skipped entirely and `affixes` is the
+  // empty list a plain white grant produces.
+  assert.deepEqual(result.items, [{ id: 'pi1', item_type_id: 3, quantity: 1, affixes: [] }]);
   // Final-review fix (SOMET-244 Important #3): awardXp always computes a
   // `progression` object (even on a no-op award) -- openChest must hand it
   // back so the caller can call world.applyDerivedStats on a level-up,

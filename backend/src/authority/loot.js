@@ -3,6 +3,8 @@
 
 const { CREATURE_SIZE } = require('./creatures');
 const { hasFreeSlot } = require('./items');
+const { rollRarity } = require('./rarity.js');
+const { rollItemInstance } = require('./affixes.js');
 const { awardXp, loadProgression } = require('../services/progressionStore.js');
 const { xpForKill } = require('../services/playerStats.js');
 const { RESPAWN_DELAY_MS } = require('../services/creatureRespawn');
@@ -67,8 +69,16 @@ function rollGold(range, rng = Math.random) {
 // Otherwise returns `{ awarded, leveledUp, newLevel, progression,
 // killerUserId }`, which server.js's onCreatureDeath uses to move the live
 // player's pools (on level-up) and push a wire update to their socket.
+// SOMET-481: `rarityAnchors`/`affixPool` are accepted and forwarded rather
+// than left to spawnDrops' own entry-defaults. They resolve to the same values
+// either way, but naming them here makes the rarity roll a VISIBLE part of the
+// kill path -- a caller reading this signature can see that a death rolls
+// rarity, and a test can drive the whole commit with an explicit table instead
+// of mutating the entry.
 async function commitCreatureDeath(pool, entry, creatureId, {
   rng = Math.random, ttlMs = 600000, killerUserId = null,
+  rarityAnchors = (entry && entry.rarityAnchors) || null,
+  affixPool = (entry && entry.affixPool) || [],
 } = {}) {
   const client = await pool.connect();
   try {
@@ -135,7 +145,9 @@ async function commitCreatureDeath(pool, entry, creatureId, {
       awarded = award.awarded;
     }
 
-    await spawnDrops(client, entry, dead, { rng, ttlMs });
+    await spawnDrops(client, entry, dead, {
+      rng, ttlMs, rarityAnchors, affixPool,
+    });
     await client.query('COMMIT');
     return {
       awarded, leveledUp, newLevel, progression, killerUserId,
@@ -148,7 +160,17 @@ async function commitCreatureDeath(pool, entry, creatureId, {
   }
 }
 
-async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000 } = {}) {
+// SOMET-481: `rarityAnchors` and `affixPool` default to the entry's cached
+// copies (server.js refreshes them on the sweep cadence), and to "no rolling"
+// when the entry carries neither. "No rolling" means every drop is a plain
+// white item with no affixes -- which is exactly how this function behaved
+// before T13, so every hand-built fixture in the test suite keeps its existing
+// expectations without being touched.
+async function spawnDrops(pool, entry, dead, {
+  rng = Math.random, ttlMs = 600000,
+  rarityAnchors = (entry && entry.rarityAnchors) || null,
+  affixPool = (entry && entry.affixPool) || [],
+} = {}) {
   // world_creatures.type stores the entity type NAME; creature_drops keys on
   // entity_type_id. entry.creatureTypeIds is built at world load, so this costs
   // no query. An unknown name yields no drops rather than throwing.
@@ -198,12 +220,45 @@ async function spawnDrops(pool, entry, dead, { rng = Math.random, ttlMs = 600000
     // quantity is named explicitly (not left to the column default): creature
     // drops stay one-per-unit this slice, and being explicit stops a future
     // edit from silently inheriting whatever the default happens to be.
+    //
+    // SOMET-481: rarity/item_level/affixes ride the SAME unnest as three more
+    // arrays. Item level is the DEAD CREATURE's level (design doc 6.2), so a
+    // level-150 kill rolls off the top of the weight table and a level-1 kill
+    // off the bottom. Read from `dead` here rather than passed in: the level is
+    // already on the row commitCreatureDeath's DELETE ... RETURNING produced,
+    // and re-deriving it anywhere else would be a second answer to one
+    // question. Clamped to world_items_item_level_check's 1..150 window so a
+    // catalog row with an out-of-band level cannot make a whole kill's INSERT
+    // throw and cost the player their drops.
+    const itemLevel = Math.min(150, Math.max(1, Math.round(Number(dead.level)) || 1));
+    const rarities = [];
+    const itemLevels = [];
+    const affixJson = [];
+    for (const typeId of droppedItemTypeIds) {
+      // No anchors at all -> white, and NO rng consumed: an entry without a
+      // weight table must produce byte-identical drops to the pre-T13 code.
+      const rarity = rarityAnchors ? rollRarity(itemLevel, rarityAnchors, rng) : 'white';
+      const itemType = entry.world && entry.world.weapons
+        ? entry.world.weapons.get(typeId) : null;
+      const rolled = rollItemInstance({ itemType, itemLevel, rarity, affixPool }, rng);
+      rarities.push(rolled.rarity);
+      itemLevels.push(rolled.itemLevel);
+      // Only affixTypeId/value are persisted: `key` and `effect` are catalog
+      // facts claimItem re-joins from affix_types, and snapshotting them here
+      // would let a ground item carry a stale copy of an affix an admin edited.
+      affixJson.push(JSON.stringify(
+        rolled.affixes.map((a) => ({ affixTypeId: a.affixTypeId, value: a.value })),
+      ));
+    }
     const ins = await pool.query(
-      `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity)
-       SELECT $1, t.item_type_id, $2, $3, now() + ($4::int * interval '1 millisecond'), 1
-         FROM unnest($5::int[]) AS t(item_type_id)
-       RETURNING id, item_type_id, x, y, expires_at, quantity`,
-      [entry.worldId, dropX, dropY, ttlMs, droppedItemTypeIds],
+      `INSERT INTO world_items (world_id, item_type_id, x, y, expires_at, quantity,
+                                rarity, item_level, affixes)
+       SELECT $1, t.item_type_id, $2, $3, now() + ($4::int * interval '1 millisecond'), 1,
+              t.rarity, t.item_level, t.affixes
+         FROM unnest($5::int[], $6::text[], $7::int[], $8::jsonb[])
+                AS t(item_type_id, rarity, item_level, affixes)
+       RETURNING id, item_type_id, x, y, expires_at, quantity, rarity, item_level, affixes`,
+      [entry.worldId, dropX, dropY, ttlMs, droppedItemTypeIds, rarities, itemLevels, affixJson],
     );
     // Straight into the sim so it appears in the next AOI broadcast rather than
     // waiting for a chunk reload.

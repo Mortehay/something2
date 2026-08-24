@@ -5,6 +5,8 @@
 // does, so this is the existing formula applied to the guard's level rather
 // than a new one.
 const { rollDrops } = require('./loot.js');
+const { rollRarity } = require('./rarity.js');
+const { rollItemInstance } = require('./affixes.js');
 const { xpForKill } = require('../services/playerStats.js');
 const { awardXp, loadProgression } = require('../services/progressionStore.js');
 
@@ -43,7 +45,14 @@ function xpForChest(guardLevel, playerLevel) {
 // `freeSlots` is how many player_items rows this character can still take. It
 // defaults to Infinity so every existing caller and fixture behaves exactly as
 // before; server.js passes the real number.
-async function openChest(pool, chestId, characterId, { rng = Math.random, freeSlots = Infinity } = {}) {
+// SOMET-481: `rarityAnchors`, `affixPool` and `itemTypes` all default to "no
+// rolling" / "no catalog", so every existing caller and fixture keeps granting
+// plain white items exactly as before. server.js supplies the live values off
+// the world entry.
+async function openChest(pool, chestId, characterId, {
+  rng = Math.random, freeSlots = Infinity,
+  rarityAnchors = null, affixPool = [], itemTypes = null,
+} = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -123,12 +132,59 @@ async function openChest(pool, chestId, characterId, { rng = Math.random, freeSl
       // bare item_type_id list gave the handler nothing to push, so a
       // chest-granted item could not be equipped/dropped/sold until the
       // player reconnected and reloaded their inventory from the DB.
-      const ins = await client.query(
-        `INSERT INTO player_items (character_id, item_type_id, quantity)
-         VALUES ($1,$2,1) RETURNING id, item_type_id, quantity`,
-        [characterId, itemTypeId],
+      //
+      // SOMET-481: a chest's item level is its GUARD's level -- the same scale
+      // a kill's creature level is on, which is why xpForChest already reuses
+      // xpForKill. Clamped to player_items_item_level_check's 1..150 window so
+      // an out-of-band guard_level cannot make the grant throw and cost the
+      // player loot the chest has already been CAS'd open to give them.
+      const itemLevel = Math.min(150, Math.max(1, Math.round(Number(chest.guard_level)) || 1));
+      const rarity = rarityAnchors ? rollRarity(itemLevel, rarityAnchors, rng) : 'white';
+      const rolled = rollItemInstance(
+        {
+          itemType: itemTypes ? itemTypes.get(itemTypeId) : null,
+          itemLevel,
+          rarity,
+          affixPool,
+        },
+        rng,
       );
-      items.push(ins.rows[0]);
+      const ins = await client.query(
+        `INSERT INTO player_items (character_id, item_type_id, quantity, rarity, item_level)
+         VALUES ($1,$2,1,$3,$4) RETURNING id, item_type_id, quantity, rarity, item_level`,
+        [characterId, itemTypeId, rolled.rarity, rolled.itemLevel],
+      );
+      // Inside the SAME transaction as the grant: an item handed over with its
+      // rarity but silently stripped of its affixes is the failure claimItem's
+      // single-statement CTE exists to prevent, and a chest grant must not
+      // reintroduce it through a second, separately-committed write.
+      for (let i = 0; i < rolled.affixes.length; i += 1) {
+        await client.query(
+          `INSERT INTO player_item_affixes (player_item_id, idx, affix_type_id, value)
+           VALUES ($1,$2,$3,$4)`,
+          [ins.rows[0].id, i, rolled.affixes[i].affixTypeId, rolled.affixes[i].value],
+        );
+      }
+      // The caller pushes this onto p.inv.items so a chest-granted item is
+      // equippable without a reconnect (see the comment above). It therefore
+      // has to carry the rolled affixes too, and specifically each affix's
+      // `effect`: equipRequirements#gearStatGrants reads a.effect.type/.stat
+      // and SILENTLY SKIPS an affix that has none, so a list pushed without it
+      // is a stat bonus that exists in the database and does nothing in play
+      // until the next reconnect -- the exact "live in the schema, inert in
+      // play" shape D1, D2 and C2 each shipped. rollItemInstance returns
+      // {affixTypeId, key, value}; the effect comes from the pool row that was
+      // rolled, so this costs no query.
+      const byId = new Map((affixPool || []).filter((a) => a).map((a) => [a.id, a]));
+      items.push({
+        ...ins.rows[0],
+        affixes: rolled.affixes.map((a) => ({
+          affixTypeId: a.affixTypeId,
+          key: a.key,
+          value: a.value,
+          effect: (byId.get(a.affixTypeId) || {}).effect ?? null,
+        })),
+      });
     }
 
     const before = await loadProgression(client, characterId);
