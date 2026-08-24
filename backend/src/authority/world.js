@@ -8,6 +8,7 @@ const { ProjectileSim } = require('./projectiles');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION, playerKey } = require('./damage');
 const {
   tickEffects, effectMagnitude, applyElementEffect, canAct, clearInterrupt, activeEffectKeys,
+  applyCharm, charmerOf,
   BURN, CHILL, SHOCK, SHOCK_MANA_DRAIN,
 } = require('./effects');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
@@ -33,6 +34,13 @@ const PLAYER_MAX_MANA = 100;
 const PLAYER_MANA_REGEN = 10; // per second
 const PLAYER_MAX_STAMINA = 100;
 const PLAYER_STAMINA_REGEN = 10; // per second
+
+// How fast the charm pushes a pacified player away from their charmer, in world
+// px per second. Small on purpose: spec 8.2 calls it a SOFT repel, and this
+// runs every tick for four seconds. A quarter of PLAYER_SPEED, so a player
+// walking toward the druid still closes -- slowly. It is a nudge, not a leash:
+// the player's own input is resolved first and is never overridden.
+const CHARM_REPEL_SPEED = 50;
 
 // A level-1 (all-base-stat, NO CLASS) character's derived bundle.
 // playerStats.js guarantees this is an identity on the pre-A2 constants above
@@ -249,6 +257,9 @@ class World {
       bind,
       gold: Number(gold) || 0,
       _attackCd: 0,
+      // The creature this player's summons follow them onto (spec 8.2).
+      // Written only by attack(), read only by CreatureSim's charmed branch.
+      _charmTargetId: null,
       _doorwayCdUntil: 0,
       autoLoot: false,
       // Recently-dropped GROUND ITEM ids -> grace expiry (ms, same clock as
@@ -376,6 +387,26 @@ class World {
       if (f) p.facing = f;
       p.ackSeq = p.pendingSeq;
     }
+
+    // The charm's soft repel (spec 8.2). Applied AFTER each player's own
+    // movement step, deliberately: this NUDGES, it does not steer. The target's
+    // input has already moved them exactly as it always did, which is what
+    // "keeps their own movement input -- no control transfer" means, and is the
+    // whole difference between the player pacify and the creature charm.
+    //
+    // shoveAwayFrom is the same wall-aware primitive knockback and the portal
+    // bounce use, so a repel can never push anyone into terrain.
+    for (const p of this.players.values()) {
+      const charmerId = charmerOf(p, this.now);
+      if (charmerId == null) continue;
+      const src = this.players.get(charmerId);
+      // The charmer left the world (or was never in it). The pacify itself
+      // stays -- it is a timed effect, not a tether -- but there is nothing to
+      // be repelled from.
+      if (!src || src === p) continue;
+      shoveAwayFrom(this.map, src.x + src.width / 2, src.y + src.height / 2, p,
+        CHARM_REPEL_SPEED * dt);
+    }
     return { kills };
   }
 
@@ -391,7 +422,8 @@ class World {
     // no early return, nothing else in its body returns -- so the `|| {
     // killed: [], shots: [] }` fallback here could never fire. Removed.
     const {
-      killed: killedIds, shots, attacks: creatureAttacks, impacts: creatureImpacts,
+      killed: killedIds, killCredits, shots,
+      attacks: creatureAttacks, impacts: creatureImpacts,
     } = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now);
 
     for (const s of shots) {
@@ -422,12 +454,16 @@ class World {
     }
 
     // A guard's kill has no player behind it — always null, never omitted.
+    // SOMET-473: a Druid's PET is the one creature-owned kill that does have a
+    // player behind it, and CreatureSim reports that in `killCredits`. Read
+    // through `?? null` so every other path is byte-identical to before and a
+    // sim double that predates the field still works.
     // Slice D: creature attacks ride the SAME frame keys player swings do, so
     // server.js pushes them through the same two helpers and the client draws
     // them through the same path. Defaulted to [] because several tests build
     // a CreatureSim-shaped double that predates these fields.
     return {
-      kills: killedIds.map((id) => ({ id, killerUserId: null })),
+      kills: killedIds.map((id) => ({ id, killerUserId: (killCredits && killCredits.get(id)) ?? null })),
       attacks: creatureAttacks || [],
       impacts: creatureImpacts || [],
     };
@@ -560,6 +596,12 @@ class World {
     // rather than a tile constant -- that substitution is the whole fix.
     // Render-only: nothing below reads it for reach, arc or line-of-sight.
     const originLift = attackLift(w, p.height);
+    // The charm pacify (spec 8.2). Resolved ONCE per attack, exactly like
+    // originLift above, so the melee arc, the player sweep and the spawned
+    // projectile all consult one value rather than three copies of the lookup.
+    // null for everyone who is not currently charmed, i.e. every attack in the
+    // game today.
+    const pacifiedFrom = charmerOf(p, this.now);
 
     if (w.kind === 'melee') {
       const f = facingFromInput(sign(nx), sign(ny));
@@ -574,7 +616,7 @@ class World {
       // as it was.
       const {
         hit: creatureTargets, blocked: blockedTargets,
-      } = this.creatures.meleeArcScan(cx, cy, nx, ny, w.reach, w.arc_width);
+      } = this.creatures.meleeArcScan(cx, cy, nx, ny, w.reach, w.arc_width, pacifiedFrom);
       // Slice C (SOMET-160): where each impact happened. Captured HERE, before
       // applyMeleeArc, for exactly the reason creatureTargets is -- a
       // one-shot kill removes the creature, and reading its position
@@ -620,7 +662,14 @@ class World {
         // than folded into weaponDamage above so the bonus is mitigated by the
         // AUGMENT's element, not the weapon's.
         w.augment || null,
+        pacifiedFrom,
       );
+      // What this player's summons will attack (spec 8.2: "attacks the druid's
+      // target"). The FIRST creature this swing reached, kept even if the swing
+      // killed it -- CreatureSim re-validates it every tick and drops a dead
+      // one, so a stale id costs one tick of nothing rather than needing a
+      // second write site here.
+      if (creatureTargets.length > 0) p._charmTargetId = creatureTargets[0];
       // SOMET-253 Task 9: survivors = targets minus killed. `creatureTargets`
       // was captured BEFORE applyMeleeArc ran, and applyMeleeArc deletes
       // whatever it kills -- iterating creatureTargets directly here would
@@ -647,6 +696,11 @@ class World {
       let playerHits = 0;
       for (const other of this.players.values()) {
         if (other.userId === userId) continue;
+        // Pacified: this swing cannot reach the player who charmed them.
+        // `continue`, not a zero-damage hit, so the impact list, the knockback
+        // and the client's hit cue all fall away together -- a swing that
+        // sparks off a target it did no damage to reads as a bug.
+        if (pacifiedFrom != null && other.userId === pacifiedFrom) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
         if (inArc(cx, cy, nx, ny, ocx, ocy, w.reach, w.arc_width)
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
@@ -758,6 +812,10 @@ class World {
       // weapon needs no ammo (staves, darts) or the row is missing from the
       // in-memory catalog.
       ammo: w.ammo_type_id != null ? (this.weapons.get(w.ammo_type_id) || null) : null,
+      // The pacify travels WITH the shot rather than being re-read on impact:
+      // the charm can lapse mid-flight, and an arrow loosed while pacified must
+      // not become lethal to the charmer because it took 300ms to arrive.
+      pacifiedFrom,
     });
     applyAttackCooldown(p, w);
     // Projectiles already render as a moving dot; their trail effects are

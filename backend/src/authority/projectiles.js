@@ -52,7 +52,14 @@ function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * d
 // MIN_DAMAGE floor, i.e. 7005 landed shots to kill one, while the guard needs
 // 4 swings to kill the hostile.
 function projectileHitsCreature(p, creature) {
-  if (p.ownerKind !== 'creature') return !immuneToPlayerDamage(creature);
+  if (p.ownerKind !== 'creature') {
+    // SOMET-473 -- the Druid's player pacify (spec 8.2). The charmer's pets are
+    // off this shot's target list, snapshotted at LAUNCH (see world.js's spawn
+    // call), so a charm that lapses mid-flight cannot make an arrow already in
+    // the air lethal to the charmer's pack.
+    if (p.pacifiedFrom != null && creature.charmOwnerUserId === p.pacifiedFrom) return false;
+    return !immuneToPlayerDamage(creature);
+  }
   if (p.ownerId === creature.id) return false;        // never its own shooter
   const targetFaction = creature.faction || 'hostile';
   return p.ownerFaction !== targetFaction;            // never same faction
@@ -67,6 +74,12 @@ function projectileHitsCreature(p, creature) {
 // Keyed on the same immuneToPlayerDamage predicate the refusal itself is, so
 // the cue and the rule cannot disagree about who is a guard.
 function projectileBlockedBy(p, creature) {
+  // SOMET-473: a pacified shot passing through the charmer's pet is the same
+  // kind of refusal a guard's is -- a rule the shooter is entitled to see --
+  // so it earns the same cue. Kept in step with meleeArcScan's `blocked` list,
+  // which draws exactly this distinction for the melee half.
+  if (p.ownerKind !== 'creature' && p.pacifiedFrom != null
+      && creature.charmOwnerUserId === p.pacifiedFrom) return true;
   return p.ownerKind !== 'creature' && immuneToPlayerDamage(creature);
 }
 
@@ -129,7 +142,11 @@ function applyPlayerAugment(p, pl, scale, now) {
 }
 
 function projectileHitsPlayer(p, player) {
-  if (p.ownerKind !== 'creature') return player.userId !== p.ownerId;
+  if (p.ownerKind !== 'creature') {
+    // Same rule, other target kind: a pacified shooter cannot hit their charmer.
+    if (p.pacifiedFrom != null && player.userId === p.pacifiedFrom) return false;
+    return player.userId !== p.ownerId;
+  }
   // A guard's arrow must never hit the player it is defending.
   return p.ownerFaction === 'hostile';
 }
@@ -181,7 +198,7 @@ class ProjectileSim {
   // became -- "explosive arrows" could not be authored at all.
   spawn({
     ownerId, ownerKind = 'player', ownerFaction = null, x, y, nx, ny, weapon, damage,
-    originLift, ammo = null,
+    originLift, ammo = null, pacifiedFrom = null,
   }) {
     const id = String(++this._id);
     // Ammo wins over the weapon where it speaks, so an explosive arrow makes
@@ -253,6 +270,11 @@ class ProjectileSim {
       // stays null, which the client reads as "use the legacy tile lift" --
       // today's appearance, never an invisible or ground-level shot.
       originLift: Number.isFinite(originLift) ? originLift : null,
+      // SOMET-473: who this shot may not hit, snapshotted at launch for the
+      // same reason `damage` is -- the charm can lapse mid-flight, and a shot
+      // loosed while pacified must not become lethal to the charmer because it
+      // took 300ms to arrive. null for every shot in the game today.
+      pacifiedFrom,
       hitIds: new Set(), // 'c:<id>' / 'p:<id>' already hit by this projectile
       // Magic Stones (SOMET-245) Task 7: the socketed spell stone's own
       // player_items.id, read straight off `weapon` (items.js's

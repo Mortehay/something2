@@ -200,6 +200,20 @@ test('class pools (SOMET-486, widened to six classes by SOMET-471)', { skip: !DB
   // just created are excluded because they are, by definition, not existing
   // ones.
   await t.test('no pre-existing character\'s max HP or max mana moves', async () => {
+    // SCOPED TO CHARACTERS THAT ACTUALLY PREDATE THE MIGRATION (SOMET-473).
+    //
+    // "Pre-existing" used to mean "every character not owned by this file's own
+    // users", which silently included characters a CONCURRENTLY RUNNING peer
+    // test had just created. Any peer that makes a non-Warrior -- and several
+    // now do: life_cost_live_join_db makes a Cultist, charm_live_db makes a
+    // Druid -- fails this assertion on a timing coincidence, because a
+    // Cultist's pools are SUPPOSED to differ from the class-blind derive. That
+    // is the guarantee working, reported as a violation of itself.
+    //
+    // The guarantee is about characters that existed BEFORE class base pools
+    // shipped, so the population is defined by the migration's own run_on
+    // rather than by "not mine". A peer's character, created after it, is out
+    // of scope no matter when it happens to exist.
     const r = await pool.query(
       `SELECT c.id, c.name, e.name AS class_name, e.max_hp, e.max_mana,
               COALESCE(p.constitution, 5) AS constitution,
@@ -208,6 +222,8 @@ test('class pools (SOMET-486, widened to six classes by SOMET-471)', { skip: !DB
          JOIN entity_types e ON e.id = c.entity_type_id
          LEFT JOIN player_progression p ON p.character_id = c.id
         WHERE c.user_id <> ALL($1::int[])
+          AND c.created_at < (SELECT run_on FROM pgmigrations
+                               WHERE name = '1714440509000_class_base_pools')
         ORDER BY c.id`,
       [userIds]);
 
