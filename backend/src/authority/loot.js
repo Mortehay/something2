@@ -257,7 +257,7 @@ async function spawnDrops(pool, entry, dead, {
               t.rarity, t.item_level, t.affixes
          FROM unnest($5::int[], $6::text[], $7::int[], $8::jsonb[])
                 AS t(item_type_id, rarity, item_level, affixes)
-       RETURNING id, item_type_id, x, y, expires_at, quantity, rarity, item_level, affixes`,
+       RETURNING id, item_type_id, x, y, expires_at, quantity, rarity, item_level`,
       [entry.worldId, dropX, dropY, ttlMs, droppedItemTypeIds, rarities, itemLevels, affixJson],
     );
     // Straight into the sim so it appears in the next AOI broadcast rather than

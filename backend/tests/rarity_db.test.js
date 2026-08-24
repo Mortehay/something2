@@ -150,11 +150,20 @@ test('game_settings carries a usable rarity_weights row', async (t) => {
 test('killing a creature writes a ROLLED rarity onto the real world_items row', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
 
   let fx = null;
   let mob = null;
-  t.after(async () => { await cleanup(pool, fx); if (mob) await dropAuthoredCreature(pool, mob.id); });
+  // ONE after-hook, and the pool is ended INSIDE it, last. node:test runs
+  // after-hooks in registration order, so a separate `t.after(pool.end)`
+  // registered earlier closes the pool before cleanup runs -- and because
+  // every cleanup statement swallows its error, the leak is completely silent.
+  // It cost this file two peer-test failures (a leaked entity_types row with
+  // no behaviour, a leaked chest_loot band) before it was noticed.
+  t.after(async () => {
+    await cleanup(pool, fx);
+    if (mob) await dropAuthoredCreature(pool, mob.id);
+    await pool.end().catch(() => {});
+  });
 
   fx = await fixture(pool, 'kill');
   const typeRow = await pool.query('SELECT id FROM item_types ORDER BY id LIMIT 1');
@@ -221,11 +230,14 @@ test('killing a creature writes a ROLLED rarity onto the real world_items row', 
 test('a level-1 kill never produces a foxy drop against the SEEDED table', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
 
   let fx = null;
   let mob = null;
-  t.after(async () => { await cleanup(pool, fx); if (mob) await dropAuthoredCreature(pool, mob.id); });
+  t.after(async () => {
+    await cleanup(pool, fx);
+    if (mob) await dropAuthoredCreature(pool, mob.id);
+    await pool.end().catch(() => {});
+  });
 
   fx = await fixture(pool, 'lvl1');
   const typeRow = await pool.query('SELECT id FROM item_types ORDER BY id LIMIT 1');
@@ -270,10 +282,14 @@ test('a level-1 kill never produces a foxy drop against the SEEDED table', async
 test('opening a chest grants a ROLLED rarity, its affix rows and the live effect payload', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
 
   let fx = null;
-  t.after(async () => { await cleanup(pool, fx); });
+  let bandId = null;
+  t.after(async () => {
+    await cleanup(pool, fx);
+    if (bandId) await pool.query('DELETE FROM chest_loot WHERE id = $1', [bandId]).catch(() => {});
+    await pool.end().catch(() => {});
+  });
   fx = await fixture(pool, 'chest');
 
   // A chest_loot band this test owns, so the grant does not depend on the
@@ -285,9 +301,7 @@ test('opening a chest grants a ROLLED rarity, its affix rows and the live effect
      VALUES ($1, 1, 1, 1, 77, 77) RETURNING id`,
     [itemTypeId],
   );
-  t.after(async () => {
-    await pool.query('DELETE FROM chest_loot WHERE id = $1', [band.rows[0].id]).catch(() => {});
-  });
+  bandId = band.rows[0].id;
 
   // guard_entity_type_id is NOT NULL; the chest is already 'unlocked' with no
   // live guards, so which type it names does not affect the open.
@@ -353,10 +367,14 @@ test('a chest opened with no rarity anchors still grants a plain white item', as
   // caller/fixture: the new options default to "no rolling".
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
-  t.after(async () => { await pool.end().catch(() => {}); });
 
   let fx = null;
-  t.after(async () => { await cleanup(pool, fx); });
+  let bandId = null;
+  t.after(async () => {
+    await cleanup(pool, fx);
+    if (bandId) await pool.query('DELETE FROM chest_loot WHERE id = $1', [bandId]).catch(() => {});
+    await pool.end().catch(() => {});
+  });
   fx = await fixture(pool, 'chest-plain');
 
   const typeRow = await pool.query('SELECT id FROM item_types ORDER BY id LIMIT 1');
@@ -365,9 +383,7 @@ test('a chest opened with no rarity anchors still grants a plain white item', as
      VALUES ($1, 1, 1, 1, 78, 78) RETURNING id`,
     [typeRow.rows[0].id],
   );
-  t.after(async () => {
-    await pool.query('DELETE FROM chest_loot WHERE id = $1', [band.rows[0].id]).catch(() => {});
-  });
+  bandId = band.rows[0].id;
   const guard = await pool.query(
     'SELECT id FROM entity_types WHERE is_creature = true ORDER BY id LIMIT 1',
   );
