@@ -47,6 +47,35 @@ export const BLOCK_EFFECT_DEF = {
   duration_ms: 380, ease: "out", fade: true,
 };
 
+// SOMET-482 — the puff a ground item leaves when its 180-second lifetime runs
+// out. Built in for the same reason BLOCK_EFFECT_DEF is: it is the only cue
+// separating "my loot expired" from "somebody took my loot", and a cue that
+// disambiguates a rule cannot be admin-deletable content. It is also why this
+// ticket needs no migration at all.
+//
+// PRESENTATION ONLY. The server frame that triggers it
+// (`{type:'vfx', name:'item_despawn', x, y}`) carries a name and a position
+// and nothing else — no target, no element, no geometry.
+//
+// `reach` is carried ON THE DEF, not on the event, and that is load-bearing:
+// RenderSystem's `burst` sizes its spokes as blastScreenRadiusX(reach) * t and
+// early-returns when that is <= 0. A despawn event has no swing and therefore
+// no event reach, so without this the spokes would silently draw nothing and
+// the whole cue would degrade to its particles alone — an inert half-feature
+// with a green test. addEffects falls back to this value; see below.
+export const DESPAWN_EFFECT_DEF = {
+  name: "item_despawn", shape: "burst", color: "#b8b8c8", width: 2,
+  duration_ms: 420, ease: "out", fade: true, reach: 26,
+  particle_count: 8, particle_spread: 6.283, particle_speed: 40,
+  particle_gravity: -20, particle_lifetime_ms: 420, particle_size: 2,
+};
+
+// Names the authored library can never shadow. Consulted BEFORE `defs`, so an
+// admin row that happens to share a name cannot replace a built-in cue — the
+// same guarantee `b === true` gives BLOCK_EFFECT_DEF, expressed by name
+// because the despawn frame has no boolean flag to ride on.
+const BUILTIN_DEFS = { [DESPAWN_EFFECT_DEF.name]: DESPAWN_EFFECT_DEF };
+
 // Append this tick's attacks. Each is stamped with its ARRIVAL time (not a
 // server timestamp): arrival is the only clock both ends agree on without
 // clock sync, the same reasoning addBlasts documents.
@@ -62,7 +91,11 @@ export function addEffects(list, events, nowMs, defs) {
     // SOMET-286: `b` means "this attack was refused". It resolves to the
     // built-in def above WITHOUT consulting the library, so the cue survives
     // an empty or mis-migrated effect library — see BLOCK_EFFECT_DEF.
-    const def = e.b === true ? BLOCK_EFFECT_DEF : (e.v && defs ? defs[e.v] : null);
+    // SOMET-482: built-ins are checked before the library, so the despawn puff
+    // survives an empty, mis-migrated or maliciously-renamed effect library.
+    const def = e.b === true
+      ? BLOCK_EFFECT_DEF
+      : (e.v ? (BUILTIN_DEFS[e.v] || (defs ? defs[e.v] : null)) : null);
     if (!def) continue;
     let nx = Number.isFinite(e.nx) ? e.nx : 0;
     let ny = Number.isFinite(e.ny) ? e.ny : 0;
@@ -73,7 +106,11 @@ export function addEffects(list, events, nowMs, defs) {
       def,
       x: e.x, y: e.y,
       nx, ny,
-      reach: Number.isFinite(e.reach) ? e.reach : 0,
+      // SOMET-482: an event with no reach of its own falls back to the def's.
+      // A weapon event always carries one; a point cue like the despawn puff
+      // never does, and 0 makes every reach-sized shape early-return blank.
+      reach: Number.isFinite(e.reach) ? e.reach
+        : (def && Number.isFinite(Number(def.reach)) ? Number(def.reach) : 0),
       arc: Number.isFinite(e.arc) ? e.arc : 0,
       hit: e.hit === true,
       // SOMET-326: the vertical render anchor the server resolved for this

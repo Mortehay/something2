@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   indexEffects, addEffects, pruneEffects, effectProgress, effectAlpha, ease,
-  isoArcAngle, DEFAULT_DURATION_MS, BLOCK_EFFECT_DEF,
+  isoArcAngle, DEFAULT_DURATION_MS, BLOCK_EFFECT_DEF, DESPAWN_EFFECT_DEF,
 } from "../vfx.js";
 
 const DEF = {
@@ -181,5 +181,55 @@ describe("isoArcAngle", () => {
       expect(ex).toBeCloseTo(sx, 6);
       expect(ey).toBeCloseTo(sy, 6);
     }
+  });
+});
+
+// SOMET-482 -- the ground-loot despawn puff.
+describe("item_despawn", () => {
+  it("resolves from the built-in def even with an EMPTY effect library", () => {
+    // The whole point of a built-in: an admin cannot take the despawn cue away
+    // by renaming or deleting a vfx_effects row, exactly as with
+    // BLOCK_EFFECT_DEF. Passing {} here is the mis-migrated-library case.
+    const list = addEffects([], [{ v: "item_despawn", x: 321, y: 654 }], 500, {});
+    expect(list).toHaveLength(1);
+    expect(list[0].def).toBe(DESPAWN_EFFECT_DEF);
+    expect(list[0].x).toBe(321);
+    expect(list[0].y).toBe(654);
+    expect(list[0].startedAt).toBe(500);
+  });
+
+  it("cannot be shadowed by an authored row of the same name", () => {
+    const impostor = indexEffects([{ name: "item_despawn", shape: "arc", duration_ms: 1 }]);
+    const list = addEffects([], [{ v: "item_despawn", x: 1, y: 2 }], 0, impostor);
+    expect(list[0].def).toBe(DESPAWN_EFFECT_DEF);
+  });
+
+  it("carries a NON-ZERO reach so the burst is not drawn blank", () => {
+    // The trap this pins: the despawn frame carries no reach of its own (it is
+    // a point cue, not a swing), and RenderSystem's burst sizes its spokes as
+    // blastScreenRadiusX(reach) * t and early-returns at <= 0. Falling back to
+    // 0 would render nothing while every other assertion here stayed green.
+    const list = addEffects([], [{ v: "item_despawn", x: 1, y: 2 }], 0, {});
+    expect(list[0].reach).toBe(DESPAWN_EFFECT_DEF.reach);
+    expect(list[0].reach).toBeGreaterThan(0);
+  });
+
+  it("still prefers an event's own reach when it has one", () => {
+    // The def fallback must not override a weapon event that states its reach.
+    const list = addEffects([], [EV({ reach: 190 })], 0, DEFS);
+    expect(list[0].reach).toBe(190);
+  });
+
+  it("is a fading burst that carries no weapon geometry", () => {
+    expect(DESPAWN_EFFECT_DEF.shape).toBe("burst");
+    expect(DESPAWN_EFFECT_DEF.fade).toBe(true);
+    expect(DESPAWN_EFFECT_DEF.follows_weapon).toBeFalsy();
+    expect(DESPAWN_EFFECT_DEF.duration_ms).toBe(420);
+  });
+
+  it("expires on its own duration", () => {
+    const list = addEffects([], [{ v: "item_despawn", x: 1, y: 2 }], 0, {});
+    expect(pruneEffects(list, 419)).toHaveLength(1);
+    expect(pruneEffects(list, 421)).toHaveLength(0);
   });
 });
