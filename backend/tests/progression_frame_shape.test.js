@@ -64,13 +64,52 @@ test('every progression frame carries stats', () => {
     'these progression frames omit `stats` (contract §6.3)');
 });
 
-test('no progression frame recomputes stats from an unbuffed row', () => {
-  // withStoneBonuses is what folds socketed buff stones in. A frame that
-  // called derivePlayerStats(progression) directly would report numbers the
-  // live world does not use.
-  const bare = [...src.matchAll(/derivePlayerStats\((?!withStoneBonuses)/g)];
+// SOMET-496. The framed row is now built by exactly ONE expression, and it
+// folds in TWO per-session overlays: the socketed buff stones and the equipped
+// items' rolled affixes. Both are runtime-only -- neither is persisted, and
+// neither may reach the equip gate's base (see gearAffixes.js's header).
+//
+// The order in that expression is the assertion with teeth. withGearAffixes
+// RECOMPOSES the six top-level stat keys out of `sources` and the tree's
+// modifiers, so it discards whatever an earlier overlay wrote onto them:
+// stones OUTSIDE gear is correct, stones inside is a silent zeroing of every
+// buff stone worn by an affixed character.
+test('the framed row folds in gear affixes and then the buff stones, in that order', () => {
+  assert.match(src, /const row = withStoneBonuses\(withGearAffixes\(progression, affixes\), buffs\);/,
+    'the frame must fold gear affixes FIRST and the buff stones on top');
+  assert.match(src, /const affixes = inv \? equippedAffixGrants\(inv\) : \[\];/,
+    'the gear half must come from the live session inventory, not from a literal');
+});
+
+test('no progression frame recomputes stats from an unframed row', () => {
+  // A frame that called derivePlayerStats(progression) directly would report
+  // numbers the live world does not use: no buff stones, and -- the whole of
+  // SOMET-496 -- no gear affixes.
+  const bare = [...src.matchAll(/derivePlayerStats\((?!row,)/g)];
   assert.strictEqual(bare.length, 0,
-    'derivePlayerStats must be called on a stone-buffed row inside the authority');
+    'derivePlayerStats must be called on the framed row inside the authority');
+});
+
+// Contract §6.3, extended by SOMET-496: `progression` on the wire must be the
+// FRAMED row too, not the bare composed one. The Character tab renders
+// `sources.<stat>.gear` straight off it, so a raw row leaves that column
+// reading zero next to pools that already include the gear.
+test('every progression frame sends a row the frame boundary produced', () => {
+  const unframed = progressionFrames().filter((f) => (
+    // The object shorthand `progression,` -- the bare row straight off
+    // loadProgression. The lookbehind is what keeps `f.progression,` out of it.
+    /(?<![.\w])progression\s*,/.test(f)
+    // Or an explicit value naming one of the unframed rows by name.
+    || /progression:\s*(currentProgression|result\.progression|progression)\b/.test(f)
+  ));
+  assert.deepStrictEqual(unframed, [],
+    'these frames send an unframed progression row; take it from framed(...).progression');
+
+  // The `joined` frame is not a progression frame, but it is the client's
+  // FIRST progression object and its only one until something re-derives, so
+  // it has to be framed too.
+  assert.match(src, /progression: framedJoin\.progression,/,
+    'the joined frame must carry the framed row, or the Character tab reads a zero gear column all session');
 });
 
 // SOMET-486. The authority now has TWO per-player inputs to fold in before
@@ -89,8 +128,8 @@ test('the authority derives stats in exactly one place', () => {
 // a per-player value rather than a constant. A second argument that was
 // hardcoded, or omitted, would leave every class on HP_BASE/MANA_BASE again.
 test('the one derive folds in the class base pools as well as the stones', () => {
-  assert.match(src, /derivePlayerStats\(withStoneBonuses\(progression, buffs\), classPools\)/,
-    'framedStats must pass classPools into derivePlayerStats');
+  assert.match(src, /derivePlayerStats\(row, classPools\)/,
+    'the one derive must pass classPools into derivePlayerStats');
   // NOT anchored on `classPools` being the LAST argument. SOMET-472 appends
   // usesLifeCost after it, and a guard that fails on a NEW argument being
   // added is testing argument order, not the fact it was written to protect:
