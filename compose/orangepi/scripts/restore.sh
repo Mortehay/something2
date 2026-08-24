@@ -16,6 +16,9 @@
 
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Side-effect-free by design -- see the header of dump-guard.sh for why this is
+# not lib.sh, which loads .env and would undermine the DATABASE_URL check below.
+. "$HERE/dump-guard.sh"
 
 DUMP="${1:-}"
 MODE="${2:-}"
@@ -32,7 +35,7 @@ usage() {
 # Verify before destroying anything. Restoring a corrupt dump over a working
 # database turns a recoverable situation into an unrecoverable one.
 gzip -t "$DUMP" 2>/dev/null || { echo "FATAL: $DUMP is not a valid gzip stream." >&2; exit 65; }
-gzip -dc "$DUMP" | head -c 200000 | grep -q 'CREATE TABLE' \
+dump_has_create_table "$DUMP" \
   || { echo "FATAL: $DUMP contains no CREATE TABLE; refusing to restore it." >&2; exit 65; }
 
 case "$MODE" in

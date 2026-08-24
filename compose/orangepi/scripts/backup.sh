@@ -27,6 +27,7 @@
 
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/dump-guard.sh"
 
 BACKUP_DIR="${ORANGEPI_BACKUP_DIR:-$HOME/something2-backups}"
 KEEP="${ORANGEPI_BACKUP_KEEP:-14}"
@@ -106,7 +107,12 @@ fi
 # And a dump with no CREATE TABLE in it is a connection that succeeded and a
 # database that was empty -- which must not overwrite yesterday's good backup
 # silently.
-if ! gzip -dc "$part" | head -c 200000 | grep -q 'CREATE TABLE'; then
+#
+# The same SIGPIPE trap restore.sh fell into lived here too (SOMET-485), and
+# was worse on this side: `if !` suppresses `set -e` but NOT pipefail, so a
+# good multi-megabyte dump was deleted and the run reported "the dump contains
+# no CREATE TABLE" -- a backup that silently never happened.
+if ! dump_has_create_table "$part"; then
   rm -f "$part"
   echo "FATAL: the dump contains no CREATE TABLE; refusing to keep it." >&2
   exit 1
