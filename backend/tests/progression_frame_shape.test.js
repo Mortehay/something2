@@ -91,8 +91,27 @@ test('the authority derives stats in exactly one place', () => {
 test('the one derive folds in the class base pools as well as the stones', () => {
   assert.match(src, /derivePlayerStats\(withStoneBonuses\(progression, buffs\), classPools\)/,
     'framedStats must pass classPools into derivePlayerStats');
-  assert.match(src, /addPlayer\([^)]*character\.classPools\)/,
+  // NOT anchored on `classPools` being the LAST argument. SOMET-472 appends
+  // usesLifeCost after it, and a guard that fails on a NEW argument being
+  // added is testing argument order, not the fact it was written to protect:
+  // that the join hands the class pools to addPlayer at all.
+  assert.match(src, /addPlayer\([^)]*character\.classPools\b/,
     'the join must hand the class pools to addPlayer, or every later re-derive recomputes them class-blind');
+});
+
+// SOMET-472, the same guarantee for the Cultist's resource substitution: the
+// flag is derived ONCE at join and has to reach both the sim and the wire.
+// Derived twice, they could disagree about which bar is spent and which is
+// drawn; derived and then not passed, the class is inert.
+test('the join derives usesLifeCost once and hands it to both the sim and the wire', () => {
+  const derivations = [...src.matchAll(/const usesLifeCost = /g)];
+  assert.strictEqual(derivations.length, 1,
+    'usesLifeCost is resolved in exactly one place in the authority');
+  assert.match(src, /const usesLifeCost = character\.className === 'Cultist'/);
+  assert.match(src, /addPlayer\([^)]*usesLifeCost\)/,
+    'the joined player must carry the flag, or world.js can never spend life');
+  assert.match(src, /^\s*usesLifeCost,$/m,
+    'the joined frame must carry the flag, or the client draws a mana orb that never moves');
 });
 
 // Contract §4 / the Group C contract addition: Game.js's onProgression keeps

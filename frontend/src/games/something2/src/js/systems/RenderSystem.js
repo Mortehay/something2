@@ -144,7 +144,7 @@ export class RenderSystem {
 
   renderChunked({
     player, camera, chunkedMap, remotePlayers, localUserId,
-    creatures = [], projectiles = [], mana = null, maxMana = null,
+    creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
     groundItems = [], autoLoot = false, gold = null, toast = null,
@@ -306,7 +306,7 @@ export class RenderSystem {
     this.drawVfx(vfx);
 
     camera.reset(this.ctx);
-    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash, effects, gold, progression });
+    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, showMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash, effects, gold, progression });
     if (toast) this.renderToast(toast);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
@@ -1412,7 +1412,7 @@ export class RenderSystem {
     ctx.restore();
   }
 
-  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null, gold = null, progression = null }) {
+  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, showMana = true, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null, gold = null, progression = null }) {
     if (!player) return;
 
     const orbRadius = 48;
@@ -1422,10 +1422,18 @@ export class RenderSystem {
     const hpY = GAME_HEIGHT - orbRadius - 16;
     this._drawPoEOrb(hpX, hpY, orbRadius, player.hp, player.maxHp, "HP", "life");
 
-    // Bottom-right Mana / MP Orb (Path of Exile style)
-    const mpX = GAME_WIDTH - orbRadius - 16;
-    const mpY = GAME_HEIGHT - orbRadius - 16;
-    this._drawPoEOrb(mpX, mpY, orbRadius, mana, maxMana, "MP", "mana");
+    // Bottom-right Mana / MP Orb (Path of Exile style).
+    //
+    // SOMET-472: SKIPPED ENTIRELY for a life-cost class, not drawn with a null
+    // pool. _drawPoEOrb treats a null `current` as 0 and a null `max` as 100,
+    // so passing nulls would paint a permanently EMPTY mana orb -- which reads
+    // as "you are out of mana" rather than "you have no mana bar". The Cultist
+    // spends HP, and the HP orb to the left is the whole story.
+    if (showMana) {
+      const mpX = GAME_WIDTH - orbRadius - 16;
+      const mpY = GAME_HEIGHT - orbRadius - 16;
+      this._drawPoEOrb(mpX, mpY, orbRadius, mana, maxMana, "MP", "mana");
+    }
 
     // Bottom XP bar connecting HP and MP orbs, with central level emblem
     this._drawXpBar(progression);
