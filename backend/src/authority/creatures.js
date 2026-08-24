@@ -41,6 +41,18 @@ const GUARD_LEASH_RADIUS = 300;   // px from HOME: guards hold the gate, they do
 const GUARD_DAMAGE = 25;
 const GUARD_HOME_EPSILON = 24;    // px: close enough to the post to stand still
 
+// SOMET-473 -- the Druid's charm (spec 8.2).
+//
+// How close a pet keeps to its druid when it has nothing to fight. Just outside
+// a player's own 64px box plus a creature's 48, so a following pet stands
+// beside its owner rather than inside them.
+const CHARM_FOLLOW_RANGE = 120;
+// How far a pet may be dragged from its druid before the charm simply ends. A
+// pet that has fallen this far behind is one a portal, a knockback or a
+// teleport separated from its owner, and a tether with no upper bound is a
+// creature walking across the map forever.
+const CHARM_LEASH_RADIUS = 1200;
+
 // SOMET-154 — walking home is not a straight line. A guard's post is INSIDE
 // the village's wall ring, so a guard displaced outside the ring has its own
 // wall between it and home: greedy "steer at the post" steering jams against
@@ -1153,6 +1165,20 @@ class CreatureSim {
         damage: Number.isFinite(c.damage) ? Number(c.damage) : CREATURE_DAMAGE,
         _dir: dirIdx, dirty: false,
         faction: c.faction || 'hostile',
+        // SOMET-473. The faction to restore when the charm ends. Captured at
+        // load, never recomputed: `faction` itself is overwritten while
+        // charmed, so it is no longer able to answer "what was this creature
+        // before?".
+        baseFaction: c.faction || 'hostile',
+        // The Druid's charm (spec 8.2). All three are null/0 for every creature
+        // in the world until a druid charms one, and are cleared together by
+        // releaseCharm -- a half-cleared charm is a pet with no owner, which
+        // the tick would follow to (undefined, undefined).
+        charmOwnerUserId: c.charmOwnerUserId ?? null,
+        charmedByCharacterId: c.charmedByCharacterId ?? c.charmed_by_character_id ?? null,
+        // World-clock ms, not a Date: this module never reads a clock, so the
+        // caller converts the persisted timestamptz once at load.
+        charmExpiresAt: Number.isFinite(c.charmExpiresAt) ? c.charmExpiresAt : 0,
         home: (Number.isFinite(c.home_x) && Number.isFinite(c.home_y))
           ? { x: c.home_x, y: c.home_y }
           : null,
@@ -1207,6 +1233,48 @@ class CreatureSim {
   // alone can't hand back the object. Named `get` to match the Map it wraps.
   get(id) { return this.creatures.get(id); }
 
+  // SOMET-473 -- take control of a creature. Returns false for an id this sim
+  // does not hold, so the caller can tell "charmed" from "that creature is
+  // gone" without a second lookup.
+  //
+  // The faction FLIP is what removes the pet from every hostile interaction in
+  // the sim at once: selectGuardTarget admits only `faction === 'hostile'`
+  // candidates, and projectiles.js's projectileHitsCreature refuses a
+  // same-faction shot. Setting it here, in one place, is why no consumer needs
+  // its own "is this a pet?" test.
+  //
+  // 'charmed' is IN-MEMORY ONLY and is never written to entity_types.faction,
+  // whose CHECK allows ('hostile','guard') -- world_creatures carries the charm
+  // as its own two columns instead, so no constraint has to learn a third value.
+  charm(id, { userId, characterId, expiresAt }) {
+    const c = this.creatures.get(id);
+    if (!c) return false;
+    c.faction = 'charmed';
+    c.charmOwnerUserId = userId;
+    c.charmedByCharacterId = characterId;
+    c.charmExpiresAt = expiresAt;
+    // A pet abandons whatever it was chasing. Without this it keeps the player
+    // it had acquired and spends its first charmed tick attacking them.
+    c._target = null;
+    c._targetKind = null;
+    c.dirty = true;
+    return true;
+  }
+
+  // Hand a creature back. Restores the faction captured at load rather than
+  // hardcoding 'hostile': a guard-faction creature that was somehow charmed
+  // must not come back as a wild hostile inside its own village.
+  releaseCharm(c) {
+    c.faction = c.baseFaction || 'hostile';
+    c.charmOwnerUserId = null;
+    c.charmedByCharacterId = null;
+    c.charmExpiresAt = 0;
+    c._target = null;
+    c._targetKind = null;
+    c.mode = 'roam';
+    c.dirty = true;
+  }
+
   // `now` is the world clock, threaded in for the same reason the attack
   // resolvers take it: damage reads the target's live status effects (shock's
   // vulnerability) and this module must never read a clock of its own.
@@ -1214,6 +1282,10 @@ class CreatureSim {
     const active = activeChunkKeys instanceof Set ? activeChunkKeys : new Set(activeChunkKeys);
     const byId = new Map(players.map((p) => [p.userId, p]));
     const killed = [];
+    // SOMET-473: id -> the userId to credit for that kill, for the ONE path
+    // that has a player behind it (a Druid's pet). Allocated lazily, so a tick
+    // with no pets in it -- every tick in the game today -- costs nothing.
+    let killCredits = null;
     // Populated below by ranged/cast creatures whose target is in range and
     // in line of sight. Plain data, not a callback -- World spawns these into
     // its own ProjectileSim so CreatureSim never depends on that module.
@@ -1258,6 +1330,95 @@ class CreatureSim {
       }
 
       const cc = center(c);
+
+      // --- Charmed creatures: the Druid's pets (spec 8.2, SOMET-473).
+      //
+      // Placed ahead of the guard branch deliberately: charm is a state imposed
+      // on top of whatever the creature already was, and a charmed guard must
+      // follow its druid rather than resume defending a post.
+      //
+      // The charm ends HERE, in the tick, and nowhere else: three conditions
+      // (the clock, the owner's presence, the leash) resolve in one place, so
+      // there is exactly one way for a pet to stop being one.
+      if (c.charmOwnerUserId != null) {
+        const owner = byId.get(c.charmOwnerUserId);
+        const ownerC = owner ? center(owner) : null;
+        const tooFar = ownerC
+          ? dist2(cc.x, cc.y, ownerC.x, ownerC.y) > CHARM_LEASH_RADIUS * CHARM_LEASH_RADIUS
+          : true;
+        if (now >= c.charmExpiresAt || !owner || tooFar) {
+          this.releaseCharm(c);
+          // Falls through to the ordinary paths below on the NEXT tick, not
+          // this one: releasing and then immediately acquiring a target in the
+          // same tick would let a lapsing pet bite its own druid on the way out.
+          continue;
+        }
+
+        // What the druid last landed a hit on (world.js's attack stamps
+        // `_charmTargetId`). Re-validated every tick rather than cached on the
+        // creature: the target can die, be charmed by the same druid, or be the
+        // pet itself, and a pet attacking its sibling is the shape this check
+        // exists to refuse. A pet is never pointed at a PLAYER -- _charmTargetId
+        // only ever names a creature -- so the druid can never aim their pack
+        // at another player through this seam.
+        let tgt = owner._charmTargetId ? this.creatures.get(owner._charmTargetId) : null;
+        if (tgt && (tgt.hp <= 0 || tgt.id === c.id || tgt.charmOwnerUserId === c.charmOwnerUserId)) {
+          tgt = null;
+        }
+        c._target = tgt ? tgt.id : null;
+        c._targetKind = tgt ? 'creature' : null;
+
+        if (tgt) {
+          c.mode = 'chase';
+          const tc = center(tgt);
+          const vx = tc.x - cc.x, vy = tc.y - cc.y;
+          const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult * c._buff.speedMult);
+          if (r.x !== c.x || r.y !== c.y) {
+            c.x = r.x; c.y = r.y;
+            const f = facingFor(vx, vy); if (f) c.facing = f;
+            c.dirty = true;
+          }
+          // Attack, gated by canAct exactly as the guard and hostile branches
+          // are: a shocked pet misses its strike like anything else. `cc` is
+          // the PRE-move centre, the same convention both other branches use.
+          const ability = canAct(c, now) ? selectAbility(c, bh, Math.hypot(tc.x - cc.x, tc.y - cc.y)) : null;
+          if (ability) {
+            c._abilityCd.set(ability.slot, ability.attackCooldown);
+            const dmg = (bh.damageOverride ?? c.damage) * ability.damageMult * c._buff.damageMult;
+            applyDamageWithEffects(tgt, dmg, ability.element || c.attackElement,
+              effectiveMit(tgt), now, creatureKey(c.id));
+            stampCreatureAttack(attacks, impacts, c, tgt, cc, tc);
+            tgt.dirty = true;
+            if (tgt.hp <= 0) {
+              this.creatures.delete(tgt.id);
+              killed.push(tgt.id);
+              // Credited to the DRUID, not to the pet: the kill is the player's
+              // doing, and commitCreatureDeath's XP and loot branches key on a
+              // real userId. A creature id here would be a bogus killerUserId,
+              // the exact trap killerUserIdFor exists to avoid in projectiles.js.
+              //
+              // Carried in a SEPARATE map rather than by changing `killed`'s
+              // element type: every other push into that array is a bare id and
+              // world.js maps the whole list to { id, killerUserId: null }.
+              (killCredits || (killCredits = new Map())).set(tgt.id, c.charmOwnerUserId);
+            }
+          }
+        } else {
+          // Nothing to fight: heel. Beyond CHARM_FOLLOW_RANGE it closes; inside
+          // it, it stands still rather than jittering against its owner's box.
+          c.mode = 'follow';
+          const vx = ownerC.x - cc.x, vy = ownerC.y - cc.y;
+          if (Math.hypot(vx, vy) > CHARM_FOLLOW_RANGE) {
+            const r = movedWith(this.map, c, vx, vy, dt, bh.moveSpeedMult * c._buff.speedMult);
+            if (r.x !== c.x || r.y !== c.y) {
+              c.x = r.x; c.y = r.y;
+              const f = facingFor(vx, vy); if (f) c.facing = f;
+              c.dirty = true;
+            }
+          }
+        }
+        continue;
+      }
 
       // --- Guard-style creatures: defend the post against hostile creatures.
       // Guards never target players and are never targeted by hostiles.
@@ -1933,7 +2094,7 @@ class CreatureSim {
         c._dir = (c._dir + 1) % DIRS.length; // blocked → turn
       }
     }
-    return { killed, shots, attacks, impacts };
+    return { killed, killCredits, shots, attacks, impacts };
   }
 
   // Player melee: damage creatures within `range` of (px,py); remove + return dead ids.
@@ -2224,6 +2385,7 @@ module.exports = {
   CREATURE_SIZE, CREATURE_SPEED, REDIRECT_CHANCE,
   AGGRO_RADIUS, LEASH_RADIUS, CONTACT_RANGE, CREATURE_DAMAGE, CREATURE_ATTACK_COOLDOWN,
   GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS, GUARD_DAMAGE, GUARD_HOME_EPSILON,
+  CHARM_FOLLOW_RANGE, CHARM_LEASH_RADIUS,
   // SOMET-295 — the chase give-up's three numbers, exported so the tests that
   // pin the behaviour measure against the shipped values rather than restating
   // them (a test carrying its own copy of 40 keeps passing when the real one

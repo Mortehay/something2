@@ -422,7 +422,8 @@ class World {
     // no early return, nothing else in its body returns -- so the `|| {
     // killed: [], shots: [] }` fallback here could never fire. Removed.
     const {
-      killed: killedIds, shots, attacks: creatureAttacks, impacts: creatureImpacts,
+      killed: killedIds, killCredits, shots,
+      attacks: creatureAttacks, impacts: creatureImpacts,
     } = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now);
 
     for (const s of shots) {
@@ -453,12 +454,16 @@ class World {
     }
 
     // A guard's kill has no player behind it — always null, never omitted.
+    // SOMET-473: a Druid's PET is the one creature-owned kill that does have a
+    // player behind it, and CreatureSim reports that in `killCredits`. Read
+    // through `?? null` so every other path is byte-identical to before and a
+    // sim double that predates the field still works.
     // Slice D: creature attacks ride the SAME frame keys player swings do, so
     // server.js pushes them through the same two helpers and the client draws
     // them through the same path. Defaulted to [] because several tests build
     // a CreatureSim-shaped double that predates these fields.
     return {
-      kills: killedIds.map((id) => ({ id, killerUserId: null })),
+      kills: killedIds.map((id) => ({ id, killerUserId: (killCredits && killCredits.get(id)) ?? null })),
       attacks: creatureAttacks || [],
       impacts: creatureImpacts || [],
     };
