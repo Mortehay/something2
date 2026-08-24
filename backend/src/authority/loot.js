@@ -374,6 +374,28 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
     // shortest round-tripping representation, so the number that went onto the
     // ground is the number that comes back. A `real` column would not have
     // that property (see the migration's note on the column type).
+    //
+    // SOMET-501: `aff` JOINs affix_types instead of casting the snapshot's id
+    // straight into the FK column, so an affixTypeId whose catalog row is GONE
+    // is dropped from the INSERT rather than raising 23503 and failing the
+    // whole pickup. The snapshot carries a bare id with no foreign key, and
+    // two windows can leave one dangling even with the widened admin DELETE
+    // guard (index.js) in place: a drop landing between that guard's probe and
+    // its DELETE, and each world's affix pool being a 60-second cache
+    // (server.js refreshLootTuning), which can roll an affix the admin
+    // legitimately deleted a moment earlier. Before this, either window cost
+    // the player the ITEM -- unpickable, at 20Hz, until the ground row expired.
+    //
+    // The player loses one modifier instead of the whole item, and it is NOT
+    // silent: `orphaned_affix_type_ids` reports exactly which ids were dropped
+    // and the console.error below shouts about it. A tolerance nobody can see
+    // is how SOMET-481 shipped a dead feature; this one leaves a trail naming
+    // the ground row, the granted instance and the missing catalog ids.
+    //
+    // `idx` deliberately keeps the SNAPSHOT's ordinal (ord - 1) rather than
+    // being renumbered, so a surviving affix comes back at the index it went
+    // down with. Gaps are fine: nothing reads idx as dense, and renumbering
+    // would make the two carry paths disagree about what idx means.
     const r = await pool.query(
       `WITH d AS (DELETE FROM world_items WHERE id = $1
                   RETURNING item_type_id, quantity, rarity, item_level, affixes, soulbound),
@@ -383,9 +405,11 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
                     RETURNING id, item_type_id, quantity, rarity, item_level, soulbound),
             aff AS (INSERT INTO player_item_affixes (player_item_id, idx, affix_type_id, value)
                     SELECT ins.id, (a.ord - 1)::smallint,
-                           (a.elem->>'affixTypeId')::int, (a.elem->>'value')::double precision
+                           live.id, (a.elem->>'value')::double precision
                       FROM ins, d, LATERAL jsonb_array_elements(d.affixes)
                                      WITH ORDINALITY AS a(elem, ord)
+                                   JOIN affix_types live
+                                     ON live.id = (a.elem->>'affixTypeId')::int
                     RETURNING idx, affix_type_id, value)
        SELECT ins.id, ins.item_type_id, ins.quantity, ins.rarity, ins.item_level, ins.soulbound,
               COALESCE((SELECT jsonb_agg(jsonb_build_object(
@@ -393,7 +417,12 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
                                  'label', at.label,
                                  'value', aff.value, 'effect', at.effect) ORDER BY aff.idx)
                           FROM aff JOIN affix_types at ON at.id = aff.affix_type_id),
-                       '[]'::jsonb) AS affixes
+                       '[]'::jsonb) AS affixes,
+              (SELECT jsonb_agg((a.elem->>'affixTypeId')::int)
+                 FROM d, LATERAL jsonb_array_elements(d.affixes) AS a(elem)
+                WHERE NOT EXISTS (SELECT 1 FROM affix_types live
+                                   WHERE live.id = (a.elem->>'affixTypeId')::int))
+                AS orphaned_affix_type_ids
          FROM ins`,
       [groundItemId, characterId],
     );
@@ -409,7 +438,23 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
     const {
       id: instanceId, item_type_id: typeId, quantity,
       rarity, item_level: itemLevel, soulbound, affixes,
+      orphaned_affix_type_ids: orphaned,
     } = r.rows[0];
+    // SOMET-501: the loud half of the tolerance above. Reaching this line means
+    // a ground snapshot named an affix_types row that no longer exists, which
+    // the widened admin DELETE guard is supposed to make impossible -- so it is
+    // an operational signal, not a normal outcome, and it names everything
+    // needed to reconstruct what happened. NULL (not an empty array) is the
+    // ordinary case: jsonb_agg over no rows returns NULL, so this costs one
+    // null check per pickup.
+    if (Array.isArray(orphaned) && orphaned.length > 0) {
+      console.error(
+        `SOMET-501: ground item ${groundItemId} carried affix type(s) ${orphaned.join(', ')} `
+        + `that are no longer in affix_types; granted player_items ${instanceId} WITHOUT them. `
+        + 'The item was saved, one modifier was lost -- an affix was deleted while it was on the '
+        + "ground (a lost guard race, or a world's 60s cached affix pool rolling a dead entry).",
+      );
+    }
     // `quantity` is ALWAYS present and always a number. world_items.quantity is
     // NOT NULL DEFAULT 1, so the `?? 1` is a floor for callers with partial
     // rows (tests), not a real production branch. Deliberately NOT conditional:

@@ -175,11 +175,39 @@ test('DELETE refuses an affix that is rolled on a live instance', async () => {
   assert.strictEqual(pool.calls.filter((c) => /DELETE FROM affix_types/i.test(c.sql)).length, 0);
 });
 
+// SOMET-501. The second probe. world_items carries a denormalised `affixes`
+// jsonb with a bare affixTypeId and NO foreign key, so a ground item is
+// invisible to both the probe above and the RESTRICT behind it -- the delete
+// used to succeed and every pickup of that item then failed on 23503.
+//
+// Asserted on the SQL and the bound parameter, not just the status: the probe
+// has to be a CONTAINMENT match on the array element, and a probe that looked
+// for the id anywhere in the row (or matched nothing at all) would still
+// return "no rows" here and read as a pass.
+test('DELETE refuses an affix that a GROUND item carries', async () => {
+  const pool = mockPool([
+    [/FROM player_item_affixes/i, () => ({ rows: [], rowCount: 0 })],
+    [/FROM world_items/i, () => ({ rows: [{ '?column?': 1 }], rowCount: 1 })],
+    [/DELETE FROM affix_types/i, () => { throw new Error('must not reach the DELETE'); }],
+  ]);
+  __setPool(pool);
+  const res = await request(app).delete('/api/affix-types/7').set(...AUTH);
+  assert.strictEqual(res.status, 409, JSON.stringify(res.body));
+  assert.match(res.body.error, /ground/i);
+  assert.strictEqual(pool.calls.filter((c) => /DELETE FROM affix_types/i.test(c.sql)).length, 0);
+
+  const probe = pool.calls.find((c) => /FROM world_items/i.test(c.sql));
+  assert.match(probe.sql, /affixes @>/i, 'the ground probe must be a jsonb containment match');
+  assert.deepStrictEqual(JSON.parse(probe.params[0]), [{ affixTypeId: 7 }],
+    'the probe must look for the affix id as an ARRAY ELEMENT of the snapshot');
+});
+
 // The pre-check can lose a race; the FK is the real enforcement, and its error
 // must not surface as a 500.
 test('DELETE maps a lost race on the FK to the same 409', async () => {
   __setPool(mockPool([
     [/FROM player_item_affixes/i, () => ({ rows: [], rowCount: 0 })],
+    [/FROM world_items/i, () => ({ rows: [], rowCount: 0 })],
     [/DELETE FROM affix_types/i, () => { const e = new Error('fk'); e.code = '23503'; throw e; }],
   ]));
   const res = await request(app).delete('/api/affix-types/7').set(...AUTH);
@@ -189,6 +217,7 @@ test('DELETE maps a lost race on the FK to the same 409', async () => {
 test('DELETE reports a missing row as 404', async () => {
   __setPool(mockPool([
     [/FROM player_item_affixes/i, () => ({ rows: [], rowCount: 0 })],
+    [/FROM world_items/i, () => ({ rows: [], rowCount: 0 })],
     [/DELETE FROM affix_types/i, () => ({ rows: [], rowCount: 0 })],
   ]));
   assert.strictEqual((await request(app).delete('/api/affix-types/4242').set(...AUTH)).status, 404);
