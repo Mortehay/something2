@@ -35,6 +35,16 @@ const HP_PER_CON = 10;
 const MANA_BASE = 100;
 const MANA_PER_INT = 10;
 
+// Stamina's base pool. No stat scales it and no class row carries it, so this
+// is its whole starting value; the passive tree's `resource` grants are the
+// only thing that moves it (SOMET-495).
+//
+// It was `PLAYER_MAX_STAMINA = 100` in authority/world.js until 495. world.js
+// still exports that name -- several tests import it -- but it is now an alias
+// for this constant rather than a second copy of the number, so the pool a
+// player joins with and the pool derivePlayerStats computes cannot drift.
+const STAMINA_BASE = 100;
+
 // STR -> physical damage, INT -> every other element. The split is the
 // weapon's existing `element` column; no new field.
 const MELEE_PER_STR = 0.05;
@@ -111,7 +121,7 @@ const RESPEC_BASE = 50;
 
 module.exports = {
   BASE_STAT, STAT_KEYS, MAX_LEVEL,
-  HP_BASE, HP_PER_CON, MANA_BASE, MANA_PER_INT,
+  HP_BASE, HP_PER_CON, MANA_BASE, MANA_PER_INT, STAMINA_BASE,
   MELEE_PER_STR, SPELL_PER_INT, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
   MANA_REGEN_BASE, MANA_REGEN_PER_WIS,
   PRICE_PER_CHA, SELL_FRACTION_BASE, SELL_FRACTION_MAX,

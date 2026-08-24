@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   applyDamage, applyDamageWithEffects, drainMana,
-  MIN_DAMAGE, RESIST_CAP, ELEMENTS, NO_MITIGATION,
+  MIN_DAMAGE, RESIST_CAP, RESIST_FLOOR, ELEMENTS, NO_MITIGATION,
   isProvokedBy, playerKey, creatureKey, PROVOKE_MEMORY_MS,
 } = require('../src/authority/damage.js');
 const { applyEffect, SHOCK, SHOCK_MAGNITUDE } = require('../src/authority/effects.js');
@@ -70,11 +70,32 @@ test('a NaN resistance is clamped to 0 instead of producing NaN damage/hp', () =
   assert.equal(x.hp, 90);
 });
 
-test('a negative resistance is clamped to 0, not amplifying damage', () => {
+// SOMET-495 REVERSED this test's contract, deliberately.
+//
+// It used to read "a negative resistance is clamped to 0, not amplifying
+// damage", and that was right while a resistance could only come from armour,
+// where a negative number could only be a bad row. The passive tree now
+// AUTHORS negative resistances: several keystones pay for their upside with a
+// drawback like `{element:'ice', value:-15}`, and a clamp at 0 gave the player
+// the upside for free -- the same "displayed but inert" failure SOMET-495
+// exists to end, one layer down from the grant kinds themselves.
+//
+// What is NOT negotiable is that the amplification stays BOUNDED, which is what
+// the second half pins.
+test('a negative resistance AMPLIFIES damage — drawback nodes are real', () => {
   const x = t();
   const dealt = applyDamage(x, 10, 'fire', { defense: 0, resistances: { fire: -0.5 } });
-  assert.equal(dealt, 10, 'negative resistance must not deal MORE than raw damage');
+  assert.equal(dealt, 15, 'a -50% fire resistance must take 1.5x, not 1x — '
+    + 'clamping it at 0 silently deletes every drawback keystone');
   assert.ok(Number.isFinite(dealt));
+});
+
+test('the amplification is floored at RESIST_FLOOR (never worse than double)', () => {
+  const x = t();
+  assert.equal(RESIST_FLOOR, -1, 'the floor is the mirror of RESIST_CAP');
+  // -4 is far past the floor: a stack of drawbacks cannot run away.
+  const dealt = applyDamage(x, 10, 'ice', { defense: 0, resistances: { ice: -4 } });
+  assert.equal(dealt, 20, `an absurd negative resistance must cap at 2x raw, got ${dealt}`);
 });
 
 // --- Task 6: shock's damage vulnerability, layered in FRONT of applyDamage ---

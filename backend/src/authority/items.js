@@ -436,7 +436,19 @@ function requirementGate(inv, itemTypes, itemId, type, req) {
 }
 
 // Sum equipped ARMOR defense and merge resistances per element.
-function mitigation(inv, itemTypes) {
+//
+// SOMET-495: `extraResistances` is the passive tree's `resist` aggregate --
+// composeStats' `resists`, ALREADY CONVERTED to the fraction scale armour uses
+// (a +6 node arrives here as 0.06, not as 6). It is merged into the same map
+// by the same `+=`, deliberately, because there is exactly one resistance
+// number per element and one place damage.js reads it from; a second map added
+// later at the damage site would be a second scale waiting to be mixed up.
+//
+// Merged in a SEPARATE pass rather than seeded into `resistances` before the
+// slot walk, so an element the tree touches but no armour covers still appears
+// -- including with a NEGATIVE total, which is a drawback keystone doing its
+// job and must survive all the way to applyDamage (see RESIST_FLOOR there).
+function mitigation(inv, itemTypes, extraResistances = null) {
   let defense = 0;
   const resistances = {};
   for (const slot of SLOTS) {
@@ -450,6 +462,14 @@ function mitigation(inv, itemTypes) {
     for (const [el, v] of Object.entries(type.resistances || {})) {
       resistances[el] = (resistances[el] || 0) + v;
     }
+  }
+  for (const [el, v] of Object.entries(extraResistances || {})) {
+    // A non-finite entry is dropped rather than merged: applyDamage's own NaN
+    // guard would catch it, but a NaN sitting in this map would also poison
+    // every future read of the element and is invisible in a frame dump.
+    const n = Number(v);
+    if (!Number.isFinite(n) || n === 0) continue;
+    resistances[el] = (resistances[el] || 0) + n;
   }
   return { defense, resistances };
 }
