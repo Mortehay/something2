@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { generatePassiveTree } = require('../seeds/generatePassiveTree.js');
-const { PASSIVE_TREE_SPEC } = require('../seeds/data/passiveTree.js');
+const { PASSIVE_TREE_SPEC, RULE_KEYS } = require('../seeds/data/passiveTree.js');
 const { ELEMENTS } = require('../src/authority/damage.js');
 
 // The whole vocabulary, hand-written. Deliberately NOT imported from
@@ -146,10 +146,90 @@ test('guard 3: every grant validates against the known grant vocabulary', () => 
   assert.strictEqual(bad.length, 0);
 });
 
-test('a start node grants nothing — it is free, so it must also be inert', () => {
+// ---- start nodes: contract 6.11's option 3 ----
+//
+// THIS REPLACES C1's RULE. That test asserted "a start node grants nothing --
+// it is free, so it must also be inert". SOMET-471 reverses it under contract
+// 6.11, which makes the start node the place a class's MECHANICAL identity is
+// granted, so the generator's start-node handling and this test changed
+// together.
+//
+// The replacement asserts the grants are THE INTENDED PER-CLASS ONES, keyed by
+// start_class, against hand-written literals. A weaker "a start node grants
+// something" -- or a non-empty check, or a count -- would pass for any typo:
+// the Druid granting the Cultist's rule, a value of 10 where 0.1 was meant, or
+// all six granting the same thing would all satisfy it, and none of those has
+// an in-game symptom a player could report.
+test('each start node grants exactly its own class identity (contract 6.11)', () => {
+  const byClass = {};
   for (const n of tree.nodes.filter((x) => x.kind === 'start')) {
-    assert.deepStrictEqual(n.grants, []);
+    assert.strictEqual(byClass[n.start_class], undefined,
+      `two start nodes claim ${n.start_class}`);
+    byClass[n.start_class] = n.grants;
   }
+  assert.deepStrictEqual(byClass, {
+    // == min_edge (+3 physical), the ring-1 minor used as the yardstick: a
+    // start node is free, so it may be worth at most the cheapest bought node.
+    Warrior: [{ type: 'damage', element: 'physical', value: 3 }],
+    Mage: [{ type: 'damage', element: 'arcane', value: 3 }],
+    // Each rule is the smallest step of the rule its own sector's keystones
+    // deepen: Fleet 0.32, Clarity 0.2, Blood Pact 0.75, Pack Leader +3.
+    Archer: [{ type: 'rule', rule: 'cooldownFloor', value: 0.38 }],
+    Monk: [{ type: 'rule', rule: 'regenLifeShare', value: 0.1 }],
+    Cultist: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.9 }],
+    Druid: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }],
+  });
+});
+
+test('NO start node grants a raw pool bonus (contract 6.11)', () => {
+  // The line that keeps option 1 and option 3 apart. A class's pools come from
+  // entity_types.max_hp/max_mana; a start node that also granted hp or mana
+  // would pay that class twice for being what it is. Stated separately from
+  // the literal above so the RULE survives a future retune of the values --
+  // someone editing the six grants will edit the literal, and this is what
+  // still refuses `{ type: 'resource', pool: 'hp' }` afterwards.
+  const offenders = [];
+  for (const n of tree.nodes.filter((x) => x.kind === 'start')) {
+    for (const g of n.grants) {
+      if (g.type === 'resource') offenders.push(`${n.start_class}: ${JSON.stringify(g)}`);
+    }
+  }
+  assert.deepStrictEqual(offenders, []);
+});
+
+test('the six start-node grants are comparable in weight', () => {
+  // They are FREE, so no class may open with more of them than another. One
+  // grant each -- and, since the two damage grants are the only numeric ones,
+  // they must be equal to each other and to min_edge's +3.
+  const starts = tree.nodes.filter((x) => x.kind === 'start');
+  assert.deepStrictEqual(starts.map((n) => n.grants.length), [1, 1, 1, 1, 1, 1]);
+  const damage = starts.flatMap((n) => n.grants.filter((g) => g.type === 'damage'));
+  assert.deepStrictEqual(damage.map((g) => g.value), [3, 3]);
+});
+
+test('every start-node rule grant names a rule that has a declared consumer', () => {
+  // A `rule` grant nobody reads is a node the player cannot tell apart from a
+  // working one. RULE_KEYS makes `consumer` mandatory for exactly that reason;
+  // this checks the six free nodes actually obey it, since they are the grants
+  // every character gets whether or not they ever open the tree.
+  for (const n of tree.nodes.filter((x) => x.kind === 'start')) {
+    for (const g of n.grants.filter((x) => x.type === 'rule')) {
+      const def = RULE_KEYS[g.rule];
+      assert.ok(def, `${n.start_class} grants unknown rule ${g.rule}`);
+      assert.equal(typeof def.consumer, 'string');
+      assert.ok(def.consumer.length > 0, `${g.rule} has no consumer`);
+    }
+  }
+});
+
+test('start_class values match the classes entity_types can actually roll', () => {
+  // start_class is resolved by services/passiveTreeStore.js as a JOIN on
+  // entity_types.name. A misspelling here is a class whose tree is silently
+  // unreachable -- startNodeIdFor returns null and every caller refuses.
+  // six_classes_db.test.js pins the other side of this join.
+  const starts = tree.nodes.filter((x) => x.kind === 'start');
+  assert.deepStrictEqual(starts.map((n) => n.start_class).sort(),
+    ['Archer', 'Cultist', 'Druid', 'Mage', 'Monk', 'Warrior']);
 });
 
 // ---- guard 5: determinism ----

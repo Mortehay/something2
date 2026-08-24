@@ -16,6 +16,28 @@
 // are exactly what the admin node editor writes, and clobbering them on every
 // reseed is the failure biomes.js's creature_types CASE expression exists to
 // prevent.
+//
+// ONE CARVE-OUT: A START NODE'S `grants` ARE STRUCTURAL (SOMET-471).
+//
+// Contract 6.11 makes the six start nodes the place a class's MECHANICAL
+// identity is granted -- the Cultist's life-cost affinity, the Druid's charm
+// affinity. That is a contract between the tree and the class catalog, not
+// tunable content, and it is the ONE grant every character receives whether or
+// not they ever open the tree.
+//
+// Without this carve-out the feature ships INERT on every database that
+// already has a tree. C1 seeded all six start nodes with `grants: []` by rule,
+// so a non-forced reseed would preserve those empty arrays forever, and the
+// only symptom would be six classes that all play identically -- exactly the
+// shape of the defect SOMET-486 spent eleven months not noticing. Requiring an
+// operator to remember FORCE=1 is not a fix: FORCE=1 also clobbers every
+// legitimately hand-tuned minor and notable in the tree, so the safe action
+// and the correct action would be in conflict.
+//
+// The carve-out is safe in the direction that matters: a stored `[]` on a
+// start node cannot be an admin edit, because until SOMET-471 an empty array
+// was the only legal value. passive_tree_start_grants_db.test.js proves a
+// NON-forced reseed really does deliver them.
 const path = require('path');
 const dotenv = require('dotenv');
 const { Pool } = require('pg');
@@ -38,7 +60,13 @@ async function seedPassiveTree(db, { force = false, quiet = false } = {}) {
              start_class = EXCLUDED.start_class,
              kind   = CASE WHEN $10 THEN EXCLUDED.kind   ELSE passive_nodes.kind   END,
              label  = CASE WHEN $10 THEN EXCLUDED.label  ELSE passive_nodes.label  END,
-             grants = CASE WHEN $10 THEN EXCLUDED.grants ELSE passive_nodes.grants END`,
+             -- $10 is --force. The second arm is SOMET-471's carve-out: a start
+             -- node's grants are structural (see the header), so they are
+             -- written on every reseed, forced or not. EXCLUDED.kind rather
+             -- than passive_nodes.kind, because the row being inserted is the
+             -- generator's and that is the authority on what a start node is.
+             grants = CASE WHEN $10 OR EXCLUDED.kind = 'start'
+                           THEN EXCLUDED.grants ELSE passive_nodes.grants END`,
       [n.key, n.sector, n.ring, n.x, n.y, n.kind, n.label, JSON.stringify(n.grants), n.start_class, force],
     );
   }
