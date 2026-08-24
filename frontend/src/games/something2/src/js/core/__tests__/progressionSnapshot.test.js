@@ -1,10 +1,11 @@
-// SOMET-242 Task 10: Game.getProgressionSnapshot() is the character sheet's
-// read-only window into the live progression row (see getMinimapSnapshot.js's
+// SOMET-242 Task 10: Game.getProgressionSnapshot() is the read-only window
+// into the live progression row (see getMinimapSnapshot.js's
 // sibling test for the pattern this borrows -- calling the method against a
 // hand-built `this` avoids constructing the full Game, which needs a
 // canvas/DOM).
 import { describe, it, expect } from 'vitest';
 import { Game } from '../Game.js';
+import { mergeSeedStats } from '../progressionExtras.js';
 
 function callSnapshot(state) {
   return Game.prototype.getProgressionSnapshot.call(state);
@@ -103,7 +104,7 @@ describe('F1: a newer websocket push is not clobbered by a later HTTP-response-s
 // config) is exercised end-to-end by setupInput-adjacent tests elsewhere
 // (authorityDisconnect.test.js, debugKeyRepeat.test.js) using the same
 // minimal window/canvas stub; this file only needs to prove the snapshot
-// method's own contract, which is what CharacterSheet.jsx actually reads.
+// method's own contract, which is what the settings/HUD readers consume.
 describe('Game constructor / re-join reset', () => {
   it('starts with progression null', () => {
     const originalWindow = globalThis.window;
@@ -114,5 +115,156 @@ describe('Game constructor / re-join reset', () => {
     } finally {
       globalThis.window = originalWindow;
     }
+  });
+});
+
+// SOMET-483: the Character tab's click targets and its own state, exercised
+// against a hand-built `this` for the same reason the snapshot tests above
+// are -- constructing a full Game needs a canvas.
+describe('Character tab click routing', () => {
+  function makeGame() {
+    const originalWindow = globalThis.window;
+    globalThis.window = undefined;
+    let g;
+    try {
+      g = new Game();
+    } finally {
+      globalThis.window = originalWindow;
+    }
+    g.state = 'playing';
+    g.chunked = true;
+    g.inventoryOpen = true;
+    g.renderSystem = { _invHitAreas: [] };
+    // The HTTP seed is fire-and-forget and irrelevant to routing; stub it so
+    // these cases never touch the network.
+    g._refreshProgressionBundle = () => { g._bundleRefreshes = (g._bundleRefreshes || 0) + 1; };
+    return g;
+  }
+
+  it('turns the modifier list page', () => {
+    const g = makeGame();
+    g.renderSystem._invHitAreas = [{ x: 0, y: 0, w: 10, h: 10, kind: 'charmodpage', id: 1 }];
+    g._handleInventoryClick(1, 1);
+    expect(g.characterModPage).toBe(1);
+  });
+
+  it('resets the modifier page when the tab changes', () => {
+    const g = makeGame();
+    g.characterModPage = 3;
+    g.renderSystem._invHitAreas = [{ x: 0, y: 0, w: 10, h: 10, kind: 'invtab', id: 'stones' }];
+    g._handleInventoryClick(1, 1);
+    expect(g.characterModPage).toBe(0);
+  });
+
+  it('refreshes the server bundle when the Character tab is opened, and only then', () => {
+    // xpFloor/xpToNext have no websocket sender, so without this the XP bar
+    // would read "Loading…" forever on a character that never levels.
+    const g = makeGame();
+    g.renderSystem._invHitAreas = [{ x: 0, y: 0, w: 10, h: 10, kind: 'invtab', id: 'stones' }];
+    g._handleInventoryClick(1, 1);
+    expect(g._bundleRefreshes).toBeUndefined();
+    g.renderSystem._invHitAreas = [{ x: 0, y: 0, w: 10, h: 10, kind: 'invtab', id: 'character' }];
+    g._handleInventoryClick(1, 1);
+    expect(g._bundleRefreshes).toBe(1);
+  });
+
+  it('starts with an empty extras bundle and no invented curve numbers', () => {
+    const g = makeGame();
+    expect(g.progressionExtras).toEqual({
+      stats: null, xpFloor: null, xpToNext: null, respecCost: null,
+    });
+    expect(g.characterModPage).toBe(0);
+    expect(g._statsFromSocket).toBe(false);
+  });
+
+  it('builds no character view before a progression row has arrived', () => {
+    const g = makeGame();
+    expect(g.characterView()).toBeNull();
+  });
+
+  // THE SEAM THAT MAKES THE TAB LIVE RATHER THAN DEAD. characterView() can be
+  // perfect and the panel still render "Loading character…" forever if the
+  // frame payload does not carry it. This drives the real render() and reads
+  // what renderChunked was actually handed -- the epic has shipped four
+  // features that were correct in a pure module and never reached the screen.
+  it('puts the character view and its modifier page on every frame payload', () => {
+    const g = makeGame();
+    g.className = 'Warrior';
+    g.mainStat = 'strength';
+    g.characterModPage = 2;
+    g.progression = {
+      level: 4, experience: 200, passivePoints: 2,
+      sources: { strength: { base: 5, tree: 8, gear: 0 } },
+      modifiers: [{ label: 'Sinew', value: 8, source: 'tree', kind: 'stat', detail: 'strength' }],
+    };
+    let payload = null;
+    g.renderSystem = { _invHitAreas: [], renderChunked: (p) => { payload = p; } };
+    g.ctx = { fillRect() {}, save() {}, restore() {}, fillText() {} };
+    g.canvas = { width: 1280, height: 720 };
+    // The world-object collaborators render() reads on its way to the payload.
+    // Stubbed to the empty case, not mocked out: the payload is built in one
+    // literal, so a stub that let render() finish is enough to read it back.
+    g.creatures = { all: () => [] };
+    g.projectiles = { all: () => [] };
+    g.groundItems = { all: () => [] };
+    g.render();
+    expect(payload).not.toBeNull();
+    expect(payload.inventoryView.character).not.toBeNull();
+    expect(payload.inventoryView.character.className).toBe('Warrior');
+    expect(payload.inventoryView.character.sources)
+      .toEqual({ strength: { base: 5, tree: 8, gear: 0 } });
+    expect(payload.inventoryView.modPage).toBe(2);
+  });
+
+  // The latch itself, driven through the method the websocket handler calls.
+  // progressionExtras.test.js proves mergeSeedStats obeys `latched`; this
+  // proves Game actually SETS it, which is the half a pure-module test cannot
+  // see and the half the F1 race lives in.
+  it('latches the HTTP seed off once a frame has carried the derived bundle', () => {
+    const g = makeGame();
+    expect(g._statsFromSocket).toBe(false);
+    const STATS = { maxHp: 140, maxMana: 100 };
+    g._applyProgressionFrame({ progression: { level: 1, experience: 0 }, stats: STATS });
+    expect(g._statsFromSocket).toBe(true);
+    expect(g.progressionExtras.stats).toEqual(STATS);
+
+    // A late HTTP response carrying a PRE-push bundle must now lose.
+    g.progressionExtras = mergeSeedStats(
+      g.progressionExtras, { stats: { maxHp: 100, maxMana: 100 } }, g._statsFromSocket,
+    );
+    expect(g.progressionExtras.stats).toEqual(STATS);
+  });
+
+  it('leaves the latch alone for a frame that carries no derived bundle', () => {
+    const g = makeGame();
+    g._applyProgressionFrame({ progression: { level: 1, experience: 0 } });
+    expect(g._statsFromSocket).toBe(false);
+    expect(g.progression).toEqual({ level: 1, experience: 0 });
+  });
+
+  it('refetches the curve numbers on a level change, and only on one', () => {
+    const g = makeGame();
+    g._applyProgressionFrame({ progression: { level: 1, experience: 0 } });
+    expect(g._bundleRefreshes).toBe(1);          // null -> 1 is a change
+    g._applyProgressionFrame({ progression: { level: 1, experience: 40 } });
+    expect(g._bundleRefreshes).toBe(1);          // a kill push that did not level
+    g._applyProgressionFrame({ progression: { level: 2, experience: 80 } });
+    expect(g._bundleRefreshes).toBe(2);
+  });
+
+  it('builds the view from the single-writer row, not from a cached copy', () => {
+    const g = makeGame();
+    g.className = 'Warrior';
+    g.mainStat = 'strength';
+    g.progression = {
+      level: 4, experience: 200, passivePoints: 2,
+      sources: { strength: { base: 5, tree: 8, gear: 0 } },
+      modifiers: [{ label: 'Sinew', value: 8, source: 'tree', kind: 'stat', detail: 'strength' }],
+    };
+    expect(g.characterView().sources).toEqual({ strength: { base: 5, tree: 8, gear: 0 } });
+    // Overwrite the row exactly as onProgression does and the view follows,
+    // with no merge step a stale copy could survive.
+    g.progression = { ...g.progression, sources: { strength: { base: 5, tree: 20, gear: 0 } } };
+    expect(g.characterView().sources).toEqual({ strength: { base: 5, tree: 20, gear: 0 } });
   });
 });

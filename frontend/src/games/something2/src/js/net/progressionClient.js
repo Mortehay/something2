@@ -13,7 +13,7 @@ import { API_URL } from '../../../../../config.js';
 // sheet renders "character_id is required" where the stats should be.
 //
 // Read from characterSession, the same store GameShell writes when a character
-// is chosen, rather than threaded down through CharacterSheet's props: this
+// is chosen, rather than threaded down through a component's props: this
 // module already reaches into localStorage for the auth token via authHeaders(),
 // so one more identity read follows the pattern instead of inventing a second
 // way to answer "who is this request for". One source, so the sheet can never

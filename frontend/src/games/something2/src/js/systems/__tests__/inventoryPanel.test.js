@@ -130,9 +130,12 @@ function bigInv(count) {
 }
 
 describe("tabs", () => {
-  it("offers exactly the four tabs, All first and active by default", () => {
+  // Five since SOMET-483 added the Character pane as the fifth entry. It is
+  // the one tab that is not an item filter; characterTab.test.js owns what it
+  // shows, and this only pins that it takes its place in the strip.
+  it("offers exactly the five tabs, All first and active by default", () => {
     const l = layoutInventory({ inventory: inv() });
-    expect(l.tabs.map((t) => t.key)).toEqual(["all", "equip", "supply", "stones"]);
+    expect(l.tabs.map((t) => t.key)).toEqual(["all", "equip", "supply", "stones", "character"]);
     expect(l.tabs[0].active).toBe(true);
     for (const t of l.tabs) expect(l.hitAreas).toContainEqual({ x: t.x, y: t.y, w: t.w, h: t.h, kind: "invtab", id: t.key });
   });

@@ -7,7 +7,7 @@
 // NOTE ON THE ALLOCATE RESPONSE. `allocatePassive` deliberately returns nothing
 // but a thrown error on failure. The success body carries the new progression,
 // and applying it to Game.progression would reintroduce the second writer
-// CharacterSheet.jsx's F1 header describes: the HTTP response and a concurrent
+// core/progressionExtras.js's F1 header describes: the HTTP response and a concurrent
 // kill/death websocket push travel on two independent connections with no
 // ordering between them. progressionRoutes.js calls refreshLivePlayerStats
 // after every successful allocate, which pushes an ordered `progression`
@@ -68,7 +68,7 @@ export async function respecPassives(apiUrl = API_URL) {
 }
 
 // The affordability inputs, straight from the server. The COST is never
-// recomputed here (CharacterSheet.jsx's F2 header): it rides GET
+// recomputed here (systems/characterTab.js's F2 rule): it rides GET
 // /api/progression, which also returns the gold it is measured against and the
 // server's own verdict, so the overlay renders a decision it did not make.
 export async function fetchRespecQuote(apiUrl = API_URL) {

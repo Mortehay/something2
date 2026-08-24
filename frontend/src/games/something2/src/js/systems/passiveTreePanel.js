@@ -164,7 +164,7 @@ function grantLine(g) {
 //
 // `respecCost` MUST be the server's number (GET /api/progression's respecCost,
 // itself produced by passiveTreeStore.respecQuote). A client that recomputed
-// `respec_base_gold x level` locally is the bug CharacterSheet.jsx's F2 header
+// `respec_base_gold x level` locally is the bug systems/characterTab.js's F2 rule
 // records: raise the setting server-side and the button shows itself affordable
 // while every click 402s. An absent cost is therefore "disabled", not "free".
 //

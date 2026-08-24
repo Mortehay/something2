@@ -5,6 +5,7 @@
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { rarityGlowColor } from "../core/rarityColors.js";
+import { layoutCharacterTab, drawCharacterTab } from "./characterTab.js";
 
 export const PANEL_W = 820;
 // Sized to its content, not to the old list panel: title 30 + preview 190 +
@@ -51,15 +52,20 @@ export function usedSlotsClient(inventory) {
 
 // `categories: null` means "everything not hidden" — an item whose category
 // is new server-side lands under All rather than becoming invisible.
+// `pane: "character"` marks the one tab that is NOT an item filter: it replaces
+// the grid entirely (SOMET-483, spec §10.2), so it must feed the grid an empty
+// list rather than inherit `categories: null`'s "show everything".
 export const TABS = [
   { key: "all", label: "All", categories: null },
   { key: "equip", label: "Equip", categories: ["weapon", "armor"] },
   { key: "supply", label: "Supply", categories: ["ammo", "consumable"] },
   { key: "stones", label: "Stones", categories: ["stone"] },
+  { key: "character", label: "Character", categories: null, pane: "character" },
 ];
 
 export function visibleItems(inventory, tabKey) {
   const tab = TABS.find((t) => t.key === tabKey) || TABS[0];
+  if (tab.pane === "character") return [];
   const types = (inventory && inventory.types) || new Map();
   return ((inventory && inventory.items) || []).filter((it) => {
     const t = types.get(it.typeId);
@@ -78,6 +84,8 @@ export function layoutInventory(state) {
     tab = "all",
     page = 0,
     drag = null,
+    character = null,
+    modPage = 0,
   } = state;
 
   // What the paperdoll's greying answers "can THIS go here?" about. An ARMED
@@ -172,10 +180,29 @@ export function layoutInventory(state) {
     hitAreas.push({ ...drop, kind: "drop", id: selectedItemId });
   }
 
+  // The Character pane (SOMET-483, spec §10.2) occupies exactly the rectangle
+  // the item grid and its page arrows would have. Built here rather than in the
+  // draw so its geometry and its strings are testable without a context, and so
+  // its page arrows can be hoisted into the same hitAreas list every other
+  // control uses. `shown` is empty on this tab (see visibleItems), so the grid
+  // loop above has already produced 48 empty cells and no item hit areas.
+  const characterPane = TABS.find((t) => t.key === activeTab).pane === "character"
+    ? layoutCharacterTab({
+      character,
+      x: rightX,
+      y: gridTop,
+      w: PANEL_W - (rightX - px) - PAD,
+      h: footerY - gridTop - 8,
+      modPage,
+    })
+    : null;
+  if (characterPane) for (const a of characterPane.hitAreas) hitAreas.push(a);
+
   return {
     panel, title, close, preview, slots,
     tabs,
     cells,
+    character: characterPane,
     pages: { count: pageCount, page: pageIdx, prev, next, arrowY, x: rightX },
     footer: { gold, y: footerY, drop },
     used: usedSlotsClient(inventory),
@@ -279,49 +306,58 @@ export function drawInventory(ctx, layout, state) {
     ctx.fillText(t.label, t.x + 8, t.y + 6);
   }
 
-  // Grid.
-  for (const c of layout.cells) {
-    const dragged = drag && c.item && drag.itemId === c.item.id;
-    ctx.fillStyle = c.item ? (CATEGORY_TINT[c.type && c.type.category] || "rgba(55,55,70,0.9)") : "rgba(25,25,38,0.9)";
-    ctx.globalAlpha = dragged ? 0.3 : 1;
-    ctx.fillRect(c.x, c.y, c.w, c.h);
-    // SOMET-490: a graded item's cell is bordered in its rarity colour, from
-    // the SAME rarityColors module the ground glow reads. Selection still
-    // wins -- the player needs to know what they clicked more than they need
-    // to be re-told the grade -- and a white/absent grade keeps the original
-    // neutral border, so a pre-rarity item looks exactly as it did.
-    const grade = c.item ? rarityGlowColor(c.item.rarity) : null;
-    ctx.strokeStyle = c.selected ? "#4a9eff" : (grade || "#2a2a3a");
-    ctx.strokeRect(c.x, c.y, c.w, c.h);
-    if (c.item) {
-      ctx.fillStyle = "#e5e7eb";
-      ctx.font = "14px monospace";
-      ctx.fillText(initials(c.type && c.type.name), c.x + 8, c.y + 14);
-      // Only a real STACK is badged: a "1" on every single item is noise, and
-      // the reference screenshot badges the same way.
-      if (c.item.quantity > 1) {
-        ctx.font = "10px monospace";
-        ctx.fillStyle = "#fde68a";
-        ctx.fillText(String(c.item.quantity), c.x + c.w - 16, c.y + c.h - 12);
+  // Grid, or the Character pane in its place (SOMET-483). `layout.character`
+  // is non-null only on the Character tab, and on that tab `layout.cells` is
+  // already all empty and both page arrows are already null -- the branch is
+  // here so a reader does not have to derive that, not because the loops
+  // would misbehave.
+  if (layout.character) {
+    drawCharacterTab(ctx, layout.character);
+  } else {
+    // Grid.
+    for (const c of layout.cells) {
+      const dragged = drag && c.item && drag.itemId === c.item.id;
+      ctx.fillStyle = c.item ? (CATEGORY_TINT[c.type && c.type.category] || "rgba(55,55,70,0.9)") : "rgba(25,25,38,0.9)";
+      ctx.globalAlpha = dragged ? 0.3 : 1;
+      ctx.fillRect(c.x, c.y, c.w, c.h);
+      // SOMET-490: a graded item's cell is bordered in its rarity colour, from
+      // the SAME rarityColors module the ground glow reads. Selection still
+      // wins -- the player needs to know what they clicked more than they need
+      // to be re-told the grade -- and a white/absent grade keeps the original
+      // neutral border, so a pre-rarity item looks exactly as it did.
+      const grade = c.item ? rarityGlowColor(c.item.rarity) : null;
+      ctx.strokeStyle = c.selected ? "#4a9eff" : (grade || "#2a2a3a");
+      ctx.strokeRect(c.x, c.y, c.w, c.h);
+      if (c.item) {
+        ctx.fillStyle = "#e5e7eb";
+        ctx.font = "14px monospace";
+        ctx.fillText(initials(c.type && c.type.name), c.x + 8, c.y + 14);
+        // Only a real STACK is badged: a "1" on every single item is noise, and
+        // the reference screenshot badges the same way.
+        if (c.item.quantity > 1) {
+          ctx.font = "10px monospace";
+          ctx.fillStyle = "#fde68a";
+          ctx.fillText(String(c.item.quantity), c.x + c.w - 16, c.y + c.h - 12);
+        }
       }
+      ctx.globalAlpha = 1;
     }
-    ctx.globalAlpha = 1;
-  }
 
-  // Page arrows.
-  ctx.font = "12px monospace";
-  for (const [rect, label] of [[layout.pages.prev, "<"], [layout.pages.next, ">"]]) {
-    if (!rect) continue;
-    ctx.fillStyle = "rgba(40,40,60,0.85)";
-    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-    ctx.strokeStyle = "#4a9eff";
-    ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
-    ctx.fillStyle = "#e5e7eb";
-    ctx.fillText(label, rect.x + 12, rect.y + 6);
-  }
-  if (layout.pages.count > 1) {
-    ctx.fillStyle = "#9ca3af";
-    ctx.fillText(`page ${layout.pages.page + 1}/${layout.pages.count}`, layout.pages.x + 84, layout.pages.arrowY + 6);
+    // Page arrows.
+    ctx.font = "12px monospace";
+    for (const [rect, label] of [[layout.pages.prev, "<"], [layout.pages.next, ">"]]) {
+      if (!rect) continue;
+      ctx.fillStyle = "rgba(40,40,60,0.85)";
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.strokeStyle = "#4a9eff";
+      ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.fillText(label, rect.x + 12, rect.y + 6);
+    }
+    if (layout.pages.count > 1) {
+      ctx.fillStyle = "#9ca3af";
+      ctx.fillText(`page ${layout.pages.page + 1}/${layout.pages.count}`, layout.pages.x + 84, layout.pages.arrowY + 6);
+    }
   }
 
   // Footer.

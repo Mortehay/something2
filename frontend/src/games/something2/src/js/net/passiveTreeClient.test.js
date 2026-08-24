@@ -58,7 +58,7 @@ describe('allocatePassive', () => {
   it('resolves to true and hands back NO progression to write', async () => {
     // The single-writer rule, at the seam that could break it: if this ever
     // returned the body, a caller could apply it and reintroduce the second
-    // writer CharacterSheet.jsx's F1 header removed.
+    // writer core/progressionExtras.js's F1 header removed.
     global.fetch = vi.fn().mockResolvedValue(ok({ progression: { level: 9 }, stats: {} }));
     expect(await allocatePassive(1, 'http://api')).toBe(true);
   });

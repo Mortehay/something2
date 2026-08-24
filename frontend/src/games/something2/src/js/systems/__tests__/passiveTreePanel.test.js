@@ -397,7 +397,7 @@ describe("the single-writer rule survives this feature", () => {
     path.resolve(here, "../../net/passiveTreeClient.js"), "utf8");
 
   it("leaves Game.progression with exactly the writers it had before", () => {
-    // CharacterSheet.jsx's F1 header documents a cross-channel race that was
+    // core/progressionExtras.js's F1 header documents a cross-channel race that was
     // fixed by DELETING the second writer. An allocate response applied
     // straight to Game.progression would bring it back, and it would look like
     // a level-up occasionally undoing itself rather than like this feature.
@@ -406,8 +406,19 @@ describe("the single-writer rule survives this feature", () => {
     // `joined` frame, and the onProgression push. This feature adds none.
     const writes = game.match(/this\.progression\s*=/g) || [];
     expect(writes).toHaveLength(4);
-    expect(game).toMatch(
-      /onProgression:\s*\(msg\)\s*=>\s*\{\s*if\s*\(msg\s*&&\s*msg\.progression\)\s*this\.progression\s*=\s*msg\.progression;\s*\}/);
+
+    // SOMET-483 moved the handler's body into Game._applyProgressionFrame (it
+    // latches the derived-stat seed and refetches the curve numbers on a level
+    // change), so the one-line shape this used to pin no longer exists. What
+    // is still pinned, and is the actual property: the socket handler does
+    // nothing but delegate, and inside that method there is exactly ONE
+    // assignment to this.progression whose right-hand side is the frame's row.
+    expect(game).toMatch(/onProgression:\s*\(msg\)\s*=>\s*this\._applyProgressionFrame\(msg\),/);
+    const start = game.indexOf("_applyProgressionFrame(msg) {");
+    expect(start).toBeGreaterThan(-1);
+    const method = game.slice(start, game.indexOf("_refreshProgressionBundle() {", start));
+    expect(method.match(/this\.progression\s*=/g)).toHaveLength(1);
+    expect(method).toMatch(/this\.progression\s*=\s*msg\.progression;/);
   });
 
   it("never assigns the allocate or respec response to progression", () => {
