@@ -19,6 +19,9 @@ import {
   drawableScreenRect, CARD,
 } from "./inspect.js";
 import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
+import {
+  rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX,
+} from "./itemDisplay.js";
 
 // Read once from the layout module rather than restated, so the painter and
 // the layout can never disagree about where the card's left edge is.
@@ -1855,15 +1858,35 @@ export class RenderSystem {
     // the row is deleted on buy, unlike the catalog's infinite stock).
     let y = rowsTop;
     for (const row of pageRows) {
+      // SOMET-500. A buyback row is a HELD INSTANCE (SOMET-484), so the shelf
+      // can say what it is holding: fetchShop now carries the rarity and the
+      // rolled affixes, and both are read here. Before this, a player's own
+      // foxy sword sat on the shelf drawn exactly like a white one and they
+      // found out only after paying.
+      //
+      // The base catalogue holds no instance and never will, so `row.rarity` is
+      // absent there, affixes is "" and BOTH the border and the two-line
+      // geometry fall back to precisely what this loop drew before.
+      const affixes = affixLine(row.affixes);
+      const at = rowTextOffsets(affixes !== "");
       ctx.fillStyle = isBuyback ? "rgba(80,60,20,0.55)" : "rgba(40,40,60,0.85)";
       ctx.fillRect(leftX, y, colW, rowH);
-      ctx.strokeStyle = isBuyback ? "#caa24a" : "#3a3a4e";
+      ctx.strokeStyle = rarityBorderColor(row.rarity, isBuyback ? "#caa24a" : "#3a3a4e");
       ctx.strokeRect(leftX, y, colW, rowH);
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(resolveName(row.itemTypeId), leftX + 8, y + 6);
+      ctx.fillText(resolveName(row.itemTypeId), leftX + 8, y + at.name);
       ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
-      ctx.fillText(`${row.price} g`, leftX + 8, y + 22);
+      ctx.fillText(`${row.price} g`, leftX + 8, y + at.sub);
+      if (at.affix != null) {
+        // Clipped to the gap left of the Buy button rather than measured: see
+        // clipToWidth. Tinted with the grade so the caption and the border
+        // agree at a glance, falling back to the ordinary subline grey.
+        ctx.font = `${AFFIX_FONT_PX}px monospace`;
+        ctx.fillStyle = rarityBorderColor(row.rarity, "#9ca3af");
+        ctx.fillText(clipToWidth(affixes, colW - 16 - buyW, AFFIX_FONT_PX), leftX + 8, y + at.affix);
+        ctx.font = "12px monospace";
+      }
 
       const buyX = leftX + colW - 8 - buyW;
       const buyY = y + (rowH - buyH) / 2;
@@ -1919,7 +1942,13 @@ export class RenderSystem {
 
       ctx.fillStyle = "rgba(40,40,60,0.85)";
       ctx.fillRect(rightX, ry, rightW, rowH);
-      ctx.strokeStyle = "#3a3a4e";
+      // SOMET-500: the same border rule as the shelf opposite. These rows come
+      // straight from the live inventory, which has carried `rarity` since
+      // SOMET-480 -- so a player comparing what they are about to sell with
+      // what is already on the shelf is comparing two identically coloured
+      // rows. The ry + 22 subline is left to `bound`, which is a refusal the
+      // player needs more than a restatement of the grade.
+      ctx.strokeStyle = rarityBorderColor(item.rarity, "#3a3a4e");
       ctx.strokeRect(rightX, ry, rightW, rowH);
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
@@ -2084,13 +2113,23 @@ export class RenderSystem {
 
     let y = rowsTop;
     for (const row of pageRows) {
+      // SOMET-502. Both tabs read the grade the same way, through the same
+      // helper the inventory grid uses -- that is the ticket's second
+      // acceptance criterion, and the Carry tab is where it is most visible,
+      // because those rows ARE inventory rows and a chest row beside them
+      // showing a different colour for the same item would be the drift.
+      //
+      // The chest tab could only be plain before this: fetchChest returned the
+      // three container columns and nothing about the instance underneath.
+      const affixes = affixLine(row.affixes);
+      const at = rowTextOffsets(affixes !== "");
       ctx.fillStyle = isCarry ? "rgba(40,40,60,0.85)" : "rgba(80,60,20,0.55)";
       ctx.fillRect(leftX, y, colW, rowH);
-      ctx.strokeStyle = isCarry ? "#3a3a4e" : "#caa24a";
+      ctx.strokeStyle = rarityBorderColor(row.rarity, isCarry ? "#3a3a4e" : "#caa24a");
       ctx.strokeRect(leftX, y, colW, rowH);
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(resolveName(row.typeId), leftX + 8, y + 6);
+      ctx.fillText(resolveName(row.typeId), leftX + 8, y + at.name);
 
       // Subline: quantity when a row is a real stack, and the bound marker.
       // Bound items are storable on purpose (they can never become gold, so
@@ -2102,7 +2141,15 @@ export class RenderSystem {
       if (qty > 1) notes.push(`x${qty}`);
       if (row.soulbound === true) notes.push("bound");
       ctx.fillStyle = isCarry ? "#9ca3af" : "#caa24a";
-      if (notes.length) ctx.fillText(notes.join("  ·  "), leftX + 8, y + 22);
+      if (notes.length) ctx.fillText(notes.join("  ·  "), leftX + 8, y + at.sub);
+      if (at.affix != null) {
+        // Third line, same treatment as the shop's shelf so one item does not
+        // read two ways on two screens.
+        ctx.font = `${AFFIX_FONT_PX}px monospace`;
+        ctx.fillStyle = rarityBorderColor(row.rarity, "#9ca3af");
+        ctx.fillText(clipToWidth(affixes, colW - 16 - actW, AFFIX_FONT_PX), leftX + 8, y + at.affix);
+        ctx.font = "12px monospace";
+      }
 
       const actX = leftX + colW - 8 - actW;
       const actY = y + (rowH - actH) / 2;

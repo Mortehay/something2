@@ -195,18 +195,37 @@ function fakeDb(seed = {}) {
       return { rows: [], rowCount: 1 };
     }
 
-    if (/FROM account_items WHERE user_id = \$1/.test(s)) {
+    // SOMET-502: the listing joins to the instance each chest row is HOLDING,
+    // so the fake models that join rather than merely tolerating it -- a fake
+    // that returned the container columns alone would let the panel's grade
+    // silently disappear while these tests stayed green.
+    if (/FROM account_items ai[\s\S]*WHERE ai\.user_id = \$1/.test(s)) {
       const [userId] = params;
       const rows = state.accountItems
         .filter((a) => a.userId === userId)
         .sort((a, b) => a.slot - b.slot)
-        .map((a) => ({
-          id: a.id,
-          slot: a.slot,
-          item_type_id: a.itemTypeId,
-          quantity: a.quantity,
-          soulbound: a.soulbound,
-        }));
+        .map((a) => {
+          const held = state.playerItems.find((pi) => pi.accountItemId === a.id) || null;
+          return {
+            id: a.id,
+            slot: a.slot,
+            item_type_id: a.itemTypeId,
+            quantity: a.quantity,
+            soulbound: a.soulbound,
+            // NULL instance_id is the legacy row the panel must leave alone.
+            instance_id: held ? held.id : null,
+            rarity: held ? (held.rarity || 'white') : null,
+            item_level: held ? (held.itemLevel ?? 1) : null,
+            affixes: held
+              ? state.affixes
+                .filter((x) => x.playerItemId === held.id)
+                .sort((x, y) => x.idx - y.idx)
+                .map((x) => ({
+                  affixTypeId: x.affixTypeId, key: x.key, label: x.label, value: x.value, effect: x.effect,
+                }))
+              : null,
+          };
+        });
       return { rows, rowCount: rows.length };
     }
 
@@ -258,6 +277,37 @@ function holders(db) {
       : (p.accountItemId != null ? `chest:${p.accountItemId}` : 'NOBODY'),
   }));
 }
+
+// SOMET-502. The chest LISTING must describe the instance it is holding, not
+// just the container's three columns -- renderBank had no grade to read and drew
+// a stored foxy sword exactly like a white one. Both directions are pinned here:
+// a held row is hydrated, and a row holding nothing keeps its exact pre-502
+// five-key shape so a legacy row still renders as it always did.
+test('SOMET-502: fetchChest lists the held instance\'s rarity, level and affix VALUES, and leaves an instance-less row alone', async () => {
+  const EFFECT = { type: 'stat', stat: 'strength' };
+  const db = fakeDb({
+    accountItems: [
+      { id: 'a1', userId: USER, slot: 1, itemTypeId: 7, quantity: 1, soulbound: false },
+      { id: 'a2', userId: USER, slot: 2, itemTypeId: 8, quantity: 3, soulbound: true },
+    ],
+    playerItems: [
+      { id: 'held-a1', characterId: null, accountItemId: 'a1', itemTypeId: 7, quantity: 1, rarity: 'foxy', itemLevel: 88 },
+    ],
+    affixes: [
+      { playerItemId: 'held-a1', idx: 0, affixTypeId: 3, key: 'of_might', label: 'of Might', value: 3.13, effect: EFFECT },
+    ],
+  });
+
+  const chest = await fetchChest(db, USER);
+  assert.deepStrictEqual(chest.items[0], {
+    id: 'a1', slot: 1, typeId: 7, quantity: 1, soulbound: false,
+    rarity: 'foxy', itemLevel: 88,
+    affixes: [{ affixTypeId: 3, key: 'of_might', label: 'of Might', value: 3.13, effect: EFFECT }],
+  }, 'a held instance reaches the panel with its grade, its level and its rolled VALUES');
+  assert.deepStrictEqual(chest.items[1], {
+    id: 'a2', slot: 2, typeId: 8, quantity: 3, soulbound: true,
+  }, 'a row holding nothing gains no keys at all -- the panel falls back to its own neutral');
+});
 
 test('an item deposited by one character is in the chest for another on the same account', async () => {
   const db = fakeDb({

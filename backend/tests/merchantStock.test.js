@@ -11,25 +11,47 @@ test('sellPriceFor is half the value, floored, and never negative', () => {
   assert.equal(sellPriceFor(undefined), 0);
 });
 
+// SOMET-500 widened the read: the shelf now carries the DISPLAY IDENTITY of the
+// instance a buyback row is holding (services/heldInstance.js). This case pins
+// both halves of that against a mock -- a hydrated row gains rarity/itemLevel/
+// affixes, and an instance-less row (the infinite base catalogue, and any
+// pre-484 buyback row) keeps the five-key shape it has always had. The mock
+// cannot prove the JOIN finds the right instance; merchant_buyback_instance_db
+// and shelf_rarity_db do that against a real database.
 test('fetchShop sweeps expired rows, then splits catalog vs buyback', async () => {
   const calls = [];
+  const EFFECT = { type: 'stat', stat: 'strength' };
   const pool = { query: async (sql, params) => {
     calls.push(sql);
     if (/DELETE FROM merchant_stock/i.test(sql)) return { rowCount: 2 };
-    if (/SELECT .* FROM merchant_stock/i.test(sql)) {
-      assert.match(sql, /expires_at IS NULL OR expires_at > now\(\)/i,
+    if (/SELECT[\s\S]*FROM merchant_stock/i.test(sql)) {
+      assert.match(sql, /ms\.expires_at IS NULL OR ms\.expires_at > now\(\)/i,
         'the read must exclude expired rows');
+      assert.match(sql, /pi\.merchant_stock_id = ms\.id/i,
+        'and must reach the instance the stock row is holding');
       return { rows: [
-        { id: 'c1', item_type_id: 1, price: 20, quantity: 1, seller_user_id: null },
-        { id: 'b1', item_type_id: 2, price: 5, quantity: 1, seller_user_id: 7 },
+        // No instance: the generated base catalogue, permanently.
+        { id: 'c1', item_type_id: 1, price: 20, quantity: 1, seller_user_id: null, instance_id: null },
+        // Holding one, which is what SOMET-484 made possible and SOMET-500 lists.
+        {
+          id: 'b1', item_type_id: 2, price: 5, quantity: 1, seller_user_id: 7,
+          instance_id: 'pi-1', rarity: 'yellow', item_level: 30,
+          affixes: [{ affixTypeId: 3, key: 'of_might', label: 'of Might', value: 3.13, effect: EFFECT }],
+        },
       ] };
     }
     throw new Error('unexpected ' + sql);
   } };
   const shop = await fetchShop(pool, 'v1', 7);
   assert.ok(calls.some((s) => /DELETE FROM merchant_stock/i.test(s)), 'expired sweep ran');
-  assert.deepEqual(shop.catalog, [{ id: 'c1', itemTypeId: 1, price: 20, quantity: 1, sellerUserId: null }]);
-  assert.deepEqual(shop.buyback, [{ id: 'b1', itemTypeId: 2, price: 5, quantity: 1, sellerUserId: 7 }]);
+  assert.deepStrictEqual(shop.catalog, [
+    { id: 'c1', itemTypeId: 1, price: 20, quantity: 1, sellerUserId: null },
+  ], 'an instance-less row must gain no keys at all -- the panel falls back to its own neutral');
+  assert.deepStrictEqual(shop.buyback, [{
+    id: 'b1', itemTypeId: 2, price: 5, quantity: 1, sellerUserId: 7,
+    rarity: 'yellow', itemLevel: 30,
+    affixes: [{ affixTypeId: 3, key: 'of_might', label: 'of Might', value: 3.13, effect: EFFECT }],
+  }], 'a held instance reaches the shelf with its grade, its level and its rolled VALUES');
 });
 
 // SOMET-280. A mock pool returns whatever the fixture declared regardless of
@@ -51,7 +73,7 @@ test('fetchShop scopes buyback rows to the viewing user, and keeps the base cata
     return { rows: [] };
   } };
   await fetchShop(pool, 'v1', 42);
-  assert.match(readSql, /seller_user_id IS NULL OR seller_user_id = \$2/i,
+  assert.match(readSql, /ms\.seller_user_id IS NULL OR ms\.seller_user_id = \$2/i,
     'base catalog stays public; seller-owned rows are restricted to their seller');
   assert.deepEqual(readParams, ['v1', 42], 'the viewer id must be the second bound parameter');
 });

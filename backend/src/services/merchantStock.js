@@ -2,6 +2,10 @@
 // never expires) plus player buyback rows (seller_user_id set — one instance
 // each, expiring after BUYBACK_DAYS at the price they were sold for).
 
+const {
+  HELD_INSTANCE_COLUMNS, heldInstanceJoin, withHeldInstance,
+} = require('./heldInstance');
+
 const SELL_FRACTION = 0.5;
 const BUYBACK_DAYS = 3;
 
@@ -141,14 +145,27 @@ async function fetchShop(pool, villageId, viewerUserId) {
     'DELETE FROM merchant_stock WHERE village_id = $1 AND expires_at IS NOT NULL AND expires_at < now()',
     [villageId],
   );
+  // SOMET-500: the held instance rides along. SOMET-484 made the merchant HOLD
+  // the sold row rather than snapshot it, so a buyback listing already had the
+  // rarity and the rolled affixes one join away -- it simply never carried
+  // them, and the buyback tab therefore drew a foxy sword exactly like a white
+  // one until the player had paid for it. The join lives in
+  // services/heldInstance.js, shared with the account chest's listing, which
+  // had the identical gap (SOMET-502).
+  //
+  // Base-catalogue rows hold nothing and come back in exactly their pre-500
+  // shape -- see withHeldInstance for why that is silence rather than 'white'.
   const r = await pool.query(
-    `SELECT id, item_type_id, price, quantity, seller_user_id FROM merchant_stock
-      WHERE village_id = $1 AND (expires_at IS NULL OR expires_at > now())
-        AND (seller_user_id IS NULL OR seller_user_id = $2)
-      ORDER BY seller_user_id NULLS FIRST, created_at ASC`,
+    `SELECT ms.id, ms.item_type_id, ms.price, ms.quantity, ms.seller_user_id,
+            ${HELD_INSTANCE_COLUMNS}
+       FROM merchant_stock ms
+       ${heldInstanceJoin('merchant_stock')}
+      WHERE ms.village_id = $1 AND (ms.expires_at IS NULL OR ms.expires_at > now())
+        AND (ms.seller_user_id IS NULL OR ms.seller_user_id = $2)
+      ORDER BY ms.seller_user_id NULLS FIRST, ms.created_at ASC`,
     [villageId, viewerUserId == null ? null : Number(viewerUserId)],
   );
-  const rows = r.rows.map(mapRow);
+  const rows = r.rows.map((row) => withHeldInstance(mapRow(row), row));
   return {
     catalog: rows.filter((x) => x.sellerUserId == null),
     buyback: rows.filter((x) => x.sellerUserId != null),

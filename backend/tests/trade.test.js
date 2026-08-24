@@ -116,7 +116,13 @@ test('buying a buyback row hands back the held instance and then deletes the row
       assert.deepStrictEqual(params, ['s2', 31], 'the held instance must move to the BUYING character');
       return { rowCount: 1, rows: [{ id: 'held2', item_type_id: 3, quantity: 1, rarity: 'foxy', item_level: 71, soulbound: false }] };
     }],
-    [BUY_AFFIXES, () => ({ rowCount: 1, rows: [{ affix_type_id: 4, key: 'flaming', value: 12.25, effect: { type: 'damage', element: 'fire' } }] })],
+    // `label` is selected as of SOMET-500: gearAffixes.js captions every gear
+    // modifier with it, and the buyback LISTING now carries it too, so a
+    // purchase that dropped it would make the shelf and the item disagree.
+    [BUY_AFFIXES, (sql) => {
+      assert.match(sql, /at\.label/, 'the affix read must carry the catalog label');
+      return { rowCount: 1, rows: [{ affix_type_id: 4, key: 'flaming', label: 'Flaming', value: 12.25, effect: { type: 'damage', element: 'fire' } }] };
+    }],
     [/INSERT INTO player_items/i, () => { assert.fail('must NOT mint a new instance when the stock row holds one'); }],
   ]);
   const r = await buyStock(pool, mkEntry(p), 1, 31, 's2');
@@ -125,8 +131,11 @@ test('buying a buyback row hands back the held instance and then deletes the row
   assert.strictEqual(r.item.rarity, 'foxy', 'and its rarity');
   assert.strictEqual(r.item.itemLevel, 71, 'and its item level');
   assert.deepStrictEqual(r.item.affixes, [
-    { affixTypeId: 4, key: 'flaming', value: 12.25, effect: { type: 'damage', element: 'fire' } },
-  ], 'and every affix, by VALUE, with the effect payload the equip path reads');
+    {
+      affixTypeId: 4, key: 'flaming', label: 'Flaming', value: 12.25,
+      effect: { type: 'damage', element: 'fire' },
+    },
+  ], 'and every affix, by VALUE, with the effect payload the equip path reads and the label the Character tab captions it with');
   assert.deepStrictEqual(order, ['handover', 'delete-stock'],
     'the instance must be detached BEFORE the stock row is deleted -- the FK CASCADEs');
   assert.strictEqual(pool.committed, true);
