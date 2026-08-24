@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { useGameSettings, useUpdateGameSetting } from './useGameSettings.js';
 import { SETTING_FIELDS, parseSettingInput } from './gameSettingsForm.js';
+import PassiveNodesAdmin from './PassiveNodesAdmin.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
@@ -120,12 +121,12 @@ export default function ProgressionAdmin() {
         <Placeholder>Arrives with the item-rarity slice (T12).</Placeholder>
       </Section>
 
-      {/* MOUNT POINT: passive node browser and single-node editor. Owned by
-          group C, task T9 — passive_nodes does not exist yet. T9 replaces the
-          Placeholder below and nothing else on this page. */}
+      {/* MOUNT POINT: passive node browser and single-node editor (SOMET-477).
+          Filled by group C, task T9. The id is kept so the section stays
+          findable from a link and from the smoke test. */}
       <Section id="passive-nodes-mount">
         <SectionTitle>Passive nodes</SectionTitle>
-        <Placeholder>Arrives with the passive-tree slice (T9).</Placeholder>
+        <PassiveNodesAdmin />
       </Section>
     </AdminContainer>
   );
