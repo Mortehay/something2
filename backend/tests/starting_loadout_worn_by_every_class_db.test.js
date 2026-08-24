@@ -58,6 +58,7 @@ const WebSocket = require('ws');
 const { attachAuthority } = require('../src/authority/server.js');
 const { createCharacter } = require('../src/services/characters.js');
 const { backfillWornStartingKit } = require('../src/services/loadoutBackfill.js');
+const { entryWorldForJoin } = require('./helpers/entryWorld.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 const SECRET = 'somet493-test-secret';
@@ -168,9 +169,11 @@ test('every class wears its starting kit', { skip: !DB_URL ? 'no database URL' :
     await pool.end().catch(() => {});
   });
 
-  const entry = await pool.query('SELECT id FROM worlds WHERE is_entry = true LIMIT 1');
-  assert.strictEqual(entry.rows.length, 1, 'the database needs a seeded entry world');
-  const entryWorldId = entry.rows[0].id;
+  // NOT `WHERE is_entry = true` (SOMET-505). That flag is globally exclusive
+  // and peer test files borrow it onto throwaway worlds they then DELETE, so
+  // the id it hands back can name a row that no longer exists by the time the
+  // join frame below goes out. See tests/helpers/entryWorld.js.
+  const { id: entryWorldId } = await entryWorldForJoin(pool);
 
   const classRows = await pool.query('SELECT id, name FROM entity_types WHERE is_playable ORDER BY name');
   const classIdByName = new Map(classRows.rows.map((r) => [r.name, r.id]));

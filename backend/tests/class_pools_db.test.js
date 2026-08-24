@@ -32,6 +32,7 @@ const { attachAuthority } = require('../src/authority/server.js');
 const { listPlayableClasses, createCharacter } = require('../src/services/characters.js');
 const { derivePlayerStats } = require('../src/services/playerStats.js');
 const { HP_BASE, MANA_BASE } = require('../src/services/progressionConstants.js');
+const { entryWorldForJoin } = require('./helpers/entryWorld.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 const SECRET = 'somet486-test-secret';
@@ -94,10 +95,12 @@ test('class pools (SOMET-486, widened to six classes by SOMET-471)', { skip: !DB
     await pool.end().catch(() => {});
   });
 
-  const entry = await pool.query(
-    'SELECT id, name FROM worlds WHERE is_entry = true LIMIT 1');
-  assert.equal(entry.rows.length, 1, 'the database needs a seeded entry world');
-  const entryWorldId = entry.rows[0].id;
+  // NOT `WHERE is_entry = true` (SOMET-505). That flag is globally exclusive
+  // and peer test files borrow it onto throwaway worlds they then DELETE, so
+  // the id it hands back can be a row that no longer exists by the time the
+  // join frame below goes out -- measured, twice in four runs, as all seven
+  // subtests here failing with `unknown world`. See tests/helpers/entryWorld.js.
+  const { id: entryWorldId } = await entryWorldForJoin(pool);
 
   // ---- SOURCE 1: what character select advertises -------------------------
   const advertised = await listPlayableClasses(pool);

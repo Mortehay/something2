@@ -28,6 +28,7 @@ const { attachAuthority } = require('../src/authority/server.js');
 const { createCharacter, ownedCharacter } = require('../src/services/characters.js');
 const { loadProgression } = require('../src/services/progressionStore.js');
 const { socketStone } = require('../src/authority/items.js');
+const { entryWorldForJoin } = require('./helpers/entryWorld.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 const SECRET = 'somet472-test-secret';
@@ -95,9 +96,11 @@ test('a Cultist casts with life and a Warrior casts with mana', { skip: !DB_URL 
     await pool.end().catch(() => {});
   });
 
-  const entry = await pool.query('SELECT id FROM worlds WHERE is_entry = true LIMIT 1');
-  assert.equal(entry.rows.length, 1, 'the database needs a seeded entry world');
-  const entryWorldId = entry.rows[0].id;
+  // NOT `WHERE is_entry = true` (SOMET-505). That flag is globally exclusive
+  // and peer test files borrow it onto throwaway worlds they then DELETE, so
+  // the id it hands back can name a row that no longer exists by the time the
+  // join frame below goes out. See tests/helpers/entryWorld.js.
+  const { id: entryWorldId } = await entryWorldForJoin(pool);
 
   const types = await pool.query(
     'SELECT id, name, mana_cost FROM item_types WHERE name = ANY($1::text[])',

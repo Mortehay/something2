@@ -41,6 +41,7 @@ const { World } = require('../src/authority/world.js');
 const { loadItemTypes, loadInventory } = require('../src/authority/items.js');
 const { loadProgression } = require('../src/services/progressionStore.js');
 const { createCharacter } = require('../src/services/characters.js');
+const { entryWorldForJoin } = require('./helpers/entryWorld.js');
 
 // createCharacter takes an entity_types id, not a class name.
 async function warriorTypeId(pool) {
@@ -195,9 +196,11 @@ test('an equipped affix is live in play (SOMET-496)', { skip: !DB_URL ? 'no data
     await pool.end().catch(() => {});
   });
 
-  const entry = await pool.query('SELECT id FROM worlds WHERE is_entry = true LIMIT 1');
-  assert.strictEqual(entry.rows.length, 1, 'the database needs a seeded entry world');
-  const worldId = entry.rows[0].id;
+  // NOT `WHERE is_entry = true` (SOMET-505). That flag is globally exclusive
+  // and peer test files borrow it onto throwaway worlds they then DELETE, so
+  // the id it hands back can name a row that no longer exists by the time the
+  // join frame below goes out. See tests/helpers/entryWorld.js.
+  const { id: worldId } = await entryWorldForJoin(pool);
   const warrior = await warriorTypeId(pool);
 
   // ONE affix catalog row, shared by every character below: `of Insight`,
