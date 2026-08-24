@@ -97,14 +97,27 @@ test("sell prices with the SELLER's own priceMult, not the default and not anoth
   const bystanderStats = derivePlayerStats(at({ charisma: 999 }));
   entry.world.addPlayer('bystander', { x: 0, y: 0 }, { items: [], equipment: {} }, { x: 0, y: 0 }, 0, bystanderStats);
 
+  // SOMET-484: the sale no longer DELETEs the instance, it locks it and then
+  // hands it to the merchant. This scriptedPool falls back to
+  // {rows: [], rowCount: 0} for anything unrouted, so a route left naming the
+  // old DELETE would make the ownership read come back empty and this test
+  // would fail on 'you do not own that item' rather than on the price.
   const pool = scriptedPool([
-    [/DELETE FROM player_items/i, { rows: [{ item_type_id: 9, quantity: 1 }], rowCount: 1 }],
+    [/FROM player_items WHERE id = \$1 AND character_id = \$2 FOR UPDATE/i, { rows: [{ item_type_id: 9, quantity: 1, soulbound: false }], rowCount: 1 }],
+    [/FROM player_equipment WHERE item_id/i, { rows: [], rowCount: 0 }],
     [/FROM item_types WHERE id/i, { rows: [{ value: 100 }], rowCount: 1 }],
     [/UPDATE users SET gold/i, (p) => ({ rows: [{ gold: Number(p[1]) }], rowCount: 1 })],
     [/INSERT INTO merchant_stock/i, { rows: [{ id: 'b1' }], rowCount: 1 }],
+    [/UPDATE player_items SET character_id = NULL, merchant_stock_id/i, { rows: [], rowCount: 1 }],
   ]);
 
-  const r = await sellItem(pool, entry, 'seller', 'v1', 'itm1');
+  // The full six-argument signature. This call used to be
+  // sellItem(pool, entry, 'seller', 'v1', 'itm1') -- five arguments against a
+  // six-parameter function, so characterId was 'v1', villageId was 'itm1' and
+  // itemId was undefined. The mock ignored bind parameters, so it passed
+  // anyway; with SOMET-484's handover asserting on its own parameters, a
+  // mis-shaped call is worth not carrying forward.
+  const r = await sellItem(pool, entry, 'seller', 31, 'v1', 'itm1');
 
   assert.equal(r.ok, true);
   // value(100) * priceMult(0.7) = 70, floored. A hardcoded default (0.5)
