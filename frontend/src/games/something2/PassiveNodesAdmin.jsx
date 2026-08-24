@@ -112,7 +112,7 @@ function PassiveNodesAdmin() {
       <Hint>
         {isLoadingNodes
           ? 'Loading…'
-          : `${total} node(s) match — showing ${nodes.length} at a time. Structure (key, sector, ring, position) comes from the generator and is read-only here.`}
+          : `${total} node(s) match — ${PAGE} per page. Structure (key, sector, ring, position) comes from the generator and is read-only here.`}
       </Hint>
       {nodesError && <Err role="alert">{nodesError.message}</Err>}
 
