@@ -98,13 +98,41 @@ function normalise(entry, source) {
   };
 }
 
+// Which normalised field a grant kind's `detail` is read from. ONE table, read
+// forwards by detailOf (compose) and backwards by modifierToEntry
+// (recompose) -- two hand-written if-chains pointing opposite directions is
+// how a `resource` grant survives a round trip as a pool-less modifier that
+// silently stops adding to maxHp.
+const DETAIL_KEY = {
+  stat: 'stat',
+  resource: 'pool',
+  damage: 'element',
+  resist: 'element',
+  status: 'status',
+  rule: 'rule',
+};
+
 function detailOf(m) {
-  if (m.kind === 'stat') return m.stat;
-  if (m.kind === 'resource') return m.pool;
-  if (m.kind === 'damage' || m.kind === 'resist') return m.element;
-  if (m.kind === 'status') return m.status;
-  if (m.kind === 'rule') return m.rule;
-  return null;
+  const key = DETAIL_KEY[m.kind];
+  return key ? m[key] : null;
+}
+
+// The inverse of the `modifiers.push` below: a modifier back into the entry
+// shape composeStats() accepts. Exists so a row that has ALREADY been composed
+// can be recomposed with a new set of gear entries (gearAffixes.js's runtime
+// overlay) without the caller having to re-read the passive tree from the
+// database, and without a second, parallel fold that could drift from this
+// module's.
+//
+// `detail` collapses stat/pool/element/status/rule into one field on the way
+// out; DETAIL_KEY is what puts it back under the right name on the way in. A
+// kind this module does not know keeps its label and value and lands as a
+// caption-only modifier again, exactly as it did the first time.
+function modifierToEntry(m) {
+  const entry = { type: m.kind, value: m.value, label: m.label };
+  const key = DETAIL_KEY[m.kind];
+  if (key) entry[key] = m.detail;
+  return entry;
 }
 
 function composeStats({ base, passives = [], gear = [] } = {}) {
@@ -201,7 +229,38 @@ function composeStats({ base, passives = [], gear = [] } = {}) {
   return out;
 }
 
+// Project a composeStats() bundle onto a progression-shaped row.
+//
+// THE ONE PLACE the composed row's shape is decided. passiveTreeStore's
+// composeProgression builds the persisted/pushed row with it, and
+// gearAffixes.js's runtime overlay rebuilds that same row with it -- so a
+// gear-framed row and a bare composed row cannot differ in which fields they
+// carry. Two hand-written projections is how the overlay ends up refreshing
+// `pools` and forgetting `resists`, which nothing would notice until an
+// affixed player took fire damage.
+//
+// The six TOP-LEVEL keys carry the effective totals, because that is what
+// derivePlayerStats reads off a progression row (playerStats.js). `sources`
+// keeps the raw class-base snapshot reachable as `sources.<stat>.base`.
+function withComposedStats(row, composed) {
+  const effective = {};
+  for (const k of STAT_KEYS) effective[k] = composed[k];
+  return {
+    ...row,
+    ...effective,
+    effective,
+    sources: composed.sources,
+    modifiers: composed.modifiers,
+    rules: composed.rules,
+    pools: composed.pools,
+    damageMult: composed.damageMult,
+    resists: composed.resists,
+    hitStatuses: composed.hitStatuses,
+  };
+}
+
 module.exports = {
-  composeStats, STAT_KEYS, RULE_COMBINE, BASE_STAT,
-  POOL_KEYS, ELEMENT_KEYS, STATUS_KEYS, PERCENT,
+  composeStats, withComposedStats, modifierToEntry, detailOf,
+  STAT_KEYS, RULE_COMBINE, BASE_STAT,
+  POOL_KEYS, ELEMENT_KEYS, STATUS_KEYS, PERCENT, DETAIL_KEY,
 };
