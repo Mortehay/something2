@@ -17,6 +17,7 @@ import {
   canvasToCameraPoint, pickDrawable, targetKey, describeTarget, layoutCard,
   drawableScreenRect, CARD,
 } from "./inspect.js";
+import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
 
 // Read once from the layout module rather than restated, so the painter and
 // the layout can never disagree about where the card's left edge is.
@@ -891,6 +892,13 @@ export class RenderSystem {
     const color = type && type.category === "armor" ? "#7ec8e3" : "#e3c27e";
     const r = 9;
     this.ctx.save();
+    // SOMET-490: the grade halo goes down FIRST, so the item marker below
+    // draws over it rather than under it -- a glow painted after the diamond
+    // would wash the item's own category colour out. Nothing here replaces the
+    // canvas transform (translate/scale COMPOSE with whatever the camera has
+    // already applied); the wall-side pass got that wrong once and silently
+    // dropped everything drawn before it.
+    this.drawRarityGlow(dx, dy, r, item.rarity);
     this.ctx.fillStyle = color;
     this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
     this.ctx.lineWidth = 2;
@@ -912,6 +920,39 @@ export class RenderSystem {
         this.ctx.fillText(type.name, dx, dy - r - 6);
       }
     }
+    this.ctx.restore();
+  }
+
+  // The rarity halo: an iso-flattened radial gradient under a ground item.
+  //
+  // Colour comes from core/rarityColors.js, the SAME module the inventory
+  // panel tints its cells from -- the ground must never disagree with the
+  // tooltip a player opens two seconds later.
+  //
+  // A white / absent / unrecognised grade draws NOTHING and returns early, so
+  // an item that predates SOMET-480 renders exactly as it did before this
+  // method existed.
+  drawRarityGlow(dx, dy, r, rarity) {
+    const base = rarityGlowColor(rarity);
+    if (!base) return;
+    const inner = withAlpha(base, 0.55);
+    const outer = withAlpha(base, 0);
+    if (!inner || !outer) return; // malformed palette entry: draw nothing, not a black blob
+    const R = r * 2.4;
+    this.ctx.save();
+    // translate + scale, never setTransform: these MULTIPLY into the camera
+    // transform already on the stack. The 0.5 y-scale is the isometric tile
+    // ratio, so the halo reads as a pool of light lying on the ground rather
+    // than a sphere floating in front of it.
+    this.ctx.translate(dx, dy);
+    this.ctx.scale(1, 0.5);
+    const g = this.ctx.createRadialGradient(0, 0, 0, 0, 0, R);
+    g.addColorStop(0, inner);
+    g.addColorStop(1, outer);
+    this.ctx.fillStyle = g;
+    this.ctx.beginPath();
+    this.ctx.arc(0, 0, R, 0, Math.PI * 2);
+    this.ctx.fill();
     this.ctx.restore();
   }
 

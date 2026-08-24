@@ -4,6 +4,7 @@
 // paints exactly what this returns and decides nothing itself.
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
+import { rarityGlowColor } from "../core/rarityColors.js";
 
 export const PANEL_W = 820;
 // Sized to its content, not to the old list panel: title 30 + preview 190 +
@@ -284,7 +285,13 @@ export function drawInventory(ctx, layout, state) {
     ctx.fillStyle = c.item ? (CATEGORY_TINT[c.type && c.type.category] || "rgba(55,55,70,0.9)") : "rgba(25,25,38,0.9)";
     ctx.globalAlpha = dragged ? 0.3 : 1;
     ctx.fillRect(c.x, c.y, c.w, c.h);
-    ctx.strokeStyle = c.selected ? "#4a9eff" : "#2a2a3a";
+    // SOMET-490: a graded item's cell is bordered in its rarity colour, from
+    // the SAME rarityColors module the ground glow reads. Selection still
+    // wins -- the player needs to know what they clicked more than they need
+    // to be re-told the grade -- and a white/absent grade keeps the original
+    // neutral border, so a pre-rarity item looks exactly as it did.
+    const grade = c.item ? rarityGlowColor(c.item.rarity) : null;
+    ctx.strokeStyle = c.selected ? "#4a9eff" : (grade || "#2a2a3a");
     ctx.strokeRect(c.x, c.y, c.w, c.h);
     if (c.item) {
       ctx.fillStyle = "#e5e7eb";

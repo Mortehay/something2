@@ -1148,7 +1148,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
       );
       entry.world.creatures.addCreatures(rows.rows);
       const itemRows = await pool.query(
-        `SELECT id, item_type_id, x, y, expires_at FROM world_items
+        // `rarity` is NOT optional in this list (SOMET-490). This SELECT is
+        // the ONLY way an item re-enters the sim after flushAndPrune's
+        // pruneInactive forgot it, so a column dropped here does not merely
+        // lose a field -- it makes a foxy drop lose its glow the moment the
+        // player walks a chunk away and comes back, which reads as a render
+        // flicker rather than as a missing column.
+        `SELECT id, item_type_id, x, y, expires_at, rarity FROM world_items
          WHERE world_id = $1 AND x >= $2 AND x < $3 AND y >= $4 AND y < $5 AND expires_at > now()`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
