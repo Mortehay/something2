@@ -307,7 +307,21 @@ test('re-running the ladder upsert inserts nothing and leaves the row count unch
   t.after(async () => { await pool.end().catch(() => {}); });
 
   const rows = generateGearLadder({ tiers: GEAR_TIERS, families: GEAR_FAMILIES });
-  const before = (await pool.query('SELECT count(*)::int AS n FROM item_types')).rows[0].n;
+  // SCOPED TO THE LADDER'S OWN NAMES, not `count(*) FROM item_types`.
+  //
+  // The property under test is "re-seeding inserts nothing", which is a fact
+  // about the 150 rows upsertGearLadder writes. A global catalog count is a
+  // strictly wider assertion that this test cannot keep: several DB test files
+  // create and drop a private item_type of their own while this one runs, and
+  // node:test runs files concurrently, so a global before/after pair reports
+  // their churn as this seeder's. It did exactly that once SOMET-498 added
+  // another such file -- a red assertion about a seeder that had behaved
+  // perfectly (`inserted: 0` both times, right above).
+  const ladderNames = rows.map((r) => r.name);
+  const countLadder = async () => (await pool.query(
+    'SELECT count(*)::int AS n FROM item_types WHERE name = ANY($1)', [ladderNames],
+  )).rows[0].n;
+  const before = await countLadder();
 
   const first = await upsertGearLadder(pool, rows);
   assert.deepStrictEqual(first, { inserted: 0, skipped: 150 },
@@ -316,8 +330,10 @@ test('re-running the ladder upsert inserts nothing and leaves the row count unch
   const second = await upsertGearLadder(pool, rows);
   assert.deepStrictEqual(second, { inserted: 0, skipped: 150 });
 
-  const after = (await pool.query('SELECT count(*)::int AS n FROM item_types')).rows[0].n;
-  assert.strictEqual(after, before, 'two extra seed runs must not change the catalog size');
+  const after = await countLadder();
+  assert.strictEqual(after, before, 'two extra seed runs must not change the ladder row count');
+  assert.strictEqual(after, ladderNames.length,
+    'and all 150 ladder rows must be present -- so this is a real count, not a vacuous 0 === 0');
 
   // And the numbers are untouched too -- ON CONFLICT DO NOTHING, not DO UPDATE.
   const probe = await pool.query("SELECT damage, defense, value FROM item_types WHERE name = 'mythic-plate'");
