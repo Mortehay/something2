@@ -40,6 +40,7 @@ const WebSocket = require('ws');
 
 const { attachAuthority } = require('../src/authority/server.js');
 const { createCharacter } = require('../src/services/characters.js');
+const { entryWorldForJoin } = require('./helpers/entryWorld.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 const SECRET = 'somet499-test-secret';
@@ -116,9 +117,11 @@ test('SOMET-499: a stale close must not tear down the reconnected session', {
     await pool.end().catch(() => {});
   });
 
-  const entryRow = await pool.query('SELECT id FROM worlds WHERE is_entry = true LIMIT 1');
-  assert.strictEqual(entryRow.rows.length, 1, 'the database needs a seeded entry world');
-  const worldId = entryRow.rows[0].id;
+  // NOT `WHERE is_entry = true` (SOMET-505). That flag is globally exclusive
+  // and peer test files borrow it onto throwaway worlds they then DELETE, so
+  // the id it hands back can name a row that no longer exists by the time the
+  // join frame below goes out. See tests/helpers/entryWorld.js.
+  const { id: worldId } = await entryWorldForJoin(pool);
 
   const cls = await pool.query(
     "SELECT id FROM entity_types WHERE name = 'Warrior' AND is_playable = true LIMIT 1");
