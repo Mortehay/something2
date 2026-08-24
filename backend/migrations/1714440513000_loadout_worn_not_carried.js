@@ -67,6 +67,17 @@ exports.shorthands = undefined;
 // regen -- the class's identity is legible from the first shot, and
 // canPayLife refuses the cast that would drop it below 1 hp (spec 8.3: a
 // Cultist is stopped by its own cost, never killed by it).
+//
+// SCOPE: NEW CHARACTERS ONLY, DELIBERATELY. This does not backfill Cultists
+// that already claimed their loadout -- grantStartingLoadout is once-ever per
+// character and this migration does not touch player state. The ticket is
+// about "what the player is handed at character creation" in its own words,
+// and a backfill would have to decide what to do with a character who has
+// since sold, dropped or replaced that staff, or already equipped something
+// better into main_hand. An existing Cultist reaches the same place by
+// socketing any spell stone into any magic weapon, which is the ordinary
+// route the class always had. If pre-existing Cultists should be repaired too,
+// that is a separate, player-data-touching decision.
 exports.up = (pgm) => {
   pgm.addColumns('class_loadouts', {
     equip_slot: { type: 'text' },

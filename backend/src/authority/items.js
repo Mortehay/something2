@@ -373,8 +373,18 @@ async function grantStartingLoadout(pool, character, itemTypes) {
       const itemId = grantedByType.get(row.item_type_id);
       if (itemId === undefined) continue;
       if (row.equip_slot) {
+        // ON CONFLICT, not a bare INSERT, and not because a conflict is
+        // expected: the grant claims starting_loadout_granted_at once ever, so
+        // a character reaching this line has no equipment yet. It matters
+        // because of what a raw unique violation would DO here -- it throws,
+        // the catch rolls the whole transaction back INCLUDING the claim, and
+        // the next join runs the identical statements and throws again. That
+        // is a permanent, self-repeating join failure, i.e. a locked-out
+        // character, as the price of a row that is already what we want it to
+        // be. The same ON CONFLICT shape items.js#equip already uses.
         await client.query(
-          'INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)',
+          `INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)
+           ON CONFLICT (character_id, slot) DO UPDATE SET item_id = EXCLUDED.item_id`,
           [character.id, row.equip_slot, itemId],
         );
       }
