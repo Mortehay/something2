@@ -19,6 +19,8 @@ import {
   buildTreeIndex, layoutPassiveTree, drawPassiveTree,
 } from "../passiveTreePanel.js";
 import { RenderSystem } from "../RenderSystem.js";
+
+const NativeMap = globalThis.Map;
 import { Game } from "../../core/Game.js";
 import {
   fetchPassiveTree, allocatePassive, respecPassives, fetchRespecQuote, fetchStartClass,
@@ -162,20 +164,71 @@ describe("RenderSystem delegation", () => {
     expect(layout.nodes).toHaveLength(3);
   });
 
-  it("is actually reachable from renderChunked, not just defined", () => {
-    // The inert-feature guard. A perfect panel that renderChunked never calls
-    // draws nothing, and no test of either half notices.
+  // The inert-feature guard, and the reason it drives the REAL renderChunked
+  // rather than reading its source: a source match for the overlay block still
+  // matches a block that has been disabled in front of the condition it names.
+  // That was a live mutant this test let through in its grep form.
+  function renderFrame(over = {}) {
     const rs = Object.create(RenderSystem.prototype);
     rs.ctx = stubCtx();
-    rs._passiveHitAreas = [];
-    rs._passiveLayout = null;
+    rs.canvas = { width: 1280, height: 720 };
+    rs.imageManager = { get: () => null };
+    rs.renderHud = () => {};
     const seen = [];
-    rs.renderPassiveTree = (ctx, s, hitAreas) => { seen.push(s); hitAreas.push({ kind: "x" }); return { ok: true }; };
-    // Drive only the overlay block, with the arguments renderChunked names.
-    const src = RenderSystem.prototype.renderChunked.toString();
-    expect(src).toContain("passiveTreeOpen && passiveIndex && passiveView");
-    expect(src).toContain("this.renderPassiveTree(this.ctx");
-    expect(src).toContain("this._passiveLayout =");
+    rs.renderPassiveTree = (ctx, s, hitAreas) => {
+      seen.push(s);
+      hitAreas.push({ kind: "passiveclose", id: null });
+      return { marker: true };
+    };
+    rs.renderChunked({
+      player: { x: 0, y: 0, width: 32, height: 32, hp: 10, maxHp: 10, facing: "down", effects: null },
+      camera: { apply() {}, reset() {}, screenX: 0, screenY: 0, width: 1280, height: 720, x: 0, y: 0 },
+      chunkedMap: { mapTiles: [], chunks: new NativeMap(), chunkSize: 16, tileSize: 32, loadedKeys: () => [] },
+      remotePlayers: new NativeMap(),
+      localUserId: 1,
+      ...over,
+    });
+    return { rs, seen };
+  }
+
+  it("is actually reached from renderChunked when the panel is open", () => {
+    const { rs, seen } = renderFrame({
+      passiveTreeOpen: true,
+      passiveIndex: buildTreeIndex(TREE),
+      passiveView: { panX: 640, panY: 360, zoom: 1 },
+      allocatedNodeIds: [2],
+      passivePoints: 4,
+      startNodeId: 1,
+      gold: 5000,
+      passiveRespecCost: 2000,
+      passiveHoverX: 690,
+      passiveHoverY: 360,
+    });
+    expect(seen).toHaveLength(1);
+    expect(rs._passiveLayout).toEqual({ marker: true });
+    expect(rs._passiveHitAreas.some((a) => a.kind === "passiveclose")).toBe(true);
+    // Every field the panel needs actually arrives -- a default swallowed on
+    // the way through renderChunked is the same inert failure one layer up.
+    expect(seen[0]).toMatchObject({
+      allocatedNodeIds: [2], passivePoints: 4, startNodeId: 1,
+      gold: 5000, respecCost: 2000, hoverX: 690, hoverY: 360,
+    });
+  });
+
+  it("is not reached, and publishes no stale rects, while the panel is closed", () => {
+    const { rs, seen } = renderFrame({
+      passiveTreeOpen: false,
+      passiveIndex: buildTreeIndex(TREE),
+      passiveView: { panX: 640, panY: 360, zoom: 1 },
+    });
+    expect(seen).toEqual([]);
+    expect(rs._passiveLayout).toBe(null);
+    expect(rs._passiveHitAreas).toEqual([]);
+  });
+
+  it("is not reached before the graph has arrived", () => {
+    const { seen } = renderFrame({ passiveTreeOpen: true, passiveIndex: null, passiveView: null });
+    expect(seen).toEqual([]);
   });
 });
 
@@ -285,6 +338,59 @@ describe("Game routes a click in the tree to the server", () => {
     g.openPassiveTree();
     expect(fetchPassiveTree).toHaveBeenCalledTimes(1);   // graph cached
     expect(fetchRespecQuote).toHaveBeenCalledTimes(2);   // cost is per-level
+  });
+
+  // The P KEY, driven through the real keydown handler rather than matched in
+  // the source. A source assertion for isKey('p') still matches a branch that
+  // has been disabled in front of it -- a live mutant this file let through in
+  // its grep form.
+  function gameWithInput() {
+    const listeners = {};
+    globalThis.window = {
+      addEventListener: (t, fn) => { listeners[t] = fn; },
+      removeEventListener: () => {},
+    };
+    const g = new Game();
+    g.canvas = { addEventListener: () => {}, removeEventListener: () => {},
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 1280, height: 720 }),
+      width: 1280, height: 720 };
+    g.setupInput();
+    g.state = "playing";
+    g.chunked = true;
+    return { g, key: (k, over = {}) => listeners.keydown({ key: k, code: `Key${k.toUpperCase()}`, repeat: false, ...over }) };
+  }
+
+  it("opens and closes the tree on plain P", () => {
+    const { g, key } = gameWithInput();
+    key("p");
+    expect(g.passiveTreeOpen).toBe(true);
+    key("p");
+    expect(g.passiveTreeOpen).toBe(false);
+  });
+
+  it("opens on KeyP even when e.key is not a Latin letter", () => {
+    const { g, key } = gameWithInput();
+    key("з", { code: "KeyP" });   // Cyrillic layout: same physical key
+    expect(g.passiveTreeOpen).toBe(true);
+  });
+
+  it("closes on Escape, and lets Escape close the shop first", () => {
+    const { g, key } = gameWithInput();
+    key("p");
+    key("Escape", { code: "Escape" });
+    expect(g.passiveTreeOpen).toBe(false);
+  });
+
+  it("never stacks with the inventory in either order", () => {
+    const { g, key } = gameWithInput();
+    key("p");
+    key("i");
+    expect(g.inventoryOpen).toBe(false);
+    key("p");                       // close the tree
+    key("i");
+    expect(g.inventoryOpen).toBe(true);
+    key("p");
+    expect(g.passiveTreeOpen).toBe(false);
   });
 
   it("resolves the start node from the class, and nothing without one", () => {
