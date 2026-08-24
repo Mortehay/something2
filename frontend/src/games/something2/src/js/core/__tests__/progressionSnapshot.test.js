@@ -116,3 +116,84 @@ describe('Game constructor / re-join reset', () => {
     }
   });
 });
+
+// SOMET-483: the Character tab's click targets and its own state, exercised
+// against a hand-built `this` for the same reason the snapshot tests above
+// are -- constructing a full Game needs a canvas.
+describe('Character tab click routing', () => {
+  function makeGame() {
+    const originalWindow = globalThis.window;
+    globalThis.window = undefined;
+    let g;
+    try {
+      g = new Game();
+    } finally {
+      globalThis.window = originalWindow;
+    }
+    g.state = 'playing';
+    g.chunked = true;
+    g.inventoryOpen = true;
+    g.renderSystem = { _invHitAreas: [] };
+    // The HTTP seed is fire-and-forget and irrelevant to routing; stub it so
+    // these cases never touch the network.
+    g._refreshProgressionBundle = () => { g._bundleRefreshes = (g._bundleRefreshes || 0) + 1; };
+    return g;
+  }
+
+  it('turns the modifier list page', () => {
+    const g = makeGame();
+    g.renderSystem._invHitAreas = [{ x: 0, y: 0, w: 10, h: 10, kind: 'charmodpage', id: 1 }];
+    g._handleInventoryClick(1, 1);
+    expect(g.characterModPage).toBe(1);
+  });
+
+  it('resets the modifier page when the tab changes', () => {
+    const g = makeGame();
+    g.characterModPage = 3;
+    g.renderSystem._invHitAreas = [{ x: 0, y: 0, w: 10, h: 10, kind: 'invtab', id: 'stones' }];
+    g._handleInventoryClick(1, 1);
+    expect(g.characterModPage).toBe(0);
+  });
+
+  it('refreshes the server bundle when the Character tab is opened, and only then', () => {
+    // xpFloor/xpToNext have no websocket sender, so without this the XP bar
+    // would read "Loading…" forever on a character that never levels.
+    const g = makeGame();
+    g.renderSystem._invHitAreas = [{ x: 0, y: 0, w: 10, h: 10, kind: 'invtab', id: 'stones' }];
+    g._handleInventoryClick(1, 1);
+    expect(g._bundleRefreshes).toBeUndefined();
+    g.renderSystem._invHitAreas = [{ x: 0, y: 0, w: 10, h: 10, kind: 'invtab', id: 'character' }];
+    g._handleInventoryClick(1, 1);
+    expect(g._bundleRefreshes).toBe(1);
+  });
+
+  it('starts with an empty extras bundle and no invented curve numbers', () => {
+    const g = makeGame();
+    expect(g.progressionExtras).toEqual({
+      stats: null, xpFloor: null, xpToNext: null, respecCost: null,
+    });
+    expect(g.characterModPage).toBe(0);
+    expect(g._statsFromSocket).toBe(false);
+  });
+
+  it('builds no character view before a progression row has arrived', () => {
+    const g = makeGame();
+    expect(g.characterView()).toBeNull();
+  });
+
+  it('builds the view from the single-writer row, not from a cached copy', () => {
+    const g = makeGame();
+    g.className = 'Warrior';
+    g.mainStat = 'strength';
+    g.progression = {
+      level: 4, experience: 200, passivePoints: 2,
+      sources: { strength: { base: 5, tree: 8, gear: 0 } },
+      modifiers: [{ label: 'Sinew', value: 8, source: 'tree', kind: 'stat', detail: 'strength' }],
+    };
+    expect(g.characterView().sources).toEqual({ strength: { base: 5, tree: 8, gear: 0 } });
+    // Overwrite the row exactly as onProgression does and the view follows,
+    // with no merge step a stale copy could survive.
+    g.progression = { ...g.progression, sources: { strength: { base: 5, tree: 20, gear: 0 } } };
+    expect(g.characterView().sources).toEqual({ strength: { base: 5, tree: 20, gear: 0 } });
+  });
+});

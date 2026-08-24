@@ -406,8 +406,19 @@ describe("the single-writer rule survives this feature", () => {
     // `joined` frame, and the onProgression push. This feature adds none.
     const writes = game.match(/this\.progression\s*=/g) || [];
     expect(writes).toHaveLength(4);
-    expect(game).toMatch(
-      /onProgression:\s*\(msg\)\s*=>\s*\{\s*if\s*\(msg\s*&&\s*msg\.progression\)\s*this\.progression\s*=\s*msg\.progression;\s*\}/);
+
+    // SOMET-483 gave onProgression a body (it latches the derived-stat seed
+    // and refetches the curve numbers on a level change), so the one-line
+    // shape this used to pin no longer exists. What is still pinned, and is
+    // the actual property: inside that handler there is exactly ONE assignment
+    // to this.progression, and its right-hand side is the frame's own row.
+    const handler = game.slice(
+      game.indexOf("onProgression: (msg) => {"),
+      game.indexOf("onChests:"),
+    );
+    expect(handler).not.toBe("");
+    expect(handler.match(/this\.progression\s*=/g)).toHaveLength(1);
+    expect(handler).toMatch(/this\.progression\s*=\s*msg\.progression;/);
   });
 
   it("never assigns the allocate or respec response to progression", () => {

@@ -423,6 +423,13 @@ export default function GameShell() {
       await gameRef.current.initChunked({
         worldId,
         characterId: activeCharacter.id,
+        // SOMET-483. The Character tab's header and its strong/weak tie-break.
+        // Both already ride the resolved character (listCharacters selects
+        // e.name AS class_name and e.main_stat), so neither needs a wire field
+        // of its own. `mainStat` is allowed to be null -- the tie-break then
+        // falls back to declaration order rather than throwing.
+        className: activeCharacter.className || null,
+        mainStat: activeCharacter.mainStat || null,
         chunkSize,
         tileTypes: mapTiles,
         vfxEffects: vfxEffects || null,

@@ -1711,6 +1711,10 @@ export class RenderSystem {
       drag: v.drag || null,
       hoverX: v.hoverX ?? null,
       hoverY: v.hoverY ?? null,
+      // SOMET-483. Forwarded, not derived: Game builds the character view from
+      // its single-writer progression row and this method stays a pass-through.
+      character: v.character || null,
+      modPage: v.modPage || 0,
       playerImage: this.imageManager ? this.imageManager.get("player") : null,
     };
     const layout = layoutInventory(state);

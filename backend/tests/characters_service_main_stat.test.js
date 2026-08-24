@@ -14,7 +14,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { listPlayableClasses, ownedCharacter } = require('../src/services/characters.js');
+const { listPlayableClasses, ownedCharacter, listCharacters } = require('../src/services/characters.js');
 
 function fakePool(rows) {
   const seen = [];
@@ -87,6 +87,26 @@ test('ownedCharacter survives a character whose class row has vanished', async (
     className: null, mainStat: null,
     classPools: { maxHp: null, maxMana: null },
   });
+});
+
+// SOMET-483. listCharacters is what GameShell resolves activeCharacter from,
+// and Game.initChunked threads className/mainStat off that object into the
+// Character tab's strong/weak tie-break. Without the column in the SELECT the
+// tie-break silently falls back to declaration order for every class -- the
+// feature would be live in the DB, rendered in the UI, and inert in play.
+test('listCharacters carries main_stat through as mainStat', async () => {
+  const pool = fakePool([
+    {
+      id: 3, slot: 1, name: 'Nix', entity_type_id: 9,
+      class_name: 'Mage', main_stat: 'intelligence',
+      level: 7, last_world_name: 'Vale', last_world_id: 4,
+    },
+  ]);
+  const [c] = await listCharacters(pool, 1);
+  assert.equal(c.mainStat, 'intelligence');
+  assert.equal(c.className, 'Mage');
+  assert.match(pool.seen[0], /main_stat/,
+    'the column has to be SELECTed, or mainStat is undefined for every character');
 });
 
 test('ownedCharacter still refuses a non-integer id without querying', async () => {

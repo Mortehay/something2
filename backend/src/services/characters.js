@@ -91,7 +91,7 @@ async function listCharacters(pool, userId) {
   // just created it from.
   const r = await pool.query(
     `SELECT c.id, c.slot, c.name, c.entity_type_id,
-            e.name AS class_name,
+            e.name AS class_name, e.main_stat,
             COALESCE(pr.level, 1) AS level,
             w.name AS last_world_name,
             lw.world_id AS last_world_id
@@ -111,6 +111,13 @@ async function listCharacters(pool, userId) {
     slot: x.slot,
     name: x.name,
     className: x.class_name,
+    // SOMET-483: the Character tab breaks a strong/weak tie toward the class's
+    // main stat, and GameShell threads it from the resolved activeCharacter
+    // into Game.initChunked. Selected here rather than added to the wire: the
+    // join already carries it on ownedCharacter, and a client that had to ask
+    // a second endpoint for it would render the tie-break inert until that
+    // request landed.
+    mainStat: x.main_stat,
     entityTypeId: x.entity_type_id,
     level: Number(x.level),
     lastWorldName: x.last_world_name,

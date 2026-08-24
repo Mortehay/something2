@@ -31,6 +31,11 @@ import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
 import { shouldRepeatAttack, refusalStopsHold } from "./constantAttack.js";
 import { authorityWsUrl } from "../net/authorityUrl.js";
+import {
+    emptyExtras, frameCarriesStats, mergeFrameStats, mergeSeedStats,
+    mergeLevelInfo, buildCharacterView,
+} from "./progressionExtras.js";
+import { fetchProgression } from "../net/progressionClient.js";
 import { API_URL } from "../../../../../config.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
@@ -161,12 +166,34 @@ export class Game {
         // never enters the inventory (see onPicked/onWallet below).
         this.gold = 0;
 
-        // Progression (SOMET-242): the raw player_progression row (level,
-        // experience, passive_points, six stats) -- set from `joined.progression`
-        // and refreshed by `progression` push messages (kill XP, level-up,
-        // death). null until the first join lands. Nothing here derives HUD
-        // numbers from it directly; CharacterSheet.jsx is the sole reader.
+        // Progression (SOMET-242): the COMPOSED player_progression row (level,
+        // experience, the six effective stats, and since SOMET-475 the
+        // sources/modifiers/passivePoints/allocatedNodeIds composeStats
+        // produced) -- set from `joined.progression` and refreshed by
+        // `progression` push messages (kill XP, level-up, death, allocate,
+        // respec). null until the first join lands. EXACTLY ONE WRITER: the
+        // onProgression handler in initChunked. The inventory panel's Character
+        // tab and the passive-tree overlay are its readers, and both read it
+        // rather than caching a copy -- see core/progressionExtras.js.
         this.progression = null;
+
+        // The handful of fields the progression row does NOT carry: the derived
+        // stat bundle (which rides the socket frame beside the row but not the
+        // join frame) and the server's own xpFloor/xpToNext/respecCost. Never
+        // computed here -- see progressionExtras.js's header for both rules.
+        this.progressionExtras = emptyExtras();
+        // Latched true the first time a websocket frame carries the derived
+        // bundle, after which the HTTP seed may no longer write it (the F1
+        // race).
+        this._statsFromSocket = false;
+        this._progressionBundleBusy = false;
+        // The Character tab's own paging state, beside inventoryTab/Page.
+        this.characterModPage = 0;
+        // Class identity for the Character tab's header and its strong/weak
+        // tie-break. Supplied by GameShell from the resolved activeCharacter
+        // rather than the wire: listCharacters already sends both.
+        this.className = null;
+        this.mainStat = null;
 
         // Merchant + shop (Slice D): `merchants` is the join-time list of
         // village merchant markers to render; `shop` is the catalog/buyback
@@ -372,7 +399,7 @@ export class Game {
         }
     }
 
-    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, spawnX = 0, spawnY = 0 }) {
+    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, spawnX = 0, spawnY = 0, className = null, mainStat = null }) {
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;
@@ -446,6 +473,14 @@ export class Game {
         this.worldChests = [];
         this.gold = 0;
         this.progression = null;
+        // Reset alongside the row they describe: a stale derived bundle or a
+        // stale xpFloor from the previous world would be read against the new
+        // world's row for however long it takes the first frame to land.
+        this.progressionExtras = emptyExtras();
+        this._statsFromSocket = false;
+        this.characterModPage = 0;
+        this.className = className;
+        this.mainStat = mainStat;
         this.merchants = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
@@ -570,7 +605,28 @@ export class Game {
                     if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
                 },
                 onWithdrawn: (msg) => { if (msg.item) addItem(this.inventory, msg.item); },
-                onProgression: (msg) => { if (msg && msg.progression) this.progression = msg.progression; },
+                // Kill XP / level-up / death / allocate / respec pushes. This
+                // is still the SINGLE writer of this.progression -- an
+                // unconditional overwrite on the one channel that has a real
+                // ordering guarantee (see progressionExtras.js's header, and
+                // applyGoldResult's below).
+                //
+                // The derived bundle rides the same frame (contract §6.3) and
+                // latches the HTTP seed off once it has. A level change
+                // triggers ONE targeted refetch of the level-dependent
+                // xpFloor/xpToNext/respecCost -- a level-up is a real event,
+                // not the no-op push the original sheet was required not to
+                // refetch on.
+                onProgression: (msg) => {
+                    if (!msg || !msg.progression) return;
+                    const prevLevel = this.progression ? this.progression.level : null;
+                    this.progression = msg.progression;
+                    if (frameCarriesStats(msg)) {
+                        this.progressionExtras = mergeFrameStats(this.progressionExtras, msg);
+                        this._statsFromSocket = true;
+                    }
+                    if (msg.progression.level !== prevLevel) this._refreshProgressionBundle();
+                },
                 // SOMET-372. Both handlers are one line each on purpose: the
                 // rules they carry (whole-list replacement, and the item-shape
                 // mapping openChest needs) live in core/worldChests.js, where
@@ -775,6 +831,46 @@ export class Game {
     getProgressionSnapshot() {
         if (this.state !== 'playing' || !this.chunked || !this.progression) return null;
         return { progression: this.progression, gold: this.gold };
+    }
+
+    // SOMET-483. One HTTP read of GET /api/progression, fired when the
+    // Character tab is opened and again when the level actually changes.
+    //
+    // It writes ONLY progressionExtras -- never this.progression, which would
+    // reintroduce the F1 race applyGoldResult's comment below describes. The
+    // derived-`stats` half is additionally latched off once a socket frame has
+    // carried it (mergeSeedStats), so a late response can never overwrite a
+    // newer push. xpFloor/xpToNext/respecCost have no websocket sender at all,
+    // so they are applied unconditionally.
+    //
+    // `_progressionBundleBusy` is a single-flight guard, not a cache: clicking
+    // the tab five times must not issue five requests, but the sixth click
+    // after the first settles must still refresh.
+    _refreshProgressionBundle() {
+        if (this._progressionBundleBusy) return;
+        this._progressionBundleBusy = true;
+        fetchProgression()
+            .then((bundle) => {
+                if (!bundle) return;
+                this.progressionExtras = mergeLevelInfo(this.progressionExtras, bundle);
+                this.progressionExtras = mergeSeedStats(
+                    this.progressionExtras, bundle, this._statsFromSocket,
+                );
+            })
+            .catch(() => { /* the next tab-open or level-up retries */ })
+            .finally(() => { this._progressionBundleBusy = false; });
+    }
+
+    // Everything the Character pane renders, assembled fresh each frame from
+    // the single-writer row plus the extras above. Not cached: a kill that
+    // levels the player up must move the bar on the very next frame.
+    characterView() {
+        return buildCharacterView({
+            progression: this.progression,
+            extras: this.progressionExtras,
+            className: this.className,
+            mainStat: this.mainStat,
+        });
     }
 
     // SOMET-493 -- the in-game Settings panel's read side, following the same
@@ -1115,6 +1211,9 @@ export class Game {
                     drag: this.inventoryDrag,
                     hoverX: this._cursorX ?? null,
                     hoverY: this._cursorY ?? null,
+                    // SOMET-483. Built fresh, never cached -- see characterView.
+                    character: this.characterView(),
+                    modPage: this.characterModPage,
                 },
                 groundItems: this.groundItems.all(),
                 worldChests: this.worldChests,
@@ -1348,12 +1447,16 @@ export class Game {
         if (hit.kind === 'invtab') {
             // Page resets with the tab: page 3 of All is very likely past the
             // end of Stones, and the layout would clamp it to 0 anyway — doing
-            // it here keeps the state and the render agreeing.
+            // it here keeps the state and the render agreeing. The Character
+            // tab's own modifier page resets for the same reason.
             this.inventoryTab = hit.id;
             this.inventoryPage = 0;
+            this.characterModPage = 0;
+            if (hit.id === 'character') this._refreshProgressionBundle();
             return;
         }
         if (hit.kind === 'invpage') { this.inventoryPage = hit.id; return; }
+        if (hit.kind === 'charmodpage') { this.characterModPage = hit.id; return; }
 
         if (hit.kind === 'drop') {
             if (this.authorityClient) this.authorityClient.sendDrop(hit.id);
