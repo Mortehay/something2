@@ -15,7 +15,7 @@
 //               behind `i` made it something players had to be told about.
 //
 //   Inspect     CLIENT-owned. Persisted here in localStorage (the same
-//               convention Minimap.jsx and CharacterSheet.jsx use for their
+//               convention Minimap.jsx and WaypointTravel.jsx use for their
 //               visibility) and pushed into the Game instance.
 //
 // The push is re-asserted on every poll tick rather than only in an effect on
@@ -29,7 +29,7 @@ import { HiOutlineCog6Tooth } from 'react-icons/hi2';
 
 const LS_INSPECT = 'something2.settings.inspect';
 const LS_CONSTANT_ATTACK = 'something2.settings.constantAttack';
-// Matches CharacterSheet's own poll cadence. This reads two booleans off an
+// Matches Minimap.jsx's own poll cadence. This reads two booleans off an
 // in-memory object; there is nothing here worth a rAF subscription.
 const POLL_MS = 500;
 

@@ -1,7 +1,8 @@
-// The progression side-channel (SOMET-483). CharacterSheet.jsx's F1 header
-// documented a race that was fixed by making the websocket 'progression'
-// handler the SINGLE writer of progression state, and F2 documented a deleted
-// xpCurve.js that re-implemented backend formulas client-side.
+// The progression side-channel (SOMET-483). The deleted CharacterSheet.jsx's
+// F1 header documented a race that was fixed by making the websocket
+// 'progression' handler the SINGLE writer of progression state, and its F2
+// header documented a deleted xpCurve.js that re-implemented backend formulas
+// client-side. Both records now live in ../progressionExtras.js.
 //
 // This module is where both lessons are enforced now:
 //  - progression itself is never written here at all (Game's onProgression

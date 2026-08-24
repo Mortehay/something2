@@ -238,7 +238,7 @@ export class Game {
         // graph, fetched ONCE on the first open; `passiveIndex` is its spatial
         // index, rebuilt only when the graph itself changes. The ALLOCATED SET
         // is NOT stored here -- it lives on this.progression, whose single
-        // writer is the onProgression handler above (see CharacterSheet.jsx's
+        // writer is the onProgression handler above (see progressionExtras.js's
         // F1 header for the cross-channel race that rule exists to prevent).
         this.passiveTree = null;
         this.passiveIndex = null;
@@ -248,7 +248,7 @@ export class Game {
         this.passiveDrag = null;
         // Contract §6.4. The COST is the server's number, refetched on every
         // open; it is never recomputed from respec_base_gold x level here,
-        // which is the drift CharacterSheet.jsx's F2 header records.
+        // which is the drift systems/characterTab.js's F2 rule records.
         this.passiveRespecCost = null;
         this.passiveGold = null;
         this.passiveRespecBusy = false;
@@ -570,10 +570,6 @@ export class Game {
                     if (!this.shopOpen) this.shopView = { tab: 'catalog', page: 0 };
                     this.shopOpen = true;
                 },
-                // Kill XP / level-up / death pushes. Always the server's raw
-                // row; CharacterSheet.jsx decides what changed and whether
-                // that's worth a re-render (a zero-XP kill still pushes a
-                // frame with unchanged values -- see its progressionChanged).
                 // SOMET-310. The server sends the WHOLE chest on open and again
                 // after every deposit/withdraw, so this mirrors the frame and
                 // never reconciles a delta -- the same rule onShop follows, and
@@ -990,8 +986,8 @@ export class Game {
     }
 
     // Write-through cache update for gold ONLY (SOMET-242 D1 fix, narrowed by
-    // the F1 fix below). CharacterSheet.jsx calls this right after a
-    // successful respec HTTP response so the canvas-drawn gold HUD
+    // the F1 fix below). The passive-tree overlay's respec calls this right
+    // after a successful respec HTTP response so the canvas-drawn gold HUD
     // (RenderSystem reads this.gold directly) reflects the payment
     // immediately, the same way D1 originally fixed the sheet's own stale
     // display.
@@ -1008,7 +1004,7 @@ export class Game {
     // ordering guarantee (a single WebSocket connection preserves send
     // order, and server.js's refreshPlayerStats -- e77d929/bbab966 -- now
     // pushes a 'progression' frame after every successful allocate/respec
-    // too, through that same ordered channel). See CharacterSheet.jsx's
+    // too, through that same ordered channel). See progressionExtras.js's
     // module header for the full reasoning, including why a naive
     // "only apply if experience increased" guard was considered and
     // rejected (death decreases experience, so that check is not a valid
@@ -1400,7 +1396,7 @@ export class Game {
         // Fire and forget. The success body is discarded on purpose: the
         // server's ordered `progression` websocket frame is the ONLY writer of
         // this.progression (see the onProgression handler above and
-        // CharacterSheet.jsx's F1 header).
+        // core/progressionExtras.js's F1 header).
         allocatePassive(node.id).catch((err) => this._showToast(err.message));
     }
 
@@ -1529,6 +1525,30 @@ export class Game {
                 && !this.passiveTreeOpen) {
                 if (this.inventoryOpen) this.closeInventory();
                 else this.inventoryOpen = true;
+            }
+
+            // Character sheet (SOMET-483): C opens the inventory panel on its
+            // Character tab. The standalone popup this key used to toggle is
+            // deleted -- the key is REUSED rather than retired so the player's
+            // muscle memory survives, and hotkeyRegistry.test.js pins that
+            // nothing else claims it. Same gates as 'i', so the two centred
+            // panels can never stack.
+            //
+            // Pressing it while the panel is already open on ANOTHER tab
+            // switches to Character rather than closing: "show me my character"
+            // is the intent, and a close would make the key's effect depend on
+            // which tab happened to be showing.
+            if (isKey('c') && this.state === 'playing' && this.chunked && !e.repeat
+                && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (this.inventoryOpen && this.inventoryTab === 'character') {
+                    this.closeInventory();
+                } else {
+                    this.inventoryOpen = true;
+                    this.inventoryTab = 'character';
+                    this.inventoryPage = 0;
+                    this.characterModPage = 0;
+                    this._refreshProgressionBundle();
+                }
             }
 
             // Passive tree (SOMET-476). Gated on the other three panels being

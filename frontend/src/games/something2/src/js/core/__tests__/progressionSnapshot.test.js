@@ -1,5 +1,5 @@
-// SOMET-242 Task 10: Game.getProgressionSnapshot() is the character sheet's
-// read-only window into the live progression row (see getMinimapSnapshot.js's
+// SOMET-242 Task 10: Game.getProgressionSnapshot() is the read-only window
+// into the live progression row (see getMinimapSnapshot.js's
 // sibling test for the pattern this borrows -- calling the method against a
 // hand-built `this` avoids constructing the full Game, which needs a
 // canvas/DOM).
@@ -103,7 +103,7 @@ describe('F1: a newer websocket push is not clobbered by a later HTTP-response-s
 // config) is exercised end-to-end by setupInput-adjacent tests elsewhere
 // (authorityDisconnect.test.js, debugKeyRepeat.test.js) using the same
 // minimal window/canvas stub; this file only needs to prove the snapshot
-// method's own contract, which is what CharacterSheet.jsx actually reads.
+// method's own contract, which is what the settings/HUD readers consume.
 describe('Game constructor / re-join reset', () => {
   it('starts with progression null', () => {
     const originalWindow = globalThis.window;

@@ -3,7 +3,9 @@
 //
 // WHY THIS MODULE IS SMALL, AND WHY IT DOES NOT HOLD sources/modifiers.
 //
-// The deleted CharacterSheet.jsx's F1 header documented a real,
+// CharacterSheet.jsx -- the standalone level popup SOMET-483 deleted -- carried
+// an "F1" header, and this module is where that record now lives. It documented
+// a real,
 // browser-reproduced race: the HTTP allocate response travels on a brand-new
 // connection with NO ordering guarantee against a websocket push sent moments
 // earlier, so a late, stale HTTP response overwrote a newer level-up. It was

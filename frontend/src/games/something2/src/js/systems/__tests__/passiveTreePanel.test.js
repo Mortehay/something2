@@ -397,7 +397,7 @@ describe("the single-writer rule survives this feature", () => {
     path.resolve(here, "../../net/passiveTreeClient.js"), "utf8");
 
   it("leaves Game.progression with exactly the writers it had before", () => {
-    // CharacterSheet.jsx's F1 header documents a cross-channel race that was
+    // core/progressionExtras.js's F1 header documents a cross-channel race that was
     // fixed by DELETING the second writer. An allocate response applied
     // straight to Game.progression would bring it back, and it would look like
     // a level-up occasionally undoing itself rather than like this feature.
