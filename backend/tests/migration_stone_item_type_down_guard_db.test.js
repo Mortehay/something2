@@ -84,8 +84,54 @@ const HAS_STAT_BONUS_COLUMN = `SELECT 1 FROM information_schema.columns
 // serializes those who ask for it.
 const STONE_CATALOG_LOCK = "SELECT pg_advisory_xact_lock(hashtext('somet320:item_types_stone'))";
 
+// SOMET-497. The advisory lock above is necessary but NOT sufficient, and the
+// reason is the sentence right above it: a lock only serializes those who ask.
+// The three stone files ask. Everybody else who touches item_types does not,
+// and does not need to -- until this file's transaction runs DDL.
+//
+// The captured lock graph (Postgres deadlock DETAIL, somet497 scratch DB):
+//
+//   Process 43220 waits for ShareLock on transaction 4324658; blocked by 43218.
+//   Process 43218 waits for AccessExclusiveLock on relation item_types;
+//                                                 blocked by process 43220.
+//   Process 43220: INSERT INTO player_items (character_id, item_type_id) ...
+//   Process 43218: ALTER TABLE "item_types" DROP CONSTRAINT
+//                  "item_types_stat_bonus_stat_check";
+//   CONTEXT: while locking tuple (1,51) in relation "item_types"
+//            SQL statement "SELECT 1 FROM ONLY "public"."item_types" x
+//                            WHERE "id" = $1 FOR KEY SHARE OF x"
+//
+// Read it as a lock-ordering bug in THIS file, because that is what it is:
+//
+//   * 43218 is us. We hold the advisory lock, we have already DELETEd the
+//     category='stone' rows (row locks on item_types tuples), and only THEN
+//     does down()'s DDL ask for AccessExclusiveLock on the whole table.
+//     Row locks first, table lock second -- the classic inversion.
+//   * 43220 is any peer file inserting a player_items row whose item_type_id
+//     is one of those stone rows (life_cost_live_join_db's staff/stone
+//     fixture is the one that caught it). Its FK check takes RowShareLock on
+//     item_types (conflicts with our AccessExclusiveLock) and then waits on
+//     the stone tuple we deleted. Table lock first, row lock second -- the
+//     opposite order, so: cycle.
+//
+// The fix is to take the coarsest lock FIRST, before this transaction owns any
+// row. While we are waiting for it we hold nothing but the advisory lock (both
+// are taken at the very top of openTxClient, before a single item_types row is
+// read or written), so we cannot be one edge of a cycle; and once it is
+// granted, a peer's FK probe simply queues behind us instead of overtaking us
+// into a tuple we are about to delete. Nothing outside these three files has
+// to change, which is the point -- the alternative was to teach every file
+// that inserts a stone-typed player_item about a lock it has no business
+// knowing, and that list only ever grows.
+//
+// LOCK TABLE is transaction-scoped like the advisory lock, so the ROLLBACK in
+// `finally` still releases everything. Measured cost: peers block for the
+// ~100-500ms these transactions live, not longer.
+const STONE_CATALOG_TABLE_LOCK = 'LOCK TABLE item_types IN ACCESS EXCLUSIVE MODE';
+
 async function lockStoneCatalog(client) {
   await client.query(STONE_CATALOG_LOCK);
+  await client.query(STONE_CATALOG_TABLE_LOCK);
 }
 
 async function openTxClient(t) {

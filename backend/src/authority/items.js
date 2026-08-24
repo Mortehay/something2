@@ -795,6 +795,37 @@ async function unequip(pool, characterId, inv, slot) {
 // a later action in the same session (canEquip, a second socket attempt, and
 // eventually combat's activeWeaponType) sees the change without a reload --
 // same reason claimItem/dropItem/sellItem push/filter p.inv.items in place.
+// LOCK ORDER (SOMET-497). Read this before adding a query to this function.
+//
+// socketStone takes exactly two row locks, in this order:
+//   1. the STONE's player_items row AND its stone_instances row, together, by
+//      the one FOR UPDATE over the join below;
+//   2. the HOST's player_items row.
+// It takes NO lock on item_types at any point: the type rows come from the
+// caller's in-memory `itemTypes` map, and the only foreign key the final
+// UPDATE re-checks (stone_instances.socketed_into_id -> player_items) names a
+// row this transaction is already holding FOR UPDATE.
+//
+// Two consequences worth writing down, because SOMET-497 was filed as a
+// deadlock "inside socketStone" and the lock graph Postgres actually printed
+// for it did not name this function at all -- it was a peer test's
+// `INSERT INTO player_items` FK probe against a stone migration test's
+// `ALTER TABLE item_types`, neither of which is this code:
+//
+//   * Two concurrent socketStone calls CANNOT deadlock against each other.
+//     A cycle needs one item that is simultaneously a stone (a stone_instances
+//     row, only ever created for a category='stone' type -- see
+//     grantStartingLoadout above and 1714440167000) and a legal host
+//     (isCompatible demands category 'weapon' or 'armor'). Nothing can be
+//     both, and the character_id predicate keeps both rows inside one
+//     character regardless.
+//   * What this function DOES deadlock against is a statement that sweeps
+//     player_items in a different order -- specifically the database-wide
+//     DELETE in 1714440167000_convert_magic_weapons_to_stones.js's down(),
+//     which migration_convert_magic_weapons_db.test.js runs for real against
+//     every character's rows. That is SOMET-506, and it is reachable only from
+//     that test: down() migrations are not run in production. Fix it there,
+//     not by giving this live authority path a test-only lock.
 async function socketStone(pool, characterId, inv, stonePlayerItemId, hostPlayerItemId, itemTypes) {
   const client = await pool.connect();
   try {
