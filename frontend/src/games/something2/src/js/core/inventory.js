@@ -58,8 +58,14 @@ export function applyJoined(inv, msg) {
   //
   // NEVER a permission: what may be sold or dropped is decided server-side
   // against the row. This copy exists to label a row, nothing more.
+  // SOMET-490: `rarity` is carried so the panel can tint a cell by grade from
+  // the same palette the ground glow uses. Defaulted to 'white' rather than
+  // passed through, for the same reason `soulbound` is normalised above: an
+  // older frame that omits the field must read as "ordinary", and 'white' is
+  // both the column default and the grade that draws no highlight at all.
   inv.items = (msg.items || []).map((i) => ({
     id: i.id, typeId: i.typeId, quantity: qtyOf(i), soulbound: i.soulbound === true,
+    rarity: i.rarity || 'white',
   }));
   inv.equipment = { ...(msg.equipment || {}) };
   // A join snapshot is the whole truth about every stack the player holds, so
@@ -94,6 +100,7 @@ export function addItem(inv, item) {
   // account chest must keep its marker.
   inv.items.push({
     id: item.id, typeId: item.typeId, quantity: qtyOf(item), soulbound: item.soulbound === true,
+    rarity: item.rarity || 'white',
   });
   forgetAmmoCount(inv, item.typeId);
 }
