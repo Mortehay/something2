@@ -84,7 +84,14 @@ async function opensWithin(promise, ms, what) {
 test('SOMET-499: a stale close must not tear down the reconnected session', {
   skip: !DB_URL ? 'no database URL' : false,
 }, async (t) => {
-  const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 3000, max: 10 });
+  // max 4, and every authority booted below is shut down at the end of its own
+  // subtest. `node --test` runs test FILES in parallel against one Postgres, so
+  // a file that leaves six live authorities ticking (each with its own tick,
+  // flush, heartbeat and sweep timers) starves the connection pool for every
+  // other file -- which reaches them as a join answered "unknown world", not as
+  // anything resembling a connection error. That is a real failure this file
+  // caused once; it is not a hypothetical.
+  const pool = new Pool({ connectionString: DB_URL, connectionTimeoutMillis: 3000, max: 4 });
   try {
     await pool.query('SELECT 1');
   } catch (err) {
@@ -127,6 +134,16 @@ test('SOMET-499: a stale close must not tear down the reconnected session', {
     const rec = { server, handle, url: `ws://127.0.0.1:${server.address().port}/authority` };
     servers.push(rec);
     return rec;
+  }
+
+  // Called at the end of each subtest. The t.after hook below is a backstop for
+  // a subtest that threw, not the normal path -- see the pool comment above for
+  // why leaving these running matters.
+  async function shutdown(rt) {
+    rt.handle.close();
+    if (rt.server.listening) await new Promise((r) => rt.server.close(r));
+    const i = servers.indexOf(rt);
+    if (i >= 0) servers.splice(i, 1);
   }
 
   let seq = 0;
@@ -186,6 +203,7 @@ test('SOMET-499: a stale close must not tear down the reconnected session', {
     assert.strictEqual(ghosts.length, 0,
       `${ghosts.length}/${RECONNECT_RUNS} reconnects were ghosted:\n  ${ghosts.join('\n  ')}`);
     cur.close();
+    await shutdown(rt);
   });
 
   await t.test('a forced-stale close leaves the new session alive and still saves the old one', async () => {
@@ -237,7 +255,8 @@ test('SOMET-499: a stale close must not tear down the reconnected session', {
     ws1.close();
     // Deterministic handshake, not a sleep: the replacement joins only once
     // the outgoing close is provably parked inside its persist().
-    await persistStarted;
+    await opensWithin(persistStarted, 15000,
+      'the outgoing close never persisted -- a stale close must not skip saving');
 
     const ws2 = await join(rt, account, incoming.id);
     const st = await nextFrame(ws2, 'state', 5000);
@@ -275,6 +294,7 @@ test('SOMET-499: a stale close must not tear down the reconnected session', {
       'the stale close skipped persisting the outgoing session\'s position');
 
     ws2.close();
+    await shutdown(rt);
   });
 
   await t.test('an eviction that races a join must not detach the world it flushed', async () => {
@@ -348,6 +368,7 @@ test('SOMET-499: a stale close must not tear down the reconnected session', {
       'state frames stopped once the racing eviction completed');
 
     ws2.close();
+    await shutdown(rt);
   });
 
   await t.test('a join whose world is evicted mid-flight re-attaches instead of joining a detached one', async () => {
@@ -437,6 +458,7 @@ test('SOMET-499: a stale close must not tear down the reconnected session', {
     assert.ok(after.world.getPlayer(account.key), 'the rejoined player is not in the world');
 
     ws2.close();
+    await shutdown(rt);
   });
 
   await t.test('another account\'s close must not evict a world a registered join is in', async () => {
@@ -513,6 +535,7 @@ test('SOMET-499: a stale close must not tear down the reconnected session', {
       'the world the arriving session joined is not the registered one');
 
     wsArrive.close();
+    await shutdown(rt);
   });
 
   await t.test('the last session out still removes its player and evicts its world', async () => {
@@ -547,5 +570,6 @@ test('SOMET-499: a stale close must not tear down the reconnected session', {
       'the last session out left its socket in the registry');
     assert.strictEqual(!!entry.world.getPlayer(account.key), false,
       'the last session out left its player in the world');
+    await shutdown(rt);
   });
 });
