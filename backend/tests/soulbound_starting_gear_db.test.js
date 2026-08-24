@@ -153,6 +153,21 @@ async function itemExists(pool, itemId) {
   return r.rowCount === 1;
 }
 
+// SOMET-484: a sale no longer DESTROYS the instance, it hands it to the
+// merchant (player_items.merchant_stock_id). "The seller no longer has it" is
+// therefore the question this file actually cares about, and itemExists can no
+// longer answer it -- after a successful sale the row is still there, owned by
+// nobody. Asserting itemExists === false would now fail on a correct sale;
+// asserting itemExists === true would pass on a REFUSED one too, and the
+// refusal case above is the whole point of the test, so the two need different
+// questions.
+async function ownedByCharacter(pool, itemId, characterId) {
+  const r = await pool.query(
+    'SELECT 1 FROM player_items WHERE id = $1 AND character_id = $2', [itemId, characterId],
+  );
+  return r.rowCount === 1;
+}
+
 test('SOMET-277: a GRANTED starting-loadout instance cannot be sold, and the identical LOOTED instance can', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) {
@@ -196,8 +211,8 @@ test('SOMET-277: a GRANTED starting-loadout instance cannot be sold, and the ide
     assert.equal(refused.ok, false, 'selling granted starting gear must be refused');
     assert.match(refused.reason, /cannot be sold/i, 'the refusal must be a clear, player-readable reason');
     assert.equal(await goldOf(pool, fx.userId), goldBefore, 'no gold may be credited for a refused sale');
-    assert.equal(await itemExists(pool, granted.id), true,
-      'the refusal must ROLL BACK the DELETE -- a destroyed item with no payment is worse than the exploit');
+    assert.strictEqual(await ownedByCharacter(pool, granted.id, fx.character.id), true,
+      'the refusal must ROLL BACK -- the seller must still OWN the item, not merely have a row somewhere');
     assert.ok(player.inv.items.some((it) => it.id === granted.id), 'in-memory inventory keeps the item too');
 
     // --- the control: same item TYPE, same character, unbound instance ---
@@ -207,7 +222,10 @@ test('SOMET-277: a GRANTED starting-loadout instance cannot be sold, and the ide
       + 'a per-TYPE ban would make every looted copy worthless');
     assert.ok(sold.price > 0, 'the looted twin must pay its normal price, not zero');
     assert.equal(await goldOf(pool, fx.userId), goldBefore + sold.price, 'the legitimate sale is credited');
-    assert.equal(await itemExists(pool, looted.id), false, 'the sold instance is gone');
+    assert.strictEqual(await ownedByCharacter(pool, looted.id, fx.character.id), false,
+      'the seller must no longer own the sold instance');
+    assert.strictEqual(await itemExists(pool, looted.id), true,
+      'SOMET-484: and it must still EXIST -- the merchant is holding it, so buying it back returns it intact');
   } finally {
     if (userId != null) await cleanup(pool, userId);
     await pool.end();
