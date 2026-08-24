@@ -67,10 +67,19 @@ class GroundItemSim {
     return dropped;
   }
 
+  // SOMET-482: returns {id, x, y} per removed item, NOT a bare id list.
+  //
+  // The position is the whole point of the return value now: server.js
+  // broadcasts a despawn puff at each expired item's position, and once the
+  // entry is deleted from this.items there is nowhere left to look it up.
+  // Reading x/y BEFORE the delete is the only order that works.
   removeExpired(nowMs) {
     const removed = [];
     for (const [id, it] of this.items) {
-      if (it.expiresAt <= nowMs) { this.items.delete(id); removed.push(id); }
+      if (it.expiresAt <= nowMs) {
+        removed.push({ id, x: it.x, y: it.y });
+        this.items.delete(id);
+      }
     }
     return removed;
   }

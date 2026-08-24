@@ -47,11 +47,14 @@ test('pruneInactive drops items outside the active chunk set', () => {
   assert.strictEqual(sim.get('drop'), null);
 });
 
-test('removeExpired removes only expired items and returns their ids', () => {
+test('removeExpired removes only expired items and returns their id AND position', () => {
   const sim = new GroundItemSim(CHUNK);
   sim.add(rows(['old', 100, 100, 1, '2000-01-01T00:00:00Z'], ['new', 120, 120]));
   const removed = sim.removeExpired(Date.parse('2020-01-01T00:00:00Z'));
-  assert.deepStrictEqual(removed, ['old']);
+  // SOMET-482: the position is what the despawn puff is drawn at. An id alone
+  // cannot be placed, because the entry is gone from the map by the time the
+  // caller looks at the return value.
+  assert.deepStrictEqual(removed, [{ id: 'old', x: 100, y: 100 }]);
   assert.strictEqual(sim.count(), 1);
 });
 
