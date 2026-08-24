@@ -33,6 +33,8 @@ const { loadProgression } = require('../services/progressionStore.js');
 const { allocateNode, respecPassives, respecQuote } = require('../services/passiveTreeStore.js');
 const { derivePlayerStats, xpFloor, xpToNext } = require('../services/playerStats.js');
 const { ownedCharacter } = require('../services/characters.js');
+const { loadInventory } = require('../authority/items.js');
+const { withGearAffixes, equippedAffixGrants } = require('../services/gearAffixes.js');
 
 // `refreshLivePlayerStats(userId, progression, stats)` pushes a successful
 // write into the live authority session (SOMET-242 follow-up: allocating a
@@ -46,6 +48,37 @@ const { ownedCharacter } = require('../services/characters.js');
 module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () => false) {
   const router = express.Router();
   const guard = requireAuth(pool);
+
+  // SOMET-496. The equipped items' rolled affixes, folded onto the row before
+  // anything is derived from it.
+  //
+  // WHY IT IS HERE AND NOT IN loadProgression. That row is what
+  // world.js#_requirementContext measures an item's requirements against, so
+  // gear must never reach it -- see services/gearAffixes.js's header for the
+  // SOMET-478 bootstrap hole that would reopen. The fold belongs at every
+  // boundary that DERIVES, and this file is one of two (the authority's
+  // `framed` is the other).
+  //
+  // WHY THE SHEET NEEDS IT AT ALL, given the authority pushes its own frames:
+  // the `joined` frame deliberately carries no `stats`, so until the player's
+  // first kill/equip/level-up the Character tab's derived numbers come from
+  // THIS route (Game.js's `_statsFromSocket` latch). Gear-free numbers here
+  // are the same advertise-vs-play split the ticket exists to close, just in
+  // a narrower window.
+  //
+  // Buff stones are deliberately NOT folded in here. That is pre-existing
+  // (SOMET-245 chose to recompute them inside the authority, which is the only
+  // place that knows a live session's socket state) and is not what this
+  // ticket changed; loadProgression's row was stone-free before and still is.
+  //
+  // Idempotent, which matters for the two POSTs: they hand the framed row to
+  // refreshLivePlayerStats, and the authority folds gear in again. Only the
+  // `source:'gear'` half is ever replaced -- gear_affix_overlay.test.js pins
+  // that applying the overlay twice is applying it once.
+  async function gearFramed(characterId, progression) {
+    const inv = await loadInventory(pool, characterId);
+    return withGearAffixes(progression, equippedAffixGrants(inv));
+  }
 
   // SOMET-257 made progression per-character, so every route here needs a
   // character id as well as the authenticated account. It is read from the
@@ -73,7 +106,7 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
     try {
       const character = await resolveCharacter(req, res);
       if (!character) return undefined;
-      const progression = await loadProgression(pool, character.id);
+      const progression = await gearFramed(character.id, await loadProgression(pool, character.id));
       // The respec cost, the gold it is measured against and the verdict all
       // come from the server (contract §6.4). T8's overlay renders
       // `respecDisabled` rather than recomputing `respec_base_gold x level`,
@@ -112,7 +145,7 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
       if (!character) return undefined;
       const r = await allocateNode(pool, character.id, req.params.nodeId);
       if (!r.ok) return res.status(400).json({ error: r.reason });
-      const progression = await loadProgression(pool, character.id);
+      const progression = await gearFramed(character.id, await loadProgression(pool, character.id));
       const stats = derivePlayerStats(progression, character.classPools);
       // Best-effort, same contract as before: this is what sends the ordered
       // websocket `progression` frame the client treats as its ONLY writer of
@@ -135,7 +168,7 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
       // for it is per-account.
       const r = await respecPassives(pool, req.user.id, character.id);
       if (!r.ok) return res.status(402).json({ error: r.reason, cost: r.cost });
-      const progression = await loadProgression(pool, character.id);
+      const progression = await gearFramed(character.id, await loadProgression(pool, character.id));
       const stats = derivePlayerStats(progression, character.classPools);
       refreshLivePlayerStats(req.user.id, progression, stats);
       return res.status(200).json({ progression, stats, gold: r.gold });

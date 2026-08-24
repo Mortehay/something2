@@ -9,6 +9,7 @@ const { loadCatalogs, elementsForWire } = require('./catalogs');
 const { configureAttackOrigins } = require('./attackOrigin.js');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
+const { withGearAffixes, equippedAffixGrants } = require('../services/gearAffixes.js');
 const { ownedCharacter } = require('../services/characters.js');
 const { charmBudget, canSummon, PLAYER_CHARM_MS } = require('../services/charm.js');
 // SOMET-473: the PLAYER pacify. applyCharm owns the non-refreshing immunity
@@ -829,13 +830,33 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // `over` exists for the join path alone, which derives BEFORE addPlayer:
   // the player is not in the world yet, so neither its inventory nor its
   // class pools can be read off it.
-  const framedStats = (entry, userId, progression, over = {}) => {
+  //
+  // SOMET-496 widened it again, from "the authority's only derive" to "the
+  // authority's only FRAME". It now returns the framed progression ROW beside
+  // the bundle, because the row picked up a per-session overlay of its own:
+  // the rolled affixes on the character's equipped items. A frame that sent
+  // the raw row next to gear-aware stats would render a Character tab whose
+  // `gear` column reads zero while the pools listed beside it already include
+  // the gear -- the same advertise-vs-play split 486 closed, moved onto the
+  // wire. Every `{type:'progression'}` send site takes `.progression` from
+  // here; progression_frame_shape.test.js pins that none of them sends a row
+  // this function did not produce.
+  //
+  // THE FOLD ORDER IS LOAD-BEARING. withGearAffixes RECOMPOSES the six
+  // top-level stat keys out of `sources` plus the tree's modifiers, so it
+  // discards anything a previous overlay wrote onto those keys. Gear first,
+  // stones on top. Reversed, every socketed buff stone silently stops
+  // counting for a player who is also wearing an affixed item.
+  const framed = (entry, userId, progression, over = {}) => {
     const p = entry.world.getPlayer(userId);
     const inv = over.inv !== undefined ? over.inv : (p ? p.inv : null);
     const buffs = inv ? socketedBuffStones(inv, entry.world.weapons) : [];
+    const affixes = inv ? equippedAffixGrants(inv) : [];
     const classPools = over.classPools !== undefined ? over.classPools : (p ? p.classPools : null);
-    return derivePlayerStats(withStoneBonuses(progression, buffs), classPools);
+    const row = withStoneBonuses(withGearAffixes(progression, affixes), buffs);
+    return { progression: row, stats: derivePlayerStats(row, classPools) };
   };
+  const framedStats = (entry, userId, progression, over = {}) => framed(entry, userId, progression, over).stats;
 
   // Single fire-and-forget entry point for a killed creature: named once here
   // so every kill site (melee attack handler, burn tick, guard tick,
@@ -890,8 +911,11 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // never throws either way.
         const sock = entry.sockets.get(result.killerUserId);
         if (sock) {
-          const stats = framedStats(entry, result.killerUserId, progression);
-          send(sock, { type: 'progression', progression, stats, leveledUp, newLevel, awarded });
+          const f = framed(entry, result.killerUserId, progression);
+          send(sock, {
+            type: 'progression', progression: f.progression, stats: f.stats,
+            leveledUp, newLevel, awarded,
+          });
         }
       })
       .catch((err) => console.error('death commit failed:', err));
@@ -1024,7 +1048,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // the death and this commit finishing) — entry.sockets.get returns
       // undefined and send() itself no-ops on a non-OPEN socket either way.
       const sock = entry.sockets.get(userId);
-      if (sock) send(sock, { type: 'progression', progression, stats: framedStats(entry, userId, progression), lost });
+      if (sock) {
+        const f = framed(entry, userId, progression);
+        send(sock, { type: 'progression', progression: f.progression, stats: f.stats, lost });
+      }
     })
       .catch((err) => console.error('death penalty commit failed:', err));
   };
@@ -1407,7 +1434,29 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const r = msg.type === 'equip'
         ? await entry.world.setEquipment(pool, ws.userId, msg.itemId, msg.slot)
         : await entry.world.clearEquipment(pool, ws.userId, msg.slot);
-      if (r && !r.ok) send(ws, { type: 'error', message: r.reason || `cannot ${msg.type}` });
+      if (r && !r.ok) { send(ws, { type: 'error', message: r.reason || `cannot ${msg.type}` }); return; }
+
+      // SOMET-496. An item's rolled affixes are a per-session overlay
+      // (services/gearAffixes.js), so the paper doll changing is exactly the
+      // moment they have to be re-folded -- otherwise a +6 INT staff raises
+      // nothing until the player's next kill, chest or level-up happens to
+      // re-derive, and unequipping it leaves the bonus live until then too.
+      //
+      // Same shape and same guards as the socket/unsocket handlers below,
+      // which had to solve this for buff stones: reload the row, frame it
+      // once, push that ONE result into both the world and the wire. The
+      // hp > 0 guard is not optional -- applyDerivedStats clamps current hp to
+      // a floor of 1, so calling it on a player currently sitting at <= 0
+      // awaiting resolveDeaths() would cancel their death.
+      const p = entry.world.getPlayer(ws.userId);
+      if (!p || p.hp <= 0) return;
+      const currentProgression = await loadProgression(pool, p.characterId);
+      const f = framed(entry, ws.userId, currentProgression);
+      entry.world.applyDerivedStats(ws.userId, f.stats);
+      send(ws, {
+        type: 'progression', progression: f.progression, stats: f.stats,
+        leveledUp: false, newLevel: currentProgression.level, awarded: 0,
+      });
     });
   }
 
@@ -1561,9 +1610,14 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // character select's 100/85/75 was decoration. `over` is needed
         // because addPlayer has not run yet -- there is no player in the world
         // to read either the inventory or the pools off.
-        const stats = framedStats(entry, ws.userId, progression, {
+        // SOMET-496: the joined frame must carry the FRAMED row, not the bare
+        // composed one -- it is the client's first (and, until the next kill,
+        // only) progression object, so a raw row here leaves the Character tab
+        // showing a zero `gear` column for the whole session.
+        const framedJoin = framed(entry, ws.userId, progression, {
           inv, classPools: character.classPools,
         });
+        const stats = framedJoin.stats;
         // SOMET-472 (spec 8.3). ONE derivation, read twice below -- once for
         // the sim and once for the wire -- so the server and the client can
         // never disagree about which bar is spent and which bar is drawn.
@@ -1673,7 +1727,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // assumption about what addPlayer currently does.
           autoLoot: entry.world.getPlayer(ws.userId).autoLoot,
           gold,
-          progression,
+          progression: framedJoin.progression,
           // SOMET-472, presentation only: the client hides the mana orb for a
           // life-cost class, because a Cultist has a mana pool the server
           // never spends and an inert bar is one the player learns to ignore.
@@ -1951,10 +2005,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
             // ONE derive, used for both the live apply and the frame: two
             // calls could drift into differently-buffed rows, which is
             // exactly what contract §6.3 exists to stop.
-            const stats = framedStats(entry, ws.userId, currentProgression);
-            entry.world.applyDerivedStats(ws.userId, stats);
+            const f = framed(entry, ws.userId, currentProgression);
+            entry.world.applyDerivedStats(ws.userId, f.stats);
             send(ws, {
-              type: 'progression', progression: currentProgression, stats,
+              type: 'progression', progression: f.progression, stats: f.stats,
               leveledUp: false, newLevel: currentProgression.level, awarded: 0,
             });
           }
@@ -1993,10 +2047,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
             // ONE derive, used for both the live apply and the frame: two
             // calls could drift into differently-buffed rows, which is
             // exactly what contract §6.3 exists to stop.
-            const stats = framedStats(entry, ws.userId, currentProgression);
-            entry.world.applyDerivedStats(ws.userId, stats);
+            const f = framed(entry, ws.userId, currentProgression);
+            entry.world.applyDerivedStats(ws.userId, f.stats);
             send(ws, {
-              type: 'progression', progression: currentProgression, stats,
+              type: 'progression', progression: f.progression, stats: f.stats,
               leveledUp: false, newLevel: currentProgression.level, awarded: 0,
             });
           }
@@ -2393,9 +2447,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // leveledUp, newLevel, awarded}`) so the client's existing
         // progression handling (built for kills) also picks up chest XP
         // without a second, chest-specific client-side path.
+        const chestFrame = framed(entry, ws.userId, result.progression);
         send(ws, {
-          type: 'progression', progression: result.progression,
-          stats: framedStats(entry, ws.userId, result.progression),
+          type: 'progression', progression: chestFrame.progression,
+          stats: chestFrame.stats,
           leveledUp: result.leveledUp, newLevel: result.newLevel, awarded: result.awarded,
         });
       });
@@ -3061,7 +3116,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
     if (worlds.size === 0) return;
     const [anchors, affixes, ttlSeconds] = await Promise.all([
       getSetting(pool, 'rarity_weights'),
-      pool.query(`SELECT id, key, kind, effect, min_value, max_value,
+      // `label` is in the list for SOMET-496: chestLoot.js hands the rolled
+      // affixes straight to the client with no second query, and
+      // gearAffixes.js captions each gear modifier by label. Without it a
+      // chest-opened item's affixes are labelled by their slug until the next
+      // reconnect reloads them through loadInventory (which does select it).
+      pool.query(`SELECT id, key, label, kind, effect, min_value, max_value,
                          min_item_level, max_item_level, allowed_slots, min_rarity, weight
                     FROM affix_types`),
       getSetting(pool, 'ground_item_ttl_seconds'),
@@ -3275,10 +3335,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // the stones rather than being separately remembered here. progression
       // Routes' own derive IS class-aware, but it cannot see this session's
       // sockets, so the recompute stays and must not lose the pools doing it.
-      const buffedStats = framedStats(entry, uid, progression);
-      entry.world.applyDerivedStats(uid, buffedStats);
+      const buffed = framed(entry, uid, progression);
+      entry.world.applyDerivedStats(uid, buffed.stats);
       const sock = entry.sockets.get(uid);
-      if (sock) send(sock, { type: 'progression', progression, stats: buffedStats });
+      if (sock) send(sock, { type: 'progression', progression: buffed.progression, stats: buffed.stats });
       return true;
     },
     close() {

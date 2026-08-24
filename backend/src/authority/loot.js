@@ -390,6 +390,7 @@ async function claimItem(pool, entry, userId, characterId, groundItemId, { now =
        SELECT ins.id, ins.item_type_id, ins.quantity, ins.rarity, ins.item_level, ins.soulbound,
               COALESCE((SELECT jsonb_agg(jsonb_build_object(
                                  'affixTypeId', aff.affix_type_id, 'key', at.key,
+                                 'label', at.label,
                                  'value', aff.value, 'effect', at.effect) ORDER BY aff.idx)
                           FROM aff JOIN affix_types at ON at.id = aff.affix_type_id),
                        '[]'::jsonb) AS affixes

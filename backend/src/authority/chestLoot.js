@@ -186,6 +186,11 @@ async function openChest(pool, chestId, characterId, {
           key: a.key,
           value: a.value,
           effect: (affixById.get(a.affixTypeId) || {}).effect ?? null,
+          // SOMET-496: same reason `effect` rides along. gearAffixes.js
+          // captions each gear modifier with this, and a just-opened chest
+          // must not label an affix differently from the way the same item
+          // reads after a reconnect (loadInventory selects at.label).
+          label: (affixById.get(a.affixTypeId) || {}).label ?? null,
         })),
       });
     }

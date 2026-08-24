@@ -9,7 +9,7 @@
 // cache is keyed on nothing and cleared explicitly by the admin route, because
 // a per-request read of 1806 nodes + 2142 edges on every join is real work for
 // data that changes about once a month.
-const { composeStats } = require('./statComposition.js');
+const { composeStats, withComposedStats } = require('./statComposition.js');
 const { buildAdjacency, isAllocatable, flattenGrants } = require('./passiveRules.js');
 const { getSettings } = require('./gameSettings.js');
 
@@ -262,9 +262,18 @@ async function respecQuote(pool, userId, level) {
 
 // The composed progression row every push site sends. `base` is the class-base
 // snapshot the six frozen stat columns hold (spec §3.3 / contract §6.1 -- every
-// class bases at 5); `gear` is [] until Group D T12 lands the affix instances,
-// and is passed explicitly rather than omitted so the seam is visible rather
-// than forgotten.
+// class bases at 5).
+//
+// `gear` IS STILL [] HERE, AND MUST STAY THAT WAY (SOMET-496). This row is
+// what progressionStore.loadProgression returns, and world.js's
+// _requirementContext builds the equip gate's `base` out of its six top-level
+// keys. An item whose own affixes were folded in here would sit inside the
+// base its own requirement is measured against -- the bootstrap hole SOMET-478
+// exists to close, reopened one layer up. The gear fold is a RUNTIME OVERLAY
+// applied at the frame boundary instead: services/gearAffixes.js's
+// withGearAffixes, called from server.js's `framed`, exactly as
+// stoneBonuses.js's withStoneBonuses already was. Read that module's header
+// before changing this line.
 //
 // TWO VIEWS OF THE SAME SIX NUMBERS, on purpose:
 //
@@ -280,34 +289,17 @@ async function respecQuote(pool, userId, level) {
 async function composeProgression(db, characterId, row) {
   const bundle = await passiveBundle(db, characterId);
   const composed = composeStats({ base: row, passives: bundle.passives, gear: [] });
-  const effective = {
-    strength: composed.strength,
-    dexterity: composed.dexterity,
-    constitution: composed.constitution,
-    intelligence: composed.intelligence,
-    wisdom: composed.wisdom,
-    charisma: composed.charisma,
-  };
+  // withComposedStats owns the row's shape -- the six effective keys, the
+  // `effective` object, `sources`/`modifiers`/`rules` and SOMET-495's four
+  // aggregates (`pools`, `damageMult`, `resists`, `hitStatuses`). It is shared
+  // with gearAffixes.js's overlay so a gear-framed row and this one cannot
+  // differ in which fields they carry.
   return {
-    ...row,
-    ...effective,
-    effective,
+    ...withComposedStats(row, composed),
     // The wallet is the column T2 owns (contract §6.7), read straight off the
     // row -- never recomputed here.
     passivePoints: Number(row.passive_points) || 0,
     allocatedNodeIds: bundle.allocatedNodeIds,
-    sources: composed.sources,
-    modifiers: composed.modifiers,
-    rules: composed.rules,
-    // SOMET-495. The four aggregates the OTHER grant kinds compose to, carried
-    // on the row exactly as `rules` is and for the same reason: every consumer
-    // reads them via derivePlayerStats, which takes this row. Before 495 they
-    // did not exist and `modifiers` was the only trace of 1419 grants -- the
-    // Character tab listed them and nothing applied them.
-    pools: composed.pools,
-    damageMult: composed.damageMult,
-    resists: composed.resists,
-    hitStatuses: composed.hitStatuses,
   };
 }
 
