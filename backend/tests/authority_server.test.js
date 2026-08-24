@@ -1221,6 +1221,52 @@ test('firing with no ammo sends noammo and leaves the cooldown untouched', async
   h.close();
 });
 
+// SOMET-494 -- "Constant attack" holds the button down, so the client has to
+// tell "still on cooldown" (keep holding) from "you have run out" (stop). Both
+// of these run the REAL handler over a live socket, because the whole point is
+// which frames actually reach the wire.
+test('an attack refused for a resource tells the client so', async () => {
+  const h = await mkAttackHarness({
+    weapon: { kind: 'melee', reach: 80, arc_width: 1, damage: 5, cooldown: 0.3, stamina_cost: 10 },
+  });
+  h.player.stamina = 0;
+  await h.sendAttack(1, 0);
+  const refused = h.sent.find((m) => m.type === 'attackrefused');
+  assert.ok(refused, 'the client was never told the attack was unaffordable');
+  // Mana, life and stamina all report as one value: SOMET-472 AC2 requires a
+  // life refusal to be indistinguishable from a mana refusal, and nothing
+  // downstream needs the distinction -- every one of them stops the hold.
+  assert.equal(refused.reason, 'resource');
+  assert.equal(h.player._attackCd, 0, 'a refusal still costs nothing, cooldown included');
+  h.close();
+});
+
+test('an attack refused for COOLDOWN is not announced', async () => {
+  // A held button is refused for cooldown many times a second. Putting that on
+  // the wire would be pure noise, and a client that stopped holding on it would
+  // fire exactly once.
+  const h = await mkAttackHarness({
+    weapon: { kind: 'melee', reach: 80, arc_width: 1, damage: 5, cooldown: 0.3 },
+  });
+  h.player._attackCd = 1;
+  await h.sendAttack(1, 0);
+  assert.equal(h.sent.find((m) => m.type === 'attackrefused'), undefined,
+    'a cooldown refusal must stay silent');
+  h.close();
+});
+
+test('a successful attack announces no refusal at all', async () => {
+  // The guard against a refusal frame that fires unconditionally -- which
+  // would stop every hold on its first successful swing.
+  const h = await mkAttackHarness({
+    weapon: { kind: 'melee', reach: 80, arc_width: 1, damage: 5, cooldown: 0.3 },
+  });
+  await h.sendAttack(1, 0);
+  assert.ok(h.player._attackCd > 0, 'precondition: the attack actually fired');
+  assert.equal(h.sent.find((m) => m.type === 'attackrefused'), undefined);
+  h.close();
+});
+
 test('a weapon with no ammo_type_id never touches player_items', async () => {
   let consumed = false;
   const h = await mkAttackHarness({

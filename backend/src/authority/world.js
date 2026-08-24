@@ -504,16 +504,30 @@ class World {
   // irreversible (ammo), since an attack refused for cooldown must not have
   // already destroyed an arrow. `attack` keeps performing these same checks
   // itself — this is additive, and attack() stays correct called directly.
+  // SOMET-494 added `reason`. A caller that only asks "may this fire?" reads
+  // `ok` exactly as before; the reason exists because holding the mouse to
+  // attack has to tell two refusals apart that used to look identical from
+  // outside: `cooldown` is the normal rhythm of holding and the hold must
+  // continue through it, while `resource` means the player has run out and the
+  // hold must stop.
+  //
+  // `resource` covers mana, life AND stamina as ONE value on purpose. SOMET-472
+  // AC2 requires a Cultist's life refusal to be indistinguishable from a mana
+  // refusal ("or a client would have to learn a second shape"), and that
+  // invariant is pinned by a test that deep-equals the two answers. Splitting
+  // them here to make a prettier message would quietly break it, and nothing
+  // downstream needs the distinction: every resource refusal stops the hold.
   canAttack(userId) {
     const p = this.players.get(userId);
-    if (!p || p._attackCd > 0) return { ok: false, weapon: null };
+    if (!p) return { ok: false, weapon: null, reason: 'unknown' };
+    if (p._attackCd > 0) return { ok: false, weapon: null, reason: 'cooldown' };
     // Interrupted: refused BEFORE the weapon is even resolved, so the caller
     // never spends ammo on a swing the interrupt is about to eat.
-    if (!canAct(p, this.now)) return { ok: false, weapon: null };
+    if (!canAct(p, this.now)) return { ok: false, weapon: null, reason: 'interrupted' };
     const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
-    if (!w) return { ok: false, weapon: null };
-    if (resourceRefusal(p, w)) return { ok: false, weapon: w };
-    return { ok: true, weapon: w };
+    if (!w) return { ok: false, weapon: null, reason: 'unarmed' };
+    if (resourceRefusal(p, w)) return { ok: false, weapon: w, reason: 'resource' };
+    return { ok: true, weapon: w, reason: null };
   }
 
   // Attack in the aim direction with the equipped weapon. Melee resolves an arc
