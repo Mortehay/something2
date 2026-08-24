@@ -23,14 +23,30 @@
 //   Warrior  dagger 8 / 0.30 / free        short sword 11 / 0.45 / 6 stamina
 //   Druid    dagger 8 / 0.30 / free        club        10 / 0.45 / 6 stamina
 //   Archer   dagger 8 / 0.30 / free        bow         12 / 0.60 / 8 stamina
-//   Monk     dagger 8 / 0.30 / free        stick        7 / 0.35 / free
+//   Monk     dagger 8 / 0.30 / free        quarterstaff 7 / 0.25 / free
 //   Mage     dagger 8 / 0.30 / free        staff       10 / 0.55 / 8 mana
 //   Cultist  staff 10 / 0.55 / 5 hp        unchanged, plus chest armour
 //
-// The Monk's row is a DOWNGRADE (20.0 dps against the dagger's 26.7) and is
-// asserted as one rather than smoothed over: the stick is the Monk's authored
-// kit, and this file's job is to make the balance change visible, not to
-// disguise it.
+// SOMET-504 CHANGED THE MONK'S ROW, AND THIS FILE'S CLAIM ABOUT IT. SOMET-503
+// shipped the Monk on a `stick` -- 7 damage on 0.35s, 20.0 dps against the
+// dagger fallback's 26.7 -- and this file asserted that DOWNGRADE as a fact,
+// deliberately, so it could not be discovered later as a surprise. The product
+// owner has now replaced the Monk's weapon rather than re-tuning the stick.
+// The quarterstaff keeps the stick's 7 damage and 0.7 arc and buys the fix
+// purely with rate: 0.25s, the fastest swing in the catalog, 28.0 dps. The old
+// 'the Monk is WEAKER' subtest has been REPLACED by its inverse rather than
+// left standing beside it -- see the note on that test.
+//
+// THE ONE THING THIS FILE CANNOT ASSERT, SAID OUT LOUD. The Monk is now the
+// highest-dps starting class (28.0, against the Warrior's 24.4). That is not a
+// design claim; it is forced. The brief requires the Monk to clear the dagger
+// fallback, and the fallback ALREADY out-damages all five other kits -- so any
+// weapon meeting the brief tops the table. On sustained damage it is worse
+// still: stamina regen is 10/s (authority/world.js PLAYER_STAMINA_REGEN)
+// against the Warrior's 6-per-swing at 0.45s = 13.3/s, so a Warrior throttles
+// to 18.3 dps while the free dagger never throttles at all. The real defect is
+// the fallback's tuning, not the Monk's weapon. It is out of scope here and is
+// recorded so the next person does not re-derive it.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -68,10 +84,12 @@ const EXPECTED = {
     element: null, spend: { hp: 0, mana: 0, stamina: 8 },
   },
   Monk: {
-    // 7 damage against the dagger fallback's 8, on a SLOWER 0.35s cooldown.
-    // Wearing its own kit makes the Monk weaker; that is the authored content.
-    equipment: [{ slot: 'chest', name: 'leather-vest' }, { slot: 'main_hand', name: 'stick' }],
-    weapon: 'stick', damage: 7, cooldown: 0.35, manaCost: 0, staminaCost: 0,
+    // SOMET-504: the quarterstaff, not the stick. Same 7 damage -- still the
+    // lowest per-hit of the six -- on the catalog's FASTEST cooldown, 0.25s,
+    // for 28.0 dps against the dagger fallback's 26.7. Plain physical and free
+    // on purpose; see migration 1714440516000's header for every number.
+    equipment: [{ slot: 'chest', name: 'leather-vest' }, { slot: 'main_hand', name: 'quarterstaff' }],
+    weapon: 'quarterstaff', damage: 7, cooldown: 0.25, manaCost: 0, staminaCost: 0,
     element: null, spend: { hp: 0, mana: 0, stamina: 0 },
   },
   Mage: {
@@ -280,18 +298,134 @@ test('every class wears its starting kit', { skip: !DB_URL ? 'no database URL' :
     assert.strictEqual(Number(baseline.rows[0].cooldown), DAGGER.cooldown);
   });
 
-  await t.test('the Monk is WEAKER for wearing its kit, and that is the authored content', () => {
-    // Recorded as an assertion rather than a comment so the regression cannot
-    // be discovered later as a surprise. The stick is 7 damage on 0.35s
-    // against the dagger fallback's 8 on 0.30s.
+  // SOMET-504. THIS TEST REPLACES ITS OWN OPPOSITE. Until now this file
+  // asserted 'the Monk is WEAKER for wearing its kit, and that is the authored
+  // content' -- pinning stickDps < daggerDps and the literal 20.0 -- because
+  // SOMET-503 shipped that regression deliberately and recorded it rather than
+  // hiding it. The product owner has now fixed the kit, so the fact has
+  // inverted and the old assertion is DELETED rather than left beside this one:
+  // two contradictory pins on one number is how a suite ends up unable to fail.
+  await t.test('the Monk is no longer WEAKER for wearing its kit', () => {
+    // Read off the running sim, not the catalog: this is the assertion that
+    // proves the quarterstaff is what the Monk actually swings after a real
+    // createCharacter + join, so a lost directive (or the stick row surviving
+    // beside it and winning grantStartingLoadout's `ORDER BY id ASC`) collapses
+    // it to 7/0.35 or to the dagger and fails here.
     const w = joined.Monk.world.activeWeapon(String(joined.Monk.userId));
-    const stickDps = Number(w.damage) / Number(w.cooldown);
+    assert.strictEqual(w.name, 'quarterstaff');
+
+    const monkDps = Number(w.damage) / Number(w.cooldown);
     const daggerDps = DAGGER.damage / DAGGER.cooldown;
-    assert.ok(Number(w.damage) < DAGGER.damage,
-      'if the stick ever out-damages the dagger, this note and the ticket both need revisiting');
-    assert.ok(stickDps < daggerDps);
-    assert.strictEqual(Math.round(stickDps * 10) / 10, 20);
+
+    // The pin the brief asks for, with the number in it, so a future catalog
+    // edit that regresses the Monk below the fallback it replaces fails loudly
+    // instead of quietly reintroducing SOMET-503's bug.
+    assert.ok(monkDps > daggerDps,
+      `the Monk must not be below the dagger fallback it replaces: ${monkDps} vs ${daggerDps}`);
+    assert.strictEqual(Math.round(monkDps * 10) / 10, 28);
     assert.strictEqual(Math.round(daggerDps * 10) / 10, 26.7);
+
+    // ...and the trade-off that stops it being a free buff, asserted so it
+    // cannot be tuned away by accident. The quarterstaff is NOT strictly
+    // better than the dagger: it wins on rate and reach and LOSES on per-hit
+    // damage, which matters because applyDamage mitigates by flat subtraction
+    // (`raw2 = raw - defense`, authority/damage.js).
+    assert.ok(Number(w.damage) < DAGGER.damage,
+      'the Monk buys its dps with speed, not with a bigger hit; if that inverts, '
+      + 'the armour trade-off below is gone and the weapon needs re-justifying');
+
+    // The concrete consequence, computed the way damage.js computes it: against
+    // a 3-defense target the dagger overtakes the quarterstaff. This is the
+    // Monk's real weakness and the reason the raw-dps lead is acceptable.
+    const armour = 3;
+    const monkVsArmour = (Number(w.damage) - armour) / Number(w.cooldown);
+    const daggerVsArmour = (DAGGER.damage - armour) / DAGGER.cooldown;
+    assert.ok(monkVsArmour < daggerVsArmour,
+      `flat mitigation must still punish the fast light weapon: ${monkVsArmour} vs ${daggerVsArmour}`);
+  });
+
+  await t.test('the Monk out-damages the dagger WITHOUT paying a resource for it', async () => {
+    // The brief asks whether the Monk paying nothing is itself the imbalance.
+    // It is not, and this test is why: the fallback is free too, so a cost on
+    // the Monk's weapon is opt-out-able by unequipping and therefore not a
+    // cost. Pinned as behaviour rather than as a comment -- if someone later
+    // gives the quarterstaff a stamina or mana cost, this fails and they have
+    // to re-read the argument before shipping it.
+    const w = joined.Monk.world.activeWeapon(String(joined.Monk.userId));
+    assert.strictEqual(Number(w.stamina_cost), 0);
+    assert.strictEqual(Number(w.mana_cost), 0);
+
+    // And the reason it needs no stone (the Mage precedent). activeWeaponType
+    // zeroes a BARE weapon carrying a nonzero mana_cost or a non-physical
+    // element down to the DAGGER's damage. The quarterstaff must never enter
+    // that branch: if it did, the Monk would swing 8 physical on a 0.25s
+    // cooldown and this file would be reporting a weapon the class does not
+    // have. `element` staying null is what keeps it out.
+    assert.strictEqual(w.element, null,
+      'a non-physical element would send the quarterstaff through '
+      + "activeWeaponType's zeroing branch and it would need a socketed stone");
+    // Boolean(), because the predicate is copied verbatim from
+    // activeWeaponType and `0 || false` is the boolean false, not 0 -- what
+    // matters is only whether the branch is TAKEN.
+    const zeroed = Number(w.mana_cost) || (w.element != null && w.element !== 'physical');
+    assert.strictEqual(Boolean(zeroed), false,
+      "the exact predicate from activeWeaponType: the quarterstaff must not match it");
+    assert.strictEqual(Number(w.damage), 7,
+      'damage 7 is the weapon\'s own row; 8 here would mean it WAS zeroed to the dagger baseline');
+
+    // The weapon must also LOOK like it is working. item_types.vfx is nullable
+    // and a null one costs no test any damage number -- the Monk would swing
+    // several times a second drawing no arc, no impact spark and no whiff, and
+    // every assertion above would still be green. Asserted off the resolved
+    // weapon, and against real vfx_effects rows, so neither a dropped column
+    // nor a typo'd effect name can ship.
+    assert.deepStrictEqual(w.vfx,
+      { attack: 'slash_light', impact: 'spark_hit', miss: 'generic_whiff' },
+      'the quarterstaff must carry the same fast-light-melee vfx set as the stick it replaces');
+    const fx = await pool.query(
+      'SELECT name FROM vfx_effects WHERE name = ANY($1::text[])',
+      [Object.values(w.vfx)]);
+    assert.strictEqual(fx.rowCount, 3, 'every vfx name must be a real vfx_effects row');
+  });
+
+  await t.test('the other five classes are untouched by the Monk change', async () => {
+    // SOMET-504 must move exactly one row. Asserted by VALUE against the live
+    // sim for all five, rather than trusting that the per-class subtests above
+    // still cover them -- those read from EXPECTED, which this ticket edited.
+    // These literals are written out here on purpose so that editing EXPECTED
+    // cannot silently move them too.
+    const UNCHANGED = {
+      Warrior: { weapon: 'short sword',     damage: 11, cooldown: 0.45, mana: 0, stamina: 6 },
+      Druid:   { weapon: 'club',            damage: 10, cooldown: 0.45, mana: 0, stamina: 6 },
+      Archer:  { weapon: 'bow',             damage: 12, cooldown: 0.6,  mana: 0, stamina: 8 },
+      Mage:    { weapon: 'apprentice staff', damage: 10, cooldown: 0.55, mana: 8, stamina: 0 },
+      Cultist: { weapon: 'apprentice staff', damage: 10, cooldown: 0.55, mana: 8, stamina: 0 },
+    };
+    for (const [className, want] of Object.entries(UNCHANGED)) {
+      const ctx = joined[className];
+      assert.ok(ctx, `${className} never joined, so this check is vacuous`);
+      const w = ctx.world.activeWeapon(String(ctx.userId));
+      assert.strictEqual(w.name, want.weapon, `${className}'s weapon moved`);
+      assert.strictEqual(Number(w.damage), want.damage, `${className}'s damage moved`);
+      assert.strictEqual(Number(w.cooldown), want.cooldown, `${className}'s cooldown moved`);
+      assert.strictEqual(Number(w.mana_cost), want.mana, `${className}'s mana cost moved`);
+      assert.strictEqual(Number(w.stamina_cost), want.stamina, `${className}'s stamina cost moved`);
+    }
+    // The stick is still a perfectly good catalog item -- it simply is not the
+    // Monk's any more. Dropping the row would break anything that lists it.
+    const stick = await pool.query('SELECT damage, cooldown FROM item_types WHERE name = $1', ['stick']);
+    assert.strictEqual(stick.rowCount, 1, 'the stick must stay in the catalog, just not in the kit');
+    assert.strictEqual(Number(stick.rows[0].damage), 7);
+    assert.strictEqual(Number(stick.rows[0].cooldown), 0.35);
+    // ...and it must not still be on the Monk's loadout, which is the state
+    // that would let it win the main_hand slot on id order.
+    const stillListed = await pool.query(
+      `SELECT 1 FROM class_loadouts cl
+         JOIN entity_types e ON e.id = cl.entity_type_id
+         JOIN item_types  it ON it.id = cl.item_type_id
+        WHERE e.name = 'Monk' AND it.name = 'stick'`);
+    assert.strictEqual(stillListed.rowCount, 0,
+      'the stick is still on the Monk loadout; it would beat the quarterstaff on ORDER BY id ASC');
   });
 
   await t.test('the Mage pays MANA, the Cultist pays LIFE, for the identical stone', async () => {
