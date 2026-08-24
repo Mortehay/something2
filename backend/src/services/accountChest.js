@@ -1,5 +1,8 @@
 // SOMET-310 -- the account chest ("bank"). Item storage shared by every
 const { hasFreeSlot } = require('../authority/items');
+const {
+  HELD_INSTANCE_COLUMNS, heldInstanceJoin, withHeldInstance,
+} = require('./heldInstance');
 // character on ONE account, reachable from the bank post beside every village
 // merchant.
 //
@@ -55,6 +58,13 @@ const CHEST_CAPACITY = 40;
 // gameplay path can reach it), and the 1714440513000 down() reverts the schema
 // by reading exactly these columns back. `chest rows mirror the instance they
 // hold` in account_chest_instance_db.test.js is what keeps that true.
+//
+// SOMET-502 widened the LISTING, not this. fetchChest wraps every row in
+// withHeldInstance so the panel can colour it; depositItem's `stored` keeps the
+// container-only shape, because an INSERT ... RETURNING carries no
+// held-instance columns and nothing consumes that value -- server.js answers a
+// deposit with a fresh `bank` frame built by fetchChest, which is the coloured
+// one.
 function mapAccountItem(r) {
   return {
     id: r.id,
@@ -72,13 +82,30 @@ function mapAccountItem(r) {
 // the lowest-free-slot rule means a withdrawal from the middle leaves a hole
 // the next deposit refills. Ordering by time would instead reshuffle every
 // item after the hole, moving things under the player's cursor.
+//
+// SOMET-502: each row also carries the DISPLAY IDENTITY of the instance it
+// holds -- rarity, item level and the rolled affixes -- because renderBank had
+// no way to tell a stored foxy sword from a white one and drew both as plain.
+// SOMET-498 already put the instance one join away; the listing simply never
+// read it. The join is services/heldInstance.js's, shared with the merchant's
+// buyback shelf (SOMET-500), which had the identical gap.
+//
+// This does NOT make mapAccountItem's three container columns a second source
+// of truth: they still answer "what is stored here" (and are what the
+// 1714440513000 down() reverts by), while these three answer "what does the
+// panel paint it". A row holding nothing -- which after the 498 backfill means
+// only a row whose instance a CASCADE has since taken -- comes back in exactly
+// its pre-502 shape.
 async function fetchChest(db, userId) {
   const r = await db.query(
-    `SELECT id, slot, item_type_id, quantity, soulbound
-       FROM account_items WHERE user_id = $1 ORDER BY slot ASC`,
+    `SELECT ai.id, ai.slot, ai.item_type_id, ai.quantity, ai.soulbound,
+            ${HELD_INSTANCE_COLUMNS}
+       FROM account_items ai
+       ${heldInstanceJoin('account_item')}
+      WHERE ai.user_id = $1 ORDER BY ai.slot ASC`,
     [userId],
   );
-  return { items: r.rows.map(mapAccountItem), capacity: CHEST_CAPACITY };
+  return { items: r.rows.map((row) => withHeldInstance(mapAccountItem(row), row)), capacity: CHEST_CAPACITY };
 }
 
 // Postgres unique_violation. Two sessions of the SAME account depositing at the

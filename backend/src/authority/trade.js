@@ -121,8 +121,18 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
     // hands, and for a freshly minted one it is correctly empty. Joined to
     // affix_types so the in-memory push below carries `key` and `effect` --
     // see that push for why a bare id list would leave the item inert.
+    //
+    // `label` rides along for the same reason `effect` does, and it was missing
+    // until SOMET-500: gearAffixes.js captions every gear modifier with it, so
+    // a bought-back item's affixes rendered as "unknown" on the Character tab
+    // until the next reconnect re-read them through loadInventory. It is also
+    // what makes the buyback LISTING and the bought item the same object --
+    // fetchShop now hydrates the shelf through the same column set
+    // (services/heldInstance.js), and a listing that carried a label the
+    // purchase dropped would be exactly the drift SOMET-500 asks us to rule
+    // out.
     const affr = await client.query(
-      `SELECT pia.affix_type_id, at.key, pia.value, at.effect
+      `SELECT pia.affix_type_id, at.key, at.label, pia.value, at.effect
          FROM player_item_affixes pia
          JOIN affix_types at ON at.id = pia.affix_type_id
         WHERE pia.player_item_id = $1
@@ -162,7 +172,11 @@ async function buyStock(pool, entry, userId, characterId, stockId, villageId) {
       itemLevel: Number(row.item_level ?? 1),
       soulbound: row.soulbound === true,
       affixes: affr.rows.map((a) => ({
-        affixTypeId: a.affix_type_id, key: a.key, value: Number(a.value), effect: a.effect,
+        affixTypeId: a.affix_type_id,
+        key: a.key,
+        label: a.label,
+        value: Number(a.value),
+        effect: a.effect,
       })),
     };
     p.inv.items.push(item);
