@@ -83,6 +83,38 @@ describe("RenderSystem delegation", () => {
     expect(hits.some((a) => a.kind === "slot" && a.id === "main_hand")).toBe(true);
     expect(hits.some((a) => a.kind === "invclose")).toBe(true);
   });
+
+  // SOMET-483. The forwarding seam: a perfect layoutCharacterTab reaches
+  // nothing if renderInventory drops `character`/`modPage` out of the view it
+  // was handed. Driven through the real method rather than asserted against
+  // its source text.
+  it("forwards the character view and its page through to the pane", () => {
+    const rs = Object.create(RenderSystem.prototype);
+    rs.imageManager = { get: () => null };
+    const character = {
+      className: "Warrior", mainStat: "strength", level: 7, experience: 102,
+      xpFloor: 63, xpToNext: 78, passivePoints: 3,
+      sources: {
+        strength: { base: 5, tree: 33, gear: 4 }, dexterity: { base: 5, tree: 0, gear: 0 },
+        constitution: { base: 5, tree: 0, gear: 0 }, intelligence: { base: 5, tree: 0, gear: 0 },
+        wisdom: { base: 5, tree: 0, gear: 0 }, charisma: { base: 5, tree: 0, gear: 0 },
+      },
+      modifiers: Array.from({ length: 8 }, (_, n) => (
+        { label: `Mod ${n}`, value: n, source: "tree", kind: "stat", detail: "strength" })),
+      stats: {
+        maxHp: 140, maxMana: 100, maxStamina: 108, meleeMult: 1.15, spellMult: 1,
+        cooldownMult: 0.87, manaRegen: 10, priceMult: 0.55,
+      },
+    };
+    const hits = [];
+    const layout = rs.renderInventory(stubCtx(), inv({}), hits, null,
+      { tab: "character", page: 0, gold: 0, character, modPage: 1 });
+    expect(layout.character).not.toBeNull();
+    expect(layout.character.header.text).toBe("Warrior — Level 7");
+    // modPage 1 arrived: page 2 of 2 shows the tail and offers only a back arrow.
+    expect(layout.character.modifiers.page).toBe(1);
+    expect(hits.some((a) => a.kind === "charmodpage" && a.id === 0)).toBe(true);
+  });
 });
 
 describe("Game click routing for the new controls", () => {

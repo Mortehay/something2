@@ -5,6 +5,7 @@
 // canvas/DOM).
 import { describe, it, expect } from 'vitest';
 import { Game } from '../Game.js';
+import { mergeSeedStats } from '../progressionExtras.js';
 
 function callSnapshot(state) {
   return Game.prototype.getProgressionSnapshot.call(state);
@@ -179,6 +180,76 @@ describe('Character tab click routing', () => {
   it('builds no character view before a progression row has arrived', () => {
     const g = makeGame();
     expect(g.characterView()).toBeNull();
+  });
+
+  // THE SEAM THAT MAKES THE TAB LIVE RATHER THAN DEAD. characterView() can be
+  // perfect and the panel still render "Loading character…" forever if the
+  // frame payload does not carry it. This drives the real render() and reads
+  // what renderChunked was actually handed -- the epic has shipped four
+  // features that were correct in a pure module and never reached the screen.
+  it('puts the character view and its modifier page on every frame payload', () => {
+    const g = makeGame();
+    g.className = 'Warrior';
+    g.mainStat = 'strength';
+    g.characterModPage = 2;
+    g.progression = {
+      level: 4, experience: 200, passivePoints: 2,
+      sources: { strength: { base: 5, tree: 8, gear: 0 } },
+      modifiers: [{ label: 'Sinew', value: 8, source: 'tree', kind: 'stat', detail: 'strength' }],
+    };
+    let payload = null;
+    g.renderSystem = { _invHitAreas: [], renderChunked: (p) => { payload = p; } };
+    g.ctx = { fillRect() {}, save() {}, restore() {}, fillText() {} };
+    g.canvas = { width: 1280, height: 720 };
+    // The world-object collaborators render() reads on its way to the payload.
+    // Stubbed to the empty case, not mocked out: the payload is built in one
+    // literal, so a stub that let render() finish is enough to read it back.
+    g.creatures = { all: () => [] };
+    g.projectiles = { all: () => [] };
+    g.groundItems = { all: () => [] };
+    g.render();
+    expect(payload).not.toBeNull();
+    expect(payload.inventoryView.character).not.toBeNull();
+    expect(payload.inventoryView.character.className).toBe('Warrior');
+    expect(payload.inventoryView.character.sources)
+      .toEqual({ strength: { base: 5, tree: 8, gear: 0 } });
+    expect(payload.inventoryView.modPage).toBe(2);
+  });
+
+  // The latch itself, driven through the method the websocket handler calls.
+  // progressionExtras.test.js proves mergeSeedStats obeys `latched`; this
+  // proves Game actually SETS it, which is the half a pure-module test cannot
+  // see and the half the F1 race lives in.
+  it('latches the HTTP seed off once a frame has carried the derived bundle', () => {
+    const g = makeGame();
+    expect(g._statsFromSocket).toBe(false);
+    const STATS = { maxHp: 140, maxMana: 100 };
+    g._applyProgressionFrame({ progression: { level: 1, experience: 0 }, stats: STATS });
+    expect(g._statsFromSocket).toBe(true);
+    expect(g.progressionExtras.stats).toEqual(STATS);
+
+    // A late HTTP response carrying a PRE-push bundle must now lose.
+    g.progressionExtras = mergeSeedStats(
+      g.progressionExtras, { stats: { maxHp: 100, maxMana: 100 } }, g._statsFromSocket,
+    );
+    expect(g.progressionExtras.stats).toEqual(STATS);
+  });
+
+  it('leaves the latch alone for a frame that carries no derived bundle', () => {
+    const g = makeGame();
+    g._applyProgressionFrame({ progression: { level: 1, experience: 0 } });
+    expect(g._statsFromSocket).toBe(false);
+    expect(g.progression).toEqual({ level: 1, experience: 0 });
+  });
+
+  it('refetches the curve numbers on a level change, and only on one', () => {
+    const g = makeGame();
+    g._applyProgressionFrame({ progression: { level: 1, experience: 0 } });
+    expect(g._bundleRefreshes).toBe(1);          // null -> 1 is a change
+    g._applyProgressionFrame({ progression: { level: 1, experience: 40 } });
+    expect(g._bundleRefreshes).toBe(1);          // a kill push that did not level
+    g._applyProgressionFrame({ progression: { level: 2, experience: 80 } });
+    expect(g._bundleRefreshes).toBe(2);
   });
 
   it('builds the view from the single-writer row, not from a cached copy', () => {

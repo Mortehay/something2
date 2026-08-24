@@ -1,7 +1,7 @@
 // drawCharacterTab only ever writes to a context, so a recording stub is the
 // whole test surface -- the same convention the other draw tests here use.
 import { describe, it, expect } from "vitest";
-import { layoutInventory, drawInventory } from "../inventoryPanel.js";
+import { layoutInventory, drawInventory, CELL } from "../inventoryPanel.js";
 import { layoutCharacterTab, drawCharacterTab } from "../characterTab.js";
 
 function stubCtx() {
@@ -172,6 +172,27 @@ describe("drawInventory dispatch", () => {
     const said = ctx.texts.map((t) => t.text);
     expect(said).toContain("Warrior — Level 7");
     expect(said).not.toContain("SH");   // the sword cell's initials
+  });
+
+  it("paints not one empty grid cell over the pane", () => {
+    // The `not.toContain("SH")` case above only proves no item LABEL is drawn.
+    // An empty cell has no label, so a grid loop left running would paint 48
+    // opaque 44x44 rects straight over the character pane and every text
+    // assertion would still pass. This measures the rects.
+    const state = { inventory: inv(), tab: "character", character: CHARACTER };
+    const ctx = stubCtx();
+    const layout = layoutInventory(state);
+    drawInventory(ctx, layout, state);
+    const cellRects = ctx.fillRects.filter((r) => r.w === CELL && r.h === CELL);
+    expect(cellRects).toHaveLength(0);
+
+    // Control: the same panel on the All tab DOES paint them, so the zero
+    // above is about the branch and not about a stub that records nothing.
+    const gridState = { inventory: inv(), tab: "all", character: CHARACTER };
+    const gridCtx = stubCtx();
+    drawInventory(gridCtx, layoutInventory(gridState), gridState);
+    expect(gridCtx.fillRects.filter((r) => r.w === CELL && r.h === CELL))
+      .toHaveLength(layout.cells.length);
   });
 
   it("still paints the item grid on every other tab", () => {

@@ -407,18 +407,18 @@ describe("the single-writer rule survives this feature", () => {
     const writes = game.match(/this\.progression\s*=/g) || [];
     expect(writes).toHaveLength(4);
 
-    // SOMET-483 gave onProgression a body (it latches the derived-stat seed
-    // and refetches the curve numbers on a level change), so the one-line
-    // shape this used to pin no longer exists. What is still pinned, and is
-    // the actual property: inside that handler there is exactly ONE assignment
-    // to this.progression, and its right-hand side is the frame's own row.
-    const handler = game.slice(
-      game.indexOf("onProgression: (msg) => {"),
-      game.indexOf("onChests:"),
-    );
-    expect(handler).not.toBe("");
-    expect(handler.match(/this\.progression\s*=/g)).toHaveLength(1);
-    expect(handler).toMatch(/this\.progression\s*=\s*msg\.progression;/);
+    // SOMET-483 moved the handler's body into Game._applyProgressionFrame (it
+    // latches the derived-stat seed and refetches the curve numbers on a level
+    // change), so the one-line shape this used to pin no longer exists. What
+    // is still pinned, and is the actual property: the socket handler does
+    // nothing but delegate, and inside that method there is exactly ONE
+    // assignment to this.progression whose right-hand side is the frame's row.
+    expect(game).toMatch(/onProgression:\s*\(msg\)\s*=>\s*this\._applyProgressionFrame\(msg\),/);
+    const start = game.indexOf("_applyProgressionFrame(msg) {");
+    expect(start).toBeGreaterThan(-1);
+    const method = game.slice(start, game.indexOf("_refreshProgressionBundle() {", start));
+    expect(method.match(/this\.progression\s*=/g)).toHaveLength(1);
+    expect(method).toMatch(/this\.progression\s*=\s*msg\.progression;/);
   });
 
   it("never assigns the allocate or respec response to progression", () => {

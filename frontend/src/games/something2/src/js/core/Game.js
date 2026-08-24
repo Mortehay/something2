@@ -601,28 +601,9 @@ export class Game {
                     if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
                 },
                 onWithdrawn: (msg) => { if (msg.item) addItem(this.inventory, msg.item); },
-                // Kill XP / level-up / death / allocate / respec pushes. This
-                // is still the SINGLE writer of this.progression -- an
-                // unconditional overwrite on the one channel that has a real
-                // ordering guarantee (see progressionExtras.js's header, and
-                // applyGoldResult's below).
-                //
-                // The derived bundle rides the same frame (contract §6.3) and
-                // latches the HTTP seed off once it has. A level change
-                // triggers ONE targeted refetch of the level-dependent
-                // xpFloor/xpToNext/respecCost -- a level-up is a real event,
-                // not the no-op push the original sheet was required not to
-                // refetch on.
-                onProgression: (msg) => {
-                    if (!msg || !msg.progression) return;
-                    const prevLevel = this.progression ? this.progression.level : null;
-                    this.progression = msg.progression;
-                    if (frameCarriesStats(msg)) {
-                        this.progressionExtras = mergeFrameStats(this.progressionExtras, msg);
-                        this._statsFromSocket = true;
-                    }
-                    if (msg.progression.level !== prevLevel) this._refreshProgressionBundle();
-                },
+                // Kill XP / level-up / death / allocate / respec pushes. The
+                // whole body is Game._applyProgressionFrame -- see there.
+                onProgression: (msg) => this._applyProgressionFrame(msg),
                 // SOMET-372. Both handlers are one line each on purpose: the
                 // rules they carry (whole-list replacement, and the item-shape
                 // mapping openChest needs) live in core/worldChests.js, where
@@ -842,6 +823,32 @@ export class Game {
     // `_progressionBundleBusy` is a single-flight guard, not a cache: clicking
     // the tab five times must not issue five requests, but the sixth click
     // after the first settles must still refresh.
+    // The websocket `progression` frame's whole effect. A METHOD rather than a
+    // closure inside initChunked because the latch below is a rule, and a rule
+    // buried in a closure that needs a live websocket to reach is a rule
+    // nothing tests -- which is how this epic shipped nine features that were
+    // live in the database and inert in play.
+    //
+    // This is still the SINGLE writer of this.progression: an unconditional
+    // overwrite on the one channel that has a real ordering guarantee (see
+    // progressionExtras.js's header, and applyGoldResult's below).
+    //
+    // The derived bundle rides the same frame (contract §6.3) and latches the
+    // HTTP seed off once it has. A level change triggers ONE targeted refetch
+    // of the level-dependent xpFloor/xpToNext/respecCost -- a level-up is a
+    // real event, not the no-op push the original sheet was required not to
+    // refetch on.
+    _applyProgressionFrame(msg) {
+        if (!msg || !msg.progression) return;
+        const prevLevel = this.progression ? this.progression.level : null;
+        this.progression = msg.progression;
+        if (frameCarriesStats(msg)) {
+            this.progressionExtras = mergeFrameStats(this.progressionExtras, msg);
+            this._statsFromSocket = true;
+        }
+        if (msg.progression.level !== prevLevel) this._refreshProgressionBundle();
+    }
+
     _refreshProgressionBundle() {
         if (this._progressionBundleBusy) return;
         this._progressionBundleBusy = true;
