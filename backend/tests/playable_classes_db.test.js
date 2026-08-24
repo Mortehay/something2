@@ -156,10 +156,10 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
   // against rows the migration already created would pass against a seeder
   // that knows nothing about classes at all.
   //
-  // It is safe because the blast radius is exactly the rows this epic created
-  // minutes ago -- no pre-existing catalog row is touched, the class_loadouts
-  // rows cascade with them, and the finally block re-seeds unconditionally so
-  // even a mid-test failure leaves the catalog whole.
+  // SOMET-491: the deletion is now made INSIDE A TRANSACTION THAT IS ALWAYS
+  // ROLLED BACK, so it is never visible outside this file's own connection.
+  // See the long note on the restore test below for why a committed delete
+  // plus a "re-seed in a finally block" cleanup was not safe at all.
   await t.test('a class a character is playing cannot be deleted out from under it', async () => {
     // characters.entity_type_id is a plain reference with no ON DELETE, and
     // that is deliberate: deleting a class must not silently orphan or destroy
@@ -189,12 +189,50 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
     // all (it upserts ON CONFLICT DO NOTHING), so a class really is deleted
     // here and the seeder really does have to put it back.
     //
+    // SOMET-491 -- WHY THIS RUNS IN A TRANSACTION THAT IS ROLLED BACK.
+    //
+    // The delete used to be COMMITTED, with a `finally { seedCatalogs(pool) }`
+    // putting the class back afterwards. `node --test` runs test FILES as
+    // concurrent processes against ONE database, so for the ~1s that
+    // seedCatalogs takes to reach its class block, every other process saw a
+    // catalog with a class missing. Measured on a freshly seeded scratch
+    // database, running only the four class files together failed 10 runs out
+    // of 10: with no characters present the victim query below always picks
+    // Archer, and that window reliably swallowed class_pools_db.test.js's
+    // opening listPlayableClasses() and characters_routes.test.js's
+    // GET /api/characters/classes.
+    //
+    // An advisory lock cannot fix this and was tried and reverted: it would
+    // only work if the READERS took it too, and the readers here are the real
+    // HTTP route and the real authority join path, which obviously do not.
+    // Weakening the readers to tolerate a missing class was rejected outright
+    // -- "the catalog offers exactly six classes" is the assertion those files
+    // exist to make.
+    //
+    // A transaction removes the window instead of shrinking it. Under READ
+    // COMMITTED no other session can observe an uncommitted DELETE at all, so
+    // there is no interleaving left to lose: the class is missing only on this
+    // connection, and only until ROLLBACK. Everything the subtest proved
+    // before is proved unchanged -- the real seedCatalogs entry point still
+    // has to rebuild the row, its main_stat and its loadout, and still has to
+    // be idempotent -- because a transaction reads its own writes.
+    //
+    // ROLLBACK is also a strictly better cleanup than the old finally block,
+    // which asked the code under test to repair the damage the test did: if
+    // the seeder were broken in exactly the way this test exists to catch, the
+    // cleanup was broken too. And the committed delete cascaded further than
+    // the seeder restores -- sprite_sets.entity_type_id is ON DELETE SET NULL
+    // and creature_drops is ON DELETE CASCADE, neither of which seedCatalogs
+    // puts back for a class -- so on a long-lived database it was quietly
+    // destructive. A rollback restores the row with its original id and every
+    // dependent row intact.
+    //
     // The class is chosen at runtime as one NO character is playing -- the FK
     // above makes any other choice impossible, and hardcoding a name would
     // turn this test red the first time someone rolls that class.
     const { seedCatalogs } = require('../scripts/seed-catalogs.js');
     const free = await pool.query(
-      `SELECT e.name FROM entity_types e
+      `SELECT e.id, e.name FROM entity_types e
         WHERE e.is_playable = true
           AND NOT EXISTS (SELECT 1 FROM characters c WHERE c.entity_type_id = e.id)
         ORDER BY e.name LIMIT 1`);
@@ -203,6 +241,7 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       return;
     }
     const victim = free.rows[0].name;
+    const victimId = free.rows[0].id;
     // Ranger cannot be the victim: the query above selects only is_playable
     // rows and SOMET-471 demoted it. It is left out rather than kept "just in
     // case", because the restore assertion below requires is_playable = true
@@ -230,18 +269,37 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       && expectedMainStat !== undefined,
       `no expectation is written for ${victim}; a new class must be added here or this test passes vacuously`);
 
+    // ONE connection for the whole delete-and-restore, because a transaction
+    // lives on a connection: issuing these through `pool` would scatter them
+    // across the pool's clients and leave the DELETE stranded in an open
+    // transaction on one of them while the assertions read a different,
+    // still-intact connection -- green, and proving nothing.
+    const client = await pool.connect();
     try {
-      await pool.query('DELETE FROM entity_types WHERE name = $1', [victim]);
+      await client.query('BEGIN');
+      await client.query('DELETE FROM entity_types WHERE name = $1', [victim]);
 
       // Prove the wipe happened; otherwise the restore assertions could pass
       // simply because nothing was ever removed.
-      const gone = await pool.query(
+      const gone = await client.query(
         'SELECT count(*)::int AS n FROM entity_types WHERE name = $1', [victim]);
       assert.equal(gone.rows[0].n, 0, 'the wipe must actually remove the class');
 
-      await seedCatalogs(pool);
+      // ...and prove it is invisible to everyone else, which is the property
+      // that makes the transaction a fix rather than a smaller window. This
+      // read goes through `pool`, i.e. a DIFFERENT connection, exactly as a
+      // concurrently running test file would. Without the BEGIN above it
+      // returns 0 and this assertion fails, so the guard cannot be removed
+      // and leave the file green.
+      const peer = await pool.query(
+        'SELECT count(*)::int AS n FROM entity_types WHERE name = $1 AND is_playable = true',
+        [victim]);
+      assert.equal(peer.rows[0].n, 1,
+        `a concurrent reader must still see ${victim}: the wipe must never be committed`);
 
-      const back = await pool.query(
+      await seedCatalogs(client);
+
+      const back = await client.query(
         'SELECT name, is_playable, main_stat, hp, max_hp, max_mana FROM entity_types WHERE name = $1',
         [victim]);
       assert.equal(back.rows.length, 1, `${victim} must be restored by the seeder`);
@@ -255,7 +313,7 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       assert.equal(back.rows[0].main_stat, expectedMainStat,
         `${victim} must be restored WITH its main stat, or it has no tree sector`);
 
-      const loadout = await pool.query(
+      const loadout = await client.query(
         `SELECT i.name AS item, l.quantity, l.equip_slot, h.name AS socket_into
            FROM class_loadouts l
            JOIN entity_types e ON e.id = l.entity_type_id
@@ -269,15 +327,42 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
         'the loadout must come back too, or a rebuilt volume leaves the class with no gear');
 
       // Idempotent: a second run must not stack duplicate loadout rows.
-      await seedCatalogs(pool);
-      const after = await pool.query('SELECT count(*)::int AS n FROM class_loadouts');
+      await seedCatalogs(client);
+      const after = await client.query('SELECT count(*)::int AS n FROM class_loadouts');
       // 17 = Warrior 2 + Ranger 3 + Mage 2 + Monk 2 + Cultist 3 + Archer 3
       // + Druid 2. Ranger's three rows are still seeded: it is not playable
       // any more, but characters are still wearing that gear. The Cultist's
       // third row is its spell stone (SOMET-492).
       assert.equal(after.rows[0].n, 17, 'a repeat run must not duplicate loadout rows');
     } finally {
-      await seedCatalogs(pool);
+      // Unconditional, and unconditionally sufficient. A failed assertion, a
+      // thrown seeder, a crashed process -- every one of them ends with the
+      // catalog byte-for-byte as it was, because an uncommitted transaction is
+      // discarded either by this statement or by the backend dropping the
+      // connection. That is the part the old `seedCatalogs(pool)` cleanup
+      // could not promise: it had to run, and it had to work, and a broken
+      // seeder failed both.
+      let rollbackFailed = false;
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        rollbackFailed = true;
+      }
+      // A client whose ROLLBACK did not land is not safe to hand back: its
+      // connection is in an unknown state and the next borrower inherits it,
+      // including the `restored` check immediately below. release(true)
+      // destroys it and the pool opens a clean one.
+      client.release(rollbackFailed);
     }
+
+    // Belt and braces, on a connection that is NOT the one that held the
+    // transaction: the class is present, playable, and carries the id it had
+    // before this subtest ran.
+    const restored = await pool.query(
+      'SELECT id, is_playable FROM entity_types WHERE name = $1', [victim]);
+    assert.equal(restored.rows.length, 1, `${victim} must survive this subtest`);
+    assert.equal(restored.rows[0].is_playable, true);
+    assert.equal(restored.rows[0].id, victimId,
+      `${victim} must keep its original id -- a re-created row breaks every FK that pointed at it`);
   });
 });
