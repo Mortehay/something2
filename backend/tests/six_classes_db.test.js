@@ -176,7 +176,7 @@ test('six playable classes', { skip: !url ? 'no database URL' : false }, async (
       'Druid:clubx1',
       'Druid:leather-vestx1',
       'Monk:leather-vestx1',
-      'Monk:stickx1',
+      'Monk:quarterstaffx1',
     ]);
   });
 

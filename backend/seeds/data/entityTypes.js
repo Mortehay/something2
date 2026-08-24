@@ -368,13 +368,27 @@ const CLASS_LOADOUTS = [
   { class: 'Mage', item: 'apprentice staff', quantity: 1, equipSlot: 'main_hand' },
   { class: 'Mage', item: 'stone_of_apprentice staff', quantity: 1, socketInto: 'apprentice staff' },
   { class: 'Mage', item: 'arcane-ward', quantity: 1, equipSlot: 'head' },
-  // The Monk's stick is 7 damage on 0.35s against the dagger fallback's 8 on
-  // 0.30s, so wearing its own kit makes the Monk WEAKER (20.0 dps vs 26.7).
-  // That is left exactly as authored rather than papered over with a
-  // substituted weapon: the stick is the Monk's kit, and if the kit is wrong
-  // the number to change is the stick's, here, not a special case in the
-  // equip mechanism.
-  { class: 'Monk', item: 'stick', quantity: 1, equipSlot: 'main_hand' },
+  // SOMET-504. The stick is GONE from the Monk's kit, replaced by the
+  // quarterstaff that migration 1714440516000 adds to item_types. The stick
+  // made the Monk weaker for wearing its own kit -- 7 damage on 0.35s, 20.0
+  // dps, against the dagger fallback's 8 on 0.30s and 26.7 -- which is the
+  // regression 1714440514000 shipped and reported rather than hid.
+  //
+  // The quarterstaff keeps the stick's 7 damage (still the lowest per-hit of
+  // any class weapon) and its 0.7 arc, and buys the fix entirely with speed:
+  // 0.25s, the fastest swing in the catalog, for 28.0 dps. A martial artist
+  // hits more, not harder. Full reasoning -- why no existing catalog row fits,
+  // why it costs no resource, why it needs no stone, and why it cannot key off
+  // wisdom without new combat code -- is in that migration's header.
+  //
+  // REMOVING THE STICK LINE IS LOAD-BEARING, not tidying. The seeder only ever
+  // INSERTs and UPDATEs; it never deletes a row that has left this list. If the
+  // Monk kept both directives, grantStartingLoadout's second pass walks them
+  // `ORDER BY id ASC` with an ON CONFLICT DO NOTHING equip, so the OLDER row --
+  // the stick -- would win the main_hand slot and this whole change would ship
+  // live and inert. The migration DELETEs the stick row for databases that
+  // already have it; this list is what stops a re-seed putting it back.
+  { class: 'Monk', item: 'quarterstaff', quantity: 1, equipSlot: 'main_hand' },
   { class: 'Monk', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
   // SOMET-492. The Cultist is the one class whose loadout is WORN rather than
   // carried, and it has to be: a Cultist casts with life instead of mana, and

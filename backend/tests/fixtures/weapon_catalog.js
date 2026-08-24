@@ -20,8 +20,12 @@
 // backfilled per 1714440019000_weapon_catalog.js) plus the 18 new weapons
 // from 1714440019000_weapon_catalog.js, with stamina_cost rebalanced per
 // 1714440020000_rebalance_stamina.js, plus the ammo/aoe columns and the 3
-// ammo rows from 1714440021000_aoe_ammo.js. 22 weapons + 3 ammo = 25 rows.
-// Keep in sync with the migrations.
+// ammo rows from 1714440021000_aoe_ammo.js. 22 weapons + 3 ammo = 25 rows,
+// plus the Monk's `quarterstaff` from 1714440516000 (SOMET-504) and the gear
+// ladder's 30 weapons from 1714440506000 -- 53 weapons + 3 ammo = 56 rows.
+// Keep in sync with the migrations: 'the live item_types catalog matches
+// SEED_ROWS' reports ANY weapon or ammo row in the database that is missing
+// here, so a migration that adds a weapon must add it to this list too.
 const SEED_ROWS = [
   // --- original 4, from 1714440016000 (+ stamina backfill/rebalance) ---
   { id: 1, name: 'dagger', category: 'weapon', kind: 'melee', damage: 8, cooldown: 0.30,
@@ -128,6 +132,23 @@ const SEED_ROWS = [
     reach: null, arc_width: null, range: 800, projectile_speed: 850, projectile_radius: 14,
     pierce: 1, mana_cost: 32, stamina_cost: 0, element: 'arcane',
     stackable: false, ammo_type_id: null, aoe_radius: 110 },
+
+  // --- the Monk's starting weapon, from 1714440516000_monk_quarterstaff
+  // (SOMET-504) ---
+  //
+  // Replaces `stick` in the Monk's kit; the stick itself stays in the catalog
+  // (and above in this fixture) because it is an ordinary item other content
+  // may drop. Same 7 damage as the stick, on 0.25s -- the fastest cooldown in
+  // the catalog, tied with `knife` -- for 28.0 dps against the dagger
+  // fallback's 26.7. Plain physical at zero cost on purpose: a nonzero
+  // mana_cost or a non-physical element would send it through
+  // activeWeaponType's bare-magic-weapon branch and zero it to the dagger's
+  // damage. See that migration's header for the whole argument.
+  { id: 25, name: 'quarterstaff', category: 'weapon', kind: 'melee', damage: 7, cooldown: 0.25,
+    reach: 110, arc_width: 0.7, range: null, projectile_speed: null, projectile_radius: null,
+    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
+
   // --- 3 ammo rows, from 1714440021000_aoe_ammo.js ---
   { id: 101, name: 'arrow', category: 'ammo', kind: null, damage: 0, cooldown: 0,
     reach: null, arc_width: null, range: null, projectile_speed: null, projectile_radius: null,
