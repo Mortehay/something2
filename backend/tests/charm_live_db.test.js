@@ -91,12 +91,31 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
       // cascade off the user row.
       await pool.query('DELETE FROM users WHERE id = ANY($1::int[])', [userIds]).catch(() => {});
     }
+    // Last of the row cleanups, and before pool.end(): world_creatures cascades
+    // off it, so this also sweeps any fixture the ids above missed.
+    await pool.query('DELETE FROM worlds WHERE name = $1', [`${TAG}_world`]).catch(() => {});
     await pool.end().catch(() => {});
   });
 
-  const entry = await pool.query('SELECT id FROM worlds WHERE is_entry = true LIMIT 1');
-  assert.equal(entry.rows.length, 1, 'the database needs a seeded entry world');
-  const entryWorldId = entry.rows[0].id;
+  // A WORLD OF THIS FILE'S OWN, not the seeded entry world.
+  //
+  // worldPopulation.js's populateWorld runs `DELETE FROM world_creatures WHERE
+  // world_id = $1 AND type <> 'Village Guard' AND blocks_portal_id IS NULL AND
+  // home_x IS NULL` -- i.e. it wipes every ordinary creature in a world it
+  // repopulates. Any peer test that re-seeds a map therefore deletes this
+  // file's creature fixtures out from under it, and the failure lands here as
+  // "the creature vanished between the spawn and the assertion" rather than
+  // anywhere near the cause. The entry world is the one every seeding test
+  // touches, so this file stops sharing it.
+  //
+  // The users below are role 'admin' purely so mayJoin admits them to a world
+  // that is not the entry and that they have never visited (joinPolicy.js's
+  // first branch). Nothing this file asserts is about the join policy.
+  const wr = await pool.query(
+    `INSERT INTO worlds (name, width, height, seed, chunk_size)
+     VALUES ($1, 40, 40, 7, 32) RETURNING id`,
+    [`${TAG}_world`]);
+  const entryWorldId = wr.rows[0].id;
 
   const classes = await pool.query(
     "SELECT id, name FROM entity_types WHERE name IN ('Druid', 'Warrior')");
@@ -114,7 +133,8 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
   async function join(className, { charisma = null } = {}) {
     const who = `${TAG}_${className}_${seq++}`.toLowerCase();
     const u = await pool.query(
-      "INSERT INTO users (username, password_hash) VALUES ($1, 'x') RETURNING id", [who]);
+      "INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', 'admin') RETURNING id",
+      [who]);
     const userId = u.rows[0].id;
     userIds.push(userId);
     const character = await createCharacter(
