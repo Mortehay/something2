@@ -74,7 +74,6 @@ export function layoutInventory(state) {
     inventory,
     selectedItemId = null,
     gold = 0,
-    autoLoot = false,
     tab = "all",
     page = 0,
     drag = null,
@@ -160,12 +159,15 @@ export function layoutInventory(state) {
   if (prev) hitAreas.push({ ...prev, kind: "invpage", id: pageIdx - 1 });
   if (next) hitAreas.push({ ...next, kind: "invpage", id: pageIdx + 1 });
 
+  // SOMET-493: the auto-loot toggle used to sit here, at colX. It moved to
+  // the Settings panel (GameSettings.jsx) because it is a preference, not an
+  // inventory operation, and burying a preference behind `i` made it something
+  // players had to be told about. "Drop selected" inherits its slot rather
+  // than leaving a hole where it was.
   const footerY = py + PANEL_H - PAD - FOOTER_H;
-  const autoLootRect = { x: colX, y: footerY, w: 150, h: 26 };
-  hitAreas.push({ ...autoLootRect, kind: "autoloot", id: null });
   let drop = null;
   if (selectedItemId != null) {
-    drop = { x: colX + 160, y: footerY, w: 150, h: 26 };
+    drop = { x: colX, y: footerY, w: 150, h: 26 };
     hitAreas.push({ ...drop, kind: "drop", id: selectedItemId });
   }
 
@@ -174,7 +176,7 @@ export function layoutInventory(state) {
     tabs,
     cells,
     pages: { count: pageCount, page: pageIdx, prev, next, arrowY, x: rightX },
-    footer: { gold, autoLoot: autoLootRect, autoLootOn: autoLoot === true, drop },
+    footer: { gold, y: footerY, drop },
     used: usedSlotsClient(inventory),
     capacity: capacityOf(inventory),
     hitAreas,
@@ -317,12 +319,6 @@ export function drawInventory(ctx, layout, state) {
 
   // Footer.
   const f = layout.footer;
-  ctx.fillStyle = f.autoLootOn ? "rgba(74,158,255,0.28)" : "rgba(40,40,60,0.85)";
-  ctx.fillRect(f.autoLoot.x, f.autoLoot.y, f.autoLoot.w, f.autoLoot.h);
-  ctx.strokeStyle = "#4a9eff";
-  ctx.strokeRect(f.autoLoot.x, f.autoLoot.y, f.autoLoot.w, f.autoLoot.h);
-  ctx.fillStyle = "#e5e7eb";
-  ctx.fillText(`Auto-loot: ${f.autoLootOn ? "ON" : "OFF"}`, f.autoLoot.x + 8, f.autoLoot.y + 7);
   if (f.drop) {
     ctx.fillStyle = "rgba(120,40,40,0.85)";
     ctx.fillRect(f.drop.x, f.drop.y, f.drop.w, f.drop.h);
@@ -332,7 +328,7 @@ export function drawInventory(ctx, layout, state) {
     ctx.fillText("Drop selected", f.drop.x + 8, f.drop.y + 7);
   }
   ctx.fillStyle = "#fde68a";
-  ctx.fillText(`Gold: ${f.gold ?? 0}`, layout.panel.x + layout.panel.w - 200, f.autoLoot.y + 7);
+  ctx.fillText(`Gold: ${f.gold ?? 0}`, layout.panel.x + layout.panel.w - 200, f.y + 7);
 
   // Tooltip last, so nothing paints over it. Suppressed mid-drag: the ghost is
   // already following the cursor and two floating boxes read as a glitch.

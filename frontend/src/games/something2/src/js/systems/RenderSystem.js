@@ -13,6 +13,15 @@ import { effectProgress, effectAlpha, isoArcAngle, particlesAt } from "../core/v
 import { anchorY } from "../core/attackAnchor.js";
 import { elementTint } from "../core/elements.js";
 import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffects.js";
+import {
+  canvasToCameraPoint, pickDrawable, targetKey, describeTarget, layoutCard,
+  drawableScreenRect, CARD,
+} from "./inspect.js";
+
+// Read once from the layout module rather than restated, so the painter and
+// the layout can never disagree about where the card's left edge is.
+const CARD_PAD_X = CARD.padX;
+const CARD_BAR_LABEL = CARD.barLabelSize;
 
 // Mirrors PICKUP_RADIUS in backend/src/authority/groundItems.js — used here
 // only to decide when a ground item's name label is shown (i.e. when the
@@ -136,7 +145,11 @@ export class RenderSystem {
         // top-left put a decoration's depth key one tile toward the back of
         // its actual drawn position — wrongly occluded by an actor/wall a
         // tile closer to the camera that should have been behind it.
-        out.push({ kind: "decoration", ref: { ...type, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: type.place_order || 0, depth: depthKey(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2) });
+        // `name` is spread in from `d`, not from `type`: getEntityTypesMap
+        // keys the map BY name and does not repeat it inside the value, so a
+        // decoration drawable carried no way to say what it was until the
+        // inspect card needed one (SOMET-493).
+        out.push({ kind: "decoration", ref: { ...type, name: d.name, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: type.place_order || 0, depth: depthKey(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2) });
       }
     }
     return out;
@@ -147,7 +160,7 @@ export class RenderSystem {
     creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
-    groundItems = [], autoLoot = false, gold = null, toast = null,
+    groundItems = [], gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
@@ -170,8 +183,18 @@ export class RenderSystem {
     // arrives asynchronously, after the renderer exists.
     vfxDefs = null,
     progression = null,
+    // SOMET-493 — the inspect card. Shaped
+    // { enabled, cursorX, cursorY, pinnedKey, entityDefs, localPlayer }.
+    // Off by default, and `enabled: false` costs exactly one branch: the
+    // hit-test runs over the drawables list only when the player asked for it.
+    inspect = null,
   }) {
     if (vfxDefs) this.vfxDefs = vfxDefs;
+    // While any full-screen panel is up the cursor is being used to click ITS
+    // rows, so the inspect card must not follow it around over the top of the
+    // panel — and, more importantly, must not hit-test the world hidden behind
+    // one and let a click pin something the player cannot see.
+    const panelOpen = (inventoryOpen && !!inventory) || (shopOpen && !!shop) || (bankOpen && !!bank);
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     // Timestamp for this frame; animated tile textures advance off it (unlike
@@ -282,6 +305,13 @@ export class RenderSystem {
       else this.drawEntity(d.ref);
     }
 
+    // SOMET-493. Resolved against the SAME `drawables` list that was just
+    // painted, in the same frame, so the card can never name something that is
+    // not on screen or is buried under something else. Only the resolution
+    // happens here; the card itself is drawn at the very end of this method,
+    // in canvas pixel space, on top of the HUD.
+    this._resolveInspect(inspect, drawables, panelOpen);
+
     // Projectiles render on top — small, fast, no depth-sort needed.
     for (const pr of projectiles) {
       // Slice D (SOMET-161): the trail retires the identical 6px dot every
@@ -313,7 +343,7 @@ export class RenderSystem {
     // pixel space — same space Game hit-tests clicks against).
     this._invHitAreas = [];
     if (inventoryOpen && inventory) {
-      this._invLayout = this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, autoLoot, inventoryView);
+      this._invLayout = this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, inventoryView);
     }
 
     // Shop panel overlay (Slice D) — same overlay convention as the
@@ -336,6 +366,152 @@ export class RenderSystem {
       const itemTypes = inventory ? inventory.types : new Map();
       this.renderBank(this.ctx, bank, inventory, itemTypes, this._bankHitAreas, bankView);
     }
+
+    // SOMET-493 — last of all, so the card sits on top of the HUD orbs and the
+    // toast rather than being half-covered by them. `_inspectLayout` was
+    // computed in the same frame, from the drawables that were actually drawn.
+    if (this._inspectLayout) this.drawInspectCard(this._inspectLayout);
+  }
+
+  // Decide what the inspect card is showing this frame, and lay it out.
+  //
+  // Split out of renderChunked so the pinned-target lookup and the "panel is
+  // open" suppression are one readable block rather than another twenty lines
+  // inside a 200-line method. Writes three fields:
+  //   _inspectHoverKey  what a click would pin (read by Game's mousedown)
+  //   _inspectTarget    the resolved drawable, or null
+  //   _inspectLayout    the card geometry, or null
+  _resolveInspect(inspect, drawables, panelOpen) {
+    this._inspectHoverKey = null;
+    this._inspectTarget = null;
+    this._inspectLayout = null;
+    if (!inspect || !inspect.enabled || panelOpen) return;
+    const cx = inspect.cursorX, cy = inspect.cursorY;
+    if (!Number.isFinite(cx) || !Number.isFinite(cy) || !inspect.camera) return;
+
+    const point = canvasToCameraPoint(cx, cy, inspect.camera);
+    const hover = pickDrawable(drawables, point);
+    this._inspectHoverKey = targetKey(hover);
+
+    // Hover wins over a pin: pointing at something new is an unambiguous
+    // request to look at THAT, and making the player un-pin first would be a
+    // mode nobody asked for.
+    let target = hover;
+    // A pinned target is re-found by key every frame rather than being held as
+    // an object reference — CreatureManager replaces nothing but does DELETE a
+    // creature that leaves the neighbourhood, and holding the reference would
+    // keep drawing a card for something no longer in the world.
+    if (!target && inspect.pinnedKey) {
+      target = drawables.find((d) => targetKey(d) === inspect.pinnedKey) || null;
+    }
+    if (!target) return;
+
+    const desc = describeTarget(target, {
+      entityDefs: inspect.entityDefs,
+      itemTypes: inspect.itemTypes,
+      localPlayer: inspect.localPlayer,
+    });
+    if (!desc) return;
+
+    // Anchor at the cursor while hovering; at the target itself when the card
+    // is only up because it was pinned, so a pinned card does not trail the
+    // pointer across the screen attached to nothing.
+    let ax = cx, ay = cy;
+    if (!hover) {
+      const r = drawableScreenRect(target);
+      if (r) {
+        const off = canvasToCameraPoint(0, 0, inspect.camera);
+        ax = r.x + r.w / 2 - off.x;
+        ay = r.y - off.y;
+      }
+    }
+    this._inspectTarget = target;
+    this._inspectLayout = layoutCard(desc, ax, ay, GAME_WIDTH, GAME_HEIGHT);
+  }
+
+  // Paint the geometry inspect.layoutCard produced. Deliberately dumb: every
+  // number it draws was decided by the pure module, so a layout bug is
+  // reproducible in a unit test instead of only in a screenshot.
+  drawInspectCard(layout) {
+    const ctx = this.ctx;
+    const { box } = layout;
+    ctx.save();
+    ctx.translate(box.x, box.y);
+
+    ctx.fillStyle = "rgba(12,14,24,0.92)";
+    ctx.strokeStyle = "rgba(150,160,200,0.45)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(0, 0, box.w, box.h);
+    ctx.strokeRect(0.5, 0.5, box.w - 1, box.h - 1);
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+
+    // Title, clipped to the space left of the badge so a long creature name
+    // cannot run under it.
+    if (layout.title) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(CARD_PAD_X, 0, layout.titleMaxW, box.h);
+      ctx.clip();
+      ctx.font = `bold ${layout.title.size}px sans-serif`;
+      ctx.fillStyle = "#f4f6ff";
+      ctx.fillText(layout.title.text, CARD_PAD_X, layout.title.y);
+      ctx.restore();
+    }
+
+    // The aggression badge: a filled pill in the TOP-RIGHT corner, coloured by
+    // tier so it reads at a glance without being read.
+    if (layout.badge) {
+      const b = layout.badge;
+      const bx = box.w - CARD_PAD_X - b.w;
+      ctx.fillStyle = b.color;
+      ctx.globalAlpha = 0.22;
+      ctx.fillRect(bx, b.y, b.w, b.h);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = b.color;
+      ctx.strokeRect(bx + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+      ctx.font = `bold ${b.size}px sans-serif`;
+      ctx.fillStyle = b.color;
+      ctx.textAlign = "center";
+      ctx.fillText(b.text, bx + b.w / 2, b.y + b.h - 5);
+      ctx.textAlign = "left";
+    }
+
+    if (layout.subtitle) {
+      ctx.font = `${layout.subtitle.size}px sans-serif`;
+      ctx.fillStyle = "#9aa3c7";
+      ctx.fillText(layout.subtitle.text, CARD_PAD_X, layout.subtitle.y);
+    }
+
+    for (const line of layout.lines) {
+      ctx.font = `${line.size}px sans-serif`;
+      ctx.fillStyle = "#c8cee8";
+      ctx.fillText(line.text, CARD_PAD_X, line.y);
+    }
+
+    // HP on the upper row, MP on the lower one — thin labelled strips rather
+    // than orbs, so both fit in a card this size.
+    for (const bar of layout.bars) {
+      ctx.font = `bold ${CARD_BAR_LABEL}px sans-serif`;
+      ctx.fillStyle = "#8b93b5";
+      ctx.fillText(bar.label, bar.x, bar.y + bar.h);
+      const tx = bar.x + 18;
+      const tw = bar.w - 18;
+      ctx.fillStyle = "rgba(255,255,255,0.10)";
+      ctx.fillRect(tx, bar.y, tw, bar.h);
+      if (bar.pct > 0) {
+        ctx.fillStyle = bar.color;
+        ctx.fillRect(tx, bar.y, Math.max(1, tw * bar.pct), bar.h);
+      }
+      ctx.strokeStyle = "rgba(0,0,0,0.55)";
+      ctx.strokeRect(tx + 0.5, bar.y + 0.5, tw - 1, bar.h - 1);
+      ctx.font = `${CARD_BAR_LABEL}px sans-serif`;
+      ctx.fillStyle = "#c8cee8";
+      ctx.fillText(bar.text, tx + tw + 6, bar.y + bar.h);
+    }
+
+    ctx.restore();
   }
 
   // AoE detonation rings: each expands from nothing to its full world radius
@@ -1443,12 +1619,11 @@ export class RenderSystem {
   // the layout is pure and unit-tested there, and this method only forwards
   // state, republishes the hit areas the layout produced (so Game can
   // hit-test this same frame) and returns the layout for the drag handlers.
-  renderInventory(ctx, inventory, hitAreas, selectedItemId = null, autoLoot = false, view = null) {
+  renderInventory(ctx, inventory, hitAreas, selectedItemId = null, view = null) {
     const v = view || {};
     const state = {
       inventory,
       selectedItemId,
-      autoLoot,
       tab: v.tab || "all",
       page: v.page || 0,
       gold: v.gold ?? 0,
@@ -1516,7 +1691,7 @@ export class RenderSystem {
     ctx.fillText("Shop — [e] to close", px + 16, py + 14);
 
     // Close button — top-right of the header row, same position/sizing as
-    // the auto-loot toggle in renderInventory.
+    // the inventory panel's own footer buttons.
     const closeW = 70, closeH = 26;
     const closeX = px + panelW - 16 - closeW;
     const closeY = py + 10;
