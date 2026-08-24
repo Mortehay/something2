@@ -11,6 +11,7 @@ import WorldPreview from "./WorldPreview.jsx";
 import Minimap from "./Minimap.jsx";
 import WaypointTravel from "./WaypointTravel.jsx";
 import GameSettings from "./GameSettings.jsx";
+import PassivePointsNudge from "./PassivePointsNudge.jsx";
 
 const UIOverlay = styled.div`
   position: absolute;
@@ -274,6 +275,11 @@ export default function GameView() {
       {/* SOMET-493 -- directly below "How to play", and it owns the auto-loot
           toggle that used to live in the canvas inventory panel's footer. */}
       {isPlaying && <GameSettings gameRef={gameRef} />}
+      {/* SOMET-483/476 follow-up: the tree and the character sheet both shipped
+          without a help row, so a player could hold unspent points with nothing
+          in the game pointing at either. This removes itself once they are
+          spent. */}
+      {isPlaying && <PassivePointsNudge gameRef={gameRef} />}
       {isPlaying && (
         <ChangeCharacterButton
           type="button"

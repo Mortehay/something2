@@ -124,6 +124,19 @@ const HELP_SECTIONS = [
       { k: [['G']], d: 'Pick up the nearest ground item you are standing near' },
       { k: [['Auto-loot']], d: 'Toggle it in Settings (below "How to play") — walk over items to collect them without pressing G' },
       { k: [['I']], d: 'Open the inventory / paper-doll: click an item then a slot to equip, click an equipped slot to unequip, and drop from the panel' },
+      { k: [['B']], d: 'Bank — stand next to a village bank post and press B to open your account stash' },
+      { k: [['F']], d: 'Open the chest you are standing next to' },
+    ],
+  },
+  {
+    // SOMET-483 / SOMET-476. These two shipped without a help row and a player
+    // with unspent points had no way to discover the tree at all -- which is
+    // what the guard test in __tests__/helpCoversHotkeys.test.js now prevents.
+    title: 'Character & passives',
+    rows: [
+      { k: [['C']], d: 'Character sheet — your class, level, XP, and each stat broken down into where it came from (base, passive tree, gear). Opens the inventory panel on its Character tab' },
+      { k: [['P']], d: 'Passive skill tree — spend passive points. You get one per level. Drag to pan, scroll to zoom, click a lit node to allocate it; you can only take a node next to one you already own. Unspent points are shown at the top' },
+      { k: [['Respec']], d: 'The button inside the passive tree refunds every allocated point for gold, so you can rebuild from scratch' },
     ],
   },
   {
