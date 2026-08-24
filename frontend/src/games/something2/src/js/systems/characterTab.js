@@ -220,3 +220,103 @@ export function formatXpLabel(bar, loaded) {
 export function formatPoints(passivePoints) {
   return `Passive points: ${num(passivePoints)}`;
 }
+
+// --- Pane layout -----------------------------------------------------------
+// Same contract as layoutInventory: rects and strings only, no context. The
+// caller hands in the rectangle the panel has free (see inventoryPanel.js) and
+// gets back everything drawCharacterTab needs to paint, plus the hit areas the
+// panel must hoist so clicks route.
+
+export const CHAR_LINE_H = 16;
+// Five, not seven: the derived block grew to eight rows with maxStamina, and
+// the rectangle the panel hands over is 340px tall. Measured against that real
+// rectangle rather than guessed -- layoutCharacterTab's own test asserts every
+// element stays inside it, which turns a bad constant here into a failing test
+// rather than a clipped list nobody sees until the browser pass.
+export const CHAR_MOD_ROWS = 5;
+const XP_TRACK_W = 300;
+const XP_TRACK_H = 10;
+const DERIVED_COL_DX = 300;
+const STATS_DY = 52;
+const HIGHLIGHT_DY = 186;
+const POINTS_DY = 202;
+const MODS_TITLE_DY = 222;
+const MODS_DY = 240;
+const ARROW_W = 24;
+const ARROW_H = 16;
+
+export function layoutCharacterTab({ character, x, y, w, h, modPage = 0 }) {
+  const hitAreas = [];
+  const empty = {
+    x, y, w, h, loading: null, header: null, xp: null,
+    statLines: [], highlight: null, points: null, derived: [], modifiers: null, hitAreas,
+  };
+  if (!character) {
+    return { ...empty, loading: { text: "Loading character…", x, y } };
+  }
+
+  const header = { text: formatHeader(character), x, y };
+
+  const loaded = xpLoaded(character);
+  const bar = xpBar(character);
+  const xp = {
+    track: { x, y: y + 20, w: XP_TRACK_W, h: XP_TRACK_H },
+    fillW: Math.round((XP_TRACK_W * Math.max(0, Math.min(100, bar.pct))) / 100),
+    pct: bar.pct,
+    label: formatXpLabel(bar, loaded),
+    labelX: x,
+    labelY: y + 34,
+  };
+
+  const { strong, weak } = strongAndWeak(character.sources, character.mainStat || null);
+  const statLines = CHAR_STAT_KEYS.map((key, i) => ({
+    key,
+    text: formatStatBreakdown(key, character.sources ? character.sources[key] : null),
+    x,
+    y: y + STATS_DY + i * CHAR_LINE_H,
+    strong: key === strong,
+    weak: key === weak,
+  }));
+
+  const highlight = {
+    text: formatHighlights(character.sources, character.mainStat || null),
+    x, y: y + HIGHLIGHT_DY,
+  };
+  const points = { text: formatPoints(character.passivePoints), x, y: y + POINTS_DY };
+
+  const derived = derivedRows(character.stats).map((text, i) => ({
+    text, x: x + DERIVED_COL_DX, y: y + STATS_DY + i * CHAR_LINE_H,
+  }));
+
+  const allRows = modifierRows(character.modifiers);
+  const pageCount = Math.max(1, Math.ceil(allRows.length / CHAR_MOD_ROWS));
+  // Clamped rather than trusted, exactly as the item grid's page is: the page
+  // survives an equipment change that shortened the list under it, and an
+  // unclamped index would render an empty pane the player cannot page out of.
+  const page = Math.min(Math.max(0, Math.floor(Number(modPage) || 0)), pageCount - 1);
+  const rows = allRows
+    .slice(page * CHAR_MOD_ROWS, page * CHAR_MOD_ROWS + CHAR_MOD_ROWS)
+    .map((r, i) => ({ text: r.text, source: r.source, x, y: y + MODS_DY + i * CHAR_LINE_H }));
+
+  const arrowY = y + MODS_DY + CHAR_MOD_ROWS * CHAR_LINE_H + 2;
+  const prev = page > 0 ? { x, y: arrowY, w: ARROW_W, h: ARROW_H } : null;
+  const next = page < pageCount - 1 ? { x: x + ARROW_W + 8, y: arrowY, w: ARROW_W, h: ARROW_H } : null;
+  if (prev) hitAreas.push({ ...prev, kind: "charmodpage", id: page - 1 });
+  if (next) hitAreas.push({ ...next, kind: "charmodpage", id: page + 1 });
+
+  return {
+    x, y, w, h,
+    loading: null,
+    header,
+    xp,
+    statLines,
+    highlight,
+    points,
+    derived,
+    modifiers: {
+      title: { text: "Modifiers", x, y: y + MODS_TITLE_DY },
+      rows, page, pageCount, prev, next,
+    },
+    hitAreas,
+  };
+}

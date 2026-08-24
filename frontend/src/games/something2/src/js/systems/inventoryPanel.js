@@ -5,6 +5,7 @@
 import { GAME_WIDTH, GAME_HEIGHT } from "../core/constants.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { rarityGlowColor } from "../core/rarityColors.js";
+import { layoutCharacterTab } from "./characterTab.js";
 
 export const PANEL_W = 820;
 // Sized to its content, not to the old list panel: title 30 + preview 190 +
@@ -51,15 +52,20 @@ export function usedSlotsClient(inventory) {
 
 // `categories: null` means "everything not hidden" — an item whose category
 // is new server-side lands under All rather than becoming invisible.
+// `pane: "character"` marks the one tab that is NOT an item filter: it replaces
+// the grid entirely (SOMET-483, spec §10.2), so it must feed the grid an empty
+// list rather than inherit `categories: null`'s "show everything".
 export const TABS = [
   { key: "all", label: "All", categories: null },
   { key: "equip", label: "Equip", categories: ["weapon", "armor"] },
   { key: "supply", label: "Supply", categories: ["ammo", "consumable"] },
   { key: "stones", label: "Stones", categories: ["stone"] },
+  { key: "character", label: "Character", categories: null, pane: "character" },
 ];
 
 export function visibleItems(inventory, tabKey) {
   const tab = TABS.find((t) => t.key === tabKey) || TABS[0];
+  if (tab.pane === "character") return [];
   const types = (inventory && inventory.types) || new Map();
   return ((inventory && inventory.items) || []).filter((it) => {
     const t = types.get(it.typeId);
@@ -78,6 +84,8 @@ export function layoutInventory(state) {
     tab = "all",
     page = 0,
     drag = null,
+    character = null,
+    modPage = 0,
   } = state;
 
   // What the paperdoll's greying answers "can THIS go here?" about. An ARMED
@@ -172,10 +180,29 @@ export function layoutInventory(state) {
     hitAreas.push({ ...drop, kind: "drop", id: selectedItemId });
   }
 
+  // The Character pane (SOMET-483, spec §10.2) occupies exactly the rectangle
+  // the item grid and its page arrows would have. Built here rather than in the
+  // draw so its geometry and its strings are testable without a context, and so
+  // its page arrows can be hoisted into the same hitAreas list every other
+  // control uses. `shown` is empty on this tab (see visibleItems), so the grid
+  // loop above has already produced 48 empty cells and no item hit areas.
+  const characterPane = TABS.find((t) => t.key === activeTab).pane === "character"
+    ? layoutCharacterTab({
+      character,
+      x: rightX,
+      y: gridTop,
+      w: PANEL_W - (rightX - px) - PAD,
+      h: footerY - gridTop - 8,
+      modPage,
+    })
+    : null;
+  if (characterPane) for (const a of characterPane.hitAreas) hitAreas.push(a);
+
   return {
     panel, title, close, preview, slots,
     tabs,
     cells,
+    character: characterPane,
     pages: { count: pageCount, page: pageIdx, prev, next, arrowY, x: rightX },
     footer: { gold, y: footerY, drop },
     used: usedSlotsClient(inventory),

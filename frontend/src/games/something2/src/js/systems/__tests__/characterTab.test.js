@@ -10,7 +10,9 @@ import {
   CHAR_STAT_KEYS, statTotal, formatStatBreakdown, strongAndWeak, formatHighlights,
   formatHeader, derivedRows, formatModifier, modifierRows, xpBar, formatXpLabel,
   formatPoints,
+  layoutCharacterTab, CHAR_MOD_ROWS, CHAR_LINE_H,
 } from "../characterTab.js";
+import { layoutInventory, visibleItems, TABS } from "../inventoryPanel.js";
 
 // A level-7 Warrior deep into the strength sector, wearing one +4 STR item.
 const RICH_SOURCES = {
@@ -372,6 +374,237 @@ describe("formatPoints", () => {
   it("shows zero rather than nothing", () => {
     expect(formatPoints(0)).toBe("Passive points: 0");
     expect(formatPoints(null)).toBe("Passive points: 0");
+  });
+});
+
+// --- Task 15b: the pane layout, and the fifth tab --------------------------
+
+const PANE = { x: 300, y: 200, w: 528, h: 340 };
+
+const RICH_CHARACTER = {
+  className: "Warrior",
+  mainStat: "strength",
+  level: 7,
+  experience: 102,
+  xpFloor: 63,
+  xpToNext: 78,
+  passivePoints: 3,
+  sources: RICH_SOURCES,
+  modifiers: [
+    { label: "Kindling", value: 12, source: "tree", kind: "damage", detail: "fire" },
+    { label: "of the Bear", value: 4, source: "gear", kind: "stat", detail: "strength" },
+  ],
+  stats: {
+    maxHp: 140, maxMana: 100, maxStamina: 108, meleeMult: 1.15, spellMult: 1,
+    cooldownMult: 0.8696, manaRegen: 10, priceMult: 0.55,
+  },
+};
+
+const FRESH_CHARACTER = {
+  className: "Mage",
+  mainStat: "intelligence",
+  level: 1,
+  experience: 0,
+  xpFloor: 0,
+  xpToNext: 18,
+  passivePoints: 0,
+  sources: FRESH_SOURCES,
+  modifiers: [],
+  stats: {
+    maxHp: 100, maxMana: 100, maxStamina: 100, meleeMult: 1, spellMult: 1,
+    cooldownMult: 1, manaRegen: 10, priceMult: 0.5,
+  },
+};
+
+describe("layoutCharacterTab", () => {
+  it("lays out the header, the six itemised stats and the eight derived rows", () => {
+    const l = layoutCharacterTab({ ...PANE, character: RICH_CHARACTER });
+    expect(l.header.text).toBe("Warrior — Level 7");
+    expect(l.statLines.map((s) => s.text)).toEqual([
+      "STR 42 = 5 base + 33 tree + 4 gear",
+      "DEX 11 = 5 base + 6 tree",
+      "CON 14 = 8 base + 4 tree + 2 gear",
+      "INT 5 = 5 base",
+      "WIS 8 = 6 base + 2 tree",
+      "CHA 5 = 5 base",
+    ]);
+    expect(l.derived.map((d) => d.text)).toEqual([
+      "Max HP        140",
+      "Max mana      100",
+      "Max stamina   108",
+      "Melee         x1.15",
+      "Spell         x1.00",
+      "Cooldown      x0.87",
+      "Mana regen    10",
+      "Sell price    x0.55",
+    ]);
+    expect(l.highlight.text).toBe("Strong: STR 42    Weak: INT 5");
+    expect(l.points.text).toBe("Passive points: 3");
+    expect(l.xp.label).toBe("39 / 78 XP");
+    expect(l.modifiers.rows.map((r) => r.text)).toEqual([
+      "Kindling  +12% fire damage",
+      "of the Bear  +4 STR",
+    ]);
+    expect(l.modifiers.rows.map((r) => r.source)).toEqual(["tree", "gear"]);
+  });
+
+  it("marks the strong and weak stat lines so the draw can tint them", () => {
+    const l = layoutCharacterTab({ ...PANE, character: RICH_CHARACTER });
+    expect(l.statLines[0].strong).toBe(true);   // strength
+    expect(l.statLines[0].weak).toBe(false);
+    expect(l.statLines[3].weak).toBe(true);     // intelligence
+    expect(l.statLines[3].strong).toBe(false);
+    expect(l.statLines.filter((s) => s.strong)).toHaveLength(1);
+    expect(l.statLines.filter((s) => s.weak)).toHaveLength(1);
+  });
+
+  it("puts the stat column and the derived column side by side, not on top of each other", () => {
+    const l = layoutCharacterTab({ ...PANE, character: RICH_CHARACTER });
+    expect(l.statLines[0].x).toBe(PANE.x);
+    expect(l.derived[0].x).toBeGreaterThan(PANE.x);
+    expect(l.derived[0].y).toBe(l.statLines[0].y);
+  });
+
+  it("renders a fresh level-1 character with zero passives and zero affixes", () => {
+    const l = layoutCharacterTab({ ...PANE, character: FRESH_CHARACTER });
+    expect(l.statLines.map((s) => s.text)).toEqual([
+      "STR 5 = 5 base", "DEX 5 = 5 base", "CON 5 = 5 base",
+      "INT 5 = 5 base", "WIS 5 = 5 base", "CHA 5 = 5 base",
+    ]);
+    expect(l.highlight.text).toBe("Strong: INT 5    Weak: —");
+    expect(l.points.text).toBe("Passive points: 0");
+    expect(l.xp.label).toBe("0 / 18 XP");
+    expect(l.xp.fillW).toBe(0);
+    expect(l.modifiers.rows).toEqual([
+      { text: "No modifiers yet — allocate passives or equip gear.", source: null, x: 300, y: 440 },
+    ]);
+    expect(l.modifiers.pageCount).toBe(1);
+    expect(l.modifiers.prev).toBeNull();
+    expect(l.modifiers.next).toBeNull();
+    expect(l.hitAreas).toEqual([]);
+  });
+
+  it("keeps every element inside the pane it was given", () => {
+    // The one guard that turns a mis-sized constant (CHAR_MOD_ROWS, the derived
+    // block's row count) into a red test instead of a list clipped off the
+    // bottom of the panel in the browser.
+    const many = [];
+    for (let i = 0; i < CHAR_MOD_ROWS + 2; i += 1) {
+      many.push({ label: `Mod ${i}`, value: i, source: "tree", kind: "stat", detail: "strength" });
+    }
+    const l = layoutCharacterTab({ ...PANE, character: { ...RICH_CHARACTER, modifiers: many } });
+    const boxes = [
+      l.xp.track, ...l.modifiers.rows, ...l.statLines, ...l.derived,
+      l.highlight, l.points, l.modifiers.title, l.modifiers.next,
+    ].filter(Boolean);
+    for (const b of boxes) {
+      expect(b.x).toBeGreaterThanOrEqual(PANE.x);
+      expect(b.y).toBeGreaterThanOrEqual(PANE.y);
+      expect(b.y + (b.h || CHAR_LINE_H)).toBeLessThanOrEqual(PANE.y + PANE.h);
+    }
+  });
+
+  it("pages a long modifier list and registers arrow hit areas", () => {
+    const many = [];
+    for (let i = 0; i < CHAR_MOD_ROWS + 2; i += 1) {
+      many.push({ label: `Mod ${i}`, value: i, source: "tree", kind: "stat", detail: "strength" });
+    }
+    const p0 = layoutCharacterTab({ ...PANE, character: { ...RICH_CHARACTER, modifiers: many } });
+    expect(p0.modifiers.pageCount).toBe(2);
+    expect(p0.modifiers.rows).toHaveLength(CHAR_MOD_ROWS);
+    expect(p0.modifiers.rows[0].text).toBe("Mod 0  +0 STR");
+    expect(p0.modifiers.prev).toBeNull();
+    expect(p0.hitAreas).toContainEqual({ ...p0.modifiers.next, kind: "charmodpage", id: 1 });
+
+    const p1 = layoutCharacterTab({ ...PANE, character: { ...RICH_CHARACTER, modifiers: many }, modPage: 1 });
+    expect(p1.modifiers.rows).toHaveLength(2);
+    expect(p1.modifiers.rows[0].text).toBe(`Mod ${CHAR_MOD_ROWS}  +${CHAR_MOD_ROWS} STR`);
+    expect(p1.modifiers.next).toBeNull();
+    expect(p1.hitAreas).toContainEqual({ ...p1.modifiers.prev, kind: "charmodpage", id: 0 });
+  });
+
+  it("clamps a modifier page past the end", () => {
+    const l = layoutCharacterTab({ ...PANE, character: RICH_CHARACTER, modPage: 9 });
+    expect(l.modifiers.page).toBe(0);
+    expect(l.modifiers.rows[0].text).toBe("Kindling  +12% fire damage");
+  });
+
+  it("says it is loading when no character view has arrived", () => {
+    const l = layoutCharacterTab({ ...PANE, character: null });
+    expect(l.loading.text).toBe("Loading character…");
+    expect(l.statLines).toEqual([]);
+    expect(l.header).toBeNull();
+    expect(l.hitAreas).toEqual([]);
+  });
+});
+
+describe("the Character tab inside the inventory panel", () => {
+  function inv() {
+    return { types: new Map(), items: [], equipment: {}, ammoCounts: new Map(), capacity: 48 };
+  }
+
+  it("offers Character as the fifth tab, after the four item filters", () => {
+    expect(TABS.map((t) => t.key)).toEqual(["all", "equip", "supply", "stones", "character"]);
+    const l = layoutInventory({ inventory: inv() });
+    expect(l.tabs.map((t) => t.label)).toEqual(["All", "Equip", "Supply", "Stones", "Character"]);
+    const last = l.tabs[4];
+    expect(last.x + last.w).toBeLessThanOrEqual(l.panel.x + l.panel.w);
+    expect(l.hitAreas).toContainEqual({ x: last.x, y: last.y, w: last.w, h: last.h, kind: "invtab", id: "character" });
+  });
+
+  it("feeds the item grid nothing at all on the Character tab", () => {
+    // Without this the tab would inherit `categories: null` ("show everything")
+    // and paint the item grid straight through the character pane.
+    const i = inv();
+    i.types = new Map([[1, { id: 1, name: "short sword", category: "weapon", slot: "main_hand" }]]);
+    i.items = [{ id: "w", typeId: 1, quantity: 1 }];
+    expect(visibleItems(i, "character")).toEqual([]);
+    // ...and the control: the same inventory on any item tab is NOT empty, so
+    // the assertion above is about the tab and not about an empty fixture.
+    expect(visibleItems(i, "all")).toHaveLength(1);
+    const l = layoutInventory({ inventory: i, tab: "character" });
+    expect(l.cells.every((c) => c.item === null)).toBe(true);
+    expect(l.hitAreas.some((a) => a.kind === "item")).toBe(false);
+    expect(l.pages.count).toBe(1);
+    expect(l.pages.prev).toBeNull();
+    expect(l.pages.next).toBeNull();
+  });
+
+  it("builds the character pane only on the Character tab", () => {
+    expect(layoutInventory({ inventory: inv(), tab: "all", character: RICH_CHARACTER }).character).toBeNull();
+    const l = layoutInventory({ inventory: inv(), tab: "character", character: RICH_CHARACTER });
+    expect(l.character).not.toBeNull();
+    expect(l.character.header.text).toBe("Warrior — Level 7");
+  });
+
+  it("hoists the pane's hit areas onto the panel so clicks route", () => {
+    const many = [];
+    for (let i = 0; i < CHAR_MOD_ROWS + 2; i += 1) {
+      many.push({ label: `Mod ${i}`, value: i, source: "tree", kind: "stat", detail: "strength" });
+    }
+    const l = layoutInventory({
+      inventory: inv(), tab: "character",
+      character: { ...RICH_CHARACTER, modifiers: many },
+    });
+    expect(l.hitAreas.some((a) => a.kind === "charmodpage" && a.id === 1)).toBe(true);
+  });
+
+  it("keeps the paperdoll and the footer on the Character tab", () => {
+    // The left column is character-shaped already; only the right-hand grid is
+    // replaced. Losing the equipment boxes here would be a regression.
+    const l = layoutInventory({ inventory: inv(), tab: "character", character: RICH_CHARACTER, gold: 42 });
+    expect(l.slots).toHaveLength(8);
+    expect(l.footer.gold).toBe(42);
+    expect(l.character.x).toBeGreaterThan(l.preview.x + l.preview.w);
+  });
+
+  it("gives the pane exactly the rectangle the grid would have had", () => {
+    const l = layoutInventory({ inventory: inv(), tab: "character", character: RICH_CHARACTER });
+    const grid = layoutInventory({ inventory: inv(), tab: "all", character: RICH_CHARACTER });
+    expect(l.character.x).toBe(grid.cells[0].x);
+    expect(l.character.y).toBe(grid.cells[0].y);
+    expect(l.character.x + l.character.w).toBeLessThanOrEqual(l.panel.x + l.panel.w);
+    expect(l.character.y + l.character.h).toBeLessThanOrEqual(l.footer.y);
   });
 });
 
