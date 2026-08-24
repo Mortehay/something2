@@ -15,6 +15,7 @@ const { unequipBlockers } = require('./equipRequirements.js');
 const { loadProgression } = require('../services/progressionStore.js');
 const { GroundItemSim } = require('./groundItems');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerStats.js');
+const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
 
 // Bounds concurrent creature-owned projectiles per world. A swarm-density
 // world can hold 12-creature packs; twelve Ranged creatures on a 1.8s cooldown
@@ -65,6 +66,42 @@ function weaponDamage(p, w) {
 // reappear.
 function applyAttackCooldown(p, w) {
   p._attackCd = w.cooldown * p.stats.cooldownMult;
+}
+
+// THE ONE ATTACK RESOURCE GATE (SOMET-472; spec 8.3: "the check lives in the
+// same place the mana check does today, so there is one cost gate, not two").
+//
+// Both canAttack -- the pre-check server.js runs BEFORE it spends ammo -- and
+// attack itself call this. Two hand-written copies of the rule is exactly how a
+// class could end up unable to fire but still losing an arrow.
+//
+// Returns null when the attack is affordable, or the name of the resource that
+// refused it. A refusal costs NOTHING: no resource is touched, no cooldown is
+// stamped. That has always been mana's rule here and it now covers life too.
+function resourceRefusal(p, w) {
+  if (p.stamina < (w.stamina_cost || 0)) return 'stamina';
+  const manaCost = w.mana_cost || 0;
+  if (manaCost <= 0) return null;
+  if (p.usesLifeCost) {
+    // p.stats is the bundle derivePlayerStats produced, and it carries the
+    // passive tree's lifeCostMultiplier (playerStats.js). Reading it off
+    // `stats` rather than off the player is what makes an allocated Blood
+    // Pact take effect the instant applyDerivedStats runs.
+    return canPayLife(p.hp, lifeCostFor(manaCost, p.stats.lifeCostMultiplier)) ? null : 'life';
+  }
+  return p.mana < manaCost ? 'mana' : null;
+}
+
+// The matching spend. Called ONLY after resourceRefusal returned null, and
+// deliberately adjacent to it: a spend that could pick a different pool from
+// the check is a way to cast for free.
+function spendResources(p, w) {
+  const staminaCost = w.stamina_cost || 0;
+  if (staminaCost) p.stamina -= staminaCost;
+  const manaCost = w.mana_cost || 0;
+  if (!manaCost) return;
+  if (p.usesLifeCost) p.hp -= lifeCostFor(manaCost, p.stats.lifeCostMultiplier);
+  else p.mana -= manaCost;
 }
 
 // Burn is fire damage, so a fire resistance mitigates the DOT exactly as it
@@ -170,7 +207,16 @@ class World {
   // defect as the buff-stone overwrite SOMET-245 Task 6 fixed. Defaults to
   // null so a test that builds a player unchanged still gets HP_BASE/
   // MANA_BASE via derivePlayerStats' own fallback.
-  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null, bind = null, classPools = null) {
+  //
+  // `usesLifeCost` (SOMET-472) is the Cultist's resource substitution: every
+  // item_types.mana_cost is paid in HP instead. Resolved ONCE at join from the
+  // character's class name (server.js) and read ONLY by resourceRefusal /
+  // spendResources above, so no other site in the sim branches on class.
+  // Defaults false, so every existing caller -- and every test that builds a
+  // player -- behaves exactly as before. HOW MUCH it costs is not here: that
+  // is stats.lifeCostMultiplier, which the tree owns and applyDerivedStats
+  // refreshes.
+  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null, bind = null, classPools = null, usesLifeCost = false) {
     this.players.set(userId, {
       userId,
       characterId,
@@ -221,6 +267,9 @@ class World {
       // consults it, because every pool number this file needs is already
       // baked into `stats`.
       classPools,
+      // Strict boolean: a truthy string off the join path must not silently
+      // enrol a Warrior in life casting.
+      usesLifeCost: usesLifeCost === true,
     });
   }
 
@@ -463,9 +512,7 @@ class World {
     if (!canAct(p, this.now)) return { ok: false, weapon: null };
     const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
     if (!w) return { ok: false, weapon: null };
-    if (p.mana < (w.mana_cost || 0) || p.stamina < (w.stamina_cost || 0)) {
-      return { ok: false, weapon: w };
-    }
+    if (resourceRefusal(p, w)) return { ok: false, weapon: w };
     return { ok: true, weapon: w };
   }
 
@@ -484,12 +531,12 @@ class World {
     const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
     if (!w) return { kills: [], attacks: [], impacts: [], stoneHit: null };
 
-    const manaCost = w.mana_cost || 0;
-    const staminaCost = w.stamina_cost || 0;
     // Both resources are checked BEFORE either is deducted, and a denied
     // attack does NOT consume the cooldown — matching mana's existing rule,
     // now covering the melee branch too (melee weapons can carry a cost).
-    if (p.mana < manaCost || p.stamina < staminaCost) return { kills: [], attacks: [], impacts: [], stoneHit: null };
+    // resourceRefusal is the same call canAttack makes, so the pre-check that
+    // guards ammo and the real check cannot disagree.
+    if (resourceRefusal(p, w)) return { kills: [], attacks: [], impacts: [], stoneHit: null };
 
     const { nx, ny } = normalizeAim(ax, ay, p.facing);
     const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
@@ -503,8 +550,7 @@ class World {
     if (w.kind === 'melee') {
       const f = facingFromInput(sign(nx), sign(ny));
       if (f) p.facing = f;
-      if (manaCost) p.mana -= manaCost;
-      if (staminaCost) p.stamina -= staminaCost;
+      spendResources(p, w);
       // Queried BEFORE applyMeleeArc, which deletes whatever it kills: after
       // the fact a one-shot kill would look like a miss.
       // SOMET-286: one scan, two lists -- what the swing may damage, and what
@@ -685,8 +731,7 @@ class World {
     // projectile
     const f = facingFromInput(sign(nx), sign(ny));
     if (f) p.facing = f;
-    if (manaCost) p.mana -= manaCost;
-    if (staminaCost) p.stamina -= staminaCost;
+    spendResources(p, w);
     this.projectiles.spawn({
       ownerId: userId, x: cx, y: cy, nx, ny, weapon: w, damage: weaponDamage(p, w),
       // Snapshotted at launch for the same reason `damage` is, and for one
