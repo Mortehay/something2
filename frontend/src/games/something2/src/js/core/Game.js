@@ -18,6 +18,12 @@ import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
+import {
+    buildTreeIndex, hitNodeAt, clampZoom, zoomAbout, DEFAULT_ZOOM,
+} from '../systems/passiveTreePanel.js';
+import {
+    fetchPassiveTree, allocatePassive, respecPassives, fetchRespecQuote, fetchStartClass,
+} from '../net/passiveTreeClient.js';
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
 import { addBlasts, pruneBlasts } from "./blasts.js";
@@ -200,6 +206,25 @@ export class Game {
         // shopView: clicks only ever set a page the last rendered frame
         // offered.
         this.bankView = { tab: 'chest', page: 0 };
+
+        // Passive tree overlay (SOMET-476). `passiveTree` is the immutable
+        // graph, fetched ONCE on the first open; `passiveIndex` is its spatial
+        // index, rebuilt only when the graph itself changes. The ALLOCATED SET
+        // is NOT stored here -- it lives on this.progression, whose single
+        // writer is the onProgression handler above (see CharacterSheet.jsx's
+        // F1 header for the cross-channel race that rule exists to prevent).
+        this.passiveTree = null;
+        this.passiveIndex = null;
+        this.passiveTreeOpen = false;
+        this.passiveStartClass = null;
+        this.passiveView = { panX: GAME_WIDTH / 2, panY: GAME_HEIGHT / 2, zoom: DEFAULT_ZOOM };
+        this.passiveDrag = null;
+        // Contract §6.4. The COST is the server's number, refetched on every
+        // open; it is never recomputed from respec_base_gold x level here,
+        // which is the drift CharacterSheet.jsx's F2 header records.
+        this.passiveRespecCost = null;
+        this.passiveGold = null;
+        this.passiveRespecBusy = false;
 
         // Transient on-screen toast (Slice 3b fast-follow F3): the server's
         // rejection frames (equip/drop/etc "error" replies) previously only
@@ -441,6 +466,12 @@ export class Game {
         this.blasts = [];
         this.vfx = [];
         this.noAmmoUntil = 0;
+        // SOMET-476. The GRAPH is world-independent and deliberately survives a
+        // join (it is ~1800 rows and identical everywhere), but the open state,
+        // the pan and any in-flight drag belong to the world being left.
+        this.passiveTreeOpen = false;
+        this.passiveDrag = null;
+        this.passiveRespecBusy = false;
 
         this._inputBuffer = [];
         // Connect to the authoritative sim; spawn comes from the server. The
@@ -803,7 +834,8 @@ export class Game {
     // the render params it is handed rather than calling this, since it must
     // answer for the frame it is drawing, not for the tick that follows.
     _anyPanelOpen() {
-        return this.inventoryOpen === true || this.shopOpen === true || this.bankOpen === true;
+        return this.inventoryOpen === true || this.shopOpen === true || this.bankOpen === true
+            || this.passiveTreeOpen === true;
     }
 
     // One repeat step, called from update(). Everything it decides lives in
@@ -908,6 +940,7 @@ export class Game {
         if (this._mouseDownHandler) this.canvas.removeEventListener('mousedown', this._mouseDownHandler);
         if (this._mouseUpHandler) this.canvas.removeEventListener('mouseup', this._mouseUpHandler);
         if (this._windowMouseUpHandler) window.removeEventListener('mouseup', this._windowMouseUpHandler);
+        if (this._wheelHandler) this.canvas.removeEventListener('wheel', this._wheelHandler);
         if (this.authorityClient) this.authorityClient.disconnect();
 
         cancelAnimationFrame(this.animationFrameId);
@@ -1108,6 +1141,22 @@ export class Game {
                 // at their feet come from this.player.effects via drawCreature.
                 effects: this.player.effects || null,
                 progression: this.progression,
+                // SOMET-476 — the passive-tree overlay. Every field here is
+                // read straight off the single-writer progression row rather
+                // than cached anywhere: a kill that levels the player up must
+                // open new nodes on the very next frame.
+                passiveTreeOpen: this.passiveTreeOpen,
+                passiveIndex: this.passiveIndex,
+                passiveView: this.passiveView,
+                allocatedNodeIds: (this.progression && this.progression.allocatedNodeIds) || [],
+                passivePoints: (this.progression && this.progression.passivePoints) || 0,
+                startNodeId: this._passiveStartNodeId(),
+                // Contract §6.4. `passiveRespecCost` is the SERVER's number; a
+                // null keeps the button disabled rather than guessing one.
+                passiveRespecCost: this.passiveRespecCost,
+                passiveRespecBusy: this.passiveRespecBusy,
+                passiveHoverX: this.passiveTreeOpen ? (this._cursorX ?? null) : null,
+                passiveHoverY: this.passiveTreeOpen ? (this._cursorY ?? null) : null,
                 // SOMET-493. `enabled` false short-circuits the whole pass in
                 // RenderSystem, so a player who never turns it on pays one
                 // property read per frame.
@@ -1156,6 +1205,115 @@ export class Game {
         this.inventoryOpen = false;
         this.inventorySelectedItemId = null;
         this.inventoryDrag = null;
+    }
+
+    // The ONE way the passive tree opens, for the same reason closeInventory
+    // is the one way the inventory closes: the P toggle is the only caller
+    // today, but the fetch/centre pair must not be duplicated at a second one.
+    openPassiveTree() {
+        this.passiveTreeOpen = true;
+        // Recentred on every open: a player who panned into a far sector last
+        // time should not reopen to an empty screen with no idea which way
+        // home is.
+        this.passiveView = { panX: GAME_WIDTH / 2, panY: GAME_HEIGHT / 2, zoom: DEFAULT_ZOOM };
+        if (!this.passiveTree) {
+            fetchPassiveTree()
+                .then((tree) => {
+                    this.passiveTree = tree;
+                    this.passiveIndex = buildTreeIndex(tree);
+                })
+                .catch((err) => this._showToast(err.message));
+        }
+        if (this.passiveStartClass == null) {
+            fetchStartClass()
+                .then((name) => { this.passiveStartClass = name; })
+                .catch(() => { this.passiveStartClass = null; });
+        }
+        this._refreshRespecQuote();
+    }
+
+    // The ONE way it closes. Escape, the panel's [X] and the 'p' toggle all
+    // land here so an in-flight PAN that outlived its panel cannot resolve
+    // against a layout that is no longer on screen -- the same hazard
+    // closeInventory's header describes for an in-flight drag.
+    closePassiveTree() {
+        this.passiveTreeOpen = false;
+        this.passiveDrag = null;
+    }
+
+    // Contract §6.4's affordability inputs, refetched rather than cached with
+    // the graph: the cost is respec_base_gold x LEVEL and the player levels up
+    // mid-session. Failure leaves the cost null, which respecDisabled reads as
+    // "disabled", never as "free".
+    _refreshRespecQuote() {
+        return fetchRespecQuote()
+            .then((q) => {
+                this.passiveRespecCost = q.respecCost;
+                this.passiveGold = q.gold;
+            })
+            .catch(() => { this.passiveRespecCost = null; });
+    }
+
+    // A press inside the open tree. Either it lands on a chrome control (the
+    // [X], the respec button) and is consumed here, or it ARMS a pan -- and
+    // whether that was a pan or a click on a node is decided on mouseup by
+    // `moved`, exactly as the inventory drag decides between a drag and a click.
+    _handlePassivePress(x, y) {
+        const layout = this.renderSystem && this.renderSystem._passiveLayout;
+        if (layout) {
+            const hit = layout.hitAreas.find(
+                (a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h
+                    && (a.kind === 'passiveclose' || a.kind === 'passiverespec'),
+            );
+            if (hit && hit.kind === 'passiveclose') { this.closePassiveTree(); return; }
+            if (hit && hit.kind === 'passiverespec') {
+                // The hit area exists ONLY while the button is enabled
+                // (layoutPassiveTree publishes it conditionally), so there is
+                // no second affordability check here to drift from the first.
+                this.passiveRespecBusy = true;
+                respecPassives()
+                    .then(({ gold }) => {
+                        // gold ONLY. The progression comes back over the
+                        // ordered websocket frame; applying the HTTP body here
+                        // would be the second writer F1 removed.
+                        if (Number.isFinite(gold)) this.gold = gold;
+                        return this._refreshRespecQuote();
+                    })
+                    .catch((err) => this._showToast(err.message))
+                    .finally(() => { this.passiveRespecBusy = false; });
+                return;
+            }
+        }
+        this.passiveDrag = { startX: x, startY: y, lastX: x, lastY: y, moved: false };
+    }
+
+    // A press that never travelled: resolve it against the node circles of the
+    // frame the player was actually looking at.
+    _handlePassiveClick(x, y) {
+        const layout = this.renderSystem && this.renderSystem._passiveLayout;
+        if (!layout) return;
+        const node = hitNodeAt(layout, x, y);
+        // A LOCKED node is not clickable. The server refuses it too
+        // (passiveRules.isAllocatable), so this is an affordance, not a gate --
+        // but firing the request anyway would toast a refusal on every stray
+        // click in the tree.
+        if (!node || node.state !== 'allocatable') return;
+        // Fire and forget. The success body is discarded on purpose: the
+        // server's ordered `progression` websocket frame is the ONLY writer of
+        // this.progression (see the onProgression handler above and
+        // CharacterSheet.jsx's F1 header).
+        allocatePassive(node.id).catch((err) => this._showToast(err.message));
+    }
+
+    // The client's copy of the server's class -> start-node lookup, used ONLY
+    // to decide which nodes to DRAW as reachable. passiveTreeStore's
+    // startNodeIdFor resolves it again on every allocate and is the only thing
+    // that authorizes one. A class with no start node returns null and nothing
+    // is drawn allocatable, rather than defaulting into another class's sector.
+    _passiveStartNodeId() {
+        if (!this.passiveTree || !this.passiveStartClass) return null;
+        const start = this.passiveTree.nodes.find((n) => n.start_class === this.passiveStartClass);
+        return start ? start.id : null;
     }
 
     // Hit-test the slot/item rects RenderSystem recorded while drawing the
@@ -1247,7 +1405,7 @@ export class Game {
             KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd',
             KeyI: 'i', KeyE: 'e', KeyB: 'b', KeyG: 'g',
             KeyF: 'f', KeyM: 'm', KeyT: 't', KeyC: 'c',
-            KeyR: 'r', KeyQ: 'q', Space: ' ',
+            KeyR: 'r', KeyQ: 'q', KeyP: 'p', Space: ' ',
             ArrowUp: 'arrowup', ArrowDown: 'arrowdown', ArrowLeft: 'arrowleft', ArrowRight: 'arrowright',
             Escape: 'escape',
         };
@@ -1264,9 +1422,22 @@ export class Game {
             // weapon switch — equipping now goes through the panel). Gated on
             // !shopOpen so the two centred panels can never stack (the shop is
             // closed with 'e' or Escape first).
-            if (isKey('i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen) {
+            if (isKey('i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen
+                && !this.passiveTreeOpen) {
                 if (this.inventoryOpen) this.closeInventory();
                 else this.inventoryOpen = true;
+            }
+
+            // Passive tree (SOMET-476). Gated on the other three panels being
+            // closed for the same reason the 'i' binding is: two centred
+            // panels must never stack. The graph is ~1800 nodes and never
+            // changes during a session, so it is fetched once, lazily, on the
+            // first open rather than on join.
+            if (isKey('p') && this.state === 'playing' && this.chunked && !e.repeat
+                && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+                if (this.passiveTreeOpen) { this.closePassiveTree(); return; }
+                this.openPassiveTree();
+                return;
             }
 
             if (isKey('escape')) {
@@ -1276,6 +1447,8 @@ export class Game {
                     this.shopOpen = false;
                 } else if (this.bankOpen) {
                     this.bankOpen = false;
+                } else if (this.passiveTreeOpen) {
+                    this.closePassiveTree();
                 } else if (this.inventoryOpen) {
                     this.closeInventory();
                 }
@@ -1378,6 +1551,21 @@ export class Game {
                 const dy = this._cursorY - this.inventoryDrag.startY;
                 if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) this.inventoryDrag.armed = true;
             }
+            if (this.passiveDrag) {
+                // Pan by the DELTA since the last move, not from the press
+                // origin: accumulating from the origin re-applies the whole
+                // offset every frame and the tree shoots off screen.
+                this.passiveView = {
+                    ...this.passiveView,
+                    panX: this.passiveView.panX + (this._cursorX - this.passiveDrag.lastX),
+                    panY: this.passiveView.panY + (this._cursorY - this.passiveDrag.lastY),
+                };
+                this.passiveDrag.lastX = this._cursorX;
+                this.passiveDrag.lastY = this._cursorY;
+                const dx = this._cursorX - this.passiveDrag.startX;
+                const dy = this._cursorY - this.passiveDrag.startY;
+                if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) this.passiveDrag.moved = true;
+            }
         };
         this._mouseDownHandler = (e) => {
             if (e.button !== 0) return;
@@ -1398,6 +1586,10 @@ export class Game {
             }
             if (this.bankOpen) {
                 this._handleBankClick(this._cursorX ?? 0, this._cursorY ?? 0);
+                return;
+            }
+            if (this.passiveTreeOpen) {
+                this._handlePassivePress(this._cursorX ?? 0, this._cursorY ?? 0);
                 return;
             }
             if (this.inventoryOpen) {
@@ -1489,6 +1681,17 @@ export class Game {
 
         this._mouseUpHandler = (e) => {
             if (e.button !== 0) return;
+            if (this.passiveDrag) {
+                const pan = this.passiveDrag;
+                this.passiveDrag = null;
+                // It travelled: that was a pan, not a click on a node.
+                if (pan.moved) return;
+                // The panel closed while the button was down (Escape, a world
+                // change): there is no layout left to resolve against.
+                if (!this.passiveTreeOpen) return;
+                this._handlePassiveClick(pan.startX, pan.startY);
+                return;
+            }
             const drag = this.inventoryDrag;
             if (!drag) return;
             this.inventoryDrag = null;
@@ -1517,6 +1720,19 @@ export class Game {
             }
         };
 
+        // SOMET-476. `passive: false` because the handler calls
+        // preventDefault -- without it the browser scrolls the page behind the
+        // canvas while the player is zooming the tree.
+        this._wheelHandler = (e) => {
+            if (!this.passiveTreeOpen) return;
+            if (typeof e.preventDefault === 'function') e.preventDefault();
+            const pt = this._canvasPoint(e);
+            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+            this.passiveView = zoomAbout(
+                this.passiveView, pt.x, pt.y, clampZoom(this.passiveView.zoom * factor),
+            );
+        };
+
         window.addEventListener('keydown', this._keydownHandler);
         window.addEventListener('keyup', this._keyupHandler);
         window.addEventListener('contextmenu', this._contextMenuHandler);
@@ -1525,6 +1741,7 @@ export class Game {
         this.canvas.addEventListener('mousedown', this._mouseDownHandler);
         this.canvas.addEventListener('mouseup', this._mouseUpHandler);
         window.addEventListener('mouseup', this._windowMouseUpHandler);
+        this.canvas.addEventListener('wheel', this._wheelHandler, { passive: false });
     }
 
     startGame(){

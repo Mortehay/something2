@@ -8,6 +8,7 @@ import { TileDiamondCache } from "./tileTexture.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
+import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
 import { effectProgress, effectAlpha, isoArcAngle, particlesAt } from "../core/vfx.js";
 import { anchorY } from "../core/attackAnchor.js";
@@ -60,6 +61,12 @@ export class RenderSystem {
     this._shopHitAreas = [];
     // ...and for the account chest panel (SOMET-310).
     this._bankHitAreas = [];
+    // ...and for the passive-tree overlay (SOMET-476). `_passiveLayout` is
+    // what Game hit-tests a click against, and it is the SAME object the frame
+    // was drawn from -- re-laying it out on click could disagree with what the
+    // player saw.
+    this._passiveHitAreas = [];
+    this._passiveLayout = null;
   }
 
   // Effective render mode for an entity: the global override wins, else the
@@ -189,13 +196,21 @@ export class RenderSystem {
     // Off by default, and `enabled: false` costs exactly one branch: the
     // hit-test runs over the drawables list only when the player asked for it.
     inspect = null,
+    // SOMET-476 -- the passive-tree overlay. `passiveIndex` is the spatial
+    // index Game built once when the graph arrived; the renderer never builds
+    // one, so a 1806-node re-index can never land in a frame.
+    passiveTreeOpen = false, passiveIndex = null, passiveView = null,
+    allocatedNodeIds = [], passivePoints = 0, startNodeId = null,
+    passiveRespecCost = null, passiveRespecBusy = false,
+    passiveHoverX = null, passiveHoverY = null,
   }) {
     if (vfxDefs) this.vfxDefs = vfxDefs;
     // While any full-screen panel is up the cursor is being used to click ITS
     // rows, so the inspect card must not follow it around over the top of the
     // panel — and, more importantly, must not hit-test the world hidden behind
     // one and let a click pin something the player cannot see.
-    const panelOpen = (inventoryOpen && !!inventory) || (shopOpen && !!shop) || (bankOpen && !!bank);
+    const panelOpen = (inventoryOpen && !!inventory) || (shopOpen && !!shop) || (bankOpen && !!bank)
+      || (passiveTreeOpen && !!passiveIndex);
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     // Timestamp for this frame; animated tile textures advance off it (unlike
@@ -366,6 +381,19 @@ export class RenderSystem {
     if (bankOpen && bank) {
       const itemTypes = inventory ? inventory.types : new Map();
       this.renderBank(this.ctx, bank, inventory, itemTypes, this._bankHitAreas, bankView);
+    }
+
+    // Passive tree overlay (SOMET-476) — same convention as the three panels
+    // above: raw canvas pixel space, hit areas rebuilt every frame and only
+    // populated while the panel is open, so a click can never hit a stale rect.
+    this._passiveHitAreas = [];
+    this._passiveLayout = null;
+    if (passiveTreeOpen && passiveIndex && passiveView) {
+      this._passiveLayout = this.renderPassiveTree(this.ctx, {
+        index: passiveIndex, view: passiveView, allocatedNodeIds, passivePoints, startNodeId,
+        gold: gold ?? 0, respecCost: passiveRespecCost, respecBusy: passiveRespecBusy,
+        hoverX: passiveHoverX, hoverY: passiveHoverY,
+      }, this._passiveHitAreas);
     }
 
     // SOMET-493 — last of all, so the card sits on top of the HUD orbs and the
@@ -1654,6 +1682,18 @@ export class RenderSystem {
 
     // Bottom XP bar connecting HP and MP orbs, with central level emblem
     this._drawXpBar(progression);
+  }
+
+  // Canvas-drawn passive tree (SOMET-476). Delegates to
+  // systems/passiveTreePanel.js: the spatial-index culling, the three visual
+  // states and every rect are pure and unit-tested there, and this method only
+  // forwards state, republishes the hit areas and returns the layout for the
+  // click/hover handlers -- exactly what renderInventory below does.
+  renderPassiveTree(ctx, state, hitAreas) {
+    const layout = layoutPassiveTree(state);
+    for (const a of layout.hitAreas) hitAreas.push(a);
+    drawPassiveTree(ctx, layout);
+    return layout;
   }
 
   // Canvas-drawn inventory window. Delegates to systems/inventoryPanel.js:
