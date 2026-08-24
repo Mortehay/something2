@@ -199,6 +199,87 @@ test('GET returns the derived bundle alongside the raw row', async (t) => {
   }
 });
 
+// SOMET-496. The character sheet seeds its DERIVED numbers from this route
+// until the first websocket frame that carries `stats` (the `joined` frame
+// deliberately does not -- see Game.js's `_statsFromSocket` latch). So a
+// gear-free bundle here is a sheet that disagrees with the world the player is
+// standing in, which is the whole defect this ticket closes, just in a
+// narrower window.
+//
+// Every number below is hand-computed from progressionConstants for a Warrior
+// (base pools 100/100) at base INT 5 wearing one +6 INT affix:
+//   INT       = 5 + 6 = 11
+//   maxMana   = MANA_BASE 100 + MANA_PER_INT 10 * (11 - 5) = 160
+//   spellMult = 1 + SPELL_PER_INT 0.05 * (11 - 5)          = 1.30
+// The unequipped control is asserted FIRST, in the same test, so "160" cannot
+// be a number this route happened to return anyway.
+//
+// The persisted row is NOT asserted to be 11 anywhere: loadProgression's row
+// feeds world.js#_requirementContext and must stay gear-free (SOMET-478).
+// gear_affix_composition_db.test.js is where that half is pinned.
+test('GET folds the equipped items rolled affixes into the derived bundle', async (t) => {
+  if (!dbReady(t, 'this test creates a throwaway user wearing an affixed item')) return;
+  let user;
+  let affixId;
+  let typeId;
+  const tag = `s496-${process.pid}-${Date.now()}`;
+  try {
+    user = await createTestUser(dbPool, 'gearframe');
+    const characterId = await charOf(dbPool, user);
+
+    // min_value === max_value, so nothing about this affix is a roll.
+    affixId = (await dbPool.query(
+      `INSERT INTO affix_types (key, label, kind, effect, min_value, max_value,
+                                min_item_level, min_rarity, weight)
+       VALUES ($1, 'of Insight', 'buff', '{"type":"stat","stat":"intelligence"}'::jsonb,
+               6, 6, 1, 'blue', 100) RETURNING id`,
+      [`${tag}-insight`],
+    )).rows[0].id;
+    typeId = (await dbPool.query(
+      `INSERT INTO item_types (name, category, slot, kind, damage, cooldown, defense)
+       VALUES ($1, 'armor', 'head', NULL, 0, 0, 1) RETURNING id`,
+      [`${tag}-circlet`],
+    )).rows[0].id;
+    const itemId = (await dbPool.query(
+      `INSERT INTO player_items (character_id, item_type_id, quantity, rarity, item_level)
+       VALUES ($1, $2, 1, 'blue', 1) RETURNING id`,
+      [characterId, typeId],
+    )).rows[0].id;
+    await dbPool.query(
+      'INSERT INTO player_item_affixes (player_item_id, idx, affix_type_id, value) VALUES ($1, 0, $2, 6)',
+      [itemId, affixId],
+    );
+
+    // CONTROL: carried, not worn. An affix in the backpack must move nothing.
+    const carried = await request(app).get('/api/progression')
+      .query({ character_id: characterId }).set(authed(user));
+    assert.equal(carried.status, 200);
+    assert.equal(carried.body.stats.maxMana, 100);
+    assert.equal(carried.body.stats.spellMult, 1);
+    assert.equal(carried.body.sources.intelligence.gear, 0);
+
+    await dbPool.query(
+      "INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1, 'head', $2)",
+      [characterId, itemId],
+    );
+
+    const worn = await request(app).get('/api/progression')
+      .query({ character_id: characterId }).set(authed(user));
+    assert.equal(worn.status, 200);
+    assert.equal(worn.body.stats.maxMana, 160,
+      'the sheet must derive from a gear-framed row, or it advertises numbers the world does not use');
+    assert.equal(worn.body.stats.spellMult, 1.3);
+    assert.equal(worn.body.effective.intelligence, 11);
+    assert.equal(worn.body.sources.intelligence.gear, 6);
+  } finally {
+    await dropUser(dbPool, user);
+    // affix_types is ON DELETE RESTRICT from player_item_affixes, so the user
+    // cascade above has to land first.
+    if (affixId != null) await dbPool.query('DELETE FROM affix_types WHERE id = $1', [affixId]).catch(() => {});
+    if (typeId != null) await dbPool.query('DELETE FROM item_types WHERE id = $1', [typeId]).catch(() => {});
+  }
+});
+
 // The security-critical test, MOVED off the deleted allocate route onto the
 // one write route that remains. It asks the API -- AS userA -- to act on
 // userB by slipping a userId into the body; the only row that may move is

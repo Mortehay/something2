@@ -178,7 +178,9 @@ async function loadInventory(pool, characterId) {
   // the one loader, and NOT in a second query somewhere on the equip path.
   // `effect` rides along with each affix because a stat affix is identified by
   // its effect payload, not by its key -- equipRequirements#gearStatGrants
-  // reads exactly that.
+  // reads exactly that. `label` rides along (SOMET-496) because the Character
+  // tab lists every gear modifier by label, and gearAffixes.js has no second
+  // query to look one up with.
   //
   // The GROUP BY makes this one round trip rather than one per item. The
   // FILTER is load-bearing: a plain jsonb_agg over a LEFT JOIN emits
@@ -189,6 +191,7 @@ async function loadInventory(pool, characterId) {
             pi.created_at,
             COALESCE(jsonb_agg(
               jsonb_build_object('affixTypeId', pia.affix_type_id, 'key', at.key,
+                                 'label', at.label,
                                  'value', pia.value, 'effect', at.effect)
               ORDER BY pia.idx
             ) FILTER (WHERE pia.player_item_id IS NOT NULL), '[]'::jsonb) AS affixes
