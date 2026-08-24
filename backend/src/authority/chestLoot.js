@@ -119,6 +119,10 @@ async function openChest(pool, chestId, characterId, {
     // everything they rolled, and a full inventory costs them a walk instead
     // of the reward.
     const overflowTypeIds = [];
+    // Built ONCE, not per granted item: affix_types rows carry the `effect`
+    // payload the in-memory copy below needs, and rollItemInstance's return
+    // shape does not.
+    const affixById = new Map((affixPool || []).filter((a) => a).map((a) => [a.id, a]));
     for (const itemTypeId of itemTypeIds) {
       if (items.length >= freeSlots) { overflowTypeIds.push(itemTypeId); continue; }
       // One row per unit (rollChestLoot/rollDrops already repeats
@@ -175,14 +179,13 @@ async function openChest(pool, chestId, characterId, {
       // play" shape D1, D2 and C2 each shipped. rollItemInstance returns
       // {affixTypeId, key, value}; the effect comes from the pool row that was
       // rolled, so this costs no query.
-      const byId = new Map((affixPool || []).filter((a) => a).map((a) => [a.id, a]));
       items.push({
         ...ins.rows[0],
         affixes: rolled.affixes.map((a) => ({
           affixTypeId: a.affixTypeId,
           key: a.key,
           value: a.value,
-          effect: (byId.get(a.affixTypeId) || {}).effect ?? null,
+          effect: (affixById.get(a.affixTypeId) || {}).effect ?? null,
         })),
       });
     }
