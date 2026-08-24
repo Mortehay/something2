@@ -342,7 +342,17 @@ const CLASS_LOADOUTS = [
   { class: 'Mage', item: 'arcane-ward', quantity: 1 },
   { class: 'Monk', item: 'stick', quantity: 1 },
   { class: 'Monk', item: 'leather-vest', quantity: 1 },
-  { class: 'Cultist', item: 'apprentice staff', quantity: 1 },
+  // SOMET-492. The Cultist is the one class whose loadout is WORN rather than
+  // carried, and it has to be: a Cultist casts with life instead of mana, and
+  // that identity cannot engage while the staff sits in the bag (nothing is
+  // equipped on a fresh character -- activeWeaponType falls back to the
+  // dagger) and while the staff is bare (activeWeaponType zeroes a bare
+  // weapon's mana_cost, so even an equipped staff casts free). Both halves are
+  // closed here, in data. `stone_of_apprentice staff` is the stone
+  // 1714440167000 generated FROM this staff, so its spell is the staff's own.
+  // Mirrors migration 1714440513000; keep the two in step.
+  { class: 'Cultist', item: 'apprentice staff', quantity: 1, equipSlot: 'main_hand' },
+  { class: 'Cultist', item: 'stone_of_apprentice staff', quantity: 1, socketInto: 'apprentice staff' },
   { class: 'Cultist', item: 'leather-vest', quantity: 1 },
   { class: 'Archer', item: 'bow', quantity: 1 },
   { class: 'Archer', item: 'arrow', quantity: 20 },

@@ -313,9 +313,19 @@ async function grantStartingLoadout(pool, character, itemTypes) {
     );
     if (claim.rowCount === 0) { await client.query('ROLLBACK'); return false; }
     const rows = await client.query(
-      'SELECT item_type_id, quantity FROM class_loadouts WHERE entity_type_id = $1 ORDER BY id ASC',
+      `SELECT item_type_id, quantity, equip_slot, socket_into_item_type_id
+         FROM class_loadouts WHERE entity_type_id = $1 ORDER BY id ASC`,
       [character.entityTypeId],
     );
+    // SOMET-492: item_type_id -> the player_items.id this grant just created
+    // for it, so a socket directive can name its host by TYPE (the only thing
+    // a catalog row can name) and still be wired to the exact instance. Built
+    // as the loop runs rather than re-queried afterwards for the same reason
+    // 1714440167000 threads its stone ids through a MATERIALIZED CTE: a
+    // re-join on (character_id, item_type_id) is only 1:1-correct while a
+    // class is never handed two instances of one type, which is a fact about
+    // today's content and not a guarantee.
+    const grantedByType = new Map();
     for (const row of rows.rows) {
       // The fk on class_loadouts already guarantees the item type exists in the
       // database. This guard is about the in-memory catalog the world was built
@@ -331,10 +341,57 @@ async function grantStartingLoadout(pool, character, itemTypes) {
       // Written inside this same transaction as the claim, so a grant is
       // still all-or-nothing -- there is no path that inserts a granted row
       // and leaves it unbound.
-      await client.query(
-        'INSERT INTO player_items (character_id, item_type_id, quantity, soulbound) VALUES ($1, $2, $3, true)',
+      //
+      // The granted stone is soulbound by the same INSERT as everything else,
+      // which is the ticket's third acceptance criterion: a Cultist cannot
+      // unsocket its starting stone and sell it on a delete-and-reroll loop.
+      const ins = await client.query(
+        `INSERT INTO player_items (character_id, item_type_id, quantity, soulbound)
+         VALUES ($1, $2, $3, true) RETURNING id`,
         [character.id, row.item_type_id, row.quantity],
       );
+      const playerItemId = ins.rows[0].id;
+      if (!grantedByType.has(row.item_type_id)) grantedByType.set(row.item_type_id, playerItemId);
+
+      // A stone instance needs its stone_instances row or it is inert: every
+      // socket path (socketStone, loadInventory's hydration join, loot.js's
+      // drop guard) joins player_items to that table and a stone missing from
+      // it can never be socketed, ever. Until now the conversion migration
+      // (1714440167000) was the ONLY writer of this table -- loot.js says so
+      // in as many words -- so granting a stone without this INSERT would hand
+      // the Cultist a stone it could not put in anything.
+      if (itemTypes.get(row.item_type_id).category === 'stone') {
+        await client.query('INSERT INTO stone_instances (player_item_id) VALUES ($1)', [playerItemId]);
+      }
+    }
+
+    // SOMET-492, second pass. Worn and socketed AFTER every row is inserted,
+    // not inline, because a socket directive may name a host that appears
+    // later in the loadout's own id order and a first-pass wiring would then
+    // silently no-op on ordering alone.
+    for (const row of rows.rows) {
+      const itemId = grantedByType.get(row.item_type_id);
+      if (itemId === undefined) continue;
+      if (row.equip_slot) {
+        await client.query(
+          'INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)',
+          [character.id, row.equip_slot, itemId],
+        );
+      }
+      if (row.socket_into_item_type_id != null) {
+        const hostId = grantedByType.get(row.socket_into_item_type_id);
+        // A directive whose host is not in the same loadout is a content
+        // error, and it is left UNSOCKETED rather than thrown: the stone is
+        // still in the bag and the player can socket it by hand, whereas a
+        // throw here rolls back the whole grant and leaves the character
+        // permanently unable to join. The loadout tests assert the resolved
+        // socket, so the content error fails a test rather than a player.
+        if (hostId === undefined) continue;
+        await client.query(
+          'UPDATE stone_instances SET socketed_into_id = $1 WHERE player_item_id = $2',
+          [hostId, itemId],
+        );
+      }
     }
     await client.query('COMMIT');
     return true;

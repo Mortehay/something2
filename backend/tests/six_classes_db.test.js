@@ -172,6 +172,7 @@ test('six playable classes', { skip: !url ? 'no database URL' : false }, async (
       'Archer:leather-vestx1',
       'Cultist:apprentice staffx1',
       'Cultist:leather-vestx1',
+      'Cultist:stone_of_apprentice staffx1',  // SOMET-492
       'Druid:clubx1',
       'Druid:leather-vestx1',
       'Monk:leather-vestx1',

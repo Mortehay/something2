@@ -109,12 +109,19 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
 
   await t.test('each class has its loadout, resolved to real item types', async () => {
     const r = await pool.query(
-      `SELECT e.name AS class, i.name AS item, l.quantity
+      `SELECT e.name AS class, i.name AS item, l.quantity, l.equip_slot, h.name AS socket_into
          FROM class_loadouts l
          JOIN entity_types e ON e.id = l.entity_type_id
          JOIN item_types  i ON i.id = l.item_type_id
+         LEFT JOIN item_types h ON h.id = l.socket_into_item_type_id
         ORDER BY e.name, i.name`);
-    const got = r.rows.map((x) => `${x.class}:${x.item}x${x.quantity}`);
+    // SOMET-492: the wear directives are part of the expectation, not a
+    // separate optional check. A list that only names items would go green
+    // again the moment the Cultist's staff stopped being worn or its stone
+    // stopped being socketed -- which is exactly the state this item fixed.
+    const got = r.rows.map((x) => `${x.class}:${x.item}x${x.quantity}`
+      + (x.equip_slot ? `@${x.equip_slot}` : '')
+      + (x.socket_into ? `>${x.socket_into}` : ''));
     // Ranger is still here after SOMET-471's demotion: characters are wearing
     // this gear, and a rebuilt volume that restored the class without it would
     // leave them with nothing.
@@ -122,8 +129,9 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       'Archer:arrowx20',
       'Archer:bowx1',
       'Archer:leather-vestx1',
-      'Cultist:apprentice staffx1',
+      'Cultist:apprentice staffx1@main_hand',
       'Cultist:leather-vestx1',
+      'Cultist:stone_of_apprentice staffx1>apprentice staff',
       'Druid:clubx1',
       'Druid:leather-vestx1',
       'Mage:apprentice staffx1',
@@ -206,7 +214,11 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       Warrior: ['leather-vestx1', 'short swordx1'],
       Mage: ['apprentice staffx1', 'arcane-wardx1'],
       Monk: ['leather-vestx1', 'stickx1'],
-      Cultist: ['apprentice staffx1', 'leather-vestx1'],
+      // SOMET-492/SOMET-335: the directives are in the expectation because a
+      // re-seed is exactly where they would be silently lost. The migration
+      // authored them; only seeds/data/entityTypes.js can restore them.
+      Cultist: ['apprentice staffx1@main_hand', 'leather-vestx1',
+        'stone_of_apprentice staffx1>apprentice staff'],
       Archer: ['arrowx20', 'bowx1', 'leather-vestx1'],
       Druid: ['clubx1', 'leather-vestx1'],
     }[victim];
@@ -244,22 +256,26 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
         `${victim} must be restored WITH its main stat, or it has no tree sector`);
 
       const loadout = await pool.query(
-        `SELECT i.name AS item, l.quantity
+        `SELECT i.name AS item, l.quantity, l.equip_slot, h.name AS socket_into
            FROM class_loadouts l
            JOIN entity_types e ON e.id = l.entity_type_id
            JOIN item_types  i ON i.id = l.item_type_id
+           LEFT JOIN item_types h ON h.id = l.socket_into_item_type_id
           WHERE e.name = $1 ORDER BY i.name`, [victim]);
       assert.deepEqual(
-        loadout.rows.map((x) => `${x.item}x${x.quantity}`), expectedLoadout,
+        loadout.rows.map((x) => `${x.item}x${x.quantity}`
+          + (x.equip_slot ? `@${x.equip_slot}` : '')
+          + (x.socket_into ? `>${x.socket_into}` : '')), expectedLoadout,
         'the loadout must come back too, or a rebuilt volume leaves the class with no gear');
 
       // Idempotent: a second run must not stack duplicate loadout rows.
       await seedCatalogs(pool);
       const after = await pool.query('SELECT count(*)::int AS n FROM class_loadouts');
-      // 16 = Warrior 2 + Ranger 3 + Mage 2 + Monk 2 + Cultist 2 + Archer 3
+      // 17 = Warrior 2 + Ranger 3 + Mage 2 + Monk 2 + Cultist 3 + Archer 3
       // + Druid 2. Ranger's three rows are still seeded: it is not playable
-      // any more, but characters are still wearing that gear.
-      assert.equal(after.rows[0].n, 16, 'a repeat run must not duplicate loadout rows');
+      // any more, but characters are still wearing that gear. The Cultist's
+      // third row is its spell stone (SOMET-492).
+      assert.equal(after.rows[0].n, 17, 'a repeat run must not duplicate loadout rows');
     } finally {
       await seedCatalogs(pool);
     }

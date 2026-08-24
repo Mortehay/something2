@@ -237,10 +237,75 @@ test('grantStartingLoadout skips loadout entries missing from the catalog (no cr
       { item_type_id: 1, quantity: 1 },
       { item_type_id: 99, quantity: 1 },
     ] })],
-    [/INSERT INTO player_items/i, (sql, p) => { inserts.push(p); return { rows: [] }; }],
+    // SOMET-492: the insert is `... RETURNING id` now, because a socket
+    // directive has to be wired to the exact instance this grant created. A
+    // mock that returns no row would make grantStartingLoadout throw on
+    // rows[0], so returning one here is the fixture keeping up with the query
+    // rather than the guard being relaxed.
+    [/INSERT INTO player_items/i, (sql, p) => { inserts.push(p); return { rows: [{ id: 'new' }] }; }],
   ]);
   const granted = await grantStartingLoadout(pool, { id: 3, entityTypeId: 11 },
     new Map([[1, { id: 1, name: 'short sword' }]]));
   assert.equal(granted, true);
   assert.equal(inserts.length, 1); // only the short sword existed
+});
+
+// SOMET-492. class_loadouts can now say HOW a granted item is worn, and this is
+// the unit-level proof that the two directives are read and acted on -- the
+// live end-to-end proof (a real Cultist, a real join, hp actually moving) is
+// cultist_starting_loadout_db.test.js.
+test('grantStartingLoadout equips what the loadout says to wear and sockets what it says to socket', async () => {
+  const equips = [];
+  const sockets = [];
+  const stoneRows = [];
+  let nextId = 0;
+  const pool = recordingPool([
+    [/UPDATE characters SET starting_loadout_granted_at/i, () => ({ rows: [{ id: 3 }], rowCount: 1 })],
+    // The stone is listed BEFORE its host on purpose: a first-pass wiring that
+    // socketed inline, as each row was inserted, would find no host yet and
+    // silently skip. The directive must survive its host arriving later.
+    [/FROM class_loadouts/i, () => ({ rows: [
+      { item_type_id: 7, quantity: 1, equip_slot: null, socket_into_item_type_id: 2 },
+      { item_type_id: 2, quantity: 1, equip_slot: 'main_hand', socket_into_item_type_id: null },
+      { item_type_id: 5, quantity: 1, equip_slot: null, socket_into_item_type_id: null },
+    ] })],
+    [/INSERT INTO player_items/i, () => { nextId += 1; return { rows: [{ id: `pi${nextId}` }] }; }],
+    [/INSERT INTO stone_instances/i, (sql, p) => { stoneRows.push(p); return { rows: [] }; }],
+    [/INSERT INTO player_equipment/i, (sql, p) => { equips.push(p); return { rows: [] }; }],
+    [/UPDATE stone_instances SET socketed_into_id/i, (sql, p) => { sockets.push(p); return { rows: [] }; }],
+  ]);
+  const itemTypes = new Map([
+    [2, { id: 2, name: 'apprentice staff', category: 'weapon' }],
+    [5, { id: 5, name: 'leather-vest', category: 'armor' }],
+    [7, { id: 7, name: 'stone_of_apprentice staff', category: 'stone' }],
+  ]);
+  const granted = await grantStartingLoadout(pool, { id: 3, entityTypeId: 11 }, itemTypes);
+  assert.strictEqual(granted, true);
+
+  // The stone was inserted first, so it is pi1 and the staff is pi2.
+  assert.deepStrictEqual(stoneRows, [['pi1']],
+    'a granted stone needs its stone_instances row or it can never be socketed');
+  assert.deepStrictEqual(equips, [[3, 'main_hand', 'pi2']]);
+  assert.deepStrictEqual(sockets, [['pi2', 'pi1']],
+    'the stone is socketed into the staff instance this same grant created');
+});
+
+test('grantStartingLoadout leaves a stone loose when its host is not in the same loadout', async () => {
+  const sockets = [];
+  const pool = recordingPool([
+    [/UPDATE characters SET starting_loadout_granted_at/i, () => ({ rows: [{ id: 3 }], rowCount: 1 })],
+    // Item type 2 is named as the host but is not granted to this class.
+    [/FROM class_loadouts/i, () => ({ rows: [
+      { item_type_id: 7, quantity: 1, equip_slot: null, socket_into_item_type_id: 2 },
+    ] })],
+    [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'pi1' }] })],
+    [/INSERT INTO stone_instances/i, () => ({ rows: [] })],
+    [/UPDATE stone_instances SET socketed_into_id/i, (sql, p) => { sockets.push(p); return { rows: [] }; }],
+  ]);
+  const granted = await grantStartingLoadout(pool, { id: 3, entityTypeId: 11 },
+    new Map([[7, { id: 7, name: 'stone_of_apprentice staff', category: 'stone' }]]));
+  // Granted, not thrown: a content error must not make a character permanently
+  // unable to join.
+  assert.strictEqual(granted, true);
+  assert.deepStrictEqual(sockets, []);
 });

@@ -389,16 +389,41 @@ async function seedOnePlayableClass(pool, c) {
 // the class or the item inserts nothing rather than failing the whole seed.
 // ON CONFLICT is safe here (unlike creature_drops) because class_loadouts DOES
 // carry a unique constraint on (entity_type_id, item_type_id).
+//
+// SOMET-492: `equipSlot` and `socketInto` (both optional, both NULL for every
+// class but the Cultist) ride along, and unlike `quantity` they are written on
+// CONFLICT as well as on INSERT. That asymmetry is the point: SOMET-335's trap
+// is a migration-authored fact that a re-seed silently reverts, and
+// playable_classes_db.test.js deletes and re-seeds these very rows. With a
+// bare DO NOTHING a re-seeded Cultist would get its staff and stone back with
+// no equip and no socket -- inventory identical, class inert, every test on
+// the row COUNT still green. quantity keeps its DO NOTHING semantics because
+// nothing here changes it and an operator-adjusted quantity is not this
+// slice's to clobber.
+//
+// `socketInto` is resolved through a LEFT JOIN so a spec naming a host item
+// that is not in the catalog leaves NULL (the item is still granted, just
+// loose) rather than dropping the whole row via a failed cross-join -- the
+// same fail-safe posture as the guard above.
 async function seedOneClassLoadout(pool, l) {
   const r = await pool.query(
-    `INSERT INTO class_loadouts (entity_type_id, item_type_id, quantity)
-     SELECT e.id, i.id, $3
-       FROM entity_types e, item_types i
+    `INSERT INTO class_loadouts (entity_type_id, item_type_id, quantity, equip_slot, socket_into_item_type_id)
+     SELECT e.id, i.id, $3, $4, h.id
+       FROM entity_types e
+       CROSS JOIN item_types i
+       LEFT JOIN item_types h ON h.name = $5
       WHERE e.name = $1 AND i.name = $2
-     ON CONFLICT (entity_type_id, item_type_id) DO NOTHING`,
-    [l.class, l.item, l.quantity],
+     ON CONFLICT (entity_type_id, item_type_id) DO UPDATE
+       SET equip_slot = EXCLUDED.equip_slot,
+           socket_into_item_type_id = EXCLUDED.socket_into_item_type_id
+     RETURNING (xmax = 0) AS inserted`,
+    [l.class, l.item, l.quantity, l.equipSlot || null, l.socketInto || null],
   );
-  return r.rowCount;
+  // rowCount is 1 for an UPDATE too, so counting it would make the seeder
+  // report "restored 17 missing rows" on every run of a fully-seeded database.
+  // xmax = 0 is Postgres' own "this tuple was inserted, not updated by the
+  // conflict clause" tell, so the restored-count keeps meaning what it says.
+  return r.rows.length && r.rows[0].inserted ? 1 : 0;
 }
 
 async function seedCatalogs(pool) {
