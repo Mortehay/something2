@@ -376,7 +376,13 @@ test('a soulbound instance is now DROPPABLE and comes back still bound', async (
     'the laundering hole SOMET-277 closed must stay closed -- the flag rides the round trip');
 });
 
-test('selling an affixed item succeeds and cascades its affix rows away', async (t) => {
+// SOMET-484 changed what this test pins, and deliberately so. It used to
+// assert that selling CASCADED the affix rows away -- which was true, and was
+// the bug: the instance was destroyed and the buyback rebuilt a white one. The
+// sale now hands the instance to the merchant, so the affix rows survive on
+// the shelf. What is still asserted is the property the original cared about:
+// selling an affixed item works, and the SELLER stops having it.
+test('selling an affixed item succeeds and the seller stops holding it', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
   let fx = null;
@@ -403,25 +409,47 @@ test('selling an affixed item succeeds and cascades its affix rows away', async 
   const sold = await sellItem(pool, entry, String(fx.userId), fx.characterId, fx.villageId, item.rows[0].id);
   assert.strictEqual(sold.ok, true, `an affixed item must still be sellable (got: ${sold.reason})`);
 
+  const owned = await pool.query(
+    'SELECT character_id, merchant_stock_id FROM player_items WHERE id = $1', [item.rows[0].id],
+  );
+  assert.strictEqual(owned.rowCount, 1, 'the instance survives the sale -- the merchant holds it now');
+  assert.strictEqual(owned.rows[0].character_id, null, 'the seller must no longer own it');
+  assert.notStrictEqual(owned.rows[0].merchant_stock_id, null, 'a merchant_stock row must hold it');
   const left = await pool.query(
     'SELECT count(*)::int AS n FROM player_item_affixes WHERE player_item_id = $1', [item.rows[0].id],
   );
-  assert.strictEqual(left.rows[0].n, 0, 'affix rows must cascade with their instance');
+  assert.strictEqual(left.rows[0].n, 1, 'and its affix rows ride along with it');
+  // The seller's own inventory is what the player sees, and it must be empty.
+  const inv = await loadInventory(pool, fx.characterId);
+  assert.strictEqual(inv.items.some((i) => i.id === item.rows[0].id), false,
+    'a sold item must not still load into the seller inventory');
 });
 
-// SOMET-484, documented rather than fixed here. merchant_stock carries only
-// item_type_id, so a sold yellow item buys back as a plain white base item:
-// the rarity, the item level and every affix are gone. That is a second
-// denormalised carry path on a row with a multi-day lifetime, which is a
-// different trade from the 180-second world_items one, and it is out of T12's
-// scope. This test exists so the cascade is DELIBERATE and covered rather than
-// discovered by a player; delete it only together with a fix.
-test('SOMET-484: buyback STRIPS rarity, item level and affixes (documented, not fixed)', async (t) => {
+// SOMET-484, FIXED (migration 1714440512000). This test used to pin the
+// opposite: T12 deliberately left the loss visible rather than silent, because
+// merchant_stock carried only item_type_id and a sold yellow item bought back
+// as a plain white one.
+//
+// The fix did NOT add a second denormalised carry path. The merchant now HOLDS
+// the player_items row -- selling moves it off the character, buying moves it
+// back -- so rarity, item level and the affix rows are never read, never
+// written and never copied. That is why the assertions below flipped from
+// "merchant_stock must not carry rarity/item_level/affixes" (which is still
+// true, and still asserted) to "the round trip changes nothing".
+//
+// The exhaustive coverage lives in merchant_buyback_instance_db.test.js --
+// legacy stock, base catalog, catalog deletion, expiry, the soulbound guard
+// and the seller's character being deleted. This one stays here so the affix
+// suite itself still fails if the round trip regresses.
+test('SOMET-484: buyback PRESERVES rarity, item level and affix values', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
   let fx = null;
   t.after(async () => { await cleanup(pool, fx); await pool.end().catch(() => {}); });
 
+  // Still true, and load-bearing: the fix works by REFERENCE, so a snapshot
+  // column appearing on merchant_stock would mean someone added the rotting
+  // carry path this ticket rejected.
   const cols = await pool.query(
     `SELECT column_name FROM information_schema.columns
       WHERE table_name = 'merchant_stock' ORDER BY column_name`,
@@ -430,7 +458,7 @@ test('SOMET-484: buyback STRIPS rarity, item level and affixes (documented, not 
   assert.ok(names.includes('item_type_id'), 'merchant_stock keys on the TYPE');
   for (const carried of ['rarity', 'item_level', 'affixes']) {
     assert.strictEqual(names.includes(carried), false,
-      `merchant_stock unexpectedly carries ${carried} -- if buyback was fixed, this test must be replaced`);
+      `merchant_stock must not SNAPSHOT ${carried} -- SOMET-484 was fixed by holding the instance`);
   }
 
   fx = await fixture(pool, 'buyback');
@@ -441,8 +469,11 @@ test('SOMET-484: buyback STRIPS rarity, item level and affixes (documented, not 
     [fx.characterId, typeRow.rows[0].id],
   );
   const affix = await pool.query('SELECT id FROM affix_types ORDER BY id LIMIT 1');
+  // 3.13 rather than a round 4: two decimals is not representable in float4,
+  // so a value that came back as 3.130000114440918 would prove a precision
+  // loss that an integer roll would hide entirely.
   await pool.query(
-    'INSERT INTO player_item_affixes (player_item_id, idx, affix_type_id, value) VALUES ($1,0,$2,4)',
+    'INSERT INTO player_item_affixes (player_item_id, idx, affix_type_id, value) VALUES ($1,0,$2,3.13)',
     [item.rows[0].id, affix.rows[0].id],
   );
 
@@ -464,13 +495,26 @@ test('SOMET-484: buyback STRIPS rarity, item level and affixes (documented, not 
   const bought = await buyStock(pool, entry, String(fx.userId), fx.characterId, stock.rows[0].id, fx.villageId);
   assert.strictEqual(bought.ok, true, `buyback must still work on an affixed item (got: ${bought.reason})`);
 
+  // Same instance, not a rebuilt copy -- that is what makes the round trip
+  // lossless by construction rather than by careful copying.
+  assert.strictEqual(bought.item.id, item.rows[0].id,
+    'SOMET-484: the buyback hands back the very instance that was sold');
+
   const back = await pool.query(
     'SELECT rarity, item_level FROM player_items WHERE id = $1', [bought.item.id],
   );
-  assert.strictEqual(back.rows[0].rarity, 'white', 'SOMET-484: the buyback returns a WHITE base item');
-  assert.strictEqual(back.rows[0].item_level, 1, 'SOMET-484: the buyback returns item level 1');
-  const n = await pool.query(
-    'SELECT count(*)::int AS n FROM player_item_affixes WHERE player_item_id = $1', [bought.item.id],
+  assert.strictEqual(back.rows[0].rarity, 'yellow', 'SOMET-484: the buyback keeps the rarity');
+  assert.strictEqual(back.rows[0].item_level, 30, 'SOMET-484: the buyback keeps the item level');
+  // BY VALUE, deep-equal: a count check here would pass with the roll zeroed,
+  // which is most of what the bug destroyed.
+  const aff = await pool.query(
+    `SELECT idx, affix_type_id, value FROM player_item_affixes
+      WHERE player_item_id = $1 ORDER BY idx`,
+    [bought.item.id],
   );
-  assert.strictEqual(n.rows[0].n, 0, 'SOMET-484: the buyback returns no affixes');
+  assert.deepStrictEqual(
+    aff.rows.map((r) => ({ idx: Number(r.idx), affixTypeId: r.affix_type_id, value: Number(r.value) })),
+    [{ idx: 0, affixTypeId: affix.rows[0].id, value: 3.13 }],
+    'SOMET-484: the affix comes back with the same index, type and rolled VALUE',
+  );
 });
