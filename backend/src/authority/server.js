@@ -1535,6 +1535,36 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const spawn = await loadSpawn(entry.worldId, character.id, entry.row.chunk_size, entry.row, entry);
         if (ws.readyState !== ws.OPEN) return; // client vanished while we awaited spawn
 
+        // SOMET-499, the SECOND window of the same ghost. `entry` was resolved
+        // from the registry BEFORE the policy lookup and loadSpawn above, and
+        // the outgoing session's close can complete its teardown during those
+        // awaits: it removes ITS player, the world then reads empty, and
+        // `worlds.delete` runs while this join is still holding the object.
+        // Registering into a detached entry is the same frozen client by
+        // another route -- the join succeeds and the player is added, but the
+        // tick loop iterates `worlds`, not this object, so no `state` frame is
+        // ever sent. The close-side re-check below cannot cover this one: at
+        // the moment that teardown ran, this session had not registered yet.
+        // Measured over 90 close-then-rejoin runs, this route accounted for
+        // every ghost left after the close-side guard.
+        //
+        // Re-attaching the SAME object, rather than reloading the world: the
+        // entry is intact (the eviction's flushAndPrune is the same routine
+        // flush the creature timer already runs against live worlds), and the
+        // spawn computed above was derived from this entry's row.
+        if (!worlds.has(entry.worldId)) {
+          worlds.set(entry.worldId, entry);
+        } else if (worlds.get(entry.worldId) !== entry) {
+          // A concurrent load re-created this world while we were away, so a
+          // DIFFERENT object is the live one now. Re-attaching would orphan
+          // that object's players -- refuse loudly instead of joining a dead
+          // entry silently, which is the failure this whole block exists to
+          // stop happening.
+          console.warn('join raced a world reload:', entry.worldId, 'character', character.id);
+          send(ws, { type: 'error', message: 'join failed' });
+          return;
+        }
+
         // One live session per account: the newest join wins. (Refusing instead
         // would lock a user out for up to a full heartbeat cycle after a crash,
         // since the dead-socket reaper needs one interval to notice.)
@@ -2635,11 +2665,50 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // starts being a data loss. No-ops when nothing is pending.
         try { await flushBind(p, Date.now(), true); } catch { /* best-effort */ }
       }
+      // SOMET-499: RE-check, because the two awaits above are a window. The
+      // guard at the top of this handler proved nothing about this moment --
+      // a new session for the same account (entry.sockets and world.players
+      // are keyed by userId only) can have registered while persist and
+      // flushBind were in flight, and tearing down here would delete ITS
+      // socket, ITS player and -- the world now looking empty -- the whole
+      // world entry, leaving a client that is still OPEN and still in
+      // wss.clients but never sent another `state` frame. Measured at roughly
+      // one close-then-rejoin in seven before this guard existed.
+      //
+      // Deliberately narrow: only the TEARDOWN is conditional. persist and
+      // flushBind above are the outgoing session's own durable state and are
+      // always correct to run -- a stale close must not skip saving.
+      //
+      // Checked against entry.sockets and NOT against sessionsByUser: the top
+      // of this handler already deleted this socket's sessionsByUser row, so
+      // re-reading that map would report "stale" on EVERY close, including a
+      // genuine last one, and the leak this teardown prevents (an orphaned
+      // player plus a world that is never evicted) would reopen wholesale.
+      if (entry.sockets.get(ws.userId) !== ws) return;
       entry.world.removePlayer(ws.userId);
       entry.sockets.delete(ws.userId);
       if (entry.world.isEmpty()) {
         await flushAndPrune(entry).catch(() => {});
-        worlds.delete(ws.worldId);
+        // Re-checked AFTER that await (SOMET-499), which is a window of exactly
+        // the same kind as the persist/flushBind one above: measured, an entire
+        // join fits inside flushAndPrune, so an unconditional delete here
+        // detaches a world that has a live, freshly-added player in it -- and
+        // the tick loop iterates `worlds`, so that player is never sent another
+        // `state` frame.
+        //
+        // Each clause earns its place:
+        //   isEmpty()      -- a player was added while we flushed;
+        //   sockets.size   -- a session REGISTERS several awaits before its
+        //                     player reaches addPlayer, so an empty world is
+        //                     not an empty room. This is the leg that covers a
+        //                     DIFFERENT account's close landing in that gap;
+        //   worlds.get()   -- the world was evicted and reloaded while we
+        //                     flushed, so the registered entry belongs to
+        //                     somebody else and is not ours to delete.
+        if (entry.world.isEmpty() && entry.sockets.size === 0
+            && worlds.get(ws.worldId) === entry) {
+          worlds.delete(ws.worldId);
+        }
       }
     });
   });
