@@ -126,7 +126,14 @@ test('the composed progression bundle survives the whole HTTP path', { skip }, a
       strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
     });
     assert.deepStrictEqual(res.body.sources.strength, { base: 5, tree: 0, gear: 0 });
-    assert.deepStrictEqual(res.body.modifiers, []);
+    // NOT empty since SOMET-471/472: a Warrior's free start node grants
+    // physical +3, and SOMET-472 made passiveBundle actually read start-node
+    // grants (they were correct in the database and reaching nothing before
+    // that). Asserted by VALUE rather than relaxed to a length, so a start
+    // grant that silently changes or disappears still fails here.
+    assert.deepStrictEqual(res.body.modifiers, [
+      { source: 'tree', label: 'Warrior', kind: 'damage', detail: 'physical', value: 3 },
+    ]);
     assert.strictEqual(res.body.passivePoints, 5);
     assert.deepStrictEqual(res.body.allocatedNodeIds, []);
     // Contract §6.4 -- T8's predicate, computed server-side. 100000 gold
@@ -154,8 +161,15 @@ test('the composed progression bundle survives the whole HTTP path', { skip }, a
     const after = await request(app).get('/api/progression').query({ character_id: characterId }).set(auth);
     assert.deepStrictEqual(after.body.allocatedNodeIds, [adjacent]);
     assert.strictEqual(after.body.passivePoints, 4);
-    assert.strictEqual(after.body.modifiers.length, 1);
-    assert.strictEqual(after.body.modifiers[0].source, 'tree');
+    // TWO now: the Warrior's start-node grant plus the node just allocated.
+    // Both are 'tree'; the start grant is the damage one, so assert the
+    // allocated node actually ADDED something rather than just counting.
+    assert.strictEqual(after.body.modifiers.length, 2);
+    assert.ok(after.body.modifiers.every((m) => m.source === 'tree'));
+    assert.ok(
+      after.body.modifiers.some((m) => m.kind === 'damage' && m.detail === 'physical'),
+      'the free start-node grant is still present after allocating',
+    );
   });
 
   await t.test('an unreachable node is refused with the store reason, not a 500', async () => {
