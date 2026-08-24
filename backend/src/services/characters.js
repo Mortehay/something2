@@ -26,13 +26,22 @@ const CLASS_POOL_COLUMNS = 'max_hp, max_mana';
 // HP_BASE/MANA_BASE for a null rather than producing NaN; the null is passed
 // through rather than defaulted here so there is exactly one fallback, in the
 // one function that owns the formula.
+//
+// SOMET-471 fixed a latent bug here. This read `Number(row.max_hp)` directly,
+// and `Number(null)` is 0, not NaN -- so the ONE case the LEFT JOIN in
+// ownedCharacter exists to serve (a character whose entity_types row has
+// vanished) produced `{ maxHp: 0, maxMana: 0 }`, which is finite, which
+// derivePlayerStats then used as the base instead of falling back. That
+// character joins with a maximum of 0 hp. A missing column has to become null
+// BEFORE the numeric coercion, not after it.
 function classPoolsFromRow(row) {
-  const hp = row == null ? NaN : Number(row.max_hp);
-  const mana = row == null ? NaN : Number(row.max_mana);
-  return {
-    maxHp: Number.isFinite(hp) ? hp : null,
-    maxMana: Number.isFinite(mana) ? mana : null,
+  const num = (v) => {
+    if (v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
   };
+  if (row == null) return { maxHp: null, maxMana: null };
+  return { maxHp: num(row.max_hp), maxMana: num(row.max_mana) };
 }
 
 class CharacterError extends Error {
@@ -44,8 +53,12 @@ class CharacterError extends Error {
 }
 
 async function listPlayableClasses(pool) {
+  // ORDER BY id ASC is deliberately unchanged now that there are six classes:
+  // CharacterSelect.jsx defaults the picker to classes[0], so re-ordering here
+  // would silently change which class a player gets by pressing Create without
+  // touching the radios.
   const r = await pool.query(
-    `SELECT id, name, color, ${CLASS_POOL_COLUMNS},
+    `SELECT id, name, color, main_stat, ${CLASS_POOL_COLUMNS},
             strength, dexterity, constitution, intelligence, wisdom, charisma
        FROM entity_types WHERE is_playable = true ORDER BY id ASC`);
   // SOMET-486: `hp` (and the new `mana`) are the class's BASE POOLS, read
@@ -57,6 +70,9 @@ async function listPlayableClasses(pool) {
     id: x.id,
     name: x.name,
     color: x.color,
+    // SOMET-471: the passive tree's start position for this class (spec 5.2).
+    // The picker shows it as the class's main stat.
+    mainStat: x.main_stat,
     hp: classPoolsFromRow(x).maxHp,
     mana: classPoolsFromRow(x).maxMana,
     strength: Number(x.strength),
@@ -117,7 +133,8 @@ async function ownedCharacter(pool, userId, characterId) {
   // classPoolsFromRow then yields nulls and derivePlayerStats falls back to
   // HP_BASE/MANA_BASE -- a pool-less join, not a refused one.
   const r = await pool.query(
-    `SELECT c.id, c.entity_type_id, c.inventory_slots, e.max_hp, e.max_mana
+    `SELECT c.id, c.entity_type_id, c.inventory_slots,
+            e.name AS class_name, e.main_stat, e.max_hp, e.max_mana
        FROM characters c
        LEFT JOIN entity_types e ON e.id = c.entity_type_id
       WHERE c.id = $1 AND c.user_id = $2`,
@@ -130,10 +147,20 @@ async function ownedCharacter(pool, userId, characterId) {
   // classPools rides it for the same reason (SOMET-486): every path that
   // derives a character's stats already resolves ownership first, so this is
   // where the class's base pools are cheapest to obtain and hardest to forget.
+  //
+  // className and mainStat ride it too (SOMET-471). The join path already
+  // joins entity_types for the pools, so a second round trip for one string
+  // would be pure waste -- and the class has to be in hand BEFORE addPlayer
+  // builds the player object, because that is where a class's mechanical
+  // identity (spec 8.3's life-cost casting) has to be decided. Both are null
+  // for a character whose class row has vanished; the LEFT JOIN above is what
+  // makes that a pool-less join rather than a refused one.
   return {
     id: r.rows[0].id,
     entityTypeId: r.rows[0].entity_type_id,
     inventorySlots: Number(r.rows[0].inventory_slots),
+    className: r.rows[0].class_name,
+    mainStat: r.rows[0].main_stat,
     classPools: classPoolsFromRow(r.rows[0]),
   };
 }
