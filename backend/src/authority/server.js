@@ -2823,10 +2823,6 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }
 
-  // Expired ground items: delete from the DB and evict from every live sim.
-  // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
-  // sweep by up to itemSweepMs; the two are complementary (DB delete is
-  // authoritative across worlds, removeExpired just keeps each sim tidy).
   // SOMET-481: the two inputs a rarity roll needs -- the admin-editable weight
   // table and the affix catalog -- resolved on the sweep cadence, NOT per drop.
   // A query per kill would put game_settings and affix_types on the death
@@ -2852,6 +2848,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }
 
+  // Expired ground items: delete from the DB and evict from every live sim.
+  // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
+  // sweep by up to itemSweepMs; the two are complementary (DB delete is
+  // authoritative across worlds, removeExpired just keeps each sim tidy).
   const itemSweepTimer = setInterval(() => {
     if (worlds.size === 0) return;
     // Fire-and-forget, exactly like the ground-item DELETE below: a failed
