@@ -35,15 +35,24 @@ describe('ProgressionAdmin', () => {
     }
   });
 
-  // The affix catalog (T12) and the passive-node browser (T9) belong to other
-  // groups. They must be visible, labelled mount points rather than silently
-  // absent, so the next implementer edits the right file and the admin is not
-  // left wondering whether the page is broken.
-  it('carries labelled, empty mount points for the affix and passive-node sections', () => {
+  // The affix catalog (T12) still belongs to another group, so it must be a
+  // visible, labelled mount point rather than silently absent -- the next
+  // implementer edits the right file and the admin is not left wondering
+  // whether the page is broken.
+  it('still carries a labelled, empty mount point for the affix section', () => {
     expect(page).toContain('MOUNT POINT: affix catalog');
-    expect(page).toContain('MOUNT POINT: passive node browser');
     expect(page).toContain('id="affix-catalog-mount"');
+    expect(page).toContain('Arrives with the item-rarity slice');
+  });
+
+  // The passive-node section is FILLED as of SOMET-477. Asserting the section
+  // survived and that the placeholder is gone is what stops this landing as a
+  // page that still says "arrives later" next to a working editor -- and stops
+  // a later edit quietly deleting the mount.
+  it('renders the passive-node editor in its own section, placeholder removed', () => {
     expect(page).toContain('id="passive-nodes-mount"');
+    expect(page).toMatch(/<PassiveNodesAdmin\s*\/>/);
+    expect(page).not.toContain('Arrives with the passive-tree slice');
   });
 
   it('reads its data through the hook, never fetch() directly', () => {
