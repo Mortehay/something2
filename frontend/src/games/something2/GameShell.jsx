@@ -122,7 +122,7 @@ const HELP_SECTIONS = [
     title: 'Items & loot',
     rows: [
       { k: [['G']], d: 'Pick up the nearest ground item you are standing near' },
-      { k: [['Auto-loot']], d: 'Toggle in the HUD — walk over items to collect them without pressing G' },
+      { k: [['Auto-loot']], d: 'Toggle it in Settings (below "How to play") — walk over items to collect them without pressing G' },
       { k: [['I']], d: 'Open the inventory / paper-doll: click an item then a slot to equip, click an equipped slot to unequip, and drop from the panel' },
     ],
   },
@@ -132,6 +132,13 @@ const HELP_SECTIONS = [
       { k: [['E']], d: 'Trade with a village merchant — stand next to the merchant and press E to open the market' },
       { k: [['M']], d: 'Toggle the minimap (top-right corner); click the minimap to expand it' },
       { k: [['T']], d: 'Travel — while standing on a waypoint you have lit, opens the list of other lit waypoints. Walk onto a waypoint once to light it; ones you have not found are shown but cannot be chosen' },
+    ],
+  },
+  {
+    title: 'Settings',
+    rows: [
+      { k: [['Settings']], d: 'Below "How to play" — auto-loot, and inspect-on-hover' },
+      { k: [['Inspect']], d: 'With inspect on, hover anything in the world for a card describing it; creatures also show their level, an HP bar over an MP bar, and how aggressive they are. Click an entity to keep its card up while you read it' },
     ],
   },
   {

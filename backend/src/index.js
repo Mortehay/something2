@@ -382,8 +382,22 @@ if (require.main === module) {
 // file for why the ORDER BY matters).
 
 // Helper to get entity types
+// SOMET-493: the LEFT JOIN (not INNER) is load-bearing -- entity_types.behavior_id
+// is nullable and several seeded types legitimately carry no behaviour row. An
+// INNER JOIN would silently drop those types from the map the client renders
+// with, which is a blank decoration/creature rather than a missing tooltip.
+// `e.*` is kept so every existing consumer of this shape is untouched; the
+// three behaviour columns are aliased because `name` would otherwise collide
+// with the entity type's own.
+const ENTITY_TYPES_SELECT = `
+  SELECT e.*,
+         b.name AS behavior_name, b.chase_style, b.aggro_radius
+    FROM entity_types e
+    LEFT JOIN creature_behaviors b ON b.id = e.behavior_id
+   ORDER BY e.id ASC`;
+
 async function getEntityTypesMap() {
-  const result = await pool.query('SELECT * FROM entity_types ORDER BY id ASC');
+  const result = await pool.query(ENTITY_TYPES_SELECT);
   const entityTypes = {};
   result.rows.forEach(row => {
     entityTypes[row.name] = {
@@ -414,6 +428,15 @@ async function getEntityTypesMap() {
       render_mode: row.render_mode,
       sprite: row.sprite,
       prompt: row.prompt,
+      // SOMET-493 -- what the inspect card's aggression badge is derived from.
+      // Shipped as the raw catalog facts (faction + the behaviour's chase
+      // style and aggro radius) rather than as a pre-computed tier, so the
+      // banding stays one client-side rule in systems/inspect.js instead of
+      // being duplicated on both sides of the wire.
+      faction: row.faction,
+      behaviorName: row.behavior_name || null,
+      chaseStyle: row.chase_style || null,
+      aggroRadius: row.aggro_radius != null ? Number(row.aggro_radius) : null,
       // See getTileTypesMap: versions the client's asset URLs so an approved
       // regeneration is fetched instead of served stale from the browser cache.
       updated_at: row.updated_at,

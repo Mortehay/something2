@@ -81,11 +81,17 @@ describe("layoutInventory geometry", () => {
     expect(noSel.hitAreas.some((a) => a.kind === "drop")).toBe(false);
   });
 
-  it("always offers the auto-loot toggle and reports gold", () => {
-    const l = layoutInventory({ inventory: inv(), gold: 2439242, autoLoot: true });
+  it("reports gold and no longer carries an auto-loot toggle", () => {
+    const l = layoutInventory({ inventory: inv(), gold: 2439242 });
     expect(l.footer.gold).toBe(2439242);
-    expect(l.footer.autoLootOn).toBe(true);
-    expect(l.hitAreas).toContainEqual({ ...l.footer.autoLoot, kind: "autoloot", id: null });
+    // SOMET-493 moved the toggle to the React Settings panel. Asserted as an
+    // ABSENCE on both the layout and the hit areas: leaving a stale rect in
+    // hitAreas would keep the old click target live under a button nobody can
+    // see, which is worse than the toggle simply not being here.
+    expect(l.footer.autoLoot).toBeUndefined();
+    expect(l.hitAreas.some((a) => a.kind === "autoloot")).toBe(false);
+    // The footer still has a Y for the gold readout to sit on.
+    expect(typeof l.footer.y).toBe("number");
   });
 });
 

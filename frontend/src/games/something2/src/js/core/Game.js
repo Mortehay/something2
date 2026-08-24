@@ -43,6 +43,12 @@ const NativeMap = globalThis.Map;
 // a-slot flow the panel has always had would stop working.
 const DRAG_THRESHOLD_PX = 4;
 
+// SOMET-493: how long a clicked inspect target stays pinned once the cursor
+// leaves it. Long enough to read three lines and two bars, short enough that a
+// forgotten pin clears itself rather than becoming a card the player has to
+// work out how to dismiss.
+const INSPECT_PIN_MS = 6000;
+
 export class Game {
     constructor() {
         console.log("Game constructor");
@@ -103,10 +109,30 @@ export class Game {
         this.inventoryPage = 0;
 
         // Ground items (Slice 3b-2b): render-only store of items on the
-        // ground, plus a local mirror of the server-owned auto-loot flag
-        // (used only to render the toggle's current state).
+        // ground, plus a local mirror of the server-owned auto-loot flag.
+        // SOMET-493 moved the toggle itself into the React Settings panel, so
+        // this mirror is now read BY that panel (via getSettingsSnapshot)
+        // rather than to label a canvas button -- the flag is still owned by
+        // the server and still corrected by every `state` frame.
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
+
+        // SOMET-493 -- inspect-on-hover. Off unless the player turns it on in
+        // Settings; GameSettings.jsx owns the persisted preference and pushes
+        // it here with setInspectEnabled, so localStorage is read in exactly
+        // one place instead of by both halves of the app.
+        this.inspectEnabled = false;
+        // A left-click PINS whatever the cursor was over, so the card survives
+        // the pointer moving on. Kept as a key rather than an object: the
+        // drawable is rebuilt every frame and a held reference would keep
+        // describing a creature the server has already dropped.
+        this._inspectPinnedKey = null;
+        this._inspectPinnedUntil = 0;
+        // The /api/map/config entityTypes map (name -> def), kept whole so the
+        // card can read `prompt`/`mana`/`faction`/behaviour. decoTypes below
+        // is a FILTERED copy for the renderer and deliberately excludes
+        // creatures, so it cannot serve this.
+        this.entityDefs = null;
 
         // World chests (SOMET-372) -- the guarded, lootable kind authored into
         // a map spec or spawned by a loot map, NOT the account chest/bank
@@ -355,6 +381,7 @@ export class Game {
         // Non-creature entity types (map decorations: rocks, bushes, ...),
         // keyed by name for RenderSystem.collectDecorations. Built once here
         // rather than re-filtered every frame in render().
+        this.entityDefs = entityTypes || null;
         this.decoTypes = new Map();
         for (const name in (entityTypes || {})) {
             const def = entityTypes[name];
@@ -695,6 +722,48 @@ export class Game {
         return { progression: this.progression, gold: this.gold };
     }
 
+    // SOMET-493 -- the in-game Settings panel's read side, following the same
+    // convention as getMinimapSnapshot/getProgressionSnapshot above: React
+    // polls Game rather than reaching into engine internals, so there is one
+    // source of truth for what the settings currently are.
+    //
+    // `autoLoot` is the SERVER's value (every `state` frame overwrites it), so
+    // a panel rendering from this snapshot cannot show a flip the server never
+    // agreed to. `inspect` is a pure client preference and is simply mirrored.
+    // null when not in a playing world -- the panel then shows its controls
+    // disabled rather than lying about a world it is not in.
+    getSettingsSnapshot() {
+        if (this.state !== 'playing' || !this.chunked) return null;
+        return { autoLoot: this.autoLoot === true, inspect: this.inspectEnabled === true };
+    }
+
+    // Ask the server to turn auto-loot on/off. Returns whether the intent
+    // actually went out: on a dead socket the send is silently dropped and no
+    // later `state` frame can correct us, so an unconditional local flip would
+    // leave the UI reading a value the server never agreed to -- the exact
+    // failure this flag's wire echo exists to prevent. The optimistic local
+    // mirror is kept (the panel would otherwise not move until the next state
+    // frame) but only on a send that left.
+    setAutoLoot(on) {
+        const want = on === true;
+        if (!this.authorityClient) return false;
+        if (!this.authorityClient.sendAutoLoot(want)) return false;
+        this.autoLoot = want;
+        return true;
+    }
+
+    // Purely local: no server involvement, so unlike setAutoLoot this always
+    // takes. Turning it OFF drops any pinned target too, or the card would
+    // hang on screen until the pin expired.
+    setInspectEnabled(on) {
+        this.inspectEnabled = on === true;
+        if (!this.inspectEnabled) {
+            this._inspectPinnedKey = null;
+            this._inspectPinnedUntil = 0;
+        }
+        return this.inspectEnabled;
+    }
+
     // Write-through cache update for gold ONLY (SOMET-242 D1 fix, narrowed by
     // the F1 fix below). CharacterSheet.jsx calls this right after a
     // successful respec HTTP response so the canvas-drawn gold HUD
@@ -917,7 +986,6 @@ export class Game {
                 },
                 groundItems: this.groundItems.all(),
                 worldChests: this.worldChests,
-                autoLoot: this.autoLoot,
                 gold: this.gold,
                 merchants: this.merchants,
                 landmarks: this.landmarks,
@@ -941,6 +1009,19 @@ export class Game {
                 // at their feet come from this.player.effects via drawCreature.
                 effects: this.player.effects || null,
                 progression: this.progression,
+                // SOMET-493. `enabled` false short-circuits the whole pass in
+                // RenderSystem, so a player who never turns it on pays one
+                // property read per frame.
+                inspect: {
+                    enabled: this.inspectEnabled === true,
+                    camera: this.camera,
+                    cursorX: this._cursorX ?? null,
+                    cursorY: this._cursorY ?? null,
+                    pinnedKey: nowMs < this._inspectPinnedUntil ? this._inspectPinnedKey : null,
+                    entityDefs: this.entityDefs,
+                    itemTypes: this.inventory ? this.inventory.types : null,
+                    localPlayer: { mana: this.localMana, maxMana: this.localMaxMana },
+                },
             });
         }
     }
@@ -1017,18 +1098,6 @@ export class Game {
         }
         if (hit.kind === 'invpage') { this.inventoryPage = hit.id; return; }
 
-        if (hit.kind === 'autoloot') {
-            // Only mirror the flip if the intent actually reached the server.
-            // On a dead socket the send is silently dropped and no later
-            // `state` frame can correct us, so an unconditional flip would
-            // leave the label lying — the exact failure this flag's wire
-            // echo exists to prevent.
-            if (!this.authorityClient) return;
-            if (this.authorityClient.sendAutoLoot(!this.autoLoot)) {
-                this.autoLoot = !this.autoLoot;
-            }
-            return;
-        }
         if (hit.kind === 'drop') {
             if (this.authorityClient) this.authorityClient.sendDrop(hit.id);
             return;
@@ -1244,6 +1313,25 @@ export class Game {
                 this._handleInventoryClick(x, y);
                 return;
             }
+            // SOMET-493 -- clicking an entity PINS its inspect card, so the
+            // card can be read without holding the mouse perfectly still. This
+            // is deliberately additive and never consumes the click: the same
+            // press still opens a merchant or swings the weapon below. It sits
+            // after the panel branches above (which all return) because a
+            // click on an open panel is not a click on the world.
+            //
+            // `_inspectHoverKey` is what the LAST rendered frame decided was
+            // under the cursor, not a fresh hit-test: re-testing here would
+            // need its own copy of the drawables list and could disagree with
+            // what the player actually saw.
+            if (this.inspectEnabled) {
+                const key = this.renderSystem ? this.renderSystem._inspectHoverKey : null;
+                // Clicking empty ground clears the pin -- that is how a player
+                // dismisses a card without waiting it out.
+                this._inspectPinnedKey = key;
+                this._inspectPinnedUntil = key ? performance.now() + INSPECT_PIN_MS : 0;
+            }
+
             const pcx = this.player.x + this.player.width / 2;
             const pcy = this.player.y + this.player.height / 2;
 
