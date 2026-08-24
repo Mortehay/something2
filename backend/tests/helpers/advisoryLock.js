@@ -59,14 +59,22 @@ const POLL_INTERVAL_MS = 50;
 // If `pool` was not built from a connectionString there is nothing to open a
 // second connection with, so this runs fn() unlocked rather than failing the
 // caller's test outright.
-async function withAdvisoryLock(pool, lockKey, fn) {
+//
+// `waitMs` overrides LOCK_WAIT_MS for ONE call. It exists because 6000 is
+// calibrated for a caller whose guarded section is a handful of queries, and
+// seedPassiveTree() alone is ~1800 upserts plus a full edge reconcile -- one
+// holder legitimately occupies the key for the better part of ten seconds, so
+// every peer times out and degrades to unguarded, which is exactly the race
+// the key was taken to prevent. A caller that KNOWS its peers are slow says so
+// here rather than everyone paying a bigger global default.
+async function withAdvisoryLock(pool, lockKey, fn, { waitMs = LOCK_WAIT_MS } = {}) {
   const connectionString = pool.options && pool.options.connectionString;
   const locker = connectionString ? new Client({ connectionString }) : null;
   let locked = false;
 
   if (locker) {
     await locker.connect();
-    const deadline = Date.now() + LOCK_WAIT_MS;
+    const deadline = Date.now() + waitMs;
     while (Date.now() < deadline) {
       const r = await locker.query('SELECT pg_try_advisory_lock($1) AS got', [lockKey]);
       if (r.rows[0].got) { locked = true; break; }
@@ -74,7 +82,7 @@ async function withAdvisoryLock(pool, lockKey, fn) {
     }
     if (!locked) {
       console.error(
-        `withAdvisoryLock(${lockKey}): could not take the lock in ${LOCK_WAIT_MS}ms -- `
+        `withAdvisoryLock(${lockKey}): could not take the lock in ${waitMs}ms -- `
         + 'running unguarded; the section this lock protects may race with a peer holding it.',
       );
     }
@@ -103,4 +111,27 @@ async function withAdvisoryLock(pool, lockKey, fn) {
   }
 }
 
-module.exports = { withAdvisoryLock, LOCK_WAIT_MS };
+// SOMET-477: a third shared-state key, distinct from entryWorld.js's
+// ENTRY_LOCK_KEY (626526517) and seed_catalogs_db.test.js's CATALOG_LOCK_KEY
+// (748213905). Three files now run seedPassiveTree() against the same
+// database in parallel processes, and a --force reseed from one of them
+// rewrites the label/kind/grants another one just wrote and is about to
+// assert on. Every file that calls seedPassiveTree, or that asserts on a
+// label/grants value a reseed could rewrite, takes this key.
+//
+// Exported from here rather than re-declared per file so the three cannot
+// drift onto two different keys and silently stop excluding each other --
+// which is the same failure the CATALOG_LOCK_KEY comment in
+// creature_drops_db.test.js warns about, restated as a constant.
+const PASSIVE_TREE_LOCK_KEY = 471477806;
+
+// One seedPassiveTree() call is ~1800 upserts and a 2142-edge reconcile, and
+// the guarded sections wrap several of them, so a holder can occupy this key
+// for ~10s. With the 6s default every waiter degraded to unguarded and the
+// three files raced anyway -- measured, not assumed. 45s is three holders'
+// worth of headroom and still well inside the 60s per-file budget.
+const PASSIVE_TREE_LOCK_WAIT_MS = 45000;
+
+module.exports = {
+  withAdvisoryLock, LOCK_WAIT_MS, PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS,
+};
