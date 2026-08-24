@@ -9,7 +9,7 @@ const {
   applyDamageWithEffects, NO_MITIGATION, playerKey, creatureKey,
 } = require('./damage');
 const { hasLineOfSight } = require('./weapons');
-const { applyElementEffect } = require('./effects');
+const { applyElementEffect, applyHitStatuses } = require('./effects');
 const { shoveAwayFrom } = require('./knockback');
 // SOMET-283: the leash-aware creature shove. The clamp is a creature-domain
 // rule and lives next to the guard constants that define what a post is, rather
@@ -198,7 +198,7 @@ class ProjectileSim {
   // became -- "explosive arrows" could not be authored at all.
   spawn({
     ownerId, ownerKind = 'player', ownerFaction = null, x, y, nx, ny, weapon, damage,
-    originLift, ammo = null, pacifiedFrom = null,
+    originLift, ammo = null, pacifiedFrom = null, hitStatuses = null,
   }) {
     const id = String(++this._id);
     // Ammo wins over the weapon where it speaks, so an explosive arrow makes
@@ -292,6 +292,12 @@ class ProjectileSim {
       // in flight must not change because the player unsocketed mid-flight.
       // null for every unaugmented weapon and every creature ability.
       augment: weapon.augment || null,
+      // SOMET-495: the shooter's tree-granted on-hit riders ("your hits
+      // chill"), snapshotted at launch for exactly the reason `damage`,
+      // `pacifiedFrom` and `augment` are -- a respec mid-flight must not change
+      // a shot already in the air. null for every creature-fired ability, so a
+      // creature can never carry a player's riders.
+      hitStatuses,
     });
     return id;
   }
@@ -375,6 +381,11 @@ class ProjectileSim {
       // straight through as killerUserId -- the exact uuid-into-an-integer-
       // column crash killerUserIdFor exists to prevent on the direct-hit path.
       applyElementEffect(c, p.element, now, killerUserIdFor(p));
+      // SOMET-495: the shooter's tree riders, on the same terms as the element
+      // rider beside it -- full duration regardless of falloff, and the same
+      // killerUserIdFor(p) source so a later burn tick cannot report a creature
+      // uuid as a killerUserId.
+      applyHitStatuses(c, p.hitStatuses, now, killerUserIdFor(p));
     }
     for (const pl of players) {
       if (!projectileHitsPlayer(p, pl)) continue;
@@ -390,6 +401,9 @@ class ProjectileSim {
       applyDamageWithEffects(pl, p.damage * (1 - d / r), p.element, pl.mit || NO_MITIGATION,
         now, provokerKeyFor(p));
       applyElementEffect(pl, p.element, now, p.ownerId);
+      // SOMET-495: the shooter's tree riders. A player and a creature must take
+      // the same blast identically, so this mirrors the creature branch above.
+      applyHitStatuses(pl, p.hitStatuses, now, p.ownerId);
       // Survivors only -- a player never gets removed from `players` on
       // death (resolveDeaths respawns them separately), so the check here is
       // the same hp > 0 gate creatures.js uses, not a delete-happened check.
@@ -518,6 +532,10 @@ class ProjectileSim {
             // p.ownerId -- the same uuid-into-killerUserId bug, reachable
             // here via a later burn tick rather than this hit itself.
             applyElementEffect(c, p.element, now, killerUserIdFor(p));
+            // SOMET-495: the shooter's tree riders on the DIRECT hit, matching
+            // the AoE branch in _detonate. A rider wired into one and not the
+            // other is half a feature: most staves detonate, every bow does not.
+            applyHitStatuses(c, p.hitStatuses, now, killerUserIdFor(p));
             if (p.stoneItemId != null) stoneHits.push({ stoneItemId: p.stoneItemId });
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
@@ -550,6 +568,10 @@ class ProjectileSim {
             applyDamageWithEffects(pl, p.damage, p.element, pl.mit || NO_MITIGATION,
               now, provokerKeyFor(p));
             applyElementEffect(pl, p.element, now, p.ownerId);
+            // SOMET-495: the shooter's tree riders on a direct PvP hit, the
+            // fourth and last projectile site (AoE-vs-creature, AoE-vs-player,
+            // direct-vs-creature, direct-vs-player).
+            applyHitStatuses(pl, p.hitStatuses, now, p.ownerId);
             // Survivors only. Origin is the projectile's own current
             // position, matching the creature branch just above.
             if (pl.hp > 0 && p.knockback > 0) shoveAwayFrom(map, p.x, p.y, pl, p.knockback);

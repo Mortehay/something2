@@ -52,6 +52,13 @@
 // THE SECOND EXCEPTION, added by SOMET-473: the Druid's charm on a PLAYER. It
 // is the same rule for the same reason -- see applyCharm below, which does not
 // re-derive it.
+//
+// SOMET-495 added a THIRD way for shock to be applied -- the passive tree's
+// "your hits shock" rider, which can ride any weapon at any rate -- and did NOT
+// add a third rule. It routes through the same stampRider/applyShockInterrupt
+// path, so the same non-refreshing window bounds it. That is what makes the
+// window's guarantee rate-independent, and it is why the rider is safe on a
+// 200ms dagger when SOMET-480 judged shock too dangerous for a debuff affix.
 
 const { PLAYER_CHARM_MS, PLAYER_CHARM_IMMUNITY_MS } = require('../services/charm.js');
 
@@ -358,17 +365,77 @@ const ELEMENT_EFFECTS = {
 function applyElementEffect(target, element, now, sourceId) {
   const spec = ELEMENT_EFFECTS[element];
   if (!spec) return null;
+  return stampRider(target, spec, now, sourceId);
+}
+
+// The one place a rider spec is stamped, shared by the element mapping above
+// and by the passive tree's on-hit riders below, so the two cannot disagree
+// about how a status lands -- above all about shock.
+//
+// The interrupt attempt rides along HERE, in the one rider stamp, for the same
+// reason the rider table itself does: every path that applies a rider goes
+// through this, so no path can be riderless and none can be interrupt-happy.
+// Wiring it into the projectile direct hit alone would leave the storm staff's
+// own AoE detonation — most of what it actually does — unable to interrupt.
+// applyShockInterrupt itself decides whether it lands.
+function stampRider(target, spec, now, sourceId) {
   applyEffect(target, spec.key, {
     durationMs: spec.durationMs, magnitude: spec.magnitude, sourceId, now,
   });
-  // The interrupt attempt rides along HERE, in the one element->rider mapping,
-  // for the same reason the rider table itself does: every path that deals
-  // elemental damage already calls this, so no damage path can be riderless.
-  // Wiring it into the projectile direct hit alone would leave the storm
-  // staff's own AoE detonation — most of what it actually does — unable to
-  // interrupt. applyShockInterrupt itself decides whether it lands.
   if (spec.key === SHOCK) applyShockInterrupt(target, now);
   return spec.key;
+}
+
+// status key -> the same spec the element mapping uses. Built BY INVERTING
+// ELEMENT_EFFECTS rather than by re-listing three literals, so a rider's
+// duration or magnitude has exactly one author: a tree-granted burn and a fire
+// weapon's burn are the same burn, and a rebalance of one is a rebalance of
+// both by construction.
+const STATUS_EFFECTS = Object.fromEntries(
+  Object.values(ELEMENT_EFFECTS).map((spec) => [spec.key, spec]),
+);
+
+// SOMET-495. The passive tree's `status` grants: "your hits burn", "your hits
+// chill", "Jarring Blows". `statuses` is composeStats' `hitStatuses` array,
+// snapshotted onto the attacking player's derived bundle and threaded to every
+// site where that player's hit lands — melee arc, melee-vs-player, projectile
+// direct hit and AoE detonation — beside the element rider it sits next to.
+//
+// The rider is ELEMENT-INDEPENDENT: a tree burn rides a physical sword. That is
+// the whole point of the node, and it is why this cannot be folded into
+// ELEMENT_EFFECTS.
+//
+// SHOCK IS THE DANGEROUS ONE, and it is safe here for exactly one reason: it
+// goes through stampRider, hence through applyShockInterrupt, hence through the
+// per-target NON-REFRESHING immunity window. Read the file header if that reads
+// like an implementation detail. SOMET-480 excluded shock from debuff affixes
+// because an on-hit shock with no window is a permanent stunlock, and a tree
+// rider fires far more often than any lightning weapon can: the window is what
+// makes hit RATE irrelevant, since it is stamped once per landed interrupt and
+// never pushed forward, guaranteeing the target
+// (SHOCK_IMMUNITY_MS - SHOCK_INTERRUPT_MS) = 2.6s of control per interrupt no
+// matter how fast it is being hit.
+//
+// Writing `target._interruptedUntil` directly here — the obvious inlining, and
+// the one that "simplifies away" a function call — restores the chain-lock and
+// leaves every other test in this file green. `a tree shock rider cannot
+// chain-lock a player` in authority_effects.test.js is what fails.
+//
+// Returns the keys actually stamped, so a caller can assert on the hit rather
+// than on the configuration.
+function applyHitStatuses(target, statuses, now, sourceId) {
+  if (!statuses || statuses.length === 0) return null;
+  let applied = null;
+  for (const s of statuses) {
+    const spec = STATUS_EFFECTS[s];
+    // An unknown status is skipped, not defaulted: the tree's authored set is
+    // validated at seed time, and silently substituting some other rider for a
+    // typo is how a node ends up doing the wrong thing rather than nothing.
+    if (!spec) continue;
+    stampRider(target, spec, now, sourceId);
+    (applied || (applied = [])).push(spec.key);
+  }
+  return applied;
 }
 
 module.exports = {
@@ -377,7 +444,9 @@ module.exports = {
   charmerOf,
   CHARMED,
   applyElementEffect,
+  applyHitStatuses,
   ELEMENT_EFFECTS,
+  STATUS_EFFECTS,
   tickEffects,
   hasEffect,
   effectMagnitude,

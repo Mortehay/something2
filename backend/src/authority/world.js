@@ -7,7 +7,8 @@ const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION, playerKey } = require('./damage');
 const {
-  tickEffects, effectMagnitude, applyElementEffect, canAct, clearInterrupt, activeEffectKeys,
+  tickEffects, effectMagnitude, applyElementEffect, applyHitStatuses,
+  canAct, clearInterrupt, activeEffectKeys,
   applyCharm, charmerOf,
   BURN, CHILL, SHOCK, SHOCK_MANA_DRAIN,
 } = require('./effects');
@@ -16,6 +17,7 @@ const { unequipBlockers } = require('./equipRequirements.js');
 const { loadProgression } = require('../services/progressionStore.js');
 const { GroundItemSim } = require('./groundItems');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerStats.js');
+const { STAMINA_BASE } = require('../services/progressionConstants.js');
 const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
 
 // Bounds concurrent creature-owned projectiles per world. A swarm-density
@@ -32,7 +34,13 @@ const PLAYER_SPEED = 200; // client: this.speed(100) * speedMultiplier(2)
 const PLAYER_MAX_HP = 100;
 const PLAYER_MAX_MANA = 100;
 const PLAYER_MANA_REGEN = 10; // per second
-const PLAYER_MAX_STAMINA = 100;
+// An ALIAS for progressionConstants.STAMINA_BASE, not a second copy of 100
+// (SOMET-495). derivePlayerStats now computes maxStamina from that constant
+// plus the tree's `stamina` grants, and a player joins at `stats.maxStamina`;
+// two independent hundreds here would let a tree grant and the join value
+// disagree the moment either moved. Still exported under the old name because
+// several tests import it.
+const PLAYER_MAX_STAMINA = STAMINA_BASE;
 const PLAYER_STAMINA_REGEN = 10; // per second
 
 // How fast the charm pushes a pacified player away from their charmer, in world
@@ -65,7 +73,28 @@ function sign(v) { return v > 0.3 ? 1 : v < -0.3 ? -1 : 0; }
 // already in the air.
 function weaponDamage(p, w) {
   const mult = (w.element && w.element !== 'physical') ? p.stats.spellMult : p.stats.meleeMult;
-  return w.damage * mult;
+  return w.damage * mult * elementDamageMult(p.stats, w.element);
+}
+
+// SOMET-495. The passive tree's `damage` grants, as a PER-ELEMENT multiplier.
+//
+// "+35% fire damage" is a percentage, not a flat number, and composeStats has
+// already summed every grant on an element and turned the total into one
+// multiplier (x1.40 for +35 and +5) -- so grants stack ADDITIVELY with each
+// other and MULTIPLICATIVELY against the weapon, which is what the labels
+// promise. Doing the sum here instead would make two grants x1.4175.
+//
+// A weapon with a null element is physical, matching applyDamage's own default
+// -- the two must agree, or a bare weapon would be boosted as one element and
+// mitigated as another.
+//
+// The fallback is 1, never undefined: `w.damage * undefined` is NaN, and NaN
+// damage never satisfies hp <= 0, i.e. an unkillable target. Every real bundle
+// carries all five keys (playerStats.js's NO_DAMAGE_MULT covers the rest).
+function elementDamageMult(stats, element) {
+  const table = stats && stats.damageMult;
+  const v = table ? table[element || 'physical'] : undefined;
+  return Number.isFinite(v) ? v : 1;
 }
 
 // The ONLY place the weapon's cooldown field is read. Both attack branches
@@ -245,10 +274,17 @@ class World {
       maxHp: stats.maxHp,
       mana: stats.maxMana,
       maxMana: stats.maxMana,
-      stamina: PLAYER_MAX_STAMINA,
-      maxStamina: PLAYER_MAX_STAMINA,
+      // SOMET-495: from the derived bundle, like hp and mana, so a tree
+      // `+30 stamina` node is live at join rather than only after the next
+      // re-derive. `?? PLAYER_MAX_STAMINA` covers a hand-built stats object in
+      // a test that predates the field.
+      stamina: stats.maxStamina ?? PLAYER_MAX_STAMINA,
+      maxStamina: stats.maxStamina ?? PLAYER_MAX_STAMINA,
       inv,
-      mit: mitigation(inv, this.weapons),
+      // SOMET-495: armour resistances AND the tree's, merged on one scale by
+      // mitigation() itself. Rebuilt by _rebuildMit at every point either half
+      // can change -- equip, unequip, and any re-derive of `stats`.
+      mit: mitigation(inv, this.weapons, stats.resists),
       spawn: { x: respawn.x, y: respawn.y },
       // Read only by server.js (the tick loop refreshes it on village entry,
       // onPlayerDeath compares its worldId against the world the death happened
@@ -296,14 +332,35 @@ class World {
     if (!p) return { hpDelta: 0, manaDelta: 0 };
     const hpDelta = stats.maxHp - p.maxHp;
     const manaDelta = stats.maxMana - p.maxMana;
+    // SOMET-495: stamina moves by the same DELTA rule as hp and mana, so
+    // allocating a stamina node mid-fight is a bonus, not a refill. Guarded
+    // with ?? for the same reason addPlayer is -- a hand-built bundle with no
+    // maxStamina must leave the pool alone rather than NaN it.
+    const staminaDelta = (stats.maxStamina ?? p.maxStamina) - p.maxStamina;
     p.maxHp = stats.maxHp;
     p.maxMana = stats.maxMana;
+    p.maxStamina = stats.maxStamina ?? p.maxStamina;
     // Lower bound 1, not 0: a respec that shrinks CON must not kill the
     // player it is being applied to.
     p.hp = clamp(p.hp + hpDelta, 1, p.maxHp);
     p.mana = clamp(p.mana + manaDelta, 0, p.maxMana);
+    p.stamina = clamp(p.stamina + staminaDelta, 0, p.maxStamina);
     p.stats = stats;
+    // SOMET-495. THE line that makes a `resist` grant live. Without it an
+    // allocated +8 fire resist would sit in `stats` and never reach `p.mit`
+    // until the player happened to re-equip something -- displayed on the
+    // sheet, inert in play, which is the exact failure this ticket exists to
+    // end. Every re-derive path (join, level-up, chest XP, socket, allocate,
+    // respec) funnels through here, so this one call covers all of them.
+    this._rebuildMit(p);
     return { hpDelta, manaDelta };
+  }
+
+  // p.mit = equipped armour + the tree's resist aggregate, on the ONE scale
+  // mitigation() owns. Called wherever either half can change; a site that
+  // rebuilt only from the inventory would silently drop the tree half.
+  _rebuildMit(p) {
+    p.mit = mitigation(p.inv, this.weapons, p.stats && p.stats.resists);
   }
 
   removePlayer(userId) { this.players.delete(userId); }
@@ -513,7 +570,7 @@ class World {
     if (!p) return { ok: false, reason: 'no player' };
     const req = await this._requirementContext(pool, p.characterId);
     const r = await equipItem(pool, p.characterId, p.inv, this.weapons, itemId, slot, req);
-    if (r.ok) p.mit = mitigation(p.inv, this.weapons);
+    if (r.ok) this._rebuildMit(p);
     return r;
   }
 
@@ -531,7 +588,7 @@ class World {
       return { ok: false, reason: `${names} would no longer meet its requirements` };
     }
     const r = await unequipItem(pool, p.characterId, p.inv, slot);
-    if (r.ok) p.mit = mitigation(p.inv, this.weapons);
+    if (r.ok) this._rebuildMit(p);
     return r;
   }
 
@@ -603,6 +660,24 @@ class World {
     // game today.
     const pacifiedFrom = charmerOf(p, this.now);
 
+    // SOMET-495: this attacker's tree-granted on-hit riders ("your hits burn"),
+    // resolved ONCE for the whole attack and threaded to every site the swing
+    // or the shot can land — exactly like `pacifiedFrom` above, and for the
+    // same reason: a shot snapshots what was true when it was fired.
+    const hitStatuses = p.stats.hitStatuses || null;
+    // SOMET-495: an augment stone's bonus is damage in the augment's OWN
+    // element, so the tree's multiplier for THAT element applies to it. Scaled
+    // once, here, rather than at each of the three sites that consume the
+    // packet — the melee arc, the melee-vs-player branch and the projectile
+    // snapshot — because three copies of the same multiply is how one of them
+    // ends up missing it.
+    const augment = w.augment
+      ? {
+        ...w.augment,
+        bonusDamage: w.augment.bonusDamage * elementDamageMult(p.stats, w.augment.element),
+      }
+      : null;
+
     if (w.kind === 'melee') {
       const f = facingFromInput(sign(nx), sign(ny));
       if (f) p.facing = f;
@@ -661,8 +736,11 @@ class World {
         // SOMET-332: the augment stone's bonus packet, or null. Passed rather
         // than folded into weaponDamage above so the bonus is mitigated by the
         // AUGMENT's element, not the weapon's.
-        w.augment || null,
+        augment,
         pacifiedFrom,
+        // SOMET-495: the tree's on-hit riders, applied to every creature the
+        // arc reaches, beside the element's own rider.
+        hitStatuses,
       );
       // What this player's summons will attack (spec 8.2: "attacks the druid's
       // target"). The FIRST creature this swing reached, kept even if the swing
@@ -707,14 +785,21 @@ class World {
           applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION,
             this.now, playerKey(userId));
           applyElementEffect(other, w.element, this.now, userId);
+          // SOMET-495: the tree's riders, applied ONCE per target per swing --
+          // deliberately here, next to the weapon's own element rider, and NOT
+          // repeated inside the augment branch below. Two stamps on the same
+          // target in the same swing are indistinguishable from one (refresh
+          // semantics, and the shock window swallows the second), so a second
+          // call would be noise that reads like a second effect.
+          applyHitStatuses(other, hitStatuses, this.now, userId);
           // SOMET-332: the augment's bonus as a SECOND packet, mirroring the
           // creature path in applyMeleeArc. A player and a creature must take
           // the same swing identically -- an augment that only worked against
           // creatures would be a PvP balance bug nothing else would catch.
-          if (w.augment && w.augment.bonusDamage > 0) {
-            applyDamageWithEffects(other, w.augment.bonusDamage, w.augment.element,
+          if (augment && augment.bonusDamage > 0) {
+            applyDamageWithEffects(other, augment.bonusDamage, augment.element,
               other.mit || NO_MITIGATION, this.now, playerKey(userId));
-            applyElementEffect(other, w.augment.element, this.now, userId);
+            applyElementEffect(other, augment.element, this.now, userId);
           }
           playerHits++;
           // Same list as the creature impacts above -- a player hit and a
@@ -801,7 +886,17 @@ class World {
     if (f) p.facing = f;
     spendResources(p, w);
     this.projectiles.spawn({
-      ownerId: userId, x: cx, y: cy, nx, ny, weapon: w, damage: weaponDamage(p, w),
+      ownerId: userId, x: cx, y: cy, nx, ny,
+      // SOMET-495: the weapon with its augment packet already scaled by the
+      // tree's per-element multiplier (see `augment` above). Spread rather than
+      // mutated -- `w` is the shared in-memory catalog row, and writing to it
+      // would leak one player's tree onto every other player's weapon.
+      weapon: augment === null ? w : { ...w, augment },
+      damage: weaponDamage(p, w),
+      // SOMET-495: the tree's on-hit riders, snapshotted at LAUNCH for the same
+      // reason `damage` and `pacifiedFrom` are -- a respec mid-flight must not
+      // change a shot already in the air.
+      hitStatuses,
       // Snapshotted at launch for the same reason `damage` is, and for one
       // more: the shooter can be dead or out of view before this lands, so
       // there would be no body left to measure against later.

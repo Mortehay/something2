@@ -9,8 +9,14 @@ const assert = require('node:assert');
 const {
   buildAdjacency, isAllocatable, flattenGrants,
 } = require('../src/services/passiveRules.js');
-const { RULE_COMBINE } = require('../src/services/statComposition.js');
-const { RULE_KEYS } = require('../seeds/data/passiveTree.js');
+const {
+  RULE_COMBINE, POOL_KEYS, ELEMENT_KEYS, STATUS_KEYS,
+} = require('../src/services/statComposition.js');
+const {
+  RULE_KEYS, RESOURCE_POOLS, STATUSES,
+} = require('../seeds/data/passiveTree.js');
+const { ELEMENTS } = require('../src/authority/damage.js');
+const { STATUS_EFFECTS } = require('../src/authority/effects.js');
 
 //   10 (start) -- 11 -- 12
 //                  |
@@ -100,4 +106,26 @@ test('the runtime rule table and the seed rule table have not drifted apart', ()
     Object.entries(RULE_KEYS).map(([k, v]) => [k, v.combine]),
   );
   assert.deepStrictEqual(seedModes, RULE_COMBINE);
+});
+
+// SOMET-495. The same treatment for the OTHER four grant kinds' key lists.
+// statComposition.js re-declares each one rather than importing it (it is a
+// PURE module and must not require the seed data or the authority), so these
+// three assertions are the only thing that stops a fifth element or a fourth
+// status being added on one side alone -- which would silently make every grant
+// of the new kind compose to nothing, i.e. this ticket's own defect again.
+test('the runtime pool/element/status key lists have not drifted from their owners', () => {
+  assert.deepStrictEqual(POOL_KEYS, RESOURCE_POOLS,
+    'statComposition POOL_KEYS vs the seed generator RESOURCE_POOLS');
+  assert.deepStrictEqual(ELEMENT_KEYS, ELEMENTS,
+    'statComposition ELEMENT_KEYS vs damage.js ELEMENTS — the elements the '
+    + 'combat code actually mitigates');
+  assert.deepStrictEqual(STATUS_KEYS, STATUSES,
+    'statComposition STATUS_KEYS vs the seed generator STATUSES');
+  // ...and the runtime status list must name effects that actually exist. A
+  // status key with no spec is silently skipped by applyHitStatuses, so the
+  // node would render, allocate, and do nothing.
+  for (const s of STATUS_KEYS) {
+    assert.ok(STATUS_EFFECTS[s], `no effect spec for the authored status "${s}"`);
+  }
 });

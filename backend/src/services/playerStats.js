@@ -83,6 +83,57 @@ function ruleLifeCostMultiplier(progression) {
   return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
+// SOMET-495. The tree's `resource` grants, as a FLAT addition to a pool.
+//
+// It rides the derived bundle for the identical reason lifeCostMultiplier
+// does, one comment up: `stats` is the only bundle every re-derive path
+// already refreshes, so an allocated "+150 maximum life" is live the instant
+// applyDerivedStats runs and a respec that drops it shrinks the pool again.
+// A progression object with no tree context -- DEFAULT_PROGRESSION, a unit-test
+// literal, a row read before the tree was seeded -- has no `pools` and
+// contributes 0, which is what keeps every pre-495 number unmoved.
+//
+// Deliberately NOT clamped to >= 0 here: `pools` is composeStats' sum, and a
+// future drawback node granting -20 hp must be able to shrink the pool. The
+// floor that matters is on the RESULT (a pool of at least 1), applied below,
+// so no combination of grants can produce a zero or negative maximum.
+function poolGrant(progression, key) {
+  const pools = progression == null ? null : progression.pools;
+  const v = pools == null ? undefined : pools[key];
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// SOMET-495. `damage` / `resist` / `status` grants, carried onto the derived
+// bundle UNCHANGED -- this module composes no number from them, it is only the
+// courier, because `stats` is the one bundle the authority refreshes on every
+// re-derive (join, level-up, socket, allocate, respec).
+//
+// Each is defaulted to a shape its consumer can read without a guard: an empty
+// resist map merges as nothing, and an absent multiplier would be `undefined`,
+// which multiplies to NaN. The four fallbacks below are what let every unit
+// test that builds a bare progression literal keep working untouched.
+const NO_DAMAGE_MULT = Object.freeze({
+  physical: 1, arcane: 1, fire: 1, ice: 1, lightning: 1,
+});
+const NO_RESISTS = Object.freeze({});
+const NO_STATUSES = Object.freeze([]);
+
+function damageMultOf(progression) {
+  const m = progression == null ? null : progression.damageMult;
+  return m && typeof m === 'object' ? m : NO_DAMAGE_MULT;
+}
+
+function resistsOf(progression) {
+  const r = progression == null ? null : progression.resists;
+  return r && typeof r === 'object' ? r : NO_RESISTS;
+}
+
+function hitStatusesOf(progression) {
+  const s = progression == null ? null : progression.hitStatuses;
+  return Array.isArray(s) ? s : NO_STATUSES;
+}
+
 // The single source of every number a stat affects.
 //
 // `classPools` is `{ maxHp, maxMana }` -- the class's BASE pools, before any
@@ -93,8 +144,20 @@ function ruleLifeCostMultiplier(progression) {
 function derivePlayerStats(progression, classPools = null) {
   const above = (key) => stat(progression, key) - C.BASE_STAT;
   return {
-    maxHp: poolBase(classPools, 'maxHp', C.HP_BASE) + C.HP_PER_CON * above('constitution'),
-    maxMana: poolBase(classPools, 'maxMana', C.MANA_BASE) + C.MANA_PER_INT * above('intelligence'),
+    // SOMET-495: class base, then the stat scaling, then the tree's flat
+    // grant -- in that order and all three, which is the whole content of
+    // "a +10 hp node raises maxHp by 10 on top of everything else".
+    // Floored at 1: a pool of 0 is a player who cannot exist, and Math.max on
+    // the RESULT is what lets poolGrant stay unclamped for drawback nodes.
+    maxHp: Math.max(1, poolBase(classPools, 'maxHp', C.HP_BASE)
+      + C.HP_PER_CON * above('constitution') + poolGrant(progression, 'hp')),
+    maxMana: Math.max(0, poolBase(classPools, 'maxMana', C.MANA_BASE)
+      + C.MANA_PER_INT * above('intelligence') + poolGrant(progression, 'mana')),
+    // Stamina has no stat that scales it and no per-class base -- it is the one
+    // pool the tree alone moves. It was a bare constant in world.js until
+    // SOMET-495; it lives here now so every re-derive path refreshes it by the
+    // same route as hp and mana, rather than being written once at join.
+    maxStamina: Math.max(1, C.STAMINA_BASE + poolGrant(progression, 'stamina')),
     meleeMult: round4(1 + C.MELEE_PER_STR * above('strength')),
     spellMult: round4(1 + C.SPELL_PER_INT * above('intelligence')),
     // Lower is faster. Floored so attack rate stays bounded.
@@ -115,6 +178,13 @@ function derivePlayerStats(progression, classPools = null) {
     // only so it reaches the authority by the same route every other derived
     // number does.
     lifeCostMultiplier: ruleLifeCostMultiplier(progression),
+    // SOMET-495, carried the same way and for the same reason. Read by
+    // world.js's weaponDamage (damageMult), by the mitigation rebuild in
+    // world.js (resists) and by effects.js's applyHitStatuses at every player
+    // hit site (hitStatuses). Nothing here derives a number from them.
+    damageMult: damageMultOf(progression),
+    resists: resistsOf(progression),
+    hitStatuses: hitStatusesOf(progression),
   };
 }
 

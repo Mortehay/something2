@@ -10,7 +10,9 @@ const {
 } = require('./damage');
 const { resolveEffectName } = require('./vfx.js');
 const { bodyLift } = require('./attackOrigin.js');
-const { applyElementEffect, activeEffectKeys, canAct } = require('./effects');
+const {
+  applyElementEffect, applyHitStatuses, activeEffectKeys, canAct,
+} = require('./effects');
 const { resolveBehavior, DEFAULT_BEHAVIOR, DEFAULT_ABILITY } = require('../services/creatureBehaviors');
 const { shoveAwayFrom } = require('./knockback');
 
@@ -2205,7 +2207,13 @@ class CreatureSim {
   // It is a separate packet, never added into `damage`, so each portion is
   // mitigated and rides its status effect under its OWN element -- frost on a
   // physical sword must be resisted as frost.
-  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null, augment = null, pacifiedFrom = null) {
+  // SOMET-495: `hitStatuses` is the swinging player's tree-granted on-hit
+  // riders (composeStats' `hitStatuses`, threaded from world.js). Applied to
+  // every creature the arc reaches, beside the element's own rider and never
+  // instead of it -- a physical sword on a "your hits burn" character applies
+  // burn, which is the entire content of the node. Defaults to null, so the
+  // several tests that drive this method directly are unchanged.
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null, augment = null, pacifiedFrom = null, hitStatuses = null) {
     const killed = [];
     for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth, pacifiedFrom)) {
       const c = this.creatures.get(id);
@@ -2218,6 +2226,10 @@ class CreatureSim {
       // deals damage — one call adjacent to each applyDamage, never a second
       // rider table.
       applyElementEffect(c, element, now, sourceId);
+      // SOMET-495: the tree's riders, ONCE per target per swing -- deliberately
+      // beside the weapon's element rider and not repeated in the augment
+      // branch below, which lands on this same creature.
+      applyHitStatuses(c, hitStatuses, now, sourceId);
       if (augment && augment.bonusDamage > 0) {
         // effectiveMit is re-read rather than cached across the two packets:
         // the first packet's rider can change what the second is mitigated by

@@ -299,6 +299,15 @@ async function composeProgression(db, characterId, row) {
     sources: composed.sources,
     modifiers: composed.modifiers,
     rules: composed.rules,
+    // SOMET-495. The four aggregates the OTHER grant kinds compose to, carried
+    // on the row exactly as `rules` is and for the same reason: every consumer
+    // reads them via derivePlayerStats, which takes this row. Before 495 they
+    // did not exist and `modifiers` was the only trace of 1419 grants -- the
+    // Character tab listed them and nothing applied them.
+    pools: composed.pools,
+    damageMult: composed.damageMult,
+    resists: composed.resists,
+    hitStatuses: composed.hitStatuses,
   };
 }
 
