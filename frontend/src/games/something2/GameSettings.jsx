@@ -28,6 +28,7 @@ import styled from 'styled-components';
 import { HiOutlineCog6Tooth } from 'react-icons/hi2';
 
 const LS_INSPECT = 'something2.settings.inspect';
+const LS_CONSTANT_ATTACK = 'something2.settings.constantAttack';
 // Matches CharacterSheet's own poll cadence. This reads two booleans off an
 // in-memory object; there is nothing here worth a rAF subscription.
 const POLL_MS = 500;
@@ -125,17 +126,28 @@ const Row = styled.label`
 // re-read a stale value), so this is a function called from the initialiser.
 // A browser with storage blocked throws on access rather than returning null,
 // which would otherwise take the whole HUD down.
-function readInspectPref() {
+function readPref(key) {
   try {
-    return localStorage.getItem(LS_INSPECT) === '1';
+    return localStorage.getItem(key) === '1';
   } catch {
     return false;
   }
 }
 
+function writePref(key, on) {
+  try {
+    localStorage.setItem(key, on ? '1' : '0');
+  } catch {
+    // Storage blocked (private window, site data off). The setting still
+    // applies to this session; only its persistence is lost, and losing the
+    // toggle entirely would be the worse failure.
+  }
+}
+
 export default function GameSettings({ gameRef }) {
   const [open, setOpen] = useState(false);
-  const [inspect, setInspect] = useState(readInspectPref);
+  const [inspect, setInspect] = useState(() => readPref(LS_INSPECT));
+  const [constantAttack, setConstantAttack] = useState(() => readPref(LS_CONSTANT_ATTACK));
   // null = not in a playing world yet, so the controls render disabled rather
   // than claiming a state they cannot reach.
   const [autoLoot, setAutoLoot] = useState(null);
@@ -144,6 +156,8 @@ export default function GameSettings({ gameRef }) {
   // changes; the ref is that, and setInterval below depends only on gameRef.
   const inspectRef = useRef(inspect);
   useEffect(() => { inspectRef.current = inspect; });
+  const constantAttackRef = useRef(constantAttack);
+  useEffect(() => { constantAttackRef.current = constantAttack; });
 
   useEffect(() => {
     const tick = () => {
@@ -155,6 +169,9 @@ export default function GameSettings({ gameRef }) {
       if (snap && game.setInspectEnabled && snap.inspect !== inspectRef.current) {
         game.setInspectEnabled(inspectRef.current);
       }
+      if (snap && game.setConstantAttack && snap.constantAttack !== constantAttackRef.current) {
+        game.setConstantAttack(constantAttackRef.current);
+      }
     };
     tick();
     const id = setInterval(tick, POLL_MS);
@@ -163,15 +180,16 @@ export default function GameSettings({ gameRef }) {
 
   const toggleInspect = useCallback((next) => {
     setInspect(next);
-    try {
-      localStorage.setItem(LS_INSPECT, next ? '1' : '0');
-    } catch {
-      // Storage blocked (private window, site data off). The setting still
-      // applies to this session; only its persistence is lost, and losing the
-      // toggle entirely would be the worse failure.
-    }
+    writePref(LS_INSPECT, next);
     const game = gameRef.current;
     if (game && game.setInspectEnabled) game.setInspectEnabled(next);
+  }, [gameRef]);
+
+  const toggleConstantAttack = useCallback((next) => {
+    setConstantAttack(next);
+    writePref(LS_CONSTANT_ATTACK, next);
+    const game = gameRef.current;
+    if (game && game.setConstantAttack) game.setConstantAttack(next);
   }, [gameRef]);
 
   // Auto-loot is only mirrored locally if the intent actually reached the
@@ -230,6 +248,22 @@ export default function GameSettings({ gameRef }) {
                 Hover anything in the world for a card describing it. Creatures
                 also show their level, HP and MP bars, and how aggressive they
                 are. Click to keep the card up while you read it.
+              </span>
+            </span>
+          </Row>
+
+          <Row>
+            <input
+              type="checkbox"
+              checked={constantAttack}
+              onChange={(e) => toggleConstantAttack(e.target.checked)}
+            />
+            <span className="label">
+              Constant attack
+              <span className="hint">
+                Hold the left mouse button to keep attacking instead of clicking
+                each time. Stops on its own when you run out of mana, life,
+                stamina or ammo — hold again once you have recovered.
               </span>
             </span>
           </Row>

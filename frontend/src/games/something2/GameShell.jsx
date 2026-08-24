@@ -115,7 +115,7 @@ const HELP_SECTIONS = [
     title: 'Movement & combat',
     rows: [
       { k: [['W'], ['A'], ['S'], ['D']], d: 'Move (arrow keys also work)' },
-      { k: [['Left-click']], d: 'Attack — fires toward the cursor with your equipped weapon' },
+      { k: [['Left-click']], d: 'Attack — fires toward the cursor with your equipped weapon. Turn on "Constant attack" in Settings to hold the button down instead of clicking each time' },
     ],
   },
   {
@@ -137,8 +137,9 @@ const HELP_SECTIONS = [
   {
     title: 'Settings',
     rows: [
-      { k: [['Settings']], d: 'Below "How to play" — auto-loot, and inspect-on-hover' },
+      { k: [['Settings']], d: 'Below "How to play" — auto-loot, inspect-on-hover, and constant attack' },
       { k: [['Inspect']], d: 'With inspect on, hover anything in the world for a card describing it; creatures also show their level, an HP bar over an MP bar, and how aggressive they are. Click an entity to keep its card up while you read it' },
+      { k: [['Constant attack']], d: 'Hold the left mouse button to keep attacking. It stops by itself the moment you run out of mana, life, stamina or ammo — hold again once you have recovered' },
     ],
   },
   {

@@ -1222,6 +1222,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }
 
+  // SOMET-494. A refused attack has always been silently dropped, and that was
+  // fine while every attack was one deliberate click. "Constant attack" holds
+  // the button down, so the client now has to know WHY a shot was refused:
+  // a cooldown refusal is the normal rhythm of holding and the hold continues
+  // through it, but running out of mana / life / stamina must stop it.
+  //
+  // Only the resource refusal is announced. Cooldown refusals happen many times
+  // a second under a held button and carry no information the client can act
+  // on, so putting them on the wire would be pure noise. Ammo is NOT announced
+  // here either: it is refused further down, after ammo is actually consumed,
+  // and already has its own richer `noammo` frame carrying the item type.
+  function refuseAttack(ws, gate) {
+    if (gate && gate.reason === 'resource') send(ws, { type: 'attackrefused', reason: 'resource' });
+  }
+
   function broadcastCreatures(entry) {
     const N = entry.row.chunk_size;
     for (const [userId, ws] of entry.sockets) {
@@ -1752,7 +1767,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Cheap synchronous reject: cooldown / mana / stamina. Nothing has
       // been spent, and a refused attack must not consume the cooldown.
       const gate = entry.world.canAttack(ws.userId);
-      if (!gate.ok) return;
+      if (!gate.ok) { refuseAttack(ws, gate); return; }
 
       // Ammo-free weapons (all melee, all staves, darts) keep the fully
       // synchronous path: no DB round trip on the hot path.
@@ -1789,7 +1804,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const cur = worlds.get(ws.worldId);
         if (!cur) return;
         const g = cur.world.canAttack(ws.userId);
-        if (!g.ok) return; // nothing spent
+        if (!g.ok) { refuseAttack(ws, g); return; } // nothing spent
         // The equipped weapon may have changed too (an equip frame can be
         // chained between the two): always spend the CURRENT weapon's
         // ammo, and fall back to the sync path if it now needs none.
