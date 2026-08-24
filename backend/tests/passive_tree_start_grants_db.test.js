@@ -45,28 +45,56 @@ test('start-node grants reach passive_nodes', { skip: !url ? 'no database URL' :
   assert.equal(seeded.rows[0].n, 6,
     'this database needs a seeded passive tree; run scripts/seed-passive-tree.js');
 
+  // SOMET-495. Both subtests below MUTATE THE WHOLE TREE and then repair it.
+  // `node --test` runs test FILES as concurrent processes against one database,
+  // so while the repair was in flight every peer file that resolves a start-node
+  // grant -- passive_tree_routes, charm_live_db, life_cost_live_join_db -- read
+  // the emptied array and failed. That is the three-failure full-suite red this
+  // ticket found still standing (and twelve failures on a narrower, faster set),
+  // and it reproduces on a pristine main: this file passes alone, and takes its
+  // neighbours down when run beside them.
+  //
+  // Fixed by doing the mutate/repair/assert on ONE client inside a transaction
+  // and ROLLING BACK. Postgres' MVCC means no other session ever observes the
+  // emptied arrays, the assertions still see them (they are in the same
+  // transaction), and the tree is byte-identical afterwards either way -- the
+  // reseed under test writes exactly what was there before it.
+  //
+  // The rollback is NOT a substitute for the repair: what is under test is that
+  // a non-forced reseed restores the grants, and that is asserted before it.
+  const inRollback = async (fn) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await fn(client);
+    } finally {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+    }
+  };
+
   await t.test('a NON-forced reseed delivers them over the old empty arrays', async () => {
-    // Put the database back into the pre-471 state: start nodes with no
-    // grants, which is what C1 wrote and what every existing database holds.
-    // Scoped to kind = 'start' by primary key set, on a scratch database only
-    // -- and repaired by the reseed under test, which is the point.
-    await pool.query("UPDATE passive_nodes SET grants = '[]'::jsonb WHERE kind = 'start'");
+    await inRollback(async (db) => {
+      // Put the database back into the pre-471 state: start nodes with no
+      // grants, which is what C1 wrote and what every existing database holds.
+      await db.query("UPDATE passive_nodes SET grants = '[]'::jsonb WHERE kind = 'start'");
 
-    // Prove the wipe happened. Without this the assertion below could pass
-    // simply because the rows already held the right thing.
-    const before = await pool.query(
-      `SELECT count(*)::int AS n FROM passive_nodes
-        WHERE kind = 'start' AND grants = '[]'::jsonb`);
-    assert.equal(before.rows[0].n, 6, 'the six start nodes must really be emptied first');
+      // Prove the wipe happened. Without this the assertion below could pass
+      // simply because the rows already held the right thing.
+      const before = await db.query(
+        `SELECT count(*)::int AS n FROM passive_nodes
+          WHERE kind = 'start' AND grants = '[]'::jsonb`);
+      assert.equal(before.rows[0].n, 6, 'the six start nodes must really be emptied first');
 
-    // NOT forced. This is the call `make seed-passive-tree` makes.
-    await seedPassiveTree(pool, { quiet: true });
+      // NOT forced. This is the call `make seed-passive-tree` makes.
+      await seedPassiveTree(db, { quiet: true });
 
-    const r = await pool.query(
-      "SELECT start_class, grants FROM passive_nodes WHERE kind = 'start' ORDER BY start_class");
-    assert.deepEqual(
-      Object.fromEntries(r.rows.map((x) => [x.start_class, x.grants])),
-      EXPECTED);
+      const r = await db.query(
+        "SELECT start_class, grants FROM passive_nodes WHERE kind = 'start' ORDER BY start_class");
+      assert.deepEqual(
+        Object.fromEntries(r.rows.map((x) => [x.start_class, x.grants])),
+        EXPECTED);
+    });
   });
 
   await t.test('a non-forced reseed still preserves a hand-tuned ordinary node', async () => {
@@ -74,23 +102,22 @@ test('start-node grants reach passive_nodes', { skip: !url ? 'no database URL' :
     // must not turn every reseed into --force: an admin's retuned minor or
     // notable has to survive, which is the behaviour C1 built the CASE
     // expression for in the first place.
-    const victim = await pool.query(
-      "SELECT id, key, grants FROM passive_nodes WHERE kind = 'minor' ORDER BY id LIMIT 1");
-    assert.equal(victim.rows.length, 1);
-    const original = victim.rows[0].grants;
-    const tuned = [{ type: 'resource', pool: 'hp', value: 999 }];
-    try {
-      await pool.query('UPDATE passive_nodes SET grants = $2::jsonb WHERE id = $1',
+    await inRollback(async (db) => {
+      const victim = await db.query(
+        "SELECT id, key, grants FROM passive_nodes WHERE kind = 'minor' ORDER BY id LIMIT 1");
+      assert.equal(victim.rows.length, 1);
+      const tuned = [{ type: 'resource', pool: 'hp', value: 999 }];
+      await db.query('UPDATE passive_nodes SET grants = $2::jsonb WHERE id = $1',
         [victim.rows[0].id, JSON.stringify(tuned)]);
-      await seedPassiveTree(pool, { quiet: true });
-      const after = await pool.query(
+      await seedPassiveTree(db, { quiet: true });
+      const after = await db.query(
         'SELECT grants FROM passive_nodes WHERE id = $1', [victim.rows[0].id]);
       assert.deepEqual(after.rows[0].grants, tuned,
         'a non-forced reseed must not clobber an admin-tuned node');
-    } finally {
-      await pool.query('UPDATE passive_nodes SET grants = $2::jsonb WHERE id = $1',
-        [victim.rows[0].id, JSON.stringify(original)]);
-    }
+      // The explicit restore is gone: the ROLLBACK is the restore, and it
+      // cannot be skipped by an assertion throwing first (the old `finally`
+      // could still leave the row tuned if the restore query itself failed).
+    });
   });
 
   await t.test('every start node joins to a real, playable entity_types row', async () => {
