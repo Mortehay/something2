@@ -10,7 +10,10 @@ const { configureAttackOrigins } = require('./attackOrigin.js');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
 const { ownedCharacter } = require('../services/characters.js');
-const { charmBudget, canSummon } = require('../services/charm.js');
+const { charmBudget, canSummon, PLAYER_CHARM_MS } = require('../services/charm.js');
+// SOMET-473: the PLAYER pacify. applyCharm owns the non-refreshing immunity
+// window (effects.js), so this handler never decides whether a charm lands.
+const { applyCharm } = require('./effects');
 const { recordVisit } = require('../services/visitedWorlds.js');
 const { mayJoin, joinPolicyFacts, waypointTravelFacts } = require('../services/joinPolicy.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
@@ -2029,10 +2032,22 @@ function attachAuthority(httpServer, pool, opts = {}) {
       if (entry) entry.world.setAutoLoot(ws.userId, msg.on === true);
     },
 
-    // SOMET-473 -- the Druid's charm (spec 8.2). One message, four refusals, in
-    // this order: not a Druid, nothing charmable in range, already someone's
-    // pet, or over budget. Only the first and last say anything: a miss is
-    // silent, exactly like `pickup` with nothing in range.
+    // SOMET-473 -- the Druid's charm (spec 8.2). ONE message, TWO targets, and
+    // they are deliberately different mechanics:
+    //
+    //   creature_id -> full control transfer, budgeted, 120s, persisted.
+    //   player_id   -> a 4s PACIFY. No control transfer, no budget, no roster
+    //                  row, nothing persisted. It is a debuff, not a summon.
+    //
+    // The message names its target explicitly rather than the server picking a
+    // "nearest interactable": SOMET-487 is what happens when one key has to
+    // guess between two things a tile apart. A caller may name exactly one.
+    //
+    // Refusals, in order: not a Druid, no target named, nothing in range,
+    // already someone's pet, or over budget. Only "not a Druid" and the budget
+    // say anything -- a miss is silent, exactly like `pickup` with nothing in
+    // range, and so is a pacify that bounces off the immunity window (the
+    // target's protection is not the caster's business).
     //
     // The budget is composed from the DATABASE every time rather than cached on
     // the player. Charisma is a COMPOSED number (class base + passive tree +
@@ -2041,7 +2056,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
     charm(ws, msg) {
       const entry = worlds.get(ws.worldId);
       if (!entry) return;
-      if (typeof msg.creature_id !== 'string') return; // wire hygiene: ids are strings
+      // wire hygiene: ids are strings, and exactly one target kind per message.
+      const wantsCreature = typeof msg.creature_id === 'string';
+      const wantsPlayer = typeof msg.player_id === 'string';
+      if (wantsCreature === wantsPlayer) return;
       chainOp(ws, 'charm', async () => {
         const p = entry.world.getPlayer(ws.userId);
         if (!p) return;
@@ -2049,10 +2067,37 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!character || character.className !== 'Druid') {
           return send(ws, { type: 'error', message: 'Only a Druid can charm' });
         }
+        const pc = { x: p.x + p.width / 2, y: p.y + p.height / 2 };
+
+        if (wantsPlayer) {
+          const other = entry.world.getPlayer(msg.player_id);
+          // Never yourself: a self-pacify would make you unable to damage
+          // yourself, which is nothing, and would repel you from your own
+          // position, which is a jitter loop.
+          if (!other || other === p) return;
+          const oc = { x: other.x + other.width / 2, y: other.y + other.height / 2 };
+          if (Math.hypot(oc.x - pc.x, oc.y - pc.y) > CHARM_RANGE) return;
+          // applyCharm ITSELF decides whether this lands -- the non-refreshing
+          // immunity window lives there, next to the shock interrupt it copies,
+          // so no caller can chain-lock a player by calling more often. A
+          // refusal is silent: it is the TARGET's guarantee, not a fact the
+          // caster is owed.
+          //
+          // Nothing else happens here. No budget is consulted (a pacified
+          // player is not a summon and never costs a level), no
+          // character_summons row is written, and nothing is persisted -- a 4s
+          // debuff that outlived a restart would be a bug, not a feature.
+          if (applyCharm(other, ws.userId, entry.world.now)) {
+            send(ws, {
+              type: 'charmed', userId: other.userId,
+              expiresAt: entry.world.now + PLAYER_CHARM_MS,
+            });
+          }
+          return;
+        }
 
         const c = entry.world.creatures.get(msg.creature_id);
         if (!c) return; // gone: silent, like pickup with nothing in range
-        const pc = { x: p.x + p.width / 2, y: p.y + p.height / 2 };
         const cc = { x: c.x + c.width / 2, y: c.y + c.height / 2 };
         if (Math.hypot(cc.x - pc.x, cc.y - pc.y) > CHARM_RANGE) return;
         if (c.charmOwnerUserId != null) return; // already someone's pet

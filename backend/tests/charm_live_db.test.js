@@ -22,6 +22,7 @@ const { attachAuthority } = require('../src/authority/server.js');
 const { createCharacter } = require('../src/services/characters.js');
 const { loadProgression } = require('../src/services/progressionStore.js');
 const { charmBudget } = require('../src/services/charm.js');
+const { charmerOf } = require('../src/authority/effects.js');
 
 const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 const SECRET = 'somet473-test-secret';
@@ -58,7 +59,16 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
   }
 
   const server = http.createServer();
-  const handle = attachAuthority(server, pool, { jwtSecret: SECRET, tickMs: 50 });
+  // flushMs is pushed far out of the way on purpose, the same way other files
+  // here push heartbeatMs out: the periodic flushAndPrune calls pruneInactive,
+  // which DELETES any creature whose chunk is not currently active. This file
+  // injects creatures and then asserts on them across several subtests, and on
+  // a loaded machine (the full suite) those subtests take longer than the 30s
+  // default -- so the sweep fires mid-test and a creature vanishes between the
+  // spawn and the assertion. Nothing here is about the sweep.
+  const handle = attachAuthority(server, pool, {
+    jwtSecret: SECRET, tickMs: 50, flushMs: 10 * 60 * 1000,
+  });
   await new Promise((r) => server.listen(0, r));
   const url = `ws://127.0.0.1:${server.address().port}/authority`;
 
@@ -127,9 +137,25 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
     return { userId, characterId: character.id, world, player, ws };
   }
 
+  // The authority populates activeChunks from its own loop. Two things depend on
+  // it and BOTH fail silently without it: tickCreatures skips every creature
+  // when the set is empty, and flushAndPrune's pruneInactive deletes every
+  // creature whose chunk is not in it -- which, on a loaded machine, is how a
+  // freshly injected creature vanishes between a spawn and the next assertion.
+  async function awaitActiveChunks() {
+    const rec = handle.worlds.get(entryWorldId);
+    for (let i = 0; i < 200 && rec.activeChunks.size === 0; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(rec.activeChunks.size > 0,
+      'the authority never activated a chunk, so nothing below would have ticked');
+    return rec;
+  }
+
   // A creature standing next to `player`, inserted into the DB and injected
   // into the live sim the same way a mid-session spawn is.
   async function spawnBeside(player, world, { dx = 60, dy = 0, level = 3 } = {}) {
+    await awaitActiveChunks();
     const r = await pool.query(
       `INSERT INTO world_creatures (world_id, type, x, y, hp, level, damage)
        VALUES ($1, $2, $3, $4, 40, $5, 4) RETURNING id`,
@@ -166,7 +192,9 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
     warrior.ws.send(JSON.stringify({ type: 'charm', creature_id: id }));
     const err = await nextMsg(warrior.ws, 'error');
     assert.match(err.message, /Only a Druid can charm/);
-    assert.equal(warrior.world.creatures.get(id).faction, 'hostile');
+    const after = warrior.world.creatures.get(id);
+    assert.ok(after, 'the creature must still be in the sim for this assertion to mean anything');
+    assert.equal(after.faction, 'hostile');
   });
 
   let petId = null;
@@ -205,15 +233,7 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
     // The authority's own loop, over the authority's OWN active chunk set --
     // not creatures.tick() with a hand-rolled key list. This is the exact call
     // server.js makes 20 times a second.
-    const entryRec = handle.worlds.get(entryWorldId);
-    // The server populates activeChunks from its own loop; an empty set makes
-    // tickCreatures skip EVERY creature, which is a silent green-looking pass
-    // waiting to happen. Wait for the real set rather than inventing one.
-    for (let i = 0; i < 100 && entryRec.activeChunks.size === 0; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.ok(entryRec.activeChunks.size > 0,
-      'the authority never activated a chunk, so nothing below would have ticked');
+    const entryRec = await awaitActiveChunks();
     for (let i = 0; i < 10; i++) druid.world.tickCreatures(0.05, entryRec.activeChunks);
     const after = druid.world.creatures.get(petId);
     assert.ok(after.x < before, 'a pet closes on its druid across real authority ticks');
@@ -259,6 +279,59 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
       'a refused charm must write nothing');
   });
 
+  await t.test('a Druid pacifies another PLAYER over the wire, and cannot chain-lock them', async () => {
+    // The player pacify has its own wire path (msg.player_id). Without one it
+    // would be a fully-tested mechanic nothing in the running game can reach --
+    // the inertness shape this epic keeps shipping, wearing a unit test's
+    // clothes.
+    const bystander = await join('Warrior');
+    // Stand them next to the druid so the 200px range test passes.
+    bystander.player.x = druid.player.x + 40;
+    bystander.player.y = druid.player.y;
+
+    druid.ws.send(JSON.stringify({ type: 'charm', player_id: String(bystander.userId) }));
+    const ok = await nextMsg(druid.ws, 'charmed');
+    assert.equal(ok.userId, String(bystander.userId));
+    assert.equal(charmerOf(bystander.player, druid.world.now), String(druid.userId));
+
+    // NOT a summon, and it costs nothing against the budget: the roster and the
+    // creature sim must both be untouched by a pacified player.
+    assert.equal(bystander.player.charmOwnerUserId, undefined);
+    const roster = await pool.query(
+      `SELECT count(*)::int AS n FROM character_summons WHERE character_id = $1`,
+      [druid.characterId]);
+    assert.equal(roster.rows[0].n, 2, 'the two CREATURES charmed earlier, and nothing else');
+
+    // Hammering it inside the window changes nothing -- the guarantee lives in
+    // applyCharm, and this proves the wire cannot route around it.
+    const until = druid.world.now;
+    for (let i = 0; i < 5; i++) {
+      druid.ws.send(JSON.stringify({ type: 'charm', player_id: String(bystander.userId) }));
+    }
+    await new Promise((r) => setTimeout(r, 400));
+    const e = bystander.player.effects.get('charmed');
+    assert.ok(e.until <= until + 4000 + 1,
+      'a repeated charm must not push the expiry out; that is the chain-lock');
+  });
+
+  await t.test('a pacified player keeps their own movement and is never a summon', async () => {
+    // Read straight off the live world the authority is ticking: the pacify
+    // must not have taken their input away or given them a server-driven path.
+    const pacified = [...druid.world.players.values()]
+      .find((x) => charmerOf(x, druid.world.now) === String(druid.userId));
+    assert.ok(pacified, 'the pacified player must still be in the world');
+    const seqBefore = pacified.ackSeq;
+    pacified.input = { dx: 1, dy: 0 };
+    const xBefore = pacified.x;
+    pacified.pendingSeq = (seqBefore || 0) + 1;
+    druid.world.tick(0.05);
+    assert.ok(pacified.x > xBefore, 'their own input still moves them');
+    assert.equal(pacified.ackSeq, (seqBefore || 0) + 1,
+      'and the server is still acknowledging THEIR sequence numbers, not driving them');
+    assert.equal(druid.world.creatures.get(String(pacified.userId)), undefined,
+      'a pacified player never appears in the creature sim');
+  });
+
   await t.test('a persisted charm survives a reload of the same creature', async () => {
     // Drop it out of the sim and let the loader put it back -- the path a chunk
     // reload takes. Without the two columns in CREATURE_JOINED_SELECT (and the
@@ -280,7 +353,7 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
     // ...and the consequence, not just the field: a reloaded pet that the sim
     // cannot match to a live player is released on its very first tick. This is
     // what makes the type assertion above more than cosmetic.
-    const entryRec2 = handle.worlds.get(entryWorldId);
+    const entryRec2 = await awaitActiveChunks();
     for (let i = 0; i < 5; i++) druid.world.tickCreatures(0.05, entryRec2.activeChunks);
     assert.equal(druid.world.creatures.get(petId).faction, 'charmed',
       'a reloaded pet must still be a pet after the tick has had a chance to release it');
