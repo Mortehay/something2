@@ -320,3 +320,95 @@ export function layoutCharacterTab({ character, x, y, w, h, modPage = 0 }) {
     hitAreas,
   };
 }
+
+// --- Draw ------------------------------------------------------------------
+// The ONLY function in this module that touches a context. It decides nothing:
+// every string and every rect it paints came out of layoutCharacterTab.
+// Palette matches the panel's (inventoryPanel.js) rather than the admin
+// tokens -- the game canvas is deliberately hardcoded dark, per
+// .ai/styleguides/frontend.md.
+
+const TEXT = "#e5e7eb";
+const MUTED = "#9ca3af";
+const STRONG_COLOR = "#86efac";
+const WEAK_COLOR = "#fca5a5";
+const ACCENT = "#4a9eff";
+const SOURCE_COLOR = { tree: "#c4b5fd", gear: "#fcd34d" };
+// The right-hand column the `tree` / `gear` tag is right-aligned into. Wide
+// enough for the longer of the two words at 11px monospace plus a margin.
+const SOURCE_TAG_DX = 44;
+
+export function drawCharacterTab(ctx, pane) {
+  if (!pane) return;
+
+  if (pane.loading) {
+    ctx.font = "12px monospace";
+    ctx.fillStyle = MUTED;
+    ctx.fillText(pane.loading.text, pane.loading.x, pane.loading.y);
+    return;
+  }
+
+  ctx.font = "14px monospace";
+  ctx.fillStyle = TEXT;
+  ctx.fillText(pane.header.text, pane.header.x, pane.header.y);
+
+  // XP bar: track then fill, so a 0% fill paints nothing over the track.
+  const t = pane.xp.track;
+  ctx.fillStyle = "rgba(25,25,38,0.9)";
+  ctx.fillRect(t.x, t.y, t.w, t.h);
+  ctx.strokeStyle = "#3a3a4e";
+  ctx.strokeRect(t.x, t.y, t.w, t.h);
+  if (pane.xp.fillW > 0) {
+    ctx.fillStyle = ACCENT;
+    ctx.fillRect(t.x, t.y, pane.xp.fillW, t.h);
+  }
+  ctx.font = "11px monospace";
+  ctx.fillStyle = MUTED;
+  ctx.fillText(pane.xp.label, pane.xp.labelX, pane.xp.labelY);
+
+  ctx.font = "12px monospace";
+  for (const line of pane.statLines) {
+    if (line.strong) ctx.fillStyle = STRONG_COLOR;
+    else if (line.weak) ctx.fillStyle = WEAK_COLOR;
+    else ctx.fillStyle = TEXT;
+    ctx.fillText(line.text, line.x, line.y);
+  }
+
+  ctx.fillStyle = MUTED;
+  for (const row of pane.derived) ctx.fillText(row.text, row.x, row.y);
+
+  ctx.fillStyle = TEXT;
+  ctx.fillText(pane.highlight.text, pane.highlight.x, pane.highlight.y);
+  ctx.fillStyle = "#facc15";
+  ctx.fillText(pane.points.text, pane.points.x, pane.points.y);
+
+  const m = pane.modifiers;
+  ctx.fillStyle = MUTED;
+  ctx.fillText(m.title.text, m.title.x, m.title.y);
+  for (const row of m.rows) {
+    ctx.fillStyle = TEXT;
+    ctx.fillText(row.text, row.x, row.y);
+    if (row.source) {
+      // The source tag is the point of the list (spec §10.2: "every active
+      // modifier WITH ITS SOURCE"), so it gets its own colour and a fixed
+      // right-hand column rather than being appended to the text.
+      ctx.fillStyle = SOURCE_COLOR[row.source] || MUTED;
+      ctx.fillText(row.source, pane.x + pane.w - SOURCE_TAG_DX, row.y);
+    }
+  }
+
+  for (const [rect, label] of [[m.prev, "<"], [m.next, ">"]]) {
+    if (!rect) continue;
+    ctx.fillStyle = "rgba(40,40,60,0.85)";
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.strokeStyle = ACCENT;
+    ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.fillStyle = TEXT;
+    ctx.fillText(label, rect.x + 8, rect.y + 3);
+  }
+  if (m.pageCount > 1) {
+    ctx.fillStyle = MUTED;
+    // Beside the arrows, on their own row, so it never lands on a modifier.
+    ctx.fillText(`page ${m.page + 1}/${m.pageCount}`, pane.x + 64, (m.next || m.prev).y + 3);
+  }
+}
