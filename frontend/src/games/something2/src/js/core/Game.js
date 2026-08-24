@@ -23,6 +23,7 @@ import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
+import { shouldRepeatAttack, refusalStopsHold } from "./constantAttack.js";
 import { authorityWsUrl } from "../net/authorityUrl.js";
 import { API_URL } from "../../../../../config.js";
 
@@ -122,6 +123,14 @@ export class Game {
         // it here with setInspectEnabled, so localStorage is read in exactly
         // one place instead of by both halves of the app.
         this.inspectEnabled = false;
+        // SOMET-494 -- "Constant attack". Same ownership as inspectEnabled:
+        // GameSettings.jsx holds the persisted preference and pushes it here.
+        this.constantAttack = false;
+        // Whether the left button is currently down ON THE WORLD (a press that
+        // opened a shop or hit a panel never sets it). Cleared by the release,
+        // by losing focus, by the context menu, and by a resource refusal.
+        this._attackHeld = false;
+        this._lastAttackSentAt = 0;
         // A left-click PINS whatever the cursor was over, so the card survives
         // the pointer moving on. Kept as a key rather than an object: the
         // drawable is rebuilt every frame and a held reference would keep
@@ -398,6 +407,13 @@ export class Game {
         this.inventoryPage = 0;
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
+        // SOMET-494. The SETTING survives a join (it is the player's, not the
+        // world's); the in-flight hold does not. Walking through a doorway
+        // re-inits the world, and arriving in a new one already swinging --
+        // off a button press made in the previous one -- is not something the
+        // player asked for.
+        this._attackHeld = false;
+        this._lastAttackSentAt = 0;
         // SOMET-372. Cleared on join for the same reason merchants/landmarks
         // are: the first `chests` frame of the new world may be a few ticks
         // out, and until it lands the previous world's chests would otherwise
@@ -564,7 +580,15 @@ export class Game {
                 onNoAmmo: (msg) => {
                     this.noAmmoUntil = performance.now() + NO_AMMO_FLASH_MS;
                     applyAmmoCount(this.inventory, msg && msg.item_type_id, 0);
+                    // SOMET-494: an empty quiver is "the thing the attack
+                    // depends on ran out" exactly as much as an empty mana
+                    // pool is, so it ends a held attack too. It arrives on its
+                    // own frame rather than through `attackrefused` because
+                    // ammo is refused later, after the spend, and carries the
+                    // item type the HUD has to zero.
+                    this._stopConstantAttack();
                 },
+                onAttackRefused: (msg) => this._onAttackRefused(msg),
                 onAmmo: (msg) => applyAmmoCount(this.inventory, msg.item_type_id, msg.count),
                 onError: (e) => {
                     console.error('[authority]', e);
@@ -734,7 +758,11 @@ export class Game {
     // disabled rather than lying about a world it is not in.
     getSettingsSnapshot() {
         if (this.state !== 'playing' || !this.chunked) return null;
-        return { autoLoot: this.autoLoot === true, inspect: this.inspectEnabled === true };
+        return {
+            autoLoot: this.autoLoot === true,
+            inspect: this.inspectEnabled === true,
+            constantAttack: this.constantAttack === true,
+        };
     }
 
     // Ask the server to turn auto-loot on/off. Returns whether the intent
@@ -752,6 +780,66 @@ export class Game {
         return true;
     }
 
+    // SOMET-494 -- send an attack toward wherever the cursor is NOW.
+    //
+    // The aim is recomputed per send rather than captured at mousedown, so a
+    // held attack follows the pointer: swinging at where the cursor was a
+    // second ago is not what "hold to keep attacking" means to anyone.
+    _sendAttackAtCursor() {
+        if (!this.authorityClient || !this.camera) return;
+        const pcx = this.player.x + this.player.width / 2;
+        const pcy = this.player.y + this.player.height / 2;
+        const { nx, ny } = aimVector(
+            this._cursorX ?? this.canvas.width / 2,
+            this._cursorY ?? this.canvas.height / 2,
+            this.camera, pcx, pcy,
+        );
+        this.authorityClient.sendAttack(nx, ny);
+        this._lastAttackSentAt = performance.now();
+    }
+
+    // True while any full-screen panel owns the cursor. The same three panels
+    // RenderSystem suppresses the inspect card for -- it computes that from
+    // the render params it is handed rather than calling this, since it must
+    // answer for the frame it is drawing, not for the tick that follows.
+    _anyPanelOpen() {
+        return this.inventoryOpen === true || this.shopOpen === true || this.bankOpen === true;
+    }
+
+    // One repeat step, called from update(). Everything it decides lives in
+    // core/constantAttack.js so the conditions can be asserted directly --
+    // a stuck hold is an input bug no screenshot shows and no player can undo
+    // without reloading.
+    _tickConstantAttack() {
+        if (!this._attackHeld) return;
+        // A panel opening ENDS the hold rather than merely pausing it. Pausing
+        // would resume swinging the moment the panel closed, off a button
+        // press the player made before they went shopping.
+        if (this._anyPanelOpen()) { this._attackHeld = false; return; }
+        const should = shouldRepeatAttack({
+            enabled: this.constantAttack === true,
+            held: true,
+            playing: this.state === 'playing' && !!this.chunked && !!this.authorityClient,
+            panelOpen: false,
+            lastSentAt: this._lastAttackSentAt,
+        }, performance.now());
+        if (should) this._sendAttackAtCursor();
+    }
+
+    // The server refused an attack. Only a refusal the player cannot wait out
+    // ends the hold -- see refusalStopsHold for why a cooldown refusal must
+    // not, and why a shock interrupt must not either.
+    _onAttackRefused(msg) {
+        if (refusalStopsHold(msg && msg.reason)) this._stopConstantAttack();
+    }
+
+    // Ends a held attack. Public-ish because two different server frames reach
+    // it (`attackrefused` and `noammo`) and both mean the same thing to the
+    // player: you have run out, so the character stops.
+    _stopConstantAttack() {
+        this._attackHeld = false;
+    }
+
     // Purely local: no server involvement, so unlike setAutoLoot this always
     // takes. Turning it OFF drops any pinned target too, or the card would
     // hang on screen until the pin expired.
@@ -762,6 +850,15 @@ export class Game {
             this._inspectPinnedUntil = 0;
         }
         return this.inspectEnabled;
+    }
+
+    // SOMET-494. Also local. Turning it OFF drops any hold in progress, so the
+    // character stops swinging the instant the box is unticked rather than
+    // when the player happens to let go.
+    setConstantAttack(on) {
+        this.constantAttack = on === true;
+        if (!this.constantAttack) this._attackHeld = false;
+        return this.constantAttack;
     }
 
     // Write-through cache update for gold ONLY (SOMET-242 D1 fix, narrowed by
@@ -810,6 +907,7 @@ export class Game {
         if (this._mouseMoveHandler) this.canvas.removeEventListener('mousemove', this._mouseMoveHandler);
         if (this._mouseDownHandler) this.canvas.removeEventListener('mousedown', this._mouseDownHandler);
         if (this._mouseUpHandler) this.canvas.removeEventListener('mouseup', this._mouseUpHandler);
+        if (this._windowMouseUpHandler) window.removeEventListener('mouseup', this._windowMouseUpHandler);
         if (this.authorityClient) this.authorityClient.disconnect();
 
         cancelAnimationFrame(this.animationFrameId);
@@ -829,6 +927,7 @@ export class Game {
                 const s = this.authorityClient.sendInput(dx, dy, dt);
                 if (s.sent) this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt });
             }
+            this._tickConstantAttack();
             this.creatures.interpolate(dt);
             if (this.projectiles) this.projectiles.interpolate(dt);
             this.camera.update(this.player);
@@ -1252,12 +1351,18 @@ export class Game {
             if (codeKey) this.keys[codeKey] = false;
         };
 
+        // Both of these also drop a held attack (SOMET-494). A right-click or a
+        // tab-away never produces the mouseup that would otherwise end the
+        // hold, and a stuck auto-attack is not something a player can undo
+        // without reloading -- the same reason both already clear this.keys.
         this._contextMenuHandler = () => {
             this.keys = {};
+            this._attackHeld = false;
         };
 
         this._blurHandler = () => {
             this.keys = {};
+            this._attackHeld = false;
         };
 
         // Mouse aim (Slice 3b): track cursor canvas-px position, and on
@@ -1365,8 +1470,21 @@ export class Game {
                 }
             }
 
-            const { nx, ny } = aimVector(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera, pcx, pcy);
-            this.authorityClient.sendAttack(nx, ny);
+            // SOMET-494: reaching here means the press was NOT spent on a
+            // panel, a merchant, a bank or a chest -- every one of those
+            // returned above. So this is the one place a press becomes an
+            // attack, and therefore the one place a hold may start.
+            this._attackHeld = true;
+            this._sendAttackAtCursor();
+        };
+
+        // SOMET-494. Releasing over the HUD, the sidebar or outside the window
+        // never fires the canvas's own mouseup, so the hold would survive a
+        // release the player has already made. Registered on `window` for that
+        // reason and kept deliberately separate from _mouseUpHandler below,
+        // which owns inventory-drag resolution and must stay canvas-scoped.
+        this._windowMouseUpHandler = (e) => {
+            if (e.button === 0) this._attackHeld = false;
         };
 
         this._mouseUpHandler = (e) => {
@@ -1406,6 +1524,7 @@ export class Game {
         this.canvas.addEventListener('mousemove', this._mouseMoveHandler);
         this.canvas.addEventListener('mousedown', this._mouseDownHandler);
         this.canvas.addEventListener('mouseup', this._mouseUpHandler);
+        window.addEventListener('mouseup', this._windowMouseUpHandler);
     }
 
     startGame(){

@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onChests, onChestOpened, onVfx, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAttackRefused, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onChests, onChestOpened, onVfx, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -42,6 +42,7 @@ export class WorldAuthorityClient {
     // "full list" contract to keep in step.
     this.onVfx = onVfx || (() => {});
     this.onNoAmmo = onNoAmmo || (() => {});
+    this.onAttackRefused = onAttackRefused || (() => {});
     this.onAmmo = onAmmo || (() => {});
     this.onTransition = onTransition || (() => {});
     // SOMET-292 sends this frame; SOMET-293 is the first thing to listen. Without
@@ -133,6 +134,12 @@ export class WorldAuthorityClient {
       // stack. The server consumed NO cooldown, so this is purely a cue to
       // the player — nothing local needs rolling back.
       case 'noammo': this.onNoAmmo(msg); break;
+      // SOMET-494. Sent to this socket alone when an attack was refused because
+      // the player cannot PAY for it (mana / life / stamina) -- never for a
+      // cooldown, which under a held button would arrive many times a second
+      // and means nothing more than "not yet". Nothing local needs rolling
+      // back: like `noammo`, the server spent nothing and consumed no cooldown.
+      case 'attackrefused': this.onAttackRefused(msg); break;
       // The authoritative ammo count for one type after a successful shot.
       // The server's number always wins — never merge it with a
       // locally-derived count or decrement on send, see core/ammo.js.
