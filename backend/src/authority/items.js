@@ -381,10 +381,23 @@ async function grantStartingLoadout(pool, character, itemTypes) {
         // the next join runs the identical statements and throws again. That
         // is a permanent, self-repeating join failure, i.e. a locked-out
         // character, as the price of a row that is already what we want it to
-        // be. The same ON CONFLICT shape items.js#equip already uses.
+        // be.
+        //
+        // SOMET-493: DO NOTHING, where SOMET-492 wrote DO UPDATE SET item_id.
+        // The reason 492 gave for the ON CONFLICT was only "do not throw", and
+        // DO UPDATE was picked to mirror items.js#equip -- but equip is a
+        // player DELIBERATELY replacing a slot, and this is a grant, which may
+        // never replace anything. On the DO UPDATE version a character that
+        // somehow reaches its first join with a slot already filled has that
+        // item silently swapped out for starting gear, and SOMET-493 widened
+        // that from the Cultist's one hand to two slots on all six classes.
+        // DO NOTHING keeps the anti-lockout property exactly (still no throw,
+        // still no rolled-back claim) and drops the destructive half: the slot
+        // the player already has wins, and the granted item simply stays in
+        // the bag, which is where every un-directed loadout row lives anyway.
         await client.query(
           `INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)
-           ON CONFLICT (character_id, slot) DO UPDATE SET item_id = EXCLUDED.item_id`,
+           ON CONFLICT (character_id, slot) DO NOTHING`,
           [character.id, row.equip_slot, itemId],
         );
       }

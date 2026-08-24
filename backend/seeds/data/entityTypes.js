@@ -332,16 +332,50 @@ const PLAYABLE_CLASSES = [
 // Ranger keeps its loadout even though it is no longer playable: the rows are
 // restored for a class that already has characters in it, not for one that can
 // be rolled fresh.
+//
+// SOMET-493. Every class's kit is WORN, not carried -- `equipSlot` on every
+// weapon and every piece of armour below. Until this, only the Cultist's staff
+// carried a directive, so a freshly created character of any other class
+// joined with an empty paper doll and fought with activeWeaponType's dagger
+// fallback (8 damage, 0.30s, free) while its own kit sat in the bag.
+//
+// These directives are the SECOND source of truth for that fact -- migration
+// 1714440514000 is the first -- and this file is the one that wins on a
+// re-seed: playable_classes_db.test.js deletes and re-seeds these very rows,
+// and seed-catalogs.js's seedOneClassLoadout writes equip_slot and
+// socket_into_item_type_id ON CONFLICT as well as on INSERT precisely so a
+// migration-authored directive cannot be silently reverted here (SOMET-335).
+// A row added or changed in one of the two must be added or changed in both.
+//
+// `arrow` gets no slot: ammo is spent out of the BAG (authority/ammo.js), no
+// paper-doll slot holds it, and item_types.slot is NULL for the whole ammo
+// category. The Archer's 20 arrows are what make its newly-equipped bow able
+// to fire at all.
 const CLASS_LOADOUTS = [
-  { class: 'Warrior', item: 'short sword', quantity: 1 },
-  { class: 'Warrior', item: 'leather-vest', quantity: 1 },
-  { class: 'Ranger', item: 'bow', quantity: 1 },
+  { class: 'Warrior', item: 'short sword', quantity: 1, equipSlot: 'main_hand' },
+  { class: 'Warrior', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
+  { class: 'Ranger', item: 'bow', quantity: 1, equipSlot: 'main_hand' },
   { class: 'Ranger', item: 'arrow', quantity: 20 },
-  { class: 'Ranger', item: 'leather-vest', quantity: 1 },
-  { class: 'Mage', item: 'apprentice staff', quantity: 1 },
-  { class: 'Mage', item: 'arcane-ward', quantity: 1 },
-  { class: 'Monk', item: 'stick', quantity: 1 },
-  { class: 'Monk', item: 'leather-vest', quantity: 1 },
+  { class: 'Ranger', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
+  // The Mage's staff needs the same stone the Cultist's does, and for the same
+  // reason: activeWeaponType zeroes a BARE magic weapon to physical damage at
+  // the dagger's baseline, so an equipped-but-unsocketed apprentice staff
+  // would hit for 8 physical on a 0.55s cooldown -- worse than the dagger it
+  // replaces, and it would leave the Mage's own passive start node (+3 ARCANE
+  // damage) permanently inert, because the class would never deal arcane
+  // damage at all. Socketed, the staff casts its own original spell: 10
+  // arcane, 8 mana, 0.55s.
+  { class: 'Mage', item: 'apprentice staff', quantity: 1, equipSlot: 'main_hand' },
+  { class: 'Mage', item: 'stone_of_apprentice staff', quantity: 1, socketInto: 'apprentice staff' },
+  { class: 'Mage', item: 'arcane-ward', quantity: 1, equipSlot: 'head' },
+  // The Monk's stick is 7 damage on 0.35s against the dagger fallback's 8 on
+  // 0.30s, so wearing its own kit makes the Monk WEAKER (20.0 dps vs 26.7).
+  // That is left exactly as authored rather than papered over with a
+  // substituted weapon: the stick is the Monk's kit, and if the kit is wrong
+  // the number to change is the stick's, here, not a special case in the
+  // equip mechanism.
+  { class: 'Monk', item: 'stick', quantity: 1, equipSlot: 'main_hand' },
+  { class: 'Monk', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
   // SOMET-492. The Cultist is the one class whose loadout is WORN rather than
   // carried, and it has to be: a Cultist casts with life instead of mana, and
   // that identity cannot engage while the staff sits in the bag (nothing is
@@ -353,12 +387,12 @@ const CLASS_LOADOUTS = [
   // Mirrors migration 1714440513000; keep the two in step.
   { class: 'Cultist', item: 'apprentice staff', quantity: 1, equipSlot: 'main_hand' },
   { class: 'Cultist', item: 'stone_of_apprentice staff', quantity: 1, socketInto: 'apprentice staff' },
-  { class: 'Cultist', item: 'leather-vest', quantity: 1 },
-  { class: 'Archer', item: 'bow', quantity: 1 },
+  { class: 'Cultist', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
+  { class: 'Archer', item: 'bow', quantity: 1, equipSlot: 'main_hand' },
   { class: 'Archer', item: 'arrow', quantity: 20 },
-  { class: 'Archer', item: 'leather-vest', quantity: 1 },
-  { class: 'Druid', item: 'club', quantity: 1 },
-  { class: 'Druid', item: 'leather-vest', quantity: 1 },
+  { class: 'Archer', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
+  { class: 'Druid', item: 'club', quantity: 1, equipSlot: 'main_hand' },
+  { class: 'Druid', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
 ];
 
 module.exports = { HOSTILE_CREATURES, CREATURE_DROPS, PLAYABLE_CLASSES, CLASS_LOADOUTS };
