@@ -5,7 +5,7 @@
 //
 // One entry per (target, effectKey): re-applying an effect REFRESHES its
 // expiry/magnitude/source rather than adding a new entry. This bounds
-// target.effects by the number of distinct effect KINDS (currently 3), not
+// target.effects by the number of distinct effect KINDS (currently 4), not
 // by how often a weapon can trigger one — a fast-firing weapon re-applying
 // BURN every 100ms must still leave exactly one entry, not one per hit. (A
 // prior slice needed MAX_DROP_QTY to cap exactly this class of unbounded-
@@ -48,10 +48,20 @@
 // If you are reading this because the non-refreshing branch looks like a bug:
 // it is not. It is the entire point, and `shock cannot chain-lock` in
 // authority_effects.test.js fails if you "fix" it.
+//
+// THE SECOND EXCEPTION, added by SOMET-473: the Druid's charm on a PLAYER. It
+// is the same rule for the same reason -- see applyCharm below, which does not
+// re-derive it.
+
+const { PLAYER_CHARM_MS, PLAYER_CHARM_IMMUNITY_MS } = require('../services/charm.js');
 
 const BURN = 'burn';
 const CHILL = 'chill';
 const SHOCK = 'shock';
+// The Druid's pacify on a PLAYER (spec 8.2). A creature charm is NOT this: a
+// creature is taken over outright by CreatureSim (faction flip + follow), and
+// never carries an effects entry. See applyCharm below.
+const CHARMED = 'charmed';
 
 const BURN_DURATION_MS = 4000;
 const BURN_MAGNITUDE = 2;    // damage dealt per burn tick (pre-mitigation)
@@ -254,6 +264,61 @@ function canAct(target, now) {
   return !(target._interruptedUntil > now);
 }
 
+// THE SECOND EXCEPTION TO THE REFRESH RULE: the Druid's charm on a PLAYER.
+//
+// This is the shock interrupt's rule applied to a second control-affecting
+// effect, and for precisely the reason the shock note at the top of this file
+// gives at length: under sustained application, a REFRESHED effect is a
+// PERMANENT effect. A druid re-charming every second would hold a player
+// pacified forever, and every test in this file would stay green while it
+// happened -- refresh semantics working exactly as specified.
+//
+// So applyCharm returns EARLY inside the immunity window and stamps NOTHING:
+// not the effect entry, not the window. The window runs to completion from the
+// moment the charm landed, so the target is guaranteed
+// (PLAYER_CHARM_IMMUNITY_MS - PLAYER_CHARM_MS) = 4 seconds of freedom per
+// charm no matter how many druids are aiming at them. Re-stamping either field
+// here -- the natural "refresh like everything else" edit -- restores the
+// chain-lock.
+//
+// The window is per-TARGET, never per-caster. A per-caster window is two druids
+// taking turns, forever.
+//
+// Because the immunity (8000ms) is strictly longer than the duration (4000ms),
+// a second charm can never reach applyEffect while the first is still live --
+// which is what makes it safe to keep the charm in the effects Map at all, with
+// its refresh semantics intact, rather than inventing a third storage rule.
+//
+// If you are reading this because the early return looks like a bug: it is not.
+// `a charmed player cannot be chain-locked by repeated charms` in
+// authority_charm_player.test.js fails if you "fix" it.
+//
+// `charmerUserId` is the DRUID's userId, matching the sourceId convention every
+// other apply site in this file uses (applyElementEffect threads a userId, not
+// a tag). NOTHING here transfers control: the pacify's whole content is "your
+// damage cannot reach this player", enforced by the callers, plus world.js's
+// soft repel. The target's own input is never touched -- that is the difference
+// between this and the creature charm, which IS a control transfer.
+function applyCharm(target, charmerUserId, now) {
+  if (target._charmImmuneUntil > now) return false;   // undefined > now is false
+  applyEffect(target, CHARMED, {
+    durationMs: PLAYER_CHARM_MS, magnitude: 0, sourceId: charmerUserId, now,
+  });
+  target._charmImmuneUntil = now + PLAYER_CHARM_IMMUNITY_MS;
+  return true;
+}
+
+// The userId of whoever currently has `target` charmed, or null.
+//
+// The ONE reader of the charm entry. world.js's attack sweep, creatures.js's
+// melee arc and projectiles.js's two hit tests all resolve their pacify state
+// through this, so no damage path can hold a different opinion about who is
+// protected. Allocation-free, and safe on a target that has never been charmed.
+function charmerOf(target, now) {
+  const e = target && target.effects && target.effects.get(CHARMED);
+  return e && e.until > now ? e.sourceId : null;
+}
+
 // Clears an in-progress interrupt WITHOUT clearing the immunity window.
 // Used on respawn: a player who just died must not get up still staggered.
 // The immunity deliberately survives, so respawning cannot be used to shed the
@@ -308,6 +373,9 @@ function applyElementEffect(target, element, now, sourceId) {
 
 module.exports = {
   applyEffect,
+  applyCharm,
+  charmerOf,
+  CHARMED,
   applyElementEffect,
   ELEMENT_EFFECTS,
   tickEffects,

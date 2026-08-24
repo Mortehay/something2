@@ -462,6 +462,21 @@ function immuneToPlayerDamage(creature) {
   return isGuardCreature(creature);
 }
 
+// SOMET-473 -- the creature half of the Druid's PLAYER pacify (spec 8.2). A
+// charmed player's damage cannot reach the creatures their charmer holds.
+//
+// Same shape as immuneToPlayerDamage above and applied at the same two places
+// (meleeArcScan here, projectileHitsCreature in projectiles.js), so damage,
+// element riders, knockback and the client's block cue fall away together
+// rather than one of them being missed.
+//
+// `pacifiedFrom` is the charmer's userId, or null for every attacker who is not
+// charmed -- which is the overwhelmingly common case, and the reason the null
+// test comes first.
+function pacifiedAgainst(creature, pacifiedFrom) {
+  return pacifiedFrom != null && creature.charmOwnerUserId === pacifiedFrom;
+}
+
 // SOMET-290: keyed on the HOME ANCHOR alone now, not on guard-ness.
 //
 // The anchor was always the thing that mattered -- `isGuardCreature` was a
@@ -1966,8 +1981,8 @@ class CreatureSim {
   // immuneToPlayerDamage). The one creature-owned caller of this file's melee
   // code — the tick's guard branch — does not go through this method, so a
   // guard's own strike on a hostile is untouched.
-  meleeArcTargets(ox, oy, nx, ny, reach, arcWidth) {
-    return this.meleeArcScan(ox, oy, nx, ny, reach, arcWidth).hit;
+  meleeArcTargets(ox, oy, nx, ny, reach, arcWidth, pacifiedFrom = null) {
+    return this.meleeArcScan(ox, oy, nx, ny, reach, arcWidth, pacifiedFrom).hit;
   }
 
   // SOMET-286: the same arc, split by whether the swing was allowed to land.
@@ -1983,14 +1998,19 @@ class CreatureSim {
   // The immunity test moved AFTER the geometry (it used to short-circuit
   // before it) purely so a blocked target is known to be in range; `hit` is
   // unchanged either way, since both filters are conjunctive.
-  meleeArcScan(ox, oy, nx, ny, reach, arcWidth) {
+  meleeArcScan(ox, oy, nx, ny, reach, arcWidth, pacifiedFrom = null) {
     const hit = [], blocked = [];
     for (const [id, c] of this.creatures) {
       const cc = center(c);
       if (!inArc(ox, oy, nx, ny, cc.x, cc.y, reach, arcWidth)) continue;
       // Terrain blocks the swing, exactly as it blocks a projectile.
       if (!hasLineOfSight(this.map, ox, oy, cc.x, cc.y)) continue;
-      (immuneToPlayerDamage(c) ? blocked : hit).push(id);
+      // SOMET-473: a pacified swing at the charmer's pet is reported as
+      // BLOCKED, not as a miss -- it is a rule refusing a blow the arc
+      // physically reached, which is exactly what the guard cue already means,
+      // and the player deserves to see why nothing happened.
+      const refused = immuneToPlayerDamage(c) || pacifiedAgainst(c, pacifiedFrom);
+      (refused ? blocked : hit).push(id);
     }
     return { hit, blocked };
   }
@@ -2015,9 +2035,9 @@ class CreatureSim {
   // It is a separate packet, never added into `damage`, so each portion is
   // mitigated and rides its status effect under its OWN element -- frost on a
   // physical sword must be resisted as frost.
-  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null, augment = null) {
+  applyMeleeArc(ox, oy, nx, ny, reach, arcWidth, damage, element, now = 0, sourceId = null, augment = null, pacifiedFrom = null) {
     const killed = [];
-    for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth)) {
+    for (const id of this.meleeArcTargets(ox, oy, nx, ny, reach, arcWidth, pacifiedFrom)) {
       const c = this.creatures.get(id);
       if (!c) continue;
       // SOMET-290: `sourceId` is the swinging player, already threaded here for
@@ -2233,7 +2253,7 @@ module.exports = {
   // SOMET-285: the one guard predicate, exported so projectiles.js filters
   // player shots on exactly the notion of "guard" this file's tick and leash
   // rules use, and so tests can pin it directly.
-  isGuardCreature, immuneToPlayerDamage,
+  isGuardCreature, immuneToPlayerDamage, pacifiedAgainst,
   // SOMET-154: exported so the wall-ring tests can pin the path search itself
   // (and its bounds) without having to infer it from 1500 ticks of movement.
   findHomePath, GUARD_RETURN_STALL_TICKS, GUARD_MAX_REPATHS, GUARD_PATH_RANGE,
