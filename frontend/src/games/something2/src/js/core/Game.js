@@ -75,6 +75,9 @@ export class Game {
         // projectile render store.
         this.localMana = null;
         this.localMaxMana = null;
+        // SOMET-472. Set from the `joined` frame; false until then so a
+        // pre-join frame draws the ordinary two-orb HUD.
+        this.usesLifeCost = false;
         this.localStamina = null;
         this.localMaxStamina = null;
         this.projectiles = null;
@@ -431,6 +434,11 @@ export class Game {
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
                     this.banks = Array.isArray(msg.banks) ? msg.banks : [];
                     this.progression = msg.progression || null;
+                    // SOMET-472 -- a Cultist pays every mana cost in HP, so
+                    // the mana orb would be a bar that never moves. Server-
+                    // supplied, never inferred from the class name here: the
+                    // client has no class catalog.
+                    this.usesLifeCost = msg.usesLifeCost === true;
                     resolve(msg.spawn);
                 },
                 onState: (msg) => this._onWorldState(msg),
@@ -875,6 +883,10 @@ export class Game {
                 projectiles: this.projectiles ? this.projectiles.all() : [],
                 mana: this.localMana,
                 maxMana: this.localMaxMana,
+                // The mana ORB is hidden outright, not fed a null pool: an
+                // empty blue orb reads as "out of mana", which is the opposite
+                // of the truth for a class that never spends it.
+                showMana: !this.usesLifeCost,
                 stamina: this.localStamina,
                 maxStamina: this.localMaxStamina,
                 weaponName: this._resolveWeaponName(),

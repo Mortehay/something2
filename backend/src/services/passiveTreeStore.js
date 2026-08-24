@@ -87,12 +87,33 @@ async function loadAllocatedIds(db, characterId) {
 // The composed view of a character's tree: what they have and what it grants.
 // The WALLET is not computed here -- it is player_progression.passive_points
 // (contract §6.7), which the caller already holds on the row it read.
+//
+// SOMET-472: the class's START node is folded into `passives` even though it is
+// never in character_passives. It is GRANTED, not allocated -- it costs no
+// point and isAllocatable refuses it -- but "granted" has to mean the grant
+// actually reaches composeStats. SOMET-471 authored six start-node grants
+// (contract §6.11: "start nodes carry class identity, as RULES not numbers"),
+// seed-passive-tree.js writes them, passive_tree_start_grants_db.test.js proves
+// they are in the database -- and until this, NOTHING read them: passiveBundle
+// only ever looked at allocated ids, so every class composed identically and
+// the Cultist's lifeCostMultiplier 0.9 was dead data. Precisely the shape this
+// epic has shipped six times.
+//
+// It stays OUT of `allocatedNodeIds`, which is the list of nodes a point was
+// spent on and what the tree overlay renders as filled.
 async function passiveBundle(db, characterId) {
-  const ids = await loadAllocatedIds(db, characterId);
-  if (ids.length === 0) return { allocatedNodeIds: [], passives: [] };
+  const [ids, startNodeId] = await Promise.all([
+    loadAllocatedIds(db, characterId),
+    startNodeIdFor(db, characterId),
+  ]);
+  // A legacy or not-playable class (`Player`, the demoted `Ranger`) has no
+  // start node; startNodeIdFor returns null and it contributes nothing, rather
+  // than defaulting into some other class's sector.
+  const nodeIds = startNodeId == null ? ids : [startNodeId, ...ids];
+  if (nodeIds.length === 0) return { allocatedNodeIds: [], passives: [] };
   const rows = await db.query(
     'SELECT id, label, grants FROM passive_nodes WHERE id = ANY($1::int[]) ORDER BY id',
-    [ids],
+    [nodeIds],
   );
   return {
     allocatedNodeIds: ids,

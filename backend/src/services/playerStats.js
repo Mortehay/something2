@@ -60,6 +60,29 @@ function poolBase(classPools, key, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+// The passive tree's `lifeCostMultiplier` rule, carried onto the derived
+// bundle so the authority has ONE place to read it (SOMET-472).
+//
+// It rides `stats` rather than living as its own field on the player object
+// because `stats` is the only bundle every re-derive path already refreshes --
+// join, level-up, chest XP, socket, allocate, respec all go through
+// derivePlayerStats and then applyDerivedStats. A separate player field would
+// be written once at join and then go stale the moment a Cultist allocated
+// Blood Pact, which is precisely the silent half-wired shape this epic keeps
+// shipping.
+//
+// `progression.rules` is composeStats' aggregate (contract §2 / §6.11),
+// attached to every row loadProgression returns. A progression object with no
+// tree context at all -- DEFAULT_PROGRESSION, a unit-test literal, a row read
+// before the tree was seeded -- has no `rules`, and degrades to 1: no
+// discount, never a free cast.
+function ruleLifeCostMultiplier(progression) {
+  const rules = progression == null ? null : progression.rules;
+  const v = rules == null ? undefined : rules.lifeCostMultiplier;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
 // The single source of every number a stat affects.
 //
 // `classPools` is `{ maxHp, maxMana }` -- the class's BASE pools, before any
@@ -87,6 +110,11 @@ function derivePlayerStats(progression, classPools = null) {
       C.SELL_FRACTION_MAX,
       round4(C.SELL_FRACTION_BASE + C.PRICE_PER_CHA * above('charisma')),
     ),
+    // Passed straight to lifeCost.js `lifeCostFor` at the one attack gate.
+    // NOT derived from any stat -- it is a passive-tree rule, carried here
+    // only so it reaches the authority by the same route every other derived
+    // number does.
+    lifeCostMultiplier: ruleLifeCostMultiplier(progression),
   };
 }
 

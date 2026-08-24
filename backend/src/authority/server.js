@@ -1488,6 +1488,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const stats = framedStats(entry, ws.userId, progression, {
           inv, classPools: character.classPools,
         });
+        // SOMET-472 (spec 8.3). ONE derivation, read twice below -- once for
+        // the sim and once for the wire -- so the server and the client can
+        // never disagree about which bar is spent and which bar is drawn.
+        //
+        // Keyed on the class NAME rather than on main_stat: main_stat is the
+        // passive tree's start position and two classes could legitimately
+        // share one, while the life-cost substitution is a fact about the
+        // Cultist specifically. HOW MUCH a cast costs is not decided here --
+        // that is stats.lifeCostMultiplier, folded in by derivePlayerStats
+        // from the tree rules the line above already composed.
+        const usesLifeCost = character.className === 'Cultist';
 
         // A newer session for this same account may have won (and kicked
         // us) while we awaited inventory above. If so, our reservation was
@@ -1508,7 +1519,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // spawn.bind (SOMET-294) is the player_binds row as loaded, world id and
         // all -- distinct from spawn.respawn, which is always a point in THIS
         // world. See loadSpawn for why the two are separate facts.
-        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id, spawn.bind, character.classPools);
+        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id, spawn.bind, character.classPools, usesLifeCost);
 
         // Latch the tile this join landed on, for EVERY join -- not just a
         // doorway arrival. A resume or a map fast-travel spawns the character
@@ -1587,6 +1598,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
           autoLoot: entry.world.getPlayer(ws.userId).autoLoot,
           gold,
           progression,
+          // SOMET-472, presentation only: the client hides the mana orb for a
+          // life-cost class, because a Cultist has a mana pool the server
+          // never spends and an inert bar is one the player learns to ignore.
+          // The rule that actually spends the pool runs server-side, in
+          // world.js's resourceRefusal/spendResources.
+          usesLifeCost,
           merchants: (entry.villages || [])
             .filter((v) => v.merchantX != null && v.merchantY != null)
             .map((v) => ({ villageId: v.id, x: v.merchantX, y: v.merchantY })),
