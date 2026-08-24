@@ -76,7 +76,7 @@ function rollGold(range, rng = Math.random) {
 // rarity, and a test can drive the whole commit with an explicit table instead
 // of mutating the entry.
 async function commitCreatureDeath(pool, entry, creatureId, {
-  rng = Math.random, ttlMs = 600000, killerUserId = null,
+  rng = Math.random, ttlMs = 180000, killerUserId = null,
   rarityAnchors = (entry && entry.rarityAnchors) || null,
   affixPool = (entry && entry.affixPool) || [],
 } = {}) {
@@ -167,7 +167,7 @@ async function commitCreatureDeath(pool, entry, creatureId, {
 // before T13, so every hand-built fixture in the test suite keeps its existing
 // expectations without being touched.
 async function spawnDrops(pool, entry, dead, {
-  rng = Math.random, ttlMs = 600000,
+  rng = Math.random, ttlMs = 180000,
   rarityAnchors = (entry && entry.rarityAnchors) || null,
   affixPool = (entry && entry.affixPool) || [],
 } = {}) {
@@ -296,7 +296,7 @@ async function spawnDrops(pool, entry, dead, {
 // fit in the opener's inventory (SOMET-464). Same INSERT shape and the same
 // straight-into-the-sim add as spawnDrops, so the items appear in the next AOI
 // broadcast rather than waiting for a chunk reload.
-async function spawnGroundItemTypes(pool, entry, itemTypeIds, x, y, { ttlMs = 600000 } = {}) {
+async function spawnGroundItemTypes(pool, entry, itemTypeIds, x, y, { ttlMs = 180000 } = {}) {
   const ids = (itemTypeIds || []).filter((id) => Number.isInteger(Number(id)));
   if (ids.length === 0) return [];
   const ins = await pool.query(
@@ -542,7 +542,7 @@ function dropGraceActive(p, groundItemId, now) {
   return true;
 }
 
-async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 600000, now = Date.now(), graceMs = DROP_GRACE_MS } = {}) {
+async function dropItem(pool, entry, userId, characterId, itemId, { ttlMs = 180000, now = Date.now(), graceMs = DROP_GRACE_MS } = {}) {
   const p = entry.world.getPlayer(userId);
   if (!p || !p.inv) return { ok: false, reason: 'no player' };
 

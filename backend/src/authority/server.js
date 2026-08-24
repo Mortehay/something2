@@ -387,7 +387,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const creatureKnown = new WeakMap();
   const creatureFlushMs = opts.creatureFlushMs || 3000;
   const heartbeatMs = opts.heartbeatMs || 30000;
-  const groundItemTtlMs = opts.groundItemTtlMs || 600000; // 10 min
+  // SOMET-482: 180 seconds (game_settings.ground_item_ttl_seconds), replacing
+  // the hardcoded 600000. Held in a mutable local rather than a const because
+  // refreshLootTuning re-reads the setting on the sweep cadence -- an admin
+  // lowering it must reach live drops without a restart. `opts.groundItemTtlMs`
+  // still wins at boot, which is what every existing test passes.
+  let groundItemTtlMs = opts.groundItemTtlMs || 180000;
   const itemSweepMs = opts.itemSweepMs || 60000;
   // Its own interval, NOT itemSweepMs (60000): a 30-second respawn queue
   // drained on a 60-second timer would take 30-90s per creature.
@@ -2851,43 +2856,95 @@ function attachAuthority(httpServer, pool, opts = {}) {
   // #affixValue read. A column added to that module and forgotten here comes
   // back undefined and the filter silently stops applying -- the same
   // explicit-column trap loadWorld's own world SELECT carries a warning about.
+  //
+  // SOMET-482 adds the ground-item TTL to the same refresh, for the same
+  // reason and on the same cadence: it is an admin knob, so reading it per
+  // drop would put game_settings on the death path, and baking it in at boot
+  // would mean a restart before a retune reached a live drop.
   async function refreshLootTuning() {
     if (worlds.size === 0) return;
-    const [anchors, affixes] = await Promise.all([
+    const [anchors, affixes, ttlSeconds] = await Promise.all([
       getSetting(pool, 'rarity_weights'),
       pool.query(`SELECT id, key, kind, effect, min_value, max_value,
                          min_item_level, max_item_level, allowed_slots, min_rarity, weight
                     FROM affix_types`),
+      getSetting(pool, 'ground_item_ttl_seconds'),
     ]);
+    // A junk or non-positive value keeps the PREVIOUS number rather than
+    // making every drop vanish instantly or never expire at all: a bad row in
+    // game_settings must not be able to empty the world's floor.
+    const seconds = Number(ttlSeconds);
+    if (Number.isFinite(seconds) && seconds > 0) groundItemTtlMs = Math.round(seconds * 1000);
     for (const entry of worlds.values()) {
       entry.rarityAnchors = anchors;
       entry.affixPool = affixes.rows;
     }
   }
 
-  // Expired ground items: delete from the DB and evict from every live sim.
-  // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
-  // sweep by up to itemSweepMs; the two are complementary (DB delete is
-  // authoritative across worlds, removeExpired just keeps each sim tidy).
-  const itemSweepTimer = setInterval(() => {
+  // Expired ground items: delete from the DB, evict from every live sim, and
+  // announce each removal so the client can draw a puff where the item was.
+  //
+  // Each sim's own removeExpired runs alongside the DB delete so in-sim expiry
+  // doesn't lag the sweep; the two are complementary (the DB delete is
+  // authoritative across worlds, removeExpired keeps each live sim tidy AND is
+  // the only one of the two that still knows where the item stood).
+  //
+  // A whole function rather than the inline interval body it replaced so
+  // `_itemSweep` can drive one pass synchronously in a test instead of racing
+  // wall-clock itemSweepMs -- the same seam _chestRespawnSweep already is.
+  async function itemSweep() {
     if (worlds.size === 0) return;
-    // Fire-and-forget, exactly like the ground-item DELETE below: a failed
-    // refresh must not stop the sweep, and the entry keeps its last-known
-    // table (or none, which degrades to plain white drops) until the next one.
-    refreshLootTuning().catch((err) => console.error('loot tuning refresh failed:', err));
+    // A failed refresh must not stop the sweep: the entry keeps its last-known
+    // tuning (or none, which degrades to plain white drops and the previous
+    // TTL) until the next pass.
+    await refreshLootTuning().catch((err) => console.error('loot tuning refresh failed:', err));
+
     const now = Date.now();
-    for (const entry of worlds.values()) entry.world.groundItems.removeExpired(now);
-    pool.query('DELETE FROM world_items WHERE expires_at <= now() RETURNING id')
-      .then((r) => {
-        if (!r.rowCount) return;
+    for (const entry of worlds.values()) {
+      const removed = entry.world.groundItems.removeExpired(now);
+      if (removed.length === 0) continue;
+      const N = entry.row.chunk_size;
+      // SOMET-482 -- PRESENTATION ONLY. Nothing in this loop touches hp,
+      // status effects, knockback or the projectile sim, and
+      // ground_despawn_vfx.test.js asserts the ABSENCE of every damage-bearing
+      // channel on the frames a despawn produces.
+      //
+      // Deliberately its own frame rather than a rider on `state`: the state
+      // frame is built and drained per TICK, and a despawn happens on the
+      // SWEEP cadence. Riding along would mean stashing the puff until the
+      // next tick, i.e. a second lifetime to keep in step for a cosmetic cue.
+      for (const [userId, ws] of entry.sockets) {
+        const p = entry.world.getPlayer(userId);
+        if (!p) continue;
+        // The same neighbourhood filter broadcastItems uses: a puff for an
+        // item three chunks away is bytes for a frame nobody can see.
+        const pc = chunkOf(p.x, p.y, N);
+        const keys = new Set(neighborhoodKeys(pc.cx, pc.cy, 1));
+        for (const it of removed) {
+          const ic = chunkOf(it.x, it.y, N);
+          if (!keys.has(CHUNK_KEY(ic.cx, ic.cy))) continue;
+          send(ws, { type: 'vfx', name: 'item_despawn', x: it.x, y: it.y });
+        }
+      }
+    }
+
+    try {
+      const r = await pool.query('DELETE FROM world_items WHERE expires_at <= now() RETURNING id');
+      if (r.rowCount) {
         const ids = new Set(r.rows.map((row) => row.id));
         for (const entry of worlds.values()) {
           for (const id of ids) entry.world.groundItems.remove(id);
         }
-      })
-      .catch((err) => console.error('ground item sweep failed:', err));
+      }
+    } catch (err) {
+      console.error('ground item sweep failed:', err);
+    }
 
     chestRespawnSweep();
+  }
+
+  const itemSweepTimer = setInterval(() => {
+    itemSweep().catch((err) => console.error('item sweep failed:', err));
   }, itemSweepMs);
 
   const creatureSweepTimer = setInterval(() => {
@@ -2921,6 +2978,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // respawn pass synchronously (and await it, unlike the timer's
     // fire-and-forget call) instead of racing wall-clock creatureSweepMs.
     _creatureRespawnSweep: creatureRespawnSweep,
+    // SOMET-482 test seams, same reasoning as _chestRespawnSweep: run one
+    // ground-item expiry pass (and one tuning refresh) synchronously and await
+    // it, instead of racing wall-clock itemSweepMs.
+    _itemSweep: itemSweep,
+    _refreshLootTuning: refreshLootTuning,
+    // Read back the live TTL. A getter, not the value: the whole point of
+    // SOMET-482 is that this number CHANGES at runtime, so a test that
+    // captured it once could not tell a working refresh from a dead one.
+    _groundItemTtlMs: () => groundItemTtlMs,
     // Evict an IDLE world from the in-memory cache so the next entry reloads it
     // from the DB (fresh seed + creatures). Refuses to evict a world with live
     // sockets to avoid tearing down active sessions.

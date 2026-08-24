@@ -503,6 +503,20 @@ export class Game {
                 // they can be tested without a canvas.
                 onChests: (msg) => { this.worldChests = chestsFromFrame(msg); },
                 onChestOpened: (msg) => this._showToast(applyChestOpened(this.inventory, this.worldChests, msg)),
+                // SOMET-482 -- a standalone presentation frame (today: the puff
+                // a ground item leaves when its lifetime runs out). It goes
+                // through the SAME addEffects/capParticles/pruneEffects path as
+                // attacks and impacts rather than a parallel list, so the
+                // lifetime and particle budget cannot drift between the two.
+                onVfx: (msg) => {
+                    if (!msg || !Number.isFinite(msg.x) || !Number.isFinite(msg.y)) return;
+                    addEffects(this.vfx, [{ v: msg.name, x: msg.x, y: msg.y }],
+                               performance.now(), this.vfxDefs);
+                    // Same budget the impacts path enforces the moment the list
+                    // grows -- a crowded floor expiring at once is exactly when
+                    // it would blow.
+                    this.vfx = capParticles(this.vfx);
+                },
                 // A trade lands its inventory/wallet effect via the existing
                 // item/gold plumbing (addItem/removeItem, wallet frame); what
                 // 'bought'/'sold' add on top is re-issuing `interact` so the

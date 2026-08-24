@@ -5,7 +5,7 @@
  * {seq,dx,dy,dt} for client-side reconciliation.
  */
 export class WorldAuthorityClient {
-  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onChests, onChestOpened, inputIntervalMs = 50, now = () => performance.now() }) {
+  constructor({ url, token, onJoined, onState, onError, onClose, onCreatures, onKicked, onItems, onPicked, onDropped, onNoAmmo, onAmmo, onTransition, onWaypointActivated, onWallet, onShop, onBought, onSold, onBank, onDeposited, onWithdrawn, onProgression, onChests, onChestOpened, onVfx, inputIntervalMs = 50, now = () => performance.now() }) {
     this.url = url;
     this.token = token;
     this.onJoined = onJoined || (() => {});
@@ -36,6 +36,11 @@ export class WorldAuthorityClient {
     // for chest XP precisely so it lands on the handler kills already use.
     this.onChests = onChests || (() => {});
     this.onChestOpened = onChestOpened || (() => {});
+    // SOMET-482 -- a one-shot PRESENTATION frame, not world state: it carries a
+    // name and a position and nothing else, it is never resent, and dropping
+    // one costs a puff and nothing more. Unlike onItems/onCreatures there is no
+    // "full list" contract to keep in step.
+    this.onVfx = onVfx || (() => {});
     this.onNoAmmo = onNoAmmo || (() => {});
     this.onAmmo = onAmmo || (() => {});
     this.onTransition = onTransition || (() => {});
@@ -137,6 +142,7 @@ export class WorldAuthorityClient {
       case 'progression': this.onProgression(msg); break;
       case 'chests': this.onChests(msg); break;
       case 'chestOpened': this.onChestOpened(msg); break;
+      case 'vfx': this.onVfx(msg); break;
       case 'error': {
         // Tag so callers can tell a server-issued protocol rejection (e.g.
         // "unequip it first") apart from a raw transport failure below —
