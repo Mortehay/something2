@@ -167,10 +167,16 @@ test('a Cultist that was only ever CREATED pays life to cast', { skip: !DB_URL ?
          FROM player_equipment pe
          JOIN player_items pi ON pi.id = pe.item_id
          JOIN item_types it ON it.id = pi.item_type_id
-        WHERE pe.character_id = $1`,
+        WHERE pe.character_id = $1 ORDER BY pe.slot`,
       [cultist.characterId]);
-    assert.deepStrictEqual(eq.rows, [{ slot: 'main_hand', name: STAFF_NAME }],
-      'a freshly created Cultist must join with its staff already in hand');
+    // SOMET-493 added the chest piece: the Cultist's leather-vest is worn too
+    // now, along with every other class's armour. The staff row is what this
+    // file is about and is asserted in full rather than by a `some()`, so the
+    // day the staff stops being worn this goes red rather than shrinking.
+    assert.deepStrictEqual(eq.rows, [
+      { slot: 'chest', name: 'leather-vest' },
+      { slot: 'main_hand', name: STAFF_NAME },
+    ], 'a freshly created Cultist must join with its staff already in hand');
 
     // The stone is in the socket, in the database, pointing at that same staff.
     const socketed = await pool.query(
@@ -243,18 +249,35 @@ test('a Cultist that was only ever CREATED pays life to cast', { skip: !DB_URL ?
     assert.strictEqual(bound.rows[0].soulbound, true);
   });
 
-  await t.test('a freshly created Warrior is untouched: no equipment, no cost, dagger damage', async () => {
+  // SOMET-493 REPLACED THE TWO TESTS THAT USED TO STAND HERE. They asserted
+  // that a fresh Warrior joins bare with the dagger (8 damage, no cost) and
+  // that no class but the Cultist carries a wear directive -- both were true
+  // of SOMET-492's deliberately narrow content, and the product owner has
+  // since approved wearing every class's kit, so both are now false. They are
+  // not deleted quietly: their replacements assert the opposite by value, per
+  // class, in starting_loadout_worn_by_every_class_db.test.js. What this file
+  // keeps proving is the part that is still the Cultist's alone -- that the
+  // grant wears and sockets what it grants, and that life cost engages from
+  // the very first shot.
+  await t.test('the Warrior joins wearing its own kit, and still pays no life', async () => {
     warrior = await createAndJoin('Warrior');
 
     const eq = await pool.query(
-      'SELECT slot FROM player_equipment WHERE character_id = $1', [warrior.characterId]);
-    assert.deepStrictEqual(eq.rows, [],
-      'this item must not start dressing other classes -- that is a balance change, not a fix');
+      `SELECT pe.slot, it.name
+         FROM player_equipment pe
+         JOIN player_items pi ON pi.id = pe.item_id
+         JOIN item_types it ON it.id = pi.item_type_id
+        WHERE pe.character_id = $1 ORDER BY pe.slot`,
+      [warrior.characterId]);
+    assert.deepStrictEqual(eq.rows, [
+      { slot: 'chest', name: 'leather-vest' },
+      { slot: 'main_hand', name: 'short sword' },
+    ], 'SOMET-493: every class wears its kit, so the Warrior is no longer bare');
 
     const w = warrior.world.activeWeapon(String(warrior.userId));
-    assert.strictEqual(w.name, 'dagger');
+    assert.strictEqual(w.name, 'short sword');
     assert.strictEqual(Number(w.mana_cost), 0);
-    assert.strictEqual(Number(w.damage), 8);
+    assert.strictEqual(Number(w.damage), 11);
 
     assert.strictEqual(warrior.joined.usesLifeCost, false);
     const hpBefore = warrior.player.hp;
@@ -262,26 +285,37 @@ test('a Cultist that was only ever CREATED pays life to cast', { skip: !DB_URL ?
     const cast = castOnce(warrior);
     assert.strictEqual(cast.fired, true);
     assert.strictEqual(cast.hpSpent, 0, 'a Warrior must not start losing hp to its own swing');
-    assert.strictEqual(cast.manaSpent, 0, "and the dagger's cost is still nothing");
+    assert.strictEqual(cast.manaSpent, 0, 'and a sword costs no mana');
     assert.strictEqual(warrior.player.hp, hpBefore);
     assert.strictEqual(warrior.player.mana, manaBefore);
   });
 
-  await t.test('every other class still joins bare, with no socketed stone', async () => {
-    // The blast radius, stated as a fact rather than assumed. Read straight off
-    // the catalog rather than by joining five more websockets: these are the
-    // rows grantStartingLoadout acts on, and a directive appearing on any of
-    // them is exactly how "no other class changes" would stop being true.
+  await t.test('the Cultist is still the only class whose kit costs LIFE', async () => {
+    // The blast radius of the life-cost identity, which SOMET-493 did not
+    // widen: five other classes now wear their kits, and none of them may
+    // start paying hp to swing. Read off the catalog rather than by joining
+    // five more websockets -- a stone directive on a non-Cultist class is
+    // exactly how this would stop being true, and usesLifeCost is a class
+    // property the joins above already cover.
     const rows = await pool.query(
-      `SELECT e.name AS class, count(*) FILTER (WHERE cl.equip_slot IS NOT NULL) AS worn,
-              count(*) FILTER (WHERE cl.socket_into_item_type_id IS NOT NULL) AS socketed
-         FROM class_loadouts cl JOIN entity_types e ON e.id = cl.entity_type_id
-        WHERE e.name <> 'Cultist'
-        GROUP BY e.name ORDER BY e.name`);
-    assert.ok(rows.rows.length >= 4, 'the other classes must actually have loadout rows');
-    for (const r of rows.rows) {
-      assert.strictEqual(Number(r.worn), 0, `${r.class} must not start with anything equipped`);
-      assert.strictEqual(Number(r.socketed), 0, `${r.class} must not start with a socketed stone`);
-    }
+      `SELECT e.name AS class, it.name AS stone
+         FROM class_loadouts cl
+         JOIN entity_types e ON e.id = cl.entity_type_id
+         JOIN item_types it ON it.id = cl.item_type_id
+        WHERE cl.socket_into_item_type_id IS NOT NULL
+        ORDER BY e.name`);
+    assert.deepStrictEqual(rows.rows, [
+      { class: 'Cultist', stone: 'stone_of_apprentice staff' },
+      { class: 'Mage', stone: 'stone_of_apprentice staff' },
+    ], 'only the two staff classes carry a socket directive');
+
+    // The Mage now carries the SAME stone with the SAME mana_cost, so the only
+    // thing keeping the two classes apart is server.js's usesLifeCost. That is
+    // proved where it can actually be proved -- through a join, by watching
+    // which pool a cast drains -- in
+    // starting_loadout_worn_by_every_class_db.test.js ('the Mage pays MANA,
+    // the Cultist pays LIFE, for the identical stone'). Asserting a proxy for
+    // it here (a main_stat, a class name) would be a second, weaker copy of a
+    // rule that lives in exactly one line of server.js.
   });
 });

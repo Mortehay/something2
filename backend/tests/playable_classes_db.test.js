@@ -119,6 +119,11 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
     // separate optional check. A list that only names items would go green
     // again the moment the Cultist's staff stopped being worn or its stone
     // stopped being socketed -- which is exactly the state this item fixed.
+    //
+    // SOMET-493: every class now carries them, so an item losing its `@slot`
+    // here is a class silently going back to the dagger fallback. `arrow` is
+    // the one deliberate bare entry -- ammo is spent out of the bag and no
+    // paper-doll slot holds it.
     const got = r.rows.map((x) => `${x.class}:${x.item}x${x.quantity}`
       + (x.equip_slot ? `@${x.equip_slot}` : '')
       + (x.socket_into ? `>${x.socket_into}` : ''));
@@ -127,22 +132,23 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
     // leave them with nothing.
     assert.deepEqual(got, [
       'Archer:arrowx20',
-      'Archer:bowx1',
-      'Archer:leather-vestx1',
+      'Archer:bowx1@main_hand',
+      'Archer:leather-vestx1@chest',
       'Cultist:apprentice staffx1@main_hand',
-      'Cultist:leather-vestx1',
+      'Cultist:leather-vestx1@chest',
       'Cultist:stone_of_apprentice staffx1>apprentice staff',
-      'Druid:clubx1',
-      'Druid:leather-vestx1',
-      'Mage:apprentice staffx1',
-      'Mage:arcane-wardx1',
-      'Monk:leather-vestx1',
-      'Monk:stickx1',
+      'Druid:clubx1@main_hand',
+      'Druid:leather-vestx1@chest',
+      'Mage:apprentice staffx1@main_hand',
+      'Mage:arcane-wardx1@head',
+      'Mage:stone_of_apprentice staffx1>apprentice staff',
+      'Monk:leather-vestx1@chest',
+      'Monk:stickx1@main_hand',
       'Ranger:arrowx20',
-      'Ranger:bowx1',
-      'Ranger:leather-vestx1',
-      'Warrior:leather-vestx1',
-      'Warrior:short swordx1',
+      'Ranger:bowx1@main_hand',
+      'Ranger:leather-vestx1@chest',
+      'Warrior:leather-vestx1@chest',
+      'Warrior:short swordx1@main_hand',
     ]);
   });
 
@@ -249,17 +255,22 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
     const expectedHp = {
       Warrior: 100, Mage: 75, Monk: 90, Cultist: 110, Archer: 85, Druid: 90,
     }[victim];
+    // SOMET-492/SOMET-335/SOMET-493: the directives are in every expectation
+    // because a re-seed is exactly where they would be silently lost. The
+    // migrations authored them; only seeds/data/entityTypes.js can restore
+    // them, and only because seedOneClassLoadout writes them ON CONFLICT as
+    // well as on INSERT. Strip the `@slot`s from this table and the test still
+    // passes against a seeder that hands every class its gear loose in the
+    // bag -- i.e. against exactly the inert state this epic fixed.
     const expectedLoadout = {
-      Warrior: ['leather-vestx1', 'short swordx1'],
-      Mage: ['apprentice staffx1', 'arcane-wardx1'],
-      Monk: ['leather-vestx1', 'stickx1'],
-      // SOMET-492/SOMET-335: the directives are in the expectation because a
-      // re-seed is exactly where they would be silently lost. The migration
-      // authored them; only seeds/data/entityTypes.js can restore them.
-      Cultist: ['apprentice staffx1@main_hand', 'leather-vestx1',
+      Warrior: ['leather-vestx1@chest', 'short swordx1@main_hand'],
+      Mage: ['apprentice staffx1@main_hand', 'arcane-wardx1@head',
         'stone_of_apprentice staffx1>apprentice staff'],
-      Archer: ['arrowx20', 'bowx1', 'leather-vestx1'],
-      Druid: ['clubx1', 'leather-vestx1'],
+      Monk: ['leather-vestx1@chest', 'stickx1@main_hand'],
+      Cultist: ['apprentice staffx1@main_hand', 'leather-vestx1@chest',
+        'stone_of_apprentice staffx1>apprentice staff'],
+      Archer: ['arrowx20', 'bowx1@main_hand', 'leather-vestx1@chest'],
+      Druid: ['clubx1@main_hand', 'leather-vestx1@chest'],
     }[victim];
     const expectedMainStat = {
       Warrior: 'strength', Mage: 'intelligence', Monk: 'wisdom',
@@ -327,13 +338,16 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
         'the loadout must come back too, or a rebuilt volume leaves the class with no gear');
 
       // Idempotent: a second run must not stack duplicate loadout rows.
+      // SOMET-491 keeps this on the transactional `client` so the wipe is never
+      // visible to a concurrent reader; SOMET-493 raised the count to 18,
+      // because the Mage's staff now carries a spell stone row of its own.
       await seedCatalogs(client);
       const after = await client.query('SELECT count(*)::int AS n FROM class_loadouts');
-      // 17 = Warrior 2 + Ranger 3 + Mage 2 + Monk 2 + Cultist 3 + Archer 3
+      // 18 = Warrior 2 + Ranger 3 + Mage 3 + Monk 2 + Cultist 3 + Archer 3
       // + Druid 2. Ranger's three rows are still seeded: it is not playable
       // any more, but characters are still wearing that gear. The Cultist's
-      // third row is its spell stone (SOMET-492).
-      assert.equal(after.rows[0].n, 17, 'a repeat run must not duplicate loadout rows');
+      // and the Mage's third rows are their spell stones (SOMET-492/493).
+      assert.equal(after.rows[0].n, 18, 'a repeat run must not duplicate loadout rows');
     } finally {
       // Unconditional, and unconditionally sufficient. A failed assertion, a
       // thrown seeder, a crashed process -- every one of them ends with the

@@ -206,6 +206,27 @@ test('SOMET-277: a GRANTED starting-loadout instance cannot be sold, and the ide
     const entry = mkEntry(village.worldId, player);
     const goldBefore = await goldOf(pool, fx.userId);
 
+    // SOMET-493 made grantStartingLoadout WEAR the kit, so the granted sword
+    // now arrives with a player_equipment row -- and sellItem's SOMET-484
+    // database backstop ('unequip it first') sits AHEAD of the soulbound
+    // refusal and swallows every attempt to sell it. The faucet stays shut
+    // either way, but this test would silently stop testing the guard it is
+    // named after: it would be asserting the equip check, forever, while the
+    // soulbound branch could be deleted outright and it would still pass.
+    //
+    // So both are exercised, in order. First that the worn state refuses...
+    const worn = await sellItem(pool, entry, fx.userId, fx.character.id, village.villageId, granted.id);
+    assert.equal(worn.ok, false, 'a worn item must not be sellable out from under the paper doll');
+    assert.match(worn.reason, /unequip/i);
+
+    // ...then the item is taken OFF, which strips that first guard away and
+    // leaves the bound flag as the only thing standing between the granted
+    // sword and the gold it must never become.
+    const off = await pool.query(
+      'DELETE FROM player_equipment WHERE item_id = $1 RETURNING slot', [granted.id]);
+    assert.equal(off.rowCount, 1,
+      'the granted item must have been WORN, or the unequip guard above passed for the wrong reason');
+
     // --- the faucet itself: the granted instance must not become gold ---
     const refused = await sellItem(pool, entry, fx.userId, fx.character.id, village.villageId, granted.id);
     assert.equal(refused.ok, false, 'selling granted starting gear must be refused');
