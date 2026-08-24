@@ -27,12 +27,19 @@ const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 const SECRET = 'somet473-test-secret';
 const TAG = `s473_${process.pid}_${Date.now().toString(36)}`;
 
+// Rejects on an unexpected `error` frame rather than waiting out the timeout.
+// A refusal IS the server answering, and treating it as silence turns every
+// wrong-refusal regression into a 15-second hang instead of a failure with the
+// server's own reason in it.
 function nextMsg(ws, type, ms = 15000) {
   return new Promise((resolve, reject) => {
     const to = setTimeout(() => reject(new Error(`timeout waiting for ${type}`)), ms);
     ws.on('message', function onMsg(data) {
       const m = JSON.parse(data);
-      if (!type || m.type === type) {
+      if (type && type !== 'error' && m.type === 'error') {
+        clearTimeout(to); ws.off('message', onMsg);
+        reject(new Error(`expected ${type}, server refused: ${m.message}`));
+      } else if (!type || m.type === type) {
         clearTimeout(to); ws.off('message', onMsg); resolve(m);
       }
     });
@@ -263,9 +270,20 @@ test('a real Druid charms a real creature', { skip: !DB_URL ? 'no database URL' 
     const back = druid.world.creatures.get(petId);
     assert.ok(back, 'the loader must return the creature');
     assert.equal(back.faction, 'charmed', 'and it must come back as a pet, not as a hostile');
-    assert.equal(back.charmOwnerUserId, String(druid.userId),
-      'as a STRING userId -- a numeric characterId here matches no player and releases on tick 1');
+    // strictEqual, not equal: `12 == '12'` is true, and the whole point of the
+    // conversion is the TYPE. CreatureSim keys byId (a Map of string userIds)
+    // on this value, so a number here matches nobody.
+    assert.strictEqual(back.charmOwnerUserId, String(druid.userId),
+      'as a STRING userId -- a numeric one matches no player and releases on tick 1');
     assert.ok(back.charmExpiresAt > druid.world.now,
       'with the persisted expiry converted into world-clock ms, not left as an epoch timestamp');
+    // ...and the consequence, not just the field: a reloaded pet that the sim
+    // cannot match to a live player is released on its very first tick. This is
+    // what makes the type assertion above more than cosmetic.
+    const entryRec2 = handle.worlds.get(entryWorldId);
+    for (let i = 0; i < 5; i++) druid.world.tickCreatures(0.05, entryRec2.activeChunks);
+    assert.equal(druid.world.creatures.get(petId).faction, 'charmed',
+      'a reloaded pet must still be a pet after the tick has had a chance to release it');
+    assert.equal(druid.world.creatures.get(petId).charmOwnerUserId, String(druid.userId));
   });
 });

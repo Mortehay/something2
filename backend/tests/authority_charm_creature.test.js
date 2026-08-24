@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { World } = require('../src/authority/world.js');
 const { selectGuardTarget, GUARD_AGGRO_RADIUS, GUARD_LEASH_RADIUS } = require('../src/authority/creatures.js');
+const { applyCharm } = require('../src/authority/effects.js');
 
 function stubMap() {
   return { isWalkable: () => true, speedAt: () => 1, chunkSize: 8, getChunk: () => [] };
@@ -266,4 +267,84 @@ test('a charmed creature is off its charmer\'s own melee target list', () => {
   // Another player's swing is unaffected -- the pacify is per-charmer.
   const other = w.creatures.meleeArcScan(532, 532, 1, 0, 200, 1.8, 'someone-else');
   assert.deepEqual(other.hit, ['pet']);
+});
+
+
+// --- The two seams World.attack owns. The sim tests above set `_charmTargetId`
+// by hand and call meleeArcScan directly; these prove the ATTACK RESOLVER
+// actually writes the one and passes the other. Without them, deleting either
+// line in world.js leaves every test in this file green.
+
+const HALBERD = {
+  id: 2, name: 'halberd', category: 'weapon', kind: 'melee', damage: 18,
+  cooldown: 0.9, reach: 190, arc_width: 1.8, mana_cost: 0, stamina_cost: 0,
+  element: null, knockback: 0, vfx: { attack: 'sweep_arc' },
+};
+const TYPES = new Map([[2, HALBERD]]);
+const INV = { items: [{ id: 'i2', typeId: 2 }], equipment: { main_hand: 'i2' } };
+
+function armedWithWeapon() {
+  const w = new World(stubMap(), TYPES, 2);
+  w.addPlayer('druid', { x: 500, y: 500 });
+  return w;
+}
+
+test('attacking a creature stamps the target this player\'s summons will fight', () => {
+  const w = armedWithWeapon();
+  w.addPlayer('hunter', { x: 300, y: 500 }, INV);
+  w.creatures.addCreatures([
+    { id: 'foe', type: 'Wolf', x: 420, y: 500, hp: 40, level: 6, facing: 'S', color: '#c00' },
+  ]);
+  assert.equal(w.getPlayer('hunter')._charmTargetId, null);
+  w.attack('hunter', 1, 0);
+  assert.equal(w.getPlayer('hunter')._charmTargetId, 'foe',
+    'without this stamp a druid\'s pets have nothing to be pointed at and only ever heel');
+});
+
+test('a swing that reaches nothing leaves the summon target alone', () => {
+  const w = armedWithWeapon();
+  w.addPlayer('hunter', { x: 300, y: 500 }, INV);
+  w.creatures.addCreatures([
+    { id: 'foe', type: 'Wolf', x: 420, y: 500, hp: 40, level: 6, facing: 'S', color: '#c00' },
+  ]);
+  w.attack('hunter', 1, 0);
+  w.getPlayer('hunter')._attackCd = 0;
+  w.attack('hunter', -1, 0);   // swinging west, at empty ground
+  assert.equal(w.getPlayer('hunter')._charmTargetId, 'foe',
+    'a whiff must not un-point the pack mid-fight');
+});
+
+test('a charmed player cannot damage their charmer\'s pet through World.attack', () => {
+  const w = armedWithWeapon();
+  w.addPlayer('victim', { x: 300, y: 500 }, INV);
+  w.creatures.addCreatures([
+    { id: 'pet', type: 'Wolf', x: 420, y: 500, hp: 40, level: 6, facing: 'S', color: '#c00' },
+  ]);
+  w.creatures.charm('pet', { userId: 'druid', characterId: 3, expiresAt: 60000 });
+  applyCharm(w.getPlayer('victim'), 'druid', w.now);
+
+  const hpBefore = w.creatures.get('pet').hp;
+  const r = w.attack('victim', 1, 0);
+  assert.equal(w.creatures.get('pet').hp, hpBefore,
+    'the whole arc -- damage, riders, knockback -- is refused, not just the damage');
+  assert.equal(w.getPlayer('victim')._charmTargetId, null,
+    'and a refused swing must not point the druid\'s own pack at anything');
+  // The refusal is SHOWN, as a block cue on the pet, rather than reading as a
+  // miss at empty ground.
+  assert.ok(r.impacts.some((i) => i.t === 'c:pet'),
+    'a pacified swing that physically reached the pet must produce a block cue');
+});
+
+test('the same swing lands normally when the attacker is not charmed', () => {
+  // The control for the test above: proves the arc geometry reaches the pet,
+  // so the refusal is the pacify and not a swing that was always going to miss.
+  const w = armedWithWeapon();
+  w.addPlayer('victim', { x: 300, y: 500 }, INV);
+  w.creatures.addCreatures([
+    { id: 'pet', type: 'Wolf', x: 420, y: 500, hp: 40, level: 6, facing: 'S', color: '#c00' },
+  ]);
+  w.creatures.charm('pet', { userId: 'druid', characterId: 3, expiresAt: 60000 });
+  const hpBefore = w.creatures.get('pet').hp;
+  w.attack('victim', 1, 0);   // never charmed
+  assert.ok(w.creatures.get('pet').hp < hpBefore);
 });
