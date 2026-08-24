@@ -14,6 +14,18 @@ const {
 // check at all. So this fake EVALUATES the predicates against real rows and
 // honors ROLLBACK by restoring a snapshot, which is what makes the
 // "refused, and nothing moved" assertions mean anything.
+//
+// It also MODELS THE FOREIGN KEYS THAT DELETE THINGS (SOMET-498). `player_items
+// .account_item_id` is ON DELETE CASCADE, so deleting an account_items row
+// while an instance still names it destroys that instance -- which is the exact
+// mistake withdrawItem's statement ordering exists to avoid. A fake that
+// deleted the container without cascading would let that ordering be reversed
+// with every test still green, so the cascade is implemented below and
+// `withdrawing must not cascade the instance away` is what pins it.
+//
+// The round-trip behaviour this file exists to protect is asserted against a
+// REAL database in account_chest_instance_db.test.js. This file covers the
+// predicates and the orderings; that one covers rarity, item level and affixes.
 function fakeDb(seed = {}) {
   const state = {
     playerItems: seed.playerItems ? seed.playerItems.map((r) => ({ ...r })) : [],
@@ -22,6 +34,9 @@ function fakeDb(seed = {}) {
     // { playerItemId, socketedIntoId } -- one row per stone instance, exactly
     // as stone_instances stores it.
     stones: seed.stones ? seed.stones.map((r) => ({ ...r })) : [],
+    // { playerItemId, idx, affixTypeId, key, label, value, effect } -- one row
+    // per player_item_affixes row, joined to its affix_types entry.
+    affixes: seed.affixes ? seed.affixes.map((r) => ({ ...r })) : [],
   };
   let snapshot = null;
   let nextId = 1000;
@@ -32,6 +47,19 @@ function fakeDb(seed = {}) {
     state.accountItems = s.accountItems;
     state.equipment = s.equipment;
     state.stones = s.stones;
+    state.affixes = s.affixes;
+  };
+
+  // player_items.account_item_id ON DELETE CASCADE, and player_item_affixes
+  // .player_item_id ON DELETE CASCADE behind it. Modelled, not assumed: this is
+  // the destruction withdrawItem's ordering is written to avoid, so the fake
+  // has to be able to perform it.
+  const cascadeFromAccountItem = (accountItemId) => {
+    const doomed = state.playerItems
+      .filter((p) => p.accountItemId === accountItemId)
+      .map((p) => p.id);
+    state.playerItems = state.playerItems.filter((p) => !doomed.includes(p.id));
+    state.affixes = state.affixes.filter((a) => !doomed.includes(a.playerItemId));
   };
 
   const query = async (sql, params = []) => {
@@ -45,44 +73,40 @@ function fakeDb(seed = {}) {
       return { rows: [], rowCount: 0 };
     }
 
-    if (/SELECT 1 FROM player_equipment/.test(s)) {
+    // Ownership + lock. `character_id = $2` IS the authorization check.
+    if (/^SELECT item_type_id, quantity, soulbound FROM player_items WHERE id = \$1 AND character_id = \$2 FOR UPDATE/.test(s)) {
       const [itemId, characterId] = params;
-      const hit = state.equipment.filter(
-        (e) => e.itemId === itemId && e.characterId === characterId,
+      const hit = state.playerItems.filter(
+        (p) => p.id === itemId && p.characterId === characterId,
       );
+      return {
+        rows: hit.map((r) => ({
+          item_type_id: r.itemTypeId, quantity: r.quantity ?? 1, soulbound: !!r.soulbound,
+        })),
+        rowCount: hit.length,
+      };
+    }
+
+    // SOMET-498: UNSCOPED. One param, not two -- a fake that still accepted a
+    // characterId here would make the widened guard untestable.
+    if (/^SELECT 1 FROM player_equipment WHERE item_id = \$1$/.test(s)) {
+      const [itemId] = params;
+      const hit = state.equipment.filter((e) => e.itemId === itemId);
       return { rows: hit.map(() => ({ '?column?': 1 })), rowCount: hit.length };
     }
 
-    // The item IS a stone: joined through player_items on character_id, so an
-    // id the caller does not own must not match even if it is a real stone.
-    if (/FROM stone_instances si JOIN player_items pi/.test(s)) {
-      const [itemId, characterId] = params;
-      const hit = state.stones.filter((st) => st.playerItemId === itemId
-        && state.playerItems.some((p) => p.id === itemId && p.characterId === characterId));
+    // The item IS a stone.
+    if (/^SELECT 1 FROM stone_instances WHERE player_item_id = \$1$/.test(s)) {
+      const [itemId] = params;
+      const hit = state.stones.filter((st) => st.playerItemId === itemId);
       return { rows: hit.map(() => ({})), rowCount: hit.length };
     }
 
     // The item HOSTS a stone.
-    if (/FROM stone_instances si JOIN player_items host/.test(s)) {
-      const [itemId, characterId] = params;
-      const hit = state.stones.filter((st) => st.socketedIntoId === itemId
-        && state.playerItems.some((p) => p.id === itemId && p.characterId === characterId));
+    if (/^SELECT 1 FROM stone_instances WHERE socketed_into_id = \$1$/.test(s)) {
+      const [itemId] = params;
+      const hit = state.stones.filter((st) => st.socketedIntoId === itemId);
       return { rows: hit.map(() => ({})), rowCount: hit.length };
-    }
-
-    if (/DELETE FROM player_items WHERE id = \$1 AND character_id = \$2/.test(s)) {
-      const [itemId, characterId] = params;
-      const idx = state.playerItems.findIndex(
-        (p) => p.id === itemId && p.characterId === characterId,
-      );
-      if (idx === -1) return { rows: [], rowCount: 0 };
-      const [row] = state.playerItems.splice(idx, 1);
-      return {
-        rows: [{
-          item_type_id: row.itemTypeId, quantity: row.quantity ?? 1, soulbound: !!row.soulbound,
-        }],
-        rowCount: 1,
-      };
     }
 
     if (/INSERT INTO account_items/.test(s)) {
@@ -111,31 +135,64 @@ function fakeDb(seed = {}) {
       };
     }
 
-    if (/DELETE FROM account_items WHERE id = \$1 AND user_id = \$2/.test(s)) {
+    // Deposit's handover: character -> chest, both holder columns in one
+    // statement.
+    if (/^UPDATE player_items SET character_id = NULL, account_item_id = \$2 WHERE id = \$1 AND character_id = \$3/.test(s)) {
+      const [itemId, accountItemId, characterId] = params;
+      const hit = state.playerItems.filter(
+        (p) => p.id === itemId && p.characterId === characterId,
+      );
+      for (const r of hit) { r.characterId = null; r.accountItemId = accountItemId; }
+      return { rows: [], rowCount: hit.length };
+    }
+
+    // Withdraw's ownership + lock on the CONTAINER.
+    if (/^SELECT id FROM account_items WHERE id = \$1 AND user_id = \$2 FOR UPDATE/.test(s)) {
+      const [accountItemId, userId] = params;
+      const hit = state.accountItems.filter(
+        (a) => a.id === accountItemId && a.userId === userId,
+      );
+      return { rows: hit.map((a) => ({ id: a.id })), rowCount: hit.length };
+    }
+
+    // Withdraw's detach: chest -> character.
+    if (/^UPDATE player_items SET character_id = \$2, account_item_id = NULL WHERE account_item_id = \$1/.test(s)) {
+      const [accountItemId, characterId] = params;
+      const hit = state.playerItems.filter((p) => p.accountItemId === accountItemId);
+      for (const r of hit) { r.characterId = characterId; r.accountItemId = null; }
+      return {
+        rows: hit.map((r) => ({
+          id: r.id,
+          item_type_id: r.itemTypeId,
+          quantity: r.quantity ?? 1,
+          rarity: r.rarity || 'white',
+          item_level: r.itemLevel ?? 1,
+          soulbound: !!r.soulbound,
+        })),
+        rowCount: hit.length,
+      };
+    }
+
+    if (/FROM player_item_affixes pia JOIN affix_types at/.test(s)) {
+      const [playerItemId] = params;
+      const rows = state.affixes
+        .filter((a) => a.playerItemId === playerItemId)
+        .sort((a, b) => a.idx - b.idx)
+        .map((a) => ({
+          affix_type_id: a.affixTypeId, key: a.key, label: a.label, value: a.value, effect: a.effect,
+        }));
+      return { rows, rowCount: rows.length };
+    }
+
+    if (/^DELETE FROM account_items WHERE id = \$1 AND user_id = \$2$/.test(s)) {
       const [accountItemId, userId] = params;
       const idx = state.accountItems.findIndex(
         (a) => a.id === accountItemId && a.userId === userId,
       );
       if (idx === -1) return { rows: [], rowCount: 0 };
-      const [row] = state.accountItems.splice(idx, 1);
-      return {
-        rows: [{
-          item_type_id: row.itemTypeId, quantity: row.quantity ?? 1, soulbound: !!row.soulbound,
-        }],
-        rowCount: 1,
-      };
-    }
-
-    if (/INSERT INTO player_items/.test(s)) {
-      const [characterId, itemTypeId, quantity, soulbound] = params;
-      const row = {
-        id: `p${nextId += 1}`, characterId, itemTypeId, quantity, soulbound: !!soulbound,
-      };
-      state.playerItems.push(row);
-      return {
-        rows: [{ id: row.id, item_type_id: row.itemTypeId, quantity: row.quantity }],
-        rowCount: 1,
-      };
+      state.accountItems.splice(idx, 1);
+      cascadeFromAccountItem(accountItemId);
+      return { rows: [], rowCount: 1 };
     }
 
     if (/FROM account_items WHERE user_id = \$1/.test(s)) {
@@ -175,6 +232,33 @@ const OTHER_USER = 2;
 const CHAR_A = 10;
 const CHAR_B = 11;
 
+// A stored item, in the shape the chest ACTUALLY holds one after SOMET-498:
+// a container row plus the instance it holds, with the container's three
+// columns mirroring the instance's.
+function stored(id, { userId = USER, slot = 1, itemTypeId = 7, quantity = 1, soulbound = false } = {}) {
+  return {
+    accountItem: {
+      id, userId, slot, itemTypeId, quantity, soulbound,
+    },
+    playerItem: {
+      id: `held-${id}`, characterId: null, accountItemId: id, itemTypeId, quantity, soulbound,
+    },
+  };
+}
+
+// The holder of each instance, as a set of {id, holder} pairs. Asserting on
+// this rather than on `playerItems.length` is what SOMET-498 forced: a
+// deposited instance is no longer deleted, so a length check would pass for
+// both "moved into the chest" and "left on the character".
+function holders(db) {
+  return db.state.playerItems.map((p) => ({
+    id: p.id,
+    // eslint-disable-next-line no-nested-ternary
+    holder: p.characterId != null ? `char:${p.characterId}`
+      : (p.accountItemId != null ? `chest:${p.accountItemId}` : 'NOBODY'),
+  }));
+}
+
 test('an item deposited by one character is in the chest for another on the same account', async () => {
   const db = fakeDb({
     playerItems: [{ id: 'p1', characterId: CHAR_A, itemTypeId: 7, quantity: 1 }],
@@ -182,45 +266,48 @@ test('an item deposited by one character is in the chest for another on the same
   const { entry, player } = fakeEntry(USER, [{ id: 'p1', typeId: 7, quantity: 1 }]);
 
   const dep = await depositItem(db, entry, USER, CHAR_A, 'p1');
-  assert.equal(dep.ok, true);
-  // The depositing character no longer holds it, in the DB and in the mirror.
-  assert.equal(db.state.playerItems.length, 0);
-  assert.deepEqual(player.inv.items, []);
+  assert.strictEqual(dep.ok, true, dep.reason);
+  // SOMET-498: the instance is MOVED, not destroyed. The depositing character
+  // no longer holds it -- but it still exists, held by the chest row, which is
+  // the whole fix.
+  assert.deepStrictEqual(holders(db), [{ id: 'p1', holder: `chest:${dep.stored.id}` }]);
+  assert.deepStrictEqual(player.inv.items, []);
 
   // The OTHER character on the same account sees it: the chest is read by
   // user_id, and CHAR_B never touched it.
   const chest = await fetchChest(db, USER);
-  assert.equal(chest.items.length, 1);
-  assert.equal(chest.items[0].typeId, 7);
-  assert.equal(chest.capacity, CHEST_CAPACITY);
+  assert.strictEqual(chest.items.length, 1);
+  assert.strictEqual(chest.items[0].typeId, 7);
+  assert.strictEqual(chest.capacity, CHEST_CAPACITY);
 
   const { entry: entryB, player: playerB } = fakeEntry(USER, []);
   const wd = await withdrawItem(db, entryB, USER, CHAR_B, chest.items[0].id);
-  assert.equal(wd.ok, true);
-  assert.equal(wd.item.typeId, 7);
-  // It landed on CHAR_B, not back on CHAR_A.
-  assert.equal(db.state.playerItems.length, 1);
-  assert.equal(db.state.playerItems[0].characterId, CHAR_B);
-  assert.equal(playerB.inv.items.length, 1);
-  assert.equal((await fetchChest(db, USER)).items.length, 0);
+  assert.strictEqual(wd.ok, true, wd.reason);
+  assert.strictEqual(wd.item.typeId, 7);
+  // It landed on CHAR_B, not back on CHAR_A -- and it is the SAME instance id
+  // that went in, never a rebuilt copy.
+  assert.strictEqual(wd.item.id, 'p1', 'the withdrawn item must be the very instance deposited');
+  assert.deepStrictEqual(holders(db), [{ id: 'p1', holder: `char:${CHAR_B}` }]);
+  assert.strictEqual(playerB.inv.items.length, 1);
+  assert.deepStrictEqual((await fetchChest(db, USER)).items, []);
 });
 
 test('another account cannot see or withdraw a stored item', async () => {
-  const db = fakeDb({
-    accountItems: [{ id: 'a1', userId: USER, slot: 1, itemTypeId: 7, quantity: 1 }],
-  });
+  const s = stored('a1');
+  const db = fakeDb({ accountItems: [s.accountItem], playerItems: [s.playerItem] });
 
   // The bank post is public; the chest is not. A second account reads its own.
-  assert.deepEqual((await fetchChest(db, OTHER_USER)).items, []);
+  assert.deepStrictEqual((await fetchChest(db, OTHER_USER)).items, []);
 
   // ...and naming the row id directly changes nothing: the user_id predicate
   // is the authorization, not the listing.
   const { entry } = fakeEntry(OTHER_USER, []);
   const wd = await withdrawItem(db, entry, OTHER_USER, 99, 'a1');
-  assert.equal(wd.ok, false);
+  assert.strictEqual(wd.ok, false);
   assert.match(wd.reason, /not in your chest/);
-  assert.equal(db.state.accountItems.length, 1);
-  assert.equal(db.state.playerItems.length, 0);
+  assert.strictEqual(db.state.accountItems.length, 1);
+  // The refusal must not have cascaded the held instance away either.
+  assert.deepStrictEqual(holders(db), [{ id: 'held-a1', holder: 'chest:a1' }]);
 });
 
 test('a character cannot deposit another character\'s item', async () => {
@@ -230,12 +317,11 @@ test('a character cannot deposit another character\'s item', async () => {
   const { entry } = fakeEntry(USER, []);
 
   const r = await depositItem(db, entry, USER, CHAR_A, 'p1');
-  assert.equal(r.ok, false);
+  assert.strictEqual(r.ok, false);
   assert.match(r.reason, /do not own/);
   // Still CHAR_B's, and nothing was stored.
-  assert.equal(db.state.playerItems.length, 1);
-  assert.equal(db.state.playerItems[0].characterId, CHAR_B);
-  assert.equal(db.state.accountItems.length, 0);
+  assert.deepStrictEqual(holders(db), [{ id: 'p1', holder: `char:${CHAR_B}` }]);
+  assert.strictEqual(db.state.accountItems.length, 0);
 });
 
 test('an equipped item is refused and stays equipped', async () => {
@@ -246,13 +332,34 @@ test('an equipped item is refused and stays equipped', async () => {
   const { entry, player } = fakeEntry(USER, [{ id: 'p1', typeId: 7, quantity: 1 }]);
 
   const r = await depositItem(db, entry, USER, CHAR_A, 'p1');
-  assert.equal(r.ok, false);
+  assert.strictEqual(r.ok, false);
   assert.match(r.reason, /unequip/);
-  // player_equipment.item_id CASCADEs on a player_items delete, so the real
-  // failure this guards is a silent unequip: assert the row survived.
-  assert.equal(db.state.equipment.length, 1);
-  assert.equal(db.state.playerItems.length, 1);
-  assert.deepEqual(player.inv.items.map((i) => i.id), ['p1']);
+  // SOMET-498 made this guard the ONLY thing holding the line. Pre-498 the
+  // DELETE cascaded player_equipment away, so a missed case merely unequipped
+  // the character silently; an UPDATE cascades nothing, so a missed case now
+  // leaves a paper-doll row pointing at an item sitting in the chest. Assert
+  // BOTH halves: the equipment row survived AND the item never moved.
+  assert.strictEqual(db.state.equipment.length, 1);
+  assert.deepStrictEqual(holders(db), [{ id: 'p1', holder: `char:${CHAR_A}` }]);
+  assert.strictEqual(db.state.accountItems.length, 0);
+  assert.deepStrictEqual(player.inv.items.map((i) => i.id), ['p1']);
+});
+
+// The equipment row is UNIQUE(item_id) and is not scoped to the depositing
+// character in the guard any more (SOMET-498). A row naming this instance from
+// anywhere must block: with the CASCADE gone there is nothing else to clean it
+// up.
+test('an item equipped under a different character id is still refused', async () => {
+  const db = fakeDb({
+    playerItems: [{ id: 'p1', characterId: CHAR_A, itemTypeId: 7, quantity: 1 }],
+    equipment: [{ itemId: 'p1', characterId: CHAR_B, slot: 'main_hand' }],
+  });
+  const { entry } = fakeEntry(USER, [{ id: 'p1', typeId: 7, quantity: 1 }]);
+
+  const r = await depositItem(db, entry, USER, CHAR_A, 'p1');
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /unequip/);
+  assert.deepStrictEqual(holders(db), [{ id: 'p1', holder: `char:${CHAR_A}` }]);
 });
 
 test('a stone is refused, so its instance row (and its XP) is never cascaded away', async () => {
@@ -263,13 +370,20 @@ test('a stone is refused, so its instance row (and its XP) is never cascaded awa
   const { entry } = fakeEntry(USER, [{ id: 'p1', typeId: 30, quantity: 1 }]);
 
   const r = await depositItem(db, entry, USER, CHAR_A, 'p1');
-  assert.equal(r.ok, false);
+  assert.strictEqual(r.ok, false);
   assert.match(r.reason, /stones cannot be stored/);
-  assert.equal(db.state.stones.length, 1);
-  assert.equal(db.state.playerItems.length, 1);
+  assert.strictEqual(db.state.stones.length, 1);
+  assert.deepStrictEqual(holders(db), [{ id: 'p1', holder: `char:${CHAR_A}` }]);
 });
 
-test('a weapon with a stone socketed into it is refused', async () => {
+// THE GUARD SOMET-498 MADE LOAD-BEARING. Pre-498 the DELETE fired
+// stone_instances.socketed_into_id's ON DELETE SET NULL and the stone simply
+// popped out into the inventory -- untidy, not damage. An UPDATE fires no such
+// thing, so without this refusal the stone stays socketed into a weapon in the
+// chest while its own row still belongs to the character: loadInventory's
+// socket join (which requires host_pi.character_id) stops seeing the socket, so
+// the stone reads as loose while being unsocketable into anything else.
+test('a weapon with a stone socketed into it is refused, and the socket is untouched', async () => {
   const db = fakeDb({
     playerItems: [
       { id: 'w1', characterId: CHAR_A, itemTypeId: 4, quantity: 1 },
@@ -280,10 +394,16 @@ test('a weapon with a stone socketed into it is refused', async () => {
   const { entry } = fakeEntry(USER, []);
 
   const r = await depositItem(db, entry, USER, CHAR_A, 'w1');
-  assert.equal(r.ok, false);
+  assert.strictEqual(r.ok, false);
   assert.match(r.reason, /unsocket/);
-  assert.equal(db.state.playerItems.length, 2);
-  assert.equal(db.state.accountItems.length, 0);
+  assert.deepStrictEqual(holders(db), [
+    { id: 'w1', holder: `char:${CHAR_A}` },
+    { id: 's1', holder: `char:${CHAR_A}` },
+  ]);
+  assert.strictEqual(db.state.accountItems.length, 0);
+  // The socket itself must still be intact: this refusal exists precisely
+  // because nothing else would part them any more.
+  assert.deepStrictEqual(db.state.stones, [{ playerItemId: 's1', socketedIntoId: 'w1' }]);
 });
 
 test('the chest fills to exactly CHEST_CAPACITY and the next deposit is refused intact', async () => {
@@ -298,48 +418,91 @@ test('the chest fills to exactly CHEST_CAPACITY and the next deposit is refused 
 
   for (let i = 0; i < CHEST_CAPACITY; i += 1) {
     const r = await depositItem(db, entry, USER, CHAR_A, `p${i}`);
-    assert.equal(r.ok, true, `deposit ${i} should succeed`);
+    assert.strictEqual(r.ok, true, `deposit ${i} should succeed`);
   }
-  assert.equal(db.state.accountItems.length, CHEST_CAPACITY);
+  assert.strictEqual(db.state.accountItems.length, CHEST_CAPACITY);
 
   const overflow = await depositItem(db, entry, USER, CHAR_A, `p${CHEST_CAPACITY}`);
-  assert.equal(overflow.ok, false);
+  assert.strictEqual(overflow.ok, false);
   assert.match(overflow.reason, /full/);
-  // THE POINT OF THIS TEST: the refusal happens AFTER the DELETE, so without
-  // the ROLLBACK the item would be gone from the character and absent from the
-  // chest -- destroyed by a capacity check. It must still be carried.
-  assert.equal(db.state.playerItems.length, 1);
-  assert.equal(db.state.playerItems[0].id, `p${CHEST_CAPACITY}`);
-  assert.equal(db.state.accountItems.length, CHEST_CAPACITY);
-  assert.deepEqual(player.inv.items.map((i) => i.id), [`p${CHEST_CAPACITY}`]);
+  // THE POINT OF THIS TEST: the refusal happens after the container INSERT has
+  // been attempted and inside an open transaction holding the instance's FOR
+  // UPDATE lock, so it must ROLLBACK rather than return. The item must still be
+  // carried by the character -- not held by a chest row, and not ownerless.
+  const still = holders(db).filter((h) => h.holder === `char:${CHAR_A}`);
+  assert.deepStrictEqual(still, [{ id: `p${CHEST_CAPACITY}`, holder: `char:${CHAR_A}` }]);
+  assert.strictEqual(holders(db).filter((h) => h.holder === 'NOBODY').length, 0,
+    'no instance may be left without a holder');
+  assert.strictEqual(db.state.accountItems.length, CHEST_CAPACITY);
+  assert.deepStrictEqual(player.inv.items.map((i) => i.id), [`p${CHEST_CAPACITY}`]);
 
   // Slots are 1..CHEST_CAPACITY with no duplicates and no gaps.
   const slots = db.state.accountItems.map((a) => a.slot).sort((a, b) => a - b);
-  assert.deepEqual(slots, Array.from({ length: CHEST_CAPACITY }, (_, i) => i + 1));
+  assert.deepStrictEqual(slots, Array.from({ length: CHEST_CAPACITY }, (_, i) => i + 1));
 });
 
 test('a withdrawal frees its slot and the next deposit reuses the lowest free one', async () => {
+  const s1 = stored('a1', { slot: 1, itemTypeId: 5 });
+  const s2 = stored('a2', { slot: 2, itemTypeId: 6 });
+  const s3 = stored('a3', { slot: 3, itemTypeId: 8 });
   const db = fakeDb({
-    playerItems: [{ id: 'p1', characterId: CHAR_A, itemTypeId: 7, quantity: 1 }],
-    accountItems: [
-      { id: 'a1', userId: USER, slot: 1, itemTypeId: 5, quantity: 1 },
-      { id: 'a2', userId: USER, slot: 2, itemTypeId: 6, quantity: 1 },
-      { id: 'a3', userId: USER, slot: 3, itemTypeId: 8, quantity: 1 },
+    playerItems: [
+      { id: 'p1', characterId: CHAR_A, itemTypeId: 7, quantity: 1 },
+      s1.playerItem, s2.playerItem, s3.playerItem,
     ],
+    accountItems: [s1.accountItem, s2.accountItem, s3.accountItem],
   });
   const { entry } = fakeEntry(USER, [{ id: 'p1', typeId: 7, quantity: 1 }]);
 
   const wd = await withdrawItem(db, entry, USER, CHAR_A, 'a2');
-  assert.equal(wd.ok, true);
+  assert.strictEqual(wd.ok, true, wd.reason);
 
   const dep = await depositItem(db, entry, USER, CHAR_A, 'p1');
-  assert.equal(dep.ok, true);
-  assert.equal(dep.stored.slot, 2, 'the freed slot is the lowest free one');
+  assert.strictEqual(dep.ok, true, dep.reason);
+  assert.strictEqual(dep.stored.slot, 2, 'the freed slot is the lowest free one');
 
   // fetchChest orders by slot, so the panel's rows stay put across the move
   // rather than reshuffling around the hole.
   const chest = await fetchChest(db, USER);
-  assert.deepEqual(chest.items.map((i) => i.slot), [1, 2, 3]);
+  assert.deepStrictEqual(chest.items.map((i) => i.slot), [1, 2, 3]);
+});
+
+// THE ORDERING TEST. `player_items.account_item_id` is ON DELETE CASCADE, so a
+// withdrawItem that deleted the container before detaching the instance would
+// destroy the item it was handing over -- inside a transaction that then
+// COMMITs, with the player watching an empty hand. Reversing those two
+// statements in the service turns this test red and nothing else does.
+test('withdrawing must not cascade the instance away', async () => {
+  const s = stored('a1', { itemTypeId: 42 });
+  const db = fakeDb({ accountItems: [s.accountItem], playerItems: [s.playerItem] });
+  const { entry, player } = fakeEntry(USER, []);
+
+  const wd = await withdrawItem(db, entry, USER, CHAR_A, 'a1');
+  assert.strictEqual(wd.ok, true, wd.reason);
+  assert.strictEqual(wd.item.id, 'held-a1', 'the same instance must come back');
+  assert.deepStrictEqual(holders(db), [{ id: 'held-a1', holder: `char:${CHAR_A}` }]);
+  assert.deepStrictEqual(db.state.accountItems, []);
+  assert.deepStrictEqual(player.inv.items.map((i) => i.id), ['held-a1']);
+});
+
+// A container row that holds no instance is unreachable after the
+// 1714440513000 backfill, and withdrawItem REFUSES it rather than minting a
+// fresh white item from item_type_id -- which is exactly the pre-498 bug. The
+// container must survive the refusal so nothing is lost.
+test('a chest row holding no instance is refused, not rebuilt from the type', async () => {
+  const db = fakeDb({
+    accountItems: [{
+      id: 'a1', userId: USER, slot: 1, itemTypeId: 7, quantity: 1, soulbound: false,
+    }],
+  });
+  const { entry, player } = fakeEntry(USER, []);
+
+  const wd = await withdrawItem(db, entry, USER, CHAR_A, 'a1');
+  assert.strictEqual(wd.ok, false, 'an instance-less chest row must not mint a replacement');
+  assert.match(wd.reason, /cannot be withdrawn/);
+  assert.strictEqual(db.state.accountItems.length, 1, 'and the container must survive the refusal');
+  assert.deepStrictEqual(holders(db), []);
+  assert.deepStrictEqual(player.inv.items, []);
 });
 
 test('soulbound survives the round trip, so a bound item cannot be laundered into a sellable one', async () => {
@@ -349,22 +512,22 @@ test('soulbound survives the round trip, so a bound item cannot be laundered int
   const { entry } = fakeEntry(USER, [{ id: 'p1', typeId: 7, quantity: 1 }]);
 
   const dep = await depositItem(db, entry, USER, CHAR_A, 'p1');
-  assert.equal(dep.ok, true);
-  assert.equal(dep.stored.soulbound, true);
-  assert.equal((await fetchChest(db, USER)).items[0].soulbound, true);
+  assert.strictEqual(dep.ok, true, dep.reason);
+  assert.strictEqual(dep.stored.soulbound, true);
+  assert.strictEqual((await fetchChest(db, USER)).items[0].soulbound, true);
 
   const { entry: entryB } = fakeEntry(USER, []);
   const wd = await withdrawItem(db, entryB, USER, CHAR_B, dep.stored.id);
-  assert.equal(wd.ok, true);
+  assert.strictEqual(wd.ok, true, wd.reason);
   // SOMET-316: the flag must survive on the WIRE too, not only in the row.
   // Without this the withdrawn item loses its `bound` marker the instant it
   // lands back in the panel it was just taken from.
-  assert.equal(wd.item.soulbound, true);
+  assert.strictEqual(wd.item.soulbound, true);
   // The flag is what trade.js's sellItem reads to refuse the sale. If the
   // round trip cleared it, SOMET-277's gold faucet would reopen through the
   // chest: deposit the starter kit, withdraw it, sell it, delete the
   // character, repeat.
-  assert.equal(db.state.playerItems[0].soulbound, true);
+  assert.strictEqual(db.state.playerItems[0].soulbound, true);
 });
 
 test('a stacked row keeps its quantity across the round trip', async () => {
@@ -374,16 +537,63 @@ test('a stacked row keeps its quantity across the round trip', async () => {
   const { entry } = fakeEntry(USER, [{ id: 'p1', typeId: 62, quantity: 24 }]);
 
   const dep = await depositItem(db, entry, USER, CHAR_A, 'p1');
-  assert.equal(dep.ok, true);
-  assert.equal(dep.stored.quantity, 24);
+  assert.strictEqual(dep.ok, true, dep.reason);
+  assert.strictEqual(dep.stored.quantity, 24);
   // An unbound item must come back unbound: the round trip preserves the flag,
   // it does not invent one.
-  assert.equal(dep.stored.soulbound, false);
+  assert.strictEqual(dep.stored.soulbound, false);
 
   const wd = await withdrawItem(db, entry, USER, CHAR_A, dep.stored.id);
-  assert.equal(wd.ok, true);
-  // trade.js refuses to SELL a stack because it would pay for one unit and
-  // delete the row; a transfer moves the row whole, so there is nothing to
-  // refuse and nothing to lose.
-  assert.equal(wd.item.quantity, 24);
+  assert.strictEqual(wd.ok, true, wd.reason);
+  // SOMET-498: instance-held chest rows are NOT forced to quantity 1. The
+  // chest holds the instance and the stack's quantity is a column ON that
+  // instance, so a whole-row move preserves it by construction -- there is no
+  // per-unit accounting to get wrong, which is why trade.js has to refuse a
+  // stacked SALE and this does not.
+  assert.strictEqual(wd.item.quantity, 24);
+  assert.strictEqual(wd.item.id, 'p1', 'and it is the same stack row, not a rebuilt one');
+});
+
+// The live in-memory mirror is what equipRequirements#gearStatGrants reads on
+// the equip path -- NOT the database. An item that is correct in Postgres and
+// affix-less in p.inv.items is the "live in the schema, inert in play" shape
+// this epic keeps shipping, so the mirror is asserted here as well as against a
+// real database in account_chest_instance_db.test.js.
+test('the withdrawn item carries its rolled identity into the LIVE inventory', async () => {
+  const s = stored('a1', { itemTypeId: 7 });
+  s.playerItem.rarity = 'foxy';
+  s.playerItem.itemLevel = 88;
+  const db = fakeDb({
+    accountItems: [s.accountItem],
+    playerItems: [s.playerItem],
+    affixes: [
+      {
+        playerItemId: 'held-a1', idx: 0, affixTypeId: 3, key: 'might', label: 'Might', value: 3.13, effect: { str: 3.13 },
+      },
+      {
+        playerItemId: 'held-a1', idx: 1, affixTypeId: 5, key: 'vigor', label: 'Vigor', value: 11.5, effect: { hp: 11.5 },
+      },
+    ],
+  });
+  const { entry, player } = fakeEntry(USER, []);
+
+  const wd = await withdrawItem(db, entry, USER, CHAR_A, 'a1');
+  assert.strictEqual(wd.ok, true, wd.reason);
+
+  const live = player.inv.items.find((i) => i.id === 'held-a1');
+  assert.ok(live, 'the withdrawn item must be pushed into the live inventory');
+  assert.strictEqual(live.rarity, 'foxy');
+  assert.strictEqual(live.itemLevel, 88);
+  // BY VALUE, in order, with `effect` -- an id-only or zeroed list grants
+  // nothing on the equip path while looking perfectly healthy in a count check.
+  assert.deepStrictEqual(live.affixes, [
+    {
+      affixTypeId: 3, key: 'might', label: 'Might', value: 3.13, effect: { str: 3.13 },
+    },
+    {
+      affixTypeId: 5, key: 'vigor', label: 'Vigor', value: 11.5, effect: { hp: 11.5 },
+    },
+  ]);
+  // And the same object went out on the wire.
+  assert.deepStrictEqual(wd.item, live);
 });
