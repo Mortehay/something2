@@ -10,6 +10,7 @@ const { configureAttackOrigins } = require('./attackOrigin.js');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
 const { ownedCharacter } = require('../services/characters.js');
+const { charmBudget, canSummon } = require('../services/charm.js');
 const { recordVisit } = require('../services/visitedWorlds.js');
 const { mayJoin, joinPolicyFacts, waypointTravelFacts } = require('../services/joinPolicy.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
@@ -37,6 +38,15 @@ const { buyStock, sellItem } = require('./trade');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
+
+// SOMET-473 -- the Druid's charm (spec 8.2, contract §6.5).
+//
+// How close a druid must be to charm. Matches the interact radius family rather
+// than a weapon reach: charming is an interaction, not an attack.
+const CHARM_RANGE = 200;
+// How long a creature charm holds before the sim releases it. Long enough to
+// walk a pack somewhere with, short enough that a druid must keep re-charming.
+const CHARM_DURATION_MS = 120000;
 const { awardStoneXp, STONE_XP_PER_HIT } = require('./stoneXp.js');
 
 const MAP_TILE_SIZE = 100;
@@ -331,6 +341,7 @@ function drainAttacks(entry) {
 // than throwing). Both call sites append their own WHERE clause.
 const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
                 wc.level, wc.damage, wc.blocks_portal_id,
+                wc.charmed_by_character_id, wc.charm_expires_at, ch.user_id AS charm_owner_user_id,
                 COALESCE(wc.defense, et.defense) AS defense,
                 et.color, et.resistances, et.faction, et.attack_element,
                 -- Slice D (SOMET-161). This is THE loader the live simulation
@@ -347,7 +358,43 @@ const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.fac
                 ab.abilities
          FROM world_creatures wc
          LEFT JOIN entity_types et ON et.name = wc.type
+         LEFT JOIN characters ch ON ch.id = wc.charmed_by_character_id
          LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}`;
+
+// SOMET-473 -- persisted charm -> the in-memory shape addCreatures reads.
+//
+// Called on EVERY row that goes into CreatureSim, at both loader call sites, so
+// a pet that survives a chunk reload comes back as a pet instead of turning
+// hostile on its owner. Without it the two charm columns would be write-only:
+// a durable charm nothing ever reads back is the inertness trap this epic has
+// shipped seven times, dressed up as persistence.
+//
+// TWO conversions happen here, and neither can live in creatures.js (which is
+// clock-free and database-free by construction):
+//
+//   * charm_expires_at is an absolute timestamptz; the sim compares against
+//     `world.now`, a monotonic ms counter that starts at 0 when the world was
+//     created. The offset between them is (Date.now() - world.now), so the
+//     expiry in world-clock terms is world.now + (expiresAt - Date.now()).
+//   * charmed_by_character_id names a CHARACTER; the sim keys its owner lookup
+//     on the userId the socket carries, which is a STRING (server.js's
+//     `String(payload.user_id)`). A numeric user_id here would never match
+//     `byId.get(...)` and every restored pet would be released on its first
+//     tick -- silently, and with every test green.
+//
+// An already-lapsed charm is dropped rather than restored, so a row the
+// background never got round to clearing cannot resurrect a pet.
+function hydrateCharm(row, world) {
+  if (row.charmed_by_character_id == null || row.charm_owner_user_id == null) return row;
+  const expiresMs = new Date(row.charm_expires_at).getTime();
+  if (!Number.isFinite(expiresMs) || expiresMs <= Date.now()) return row;
+  return {
+    ...row,
+    charmOwnerUserId: String(row.charm_owner_user_id),
+    charmedByCharacterId: row.charmed_by_character_id,
+    charmExpiresAt: world.now + (expiresMs - Date.now()),
+  };
+}
 
 // Attach the authoritative WebSocket simulation to an existing http server.
 // Returns { close() } so callers/tests can tear it down.
@@ -1146,7 +1193,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
-      entry.world.creatures.addCreatures(rows.rows);
+      entry.world.creatures.addCreatures(rows.rows.map((r) => hydrateCharm(r, entry.world)));
       const itemRows = await pool.query(
         // `rarity` is NOT optional in this list (SOMET-490). This SELECT is
         // the ONLY way an item re-enters the sim after flushAndPrune's
@@ -1195,7 +1242,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
          WHERE wc.id = ANY($1::uuid[])`,
         [ids],
       );
-      entry.world.creatures.addCreatures(rows.rows);
+      entry.world.creatures.addCreatures(rows.rows.map((r) => hydrateCharm(r, entry.world)));
     } catch (err) {
       // Best-effort, same posture as activateChunk's own catch: log so a
       // persistently failing injection is visible to an operator instead of
@@ -1980,6 +2027,89 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const entry = worlds.get(ws.worldId);
       // Strict boolean — a truthy string from the wire must not enable it.
       if (entry) entry.world.setAutoLoot(ws.userId, msg.on === true);
+    },
+
+    // SOMET-473 -- the Druid's charm (spec 8.2). One message, four refusals, in
+    // this order: not a Druid, nothing charmable in range, already someone's
+    // pet, or over budget. Only the first and last say anything: a miss is
+    // silent, exactly like `pickup` with nothing in range.
+    //
+    // The budget is composed from the DATABASE every time rather than cached on
+    // the player. Charisma is a COMPOSED number (class base + passive tree +
+    // gear), and a budget cached at join would be wrong the moment a point is
+    // allocated -- which is a live HTTP route, not a reconnect.
+    charm(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      if (typeof msg.creature_id !== 'string') return; // wire hygiene: ids are strings
+      chainOp(ws, 'charm', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const character = await ownedCharacter(pool, Number(ws.userId), ws.characterId);
+        if (!character || character.className !== 'Druid') {
+          return send(ws, { type: 'error', message: 'Only a Druid can charm' });
+        }
+
+        const c = entry.world.creatures.get(msg.creature_id);
+        if (!c) return; // gone: silent, like pickup with nothing in range
+        const pc = { x: p.x + p.width / 2, y: p.y + p.height / 2 };
+        const cc = { x: c.x + c.width / 2, y: c.y + c.height / 2 };
+        if (Math.hypot(cc.x - pc.x, cc.y - pc.y) > CHARM_RANGE) return;
+        if (c.charmOwnerUserId != null) return; // already someone's pet
+
+        // COMPOSED, not raw, and both halves come off the SAME object.
+        // loadProgression already folds the tree in (it ends in
+        // passiveTreeStore's composeProgression), so `progression.charisma` is
+        // the EFFECTIVE total -- class base + allocated nodes + gear -- and
+        // `progression.rules.treeCharmBonus` is the summed rule the Druid's own
+        // start node (+1) and the ks_cha_pack_leader keystone (+3) grant.
+        //
+        // Reading the raw player_progression.charisma column here instead would
+        // make every charisma point the tree grants invisible to the budget:
+        // the exact dead-grant shape SOMET-472 had to go back and fix, and the
+        // seventh time this epic would have shipped it.
+        //
+        // `?? 0` is a degradation, not a default: composeStats always returns a
+        // `rules` object with treeCharmBonus at its 0 identity, so this only
+        // fires for a progression bundle that failed to compose at all.
+        const progression = await loadProgression(pool, character.id);
+        const budget = charmBudget(progression.charisma, (progression.rules || {}).treeCharmBonus ?? 0);
+        // BY LEVEL SUM, never by count -- see charm.js's canSummon. Read off
+        // the live sim rather than the roster table: `character_summons` is the
+        // "every creature ever charmed" set (spec 8.2), not the list of what is
+        // held right now, and summing that would refuse a druid's second charm
+        // of the session forever.
+        const held = entry.world.creatures.all()
+          .filter((x) => x.charmedByCharacterId === character.id)
+          .map((x) => x.level);
+        const verdict = canSummon(held, c.level, budget);
+        if (!verdict.ok) {
+          return send(ws, { type: 'error', message: `Charm refused: ${verdict.reason}` });
+        }
+
+        const expiresAt = entry.world.now + CHARM_DURATION_MS;
+        entry.world.creatures.charm(msg.creature_id, {
+          userId: ws.userId, characterId: character.id, expiresAt,
+        });
+        // Durable, in one statement each, and AFTER the in-memory charm: a
+        // failed write leaves a pet that lapses on its own timer, while a
+        // failed charm followed by a successful write would leave a durable
+        // pet the sim knows nothing about.
+        await pool.query(
+          `UPDATE world_creatures
+              SET charmed_by_character_id = $1,
+                  charm_expires_at = now() + ($2::int * interval '1 millisecond')
+            WHERE id = $3`,
+          [character.id, CHARM_DURATION_MS, msg.creature_id]);
+        // "Every creature ever charmed is recorded" (spec 8.2). ON CONFLICT DO
+        // NOTHING because the roster is a set, not a log -- see the migration.
+        await pool.query(
+          `INSERT INTO character_summons (character_id, creature_type, level)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (character_id, creature_type, level) DO NOTHING`,
+          [character.id, c.type, c.level]);
+        send(ws, { type: 'charmed', creatureId: msg.creature_id, expiresAt });
+      });
     },
 
     drop(ws, msg) {
@@ -3003,6 +3133,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // ground-item expiry pass (and one tuning refresh) synchronously and await
     // it, instead of racing wall-clock itemSweepMs.
     _itemSweep: itemSweep,
+    // SOMET-473 test seam: re-run the joined creature SELECT for specific ids
+    // and feed the rows back into the live sim -- the same call a mid-session
+    // guard INSERT makes. Exposed so charm_live_db.test.js can prove a
+    // PERSISTED charm survives a reload, which is the one thing a unit test
+    // over CreatureSim can never show.
+    _reloadCreatures: injectGuardIntoSim,
     _refreshLootTuning: refreshLootTuning,
     // Read back the live TTL. A getter, not the value: the whole point of
     // SOMET-482 is that this number CHANGES at runtime, so a test that

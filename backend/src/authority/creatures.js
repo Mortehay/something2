@@ -1149,6 +1149,15 @@ class CreatureSim {
     for (const c of list) {
       if (this.creatures.has(c.id)) continue;
       const dirIdx = Math.min(DIRS.length - 1, Math.floor(this.rng() * DIRS.length));
+      // SOMET-473. Resolved BEFORE the object literal because `faction` below
+      // is derived from it. A creature arriving from the loader with a live
+      // charm carries its owner but NOT a faction -- the row's `faction` comes
+      // from entity_types, which knows nothing about charms and always says
+      // 'hostile'. Rebuilding the flip here is what makes a persisted pet come
+      // back as a pet; without it the reload silently hands the druid's own
+      // pack back to the guards, with the charm columns still perfectly
+      // populated.
+      const charmOwner = c.charmOwnerUserId ?? null;
       this.creatures.set(c.id, {
         id: c.id, type: c.type, x: c.x, y: c.y,
         width: CREATURE_SIZE, height: CREATURE_SIZE, speed: CREATURE_SPEED,
@@ -1164,7 +1173,7 @@ class CreatureSim {
         level: Number.isInteger(c.level) ? c.level : 1,
         damage: Number.isFinite(c.damage) ? Number(c.damage) : CREATURE_DAMAGE,
         _dir: dirIdx, dirty: false,
-        faction: c.faction || 'hostile',
+        faction: charmOwner != null ? 'charmed' : (c.faction || 'hostile'),
         // SOMET-473. The faction to restore when the charm ends. Captured at
         // load, never recomputed: `faction` itself is overwritten while
         // charmed, so it is no longer able to answer "what was this creature
@@ -1174,7 +1183,7 @@ class CreatureSim {
         // in the world until a druid charms one, and are cleared together by
         // releaseCharm -- a half-cleared charm is a pet with no owner, which
         // the tick would follow to (undefined, undefined).
-        charmOwnerUserId: c.charmOwnerUserId ?? null,
+        charmOwnerUserId: charmOwner,
         charmedByCharacterId: c.charmedByCharacterId ?? c.charmed_by_character_id ?? null,
         // World-clock ms, not a Date: this module never reads a clock, so the
         // caller converts the persisted timestamptz once at load.
