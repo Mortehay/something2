@@ -949,3 +949,158 @@ test('an interval that cannot divide an hour is refused, not silently mangled', 
     assert.match(result.stderr, /PI_WATCH_INTERVAL must be/);
   }
 });
+
+// --- The dump guard (SOMET-485) ---------------------------------------------
+//
+// backup.sh and restore.sh both refuse to touch a dump that does not look like
+// a dump. Both expressed that as
+//
+//     gzip -dc "$f" | head -c 200000 | grep -q 'CREATE TABLE'
+//
+// under `set -o pipefail`, and both were therefore wrong: `grep -q` quits at
+// its first match, `gzip` is still writing, takes SIGPIPE, exits 141, and
+// pipefail hands that 141 back as the pipeline's status. A VALID dump read as
+// "contains no CREATE TABLE" -- the restore refused, the backup deleted.
+//
+// It only misfires when gzip still has output pending when grep quits, i.e.
+// when the dump is big, i.e. when it holds real data. That is why the fixture
+// below is megabytes rather than the couple of kilobytes a toy dump produces:
+// a small fixture leaves this bug completely undetected, which is how it
+// survived. Every test here runs the real scripts.
+const GUARD = path.join(SCRIPTS, 'dump-guard.sh');
+const RESTORE_SH = path.join(SCRIPTS, 'restore.sh');
+
+let dumpFixtures = null;
+function fixtures() {
+  if (dumpFixtures) return dumpFixtures;
+  const zlib = require('node:zlib');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-dump-'));
+  process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
+
+  // Shaped like pg_dump's output: schema first, then a long data section. The
+  // CREATE TABLE is near the TOP, so the guard finds it immediately and quits
+  // immediately -- which is exactly the moment the old pipeline broke.
+  const lines = ['SET statement_timeout = 0;', 'DROP TABLE IF EXISTS public.bulk;',
+    'CREATE TABLE public.bulk (id integer NOT NULL, note text);'];
+  for (let i = 0; i < 400000; i += 1) lines.push(`INSERT INTO public.bulk VALUES (${i}, 'row ${i} of the data section');`);
+  const plain = Buffer.from(`${lines.join('\n')}\n`, 'utf8');
+  assert.ok(plain.length > 4 * 1024 * 1024,
+    'the fixture must be multi-megabyte or it cannot exercise the SIGPIPE window at all');
+
+  const big = path.join(dir, 'big.sql.gz');
+  fs.writeFileSync(big, zlib.gzipSync(plain));
+
+  // A dump that decompresses fine and simply is not one.
+  const noSchema = path.join(dir, 'no-create-table.sql.gz');
+  fs.writeFileSync(noSchema, zlib.gzipSync(Buffer.from('SELECT 1;\n', 'utf8')));
+
+  // Not a gzip stream at all.
+  const notGzip = path.join(dir, 'not-gzip.sql.gz');
+  fs.writeFileSync(notGzip, 'this is not gzip');
+
+  // A real gzip stream cut off partway -- the shape an interrupted transfer
+  // leaves behind, and the one that looks most like a good backup.
+  const truncated = path.join(dir, 'truncated.sql.gz');
+  fs.writeFileSync(truncated, fs.readFileSync(big).subarray(0, 300000));
+
+  // Valid gzip of BINARY. Rejected for the same reason as any other non-dump,
+  // but it is also the input that makes bash complain about null bytes if the
+  // guard forgets to strip them.
+  const binary = path.join(dir, 'binary.sql.gz');
+  fs.writeFileSync(binary, zlib.gzipSync(Buffer.alloc(500000, 0)));
+
+  dumpFixtures = { dir, big, noSchema, notGzip, truncated, binary, plainBytes: plain.length };
+  return dumpFixtures;
+}
+
+// restore.sh runs the guard BEFORE it looks at the mode, so invoking it with no
+// mode separates the two outcomes cleanly: 65 means the guard refused the
+// dump, 64 means the guard passed it and usage() took over. Nothing is
+// restored either way, so this needs no database.
+function restoreGuardStatus(dump) {
+  return spawnSync('bash', [RESTORE_SH, dump], { encoding: 'utf8' }).status;
+}
+
+test('a valid multi-megabyte dump passes the guard 100 times out of 100', () => {
+  const f = fixtures();
+  // ONE bash process running the loop: 100 node spawns would spend more time
+  // in node than in the thing under test. The counts come back on stdout.
+  const loop = `
+    pass=0; refuse=0; other=0
+    for i in $(seq 1 100); do
+      bash ${JSON.stringify(RESTORE_SH)} ${JSON.stringify(f.big)} >/dev/null 2>&1
+      case $? in
+        64) pass=$((pass+1)) ;;
+        65) refuse=$((refuse+1)) ;;
+        *) other=$((other+1)) ;;
+      esac
+    done
+    echo "$pass $refuse $other"`;
+  const result = spawnSync('bash', ['-c', loop], { encoding: 'utf8' });
+  assert.strictEqual(result.status, 0, result.stderr);
+  const [pass, refuse, other] = result.stdout.trim().split(/\s+/).map(Number);
+  // Once is not evidence: the broken pipeline passed small dumps every time and
+  // failed this one every time, and a rate-dependent bug needs a rate to show.
+  assert.strictEqual(refuse, 0, `the guard refused a valid dump ${refuse}/100 times`);
+  assert.strictEqual(other, 0, `unexpected exit statuses in ${other}/100 runs`);
+  assert.strictEqual(pass, 100);
+});
+
+test('the guard function itself accepts the same dump 100 times out of 100', () => {
+  // backup.sh reaches the guard only after ssh-ing to a board, so its call is
+  // exercised here at the function level -- under the same `set -euo pipefail`
+  // both scripts run with, because pipefail is the whole defect.
+  const f = fixtures();
+  const loop = `
+    set -euo pipefail
+    . ${JSON.stringify(GUARD)}
+    ok=0
+    for i in $(seq 1 100); do
+      if dump_has_create_table ${JSON.stringify(f.big)}; then ok=$((ok+1)); fi
+    done
+    echo "$ok"`;
+  const result = spawnSync('bash', ['-c', loop], { encoding: 'utf8' });
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.strictEqual(Number(result.stdout.trim()), 100,
+    'dump_has_create_table must not depend on how much of the stream gzip had left');
+});
+
+test('the guard still refuses a dump that carries no schema', () => {
+  const f = fixtures();
+  // The fix must not become "always pass". A false acceptance on a recovery
+  // path is worse than the false refusal it replaced: it drops a live database
+  // and puts nothing back.
+  const result = spawnSync('bash', [RESTORE_SH, f.noSchema], { encoding: 'utf8' });
+  assert.strictEqual(result.status, 65);
+  assert.match(result.stderr, /no CREATE TABLE/);
+});
+
+test('the guard still refuses a truncated dump and a file that is not gzip', () => {
+  const f = fixtures();
+  for (const bad of [f.truncated, f.notGzip, f.binary]) {
+    assert.strictEqual(restoreGuardStatus(bad), 65, `${path.basename(bad)} must be refused`);
+  }
+});
+
+test('rejecting a binary dump does not spray bash warnings over the operator', () => {
+  // Reading the head into a shell variable is what removed the SIGPIPE window;
+  // NULs in that head are what bash complains about while still reaching the
+  // right verdict. The verdict is not enough -- a recovery transcript full of
+  // "ignored null byte in input" hides the line that matters.
+  const f = fixtures();
+  const result = spawnSync('bash', [RESTORE_SH, f.binary], { encoding: 'utf8' });
+  assert.strictEqual(result.status, 65);
+  assert.doesNotMatch(result.stderr, /null byte/);
+});
+
+test('both scripts share one guard instead of each keeping the broken pipeline', () => {
+  // The identical racy pipeline lived in two files. Two copies is how one gets
+  // fixed and the other does not.
+  for (const name of ['restore.sh', 'backup.sh']) {
+    const text = fs.readFileSync(path.join(SCRIPTS, name), 'utf8');
+    assert.doesNotMatch(text, /gzip -dc [^\n]*\|[^\n]*grep -q/,
+      `${name} must not pipe gzip into grep -q; under pipefail that reads SIGPIPE as failure`);
+    assert.match(text, /dump_has_create_table/, `${name} must use the shared guard`);
+    assert.match(text, /dump-guard\.sh/, `${name} must source the shared guard`);
+  }
+});
