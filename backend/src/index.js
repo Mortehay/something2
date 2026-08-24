@@ -1503,6 +1503,26 @@ app.put('/api/affix-types/:id', adminGuard, async (req, res) => {
 // instead of a 500 off the FK's own error -- but the FK is what actually
 // enforces it, and the catch below still maps a lost race (23503) to the same
 // 409 rather than a 500.
+//
+// SOMET-501: TWO probes, because there are two places an affix can be rolled
+// and only one of them has a foreign key. `world_items` (migration
+// 1714440507000) carries a DENORMALISED `affixes` jsonb whose entries are a
+// bare `affixTypeId` integer with no FK at all, so a ground item is invisible
+// to both the probe above and the RESTRICT behind it. Deleting an affix a
+// ground item named used to succeed, and claimItem's CTE -- which re-INSERTs
+// those rows into player_item_affixes -- then failed on 23503 for the whole
+// 180-second ground lifetime: an item the player could see and could not pick
+// up. Reported separately from the held-gear case, because the two mean very
+// different things to the admin: held gear is a permanent refusal, a ground
+// item clears itself within the TTL.
+//
+// The ground probe is NOT the whole fix and must not be mistaken for one. It
+// is a pre-check with nothing behind it, and there are two windows it cannot
+// close: a drop landing between this SELECT and the DELETE, and each live
+// world's affix pool being a 60-second cache (authority/server.js
+// refreshLootTuning), so a kill can roll an affix this route legitimately
+// deleted a moment ago. claimItem tolerates a dangling id -- loudly -- for
+// exactly those two, and that tolerance is the belt to this braces.
 app.delete('/api/affix-types/:id', adminGuard, async (req, res) => {
   try {
     const inUse = await pool.query(
@@ -1510,6 +1530,19 @@ app.delete('/api/affix-types/:id', adminGuard, async (req, res) => {
     );
     if (inUse.rowCount > 0) {
       return res.status(409).json({ error: 'that affix is rolled on items players own' });
+    }
+    // Containment (`@>`) rather than a jsonb_array_elements scan: it matches
+    // element-wise on an array, ignores whatever else the element carries
+    // (`value`), and is the form a GIN index on world_items.affixes would
+    // serve if the table ever grew enough to want one.
+    const onGround = await pool.query(
+      'SELECT 1 FROM world_items WHERE affixes @> $1::jsonb LIMIT 1',
+      [JSON.stringify([{ affixTypeId: Number(req.params.id) }])],
+    );
+    if (onGround.rowCount > 0) {
+      return res.status(409).json({
+        error: 'that affix is rolled on an item lying on the ground; it clears within a few minutes',
+      });
     }
     const del = await pool.query('DELETE FROM affix_types WHERE id = $1 RETURNING id', [req.params.id]);
     if (del.rowCount === 0) return res.status(404).json({ error: 'Affix type not found' });

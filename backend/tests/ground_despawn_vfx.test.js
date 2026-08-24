@@ -51,6 +51,15 @@ function nextMsg(ws, type) {
 // The atomic claim CTE (loot.js claimItem / dropItem) literally contains
 // "FROM world_items" in its DELETE half, so it MUST be routed before any
 // generic world_items pattern. Same ambiguity trap the sibling file documents.
+//
+// SOMET-501 widened that from "world_items" to "any generic pattern": the claim
+// CTE now also contains the literal "FROM affix_types" (it checks each
+// snapshotted affix id still exists before re-inserting it), so the catalog
+// handler below caught the claim and answered it with an empty result. claimItem
+// read that as a lost race, granted nothing, and the pickup silently never
+// happened -- with every assertion in this file still green except the one that
+// waited for the item. The claim route is therefore matched FIRST, ahead of
+// every by-table pattern, not merely ahead of the world_items ones.
 const CLAIM_RE = /^\s*WITH d AS/i;
 const ITEMS_SELECT_RE = /SELECT[\s\S]*FROM world_items/i;
 
@@ -65,6 +74,26 @@ function makePool(chunkSize, { itemsFor, settings, inventory } = {}) {
     matching(re) { return calls.filter((c) => re.test(c.sql)); },
     query: async (sql, params) => {
       calls.push({ sql, params });
+      // FIRST, ahead of every by-table pattern below -- see CLAIM_RE's comment.
+      if (CLAIM_RE.test(sql)) {
+        // dropItem's CTE: player_items row out, world_items row in. The
+        // returned row is what lands in the sim, so its expires_at has to be
+        // derived from the ttlMs the server actually passed (params[5]) --
+        // echoing a fixed date here would make the TTL untestable end to end.
+        if (/INSERT INTO world_items/i.test(sql)) {
+          const ttlMs = Number(params[5]);
+          return {
+            rows: [{
+              id: 'dropped-1', item_type_id: 7, x: params[3], y: params[4], quantity: 1,
+              expires_at: new Date(Date.now() + ttlMs).toISOString(),
+              rarity: 'white', item_level: 1, affixes: [], soulbound: false,
+            }],
+            rowCount: 1,
+          };
+        }
+        // claimItem's CTE: world_items row out, player_items row in.
+        return { rows: [{ id: 'inst-1', item_type_id: 7, quantity: 1 }], rowCount: 1 };
+      }
       if (/FROM worlds WHERE id/i.test(sql)) return { rows: [{ id: 'w1', seed: '1', chunk_size: chunkSize }] };
       if (/token_version.*FROM users WHERE/i.test(sql)) return { rows: [{ token_version: 1 }] };
       if (/FROM tile_types/i.test(sql)) return { rows: [{ name: 'grass', walkable: true, speed: 1 }] };
@@ -85,25 +114,6 @@ function makePool(chunkSize, { itemsFor, settings, inventory } = {}) {
       }
       if (/FROM affix_types/i.test(sql)) return { rows: [] };
       if (/^\s*DELETE FROM world_items WHERE expires_at/i.test(sql)) return { rows: [], rowCount: 0 };
-      if (CLAIM_RE.test(sql)) {
-        // dropItem's CTE: player_items row out, world_items row in. The
-        // returned row is what lands in the sim, so its expires_at has to be
-        // derived from the ttlMs the server actually passed (params[5]) --
-        // echoing a fixed date here would make the TTL untestable end to end.
-        if (/INSERT INTO world_items/i.test(sql)) {
-          const ttlMs = Number(params[5]);
-          return {
-            rows: [{
-              id: 'dropped-1', item_type_id: 7, x: params[3], y: params[4], quantity: 1,
-              expires_at: new Date(Date.now() + ttlMs).toISOString(),
-              rarity: 'white', item_level: 1, affixes: [], soulbound: false,
-            }],
-            rowCount: 1,
-          };
-        }
-        // claimItem's CTE: world_items row out, player_items row in.
-        return { rows: [{ id: 'inst-1', item_type_id: 7, quantity: 1 }], rowCount: 1 };
-      }
       if (ITEMS_SELECT_RE.test(sql)) {
         const row = itemsFor && itemsFor(params);
         return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
