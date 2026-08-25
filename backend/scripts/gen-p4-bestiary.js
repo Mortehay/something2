@@ -37,7 +37,11 @@ const SIZE_WORD = ['tiny', 'small', 'lean', 'armed', 'skilled', 'hulking', 'armo
 function promptFor(line, rung) {
   const sizeWord = SIZE_WORD[rung.index];
   const elementWord = line.element ? `${line.element}-touched ` : '';
-  return `a ${sizeWord} ${elementWord}${line.name.toLowerCase()} creature`;
+  // Styled here, not at generation time, so the prompt in the catalog says
+  // what it will actually draw. See seeds/data/spritePrompt.js for why the
+  // wording is what it is -- and for the two additions that were measured
+  // making it worse.
+  return styleEntityPrompt(`a ${sizeWord} ${elementWord}${line.name.toLowerCase()} creature`);
 }
 
 // SOMET-290. The rung normally decides behaviour (behavior_name below), but a

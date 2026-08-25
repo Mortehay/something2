@@ -3,6 +3,7 @@
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
         tiles-generate tiles-export tiles-seamless tiles-seed \
         entities-generate entities-export entities-cutout entities-seed \
+        entities-restyle-prompts \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
@@ -308,6 +309,12 @@ tiles-seed:
 # background out itself, so its output arrives already transparent and needs
 # no entities-cutout pass. It is sd-turbo on CPU -- about a minute an entity
 # against the remote's five seconds.
+# One-time (re-runnable) correction: bring every entity_types.prompt in the
+# database up to the styled form. The creature seeder is DO NOTHING by design,
+# so a seed-file change cannot reach rows that already exist. DRY=1 to preview.
+entities-restyle-prompts:
+	$(COMPOSE) exec -T backend node scripts/restyle-entity-prompts.js $(if $(DRY),--dry-run)
+
 entities-generate:
 	$(COMPOSE) exec -T backend node scripts/generate-entity-textures.js \
 		$(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(FORCE),--force) \

@@ -2,56 +2,56 @@
   {
     "name": "bush",
     "file": "bush.png",
-    "bytes": 110945,
-    "prompt": "a round leafy green shrub",
+    "bytes": 248396,
+    "prompt": "pixel art, a round leafy green shrub, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
     "name": "dead_tree",
     "file": "dead_tree.png",
-    "bytes": 109157,
-    "prompt": "a bare dead tree with broken branches",
+    "bytes": 184197,
+    "prompt": "pixel art, a bare dead tree with broken branches, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
     "name": "IceRock",
     "file": "IceRock.png",
-    "bytes": 61012,
-    "prompt": "a jagged pale blue ice boulder",
+    "bytes": 292772,
+    "prompt": "pixel art, a jagged pale blue ice boulder, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
     "name": "pine_tree",
     "file": "pine_tree.png",
-    "bytes": 77425,
-    "prompt": "a tall dark green pine tree with a straight trunk",
+    "bytes": 107154,
+    "prompt": "pixel art, a tall dark green pine tree with a straight trunk, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
     "name": "rose_bush",
     "file": "rose_bush.png",
-    "bytes": 80876,
-    "prompt": "a green shrub covered in red roses",
+    "bytes": 259656,
+    "prompt": "pixel art, a green shrub covered in red roses, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
     "name": "Stone",
     "file": "Stone.png",
-    "bytes": 125674,
-    "prompt": "a mossy grey boulder",
+    "bytes": 204781,
+    "prompt": "pixel art, a mossy grey boulder, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
     "name": "Tree",
     "file": "Tree.png",
-    "bytes": 140743,
-    "prompt": "a tall broadleaf tree with a thick trunk",
+    "bytes": 257679,
+    "prompt": "pixel art, a tall broadleaf tree with a thick trunk, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   }

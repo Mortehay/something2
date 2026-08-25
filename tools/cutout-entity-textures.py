@@ -301,9 +301,13 @@ def main():
         # nothing removed (the backdrop was not flat, so the subject is still
         # in a box) and almost everything removed (the subject was the same
         # colour as its backdrop and has been erased).
-        # The border test is the one that matters; coverage only catches the
-        # opposite failure, a subject erased along with its backdrop.
-        if border > 0.02 or cov < 0.03:
+        # Three failures, not one. The border test catches a backdrop that
+        # reaches the frame edge; it does NOT catch a panel sitting inside the
+        # frame, which is what a striped or bordered backdrop leaves behind --
+        # the outer ring keys away and a rectangle survives, reading as 97%
+        # subject. Anything filling almost the whole frame is that panel, not a
+        # sprite. And under 3% is a subject erased along with its backdrop.
+        if border > 0.02 or cov < 0.03 or cov > 0.90:
             suspicious.append((name[:-4], cov, border))
         print(f'  {name[:-4]}: {cov * 100:.0f}% subject, border {border * 100:.1f}% opaque (tol {tol})')
 
@@ -317,7 +321,12 @@ def main():
     if suspicious:
         print('\nNOT TRANSPARENT -- these still carry a background:')
         for nm, cov, border in suspicious:
-            what = 'subject erased' if cov < 0.03 else f'{border * 100:.0f}% of the border is opaque'
+            if cov < 0.03:
+                what = 'subject erased'
+            elif cov > 0.90:
+                what = f'{cov * 100:.0f}% of the frame is opaque -- a panel survived the cutout'
+            else:
+                what = f'{border * 100:.0f}% of the border is opaque'
             print(f'  {nm}: {what}')
         # Loud and non-zero: seeding these would put a box behind every prop,
         # and a warning nobody reads is how that ships.

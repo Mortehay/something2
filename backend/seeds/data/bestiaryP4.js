@@ -13,7 +13,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny beast creature",
+    "prompt": "pixel art, a tiny beast creature, single object, solid transparent background",
     "level_min": 1,
     "level_max": 2,
     "behavior_name": "Skittish"
@@ -28,7 +28,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 16,
     "defense": 1,
     "resistances": {},
-    "prompt": "a small beast creature",
+    "prompt": "pixel art, a small beast creature, single object, solid transparent background",
     "level_min": 2,
     "level_max": 3,
     "behavior_name": "Skirmisher"
@@ -43,7 +43,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 30,
     "defense": 3,
     "resistances": {},
-    "prompt": "a lean beast creature",
+    "prompt": "pixel art, a lean beast creature, single object, solid transparent background",
     "level_min": 4,
     "level_max": 5,
     "behavior_name": "Line"
@@ -58,7 +58,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 22,
     "defense": 1,
     "resistances": {},
-    "prompt": "a armed beast creature",
+    "prompt": "pixel art, a armed beast creature, single object, solid transparent background",
     "level_min": 5,
     "level_max": 6,
     "behavior_name": "Ranged"
@@ -73,7 +73,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 26,
     "defense": 1,
     "resistances": {},
-    "prompt": "a skilled beast creature",
+    "prompt": "pixel art, a skilled beast creature, single object, solid transparent background",
     "level_min": 7,
     "level_max": 8,
     "behavior_name": "Caster"
@@ -88,7 +88,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 48,
     "defense": 5,
     "resistances": {},
-    "prompt": "a hulking beast creature",
+    "prompt": "pixel art, a hulking beast creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 9,
     "behavior_name": "Brute"
@@ -103,7 +103,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {},
-    "prompt": "a armoured beast creature",
+    "prompt": "pixel art, a armoured beast creature, single object, solid transparent background",
     "level_min": 9,
     "level_max": 10,
     "behavior_name": "Heavy"
@@ -118,7 +118,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 85,
     "defense": 9,
     "resistances": {},
-    "prompt": "a commanding beast creature",
+    "prompt": "pixel art, a commanding beast creature, single object, solid transparent background",
     "level_min": 11,
     "level_max": 12,
     "behavior_name": "Champion"
@@ -133,7 +133,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 130,
     "defense": 13,
     "resistances": {},
-    "prompt": "a towering beast creature",
+    "prompt": "pixel art, a towering beast creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 12,
     "behavior_name": "Apex"
@@ -148,7 +148,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny woodland creature",
+    "prompt": "pixel art, a tiny woodland creature, single object, solid transparent background",
     "level_min": 1,
     "level_max": 2,
     "behavior_name": "Skittish"
@@ -163,7 +163,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 16,
     "defense": 1,
     "resistances": {},
-    "prompt": "a small woodland creature",
+    "prompt": "pixel art, a small woodland creature, single object, solid transparent background",
     "level_min": 2,
     "level_max": 3,
     "behavior_name": "Skirmisher"
@@ -178,7 +178,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 30,
     "defense": 3,
     "resistances": {},
-    "prompt": "a lean woodland creature",
+    "prompt": "pixel art, a lean woodland creature, single object, solid transparent background",
     "level_min": 4,
     "level_max": 5,
     "behavior_name": "Line"
@@ -193,7 +193,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 22,
     "defense": 1,
     "resistances": {},
-    "prompt": "a armed woodland creature",
+    "prompt": "pixel art, a armed woodland creature, single object, solid transparent background",
     "level_min": 5,
     "level_max": 6,
     "behavior_name": "Ranged"
@@ -208,7 +208,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 26,
     "defense": 1,
     "resistances": {},
-    "prompt": "a skilled woodland creature",
+    "prompt": "pixel art, a skilled woodland creature, single object, solid transparent background",
     "level_min": 7,
     "level_max": 8,
     "behavior_name": "Caster"
@@ -223,7 +223,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 48,
     "defense": 5,
     "resistances": {},
-    "prompt": "a hulking woodland creature",
+    "prompt": "pixel art, a hulking woodland creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 9,
     "behavior_name": "Brute"
@@ -238,7 +238,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {},
-    "prompt": "a armoured woodland creature",
+    "prompt": "pixel art, a armoured woodland creature, single object, solid transparent background",
     "level_min": 9,
     "level_max": 10,
     "behavior_name": "Heavy"
@@ -253,7 +253,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 85,
     "defense": 9,
     "resistances": {},
-    "prompt": "a commanding woodland creature",
+    "prompt": "pixel art, a commanding woodland creature, single object, solid transparent background",
     "level_min": 11,
     "level_max": 12,
     "behavior_name": "Champion"
@@ -268,7 +268,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 130,
     "defense": 13,
     "resistances": {},
-    "prompt": "a towering woodland creature",
+    "prompt": "pixel art, a towering woodland creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 12,
     "behavior_name": "Apex"
@@ -283,7 +283,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny fire-touched desert creature",
+    "prompt": "pixel art, a tiny fire-touched desert creature, single object, solid transparent background",
     "level_min": 1,
     "level_max": 2,
     "behavior_name": "Swarm"
@@ -300,7 +300,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.2
     },
-    "prompt": "a small fire-touched desert creature",
+    "prompt": "pixel art, a small fire-touched desert creature, single object, solid transparent background",
     "level_min": 2,
     "level_max": 3,
     "behavior_name": "Skirmisher"
@@ -317,7 +317,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.55
     },
-    "prompt": "a lean fire-touched desert creature",
+    "prompt": "pixel art, a lean fire-touched desert creature, single object, solid transparent background",
     "level_min": 4,
     "level_max": 5,
     "behavior_name": "Line"
@@ -334,7 +334,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "a armed fire-touched desert creature",
+    "prompt": "pixel art, a armed fire-touched desert creature, single object, solid transparent background",
     "level_min": 5,
     "level_max": 6,
     "behavior_name": "Ranged"
@@ -351,7 +351,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.7
     },
-    "prompt": "a skilled fire-touched desert creature",
+    "prompt": "pixel art, a skilled fire-touched desert creature, single object, solid transparent background",
     "level_min": 7,
     "level_max": 8,
     "behavior_name": "Caster"
@@ -369,7 +369,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking fire-touched desert creature",
+    "prompt": "pixel art, a hulking fire-touched desert creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 9,
     "behavior_name": "Brute"
@@ -387,7 +387,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured fire-touched desert creature",
+    "prompt": "pixel art, a armoured fire-touched desert creature, single object, solid transparent background",
     "level_min": 9,
     "level_max": 10,
     "behavior_name": "Heavy"
@@ -405,7 +405,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding fire-touched desert creature",
+    "prompt": "pixel art, a commanding fire-touched desert creature, single object, solid transparent background",
     "level_min": 11,
     "level_max": 12,
     "behavior_name": "Champion"
@@ -423,7 +423,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering fire-touched desert creature",
+    "prompt": "pixel art, a towering fire-touched desert creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 12,
     "behavior_name": "Apex"
@@ -438,7 +438,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny ice-touched tundra creature",
+    "prompt": "pixel art, a tiny ice-touched tundra creature, single object, solid transparent background",
     "level_min": 1,
     "level_max": 4,
     "behavior_name": "Swarm"
@@ -455,7 +455,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.2
     },
-    "prompt": "a small ice-touched tundra creature",
+    "prompt": "pixel art, a small ice-touched tundra creature, single object, solid transparent background",
     "level_min": 4,
     "level_max": 7,
     "behavior_name": "Skirmisher"
@@ -472,7 +472,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.55
     },
-    "prompt": "a lean ice-touched tundra creature",
+    "prompt": "pixel art, a lean ice-touched tundra creature, single object, solid transparent background",
     "level_min": 7,
     "level_max": 10,
     "behavior_name": "Line"
@@ -489,7 +489,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "a armed ice-touched tundra creature",
+    "prompt": "pixel art, a armed ice-touched tundra creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 13,
     "behavior_name": "Ranged"
@@ -506,7 +506,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.7
     },
-    "prompt": "a skilled ice-touched tundra creature",
+    "prompt": "pixel art, a skilled ice-touched tundra creature, single object, solid transparent background",
     "level_min": 13,
     "level_max": 16,
     "behavior_name": "Caster"
@@ -524,7 +524,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking ice-touched tundra creature",
+    "prompt": "pixel art, a hulking ice-touched tundra creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Brute"
@@ -542,7 +542,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured ice-touched tundra creature",
+    "prompt": "pixel art, a armoured ice-touched tundra creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 21,
     "behavior_name": "Heavy"
@@ -560,7 +560,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding ice-touched tundra creature",
+    "prompt": "pixel art, a commanding ice-touched tundra creature, single object, solid transparent background",
     "level_min": 21,
     "level_max": 24,
     "behavior_name": "Champion"
@@ -578,7 +578,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering ice-touched tundra creature",
+    "prompt": "pixel art, a towering ice-touched tundra creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 24,
     "behavior_name": "Apex"
@@ -593,7 +593,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny physical-touched swamp creature",
+    "prompt": "pixel art, a tiny physical-touched swamp creature, single object, solid transparent background",
     "level_min": 1,
     "level_max": 4,
     "behavior_name": "Swarm"
@@ -610,7 +610,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.2
     },
-    "prompt": "a small physical-touched swamp creature",
+    "prompt": "pixel art, a small physical-touched swamp creature, single object, solid transparent background",
     "level_min": 4,
     "level_max": 7,
     "behavior_name": "Skirmisher"
@@ -627,7 +627,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.55
     },
-    "prompt": "a lean physical-touched swamp creature",
+    "prompt": "pixel art, a lean physical-touched swamp creature, single object, solid transparent background",
     "level_min": 7,
     "level_max": 10,
     "behavior_name": "Line"
@@ -644,7 +644,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "a armed physical-touched swamp creature",
+    "prompt": "pixel art, a armed physical-touched swamp creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 13,
     "behavior_name": "Ranged"
@@ -661,7 +661,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a skilled physical-touched swamp creature",
+    "prompt": "pixel art, a skilled physical-touched swamp creature, single object, solid transparent background",
     "level_min": 13,
     "level_max": 16,
     "behavior_name": "Caster"
@@ -678,7 +678,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.6
     },
-    "prompt": "a hulking physical-touched swamp creature",
+    "prompt": "pixel art, a hulking physical-touched swamp creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Brute"
@@ -695,7 +695,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "a armoured physical-touched swamp creature",
+    "prompt": "pixel art, a armoured physical-touched swamp creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 21,
     "behavior_name": "Heavy"
@@ -712,7 +712,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a commanding physical-touched swamp creature",
+    "prompt": "pixel art, a commanding physical-touched swamp creature, single object, solid transparent background",
     "level_min": 21,
     "level_max": 24,
     "behavior_name": "Champion"
@@ -729,7 +729,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.8
     },
-    "prompt": "a towering physical-touched swamp creature",
+    "prompt": "pixel art, a towering physical-touched swamp creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 24,
     "behavior_name": "Apex"
@@ -744,7 +744,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny physical-touched highland creature",
+    "prompt": "pixel art, a tiny physical-touched highland creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 10,
     "behavior_name": "Skittish"
@@ -761,7 +761,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.2
     },
-    "prompt": "a small physical-touched highland creature",
+    "prompt": "pixel art, a small physical-touched highland creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 12,
     "behavior_name": "Skirmisher"
@@ -778,7 +778,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.55
     },
-    "prompt": "a lean physical-touched highland creature",
+    "prompt": "pixel art, a lean physical-touched highland creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 14,
     "behavior_name": "Line"
@@ -795,7 +795,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "a armed physical-touched highland creature",
+    "prompt": "pixel art, a armed physical-touched highland creature, single object, solid transparent background",
     "level_min": 14,
     "level_max": 16,
     "behavior_name": "Ranged"
@@ -812,7 +812,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a skilled physical-touched highland creature",
+    "prompt": "pixel art, a skilled physical-touched highland creature, single object, solid transparent background",
     "level_min": 16,
     "level_max": 18,
     "behavior_name": "Caster"
@@ -829,7 +829,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.6
     },
-    "prompt": "a hulking physical-touched highland creature",
+    "prompt": "pixel art, a hulking physical-touched highland creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 20,
     "behavior_name": "Brute"
@@ -846,7 +846,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "a armoured physical-touched highland creature",
+    "prompt": "pixel art, a armoured physical-touched highland creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 22,
     "behavior_name": "Heavy"
@@ -863,7 +863,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a commanding physical-touched highland creature",
+    "prompt": "pixel art, a commanding physical-touched highland creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 24,
     "behavior_name": "Champion"
@@ -880,7 +880,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.8
     },
-    "prompt": "a towering physical-touched highland creature",
+    "prompt": "pixel art, a towering physical-touched highland creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 24,
     "behavior_name": "Apex"
@@ -895,7 +895,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny lightning-touched jungle creature",
+    "prompt": "pixel art, a tiny lightning-touched jungle creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 10,
     "behavior_name": "Swarm"
@@ -912,7 +912,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.2
     },
-    "prompt": "a small lightning-touched jungle creature",
+    "prompt": "pixel art, a small lightning-touched jungle creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 12,
     "behavior_name": "Skirmisher"
@@ -929,7 +929,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.55
     },
-    "prompt": "a lean lightning-touched jungle creature",
+    "prompt": "pixel art, a lean lightning-touched jungle creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 14,
     "behavior_name": "Line"
@@ -946,7 +946,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.4
     },
-    "prompt": "a armed lightning-touched jungle creature",
+    "prompt": "pixel art, a armed lightning-touched jungle creature, single object, solid transparent background",
     "level_min": 14,
     "level_max": 16,
     "behavior_name": "Ranged"
@@ -963,7 +963,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.7
     },
-    "prompt": "a skilled lightning-touched jungle creature",
+    "prompt": "pixel art, a skilled lightning-touched jungle creature, single object, solid transparent background",
     "level_min": 16,
     "level_max": 18,
     "behavior_name": "Caster"
@@ -981,7 +981,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking lightning-touched jungle creature",
+    "prompt": "pixel art, a hulking lightning-touched jungle creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 20,
     "behavior_name": "Brute"
@@ -999,7 +999,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured lightning-touched jungle creature",
+    "prompt": "pixel art, a armoured lightning-touched jungle creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 22,
     "behavior_name": "Heavy"
@@ -1017,7 +1017,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding lightning-touched jungle creature",
+    "prompt": "pixel art, a commanding lightning-touched jungle creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 24,
     "behavior_name": "Champion"
@@ -1035,7 +1035,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering lightning-touched jungle creature",
+    "prompt": "pixel art, a towering lightning-touched jungle creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 24,
     "behavior_name": "Apex"
@@ -1050,7 +1050,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny lightning-touched storm creature",
+    "prompt": "pixel art, a tiny lightning-touched storm creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 11,
     "behavior_name": "Swarm"
@@ -1067,7 +1067,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.2
     },
-    "prompt": "a small lightning-touched storm creature",
+    "prompt": "pixel art, a small lightning-touched storm creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 15,
     "behavior_name": "Skirmisher"
@@ -1084,7 +1084,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.55
     },
-    "prompt": "a lean lightning-touched storm creature",
+    "prompt": "pixel art, a lean lightning-touched storm creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Line"
@@ -1101,7 +1101,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.4
     },
-    "prompt": "a armed lightning-touched storm creature",
+    "prompt": "pixel art, a armed lightning-touched storm creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -1118,7 +1118,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.7
     },
-    "prompt": "a skilled lightning-touched storm creature",
+    "prompt": "pixel art, a skilled lightning-touched storm creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 25,
     "behavior_name": "Caster"
@@ -1136,7 +1136,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking lightning-touched storm creature",
+    "prompt": "pixel art, a hulking lightning-touched storm creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 29,
     "behavior_name": "Brute"
@@ -1154,7 +1154,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured lightning-touched storm creature",
+    "prompt": "pixel art, a armoured lightning-touched storm creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -1172,7 +1172,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding lightning-touched storm creature",
+    "prompt": "pixel art, a commanding lightning-touched storm creature, single object, solid transparent background",
     "level_min": 33,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -1190,7 +1190,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering lightning-touched storm creature",
+    "prompt": "pixel art, a towering lightning-touched storm creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -1205,7 +1205,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny ice-touched ruin creature",
+    "prompt": "pixel art, a tiny ice-touched ruin creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 11,
     "behavior_name": "Swarm"
@@ -1222,7 +1222,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.2
     },
-    "prompt": "a small ice-touched ruin creature",
+    "prompt": "pixel art, a small ice-touched ruin creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 15,
     "behavior_name": "Skirmisher"
@@ -1239,7 +1239,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.55
     },
-    "prompt": "a lean ice-touched ruin creature",
+    "prompt": "pixel art, a lean ice-touched ruin creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Line"
@@ -1256,7 +1256,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "a armed ice-touched ruin creature",
+    "prompt": "pixel art, a armed ice-touched ruin creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -1273,7 +1273,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.7
     },
-    "prompt": "a skilled ice-touched ruin creature",
+    "prompt": "pixel art, a skilled ice-touched ruin creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 25,
     "behavior_name": "Caster"
@@ -1291,7 +1291,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking ice-touched ruin creature",
+    "prompt": "pixel art, a hulking ice-touched ruin creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 29,
     "behavior_name": "Brute"
@@ -1309,7 +1309,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured ice-touched ruin creature",
+    "prompt": "pixel art, a armoured ice-touched ruin creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -1327,7 +1327,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding ice-touched ruin creature",
+    "prompt": "pixel art, a commanding ice-touched ruin creature, single object, solid transparent background",
     "level_min": 33,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -1345,7 +1345,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering ice-touched ruin creature",
+    "prompt": "pixel art, a towering ice-touched ruin creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -1360,7 +1360,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny fire-touched volcanic creature",
+    "prompt": "pixel art, a tiny fire-touched volcanic creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 11,
     "behavior_name": "Swarm"
@@ -1377,7 +1377,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.2
     },
-    "prompt": "a small fire-touched volcanic creature",
+    "prompt": "pixel art, a small fire-touched volcanic creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 15,
     "behavior_name": "Skirmisher"
@@ -1394,7 +1394,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.55
     },
-    "prompt": "a lean fire-touched volcanic creature",
+    "prompt": "pixel art, a lean fire-touched volcanic creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Line"
@@ -1411,7 +1411,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "a armed fire-touched volcanic creature",
+    "prompt": "pixel art, a armed fire-touched volcanic creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -1428,7 +1428,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.7
     },
-    "prompt": "a skilled fire-touched volcanic creature",
+    "prompt": "pixel art, a skilled fire-touched volcanic creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 25,
     "behavior_name": "Caster"
@@ -1446,7 +1446,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking fire-touched volcanic creature",
+    "prompt": "pixel art, a hulking fire-touched volcanic creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 29,
     "behavior_name": "Brute"
@@ -1464,7 +1464,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured fire-touched volcanic creature",
+    "prompt": "pixel art, a armoured fire-touched volcanic creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -1482,7 +1482,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding fire-touched volcanic creature",
+    "prompt": "pixel art, a commanding fire-touched volcanic creature, single object, solid transparent background",
     "level_min": 33,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -1500,7 +1500,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering fire-touched volcanic creature",
+    "prompt": "pixel art, a towering fire-touched volcanic creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -1515,7 +1515,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny ice-touched undead creature",
+    "prompt": "pixel art, a tiny ice-touched undead creature, single object, solid transparent background",
     "level_min": 1,
     "level_max": 4,
     "behavior_name": "Swarm"
@@ -1532,7 +1532,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.2
     },
-    "prompt": "a small ice-touched undead creature",
+    "prompt": "pixel art, a small ice-touched undead creature, single object, solid transparent background",
     "level_min": 4,
     "level_max": 7,
     "behavior_name": "Skirmisher"
@@ -1549,7 +1549,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.55
     },
-    "prompt": "a lean ice-touched undead creature",
+    "prompt": "pixel art, a lean ice-touched undead creature, single object, solid transparent background",
     "level_min": 7,
     "level_max": 10,
     "behavior_name": "Line"
@@ -1566,7 +1566,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "a armed ice-touched undead creature",
+    "prompt": "pixel art, a armed ice-touched undead creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 13,
     "behavior_name": "Ranged"
@@ -1583,7 +1583,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.7
     },
-    "prompt": "a skilled ice-touched undead creature",
+    "prompt": "pixel art, a skilled ice-touched undead creature, single object, solid transparent background",
     "level_min": 13,
     "level_max": 16,
     "behavior_name": "Caster"
@@ -1601,7 +1601,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking ice-touched undead creature",
+    "prompt": "pixel art, a hulking ice-touched undead creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Brute"
@@ -1619,7 +1619,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured ice-touched undead creature",
+    "prompt": "pixel art, a armoured ice-touched undead creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 21,
     "behavior_name": "Heavy"
@@ -1637,7 +1637,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding ice-touched undead creature",
+    "prompt": "pixel art, a commanding ice-touched undead creature, single object, solid transparent background",
     "level_min": 21,
     "level_max": 24,
     "behavior_name": "Champion"
@@ -1655,7 +1655,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering ice-touched undead creature",
+    "prompt": "pixel art, a towering ice-touched undead creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 24,
     "behavior_name": "Apex"
@@ -1670,7 +1670,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny ice-touched bonelord creature",
+    "prompt": "pixel art, a tiny ice-touched bonelord creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 11,
     "behavior_name": "Swarm"
@@ -1687,7 +1687,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.2
     },
-    "prompt": "a small ice-touched bonelord creature",
+    "prompt": "pixel art, a small ice-touched bonelord creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 15,
     "behavior_name": "Skirmisher"
@@ -1704,7 +1704,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.55
     },
-    "prompt": "a lean ice-touched bonelord creature",
+    "prompt": "pixel art, a lean ice-touched bonelord creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Line"
@@ -1721,7 +1721,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "a armed ice-touched bonelord creature",
+    "prompt": "pixel art, a armed ice-touched bonelord creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -1738,7 +1738,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.7
     },
-    "prompt": "a skilled ice-touched bonelord creature",
+    "prompt": "pixel art, a skilled ice-touched bonelord creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 25,
     "behavior_name": "Caster"
@@ -1756,7 +1756,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking ice-touched bonelord creature",
+    "prompt": "pixel art, a hulking ice-touched bonelord creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 29,
     "behavior_name": "Brute"
@@ -1774,7 +1774,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured ice-touched bonelord creature",
+    "prompt": "pixel art, a armoured ice-touched bonelord creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -1792,7 +1792,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding ice-touched bonelord creature",
+    "prompt": "pixel art, a commanding ice-touched bonelord creature, single object, solid transparent background",
     "level_min": 33,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -1810,7 +1810,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering ice-touched bonelord creature",
+    "prompt": "pixel art, a towering ice-touched bonelord creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -1825,7 +1825,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny physical-touched cave creature",
+    "prompt": "pixel art, a tiny physical-touched cave creature, single object, solid transparent background",
     "level_min": 1,
     "level_max": 4,
     "behavior_name": "Swarm"
@@ -1842,7 +1842,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.2
     },
-    "prompt": "a small physical-touched cave creature",
+    "prompt": "pixel art, a small physical-touched cave creature, single object, solid transparent background",
     "level_min": 4,
     "level_max": 7,
     "behavior_name": "Skirmisher"
@@ -1859,7 +1859,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.55
     },
-    "prompt": "a lean physical-touched cave creature",
+    "prompt": "pixel art, a lean physical-touched cave creature, single object, solid transparent background",
     "level_min": 7,
     "level_max": 10,
     "behavior_name": "Line"
@@ -1876,7 +1876,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "a armed physical-touched cave creature",
+    "prompt": "pixel art, a armed physical-touched cave creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 13,
     "behavior_name": "Ranged"
@@ -1893,7 +1893,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a skilled physical-touched cave creature",
+    "prompt": "pixel art, a skilled physical-touched cave creature, single object, solid transparent background",
     "level_min": 13,
     "level_max": 16,
     "behavior_name": "Caster"
@@ -1910,7 +1910,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.6
     },
-    "prompt": "a hulking physical-touched cave creature",
+    "prompt": "pixel art, a hulking physical-touched cave creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Brute"
@@ -1927,7 +1927,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "a armoured physical-touched cave creature",
+    "prompt": "pixel art, a armoured physical-touched cave creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 21,
     "behavior_name": "Heavy"
@@ -1944,7 +1944,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a commanding physical-touched cave creature",
+    "prompt": "pixel art, a commanding physical-touched cave creature, single object, solid transparent background",
     "level_min": 21,
     "level_max": 24,
     "behavior_name": "Champion"
@@ -1961,7 +1961,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.8
     },
-    "prompt": "a towering physical-touched cave creature",
+    "prompt": "pixel art, a towering physical-touched cave creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 24,
     "behavior_name": "Apex"
@@ -1976,7 +1976,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny lightning-touched fungal creature",
+    "prompt": "pixel art, a tiny lightning-touched fungal creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 10,
     "behavior_name": "Swarm"
@@ -1993,7 +1993,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.2
     },
-    "prompt": "a small lightning-touched fungal creature",
+    "prompt": "pixel art, a small lightning-touched fungal creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 12,
     "behavior_name": "Skirmisher"
@@ -2010,7 +2010,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.55
     },
-    "prompt": "a lean lightning-touched fungal creature",
+    "prompt": "pixel art, a lean lightning-touched fungal creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 14,
     "behavior_name": "Line"
@@ -2027,7 +2027,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.4
     },
-    "prompt": "a armed lightning-touched fungal creature",
+    "prompt": "pixel art, a armed lightning-touched fungal creature, single object, solid transparent background",
     "level_min": 14,
     "level_max": 16,
     "behavior_name": "Ranged"
@@ -2044,7 +2044,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.7
     },
-    "prompt": "a skilled lightning-touched fungal creature",
+    "prompt": "pixel art, a skilled lightning-touched fungal creature, single object, solid transparent background",
     "level_min": 16,
     "level_max": 18,
     "behavior_name": "Caster"
@@ -2062,7 +2062,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking lightning-touched fungal creature",
+    "prompt": "pixel art, a hulking lightning-touched fungal creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 20,
     "behavior_name": "Brute"
@@ -2080,7 +2080,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured lightning-touched fungal creature",
+    "prompt": "pixel art, a armoured lightning-touched fungal creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 22,
     "behavior_name": "Heavy"
@@ -2098,7 +2098,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding lightning-touched fungal creature",
+    "prompt": "pixel art, a commanding lightning-touched fungal creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 24,
     "behavior_name": "Champion"
@@ -2116,7 +2116,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering lightning-touched fungal creature",
+    "prompt": "pixel art, a towering lightning-touched fungal creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 24,
     "behavior_name": "Apex"
@@ -2131,7 +2131,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny fire-touched ember creature",
+    "prompt": "pixel art, a tiny fire-touched ember creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 11,
     "behavior_name": "Swarm"
@@ -2148,7 +2148,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.2
     },
-    "prompt": "a small fire-touched ember creature",
+    "prompt": "pixel art, a small fire-touched ember creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 15,
     "behavior_name": "Skirmisher"
@@ -2165,7 +2165,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.55
     },
-    "prompt": "a lean fire-touched ember creature",
+    "prompt": "pixel art, a lean fire-touched ember creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Line"
@@ -2182,7 +2182,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "a armed fire-touched ember creature",
+    "prompt": "pixel art, a armed fire-touched ember creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -2199,7 +2199,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.7
     },
-    "prompt": "a skilled fire-touched ember creature",
+    "prompt": "pixel art, a skilled fire-touched ember creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 25,
     "behavior_name": "Caster"
@@ -2217,7 +2217,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking fire-touched ember creature",
+    "prompt": "pixel art, a hulking fire-touched ember creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 29,
     "behavior_name": "Brute"
@@ -2235,7 +2235,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured fire-touched ember creature",
+    "prompt": "pixel art, a armoured fire-touched ember creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -2253,7 +2253,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding fire-touched ember creature",
+    "prompt": "pixel art, a commanding fire-touched ember creature, single object, solid transparent background",
     "level_min": 33,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -2271,7 +2271,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering fire-touched ember creature",
+    "prompt": "pixel art, a towering fire-touched ember creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -2286,7 +2286,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny ice-touched rime creature",
+    "prompt": "pixel art, a tiny ice-touched rime creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 11,
     "behavior_name": "Swarm"
@@ -2303,7 +2303,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.2
     },
-    "prompt": "a small ice-touched rime creature",
+    "prompt": "pixel art, a small ice-touched rime creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 15,
     "behavior_name": "Skirmisher"
@@ -2320,7 +2320,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.55
     },
-    "prompt": "a lean ice-touched rime creature",
+    "prompt": "pixel art, a lean ice-touched rime creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Line"
@@ -2337,7 +2337,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "a armed ice-touched rime creature",
+    "prompt": "pixel art, a armed ice-touched rime creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -2354,7 +2354,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.7
     },
-    "prompt": "a skilled ice-touched rime creature",
+    "prompt": "pixel art, a skilled ice-touched rime creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 25,
     "behavior_name": "Caster"
@@ -2372,7 +2372,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking ice-touched rime creature",
+    "prompt": "pixel art, a hulking ice-touched rime creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 29,
     "behavior_name": "Brute"
@@ -2390,7 +2390,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured ice-touched rime creature",
+    "prompt": "pixel art, a armoured ice-touched rime creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -2408,7 +2408,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding ice-touched rime creature",
+    "prompt": "pixel art, a commanding ice-touched rime creature, single object, solid transparent background",
     "level_min": 33,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -2426,7 +2426,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering ice-touched rime creature",
+    "prompt": "pixel art, a towering ice-touched rime creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -2441,7 +2441,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny physical-touched construct creature",
+    "prompt": "pixel art, a tiny physical-touched construct creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 22,
     "behavior_name": "Swarm"
@@ -2458,7 +2458,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.2
     },
-    "prompt": "a small physical-touched construct creature",
+    "prompt": "pixel art, a small physical-touched construct creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 24,
     "behavior_name": "Skirmisher"
@@ -2475,7 +2475,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.55
     },
-    "prompt": "a lean physical-touched construct creature",
+    "prompt": "pixel art, a lean physical-touched construct creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 26,
     "behavior_name": "Line"
@@ -2492,7 +2492,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "a armed physical-touched construct creature",
+    "prompt": "pixel art, a armed physical-touched construct creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 28,
     "behavior_name": "Ranged"
@@ -2509,7 +2509,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a skilled physical-touched construct creature",
+    "prompt": "pixel art, a skilled physical-touched construct creature, single object, solid transparent background",
     "level_min": 28,
     "level_max": 30,
     "behavior_name": "Caster"
@@ -2526,7 +2526,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.6
     },
-    "prompt": "a hulking physical-touched construct creature",
+    "prompt": "pixel art, a hulking physical-touched construct creature, single object, solid transparent background",
     "level_min": 30,
     "level_max": 32,
     "behavior_name": "Brute"
@@ -2543,7 +2543,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "a armoured physical-touched construct creature",
+    "prompt": "pixel art, a armoured physical-touched construct creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Heavy"
@@ -2560,7 +2560,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a commanding physical-touched construct creature",
+    "prompt": "pixel art, a commanding physical-touched construct creature, single object, solid transparent background",
     "level_min": 34,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -2577,7 +2577,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.8
     },
-    "prompt": "a towering physical-touched construct creature",
+    "prompt": "pixel art, a towering physical-touched construct creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -2592,7 +2592,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny physical-touched hive creature",
+    "prompt": "pixel art, a tiny physical-touched hive creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 11,
     "behavior_name": "Swarm"
@@ -2609,7 +2609,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.2
     },
-    "prompt": "a small physical-touched hive creature",
+    "prompt": "pixel art, a small physical-touched hive creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 15,
     "behavior_name": "Skirmisher"
@@ -2626,7 +2626,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.55
     },
-    "prompt": "a lean physical-touched hive creature",
+    "prompt": "pixel art, a lean physical-touched hive creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Line"
@@ -2643,7 +2643,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "a armed physical-touched hive creature",
+    "prompt": "pixel art, a armed physical-touched hive creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -2660,7 +2660,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a skilled physical-touched hive creature",
+    "prompt": "pixel art, a skilled physical-touched hive creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 25,
     "behavior_name": "Caster"
@@ -2677,7 +2677,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.6
     },
-    "prompt": "a hulking physical-touched hive creature",
+    "prompt": "pixel art, a hulking physical-touched hive creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 29,
     "behavior_name": "Brute"
@@ -2694,7 +2694,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "a armoured physical-touched hive creature",
+    "prompt": "pixel art, a armoured physical-touched hive creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -2711,7 +2711,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a commanding physical-touched hive creature",
+    "prompt": "pixel art, a commanding physical-touched hive creature, single object, solid transparent background",
     "level_min": 33,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -2728,7 +2728,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.8
     },
-    "prompt": "a towering physical-touched hive creature",
+    "prompt": "pixel art, a towering physical-touched hive creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -2743,7 +2743,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny ice-touched drowned creature",
+    "prompt": "pixel art, a tiny ice-touched drowned creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 11,
     "behavior_name": "Swarm"
@@ -2760,7 +2760,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.2
     },
-    "prompt": "a small ice-touched drowned creature",
+    "prompt": "pixel art, a small ice-touched drowned creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 15,
     "behavior_name": "Skirmisher"
@@ -2777,7 +2777,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.55
     },
-    "prompt": "a lean ice-touched drowned creature",
+    "prompt": "pixel art, a lean ice-touched drowned creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Line"
@@ -2794,7 +2794,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "a armed ice-touched drowned creature",
+    "prompt": "pixel art, a armed ice-touched drowned creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -2811,7 +2811,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.7
     },
-    "prompt": "a skilled ice-touched drowned creature",
+    "prompt": "pixel art, a skilled ice-touched drowned creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 25,
     "behavior_name": "Caster"
@@ -2829,7 +2829,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking ice-touched drowned creature",
+    "prompt": "pixel art, a hulking ice-touched drowned creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 29,
     "behavior_name": "Brute"
@@ -2847,7 +2847,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured ice-touched drowned creature",
+    "prompt": "pixel art, a armoured ice-touched drowned creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -2865,7 +2865,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding ice-touched drowned creature",
+    "prompt": "pixel art, a commanding ice-touched drowned creature, single object, solid transparent background",
     "level_min": 33,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -2883,7 +2883,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering ice-touched drowned creature",
+    "prompt": "pixel art, a towering ice-touched drowned creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -2898,7 +2898,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny physical-touched umbral creature",
+    "prompt": "pixel art, a tiny physical-touched umbral creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 23,
     "behavior_name": "Swarm"
@@ -2915,7 +2915,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.2
     },
-    "prompt": "a small physical-touched umbral creature",
+    "prompt": "pixel art, a small physical-touched umbral creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 27,
     "behavior_name": "Skirmisher"
@@ -2932,7 +2932,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.55
     },
-    "prompt": "a lean physical-touched umbral creature",
+    "prompt": "pixel art, a lean physical-touched umbral creature, single object, solid transparent background",
     "level_min": 28,
     "level_max": 31,
     "behavior_name": "Line"
@@ -2949,7 +2949,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "a armed physical-touched umbral creature",
+    "prompt": "pixel art, a armed physical-touched umbral creature, single object, solid transparent background",
     "level_min": 31,
     "level_max": 34,
     "behavior_name": "Ranged"
@@ -2966,7 +2966,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a skilled physical-touched umbral creature",
+    "prompt": "pixel art, a skilled physical-touched umbral creature, single object, solid transparent background",
     "level_min": 35,
     "level_max": 38,
     "behavior_name": "Caster"
@@ -2983,7 +2983,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.6
     },
-    "prompt": "a hulking physical-touched umbral creature",
+    "prompt": "pixel art, a hulking physical-touched umbral creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 42,
     "behavior_name": "Brute"
@@ -3000,7 +3000,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "a armoured physical-touched umbral creature",
+    "prompt": "pixel art, a armoured physical-touched umbral creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 46,
     "behavior_name": "Heavy"
@@ -3017,7 +3017,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a commanding physical-touched umbral creature",
+    "prompt": "pixel art, a commanding physical-touched umbral creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 49,
     "behavior_name": "Champion"
@@ -3034,7 +3034,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.8
     },
-    "prompt": "a towering physical-touched umbral creature",
+    "prompt": "pixel art, a towering physical-touched umbral creature, single object, solid transparent background",
     "level_min": 50,
     "level_max": 50,
     "behavior_name": "Apex"
@@ -3049,7 +3049,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny lightning-touched crystal creature",
+    "prompt": "pixel art, a tiny lightning-touched crystal creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 22,
     "behavior_name": "Swarm"
@@ -3066,7 +3066,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.2
     },
-    "prompt": "a small lightning-touched crystal creature",
+    "prompt": "pixel art, a small lightning-touched crystal creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 24,
     "behavior_name": "Skirmisher"
@@ -3083,7 +3083,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.55
     },
-    "prompt": "a lean lightning-touched crystal creature",
+    "prompt": "pixel art, a lean lightning-touched crystal creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 26,
     "behavior_name": "Line"
@@ -3100,7 +3100,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.4
     },
-    "prompt": "a armed lightning-touched crystal creature",
+    "prompt": "pixel art, a armed lightning-touched crystal creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 28,
     "behavior_name": "Ranged"
@@ -3117,7 +3117,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.7
     },
-    "prompt": "a skilled lightning-touched crystal creature",
+    "prompt": "pixel art, a skilled lightning-touched crystal creature, single object, solid transparent background",
     "level_min": 28,
     "level_max": 30,
     "behavior_name": "Caster"
@@ -3135,7 +3135,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking lightning-touched crystal creature",
+    "prompt": "pixel art, a hulking lightning-touched crystal creature, single object, solid transparent background",
     "level_min": 30,
     "level_max": 32,
     "behavior_name": "Brute"
@@ -3153,7 +3153,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured lightning-touched crystal creature",
+    "prompt": "pixel art, a armoured lightning-touched crystal creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Heavy"
@@ -3171,7 +3171,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding lightning-touched crystal creature",
+    "prompt": "pixel art, a commanding lightning-touched crystal creature, single object, solid transparent background",
     "level_min": 34,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -3189,7 +3189,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering lightning-touched crystal creature",
+    "prompt": "pixel art, a towering lightning-touched crystal creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -3204,7 +3204,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny physical-touched blight creature",
+    "prompt": "pixel art, a tiny physical-touched blight creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 11,
     "behavior_name": "Swarm"
@@ -3221,7 +3221,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.2
     },
-    "prompt": "a small physical-touched blight creature",
+    "prompt": "pixel art, a small physical-touched blight creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 15,
     "behavior_name": "Skirmisher"
@@ -3238,7 +3238,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.55
     },
-    "prompt": "a lean physical-touched blight creature",
+    "prompt": "pixel art, a lean physical-touched blight creature, single object, solid transparent background",
     "level_min": 15,
     "level_max": 18,
     "behavior_name": "Line"
@@ -3255,7 +3255,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "a armed physical-touched blight creature",
+    "prompt": "pixel art, a armed physical-touched blight creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -3272,7 +3272,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a skilled physical-touched blight creature",
+    "prompt": "pixel art, a skilled physical-touched blight creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 25,
     "behavior_name": "Caster"
@@ -3289,7 +3289,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.6
     },
-    "prompt": "a hulking physical-touched blight creature",
+    "prompt": "pixel art, a hulking physical-touched blight creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 29,
     "behavior_name": "Brute"
@@ -3306,7 +3306,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "a armoured physical-touched blight creature",
+    "prompt": "pixel art, a armoured physical-touched blight creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -3323,7 +3323,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a commanding physical-touched blight creature",
+    "prompt": "pixel art, a commanding physical-touched blight creature, single object, solid transparent background",
     "level_min": 33,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -3340,7 +3340,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.8
     },
-    "prompt": "a towering physical-touched blight creature",
+    "prompt": "pixel art, a towering physical-touched blight creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -3355,7 +3355,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny ice-touched gloom creature",
+    "prompt": "pixel art, a tiny ice-touched gloom creature, single object, solid transparent background",
     "level_min": 8,
     "level_max": 10,
     "behavior_name": "Swarm"
@@ -3372,7 +3372,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.2
     },
-    "prompt": "a small ice-touched gloom creature",
+    "prompt": "pixel art, a small ice-touched gloom creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 12,
     "behavior_name": "Skirmisher"
@@ -3389,7 +3389,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.55
     },
-    "prompt": "a lean ice-touched gloom creature",
+    "prompt": "pixel art, a lean ice-touched gloom creature, single object, solid transparent background",
     "level_min": 12,
     "level_max": 14,
     "behavior_name": "Line"
@@ -3406,7 +3406,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "a armed ice-touched gloom creature",
+    "prompt": "pixel art, a armed ice-touched gloom creature, single object, solid transparent background",
     "level_min": 14,
     "level_max": 16,
     "behavior_name": "Ranged"
@@ -3423,7 +3423,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.7
     },
-    "prompt": "a skilled ice-touched gloom creature",
+    "prompt": "pixel art, a skilled ice-touched gloom creature, single object, solid transparent background",
     "level_min": 16,
     "level_max": 18,
     "behavior_name": "Caster"
@@ -3441,7 +3441,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking ice-touched gloom creature",
+    "prompt": "pixel art, a hulking ice-touched gloom creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 20,
     "behavior_name": "Brute"
@@ -3459,7 +3459,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured ice-touched gloom creature",
+    "prompt": "pixel art, a armoured ice-touched gloom creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 22,
     "behavior_name": "Heavy"
@@ -3477,7 +3477,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding ice-touched gloom creature",
+    "prompt": "pixel art, a commanding ice-touched gloom creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 24,
     "behavior_name": "Champion"
@@ -3495,7 +3495,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering ice-touched gloom creature",
+    "prompt": "pixel art, a towering ice-touched gloom creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 24,
     "behavior_name": "Apex"
@@ -3510,7 +3510,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny fire-touched stoneborn creature",
+    "prompt": "pixel art, a tiny fire-touched stoneborn creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 22,
     "behavior_name": "Swarm"
@@ -3527,7 +3527,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.2
     },
-    "prompt": "a small fire-touched stoneborn creature",
+    "prompt": "pixel art, a small fire-touched stoneborn creature, single object, solid transparent background",
     "level_min": 22,
     "level_max": 24,
     "behavior_name": "Skirmisher"
@@ -3544,7 +3544,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.55
     },
-    "prompt": "a lean fire-touched stoneborn creature",
+    "prompt": "pixel art, a lean fire-touched stoneborn creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 26,
     "behavior_name": "Line"
@@ -3561,7 +3561,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "a armed fire-touched stoneborn creature",
+    "prompt": "pixel art, a armed fire-touched stoneborn creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 28,
     "behavior_name": "Ranged"
@@ -3578,7 +3578,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.7
     },
-    "prompt": "a skilled fire-touched stoneborn creature",
+    "prompt": "pixel art, a skilled fire-touched stoneborn creature, single object, solid transparent background",
     "level_min": 28,
     "level_max": 30,
     "behavior_name": "Caster"
@@ -3596,7 +3596,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking fire-touched stoneborn creature",
+    "prompt": "pixel art, a hulking fire-touched stoneborn creature, single object, solid transparent background",
     "level_min": 30,
     "level_max": 32,
     "behavior_name": "Brute"
@@ -3614,7 +3614,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured fire-touched stoneborn creature",
+    "prompt": "pixel art, a armoured fire-touched stoneborn creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Heavy"
@@ -3632,7 +3632,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding fire-touched stoneborn creature",
+    "prompt": "pixel art, a commanding fire-touched stoneborn creature, single object, solid transparent background",
     "level_min": 34,
     "level_max": 36,
     "behavior_name": "Champion"
@@ -3650,7 +3650,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering fire-touched stoneborn creature",
+    "prompt": "pixel art, a towering fire-touched stoneborn creature, single object, solid transparent background",
     "level_min": 36,
     "level_max": 36,
     "behavior_name": "Apex"
@@ -3665,7 +3665,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny physical-touched void creature",
+    "prompt": "pixel art, a tiny physical-touched void creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Swarm"
@@ -3685,7 +3685,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.15,
       "lightning": 0.15
     },
-    "prompt": "a small physical-touched void creature",
+    "prompt": "pixel art, a small physical-touched void creature, single object, solid transparent background",
     "level_min": 34,
     "level_max": 36,
     "behavior_name": "Skirmisher"
@@ -3705,7 +3705,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.3,
       "lightning": 0.3
     },
-    "prompt": "a lean physical-touched void creature",
+    "prompt": "pixel art, a lean physical-touched void creature, single object, solid transparent background",
     "level_min": 37,
     "level_max": 39,
     "behavior_name": "Line"
@@ -3725,7 +3725,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.3,
       "lightning": 0.3
     },
-    "prompt": "a armed physical-touched void creature",
+    "prompt": "pixel art, a armed physical-touched void creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -3745,7 +3745,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.3,
       "lightning": 0.3
     },
-    "prompt": "a skilled physical-touched void creature",
+    "prompt": "pixel art, a skilled physical-touched void creature, single object, solid transparent background",
     "level_min": 41,
     "level_max": 43,
     "behavior_name": "Caster"
@@ -3765,7 +3765,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.35,
       "lightning": 0.35
     },
-    "prompt": "a hulking physical-touched void creature",
+    "prompt": "pixel art, a hulking physical-touched void creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 45,
     "behavior_name": "Brute"
@@ -3785,7 +3785,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.4,
       "lightning": 0.4
     },
-    "prompt": "a armoured physical-touched void creature",
+    "prompt": "pixel art, a armoured physical-touched void creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"
@@ -3805,7 +3805,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.45,
       "lightning": 0.45
     },
-    "prompt": "a commanding physical-touched void creature",
+    "prompt": "pixel art, a commanding physical-touched void creature, single object, solid transparent background",
     "level_min": 48,
     "level_max": 50,
     "behavior_name": "Champion"
@@ -3825,7 +3825,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.5,
       "lightning": 0.5
     },
-    "prompt": "a towering physical-touched void creature",
+    "prompt": "pixel art, a towering physical-touched void creature, single object, solid transparent background",
     "level_min": 50,
     "level_max": 50,
     "behavior_name": "Apex"
@@ -3840,7 +3840,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny fire-touched demonic creature",
+    "prompt": "pixel art, a tiny fire-touched demonic creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 23,
     "behavior_name": "Swarm"
@@ -3857,7 +3857,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.2
     },
-    "prompt": "a small fire-touched demonic creature",
+    "prompt": "pixel art, a small fire-touched demonic creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 27,
     "behavior_name": "Skirmisher"
@@ -3874,7 +3874,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.55
     },
-    "prompt": "a lean fire-touched demonic creature",
+    "prompt": "pixel art, a lean fire-touched demonic creature, single object, solid transparent background",
     "level_min": 28,
     "level_max": 31,
     "behavior_name": "Line"
@@ -3891,7 +3891,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "a armed fire-touched demonic creature",
+    "prompt": "pixel art, a armed fire-touched demonic creature, single object, solid transparent background",
     "level_min": 31,
     "level_max": 34,
     "behavior_name": "Ranged"
@@ -3908,7 +3908,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.7
     },
-    "prompt": "a skilled fire-touched demonic creature",
+    "prompt": "pixel art, a skilled fire-touched demonic creature, single object, solid transparent background",
     "level_min": 35,
     "level_max": 38,
     "behavior_name": "Caster"
@@ -3926,7 +3926,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking fire-touched demonic creature",
+    "prompt": "pixel art, a hulking fire-touched demonic creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 42,
     "behavior_name": "Brute"
@@ -3944,7 +3944,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured fire-touched demonic creature",
+    "prompt": "pixel art, a armoured fire-touched demonic creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 46,
     "behavior_name": "Heavy"
@@ -3962,7 +3962,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding fire-touched demonic creature",
+    "prompt": "pixel art, a commanding fire-touched demonic creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 49,
     "behavior_name": "Champion"
@@ -3980,7 +3980,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering fire-touched demonic creature",
+    "prompt": "pixel art, a towering fire-touched demonic creature, single object, solid transparent background",
     "level_min": 50,
     "level_max": 50,
     "behavior_name": "Apex"
@@ -3995,7 +3995,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny lightning-touched chaos creature",
+    "prompt": "pixel art, a tiny lightning-touched chaos creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Swarm"
@@ -4012,7 +4012,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.2
     },
-    "prompt": "a small lightning-touched chaos creature",
+    "prompt": "pixel art, a small lightning-touched chaos creature, single object, solid transparent background",
     "level_min": 34,
     "level_max": 36,
     "behavior_name": "Skirmisher"
@@ -4029,7 +4029,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.55
     },
-    "prompt": "a lean lightning-touched chaos creature",
+    "prompt": "pixel art, a lean lightning-touched chaos creature, single object, solid transparent background",
     "level_min": 37,
     "level_max": 39,
     "behavior_name": "Line"
@@ -4046,7 +4046,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.4
     },
-    "prompt": "a armed lightning-touched chaos creature",
+    "prompt": "pixel art, a armed lightning-touched chaos creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -4063,7 +4063,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.7
     },
-    "prompt": "a skilled lightning-touched chaos creature",
+    "prompt": "pixel art, a skilled lightning-touched chaos creature, single object, solid transparent background",
     "level_min": 41,
     "level_max": 43,
     "behavior_name": "Caster"
@@ -4081,7 +4081,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking lightning-touched chaos creature",
+    "prompt": "pixel art, a hulking lightning-touched chaos creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 45,
     "behavior_name": "Brute"
@@ -4099,7 +4099,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured lightning-touched chaos creature",
+    "prompt": "pixel art, a armoured lightning-touched chaos creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"
@@ -4117,7 +4117,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding lightning-touched chaos creature",
+    "prompt": "pixel art, a commanding lightning-touched chaos creature, single object, solid transparent background",
     "level_min": 48,
     "level_max": 50,
     "behavior_name": "Champion"
@@ -4135,7 +4135,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering lightning-touched chaos creature",
+    "prompt": "pixel art, a towering lightning-touched chaos creature, single object, solid transparent background",
     "level_min": 50,
     "level_max": 50,
     "behavior_name": "Apex"
@@ -4150,7 +4150,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny ice-touched fallen creature",
+    "prompt": "pixel art, a tiny ice-touched fallen creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Swarm"
@@ -4167,7 +4167,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.2
     },
-    "prompt": "a small ice-touched fallen creature",
+    "prompt": "pixel art, a small ice-touched fallen creature, single object, solid transparent background",
     "level_min": 34,
     "level_max": 36,
     "behavior_name": "Skirmisher"
@@ -4184,7 +4184,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.55
     },
-    "prompt": "a lean ice-touched fallen creature",
+    "prompt": "pixel art, a lean ice-touched fallen creature, single object, solid transparent background",
     "level_min": 37,
     "level_max": 39,
     "behavior_name": "Line"
@@ -4201,7 +4201,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "a armed ice-touched fallen creature",
+    "prompt": "pixel art, a armed ice-touched fallen creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -4218,7 +4218,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.7
     },
-    "prompt": "a skilled ice-touched fallen creature",
+    "prompt": "pixel art, a skilled ice-touched fallen creature, single object, solid transparent background",
     "level_min": 41,
     "level_max": 43,
     "behavior_name": "Caster"
@@ -4236,7 +4236,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking ice-touched fallen creature",
+    "prompt": "pixel art, a hulking ice-touched fallen creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 45,
     "behavior_name": "Brute"
@@ -4254,7 +4254,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured ice-touched fallen creature",
+    "prompt": "pixel art, a armoured ice-touched fallen creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"
@@ -4272,7 +4272,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding ice-touched fallen creature",
+    "prompt": "pixel art, a commanding ice-touched fallen creature, single object, solid transparent background",
     "level_min": 48,
     "level_max": 50,
     "behavior_name": "Champion"
@@ -4290,7 +4290,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering ice-touched fallen creature",
+    "prompt": "pixel art, a towering ice-touched fallen creature, single object, solid transparent background",
     "level_min": 50,
     "level_max": 50,
     "behavior_name": "Apex"
@@ -4305,7 +4305,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny physical-touched nightmare creature",
+    "prompt": "pixel art, a tiny physical-touched nightmare creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Swarm"
@@ -4322,7 +4322,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.2
     },
-    "prompt": "a small physical-touched nightmare creature",
+    "prompt": "pixel art, a small physical-touched nightmare creature, single object, solid transparent background",
     "level_min": 34,
     "level_max": 36,
     "behavior_name": "Skirmisher"
@@ -4339,7 +4339,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.55
     },
-    "prompt": "a lean physical-touched nightmare creature",
+    "prompt": "pixel art, a lean physical-touched nightmare creature, single object, solid transparent background",
     "level_min": 37,
     "level_max": 39,
     "behavior_name": "Line"
@@ -4356,7 +4356,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "a armed physical-touched nightmare creature",
+    "prompt": "pixel art, a armed physical-touched nightmare creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -4373,7 +4373,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a skilled physical-touched nightmare creature",
+    "prompt": "pixel art, a skilled physical-touched nightmare creature, single object, solid transparent background",
     "level_min": 41,
     "level_max": 43,
     "behavior_name": "Caster"
@@ -4390,7 +4390,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.6
     },
-    "prompt": "a hulking physical-touched nightmare creature",
+    "prompt": "pixel art, a hulking physical-touched nightmare creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 45,
     "behavior_name": "Brute"
@@ -4407,7 +4407,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "a armoured physical-touched nightmare creature",
+    "prompt": "pixel art, a armoured physical-touched nightmare creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"
@@ -4424,7 +4424,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a commanding physical-touched nightmare creature",
+    "prompt": "pixel art, a commanding physical-touched nightmare creature, single object, solid transparent background",
     "level_min": 48,
     "level_max": 50,
     "behavior_name": "Champion"
@@ -4441,7 +4441,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.8
     },
-    "prompt": "a towering physical-touched nightmare creature",
+    "prompt": "pixel art, a towering physical-touched nightmare creature, single object, solid transparent background",
     "level_min": 50,
     "level_max": 50,
     "behavior_name": "Apex"
@@ -4456,7 +4456,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny physical-touched titan creature",
+    "prompt": "pixel art, a tiny physical-touched titan creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Swarm"
@@ -4473,7 +4473,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.2
     },
-    "prompt": "a small physical-touched titan creature",
+    "prompt": "pixel art, a small physical-touched titan creature, single object, solid transparent background",
     "level_min": 34,
     "level_max": 36,
     "behavior_name": "Skirmisher"
@@ -4490,7 +4490,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.55
     },
-    "prompt": "a lean physical-touched titan creature",
+    "prompt": "pixel art, a lean physical-touched titan creature, single object, solid transparent background",
     "level_min": 37,
     "level_max": 39,
     "behavior_name": "Line"
@@ -4507,7 +4507,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "a armed physical-touched titan creature",
+    "prompt": "pixel art, a armed physical-touched titan creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -4524,7 +4524,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a skilled physical-touched titan creature",
+    "prompt": "pixel art, a skilled physical-touched titan creature, single object, solid transparent background",
     "level_min": 41,
     "level_max": 43,
     "behavior_name": "Caster"
@@ -4541,7 +4541,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.6
     },
-    "prompt": "a hulking physical-touched titan creature",
+    "prompt": "pixel art, a hulking physical-touched titan creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 45,
     "behavior_name": "Brute"
@@ -4558,7 +4558,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "a armoured physical-touched titan creature",
+    "prompt": "pixel art, a armoured physical-touched titan creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"
@@ -4575,7 +4575,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.7
     },
-    "prompt": "a commanding physical-touched titan creature",
+    "prompt": "pixel art, a commanding physical-touched titan creature, single object, solid transparent background",
     "level_min": 48,
     "level_max": 50,
     "behavior_name": "Champion"
@@ -4592,7 +4592,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.8
     },
-    "prompt": "a towering physical-touched titan creature",
+    "prompt": "pixel art, a towering physical-touched titan creature, single object, solid transparent background",
     "level_min": 50,
     "level_max": 50,
     "behavior_name": "Apex"
@@ -4607,7 +4607,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny fire-touched plague creature",
+    "prompt": "pixel art, a tiny fire-touched plague creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 23,
     "behavior_name": "Swarm"
@@ -4624,7 +4624,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.2
     },
-    "prompt": "a small fire-touched plague creature",
+    "prompt": "pixel art, a small fire-touched plague creature, single object, solid transparent background",
     "level_min": 24,
     "level_max": 27,
     "behavior_name": "Skirmisher"
@@ -4641,7 +4641,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.55
     },
-    "prompt": "a lean fire-touched plague creature",
+    "prompt": "pixel art, a lean fire-touched plague creature, single object, solid transparent background",
     "level_min": 28,
     "level_max": 31,
     "behavior_name": "Line"
@@ -4658,7 +4658,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "a armed fire-touched plague creature",
+    "prompt": "pixel art, a armed fire-touched plague creature, single object, solid transparent background",
     "level_min": 31,
     "level_max": 34,
     "behavior_name": "Ranged"
@@ -4675,7 +4675,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.7
     },
-    "prompt": "a skilled fire-touched plague creature",
+    "prompt": "pixel art, a skilled fire-touched plague creature, single object, solid transparent background",
     "level_min": 35,
     "level_max": 38,
     "behavior_name": "Caster"
@@ -4693,7 +4693,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.6,
       "physical": 0.2
     },
-    "prompt": "a hulking fire-touched plague creature",
+    "prompt": "pixel art, a hulking fire-touched plague creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 42,
     "behavior_name": "Brute"
@@ -4711,7 +4711,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "a armoured fire-touched plague creature",
+    "prompt": "pixel art, a armoured fire-touched plague creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 46,
     "behavior_name": "Heavy"
@@ -4729,7 +4729,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.7,
       "physical": 0.3
     },
-    "prompt": "a commanding fire-touched plague creature",
+    "prompt": "pixel art, a commanding fire-touched plague creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 49,
     "behavior_name": "Champion"
@@ -4747,7 +4747,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.8,
       "physical": 0.3
     },
-    "prompt": "a towering fire-touched plague creature",
+    "prompt": "pixel art, a towering fire-touched plague creature, single object, solid transparent background",
     "level_min": 50,
     "level_max": 50,
     "behavior_name": "Apex"
@@ -4762,7 +4762,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 8,
     "defense": 0,
     "resistances": {},
-    "prompt": "a tiny physical-touched eldritch creature",
+    "prompt": "pixel art, a tiny physical-touched eldritch creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Swarm"
@@ -4782,7 +4782,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.15,
       "lightning": 0.15
     },
-    "prompt": "a small physical-touched eldritch creature",
+    "prompt": "pixel art, a small physical-touched eldritch creature, single object, solid transparent background",
     "level_min": 34,
     "level_max": 36,
     "behavior_name": "Skirmisher"
@@ -4802,7 +4802,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.3,
       "lightning": 0.3
     },
-    "prompt": "a lean physical-touched eldritch creature",
+    "prompt": "pixel art, a lean physical-touched eldritch creature, single object, solid transparent background",
     "level_min": 37,
     "level_max": 39,
     "behavior_name": "Line"
@@ -4822,7 +4822,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.3,
       "lightning": 0.3
     },
-    "prompt": "a armed physical-touched eldritch creature",
+    "prompt": "pixel art, a armed physical-touched eldritch creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -4842,7 +4842,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.3,
       "lightning": 0.3
     },
-    "prompt": "a skilled physical-touched eldritch creature",
+    "prompt": "pixel art, a skilled physical-touched eldritch creature, single object, solid transparent background",
     "level_min": 41,
     "level_max": 43,
     "behavior_name": "Caster"
@@ -4862,7 +4862,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.35,
       "lightning": 0.35
     },
-    "prompt": "a hulking physical-touched eldritch creature",
+    "prompt": "pixel art, a hulking physical-touched eldritch creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 45,
     "behavior_name": "Brute"
@@ -4882,7 +4882,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.4,
       "lightning": 0.4
     },
-    "prompt": "a armoured physical-touched eldritch creature",
+    "prompt": "pixel art, a armoured physical-touched eldritch creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"
@@ -4902,7 +4902,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.45,
       "lightning": 0.45
     },
-    "prompt": "a commanding physical-touched eldritch creature",
+    "prompt": "pixel art, a commanding physical-touched eldritch creature, single object, solid transparent background",
     "level_min": 48,
     "level_max": 50,
     "behavior_name": "Champion"
@@ -4922,7 +4922,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.5,
       "lightning": 0.5
     },
-    "prompt": "a towering physical-touched eldritch creature",
+    "prompt": "pixel art, a towering physical-touched eldritch creature, single object, solid transparent background",
     "level_min": 50,
     "level_max": 50,
     "behavior_name": "Apex"

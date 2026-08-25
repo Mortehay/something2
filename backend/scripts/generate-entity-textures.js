@@ -193,18 +193,12 @@ async function generateViaCore(pool, provider, entity, { pollMs = 5000, maxWaitM
   const beforeId = before.items && before.items[0] ? Number(before.items[0].id) : 0;
 
   const body = new URLSearchParams({
-    // NAMING AN EXCLUSION ADDS IT. /api/generate_core takes no negative
-    // prompt, so the obvious move is to write the exclusions into the
-    // sentence -- and that was measured making things worse: "no pot, no
-    // planter" produced potted plants, "no person" produced a person, and the
-    // longer prompt also started returning several objects instead of one.
-    // Diffusion attends to the nouns, not the negation in front of them.
-    //
-    // So this stays short and positive. What keeps it isolated is the
-    // endpoint, not the adjectives: /api/generate_core answers with one
-    // centred subject on a flat backdrop where txt2img on the same box
-    // returns tilesets and framed cards.
-    prompt: `pixel art, ${entity.prompt}, single object, solid transparent background`,
+    // The prompt is used VERBATIM. It carries its own styling now -- see
+    // seeds/data/spritePrompt.js -- because a catalog prompt should say what
+    // it will actually draw, and because wrapping it here meant editing one in
+    // the admin UI silently dropped the part that made it work. Wrapping it
+    // again would also stack the styling twice.
+    prompt: entity.prompt,
     llm_name: provider.model || '',
   });
   const submit = await fetch(`${origin}/api/generate_core`, {

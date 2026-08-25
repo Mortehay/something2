@@ -1,3 +1,5 @@
+const { styleEntityPrompt } = require('./spritePrompt.js');
+
 // The hostile creature catalog, as checked-in seed data.
 //
 // WHY THIS FILE EXISTS. Three of these four creatures are inserted by
@@ -61,7 +63,7 @@ const HOSTILE_CREATURES = [
     max_hp: 30,
     defense: 3,
     resistances: {},
-    prompt: 'a grey meadow wolf',
+    prompt: styleEntityPrompt('a grey meadow wolf'),
     // SOMET-155: zeroed so this creature INHERITS its rung's gold range.
     // The old value was derived from its pre-SOMET-250 hp (the
     // 1714440031000_gold_economy.js formula on hp 12/18/14/8); the P4 remap
@@ -94,7 +96,7 @@ const HOSTILE_CREATURES = [
     max_hp: 30,
     defense: 3,
     resistances: { fire: 0.55 },
-    prompt: 'a translucent orange slime blob, baked by the desert sun',
+    prompt: styleEntityPrompt('a translucent orange slime blob, baked by the desert sun'),
     // SOMET-155: zeroed so this creature INHERITS its rung's gold range.
     // The old value was derived from its pre-SOMET-250 hp (the
     // 1714440031000_gold_economy.js formula on hp 12/18/14/8); the P4 remap
@@ -128,7 +130,7 @@ const HOSTILE_CREATURES = [
     max_hp: 30,
     defense: 3,
     resistances: { ice: 0.55 },
-    prompt: 'an undead skeleton warrior, risen from the catacombs',
+    prompt: styleEntityPrompt('an undead skeleton warrior, risen from the catacombs'),
     // SOMET-155: zeroed so this creature INHERITS its rung's gold range.
     // The old value was derived from its pre-SOMET-250 hp (the
     // 1714440031000_gold_economy.js formula on hp 12/18/14/8); the P4 remap
@@ -161,7 +163,7 @@ const HOSTILE_CREATURES = [
     max_hp: 30,
     defense: 3,
     resistances: { lightning: 0.55 },
-    prompt: 'a small bat roosting in the fungal deep, crackling with static',
+    prompt: styleEntityPrompt('a small bat roosting in the fungal deep, crackling with static'),
     // SOMET-155: zeroed so this creature INHERITS its rung's gold range.
     // The old value was derived from its pre-SOMET-250 hp (the
     // 1714440031000_gold_economy.js formula on hp 12/18/14/8); the P4 remap
