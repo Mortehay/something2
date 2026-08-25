@@ -424,3 +424,82 @@ gravel and dust". The styling suffix is applied by
 `backend/seeds/data/tileTypes.js`, so a tile's own prompt stays a plain subject.
 `sprite-gen`'s local `build_tile_prompt` uses the opposite vocabulary because
 sd-turbo responds to it differently; the two are not interchangeable.
+
+---
+
+## Entity art (props and creatures)
+
+Same four steps as tiles with one swap -- tiles are ground and get made
+seamless, entities are silhouettes and get their backdrop cut out:
+
+```
+make entities-generate PROVIDER="desktop gpu (objects)" CORE=1 OBJECTS=1
+make entities-export
+make entities-cutout
+make entities-seed
+```
+
+### CORE=1 is not optional on this provider
+
+`/sdapi/v1/txt2img` cannot draw an isolated object. Asked for one tree it
+returns a tileset of trees, a framed gallery card, or the tree on a checkered
+backdrop. Four prompt revisions and four cutout strategies were measured
+against that and none of them worked, because a textured backdrop has no key
+colour to remove.
+
+`/api/generate_core` on the **same box with the same model** returns one
+object, centred, on a **flat** backdrop, in about ten seconds. Flat is the
+whole game: one colour can be keyed out. That endpoint is step one of the
+service's own two-step pipeline, and the error that looks like a dead end --
+`no concept_image; prompt-to-concept is not wired yet` from `POST /api/jobs` --
+only means step two will not call step one for you.
+
+### Keep the prompt short
+
+Writing exclusions into the prompt makes it worse, measured: "no pot, no
+planter" produced potted plants, "no person" produced a person, and the longer
+prompt started returning several objects instead of one. Diffusion attends to
+the nouns, not the negation in front of them. What keeps the subject isolated
+is the endpoint, not the adjectives.
+
+### Transparency is enforced, not hoped for
+
+`entities-cutout` escalates its key tolerance (40 up to 160) until the outer
+ring of the image is genuinely transparent while the subject survives, and
+**exits non-zero** naming any file that still carries a background. A fixed
+tolerance cannot serve every image: a flat backdrop keys at 40, a dithered one
+needs 100+, and using the high value everywhere eats subjects that share a tone
+with their backdrop.
+
+It also quantizes to a small palette (`--colors`, default 32) and hardens alpha
+to a threshold. That is what makes the output actually pixel art rather than a
+smooth render in a pixel-art style -- and the sprite service agrees: it
+measured an unquantized sprite at 24,268 colours and marked it
+`usable: false` as a style reference, then accepted the quantized one at 24.
+
+### Reference images as style templates
+
+Reachable, and worth knowing how the pieces fit:
+
+```
+POST /api/references            multipart: kind, file, label -> measured, usable true/false
+POST /api/style-profiles/derive {name, reference_ids}        -> palette + cell + outline rules
+POST /api/jobs                  {concept_image, style_profile, directions, frames, cell, colors}
+```
+
+Only `usable` references contribute, which is why the quantization above
+matters twice over: it is what makes our own sprites acceptable as references.
+Derive from **your own** reference ids -- the box carries other sessions'
+uploads, and deriving from everything produced a palette of their greys.
+
+`/api/jobs` needs a `concept_image` (a filename under the service's images/,
+which `generate_core` produces) and takes about 393 s per cell against
+`generate_core`'s 10 s -- style-constrained sheets at forty times the cost.
+
+**It will not take a prop.** A boulder concept was rejected with `concept does
+not look like an isolated character: not taller than wide (aspect 1.09)
+(coverage 2%)`. The sheet builder validates that its input is a character
+silhouette -- taller than wide, filling a reasonable share of the frame -- and
+a rock is neither. So the reference/style-profile route is for CREATURES, and
+props are served by `generate_core` plus `entities-cutout`, which is both the
+cheaper path and the only one that accepts them.

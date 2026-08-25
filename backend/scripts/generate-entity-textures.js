@@ -26,7 +26,17 @@
 //     but `source` must already be a file in that machine's IMAGES_DIR and by
 //     its own note it evicts the generation pipeline while loaded.
 //
-// USE --local INSTEAD (LOCAL=1). sprite-gen asks for an isolated subject on a
+// REFERENCE IMAGES AND STYLE PROFILES ARE REACHABLE, with one limit worth
+// knowing before planning work around them. Uploading our own quantized
+// sprites to POST /api/references gets `usable: true` (the same sprites
+// unquantized measured 24,268 colours and were rejected), and
+// /api/style-profiles/derive turns them into a palette plus cell/outline
+// rules. But POST /api/jobs, the only endpoint that consumes a profile,
+// validates its concept as a CHARACTER: a boulder was refused with "not
+// taller than wide (aspect 1.09) (coverage 2%)". So that route is for
+// creatures, not props -- and at ~393s per cell against generate_core's 10s.
+//
+// USE --core (CORE=1) FOR PROPS, and --local (LOCAL=1) sprite-gen asks for an isolated subject on a
 // flat field and keys the background out itself, so its output is genuinely
 // transparent. It is sd-turbo on CPU: slow, and lower fidelity than the remote
 // pixel art. That is the trade until one of the blockers above moves.

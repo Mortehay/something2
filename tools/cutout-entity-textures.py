@@ -236,6 +236,27 @@ def cutout_until_clean(img, feather=1):
     return best
 
 
+def pixelize(img, colors=32, alpha_cut=128):
+    """Reduce to a small palette and a hard alpha edge -- i.e. actual pixel art.
+
+    THE SPRITES WERE NOT PIXEL ART, which the sprite service said out loud: it
+    measured one at 24,268 colours and marked it `usable: false` as a style
+    reference. Its own pipeline quantizes to 24. A diffusion render is a
+    smooth image in a pixel-art STYLE, and the feathered alpha and despill
+    this tool adds contribute thousands more shades around the edge.
+
+    Two things fix that. Quantizing the colour channels gives the flat blocked
+    palette the style depends on. Hardening alpha to a threshold removes the
+    semi-transparent rim -- pixel art has no partial coverage, and a soft rim
+    over grass reads as a dirty halo rather than an outline.
+    """
+    rgb = img.convert('RGB').quantize(colors=colors, method=Image.MEDIANCUT).convert('RGB')
+    alpha = img.getchannel('A').point(lambda v: 255 if v >= alpha_cut else 0)
+    out = rgb.convert('RGBA')
+    out.putalpha(alpha)
+    return out
+
+
 def coverage(img):
     """Fraction of the image that survived, as a sanity number."""
     alpha = img.getchannel('A')
@@ -247,6 +268,8 @@ def main():
     ap.add_argument('--dir', default=DEFAULT_DIR)
     ap.add_argument('--tol', type=int, default=60)
     ap.add_argument('--feather', type=int, default=1)
+    ap.add_argument('--colors', type=int, default=32,
+                    help='quantize to this many colours (0 disables) -- pixel art needs few')
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--force', action='store_true')
     args = ap.parse_args()
@@ -271,6 +294,8 @@ def main():
                 print(f'  {name[:-4]}: opaque {img.mode}')
             continue
         out, border, cov, tol = cutout_until_clean(img, args.feather)
+        if args.colors:
+            out = pixelize(out, args.colors)
         out.save(path)
         # Two failure shapes worth naming rather than silently shipping: almost
         # nothing removed (the backdrop was not flat, so the subject is still
