@@ -4,7 +4,7 @@ import { compareDrawables, wallRevealed, drawWall } from "./wallRenderer.js";
 import { drawLandmarks } from "./landmarkRenderer.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual } from "./spriteAtlas.js";
-import { TileDiamondCache } from "./tileTexture.js";
+import { TileDiamondCache, TILE_DIAMOND_PAD } from "./tileTexture.js";
 import { createTextLabelCache, drawCachedLabel } from "./textLabelCache.js";
 // domCanvasFactory lives in minimapTerrainLayer because that is where the
 // first offscreen-canvas cache needed it; it is a plain DOM helper with
@@ -296,7 +296,12 @@ export class RenderSystem {
       // Pass A: flat floor tile (unchanged).
       if (visual) {
         const cv = this._tileCache.get(visual.cacheKey, visual.img, visual.crop);
-        this.ctx.drawImage(cv, s.x - halfW, s.y - halfH);
+        // Rounded, and shifted back by the diamond's pad. Fractional blits
+        // resample the whole tile and put a soft edge on all four sides,
+        // which is the same hairline the pad exists to remove -- so both are
+        // needed, not either.
+        this.ctx.drawImage(cv, Math.round(s.x - halfW) - TILE_DIAMOND_PAD,
+          Math.round(s.y - halfH) - TILE_DIAMOND_PAD);
       } else {
         this.ctx.fillStyle = def ? def.color : "#123";
         this.ctx.beginPath();

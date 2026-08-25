@@ -3,6 +3,8 @@
 // comparator and the see-through reveal predicate. Iso diamonds are 2:1;
 // worldToScreen returns the tile diamond CENTRE, so faces are built around it.
 
+import { TILE_DIAMOND_PAD } from './tileTexture.js';
+
 // Top diamond lifted by H, and the two camera-facing (south-west / south-east)
 // vertical faces extruded straight down by H.
 export function wallFaces(s, halfW, halfH, H) {
@@ -88,7 +90,11 @@ export function drawWall(ctx, { s, def, visual, H, alpha, halfW, halfH, tileCach
     }
     // top diamond via the existing tile cache, lifted by H
     const cv = tileCache.get(visual.cacheKey, visual.img, visual.crop);
-    ctx.drawImage(cv, s.x - halfW, (s.y - H) - halfH);
+    // Same pad shift as the flat-floor blit in RenderSystem: the cached
+    // diamond is larger than its tile on every side, so drawing it at the
+    // unpadded origin would offset every wall top by TILE_DIAMOND_PAD.
+    ctx.drawImage(cv, Math.round(s.x - halfW) - TILE_DIAMOND_PAD,
+      Math.round((s.y - H) - halfH) - TILE_DIAMOND_PAD);
   } else {
     if (H > 0) {
       fillQuad(ctx, f.left, shadeColor(color, -0.12));

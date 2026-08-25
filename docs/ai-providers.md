@@ -380,7 +380,25 @@ edges are pixel-identical rather than merely close.
 ```
 make tiles-seamless CHECK=1              # measure only; 0 is a perfect seam
 make tiles-seamless PREVIEW=grass        # 2x2 tiling written to /tmp
+make tiles-seamless REPEAT=3             # shrink features further (default 2)
 ```
+
+**Feature scale is fixed in the same pass.** A tile diamond is 128x64 and the
+texture is 512x512, so the renderer squashes it 4x across and 8x down. A
+generator draws a handful of large elements per image, which lands as three or
+four boulders filling one tile — scenery, not ground. `REPEAT=N` tiles an
+N-times-downscaled copy, dividing apparent feature size by N and multiplying
+the count by N². It is free because the texture is already seamless, so the
+internal repeat seams are continuous too. N=2 is the default; N=3 starts to
+read as a pattern.
+
+**Running it twice on one export is refused**, and that guard matters:
+`tiles-seed` writes the PROCESSED textures back to the object store, so the
+next `tiles-export` pulls those down and a second pass heals, welds and
+shrinks an already-processed image — progressively blurrier and more
+repetitive, with the file shrinking each time. The manifest carries a
+`seamless` marker that export clears and this pass sets. To redo the
+processing, regenerate and export again; the pass needs raw pixels.
 
 Measured over the 50-tile catalog: mean seam score **21.1 → 3.7**. Two things
 that sound better and are not — a second offset-heal pass (measured *worse*,

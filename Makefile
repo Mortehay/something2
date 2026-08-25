@@ -269,7 +269,8 @@ tiles-export:
 # seam score without writing (0 is perfect); PREVIEW=grass writes a 2x2 tiling
 # to /tmp so a seam is visible if one survives.
 tiles-seamless:
-	python3 tools/make-tiles-seamless.py $(if $(CHECK),--check) $(if $(PREVIEW),--preview "$(PREVIEW)")
+	python3 tools/make-tiles-seamless.py $(if $(CHECK),--check) $(if $(PREVIEW),--preview "$(PREVIEW)") \
+		$(if $(REPEAT),--repeat $(REPEAT),--repeat 2) $(if $(FORCE),--force)
 
 tiles-seed:
 	$(COMPOSE) exec -T backend node scripts/seed-tile-textures.js $(if $(FORCE),--force)

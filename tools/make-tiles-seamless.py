@@ -34,6 +34,7 @@ once after `make tiles-export`.
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -43,6 +44,7 @@ except ImportError:                                          # pragma: no cover
     sys.exit("Pillow is required: pip install --user Pillow")
 
 DEFAULT_DIR = os.path.join(os.path.dirname(__file__), '..', 'backend', 'seeds', 'textures', 'tiles')
+MANIFEST = os.path.join(os.path.dirname(__file__), '..', 'backend', 'seeds', 'textures', 'tiles.json')
 
 
 def wrap_offset(img, dx, dy):
@@ -124,6 +126,33 @@ def make_seamless(img, band=48, blur=24, margin=None, weld=12):
     return weld_edges(healed, weld)
 
 
+def shrink_and_repeat(img, times):
+    """Halve (or third) the feature size by tiling a downscaled copy.
+
+    THE SCALE PROBLEM. A tile diamond is ISO_TILE_W x ISO_TILE_H = 128x64, and
+    the source texture is 512x512, so the renderer squashes it 4x across and 8x
+    down. A generator draws a handful of large elements per image, which lands
+    as three or four boulders filling one tile -- ground that reads as scenery.
+
+    Repeating a downscaled copy N times across and down divides the apparent
+    feature size by N and multiplies the count by N squared, which is what
+    "ground" looks like. Doing it AFTER the seamless pass is what makes it
+    free: a texture that already wraps tiles against itself, so the internal
+    repeat seams are continuous too.
+
+    The cost is honest and worth stating: the same elements now recur N^2
+    times inside one tile, so an obviously unique feature becomes an obviously
+    repeated one. N=2 is the safe default; N=3 starts to read as a pattern.
+    """
+    w, h = img.size
+    small = img.resize((w // times, h // times), Image.LANCZOS)
+    out = Image.new('RGB', (w, h))
+    for y in range(times):
+        for x in range(times):
+            out.paste(small, (x * (w // times), y * (h // times)))
+    return out
+
+
 def seam_score(img):
     """Mean per-channel difference between the edges that will meet when tiled.
 
@@ -156,12 +185,37 @@ def main():
     ap.add_argument('--band', type=int, default=48)
     ap.add_argument('--blur', type=int, default=24)
     ap.add_argument('--weld', type=int, default=12)
+    ap.add_argument('--force', action='store_true',
+                    help='process even if the manifest says it was already done')
+    ap.add_argument('--repeat', type=int, default=1,
+                    help='shrink features by tiling an NxN downscaled copy (after seamless)')
     ap.add_argument('--preview', help='write a 2x2 tiled preview of this tile name')
     args = ap.parse_args()
 
     names = sorted(f for f in os.listdir(args.dir) if f.endswith('.png'))
     if not names:
         sys.exit(f'no PNGs in {args.dir} -- run `make tiles-export` first')
+
+    # Refuse to process the same export twice.
+    #
+    # This is a real trap, not a theoretical one: `make tiles-seed` writes the
+    # PROCESSED textures back into the object store, so the next
+    # `make tiles-export` pulls those down and a second run heals, welds and
+    # shrinks an already-healed, welded, shrunk image. The visible result is a
+    # progressively blurrier, more repetitive tile and a file that keeps
+    # getting smaller.
+    #
+    # The manifest is the interlock. Export rewrites it from the database with
+    # no marker, so a fresh export always clears this; the marker below is
+    # written only after a successful pass. To redo the processing, regenerate
+    # and export again -- that is the honest reset, because the raw pixels are
+    # what the pass needs.
+    manifest = json.load(open(MANIFEST)) if os.path.exists(MANIFEST) else []
+    already = [m['name'] for m in manifest if m.get('seamless')]
+    if already and not args.check and not args.force:
+        sys.exit(f'{len(already)} of these were already processed (e.g. {already[0]}).\n'
+                 'Re-running compounds the blur. Regenerate and re-export first, '
+                 'or pass FORCE=1 if you know the export is raw.')
 
     worst, total_before, total_after = [], 0.0, 0.0
     for name in names:
@@ -173,6 +227,11 @@ def main():
             worst.append((before, name))
             continue
         out = make_seamless(img, args.band, args.blur, weld=args.weld)
+        if args.repeat > 1:
+            # Weld again afterwards: the downscale inside shrink_and_repeat
+            # resamples the borders that weld_edges had just made identical,
+            # which shows up as the seam score creeping back up (3.7 -> 5.2).
+            out = weld_edges(shrink_and_repeat(out, args.repeat), args.weld)
         after = seam_score(out)
         total_after += after
         out.save(path)
@@ -186,6 +245,14 @@ def main():
     else:
         print(f'{n} tiles, mean seam score {total_before / n:.1f} -> {total_after / n:.1f}')
     print('worst remaining: ' + ', '.join(f'{nm[:-4]} {sc:.1f}' for sc, nm in worst[:5]))
+
+    if not args.check and manifest:
+        for entry in manifest:
+            entry['seamless'] = True
+            entry['repeat'] = args.repeat
+        with open(MANIFEST, 'w') as fh:
+            json.dump(manifest, fh, indent=2)
+            fh.write('\n')
 
     if args.preview:
         p = os.path.join(args.dir, f'{args.preview}.png')
