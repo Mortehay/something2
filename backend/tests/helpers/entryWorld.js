@@ -1,3 +1,6 @@
+const fs = require('node:fs');
+const path = require('node:path');
+
 const { setEntryWorld } = require('../../src/services/entryWorld.js');
 const { withAdvisoryLock } = require('./advisoryLock.js');
 
@@ -67,4 +70,118 @@ async function withEntryPreserved(pool, fn) {
   });
 }
 
-module.exports = { withEntryPreserved, ENTRY_LOCK_KEY };
+// ---- THE READER SIDE OF THE SAME FLAG (SOMET-505) -------------------------
+//
+// withEntryPreserved above serializes the WRITERS: the files that borrow
+// is_entry onto a world of their own and hand it back. This is for the other
+// kind of file -- the live-join suites that need somewhere to put a brand new
+// character, and that each found it with
+//
+//     SELECT id FROM worlds WHERE is_entry = true LIMIT 1
+//
+// six times over, once per file. That query does not name a world. It names
+// whoever holds the flag at that instant, and a peer may then move the flag off
+// that world AND delete it, so the id is wrong by the time the join frame goes
+// out. Two symptoms, both measured on one scratch database during a full
+// `npm test` by logging what class_pools_db.test.js snapshotted and re-reading
+// the row afterwards:
+//
+//   * borrowed onto a THROWAWAY world, which its owner then DELETES. Caught
+//     red-handed in two of four traced runs, e.g.
+//         SNAPSHOT 20:23:06.992  zz Chest Integration World [18b7d739...]
+//         AFTER    20:23:07.564  exists=0
+//     chests_integration_db.test.js declares `is_entry: true` on its fixture
+//     spec, so applyMapSpec's setEntryWorld (scripts/seed-map.js) moves the
+//     flag for the ~200ms its guarded section lasts, and its cleanup then runs
+//     DELETE FROM worlds WHERE name = 'zz Chest Integration World'. loadWorld
+//     returns null and the authority answers `unknown world`. The same shape
+//     was observed from zzLinkA, zzTestAlpha, zzTestMoveVillage,
+//     zzTestMultiVillage, zz Vault Chest World and Portal Test Surface, with
+//     windows between 0.02s and 1.44s.
+//
+//   * borrowed onto a REAL world, which survives. seed_map_db.test.js's "every
+//     shipped spec applies cleanly" applies every checked-in spec in readdir
+//     order, so p5-descent lands before vale-region and `The Catacombs: Entry`
+//     holds the flag until vale-region takes it back -- measured at 46 and 47
+//     SECONDS of a ~300s run. Nothing is deleted, so loadWorld succeeds and it
+//     is joinPolicy that refuses: `not-reachable`, on the wire as `you cannot
+//     travel there`.
+//
+// THE ADVISORY LOCK CANNOT FIX THIS ONE, and that is measured rather than
+// argued. withAdvisoryLock gives up after LOCK_WAIT_MS (6s) and runs the body
+// unguarded, loudly, because a hung suite is worse than a racy one. The largest
+// borrow window is that 47-second one -- eight times the wait -- and it is held
+// by a writer that takes ENTRY_LOCK_KEY correctly. A reader that took the same
+// key would time out, degrade to unguarded, and read exactly the borrowed row
+// it took the lock to avoid. Raising the wait is not the answer either: it is
+// bounded precisely so one slow holder cannot eat a whole file's timeout.
+//
+// So the reference is taken off something no concurrently-running peer can
+// move: the checked-in map specs, which are the source of truth for where a
+// player may start. entry_world_egress_db.test.js stopped trusting the live
+// flag first, for this reason and in almost these words.
+//
+// `allows_fast_travel` is what makes the JOIN stable, not merely the id.
+// joinPolicy's first-join leg is
+//
+//     if (!facts.hasHistory && (facts.isEntry || facts.allowsFastTravel))
+//
+// and allows_fast_travel is a PER-WORLD column that no test writes, where
+// is_entry is globally exclusive by construction and is borrowed constantly. A
+// fresh character is therefore authorized into this world by the REAL policy
+// wherever the flag happens to be sitting. That leg is not a loophole opened
+// for the tests: joinPolicy.js documents it as existing because is_entry has
+// been lost from live data before (SOMET-265) and new characters must stay
+// playable when it is. Requiring it here turns what would otherwise be a silent
+// timing dependency into a stated precondition that fails with a reason.
+const SPEC_DIR = path.join(__dirname, '..', '..', 'seeds', 'maps');
+
+// The NAME of the world a live-join test should put a fresh character in, read
+// off the checked-in specs. Exactly one is expected; anything else is a change
+// to the shipped maps that a human has to look at, not something to guess past.
+function joinableEntryWorldName() {
+  const names = [];
+  for (const file of fs.readdirSync(SPEC_DIR).filter((f) => f.endsWith('.map.json'))) {
+    const spec = JSON.parse(fs.readFileSync(path.join(SPEC_DIR, file), 'utf8'));
+    for (const w of spec.worlds || []) {
+      if (w.is_entry === true && w.allows_fast_travel === true) names.push(w.name);
+    }
+  }
+  if (names.length !== 1) {
+    throw new Error(
+      'expected exactly one shipped-spec world declaring BOTH is_entry and '
+      + `allows_fast_travel, found ${names.length ? names.join(', ') : 'none'}. `
+      + 'That pair is what lets a live-join test name its target world without '
+      + 'reading worlds.is_entry, which peer test files borrow and then delete.');
+  }
+  return names[0];
+}
+
+// Resolve that world in the live database. Returns { id, name }.
+//
+// Throws rather than returning null: every caller is a suite whose whole point
+// is that a real character really joins a real world, so "there is nowhere to
+// join" must be a loud failure and never a quiet skip.
+async function entryWorldForJoin(pool) {
+  const name = joinableEntryWorldName();
+  const r = await pool.query(
+    'SELECT id, name, allows_fast_travel FROM worlds WHERE name = $1', [name]);
+  if (r.rows.length !== 1) {
+    throw new Error(
+      `this database has no world named "${name}", so nothing below was verified. `
+      + 'Seed it with `SPEC=p5-descent node scripts/seed-map.js` then '
+      + '`SPEC=vale-region node scripts/seed-map.js` (vale-region LAST).');
+  }
+  const row = r.rows[0];
+  if (row.allows_fast_travel !== true) {
+    throw new Error(
+      `"${name}" declares allows_fast_travel in its spec but the live row has it `
+      + 'false, so joinPolicy would have to fall back on is_entry -- which a peer '
+      + 'test may be borrowing right now. Re-seed the spec.');
+  }
+  return { id: row.id, name: row.name };
+}
+
+module.exports = {
+  withEntryPreserved, ENTRY_LOCK_KEY, entryWorldForJoin, joinableEntryWorldName,
+};

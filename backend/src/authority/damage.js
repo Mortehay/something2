@@ -7,6 +7,22 @@ const { effectMagnitude, SHOCK } = require('./effects');
 
 const MIN_DAMAGE = 1;    // damage floor: nothing is ever fully negated
 const RESIST_CAP = 0.8;  // resistance ceiling: nothing is ever immune
+// Resistance FLOOR. -1 means "takes double damage from this element"; nothing
+// can go below that.
+//
+// It was 0 until SOMET-495, i.e. a negative resistance was silently erased.
+// That was right while resistances came only from armour, where a negative
+// value could only be a bad row. It stopped being right when the passive tree
+// started AUTHORING negative resistances on purpose: several keystones pay for
+// their upside with a drawback like `{element:'ice', value:-15}`, and a clamp
+// at 0 hands the player the upside for free -- the same "displayed but inert"
+// failure the rest of SOMET-495 is about, one layer down.
+//
+// A floor is still needed, and is still what makes the NaN guard below
+// meaningful: without one, a stacked set of drawbacks could in principle push
+// the multiplier past 2x and keep going. -1 is the point where the drawback is
+// as severe as the cap is generous.
+const RESIST_FLOOR = -1;
 const ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
 const NO_MITIGATION = { defense: 0, resistances: {} };
 
@@ -113,7 +129,8 @@ function applyDamage(target, raw, element, mit = NO_MITIGATION, now = undefined,
   // -> NaN, which never satisfies hp <= 0, making the target permanently
   // immortal.
   const rawResist = (mit.resistances && mit.resistances[el]) || 0;
-  const resist = Number.isFinite(rawResist) ? Math.min(RESIST_CAP, Math.max(0, rawResist)) : 0;
+  const resist = Number.isFinite(rawResist)
+    ? Math.min(RESIST_CAP, Math.max(RESIST_FLOOR, rawResist)) : 0;
   const candidate = raw2 * (1 - resist);
   const final = Math.max(MIN_DAMAGE, Number.isFinite(candidate) ? candidate : MIN_DAMAGE);
   target.hp -= final;
@@ -180,7 +197,7 @@ function drainMana(target, amount) {
 
 module.exports = {
   applyDamage, applyDamageWithEffects, drainMana,
-  MIN_DAMAGE, RESIST_CAP, ELEMENTS, NO_MITIGATION,
+  MIN_DAMAGE, RESIST_CAP, RESIST_FLOOR, ELEMENTS, NO_MITIGATION,
   // SOMET-290: the provocation vocabulary lives with the funnel that stamps
   // it, so the shape of `_provokedBy` has exactly one owner. creatures.js
   // imports the reader; every damage site builds its tag with the two key

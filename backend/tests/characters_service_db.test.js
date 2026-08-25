@@ -5,6 +5,7 @@ const {
   listCharacters, listPlayableClasses, createCharacter, deleteCharacter, ownedCharacter,
   CharacterError, MAX_CHARACTERS,
 } = require('../src/services/characters');
+const { derivePlayerStats } = require('../src/services/playerStats.js');
 
 const url = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
@@ -28,8 +29,54 @@ test('characters service', { skip: !url ? 'no database URL' : false }, async (t)
     finally { await pool.query('DELETE FROM users WHERE username = $1', [username]); }
   }
 
-  await t.test('exposes exactly the three playable classes', () => {
-    assert.deepEqual(classes.map((c) => c.name).sort(), ['Mage', 'Ranger', 'Warrior']);
+  // SOMET-471: six classes, and Ranger is demoted rather than renamed into
+  // Archer -- the row is still in entity_types, it is just not rollable.
+  await t.test('exposes exactly the six playable classes, each with a main stat', () => {
+    assert.deepEqual(classes.map((c) => c.name).sort(),
+      ['Archer', 'Cultist', 'Druid', 'Mage', 'Monk', 'Warrior']);
+    assert.deepEqual(
+      classes.map((c) => `${c.name}:${c.mainStat}`).sort(),
+      ['Archer:dexterity', 'Cultist:constitution', 'Druid:charisma',
+        'Mage:intelligence', 'Monk:wisdom', 'Warrior:strength'],
+      'mainStat has to survive the service mapping, or the picker shows nothing');
+  });
+
+
+  // Contract 6.1: the six stat columns are a class-base SNAPSHOT, written
+  // once at creation and never mutated again, so that a later rebalance of a
+  // class's base stats cannot retroactively change characters that already
+  // exist. createCharacter owns that write.
+  //
+  // Every class bases at 5 on all six stats, deliberately. Writing
+  // entity_types' own numbers here instead -- Warrior 10s, Ranger DEX 12 --
+  // would silently rebalance the game: every formula in playerStats.js is an
+  // identity at BASE_STAT, so a snapshot CON of 10 makes maxHp 150. The two
+  // literals below are the pre-epic pool sizes, hand-written rather than
+  // derived from HP_BASE/MANA_BASE so a moved base cannot move the
+  // expectation with it.
+  await t.test('createCharacter writes the class-base stat snapshot, identical for every class', async () => {
+    await withUser('zzSvcSnapshot', async (userId) => {
+      for (const cls of classes) {
+        const c = await createCharacter(pool, userId, `zzSvcSnap${cls.name}`, cls.id);
+        const { rows } = await pool.query(
+          `SELECT strength, dexterity, constitution, intelligence, wisdom, charisma,
+                  level, experience, passive_points
+             FROM player_progression WHERE character_id = $1`, [c.id]);
+        assert.equal(rows.length, 1,
+          `${cls.name}: creation must write the progression row, not leave it to a lazy read`);
+        const p = rows[0];
+        for (const k of ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']) {
+          assert.equal(p[k], 5, `${cls.name}: ${k} must be snapshotted at the class base of 5`);
+        }
+        assert.equal(p.level, 1);
+        assert.equal(Number(p.experience), 0);
+        assert.equal(p.passive_points, 0);
+
+        const stats = derivePlayerStats(p);
+        assert.equal(stats.maxHp, 100, `${cls.name}: a new character must have the pre-epic 100 max hp`);
+        assert.equal(stats.maxMana, 100, `${cls.name}: a new character must have the pre-epic 100 max mana`);
+      }
+    });
   });
 
   await t.test('creates into the lowest free slot', async () => {
@@ -128,8 +175,11 @@ test('characters service', { skip: !url ? 'no database URL' : false }, async (t)
   await t.test('the list carries level and class name', async () => {
     await withUser('zzSvcList', async (userId) => {
       const c = await createCharacter(pool, userId, 'zzSvcListed', mage.id);
+      // UPDATE, not INSERT: createCharacter now writes the class-base
+      // snapshot row itself (contract 6.1), so the row already exists and an
+      // INSERT here would violate player_progression_pkey.
       await pool.query(
-        'INSERT INTO player_progression (character_id, level) VALUES ($1, 4)', [c.id]);
+        'UPDATE player_progression SET level = 4 WHERE character_id = $1', [c.id]);
       const [row] = await listCharacters(pool, userId);
       assert.equal(row.name, 'zzSvcListed');
       assert.equal(row.className, 'Mage');
@@ -137,9 +187,20 @@ test('characters service', { skip: !url ? 'no database URL' : false }, async (t)
     });
   });
 
+  // createCharacter writes a progression row now, so this case no longer
+  // arises from a plain creation -- but it is still REAL for every character
+  // that predates that write, and listCharacters' LEFT JOIN fallback is what
+  // serves them. The row is therefore deleted explicitly, so the fallback is
+  // actually exercised rather than quietly bypassed by a row that happens to
+  // say level 1 anyway. Scoped to this fixture's own character_id; it never
+  // touches another row.
   await t.test('a character with no progression row still lists at level 1', async () => {
     await withUser('zzSvcFresh', async (userId) => {
-      await createCharacter(pool, userId, 'zzSvcFreshChar', warrior.id);
+      const c = await createCharacter(pool, userId, 'zzSvcFreshChar', warrior.id);
+      await pool.query('DELETE FROM player_progression WHERE character_id = $1', [c.id]);
+      const gone = await pool.query(
+        'SELECT count(*)::int AS n FROM player_progression WHERE character_id = $1', [c.id]);
+      assert.equal(gone.rows[0].n, 0, 'precondition: the progression row must actually be absent');
       const [row] = await listCharacters(pool, userId);
       assert.equal(row.level, 1);
       assert.equal(row.lastWorldName, null, 'a character that has never played has no last world');

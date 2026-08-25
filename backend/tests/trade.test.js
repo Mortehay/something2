@@ -43,11 +43,37 @@ function mkPool(handlers) {
   return pool;
 }
 
+// SOMET-484 route shapes, named once so a statement that changes wording in
+// trade.js fails in ONE place rather than silently stopping matching in a
+// dozen `pool.seen.some(...)` negative assertions.
+//
+// SELL_LOCK replaced a `DELETE FROM player_items`: the sale no longer destroys
+// the instance, it HANDS it to the merchant (SELL_HANDOVER). Several tests
+// below used to assert `!seen.some(/DELETE FROM player_items/)` to mean "the
+// item was not taken from the player". That string matches nothing at all now,
+// so those assertions would pass no matter what the code did -- each one has
+// been re-pointed at SELL_HANDOVER, which is the statement that actually takes
+// it.
+const SELL_LOCK = /SELECT item_type_id, quantity, soulbound FROM player_items WHERE id = \$1 AND character_id = \$2 FOR UPDATE/i;
+const SELL_EQUIPPED = /SELECT 1 FROM player_equipment WHERE item_id/i;
+const SELL_HANDOVER = /UPDATE player_items SET character_id = NULL, merchant_stock_id/i;
+const BUY_HANDOVER = /UPDATE player_items SET character_id = \$2, merchant_stock_id = NULL/i;
+const BUY_AFFIXES = /FROM player_item_affixes/i;
+
+// The buy path's two new statements, for the cases where the stock row holds
+// NO instance (base catalog, and every buyback row sold before the migration):
+// the handover matches nothing, so buyStock falls back to the original INSERT.
+const BUY_NO_INSTANCE = [
+  [BUY_HANDOVER, () => ({ rowCount: 0, rows: [] })],
+  [BUY_AFFIXES, () => ({ rowCount: 0, rows: [] })],
+];
+
 test('buyStock debits gold, grants the item, and leaves a base-catalog row in place', async () => {
   const p = PLAYER();
   const pool = mkPool([
     [/FROM merchant_stock WHERE id/i, () => ({ rows: [{ id: 's1', item_type_id: 3, price: 20, seller_user_id: null, village_id: 'v1' }] })],
     [/UPDATE users SET gold = gold - /i, (sql) => { assert.match(sql, /gold >= /, 'debit must be overdraft-safe'); return { rowCount: 1, rows: [{ gold: 80 }] }; }],
+    ...BUY_NO_INSTANCE,
     [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new1', item_type_id: 3, quantity: 1 }] })],
   ]);
   const r = await buyStock(pool, mkEntry(p), 1, 31, 's1');
@@ -67,26 +93,53 @@ test('buyStock debits gold, grants the item, and leaves a base-catalog row in pl
 // only buyable by the account that sold it, and the buying userId here is 1.
 // With the old seller the case would be testing the refusal path instead of
 // the consume-on-buy path it is named for.
-test('buying a buyback row deletes it', async () => {
+// SOMET-484 rewrote what this row IS: a buyback row now HOLDS the instance
+// that was sold, so the buy moves that row back to the buyer instead of
+// minting a new one. Both halves are pinned -- the handover, and the DELETE
+// that must follow it (deleting first would CASCADE the instance away, which
+// is the one ordering mistake this design can make).
+test('buying a buyback row hands back the held instance and then deletes the row', async () => {
   const p = PLAYER();
-  let deleted = false;
+  const order = [];
   const pool = mkPool([
     // NOTE: DELETE is checked before the generic SELECT match below, since
     // "DELETE FROM merchant_stock WHERE id = $1" also matches
     // /FROM merchant_stock WHERE id/i and would otherwise be misrouted.
-    [/DELETE FROM merchant_stock/i, () => { deleted = true; return { rowCount: 1 }; }],
+    [/DELETE FROM merchant_stock/i, () => { order.push('delete-stock'); return { rowCount: 1 }; }],
     [/FROM merchant_stock WHERE id/i, () => ({ rows: [{ id: 's2', item_type_id: 3, price: 5, seller_user_id: 1, village_id: 'v1' }] })],
     [/UPDATE users SET gold = gold - /i, (sql, params) => {
-      assert.equal(params[1], 5, 'the seller buys back at the price they were paid');
+      assert.strictEqual(params[1], 5, 'the seller buys back at the price they were paid');
       return { rowCount: 1, rows: [{ gold: 95 }] };
     }],
-    [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new2', item_type_id: 3, quantity: 1 }] })],
+    [BUY_HANDOVER, (sql, params) => {
+      order.push('handover');
+      assert.deepStrictEqual(params, ['s2', 31], 'the held instance must move to the BUYING character');
+      return { rowCount: 1, rows: [{ id: 'held2', item_type_id: 3, quantity: 1, rarity: 'foxy', item_level: 71, soulbound: false }] };
+    }],
+    // `label` is selected as of SOMET-500: gearAffixes.js captions every gear
+    // modifier with it, and the buyback LISTING now carries it too, so a
+    // purchase that dropped it would make the shelf and the item disagree.
+    [BUY_AFFIXES, (sql) => {
+      assert.match(sql, /at\.label/, 'the affix read must carry the catalog label');
+      return { rowCount: 1, rows: [{ affix_type_id: 4, key: 'flaming', label: 'Flaming', value: 12.25, effect: { type: 'damage', element: 'fire' } }] };
+    }],
+    [/INSERT INTO player_items/i, () => { assert.fail('must NOT mint a new instance when the stock row holds one'); }],
   ]);
   const r = await buyStock(pool, mkEntry(p), 1, 31, 's2');
-  assert.equal(r.ok, true);
-  assert.equal(deleted, true, 'buyback rows are one-off and must be removed');
-  assert.equal(pool.committed, true);
-  assert.equal(pool.rolledBack, false);
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.item.id, 'held2', 'the buyer gets the very instance that was sold');
+  assert.strictEqual(r.item.rarity, 'foxy', 'and its rarity');
+  assert.strictEqual(r.item.itemLevel, 71, 'and its item level');
+  assert.deepStrictEqual(r.item.affixes, [
+    {
+      affixTypeId: 4, key: 'flaming', label: 'Flaming', value: 12.25,
+      effect: { type: 'damage', element: 'fire' },
+    },
+  ], 'and every affix, by VALUE, with the effect payload the equip path reads and the label the Character tab captions it with');
+  assert.deepStrictEqual(order, ['handover', 'delete-stock'],
+    'the instance must be detached BEFORE the stock row is deleted -- the FK CASCADEs');
+  assert.strictEqual(pool.committed, true);
+  assert.strictEqual(pool.rolledBack, false);
 });
 
 // SOMET-280: buyback belongs to the account that sold the item. fetchShop no
@@ -125,6 +178,7 @@ test("buyStock matches the seller by value, not by type, so the owner is never l
     [/DELETE FROM merchant_stock/i, () => ({ rowCount: 1 })],
     [/FROM merchant_stock WHERE id/i, () => ({ rows: [{ id: 's2', item_type_id: 3, price: 5, seller_user_id: '1', village_id: 'v1' }] })],
     [/UPDATE users SET gold = gold - /i, () => ({ rowCount: 1, rows: [{ gold: 95 }] })],
+    ...BUY_NO_INSTANCE,
     [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new2', item_type_id: 3, quantity: 1 }] })],
   ]);
   const r = await buyStock(pool, mkEntry(p), 1, 31, 's2');
@@ -137,6 +191,7 @@ test('buyStock locks the stock row FOR UPDATE to prevent a concurrent double-sel
   const pool = mkPool([
     [/FROM merchant_stock WHERE id/i, (sql) => { selectSql = sql; return { rows: [{ id: 's1', item_type_id: 3, price: 20, seller_user_id: null, village_id: 'v1' }] }; }],
     [/UPDATE users SET gold = gold - /i, () => ({ rowCount: 1, rows: [{ gold: 80 }] })],
+    ...BUY_NO_INSTANCE,
     [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new1', item_type_id: 3, quantity: 1 }] })],
   ]);
   const r = await buyStock(pool, mkEntry(p), 1, 31, 's1');
@@ -155,6 +210,7 @@ test('a buyback whose row vanishes out from under the DELETE (lost race) rolls b
     // losing the race for a row the buyer IS allowed to buy.
     [/FROM merchant_stock WHERE id/i, () => ({ rows: [{ id: 's2', item_type_id: 3, price: 5, seller_user_id: 1, village_id: 'v1' }] })],
     [/UPDATE users SET gold = gold - /i, () => ({ rowCount: 1, rows: [{ gold: 95 }] })],
+    ...BUY_NO_INSTANCE,
     [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new2', item_type_id: 3, quantity: 1 }] })],
   ]);
   const r = await buyStock(pool, mkEntry(p), 1, 31, 's2');
@@ -182,18 +238,33 @@ test('buyStock with insufficient gold errors, grants nothing, and rolls back', a
   assert.equal(pool.rolledBack, true, 'must roll back on rejection');
 });
 
-test('sellItem removes the item, credits gold, and inserts a buyback row', async () => {
+test('sellItem hands the item to the merchant, credits gold, and inserts a buyback row', async () => {
   const p = PLAYER();
+  const order = [];
   const pool = mkPool([
     [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 0, rows: [] })],
-    [/DELETE FROM player_items/i, (sql) => { assert.match(sql, /character_id = \$2/, 'ownership enforced in SQL'); return { rowCount: 1, rows: [{ item_type_id: 3, quantity: 1 }] }; }],
+    [SELL_LOCK, (sql) => { assert.match(sql, /character_id = \$2/, 'ownership enforced in SQL'); return { rowCount: 1, rows: [{ item_type_id: 3, quantity: 1 }] }; }],
+    [SELL_EQUIPPED, () => ({ rowCount: 0, rows: [] })],
     [/UPDATE stone_instances SET socketed_into_id = NULL/i, () => ({ rowCount: 0 })],
     [/SELECT value FROM item_types/i, () => ({ rows: [{ value: 20 }] })],
     [/UPDATE users SET gold = gold \+ /i, () => ({ rowCount: 1, rows: [{ gold: 110 }] })],
-    [/INSERT INTO merchant_stock/i, () => ({ rows: [{ id: 'b1' }] })],
+    [/INSERT INTO merchant_stock/i, () => { order.push('stock'); return { rows: [{ id: 'b1' }] }; }],
+    [SELL_HANDOVER, (sql, params) => {
+      order.push('handover');
+      assert.deepStrictEqual(params, ['i1', 'b1', 31],
+        'the instance must be attached to the buyback row that was just created, and only for its owner');
+      return { rowCount: 1 };
+    }],
   ]);
   const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'i1');
   assert.equal(r.ok, true);
+  // SOMET-484: the buyback row has to exist before anything can point at it --
+  // player_items_one_holder_check forbids an instance with no holder at all,
+  // so there is no ordering in which the item is briefly ownerless.
+  assert.deepStrictEqual(order, ['stock', 'handover'],
+    'the buyback row must exist before the instance is attached to it');
+  assert.ok(!pool.seen.some((s) => /DELETE FROM player_items/i.test(s)),
+    'the instance must be MOVED, never destroyed -- destroying it is the SOMET-484 bug');
   assert.equal(r.price, 10, 'sell price is half of value 20');
   assert.equal(r.gold, 110);
   assert.equal(p.gold, 110);
@@ -204,19 +275,22 @@ test('sellItem removes the item, credits gold, and inserts a buyback row', async
   assert.match(pool.seen[pool.seen.length - 1], /^COMMIT$/i);
 });
 
-// SOMET-245 Task 4b: stone_instances.socketed_into_id has its own
-// ON DELETE SET NULL FK back to player_items, so the DB already ejects a
-// socketed stone the instant its host's row is deleted -- this test pins
-// the SAME-TRANSACTION explicit call sellItem now also makes (belt and
-// suspenders, and load-bearing if that FK is ever altered): the eject must
-// run on the SAME checked-out client, after the DELETE is confirmed
-// (rowCount === 1) and before COMMIT, keyed on the host's itemId.
-test('sellItem ejects a stone socketed into the sold item, in the same transaction as the delete', async () => {
+// SOMET-245 Task 4b, and SOMET-484 made it LOAD-BEARING rather than belt and
+// suspenders. stone_instances.socketed_into_id used to be cleaned up for free
+// by its own ON DELETE SET NULL FK when the host's player_items row was
+// deleted. The sale no longer deletes that row, so nothing cascades and this
+// explicit call is now the only thing parting a socketed stone from a sold
+// weapon: without it the stone -- which stays with the seller -- would keep
+// pointing at an item on a merchant's shelf. It must run on the SAME checked-
+// out client, after ownership is confirmed (rowCount === 1) and before COMMIT,
+// keyed on the host's itemId.
+test('sellItem ejects a stone socketed into the sold item, in the same transaction as the handover', async () => {
   const p = PLAYER();
   const seenOrder = [];
   const pool = mkPool([
     [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 0, rows: [] })],
-    [/DELETE FROM player_items/i, () => { seenOrder.push('delete'); return { rowCount: 1, rows: [{ item_type_id: 3, quantity: 1 }] }; }],
+    [SELL_LOCK, () => { seenOrder.push('lock'); return { rowCount: 1, rows: [{ item_type_id: 3, quantity: 1 }] }; }],
+    [SELL_EQUIPPED, () => ({ rowCount: 0, rows: [] })],
     [/UPDATE stone_instances SET socketed_into_id = NULL/i, (sql, params) => {
       seenOrder.push('eject');
       assert.deepStrictEqual(params, ['i1'], 'eject must target the sold item as the host');
@@ -225,11 +299,13 @@ test('sellItem ejects a stone socketed into the sold item, in the same transacti
     [/SELECT value FROM item_types/i, () => ({ rows: [{ value: 20 }] })],
     [/UPDATE users SET gold = gold \+ /i, () => ({ rowCount: 1, rows: [{ gold: 110 }] })],
     [/INSERT INTO merchant_stock/i, () => ({ rows: [{ id: 'b1' }] })],
+    [SELL_HANDOVER, () => { seenOrder.push('handover'); return { rowCount: 1 }; }],
   ]);
   const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'i1');
   assert.equal(r.ok, true);
-  assert.deepStrictEqual(seenOrder, ['delete', 'eject'], 'eject must run after the delete is confirmed, both inside the transaction');
-  assert.equal(pool.committed, true, 'eject must be committed as part of the same transaction as the delete');
+  assert.deepStrictEqual(seenOrder, ['lock', 'eject', 'handover'],
+    'eject must run after ownership is confirmed and before the item changes hands, all inside the transaction');
+  assert.equal(pool.committed, true, 'eject must be committed as part of the same transaction as the handover');
   assert.match(pool.seen[0], /^BEGIN$/i, 'eject must be inside BEGIN...COMMIT, not before it');
   assert.match(pool.seen[pool.seen.length - 1], /^COMMIT$/i, 'eject must be inside BEGIN...COMMIT, not after it');
 });
@@ -250,10 +326,11 @@ test('sellItem refuses to sell a stacked item (quantity > 1) and rolls back inst
   const p = PLAYER(); p.inv.items = [{ id: 'i1', typeId: 3, quantity: 5 }];
   const pool = mkPool([
     [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 0, rows: [] })],
-    [/DELETE FROM player_items/i, () => ({ rowCount: 1, rows: [{ item_type_id: 3, quantity: 5 }] })],
-    // The eject runs (same transaction, right after the DELETE) before the
-    // stack check rolls everything back -- both undone together, so this
-    // must still be routed rather than throwing "unexpected".
+    [SELL_LOCK, () => ({ rowCount: 1, rows: [{ item_type_id: 3, quantity: 5 }] })],
+    [SELL_EQUIPPED, () => ({ rowCount: 0, rows: [] })],
+    // The eject runs (same transaction, right after ownership is confirmed)
+    // before the stack check rolls everything back -- both undone together, so
+    // this must still be routed rather than throwing "unexpected".
     [/UPDATE stone_instances SET socketed_into_id = NULL/i, () => ({ rowCount: 0 })],
   ]);
   const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'i1');
@@ -262,8 +339,9 @@ test('sellItem refuses to sell a stacked item (quantity > 1) and rolls back inst
   assert.ok(!pool.seen.some((s) => /SELECT value FROM item_types/i.test(s)), 'must not price a stack it refuses to sell');
   assert.ok(!pool.seen.some((s) => /UPDATE users SET gold \+/i.test(s)), 'no credit on refusal');
   assert.ok(!pool.seen.some((s) => /INSERT INTO merchant_stock/i.test(s)), 'no buyback row on refusal');
+  assert.ok(!pool.seen.some((s) => SELL_HANDOVER.test(s)), 'the stack must not change hands');
   assert.equal(pool.committed, false);
-  assert.equal(pool.rolledBack, true, 'the DELETE must be rolled back — the stack must survive intact, not be half-destroyed');
+  assert.equal(pool.rolledBack, true, 'the eject must be rolled back — the stack must survive intact, not be half-destroyed');
   assert.equal(p.gold, 100, 'wallet untouched');
   assert.equal(p.inv.items.length, 1, 'item not removed from in-memory inventory — the sale never happened');
 });
@@ -282,13 +360,14 @@ test('sellItem refuses an item the player does not own and rolls back', async ()
   const p = PLAYER();
   const pool = mkPool([
     [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 0, rows: [] })],
-    [/DELETE FROM player_items/i, () => ({ rowCount: 0, rows: [] })],
+    [SELL_LOCK, () => ({ rowCount: 0, rows: [] })],
   ]);
   const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'nope');
   assert.equal(r.ok, false);
   assert.match(r.reason, /own/i);
   assert.ok(!pool.seen.some((s) => /UPDATE users SET gold = gold \+ /i.test(s)), 'no credit on rejection');
   assert.ok(!pool.seen.some((s) => /INSERT INTO merchant_stock/i.test(s)), 'no buyback row on rejection');
+  assert.ok(!pool.seen.some((s) => SELL_HANDOVER.test(s)), 'nothing changes hands on rejection');
   assert.equal(pool.committed, false, 'must not commit on rejection');
   assert.equal(pool.rolledBack, true, 'must roll back on rejection');
 });
@@ -304,12 +383,15 @@ test('sellItem refuses a LOOSE (unsocketed) stone, deletes nothing, and rolls ba
   const p = PLAYER(); p.inv.items = [{ id: 'stone1', typeId: 9, quantity: 1 }];
   const pool = mkPool([
     [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 1, rows: [{ '?column?': 1 }] })], // IS a stone
-    [/DELETE FROM player_items/i, () => { throw new Error('must never delete a refused stone'); }],
+    // SOMET-484: the sale takes the item with SELL_HANDOVER now, not a DELETE.
+    // Tripping on the old string would make this route dead -- it can never
+    // match -- so the guard would pass whatever the code did.
+    [SELL_HANDOVER, () => { throw new Error('must never hand a refused stone to the merchant'); }],
   ]);
   const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'stone1');
   assert.equal(r.ok, false);
   assert.match(r.reason, /unsocket/i, 'must give a clear, specific reason');
-  assert.ok(!pool.seen.some((s) => /DELETE FROM player_items/i.test(s)), 'must never delete the stone\'s row');
+  assert.ok(!pool.seen.some((s) => SELL_HANDOVER.test(s)), 'must never hand the stone\'s row to the merchant');
   assert.equal(pool.committed, false);
   assert.equal(pool.rolledBack, true, 'must roll back rather than leave the transaction open');
   assert.equal(p.gold, 100, 'wallet untouched');
@@ -324,12 +406,15 @@ test('sellItem refuses a SOCKETED stone the same way as a loose one', async () =
   const p = PLAYER(); p.inv.items = [{ id: 'stone1', typeId: 9, quantity: 1 }];
   const pool = mkPool([
     [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 1, rows: [{ '?column?': 1 }] })],
-    [/DELETE FROM player_items/i, () => { throw new Error('must never delete a refused stone'); }],
+    // SOMET-484: the sale takes the item with SELL_HANDOVER now, not a DELETE.
+    // Tripping on the old string would make this route dead -- it can never
+    // match -- so the guard would pass whatever the code did.
+    [SELL_HANDOVER, () => { throw new Error('must never hand a refused stone to the merchant'); }],
   ]);
   const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'stone1');
   assert.equal(r.ok, false);
   assert.match(r.reason, /unsocket/i);
-  assert.ok(!pool.seen.some((s) => /DELETE FROM player_items/i.test(s)));
+  assert.ok(!pool.seen.some((s) => SELL_HANDOVER.test(s)));
 });
 
 // Critical #2 (SOMET-245 final review): verifies Critical #1's fix actually
@@ -349,7 +434,10 @@ test('sellItem refusing a socketed stone leaves the HOST item\'s in-memory socke
   ];
   const pool = mkPool([
     [/SELECT 1 FROM stone_instances si\s+JOIN player_items pi/i, () => ({ rowCount: 1, rows: [{ '?column?': 1 }] })],
-    [/DELETE FROM player_items/i, () => { throw new Error('must never delete a refused stone'); }],
+    // SOMET-484: the sale takes the item with SELL_HANDOVER now, not a DELETE.
+    // Tripping on the old string would make this route dead -- it can never
+    // match -- so the guard would pass whatever the code did.
+    [SELL_HANDOVER, () => { throw new Error('must never hand a refused stone to the merchant'); }],
   ]);
   const r = await sellItem(pool, mkEntry(p), 1, 31, 'v1', 'stone1');
   assert.equal(r.ok, false);
@@ -399,6 +487,7 @@ test('buyStock scopes the locked read to the village and world the player is at'
       return { rows: [{ id: 's1', item_type_id: 3, price: 20, seller_user_id: null, village_id: 'village-a' }] };
     }],
     [/UPDATE users SET gold = gold - /i, () => ({ rowCount: 1, rows: [{ gold: 80 }] })],
+    ...BUY_NO_INSTANCE,
     [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'new1', item_type_id: 3, quantity: 1 }] })],
   ]);
   const r = await buyStock(pool, mkEntry(p, 'world-1'), 1, 31, 's1', 'village-a');

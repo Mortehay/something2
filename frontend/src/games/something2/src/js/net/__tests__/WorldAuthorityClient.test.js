@@ -215,3 +215,31 @@ describe('WorldAuthorityClient', () => {
     expect(FakeWS.last.sent).toEqual([{ type: 'openchest' }]);
   });
 });
+
+// SOMET-482 -- the despawn puff's transport leg. The def and the drawing are
+// covered elsewhere; this is the seam between them, and it is exactly the
+// layer that has shipped inert on this epic before: a perfectly tested pure
+// function behind a 'vfx' case nobody added to the switch.
+describe('vfx frames (SOMET-482)', () => {
+  it('routes a vfx frame to onVfx, verbatim', () => {
+    const seen = [];
+    armClient({ onVfx: (m) => seen.push(m) });
+    const frame = { type: 'vfx', name: 'item_despawn', x: 321, y: 654 };
+    FakeWS.last._l.message({ data: JSON.stringify(frame) });
+    expect(seen).toEqual([frame]);
+  });
+
+  it('does not blow up when no onVfx handler was supplied', () => {
+    armClient();
+    expect(() => FakeWS.last._l.message({
+      data: JSON.stringify({ type: 'vfx', name: 'item_despawn', x: 1, y: 2 }),
+    })).not.toThrow();
+  });
+
+  it('does not route other frame types to onVfx', () => {
+    const seen = [];
+    armClient({ onVfx: (m) => seen.push(m) });
+    FakeWS.last._l.message({ data: JSON.stringify({ type: 'creatures', creatures: [] }) });
+    expect(seen).toEqual([]);
+  });
+});

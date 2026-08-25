@@ -1,13 +1,16 @@
 // Every read and write of player_progression. Nothing outside this file and
 // playerStats.js touches the raw stat columns.
 
-const {
-  levelForXp, applyDeathPenalty, refundedPoints, DEFAULT_PROGRESSION,
-} = require('./playerStats.js');
-const C = require('./progressionConstants.js');
+const { levelForXp, applyDeathPenalty, DEFAULT_PROGRESSION } = require('./playerStats.js');
+const { getSetting } = require('./gameSettings.js');
+
+// Required lazily, inside the functions that use it: passiveTreeStore.js
+// requires this module back (for loadProgression's row lock), and a top-level
+// require here would be a cycle that resolves to an empty object at load time.
+function composer() { return require('./passiveTreeStore.js').composeProgression; }
 
 const XP_SOURCES = ['kill', 'chest', 'dungeon_clear'];
-const COLUMNS = `character_id, experience, level, stat_points,
+const COLUMNS = `character_id, experience, level, passive_points,
                  strength, dexterity, constitution, intelligence, wisdom, charisma`;
 
 // experience is bigint, which node-postgres returns as a STRING to avoid
@@ -18,7 +21,7 @@ function mapRow(r) {
     character_id: r.character_id,
     experience: Number(r.experience) || 0,
     level: Number(r.level) || 1,
-    stat_points: Number(r.stat_points) || 0,
+    passive_points: Number(r.passive_points) || 0,
     strength: Number(r.strength),
     dexterity: Number(r.dexterity),
     constitution: Number(r.constitution),
@@ -48,7 +51,12 @@ async function loadProgression(db, characterId, { forUpdate = false } = {}) {
     `SELECT ${COLUMNS} FROM player_progression WHERE character_id = $1${forUpdate ? ' FOR UPDATE' : ''}`,
     [characterId],
   );
-  return r.rows.length ? mapRow(r.rows[0]) : { ...DEFAULT_PROGRESSION, character_id: characterId };
+  const row = r.rows.length ? mapRow(r.rows[0]) : { ...DEFAULT_PROGRESSION, character_id: characterId };
+  // The ONE place the tree is folded in. Every caller of loadProgression --
+  // the join frame, the character-sheet route, awardXp's own pre-read -- gets
+  // the composed row for free, which is what stops a second, drifting composer
+  // appearing at any of the seven `progression` push sites.
+  return composer()(db, characterId, row);
 }
 
 // Takes `db`, not `pool`: the kill path calls this INSIDE its own transaction
@@ -61,7 +69,7 @@ async function loadProgression(db, characterId, { forUpdate = false } = {}) {
 // overlapping transactions can call awardXp for the SAME user before any of
 // them commits. Without a lock, every one of those reads the same starting
 // experience and the last UPDATE to commit wins, silently discarding every
-// other award -- and since level and stat_points are derived from that same
+// other award -- and since level and passive_points are derived from that same
 // stale read, a level-up can be lost (or double-granted) right along with
 // the XP. The row lock forces the second-and-later transactions to block
 // until the first commits, so each one re-reads the just-committed value
@@ -79,86 +87,32 @@ async function awardXp(db, characterId, amount, source) {
   }
   const experience = before.experience + amt;
   const newLevel = levelForXp(experience);
-  const pointsGained = Math.max(0, newLevel - before.level) * C.STAT_POINTS_PER_LEVEL;
+  const levelsGained = Math.max(0, newLevel - before.level);
+  // The settings read happens ONLY on an actual level-up, so the common case
+  // (a kill that does not level anyone) still issues exactly the two queries
+  // it always did. `db` may be a client mid-transaction; getSetting is a plain
+  // SELECT and is safe on either.
+  const perLevel = levelsGained > 0
+    ? Number(await getSetting(db, 'passive_points_per_level')) || 0
+    : 0;
+  const pointsGained = levelsGained * perLevel;
   const r = await db.query(
     `UPDATE player_progression
-        SET experience = $2, level = $3, stat_points = stat_points + $4, updated_at = now()
+        SET experience = $2, level = $3, passive_points = passive_points + $4, updated_at = now()
       WHERE character_id = $1
       RETURNING ${COLUMNS}`,
     [characterId, experience, newLevel, pointsGained],
   );
   return {
-    progression: mapRow(r.rows[0]),
+    // Composed, like loadProgression's return: a kill push that carried the
+    // raw row would overwrite the client's allocatedNodeIds with undefined and
+    // silently revert every effective stat to the class-base snapshot.
+    progression: await composer()(db, characterId, mapRow(r.rows[0])),
     leveledUp: newLevel > before.level,
     newLevel,
     pointsGained,
     awarded: amt,
   };
-}
-
-async function allocateStat(pool, characterId, statKey, count) {
-  // Whitelist, not interpolation. statKey reaches this from an HTTP body.
-  if (!C.STAT_KEYS.includes(statKey)) return { ok: false, reason: 'unknown stat' };
-  const n = Number(count);
-  if (!Number.isInteger(n) || n < 1) return { ok: false, reason: 'invalid count' };
-
-  await loadProgression(pool, characterId);
-  // The guard is in the WHERE clause, not in a read-then-write pair: two
-  // concurrent requests both pass a read-first check and both spend the same
-  // points. Postgres serialises the UPDATE, so exactly one matches.
-  const r = await pool.query(
-    `UPDATE player_progression
-        SET ${statKey} = ${statKey} + $2, stat_points = stat_points - $2, updated_at = now()
-      WHERE character_id = $1 AND stat_points >= $2
-      RETURNING ${COLUMNS}`,
-    [characterId, n],
-  );
-  if (r.rowCount !== 1) return { ok: false, reason: 'not enough points' };
-  return { ok: true, progression: mapRow(r.rows[0]) };
-}
-
-// Takes BOTH ids, and they are not interchangeable: the stat reset is
-// per-character (player_progression), while the gold that pays for it is
-// per-ACCOUNT (users.gold stayed on users in SOMET-257). Passing a character id
-// to the gold UPDATE would charge whichever account happens to share that
-// integer, or silently charge nobody.
-async function respec(pool, userId, characterId) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const before = await loadProgression(client, characterId);
-    const cost = C.RESPEC_BASE * before.level;
-    // Gold moves first, guarded in its own WHERE. If it does not move, the
-    // whole transaction rolls back -- a failed payment must never yield a
-    // free respec.
-    const g = await client.query(
-      'UPDATE users SET gold = gold - $2 WHERE id = $1 AND gold >= $2 RETURNING gold',
-      [userId, cost],
-    );
-    if (g.rowCount !== 1) {
-      await client.query('ROLLBACK');
-      return { ok: false, reason: 'not enough gold', cost };
-    }
-    const refund = refundedPoints(before);
-    const r = await client.query(
-      `UPDATE player_progression
-          SET strength = $2, dexterity = $2, constitution = $2,
-              intelligence = $2, wisdom = $2, charisma = $2,
-              stat_points = stat_points + $3, updated_at = now()
-        WHERE character_id = $1
-        RETURNING ${COLUMNS}`,
-      [characterId, C.BASE_STAT, refund],
-    );
-    await client.query('COMMIT');
-    return {
-      ok: true, progression: mapRow(r.rows[0]), gold: Number(g.rows[0].gold) || 0, cost,
-    };
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
-    client.release();
-  }
 }
 
 // Takes `pool`, not `db`, and opens its OWN transaction -- unlike awardXp,
@@ -195,8 +149,9 @@ async function applyDeath(pool, characterId, { rng = Math.random } = {}) {
         WHERE character_id = $1 RETURNING ${COLUMNS}`,
       [characterId, experience],
     );
+    const composed = await composer()(client, characterId, mapRow(r.rows[0]));
     await client.query('COMMIT');
-    return { progression: mapRow(r.rows[0]), lost };
+    return { progression: composed, lost };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -205,6 +160,7 @@ async function applyDeath(pool, characterId, { rng = Math.random } = {}) {
   }
 }
 
-module.exports = {
-  loadProgression, awardXp, allocateStat, respec, applyDeath, XP_SOURCES,
-};
+// `respec` is GONE, not renamed: T7 moved it to passiveTreeStore.respecPassives,
+// which resets the passive allocations rather than six columns nothing can
+// raise. Leaving a shim here would leave a second, gold-charging reset alive.
+module.exports = { loadProgression, awardXp, applyDeath, XP_SOURCES };

@@ -1,6 +1,6 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
-        redis-shell admin-password admin-password-rotate seed-catalogs seed-map \
+        redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
@@ -232,6 +232,15 @@ admin-password-rotate:
 
 seed-catalogs:
 	$(COMPOSE) exec -T backend node scripts/seed-catalogs.js
+# Regenerate the passive tree and upsert it. Safe to re-run: nodes are upserted
+# by their stable generated key, never deleted, so no character_passives row is
+# ever orphaned. An admin's edited kind/label/grants survive a plain run --
+# pass FORCE=1 to overwrite them from the checked-in spec.
+#
+#   make seed-passive-tree
+#   make seed-passive-tree FORCE=1
+seed-passive-tree:
+	$(COMPOSE) exec -T backend node scripts/seed-passive-tree.js $(if $(FORCE),--force,)
 #make seed-map SPEC=vale-region
 #make seed-map SPEC=p5-descent
 seed-map:

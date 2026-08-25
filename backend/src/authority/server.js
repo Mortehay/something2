@@ -9,7 +9,12 @@ const { loadCatalogs, elementsForWire } = require('./catalogs');
 const { configureAttackOrigins } = require('./attackOrigin.js');
 const { loadProgression, applyDeath } = require('../services/progressionStore.js');
 const { withStoneBonuses, socketedBuffStones } = require('../services/stoneBonuses.js');
+const { withGearAffixes, equippedAffixGrants } = require('../services/gearAffixes.js');
 const { ownedCharacter } = require('../services/characters.js');
+const { charmBudget, canSummon, PLAYER_CHARM_MS } = require('../services/charm.js');
+// SOMET-473: the PLAYER pacify. applyCharm owns the non-refreshing immunity
+// window (effects.js), so this handler never decides whether a charm lands.
+const { applyCharm } = require('./effects');
 const { recordVisit } = require('../services/visitedWorlds.js');
 const { mayJoin, joinPolicyFacts, waypointTravelFacts } = require('../services/joinPolicy.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
@@ -24,6 +29,7 @@ const {
   fetchChests, spawnFieldChest, nearestChest, respawnDueFieldChests,
 } = require('../services/chests.js');
 const { openChest } = require('./chestLoot.js');
+const { getSetting } = require('../services/gameSettings.js');
 const { clearOverviewCache } = require('../services/overviewCache.js');
 const { fetchShop } = require('../services/merchantStock');
 const { fetchChest, depositItem, withdrawItem } = require('../services/accountChest');
@@ -36,6 +42,15 @@ const { buyStock, sellItem } = require('./trade');
 const { respawnDueCreatures, enqueueDeficit, CREATURE_SWEEP_MS } = require('../services/creatureRespawn');
 const { consumeAmmo, ammoCount } = require('./ammo');
 const { PICKUP_RADIUS } = require('./groundItems');
+
+// SOMET-473 -- the Druid's charm (spec 8.2, contract §6.5).
+//
+// How close a druid must be to charm. Matches the interact radius family rather
+// than a weapon reach: charming is an interaction, not an attack.
+const CHARM_RANGE = 200;
+// How long a creature charm holds before the sim releases it. Long enough to
+// walk a pack somewhere with, short enough that a druid must keep re-charming.
+const CHARM_DURATION_MS = 120000;
 const { awardStoneXp, STONE_XP_PER_HIT } = require('./stoneXp.js');
 
 const MAP_TILE_SIZE = 100;
@@ -330,6 +345,7 @@ function drainAttacks(entry) {
 // than throwing). Both call sites append their own WHERE clause.
 const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.facing, wc.home_x, wc.home_y,
                 wc.level, wc.damage, wc.blocks_portal_id,
+                wc.charmed_by_character_id, wc.charm_expires_at, ch.user_id AS charm_owner_user_id,
                 COALESCE(wc.defense, et.defense) AS defense,
                 et.color, et.resistances, et.faction, et.attack_element,
                 -- Slice D (SOMET-161). This is THE loader the live simulation
@@ -346,7 +362,43 @@ const CREATURE_JOINED_SELECT = `SELECT wc.id, wc.type, wc.x, wc.y, wc.hp, wc.fac
                 ab.abilities
          FROM world_creatures wc
          LEFT JOIN entity_types et ON et.name = wc.type
+         LEFT JOIN characters ch ON ch.id = wc.charmed_by_character_id
          LEFT JOIN creature_behaviors b ON b.id = et.behavior_id${ABILITIES_LATERAL}`;
+
+// SOMET-473 -- persisted charm -> the in-memory shape addCreatures reads.
+//
+// Called on EVERY row that goes into CreatureSim, at both loader call sites, so
+// a pet that survives a chunk reload comes back as a pet instead of turning
+// hostile on its owner. Without it the two charm columns would be write-only:
+// a durable charm nothing ever reads back is the inertness trap this epic has
+// shipped seven times, dressed up as persistence.
+//
+// TWO conversions happen here, and neither can live in creatures.js (which is
+// clock-free and database-free by construction):
+//
+//   * charm_expires_at is an absolute timestamptz; the sim compares against
+//     `world.now`, a monotonic ms counter that starts at 0 when the world was
+//     created. The offset between them is (Date.now() - world.now), so the
+//     expiry in world-clock terms is world.now + (expiresAt - Date.now()).
+//   * charmed_by_character_id names a CHARACTER; the sim keys its owner lookup
+//     on the userId the socket carries, which is a STRING (server.js's
+//     `String(payload.user_id)`). A numeric user_id here would never match
+//     `byId.get(...)` and every restored pet would be released on its first
+//     tick -- silently, and with every test green.
+//
+// An already-lapsed charm is dropped rather than restored, so a row the
+// background never got round to clearing cannot resurrect a pet.
+function hydrateCharm(row, world) {
+  if (row.charmed_by_character_id == null || row.charm_owner_user_id == null) return row;
+  const expiresMs = new Date(row.charm_expires_at).getTime();
+  if (!Number.isFinite(expiresMs) || expiresMs <= Date.now()) return row;
+  return {
+    ...row,
+    charmOwnerUserId: String(row.charm_owner_user_id),
+    charmedByCharacterId: row.charmed_by_character_id,
+    charmExpiresAt: world.now + (expiresMs - Date.now()),
+  };
+}
 
 // Attach the authoritative WebSocket simulation to an existing http server.
 // Returns { close() } so callers/tests can tear it down.
@@ -386,7 +438,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
   const creatureKnown = new WeakMap();
   const creatureFlushMs = opts.creatureFlushMs || 3000;
   const heartbeatMs = opts.heartbeatMs || 30000;
-  const groundItemTtlMs = opts.groundItemTtlMs || 600000; // 10 min
+  // SOMET-482: 180 seconds (game_settings.ground_item_ttl_seconds), replacing
+  // the hardcoded 600000. Held in a mutable local rather than a const because
+  // refreshLootTuning re-reads the setting on the sweep cadence -- an admin
+  // lowering it must reach live drops without a restart. `opts.groundItemTtlMs`
+  // still wins at boot, which is what every existing test passes.
+  let groundItemTtlMs = opts.groundItemTtlMs || 180000;
   const itemSweepMs = opts.itemSweepMs || 60000;
   // Its own interval, NOT itemSweepMs (60000): a 30-second respawn queue
   // drained on a 60-second timer would take 30-90s per creature.
@@ -638,6 +695,16 @@ function attachAuthority(httpServer, pool, opts = {}) {
         };
         worlds.set(canonicalId, entry);
 
+        // SOMET-481: prime the rarity inputs NOW rather than waiting for the
+        // first item sweep. Without this a freshly loaded world drops nothing
+        // but plain white items for up to one sweep interval -- a window a
+        // player can very easily kill something in, and one that would be
+        // invisible in testing because it closes on its own. Awaited (the
+        // world is already in `worlds`, so this fills THIS entry too) but
+        // never fatal: an unpopulated weight table is playable, a failed load
+        // is not.
+        await refreshLootTuning().catch((err) => console.error('loot tuning refresh failed:', err));
+
         // SOMET-309: a player entering a drained world should have it refill,
         // not stay empty forever. Enqueue the deficit ONLY -- do not drain it
         // here. This is not a race, it is a hard ordering fact: the joining
@@ -740,6 +807,57 @@ function attachAuthority(httpServer, pool, opts = {}) {
     return spawn;
   }
 
+  // Contract §6.3 (SOMET-475): `stats` rides EVERY `progression` frame, not
+  // only the refreshPlayerStats push. A client that seeded from a kill push
+  // and then rendered derived numbers otherwise showed pre-level-up values
+  // with nothing to correct them.
+  //
+  // Named once here so the six send sites cannot drift into deriving from
+  // DIFFERENTLY-buffed rows. It is always the stone-buffed derive: an unbuffed
+  // one reports numbers the live world does not use, which is the same silent
+  // overwrite SOMET-245 Task 6 fixed inside applyDerivedStats. A player who
+  // has already disconnected has no inventory to read, so the buff list is
+  // empty and the frame carries the unbuffed bundle -- there is no live
+  // session left for it to disagree with.
+  // SOMET-486 widened this from "the frame's stats" to THE authority's only
+  // derive. It was already the shape three other sites had each hand-inlined
+  // (kill level-up, chest level-up, refreshPlayerStats), and adding a second
+  // per-player input -- the class base pools -- to four copies is how a
+  // Ranger ends up joining at 85 hp and snapping to 100 on its first
+  // level-up. There is now exactly ONE derivePlayerStats call in this file,
+  // and progression_frame_shape.test.js pins that.
+  //
+  // `over` exists for the join path alone, which derives BEFORE addPlayer:
+  // the player is not in the world yet, so neither its inventory nor its
+  // class pools can be read off it.
+  //
+  // SOMET-496 widened it again, from "the authority's only derive" to "the
+  // authority's only FRAME". It now returns the framed progression ROW beside
+  // the bundle, because the row picked up a per-session overlay of its own:
+  // the rolled affixes on the character's equipped items. A frame that sent
+  // the raw row next to gear-aware stats would render a Character tab whose
+  // `gear` column reads zero while the pools listed beside it already include
+  // the gear -- the same advertise-vs-play split 486 closed, moved onto the
+  // wire. Every `{type:'progression'}` send site takes `.progression` from
+  // here; progression_frame_shape.test.js pins that none of them sends a row
+  // this function did not produce.
+  //
+  // THE FOLD ORDER IS LOAD-BEARING. withGearAffixes RECOMPOSES the six
+  // top-level stat keys out of `sources` plus the tree's modifiers, so it
+  // discards anything a previous overlay wrote onto those keys. Gear first,
+  // stones on top. Reversed, every socketed buff stone silently stops
+  // counting for a player who is also wearing an affixed item.
+  const framed = (entry, userId, progression, over = {}) => {
+    const p = entry.world.getPlayer(userId);
+    const inv = over.inv !== undefined ? over.inv : (p ? p.inv : null);
+    const buffs = inv ? socketedBuffStones(inv, entry.world.weapons) : [];
+    const affixes = inv ? equippedAffixGrants(inv) : [];
+    const classPools = over.classPools !== undefined ? over.classPools : (p ? p.classPools : null);
+    const row = withStoneBonuses(withGearAffixes(progression, affixes), buffs);
+    return { progression: row, stats: derivePlayerStats(row, classPools) };
+  };
+  const framedStats = (entry, userId, progression, over = {}) => framed(entry, userId, progression, over).stats;
+
   // Single fire-and-forget entry point for a killed creature: named once here
   // so every kill site (melee attack handler, burn tick, guard tick,
   // projectile tick) shares the same options instead of repeating them. The
@@ -779,13 +897,12 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // PvP path is the one gap that check does not cover, hence this
           // guard rather than relying on tick timing alone.
           if (p && p.hp > 0) {
-            // Magic Stones (SOMET-245) Task 6: fold in any socketed buff-stone
-            // bonuses before deriving, so a kill-triggered level-up does not
-            // silently drop a buff already reflected in this player's live
-            // stats -- derivePlayerStats(progression) alone would compute the
-            // RAW bundle and overwrite the buffed one applyDerivedStats set.
-            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
-            entry.world.applyDerivedStats(result.killerUserId, derivePlayerStats(withStoneBonuses(progression, buffs)));
+            // framedStats folds in socketed buff-stone bonuses AND the class
+            // base pools, so a kill-triggered level-up drops neither: a raw
+            // derivePlayerStats(progression) here would overwrite the buffed
+            // bundle applyDerivedStats set (SOMET-245 Task 6) and would reset
+            // a Ranger's 85 hp to 100 (SOMET-486).
+            entry.world.applyDerivedStats(result.killerUserId, framedStats(entry, result.killerUserId, progression));
           }
         }
         // Best-effort: the killer's socket may be gone (disconnected between
@@ -793,7 +910,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // undefined and send() itself no-ops on a non-OPEN socket, so this
         // never throws either way.
         const sock = entry.sockets.get(result.killerUserId);
-        if (sock) send(sock, { type: 'progression', progression, leveledUp, newLevel, awarded });
+        if (sock) {
+          const f = framed(entry, result.killerUserId, progression);
+          send(sock, {
+            type: 'progression', progression: f.progression, stats: f.stats,
+            leveledUp, newLevel, awarded,
+          });
+        }
       })
       .catch((err) => console.error('death commit failed:', err));
 
@@ -925,7 +1048,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // the death and this commit finishing) — entry.sockets.get returns
       // undefined and send() itself no-ops on a non-OPEN socket either way.
       const sock = entry.sockets.get(userId);
-      if (sock) send(sock, { type: 'progression', progression, lost });
+      if (sock) {
+        const f = framed(entry, userId, progression);
+        send(sock, { type: 'progression', progression: f.progression, stats: f.stats, lost });
+      }
     })
       .catch((err) => console.error('death penalty commit failed:', err));
   };
@@ -1097,9 +1223,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
          WHERE wc.world_id = $1 AND wc.x >= $2 AND wc.x < $3 AND wc.y >= $4 AND wc.y < $5`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
-      entry.world.creatures.addCreatures(rows.rows);
+      entry.world.creatures.addCreatures(rows.rows.map((r) => hydrateCharm(r, entry.world)));
       const itemRows = await pool.query(
-        `SELECT id, item_type_id, x, y, expires_at FROM world_items
+        // `rarity` is NOT optional in this list (SOMET-490). This SELECT is
+        // the ONLY way an item re-enters the sim after flushAndPrune's
+        // pruneInactive forgot it, so a column dropped here does not merely
+        // lose a field -- it makes a foxy drop lose its glow the moment the
+        // player walks a chunk away and comes back, which reads as a render
+        // flicker rather than as a missing column.
+        `SELECT id, item_type_id, x, y, expires_at, rarity FROM world_items
          WHERE world_id = $1 AND x >= $2 AND x < $3 AND y >= $4 AND y < $5 AND expires_at > now()`,
         [entry.worldId, cx * span, cx * span + span, cy * span, cy * span + span],
       );
@@ -1140,7 +1272,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
          WHERE wc.id = ANY($1::uuid[])`,
         [ids],
       );
-      entry.world.creatures.addCreatures(rows.rows);
+      entry.world.creatures.addCreatures(rows.rows.map((r) => hydrateCharm(r, entry.world)));
     } catch (err) {
       // Best-effort, same posture as activateChunk's own catch: log so a
       // persistently failing injection is visible to an operator instead of
@@ -1171,6 +1303,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
     for (const k of entry.loadedChunks) {
       if (!want.has(k)) entry.loadedChunks.delete(k);
     }
+  }
+
+  // SOMET-494. A refused attack has always been silently dropped, and that was
+  // fine while every attack was one deliberate click. "Constant attack" holds
+  // the button down, so the client now has to know WHY a shot was refused:
+  // a cooldown refusal is the normal rhythm of holding and the hold continues
+  // through it, but running out of mana / life / stamina must stop it.
+  //
+  // Only the resource refusal is announced. Cooldown refusals happen many times
+  // a second under a held button and carry no information the client can act
+  // on, so putting them on the wire would be pure noise. Ammo is NOT announced
+  // here either: it is refused further down, after ammo is actually consumed,
+  // and already has its own richer `noammo` frame carrying the item type.
+  function refuseAttack(ws, gate) {
+    if (gate && gate.reason === 'resource') send(ws, { type: 'attackrefused', reason: 'resource' });
   }
 
   function broadcastCreatures(entry) {
@@ -1287,7 +1434,29 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const r = msg.type === 'equip'
         ? await entry.world.setEquipment(pool, ws.userId, msg.itemId, msg.slot)
         : await entry.world.clearEquipment(pool, ws.userId, msg.slot);
-      if (r && !r.ok) send(ws, { type: 'error', message: r.reason || `cannot ${msg.type}` });
+      if (r && !r.ok) { send(ws, { type: 'error', message: r.reason || `cannot ${msg.type}` }); return; }
+
+      // SOMET-496. An item's rolled affixes are a per-session overlay
+      // (services/gearAffixes.js), so the paper doll changing is exactly the
+      // moment they have to be re-folded -- otherwise a +6 INT staff raises
+      // nothing until the player's next kill, chest or level-up happens to
+      // re-derive, and unequipping it leaves the bonus live until then too.
+      //
+      // Same shape and same guards as the socket/unsocket handlers below,
+      // which had to solve this for buff stones: reload the row, frame it
+      // once, push that ONE result into both the world and the wire. The
+      // hp > 0 guard is not optional -- applyDerivedStats clamps current hp to
+      // a floor of 1, so calling it on a player currently sitting at <= 0
+      // awaiting resolveDeaths() would cancel their death.
+      const p = entry.world.getPlayer(ws.userId);
+      if (!p || p.hp <= 0) return;
+      const currentProgression = await loadProgression(pool, p.characterId);
+      const f = framed(entry, ws.userId, currentProgression);
+      entry.world.applyDerivedStats(ws.userId, f.stats);
+      send(ws, {
+        type: 'progression', progression: f.progression, stats: f.stats,
+        leveledUp: false, newLevel: currentProgression.level, awarded: 0,
+      });
     });
   }
 
@@ -1366,6 +1535,36 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const spawn = await loadSpawn(entry.worldId, character.id, entry.row.chunk_size, entry.row, entry);
         if (ws.readyState !== ws.OPEN) return; // client vanished while we awaited spawn
 
+        // SOMET-499, the SECOND window of the same ghost. `entry` was resolved
+        // from the registry BEFORE the policy lookup and loadSpawn above, and
+        // the outgoing session's close can complete its teardown during those
+        // awaits: it removes ITS player, the world then reads empty, and
+        // `worlds.delete` runs while this join is still holding the object.
+        // Registering into a detached entry is the same frozen client by
+        // another route -- the join succeeds and the player is added, but the
+        // tick loop iterates `worlds`, not this object, so no `state` frame is
+        // ever sent. The close-side re-check below cannot cover this one: at
+        // the moment that teardown ran, this session had not registered yet.
+        // Measured over 90 close-then-rejoin runs, this route accounted for
+        // every ghost left after the close-side guard.
+        //
+        // Re-attaching the SAME object, rather than reloading the world: the
+        // entry is intact (the eviction's flushAndPrune is the same routine
+        // flush the creature timer already runs against live worlds), and the
+        // spawn computed above was derived from this entry's row.
+        if (!worlds.has(entry.worldId)) {
+          worlds.set(entry.worldId, entry);
+        } else if (worlds.get(entry.worldId) !== entry) {
+          // A concurrent load re-created this world while we were away, so a
+          // DIFFERENT object is the live one now. Re-attaching would orphan
+          // that object's players -- refuse loudly instead of joining a dead
+          // entry silently, which is the failure this whole block exists to
+          // stop happening.
+          console.warn('join raced a world reload:', entry.worldId, 'character', character.id);
+          send(ws, { type: 'error', message: 'join failed' });
+          return;
+        }
+
         // One live session per account: the newest join wins. (Refusing instead
         // would lock a user out for up to a full heartbeat cycle after a crash,
         // since the dead-socket reaper needs one interval to notice.)
@@ -1435,7 +1634,31 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // from a previous session -- fold that bonus in here too, or a
         // rejoining player would sit at the wrong maxHp/maxMana/etc until
         // their next kill, chest, or socket/unsocket action re-derives it.
-        const stats = derivePlayerStats(withStoneBonuses(progression, socketedBuffStones(inv, entry.world.weapons)));
+        //
+        // SOMET-486: `character.classPools` is what finally makes the class
+        // real. Before this, every class joined at HP_BASE/MANA_BASE and
+        // character select's 100/85/75 was decoration. `over` is needed
+        // because addPlayer has not run yet -- there is no player in the world
+        // to read either the inventory or the pools off.
+        // SOMET-496: the joined frame must carry the FRAMED row, not the bare
+        // composed one -- it is the client's first (and, until the next kill,
+        // only) progression object, so a raw row here leaves the Character tab
+        // showing a zero `gear` column for the whole session.
+        const framedJoin = framed(entry, ws.userId, progression, {
+          inv, classPools: character.classPools,
+        });
+        const stats = framedJoin.stats;
+        // SOMET-472 (spec 8.3). ONE derivation, read twice below -- once for
+        // the sim and once for the wire -- so the server and the client can
+        // never disagree about which bar is spent and which bar is drawn.
+        //
+        // Keyed on the class NAME rather than on main_stat: main_stat is the
+        // passive tree's start position and two classes could legitimately
+        // share one, while the life-cost substitution is a fact about the
+        // Cultist specifically. HOW MUCH a cast costs is not decided here --
+        // that is stats.lifeCostMultiplier, folded in by derivePlayerStats
+        // from the tree rules the line above already composed.
+        const usesLifeCost = character.className === 'Cultist';
 
         // A newer session for this same account may have won (and kicked
         // us) while we awaited inventory above. If so, our reservation was
@@ -1456,7 +1679,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // spawn.bind (SOMET-294) is the player_binds row as loaded, world id and
         // all -- distinct from spawn.respawn, which is always a point in THIS
         // world. See loadSpawn for why the two are separate facts.
-        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id, spawn.bind);
+        entry.world.addPlayer(ws.userId, spawn, inv, spawn.respawn, gold, stats, character.id, spawn.bind, character.classPools, usesLifeCost);
 
         // Latch the tile this join landed on, for EVERY join -- not just a
         // doorway arrival. A resume or a map fast-travel spawns the character
@@ -1534,7 +1757,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // assumption about what addPlayer currently does.
           autoLoot: entry.world.getPlayer(ws.userId).autoLoot,
           gold,
-          progression,
+          progression: framedJoin.progression,
+          // SOMET-472, presentation only: the client hides the mana orb for a
+          // life-cost class, because a Cultist has a mana pool the server
+          // never spends and an inert bar is one the player learns to ignore.
+          // The rule that actually spends the pool runs server-side, in
+          // world.js's resourceRefusal/spendResources.
+          usesLifeCost,
           merchants: (entry.villages || [])
             .filter((v) => v.merchantX != null && v.merchantY != null)
             .map((v) => ({ villageId: v.id, x: v.merchantX, y: v.merchantY })),
@@ -1678,7 +1907,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // Cheap synchronous reject: cooldown / mana / stamina. Nothing has
       // been spent, and a refused attack must not consume the cooldown.
       const gate = entry.world.canAttack(ws.userId);
-      if (!gate.ok) return;
+      if (!gate.ok) { refuseAttack(ws, gate); return; }
 
       // Ammo-free weapons (all melee, all staves, darts) keep the fully
       // synchronous path: no DB round trip on the hot path.
@@ -1715,7 +1944,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         const cur = worlds.get(ws.worldId);
         if (!cur) return;
         const g = cur.world.canAttack(ws.userId);
-        if (!g.ok) return; // nothing spent
+        if (!g.ok) { refuseAttack(ws, g); return; } // nothing spent
         // The equipped weapon may have changed too (an equip frame can be
         // chained between the two): always spend the CURRENT weapon's
         // ammo, and fall back to the sync path if it now needs none.
@@ -1803,10 +2032,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // push.
           if (isBuffStone && p.hp > 0) {
             const currentProgression = await loadProgression(pool, p.characterId);
-            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
-            entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(currentProgression, buffs)));
+            // ONE derive, used for both the live apply and the frame: two
+            // calls could drift into differently-buffed rows, which is
+            // exactly what contract §6.3 exists to stop.
+            const f = framed(entry, ws.userId, currentProgression);
+            entry.world.applyDerivedStats(ws.userId, f.stats);
             send(ws, {
-              type: 'progression', progression: currentProgression,
+              type: 'progression', progression: f.progression, stats: f.stats,
               leveledUp: false, newLevel: currentProgression.level, awarded: 0,
             });
           }
@@ -1842,10 +2074,13 @@ function attachAuthority(httpServer, pool, opts = {}) {
           // socketedBuffStones(p.inv, ...) below no longer counts it.
           if (wasBuffStone && p.hp > 0) {
             const currentProgression = await loadProgression(pool, p.characterId);
-            const buffs = socketedBuffStones(p.inv, entry.world.weapons);
-            entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(currentProgression, buffs)));
+            // ONE derive, used for both the live apply and the frame: two
+            // calls could drift into differently-buffed rows, which is
+            // exactly what contract §6.3 exists to stop.
+            const f = framed(entry, ws.userId, currentProgression);
+            entry.world.applyDerivedStats(ws.userId, f.stats);
             send(ws, {
-              type: 'progression', progression: currentProgression,
+              type: 'progression', progression: f.progression, stats: f.stats,
               leveledUp: false, newLevel: currentProgression.level, awarded: 0,
             });
           }
@@ -1879,6 +2114,131 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const entry = worlds.get(ws.worldId);
       // Strict boolean — a truthy string from the wire must not enable it.
       if (entry) entry.world.setAutoLoot(ws.userId, msg.on === true);
+    },
+
+    // SOMET-473 -- the Druid's charm (spec 8.2). ONE message, TWO targets, and
+    // they are deliberately different mechanics:
+    //
+    //   creature_id -> full control transfer, budgeted, 120s, persisted.
+    //   player_id   -> a 4s PACIFY. No control transfer, no budget, no roster
+    //                  row, nothing persisted. It is a debuff, not a summon.
+    //
+    // The message names its target explicitly rather than the server picking a
+    // "nearest interactable": SOMET-487 is what happens when one key has to
+    // guess between two things a tile apart. A caller may name exactly one.
+    //
+    // Refusals, in order: not a Druid, no target named, nothing in range,
+    // already someone's pet, or over budget. Only "not a Druid" and the budget
+    // say anything -- a miss is silent, exactly like `pickup` with nothing in
+    // range, and so is a pacify that bounces off the immunity window (the
+    // target's protection is not the caster's business).
+    //
+    // The budget is composed from the DATABASE every time rather than cached on
+    // the player. Charisma is a COMPOSED number (class base + passive tree +
+    // gear), and a budget cached at join would be wrong the moment a point is
+    // allocated -- which is a live HTTP route, not a reconnect.
+    charm(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      // wire hygiene: ids are strings, and exactly one target kind per message.
+      const wantsCreature = typeof msg.creature_id === 'string';
+      const wantsPlayer = typeof msg.player_id === 'string';
+      if (wantsCreature === wantsPlayer) return;
+      chainOp(ws, 'charm', async () => {
+        const p = entry.world.getPlayer(ws.userId);
+        if (!p) return;
+        const character = await ownedCharacter(pool, Number(ws.userId), ws.characterId);
+        if (!character || character.className !== 'Druid') {
+          return send(ws, { type: 'error', message: 'Only a Druid can charm' });
+        }
+        const pc = { x: p.x + p.width / 2, y: p.y + p.height / 2 };
+
+        if (wantsPlayer) {
+          const other = entry.world.getPlayer(msg.player_id);
+          // Never yourself: a self-pacify would make you unable to damage
+          // yourself, which is nothing, and would repel you from your own
+          // position, which is a jitter loop.
+          if (!other || other === p) return;
+          const oc = { x: other.x + other.width / 2, y: other.y + other.height / 2 };
+          if (Math.hypot(oc.x - pc.x, oc.y - pc.y) > CHARM_RANGE) return;
+          // applyCharm ITSELF decides whether this lands -- the non-refreshing
+          // immunity window lives there, next to the shock interrupt it copies,
+          // so no caller can chain-lock a player by calling more often. A
+          // refusal is silent: it is the TARGET's guarantee, not a fact the
+          // caster is owed.
+          //
+          // Nothing else happens here. No budget is consulted (a pacified
+          // player is not a summon and never costs a level), no
+          // character_summons row is written, and nothing is persisted -- a 4s
+          // debuff that outlived a restart would be a bug, not a feature.
+          if (applyCharm(other, ws.userId, entry.world.now)) {
+            send(ws, {
+              type: 'charmed', userId: other.userId,
+              expiresAt: entry.world.now + PLAYER_CHARM_MS,
+            });
+          }
+          return;
+        }
+
+        const c = entry.world.creatures.get(msg.creature_id);
+        if (!c) return; // gone: silent, like pickup with nothing in range
+        const cc = { x: c.x + c.width / 2, y: c.y + c.height / 2 };
+        if (Math.hypot(cc.x - pc.x, cc.y - pc.y) > CHARM_RANGE) return;
+        if (c.charmOwnerUserId != null) return; // already someone's pet
+
+        // COMPOSED, not raw, and both halves come off the SAME object.
+        // loadProgression already folds the tree in (it ends in
+        // passiveTreeStore's composeProgression), so `progression.charisma` is
+        // the EFFECTIVE total -- class base + allocated nodes + gear -- and
+        // `progression.rules.treeCharmBonus` is the summed rule the Druid's own
+        // start node (+1) and the ks_cha_pack_leader keystone (+3) grant.
+        //
+        // Reading the raw player_progression.charisma column here instead would
+        // make every charisma point the tree grants invisible to the budget:
+        // the exact dead-grant shape SOMET-472 had to go back and fix, and the
+        // seventh time this epic would have shipped it.
+        //
+        // `?? 0` is a degradation, not a default: composeStats always returns a
+        // `rules` object with treeCharmBonus at its 0 identity, so this only
+        // fires for a progression bundle that failed to compose at all.
+        const progression = await loadProgression(pool, character.id);
+        const budget = charmBudget(progression.charisma, (progression.rules || {}).treeCharmBonus ?? 0);
+        // BY LEVEL SUM, never by count -- see charm.js's canSummon. Read off
+        // the live sim rather than the roster table: `character_summons` is the
+        // "every creature ever charmed" set (spec 8.2), not the list of what is
+        // held right now, and summing that would refuse a druid's second charm
+        // of the session forever.
+        const held = entry.world.creatures.all()
+          .filter((x) => x.charmedByCharacterId === character.id)
+          .map((x) => x.level);
+        const verdict = canSummon(held, c.level, budget);
+        if (!verdict.ok) {
+          return send(ws, { type: 'error', message: `Charm refused: ${verdict.reason}` });
+        }
+
+        const expiresAt = entry.world.now + CHARM_DURATION_MS;
+        entry.world.creatures.charm(msg.creature_id, {
+          userId: ws.userId, characterId: character.id, expiresAt,
+        });
+        // Durable, in one statement each, and AFTER the in-memory charm: a
+        // failed write leaves a pet that lapses on its own timer, while a
+        // failed charm followed by a successful write would leave a durable
+        // pet the sim knows nothing about.
+        await pool.query(
+          `UPDATE world_creatures
+              SET charmed_by_character_id = $1,
+                  charm_expires_at = now() + ($2::int * interval '1 millisecond')
+            WHERE id = $3`,
+          [character.id, CHARM_DURATION_MS, msg.creature_id]);
+        // "Every creature ever charmed is recorded" (spec 8.2). ON CONFLICT DO
+        // NOTHING because the roster is a set, not a log -- see the migration.
+        await pool.query(
+          `INSERT INTO character_summons (character_id, creature_type, level)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (character_id, creature_type, level) DO NOTHING`,
+          [character.id, c.type, c.level]);
+        send(ws, { type: 'charmed', creatureId: msg.creature_id, expiresAt });
+      });
     },
 
     drop(ws, msg) {
@@ -2031,7 +2391,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // granted; whatever does not fit comes back as overflowTypeIds and is
         // spawned on the ground below rather than lost.
         const room = freeSlots(p.inv, entry.world.weapons);
-        const result = await openChest(pool, chest.id, ws.characterId, { freeSlots: room });
+        // SOMET-481: the same weight table and affix pool a creature kill in
+        // this world rolls against, cached on the entry by refreshLootTuning.
+        // Passing entry.world.weapons as the catalog is what lets an affix's
+        // allowed_slots filter apply to a chest grant at all -- without it
+        // every slot-restricted affix would be eligible on every chest item.
+        const result = await openChest(pool, chest.id, ws.characterId, {
+          freeSlots: room,
+          rarityAnchors: entry.rarityAnchors || null,
+          affixPool: entry.affixPool || [],
+          itemTypes: entry.world.weapons,
+        });
         if (!result.ok) { send(ws, { type: 'error', message: result.reason }); return; }
 
         // Final-review fix (SOMET-244 Important #2): openChest now returns
@@ -2041,8 +2411,24 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // without a reload"). Without this a chest-granted item could not
         // be equipped/dropped/sold for the rest of the session (canEquip/
         // dropItem/sellItem all validate against p.inv.items).
+        //
+        // SOMET-481: the push now mirrors claimItem's ENTIRE shape, not just
+        // its id/typeId/quantity. equipRequirements#gearStatGrants reads
+        // `affixes[].effect` off THIS object and silently skips an affix that
+        // has none, so a chest-granted foxy item pushed without them would
+        // grant its stats in the database and nothing at all in play until the
+        // next reconnect -- the same inert-feature shape claimItem's own
+        // comment calls out.
         for (const it of result.items) {
-          p.inv.items.push({ id: it.id, typeId: it.item_type_id, quantity: Number(it.quantity) || 1 });
+          p.inv.items.push({
+            id: it.id,
+            typeId: it.item_type_id,
+            quantity: Number(it.quantity) || 1,
+            rarity: it.rarity || 'white',
+            itemLevel: Number(it.item_level ?? 1),
+            soulbound: it.soulbound === true,
+            affixes: Array.isArray(it.affixes) ? it.affixes : [],
+          });
         }
 
         // Overflow: one toast, not one per item, and the loot lands where the
@@ -2077,11 +2463,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // max HP in the DB but never in the running game until reconnect --
         // "the exact defect A1's review caught."
         if (result.leveledUp && p.hp > 0) {
-          // Magic Stones (SOMET-245) Task 6: same fold-in as onCreatureDeath's
-          // level-up path above -- a chest-XP level-up must not overwrite an
-          // already-live buff-stone bonus with the unbuffed bundle.
-          const buffs = socketedBuffStones(p.inv, entry.world.weapons);
-          entry.world.applyDerivedStats(ws.userId, derivePlayerStats(withStoneBonuses(result.progression, buffs)));
+          // Same fold-in as onCreatureDeath's level-up path above -- a chest-XP
+          // level-up must not overwrite an already-live buff-stone bonus, nor a
+          // class's base pools, with the unbuffed class-blind bundle.
+          entry.world.applyDerivedStats(ws.userId, framedStats(entry, ws.userId, result.progression));
         }
         send(ws, {
           type: 'chestOpened', chestId: chest.id, items: result.items,
@@ -2092,8 +2477,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // leveledUp, newLevel, awarded}`) so the client's existing
         // progression handling (built for kills) also picks up chest XP
         // without a second, chest-specific client-side path.
+        const chestFrame = framed(entry, ws.userId, result.progression);
         send(ws, {
-          type: 'progression', progression: result.progression,
+          type: 'progression', progression: chestFrame.progression,
+          stats: chestFrame.stats,
           leveledUp: result.leveledUp, newLevel: result.newLevel, awarded: result.awarded,
         });
       });
@@ -2278,11 +2665,50 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // starts being a data loss. No-ops when nothing is pending.
         try { await flushBind(p, Date.now(), true); } catch { /* best-effort */ }
       }
+      // SOMET-499: RE-check, because the two awaits above are a window. The
+      // guard at the top of this handler proved nothing about this moment --
+      // a new session for the same account (entry.sockets and world.players
+      // are keyed by userId only) can have registered while persist and
+      // flushBind were in flight, and tearing down here would delete ITS
+      // socket, ITS player and -- the world now looking empty -- the whole
+      // world entry, leaving a client that is still OPEN and still in
+      // wss.clients but never sent another `state` frame. Measured at roughly
+      // one close-then-rejoin in seven before this guard existed.
+      //
+      // Deliberately narrow: only the TEARDOWN is conditional. persist and
+      // flushBind above are the outgoing session's own durable state and are
+      // always correct to run -- a stale close must not skip saving.
+      //
+      // Checked against entry.sockets and NOT against sessionsByUser: the top
+      // of this handler already deleted this socket's sessionsByUser row, so
+      // re-reading that map would report "stale" on EVERY close, including a
+      // genuine last one, and the leak this teardown prevents (an orphaned
+      // player plus a world that is never evicted) would reopen wholesale.
+      if (entry.sockets.get(ws.userId) !== ws) return;
       entry.world.removePlayer(ws.userId);
       entry.sockets.delete(ws.userId);
       if (entry.world.isEmpty()) {
         await flushAndPrune(entry).catch(() => {});
-        worlds.delete(ws.worldId);
+        // Re-checked AFTER that await (SOMET-499), which is a window of exactly
+        // the same kind as the persist/flushBind one above: measured, an entire
+        // join fits inside flushAndPrune, so an unconditional delete here
+        // detaches a world that has a live, freshly-added player in it -- and
+        // the tick loop iterates `worlds`, so that player is never sent another
+        // `state` frame.
+        //
+        // Each clause earns its place:
+        //   isEmpty()      -- a player was added while we flushed;
+        //   sockets.size   -- a session REGISTERS several awaits before its
+        //                     player reaches addPlayer, so an empty world is
+        //                     not an empty room. This is the leg that covers a
+        //                     DIFFERENT account's close landing in that gap;
+        //   worlds.get()   -- the world was evicted and reloaded while we
+        //                     flushed, so the registered entry belongs to
+        //                     somebody else and is not ours to delete.
+        if (entry.world.isEmpty() && entry.sockets.size === 0
+            && worlds.get(ws.worldId) === entry) {
+          worlds.delete(ws.worldId);
+        }
       }
     });
   });
@@ -2739,25 +3165,111 @@ function attachAuthority(httpServer, pool, opts = {}) {
     }
   }
 
-  // Expired ground items: delete from the DB and evict from every live sim.
-  // Also run each sim's own removeExpired so in-sim expiry doesn't lag the DB
-  // sweep by up to itemSweepMs; the two are complementary (DB delete is
-  // authoritative across worlds, removeExpired just keeps each sim tidy).
-  const itemSweepTimer = setInterval(() => {
+  // SOMET-481: the two inputs a rarity roll needs -- the admin-editable weight
+  // table and the affix catalog -- resolved on the sweep cadence, NOT per drop.
+  // A query per kill would put game_settings and affix_types on the death
+  // path, and an admin's retune reaching live drops within one sweep is fast
+  // enough for a tuning knob. Cached on each world entry so spawnDrops and
+  // openChest can read them synchronously.
+  //
+  // The SELECT names every column authority/affixes.js#eligibleAffixes and
+  // #affixValue read. A column added to that module and forgotten here comes
+  // back undefined and the filter silently stops applying -- the same
+  // explicit-column trap loadWorld's own world SELECT carries a warning about.
+  //
+  // SOMET-482 adds the ground-item TTL to the same refresh, for the same
+  // reason and on the same cadence: it is an admin knob, so reading it per
+  // drop would put game_settings on the death path, and baking it in at boot
+  // would mean a restart before a retune reached a live drop.
+  async function refreshLootTuning() {
     if (worlds.size === 0) return;
+    const [anchors, affixes, ttlSeconds] = await Promise.all([
+      getSetting(pool, 'rarity_weights'),
+      // `label` is in the list for SOMET-496: chestLoot.js hands the rolled
+      // affixes straight to the client with no second query, and
+      // gearAffixes.js captions each gear modifier by label. Without it a
+      // chest-opened item's affixes are labelled by their slug until the next
+      // reconnect reloads them through loadInventory (which does select it).
+      pool.query(`SELECT id, key, label, kind, effect, min_value, max_value,
+                         min_item_level, max_item_level, allowed_slots, min_rarity, weight
+                    FROM affix_types`),
+      getSetting(pool, 'ground_item_ttl_seconds'),
+    ]);
+    // A junk or non-positive value keeps the PREVIOUS number rather than
+    // making every drop vanish instantly or never expire at all: a bad row in
+    // game_settings must not be able to empty the world's floor.
+    const seconds = Number(ttlSeconds);
+    if (Number.isFinite(seconds) && seconds > 0) groundItemTtlMs = Math.round(seconds * 1000);
+    for (const entry of worlds.values()) {
+      entry.rarityAnchors = anchors;
+      entry.affixPool = affixes.rows;
+    }
+  }
+
+  // Expired ground items: delete from the DB, evict from every live sim, and
+  // announce each removal so the client can draw a puff where the item was.
+  //
+  // Each sim's own removeExpired runs alongside the DB delete so in-sim expiry
+  // doesn't lag the sweep; the two are complementary (the DB delete is
+  // authoritative across worlds, removeExpired keeps each live sim tidy AND is
+  // the only one of the two that still knows where the item stood).
+  //
+  // A whole function rather than the inline interval body it replaced so
+  // `_itemSweep` can drive one pass synchronously in a test instead of racing
+  // wall-clock itemSweepMs -- the same seam _chestRespawnSweep already is.
+  async function itemSweep() {
+    if (worlds.size === 0) return;
+    // A failed refresh must not stop the sweep: the entry keeps its last-known
+    // tuning (or none, which degrades to plain white drops and the previous
+    // TTL) until the next pass.
+    await refreshLootTuning().catch((err) => console.error('loot tuning refresh failed:', err));
+
     const now = Date.now();
-    for (const entry of worlds.values()) entry.world.groundItems.removeExpired(now);
-    pool.query('DELETE FROM world_items WHERE expires_at <= now() RETURNING id')
-      .then((r) => {
-        if (!r.rowCount) return;
+    for (const entry of worlds.values()) {
+      const removed = entry.world.groundItems.removeExpired(now);
+      if (removed.length === 0) continue;
+      const N = entry.row.chunk_size;
+      // SOMET-482 -- PRESENTATION ONLY. Nothing in this loop touches hp,
+      // status effects, knockback or the projectile sim, and
+      // ground_despawn_vfx.test.js asserts the ABSENCE of every damage-bearing
+      // channel on the frames a despawn produces.
+      //
+      // Deliberately its own frame rather than a rider on `state`: the state
+      // frame is built and drained per TICK, and a despawn happens on the
+      // SWEEP cadence. Riding along would mean stashing the puff until the
+      // next tick, i.e. a second lifetime to keep in step for a cosmetic cue.
+      for (const [userId, ws] of entry.sockets) {
+        const p = entry.world.getPlayer(userId);
+        if (!p) continue;
+        // The same neighbourhood filter broadcastItems uses: a puff for an
+        // item three chunks away is bytes for a frame nobody can see.
+        const pc = chunkOf(p.x, p.y, N);
+        const keys = new Set(neighborhoodKeys(pc.cx, pc.cy, 1));
+        for (const it of removed) {
+          const ic = chunkOf(it.x, it.y, N);
+          if (!keys.has(CHUNK_KEY(ic.cx, ic.cy))) continue;
+          send(ws, { type: 'vfx', name: 'item_despawn', x: it.x, y: it.y });
+        }
+      }
+    }
+
+    try {
+      const r = await pool.query('DELETE FROM world_items WHERE expires_at <= now() RETURNING id');
+      if (r.rowCount) {
         const ids = new Set(r.rows.map((row) => row.id));
         for (const entry of worlds.values()) {
           for (const id of ids) entry.world.groundItems.remove(id);
         }
-      })
-      .catch((err) => console.error('ground item sweep failed:', err));
+      }
+    } catch (err) {
+      console.error('ground item sweep failed:', err);
+    }
 
     chestRespawnSweep();
+  }
+
+  const itemSweepTimer = setInterval(() => {
+    itemSweep().catch((err) => console.error('item sweep failed:', err));
   }, itemSweepMs);
 
   const creatureSweepTimer = setInterval(() => {
@@ -2791,6 +3303,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
     // respawn pass synchronously (and await it, unlike the timer's
     // fire-and-forget call) instead of racing wall-clock creatureSweepMs.
     _creatureRespawnSweep: creatureRespawnSweep,
+    // SOMET-482 test seams, same reasoning as _chestRespawnSweep: run one
+    // ground-item expiry pass (and one tuning refresh) synchronously and await
+    // it, instead of racing wall-clock itemSweepMs.
+    _itemSweep: itemSweep,
+    // SOMET-473 test seam: re-run the joined creature SELECT for specific ids
+    // and feed the rows back into the live sim -- the same call a mid-session
+    // guard INSERT makes. Exposed so charm_live_db.test.js can prove a
+    // PERSISTED charm survives a reload, which is the one thing a unit test
+    // over CreatureSim can never show.
+    _reloadCreatures: injectGuardIntoSim,
+    _refreshLootTuning: refreshLootTuning,
+    // Read back the live TTL. A getter, not the value: the whole point of
+    // SOMET-482 is that this number CHANGES at runtime, so a test that
+    // captured it once could not tell a working refresh from a dead one.
+    _groundItemTtlMs: () => groundItemTtlMs,
     // Evict an IDLE world from the in-memory cache so the next entry reloads it
     // from the DB (fresh seed + creatures). Refuses to evict a world with live
     // sockets to avoid tearing down active sessions.
@@ -2872,11 +3399,15 @@ function attachAuthority(httpServer, pool, opts = {}) {
       // socketed buff stones folded in, the same way the other three
       // applyDerivedStats call sites do, and push THAT (not the passed-in
       // `stats`) both into the world and onto the wire.
-      const buffs = socketedBuffStones(p.inv, entry.world.weapons);
-      const buffedStats = derivePlayerStats(withStoneBonuses(progression, buffs));
-      entry.world.applyDerivedStats(uid, buffedStats);
+      //
+      // SOMET-486: framedStats is what makes the class base pools arrive with
+      // the stones rather than being separately remembered here. progression
+      // Routes' own derive IS class-aware, but it cannot see this session's
+      // sockets, so the recompute stays and must not lose the pools doing it.
+      const buffed = framed(entry, uid, progression);
+      entry.world.applyDerivedStats(uid, buffed.stats);
       const sock = entry.sockets.get(uid);
-      if (sock) send(sock, { type: 'progression', progression, stats: buffedStats });
+      if (sock) send(sock, { type: 'progression', progression: buffed.progression, stats: buffed.stats });
       return true;
     },
     close() {

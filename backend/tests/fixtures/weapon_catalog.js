@@ -20,8 +20,13 @@
 // backfilled per 1714440019000_weapon_catalog.js) plus the 18 new weapons
 // from 1714440019000_weapon_catalog.js, with stamina_cost rebalanced per
 // 1714440020000_rebalance_stamina.js, plus the ammo/aoe columns and the 3
-// ammo rows from 1714440021000_aoe_ammo.js. 22 weapons + 3 ammo = 25 rows.
-// Keep in sync with the migrations.
+// ammo rows from 1714440021000_aoe_ammo.js. 22 weapons + 3 ammo = 25 rows,
+// plus the Monk's `quarterstaff` from 1714440516000 (SOMET-504), `unarmed`
+// from 1714440517000 (SOMET-509) and the gear ladder's 30 weapons from
+// 1714440506000 -- 54 weapons + 3 ammo = 57 rows.
+// Keep in sync with the migrations: 'the live item_types catalog matches
+// SEED_ROWS' reports ANY weapon or ammo row in the database that is missing
+// here, so a migration that adds a weapon must add it to this list too.
 const SEED_ROWS = [
   // --- original 4, from 1714440016000 (+ stamina backfill/rebalance) ---
   { id: 1, name: 'dagger', category: 'weapon', kind: 'melee', damage: 8, cooldown: 0.30,
@@ -128,6 +133,43 @@ const SEED_ROWS = [
     reach: null, arc_width: null, range: 800, projectile_speed: 850, projectile_radius: 14,
     pierce: 1, mana_cost: 32, stamina_cost: 0, element: 'arcane',
     stackable: false, ammo_type_id: null, aoe_radius: 110 },
+
+  // --- the Monk's starting weapon, from 1714440516000_monk_quarterstaff
+  // (SOMET-504) ---
+  //
+  // Replaces `stick` in the Monk's kit; the stick itself stays in the catalog
+  // (and above in this fixture) because it is an ordinary item other content
+  // may drop. Same 7 damage as the stick, on 0.25s -- the fastest cooldown in
+  // the catalog, tied with `knife` -- for 28.0 dps against the dagger
+  // fallback's 26.7. Plain physical at zero cost on purpose: a nonzero
+  // mana_cost or a non-physical element would send it through
+  // activeWeaponType's bare-magic-weapon branch and zero it to the dagger's
+  // damage. See that migration's header for the whole argument.
+  { id: 25, name: 'quarterstaff', category: 'weapon', kind: 'melee', damage: 7, cooldown: 0.25,
+    reach: 110, arc_width: 0.7, range: null, projectile_speed: null, projectile_radius: null,
+    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
+
+  // --- the weapon a character holding NOTHING fights with, from
+  // 1714440517000_equal_starts_no_starting_kit (SOMET-509) ---
+  //
+  // items.js#DEFAULT_WEAPON_NAME names this row, so it is what
+  // activeWeaponType returns for an empty main hand. It is a real catalog row
+  // rather than a constant in code precisely so it shows up here and is held to
+  // the same standard as every other weapon.
+  //
+  // 3 damage on 0.6s = 5.0 dps, against a starting-band floor of 7.1
+  // (crude-wand), so every authored weapon is an upgrade. Free, in both pools:
+  // this is where a player lands when the mana is gone or the quiver is empty,
+  // and a cost on the floor would mean a drained player cannot attack at all.
+  // Plain physical for the same reason the quarterstaff is -- a mana_cost or a
+  // non-physical element would route it through activeWeaponType's
+  // bare-magic-weapon branch, which is for equipped weapons, not for fists.
+  { id: 26, name: 'unarmed', category: 'weapon', kind: 'melee', damage: 3, cooldown: 0.6,
+    reach: 55, arc_width: 0.5, range: null, projectile_speed: null, projectile_radius: null,
+    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
+
   // --- 3 ammo rows, from 1714440021000_aoe_ammo.js ---
   { id: 101, name: 'arrow', category: 'ammo', kind: null, damage: 0, cooldown: 0,
     reach: null, arc_width: null, range: null, projectile_speed: null, projectile_radius: null,
@@ -141,6 +183,47 @@ const SEED_ROWS = [
     reach: null, arc_width: null, range: null, projectile_speed: null, projectile_radius: null,
     pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
     stackable: true, ammo_type_id: null, aoe_radius: null },
+
+  // --- the base gear ladder's 30 weapons, from 1714440506000_base_gear_ladder
+  // (SOMET-479, progression epic T11) ---
+  //
+  // The ladder's other 120 rows are armor, which this fixture deliberately
+  // does not mirror ("SEED_ROWS is weapon+ammo only"). These 30 are here
+  // because they ARE weapons and the live-catalog comparison above reports any
+  // weapon row it cannot find.
+  //
+  // TRANSCRIBED BY HAND from seeds/data/gearLadder.js's two authored tables,
+  // NOT imported from generateGearLadder. Importing the generator would make
+  // this fixture and the migration the same source and the comparison above
+  // would stop being able to notice a difference between them.
+  //
+  //   blade  = 6 x tier power, melee, reach 80,  arc 1.2, cooldown 0.55
+  //   spear  = 8 x tier power, melee, reach 150, arc 0.7, cooldown 0.80
+  //   wand   = 5 x tier power, projectile, range 420, speed 520, radius 6, cooldown 0.70
+  //   powers = 1.0 1.6 2.4 3.4 4.6 6.0 7.8 9.8 12.0 14.5
+  //
+  // The ids are local to this fixture (the mock pool in
+  // 'the seeded catalog has no structurally broken weapon' keys a Map on
+  // them); the live comparison excludes id on purpose.
+  ...[
+    ['crude', 6, 8, 5], ['iron', 9.6, 12.8, 8], ['steel', 14.4, 19.2, 12],
+    ['tempered', 20.4, 27.2, 17], ['runed', 27.6, 36.8, 23], ['obsidian', 36, 48, 30],
+    ['astral', 46.8, 62.4, 39], ['void', 58.8, 78.4, 49], ['dragon', 72, 96, 60],
+    ['mythic', 87, 116, 72.5],
+  ].flatMap(([prefix, blade, spear, wand], i) => [
+    { id: 501 + i * 3, name: `${prefix}-blade`, category: 'weapon', kind: 'melee', damage: blade, cooldown: 0.55,
+      reach: 80, arc_width: 1.2, range: null, projectile_speed: null, projectile_radius: null,
+      pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+      stackable: false, ammo_type_id: null, aoe_radius: null },
+    { id: 502 + i * 3, name: `${prefix}-spear`, category: 'weapon', kind: 'melee', damage: spear, cooldown: 0.80,
+      reach: 150, arc_width: 0.7, range: null, projectile_speed: null, projectile_radius: null,
+      pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+      stackable: false, ammo_type_id: null, aoe_radius: null },
+    { id: 503 + i * 3, name: `${prefix}-wand`, category: 'weapon', kind: 'projectile', damage: wand, cooldown: 0.70,
+      reach: null, arc_width: null, range: 420, projectile_speed: 520, projectile_radius: 6,
+      pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+      stackable: false, ammo_type_id: null, aoe_radius: null },
+  ]),
 ];
 
 // The fastest (lowest) cooldown, in MILLISECONDS, of any weapon carrying

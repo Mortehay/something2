@@ -20,6 +20,7 @@ import SettingsAdmin from "./games/something2/SettingsAdmin";
 import PlayerWorldMap from "./games/something2/PlayerWorldMap";
 import CreatureBehaviorsAdmin from "./games/something2/CreatureBehaviorsAdmin";
 import VfxEffectsAdmin from './games/something2/VfxEffectsAdmin.jsx';
+import ProgressionAdmin from './games/something2/ProgressionAdmin.jsx';
 
 import { DarkModeProvider } from "./context/DarkModeContext";
 import { AuthProvider } from "./context/AuthContext";
@@ -64,6 +65,7 @@ function App() {
                       <Route path="creature-behaviors" element={<CreatureBehaviorsAdmin />} />
                       <Route path="vfx" element={<VfxEffectsAdmin />} />
                       <Route path="world-map" element={<MapGraphAdmin />} />
+                      <Route path="admin/progression" element={<ProgressionAdmin />} />
                       <Route path="settings" element={<SettingsAdmin />} />
                     </Route>
                   </Route>

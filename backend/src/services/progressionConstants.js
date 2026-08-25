@@ -8,22 +8,42 @@
 //
 // The one property that is NOT provisional: every formula in playerStats.js
 // is an identity at BASE_STAT. A fresh character must reproduce the game's
-// pre-A2 numbers exactly -- 100 hp, 100 mana, 10 mana/s, x1.0 damage, x1.0
-// cooldown, 0.5 sell fraction. Change a growth rate freely; never change a
-// base such that a level-1 character's numbers move.
+// pre-A2 numbers exactly -- 10 mana/s, x1.0 damage, x1.0 cooldown, 0.5 sell
+// fraction, and for a WARRIOR 100 hp / 100 mana. Change a growth rate freely;
+// never change a base such that a level-1 character's numbers move.
+//
+// SOMET-486 narrowed the pool half of that identity from "every class" to
+// "Warrior": at BASE_STAT a character's pools are exactly its class's base
+// pools, and Ranger/Mage are deliberately not 100/100. Every live character
+// predating 486 is a Warrior, so nothing moved.
 
 const BASE_STAT = 5;
 const STAT_KEYS = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
-const MAX_LEVEL = 50;
-const STAT_POINTS_PER_LEVEL = 3;
+const MAX_LEVEL = 150;
 
-// CON -> max hp. Base matches PLAYER_MAX_HP (authority/world.js:17).
+// CON -> max hp, INT -> max mana.
+//
+// SOMET-486 demoted HP_BASE/MANA_BASE from the UNIVERSAL base to the FALLBACK
+// base. A character whose class row is known contributes entity_types.max_hp /
+// max_mana instead; these two are what derivePlayerStats uses when there is no
+// class row, or its pool columns are NULL. They stay at 100/100 because that
+// is Warrior's base and Warrior is what every character predating 486 is --
+// see the migration 1714440509000 header for the three classes' numbers.
 const HP_BASE = 100;
 const HP_PER_CON = 10;
 
-// INT -> max mana. Base matches PLAYER_MAX_MANA (authority/world.js:18).
 const MANA_BASE = 100;
 const MANA_PER_INT = 10;
+
+// Stamina's base pool. No stat scales it and no class row carries it, so this
+// is its whole starting value; the passive tree's `resource` grants are the
+// only thing that moves it (SOMET-495).
+//
+// It was `PLAYER_MAX_STAMINA = 100` in authority/world.js until 495. world.js
+// still exports that name -- several tests import it -- but it is now an alias
+// for this constant rather than a second copy of the number, so the pool a
+// player joins with and the pool derivePlayerStats computes cannot drift.
+const STAMINA_BASE = 100;
 
 // STR -> physical damage, INT -> every other element. The split is the
 // weapon's existing `element` column; no new field.
@@ -53,9 +73,17 @@ const PRICE_PER_CHA = 0.02;
 const SELL_FRACTION_BASE = 0.5;
 const SELL_FRACTION_MAX = 0.9;
 
-// XP curve. xpToNext(level) = XP_BASE * level, so the cumulative floor is
-// XP_BASE * (level-1) * level / 2: 0, 100, 300, 600, 1000, ...
-const XP_BASE = 100;
+// XP curve. xpToNext(level) = round(XP_BASE * level^XP_EXPONENT), so the
+// cumulative floor has NO closed form and is precomputed as a 150-entry table
+// in playerStats.js. Cost of a level: 18 at 1, 45 at 2, 385 at 10, 3273 at 50,
+// 8228 at 100, 14108 at 150. Cumulative to 50 is 68,598 (down from 122,500
+// under the old linear curve) and to 150 is 901,212.
+//
+// THIS IS NOT A game_settings KEY, deliberately (design doc section 3.5).
+// Changing it re-levels every character in the database on the next read; an
+// admin toggling a number in a form must not be able to do that.
+const XP_BASE = 18;
+const XP_EXPONENT = 1.33;
 
 // Kill XP scales with the creature's A1 level RELATIVE to the player's, so
 // farming trivial creatures decays to literally zero (diff <= -5).
@@ -77,15 +105,26 @@ const XP_LEVEL_DIFF_MAX = 2;
 const DEATH_PENALTY_MIN = 0.005;
 const DEATH_PENALTY_MAX = 0.10;
 
-// Respec cost in gold: RESPEC_BASE * level.
+// RETIRED as the live respec cost (SOMET-475). The cost is now
+// gameSettings.respec_base_gold x level -- an ADMIN-TUNABLE setting, read by
+// passiveTreeStore.respecPassives/respecQuote. Nothing in src/ reads the
+// constant below any more.
+//
+// It is kept only because gameSettings.DEFAULTS.respec_base_gold must keep
+// matching it: a fresh database with no game_settings row falls back to that
+// default, and if the two ever disagreed the "unconfigured" cost would
+// silently differ from the documented one. progression_store.test.js's
+// hand-written 200 (50 x level 4) is written against the SETTING, not this.
+// Do not reintroduce a read of it -- that is the RESPEC_BASE drift
+// CharacterSheet.jsx's F2 header describes, from the other side.
 const RESPEC_BASE = 50;
 
 module.exports = {
-  BASE_STAT, STAT_KEYS, MAX_LEVEL, STAT_POINTS_PER_LEVEL,
-  HP_BASE, HP_PER_CON, MANA_BASE, MANA_PER_INT,
+  BASE_STAT, STAT_KEYS, MAX_LEVEL,
+  HP_BASE, HP_PER_CON, MANA_BASE, MANA_PER_INT, STAMINA_BASE,
   MELEE_PER_STR, SPELL_PER_INT, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
   MANA_REGEN_BASE, MANA_REGEN_PER_WIS,
   PRICE_PER_CHA, SELL_FRACTION_BASE, SELL_FRACTION_MAX,
-  XP_BASE, XP_KILL_BASE, XP_LEVEL_DIFF_SLOPE, XP_LEVEL_DIFF_MAX,
+  XP_BASE, XP_EXPONENT, XP_KILL_BASE, XP_LEVEL_DIFF_SLOPE, XP_LEVEL_DIFF_MAX,
   DEATH_PENALTY_MIN, DEATH_PENALTY_MAX, RESPEC_BASE,
 };

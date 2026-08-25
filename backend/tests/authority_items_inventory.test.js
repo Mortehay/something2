@@ -72,11 +72,51 @@ test('loadInventory returns owned instances and the equipment map', async () => 
     ] })],
   ]);
   const inv = await loadInventory(pool, 'u1');
+  // SOMET-480: rarity / itemLevel / affixes ride every instance now. These
+  // scripted rows omit the new columns, so the values below are the defaults a
+  // partial row falls back to -- an instance with no rolled identity reads as
+  // a plain white level-1 item, which is what every pre-migration row is.
   assert.deepEqual(inv.items, [
-    { id: 'i1', typeId: 1, quantity: 1, soulbound: false },
-    { id: 'i2', typeId: 5, quantity: 1, soulbound: false },
+    { id: 'i1', typeId: 1, quantity: 1, soulbound: false, rarity: 'white', itemLevel: 1, affixes: [] },
+    { id: 'i2', typeId: 5, quantity: 1, soulbound: false, rarity: 'white', itemLevel: 1, affixes: [] },
   ]);
   assert.deepEqual(inv.equipment, { main_hand: 'i1' });
+});
+
+// SOMET-480. Same reasoning as the soulbound SELECT-list pin above, and the
+// same failure mode: a column the query never asks for reads as undefined and
+// silently degrades every instance to a plain white item, with the whole
+// rarity feature live in the schema and inert in play.
+test('loadInventory selects rarity, item_level and joins the affix rows', async () => {
+  const pool = recordingPool([
+    [/FROM player_items/i, () => ({ rows: [] })],
+    [/FROM player_equipment/i, () => ({ rows: [] })],
+  ]);
+  await loadInventory(pool, 'c1');
+  const itemsQuery = pool.calls.find((c) => /FROM player_items/i.test(c.sql));
+  assert.match(itemsQuery.sql, /\brarity\b/i, 'the SELECT list must ask for rarity');
+  assert.match(itemsQuery.sql, /\bitem_level\b/i, 'the SELECT list must ask for item_level');
+  assert.match(itemsQuery.sql, /JOIN\s+player_item_affixes/i, 'the affix rows must be joined');
+  assert.match(itemsQuery.sql, /JOIN\s+affix_types/i,
+    'affix_types must be joined too -- a stat affix is identified by its effect, not its key');
+});
+
+// The mapper must READ the row, not hardcode a default. A constant-white
+// mapper satisfies the defaults test above and is wrong for every rolled item.
+test('loadInventory reports rarity, item level and affixes per instance', async () => {
+  const rolled = [{ affixTypeId: 3, key: 'of_might', value: 7.5, effect: { type: 'stat', stat: 'strength' } }];
+  const pool = recordingPool([
+    [/FROM player_items/i, () => ({ rows: [
+      { id: 'plain', item_type_id: 10, quantity: 1, soulbound: false, rarity: 'white', item_level: 1, affixes: [] },
+      { id: 'rolled', item_type_id: 10, quantity: 1, soulbound: false, rarity: 'foxy', item_level: 88, affixes: rolled },
+    ] })],
+    [/FROM player_equipment/i, () => ({ rows: [] })],
+  ]);
+  const inv = await loadInventory(pool, 'c1');
+  assert.deepEqual(
+    inv.items.map((i) => [i.id, i.rarity, i.itemLevel, i.affixes]),
+    [['plain', 'white', 1, []], ['rolled', 'foxy', 88, rolled]],
+  );
 });
 
 // Magic-stones Task 5: loadInventory hydrates each host item's
@@ -197,10 +237,75 @@ test('grantStartingLoadout skips loadout entries missing from the catalog (no cr
       { item_type_id: 1, quantity: 1 },
       { item_type_id: 99, quantity: 1 },
     ] })],
-    [/INSERT INTO player_items/i, (sql, p) => { inserts.push(p); return { rows: [] }; }],
+    // SOMET-492: the insert is `... RETURNING id` now, because a socket
+    // directive has to be wired to the exact instance this grant created. A
+    // mock that returns no row would make grantStartingLoadout throw on
+    // rows[0], so returning one here is the fixture keeping up with the query
+    // rather than the guard being relaxed.
+    [/INSERT INTO player_items/i, (sql, p) => { inserts.push(p); return { rows: [{ id: 'new' }] }; }],
   ]);
   const granted = await grantStartingLoadout(pool, { id: 3, entityTypeId: 11 },
     new Map([[1, { id: 1, name: 'short sword' }]]));
   assert.equal(granted, true);
   assert.equal(inserts.length, 1); // only the short sword existed
+});
+
+// SOMET-492. class_loadouts can now say HOW a granted item is worn, and this is
+// the unit-level proof that the two directives are read and acted on -- the
+// live end-to-end proof (a real Cultist, a real join, hp actually moving) is
+// cultist_starting_loadout_db.test.js.
+test('grantStartingLoadout equips what the loadout says to wear and sockets what it says to socket', async () => {
+  const equips = [];
+  const sockets = [];
+  const stoneRows = [];
+  let nextId = 0;
+  const pool = recordingPool([
+    [/UPDATE characters SET starting_loadout_granted_at/i, () => ({ rows: [{ id: 3 }], rowCount: 1 })],
+    // The stone is listed BEFORE its host on purpose: a first-pass wiring that
+    // socketed inline, as each row was inserted, would find no host yet and
+    // silently skip. The directive must survive its host arriving later.
+    [/FROM class_loadouts/i, () => ({ rows: [
+      { item_type_id: 7, quantity: 1, equip_slot: null, socket_into_item_type_id: 2 },
+      { item_type_id: 2, quantity: 1, equip_slot: 'main_hand', socket_into_item_type_id: null },
+      { item_type_id: 5, quantity: 1, equip_slot: null, socket_into_item_type_id: null },
+    ] })],
+    [/INSERT INTO player_items/i, () => { nextId += 1; return { rows: [{ id: `pi${nextId}` }] }; }],
+    [/INSERT INTO stone_instances/i, (sql, p) => { stoneRows.push(p); return { rows: [] }; }],
+    [/INSERT INTO player_equipment/i, (sql, p) => { equips.push(p); return { rows: [] }; }],
+    [/UPDATE stone_instances SET socketed_into_id/i, (sql, p) => { sockets.push(p); return { rows: [] }; }],
+  ]);
+  const itemTypes = new Map([
+    [2, { id: 2, name: 'apprentice staff', category: 'weapon' }],
+    [5, { id: 5, name: 'leather-vest', category: 'armor' }],
+    [7, { id: 7, name: 'stone_of_apprentice staff', category: 'stone' }],
+  ]);
+  const granted = await grantStartingLoadout(pool, { id: 3, entityTypeId: 11 }, itemTypes);
+  assert.strictEqual(granted, true);
+
+  // The stone was inserted first, so it is pi1 and the staff is pi2.
+  assert.deepStrictEqual(stoneRows, [['pi1']],
+    'a granted stone needs its stone_instances row or it can never be socketed');
+  assert.deepStrictEqual(equips, [[3, 'main_hand', 'pi2']]);
+  assert.deepStrictEqual(sockets, [['pi2', 'pi1']],
+    'the stone is socketed into the staff instance this same grant created');
+});
+
+test('grantStartingLoadout leaves a stone loose when its host is not in the same loadout', async () => {
+  const sockets = [];
+  const pool = recordingPool([
+    [/UPDATE characters SET starting_loadout_granted_at/i, () => ({ rows: [{ id: 3 }], rowCount: 1 })],
+    // Item type 2 is named as the host but is not granted to this class.
+    [/FROM class_loadouts/i, () => ({ rows: [
+      { item_type_id: 7, quantity: 1, equip_slot: null, socket_into_item_type_id: 2 },
+    ] })],
+    [/INSERT INTO player_items/i, () => ({ rows: [{ id: 'pi1' }] })],
+    [/INSERT INTO stone_instances/i, () => ({ rows: [] })],
+    [/UPDATE stone_instances SET socketed_into_id/i, (sql, p) => { sockets.push(p); return { rows: [] }; }],
+  ]);
+  const granted = await grantStartingLoadout(pool, { id: 3, entityTypeId: 11 },
+    new Map([[7, { id: 7, name: 'stone_of_apprentice staff', category: 'stone' }]]));
+  // Granted, not thrown: a content error must not make a character permanently
+  // unable to join.
+  assert.strictEqual(granted, true);
+  assert.deepStrictEqual(sockets, []);
 });

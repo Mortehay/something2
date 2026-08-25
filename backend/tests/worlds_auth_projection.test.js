@@ -72,12 +72,23 @@ function mockPool({
       if (/FROM users WHERE id/i.test(sql) && /token_version/i.test(sql)) {
         return { rows: [{ token_version: tokenVersion, role }] };
       }
-      if (/FROM characters WHERE id\s*=\s*\$1 AND user_id\s*=\s*\$2/i.test(sql)) {
+      // SOMET-486 gave ownedCharacter a LEFT JOIN onto entity_types for the
+      // class base pools, so the old `FROM characters WHERE ...` literal no
+      // longer matches and every request through it 500'd. Keyed on the WHERE
+      // clause, which is the part that carries this query's meaning, rather
+      // than on the FROM line -- a matcher pinned to the exact column list is
+      // the fixture shape this repo keeps rediscovering.
+      if (/FROM characters\b/i.test(sql) && /\.?id\s*=\s*\$1 AND c?\.?user_id\s*=\s*\$2/i.test(sql)) {
         const [id, userId] = params;
         const match = ownedCharacters.find(
           (c) => String(c.id) === String(id) && String(c.userId) === String(userId),
         );
-        return { rows: match ? [{ id: match.id, entity_type_id: match.entityTypeId ?? 1 }] : [] };
+        // max_hp/max_mana ride the real row now; nothing on this route reads
+        // them, but omitting them would make the fixture describe a shape the
+        // service can no longer receive.
+        return { rows: match
+          ? [{ id: match.id, entity_type_id: match.entityTypeId ?? 1, max_hp: 100, max_mana: 100 }]
+          : [] };
       }
       if (/FROM character_visited_worlds WHERE character_id\s*=\s*\$1/i.test(sql)) {
         const [characterId] = params;

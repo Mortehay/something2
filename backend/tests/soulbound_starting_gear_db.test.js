@@ -1,9 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { loadItemTypes, grantStartingLoadout } = require('../src/authority/items.js');
 const { sellItem } = require('../src/authority/trade.js');
-const { dropItem } = require('../src/authority/loot.js');
+const { dropItem, claimItem } = require('../src/authority/loot.js');
 
 // SOMET-277 (P0) regression suite, against a REAL database.
 //
@@ -92,15 +91,54 @@ async function cleanup(pool, userId) {
 // The granted instance worth the most gold (the short sword, for a Warrior),
 // read out of the catalog rather than hardcoded so this states "the valuable
 // piece of the class's loadout" instead of "item type 10".
+// A soulbound instance, granted.
+//
+// SOMET-509 CHANGED WHERE THIS COMES FROM, AND THE TICKET SAYS WHY IT MUST STILL
+// EXIST. This used to run grantStartingLoadout and then pick the most valuable
+// single-quantity item out of the kit it handed over. Every character now starts
+// unarmed -- class_loadouts is empty -- so grantStartingLoadout creates nothing
+// and there is no kit item to find.
+//
+// SOMET-509 is explicit that SOMET-277's guard is only MOOT FOR NEW CHARACTERS
+// and must not be deleted: it still applies to anything else granted soulbound,
+// and the exploit it closes (grant it, sell it, delete the character, keep the
+// account-wide gold) is a property of the soulbound FLAG, not of starting kits.
+//
+// So the instance is now granted directly, with soulbound = true, exactly as
+// grantStartingLoadout's own INSERT writes it -- and everything downstream, the
+// whole reason this file exists, is unchanged. What is no longer covered here
+// is the narrower claim that grantStartingLoadout marks its own instances
+// soulbound; with no rows to act on, that claim has no observable behaviour
+// left to assert, and asserting it against a hand-inserted row would be a test
+// checking its own fixture.
 async function grantedSellable(pool, characterId) {
   const r = await pool.query(
-    `SELECT pi.id, pi.item_type_id, pi.soulbound, it.value
-       FROM player_items pi JOIN item_types it ON it.id = pi.item_type_id
-      WHERE pi.character_id = $1 AND pi.quantity = 1 AND it.value > 0
-      ORDER BY it.value DESC, pi.id ASC LIMIT 1`,
+    `INSERT INTO player_items (character_id, item_type_id, quantity, soulbound)
+     SELECT $1, it.id, 1, true
+       FROM item_types it
+      WHERE it.category = 'weapon' AND it.value > 0
+      ORDER BY it.value DESC, it.id ASC
+      LIMIT 1
+     RETURNING id, item_type_id, soulbound`,
     [characterId],
   );
-  assert.equal(r.rowCount, 1, 'the class loadout granted no single-quantity item with a value');
+  assert.equal(r.rowCount, 1, 'the catalog has no valued weapon to grant, so nothing below is tested');
+  assert.equal(r.rows[0].soulbound, true,
+    'the granted instance must be soulbound -- without this the guard has nothing to refuse');
+
+  // ...and WORN, because SOMET-493's grant equipped what it handed over and the
+  // first test below depends on that: sellItem's SOMET-484 backstop ('unequip
+  // it first') sits AHEAD of the soulbound refusal, and both are exercised in
+  // order precisely so the soulbound branch cannot be deleted while the equip
+  // check keeps the test green. An unworn fixture would skip straight past the
+  // first guard and quietly stop testing the ordering.
+  const eq = await pool.query(
+    `INSERT INTO player_equipment (character_id, slot, item_id)
+     SELECT $1, it.slot, $2 FROM item_types it WHERE it.id = $3
+     RETURNING slot`,
+    [characterId, r.rows[0].id, r.rows[0].item_type_id],
+  );
+  assert.equal(eq.rowCount, 1, 'the granted instance must end up on the paper doll');
   return r.rows[0];
 }
 
@@ -125,8 +163,22 @@ function mkPlayer(userId, items) {
   };
 }
 
+// `claiming` and groundItems.remove exist because SOMET-480 makes the bound
+// item DROPPABLE, so this file now also drives the pickup half of the round
+// trip through the real claimItem.
 function mkEntry(worldId, player) {
-  return { worldId, world: { getPlayer: () => player, groundItems: { add: () => {} } } };
+  return {
+    worldId,
+    claiming: new Set(),
+    world: {
+      getPlayer: () => player,
+      // `weapons` is the catalog claimItem's capacity pre-check passes to
+      // hasFreeSlot; an empty Map means "no row is currency", which is right
+      // for the two gear instances this file creates.
+      weapons: new Map(),
+      groundItems: { add: () => {}, remove: () => {} },
+    },
+  };
 }
 
 async function goldOf(pool, userId) {
@@ -136,6 +188,21 @@ async function goldOf(pool, userId) {
 
 async function itemExists(pool, itemId) {
   const r = await pool.query('SELECT 1 FROM player_items WHERE id = $1', [itemId]);
+  return r.rowCount === 1;
+}
+
+// SOMET-484: a sale no longer DESTROYS the instance, it hands it to the
+// merchant (player_items.merchant_stock_id). "The seller no longer has it" is
+// therefore the question this file actually cares about, and itemExists can no
+// longer answer it -- after a successful sale the row is still there, owned by
+// nobody. Asserting itemExists === false would now fail on a correct sale;
+// asserting itemExists === true would pass on a REFUSED one too, and the
+// refusal case above is the whole point of the test, so the two need different
+// questions.
+async function ownedByCharacter(pool, itemId, characterId) {
+  const r = await pool.query(
+    'SELECT 1 FROM player_items WHERE id = $1 AND character_id = $2', [itemId, characterId],
+  );
   return r.rowCount === 1;
 }
 
@@ -160,13 +227,11 @@ test('SOMET-277: a GRANTED starting-loadout instance cannot be sold, and the ide
   try {
     const fx = await createFixture(pool, 'sell');
     userId = fx.userId;
-    const itemTypes = await loadItemTypes(pool);
 
-    assert.equal(await grantStartingLoadout(pool, fx.character, itemTypes), true, 'grant must succeed');
-
+    // SOMET-509: no grantStartingLoadout call any more -- with class_loadouts
+    // empty it grants nothing. grantedSellable creates the soulbound instance
+    // directly; see its header.
     const granted = await grantedSellable(pool, fx.character.id);
-    assert.equal(granted.soulbound, true,
-      'grantStartingLoadout must mark the instances it creates soulbound -- without this the guard has nothing to refuse');
     const looted = await lootedTwin(pool, fx.character.id, granted.item_type_id);
 
     const items = [
@@ -177,13 +242,34 @@ test('SOMET-277: a GRANTED starting-loadout instance cannot be sold, and the ide
     const entry = mkEntry(village.worldId, player);
     const goldBefore = await goldOf(pool, fx.userId);
 
+    // SOMET-493 made grantStartingLoadout WEAR the kit, so the granted sword
+    // now arrives with a player_equipment row -- and sellItem's SOMET-484
+    // database backstop ('unequip it first') sits AHEAD of the soulbound
+    // refusal and swallows every attempt to sell it. The faucet stays shut
+    // either way, but this test would silently stop testing the guard it is
+    // named after: it would be asserting the equip check, forever, while the
+    // soulbound branch could be deleted outright and it would still pass.
+    //
+    // So both are exercised, in order. First that the worn state refuses...
+    const worn = await sellItem(pool, entry, fx.userId, fx.character.id, village.villageId, granted.id);
+    assert.equal(worn.ok, false, 'a worn item must not be sellable out from under the paper doll');
+    assert.match(worn.reason, /unequip/i);
+
+    // ...then the item is taken OFF, which strips that first guard away and
+    // leaves the bound flag as the only thing standing between the granted
+    // sword and the gold it must never become.
+    const off = await pool.query(
+      'DELETE FROM player_equipment WHERE item_id = $1 RETURNING slot', [granted.id]);
+    assert.equal(off.rowCount, 1,
+      'the granted item must have been WORN, or the unequip guard above passed for the wrong reason');
+
     // --- the faucet itself: the granted instance must not become gold ---
     const refused = await sellItem(pool, entry, fx.userId, fx.character.id, village.villageId, granted.id);
     assert.equal(refused.ok, false, 'selling granted starting gear must be refused');
     assert.match(refused.reason, /cannot be sold/i, 'the refusal must be a clear, player-readable reason');
     assert.equal(await goldOf(pool, fx.userId), goldBefore, 'no gold may be credited for a refused sale');
-    assert.equal(await itemExists(pool, granted.id), true,
-      'the refusal must ROLL BACK the DELETE -- a destroyed item with no payment is worse than the exploit');
+    assert.strictEqual(await ownedByCharacter(pool, granted.id, fx.character.id), true,
+      'the refusal must ROLL BACK -- the seller must still OWN the item, not merely have a row somewhere');
     assert.ok(player.inv.items.some((it) => it.id === granted.id), 'in-memory inventory keeps the item too');
 
     // --- the control: same item TYPE, same character, unbound instance ---
@@ -193,18 +279,29 @@ test('SOMET-277: a GRANTED starting-loadout instance cannot be sold, and the ide
       + 'a per-TYPE ban would make every looted copy worthless');
     assert.ok(sold.price > 0, 'the looted twin must pay its normal price, not zero');
     assert.equal(await goldOf(pool, fx.userId), goldBefore + sold.price, 'the legitimate sale is credited');
-    assert.equal(await itemExists(pool, looted.id), false, 'the sold instance is gone');
+    assert.strictEqual(await ownedByCharacter(pool, looted.id, fx.character.id), false,
+      'the seller must no longer own the sold instance');
+    assert.strictEqual(await itemExists(pool, looted.id), true,
+      'SOMET-484: and it must still EXIST -- the merchant is holding it, so buying it back returns it intact');
   } finally {
     if (userId != null) await cleanup(pool, userId);
     await pool.end();
   }
 });
 
-test('SOMET-277: a GRANTED instance cannot be DROPPED either, and the identical LOOTED instance can', async (t) => {
-  // Without this half, the sell refusal is decorative: dropping moves the row
-  // into world_items (which has no soulbound column) and claimItem inserts a
-  // BRAND NEW player_items row from it, taking the default false. Drop, pick
-  // back up, sell -- the whole faucet, reopened in two keystrokes.
+test('SOMET-277/SOMET-480: a GRANTED instance survives a drop-and-repick still BOUND', async (t) => {
+  // SOMET-277 closed this hole by REFUSING the drop outright, and its own
+  // comment said why that was the shape chosen: "world_items carries no
+  // soulbound column ... claimItem then INSERTs a BRAND NEW player_items row
+  // which takes the default false. Drop, pick back up, sell -- the whole
+  // faucet, reopened in two keystrokes."
+  //
+  // SOMET-480 (T12) adds world_items.soulbound, so the flag now RIDES the
+  // ground row and the drop no longer has to be refused. The invariant is
+  // unchanged and is what this test asserts: a granted instance can never
+  // become a sellable one. Only the mechanism moved -- from a refusal to a
+  // carried flag -- and the item became droppable, which it should always
+  // have been.
   const pool = await openPool();
   if (pool.unreachable) {
     const msg = skipMsg('the SOMET-277 drop guard', pool.unreachable);
@@ -226,9 +323,8 @@ test('SOMET-277: a GRANTED instance cannot be DROPPED either, and the identical 
   try {
     const fx = await createFixture(pool, 'drop');
     userId = fx.userId;
-    const itemTypes = await loadItemTypes(pool);
-    assert.equal(await grantStartingLoadout(pool, fx.character, itemTypes), true, 'grant must succeed');
-
+    // SOMET-509: no grantStartingLoadout call -- class_loadouts is empty, so it
+    // grants nothing. grantedSellable creates the soulbound instance directly.
     const granted = await grantedSellable(pool, fx.character.id);
     const looted = await lootedTwin(pool, fx.character.id, granted.item_type_id);
     const items = [
@@ -238,10 +334,26 @@ test('SOMET-277: a GRANTED instance cannot be DROPPED either, and the identical 
     const player = mkPlayer(fx.userId, items);
     const entry = mkEntry(village.worldId, player);
 
-    const refused = await dropItem(pool, entry, fx.userId, fx.character.id, granted.id, { ttlMs: 60000 });
-    assert.equal(refused.ok, false, 'dropping granted starting gear must be refused');
-    assert.match(refused.reason, /cannot be dropped/i, 'the refusal must be a clear, player-readable reason');
-    assert.equal(await itemExists(pool, granted.id), true, 'the bound instance must still be owned');
+    const droppedBound = await dropItem(pool, entry, fx.userId, fx.character.id, granted.id, { ttlMs: 60000 });
+    assert.equal(droppedBound.ok, true,
+      `granted gear is now droppable, not refused (got: ${droppedBound.reason})`);
+    groundItemId = droppedBound.item.id;
+    const ground = await pool.query('SELECT soulbound FROM world_items WHERE id = $1', [groundItemId]);
+    assert.equal(ground.rows[0].soulbound, true,
+      'the ground row must carry the flag -- without it the drop IS the laundering exploit');
+
+    // THE INVARIANT: picked back up, it is still bound, so it still cannot be
+    // sold. Asserting the flag alone would not prove that; asserting the
+    // refusal is what makes this test about the exploit rather than a column.
+    const back = await claimItem(pool, entry, fx.userId, fx.character.id, groundItemId);
+    assert.ok(back && back.id, 'the dropped bound item must be re-claimable');
+    groundItemId = null; // consumed by the claim
+    const reBound = await pool.query('SELECT soulbound FROM player_items WHERE id = $1', [back.id]);
+    assert.equal(reBound.rows[0].soulbound, true,
+      'drop-then-pick-up must NOT launder a bound instance into an unbound one');
+    const resold = await sellItem(pool, entry, fx.userId, fx.character.id, village.villageId, back.id);
+    assert.equal(resold.ok, false, 'the laundered instance must still refuse to become gold');
+    assert.match(resold.reason, /cannot be sold/i);
 
     const dropped = await dropItem(pool, entry, fx.userId, fx.character.id, looted.id, { ttlMs: 60000 });
     assert.equal(dropped.ok, true,

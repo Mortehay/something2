@@ -131,12 +131,10 @@ test('dropping a stack carries the DELETEd quantity through to the INSERT via SQ
   // test's SQL-shape assertions on the CTE itself.
   const pool = { query: async (q) => {
     if (/FROM stone_instances/i.test(q)) return { rowCount: 0, rows: [] };
-    // SOMET-277: dropItem now also issues a preliminary read-only soulbound
-    // check ahead of the CTE (see loot.js) -- same fixture accommodation the
-    // stone_instances line above already makes, for the same reason. Must
-    // report "not soulbound" (rowCount 0) so the drop proceeds and this
-    // test's SQL-shape assertions still see the CTE.
-    if (/^\s*SELECT 1 FROM player_items WHERE id/i.test(q)) return { rowCount: 0, rows: [] };
+    // SOMET-480 retired SOMET-277's preliminary soulbound SELECT: the flag now
+    // rides the CTE itself (world_items.soulbound), so there is no separate
+    // read to accommodate here any more. The stone_instances line above stays
+    // -- that refusal is NOT relaxed.
     sql = q;
     return { rowCount: 1, rows: [{ id: 'g1', item_type_id: 7, x: 0, y: 0, quantity: 40 }] };
   } };
@@ -149,13 +147,36 @@ test('dropping a stack carries the DELETEd quantity through to the INSERT via SQ
   const cols = m[1].split(',').map((c) => c.trim().toLowerCase());
   assert.ok(cols.includes('quantity'), `the drop INSERT must name quantity (found: ${cols.join(', ')})`);
 
-  const sel = sql.match(/select\s+(.*?)\s+from\s+d/is);
-  assert.ok(sel, 'could not locate the SELECT ... FROM d projection');
-  const exprs = sel[1].split(',').map((e) => e.trim());
+  // Anchored to the INSERT's OWN projection, not to the first `SELECT ... FROM
+  // d` in the statement: SOMET-480 added a `snap` CTE that also reads FROM d,
+  // and an unanchored match lands on that one and counts the wrong list.
+  const sel = sql.match(/insert\s+into\s+world_items\s*\([^)]*\)\s*select\s+(.*?)\s+from\s+d\b/is);
+  assert.ok(sel, 'could not locate the INSERT INTO world_items ... SELECT ... FROM d projection');
+  // Split on top-level commas only -- the projection contains function calls.
+  const exprs = [];
+  let depth = 0;
+  let buf = '';
+  for (const ch of sel[1]) {
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth -= 1;
+    if (ch === ',' && depth === 0) { exprs.push(buf.trim()); buf = ''; continue; }
+    buf += ch;
+  }
+  if (buf.trim()) exprs.push(buf.trim());
   assert.equal(exprs.length, cols.length,
     `the INSERT names ${cols.length} columns but the SELECT projects ${exprs.length} expressions — Postgres would reject this at runtime`);
-  assert.ok(exprs.some((e) => /^quantity$/i.test(e)),
+  assert.ok(exprs.some((e) => /^(d\.)?quantity$/i.test(e)),
     'quantity must be projected FROM d (the deleted row), not a hardcoded literal');
+  // SOMET-480: the same rule for the rolled identity. A literal here (or a
+  // missing column) is exactly how a foxy item comes back white.
+  for (const carried of ['rarity', 'item_level', 'soulbound']) {
+    assert.ok(cols.includes(carried), `the drop INSERT must name ${carried}`);
+    assert.ok(exprs.some((e) => new RegExp(`^d\\.${carried}$`, 'i').test(e)),
+      `${carried} must be projected FROM d, not hardcoded`);
+  }
+  assert.ok(cols.includes('affixes'), 'the drop INSERT must name affixes');
+  assert.ok(exprs.some((e) => /^snap\.affixes$/i.test(e)),
+    'affixes must come from the snapshot CTE, not a literal');
 });
 
 test('claiming a stack grants the full quantity', async () => {
@@ -194,9 +215,24 @@ test('the claim CTE INSERT names quantity in its own column list', async () => {
   assert.ok(cols.includes('quantity'),
     `the claim INSERT must name quantity in its column list (found: ${cols.join(', ')}) — without it a claimed stack of 40 becomes 1`);
 
-  const sel = sql.match(/select\s+(.*?)\s+from\s+d/is);
-  assert.ok(sel, 'could not locate the SELECT ... FROM d projection');
+  // Anchored to the player_items INSERT's OWN projection: SOMET-480 added an
+  // `aff` CTE with a second INSERT and a third SELECT, so an unanchored match
+  // lands on the wrong list.
+  const sel = sql.match(/insert\s+into\s+player_items\s*\([^)]*\)\s*select\s+(.*?)\s+from\s+d\b/is);
+  assert.ok(sel, 'could not locate the INSERT INTO player_items ... SELECT ... FROM d projection');
   const exprs = sel[1].split(',').map((e) => e.trim());
   assert.equal(exprs.length, cols.length,
     `the INSERT names ${cols.length} columns but the SELECT projects ${exprs.length} expressions — Postgres would reject this at runtime`);
+
+  // SOMET-480: the claim must rebuild the rolled identity, not default it. A
+  // column missing from this list is exactly how a foxy item comes back white.
+  for (const carried of ['rarity', 'item_level', 'soulbound']) {
+    assert.ok(cols.includes(carried), `the claim INSERT must name ${carried}`);
+    assert.ok(exprs.some((e) => new RegExp(`^${carried}$`, 'i').test(e)),
+      `${carried} must be projected FROM d (the ground row), not defaulted`);
+  }
+  assert.match(sql, /insert\s+into\s+player_item_affixes/i,
+    'the claim must recreate the affix rows in the SAME statement, or a picked-up item loses them');
+  assert.match(sql, /jsonb_array_elements\s*\(\s*d\.affixes\s*\)/i,
+    'the affix rows must be expanded from the ground row\'s snapshot');
 });

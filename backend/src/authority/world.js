@@ -7,12 +7,18 @@ const { attackLift, bodyLift } = require('./attackOrigin.js');
 const { ProjectileSim } = require('./projectiles');
 const { applyDamageWithEffects, drainMana, NO_MITIGATION, playerKey } = require('./damage');
 const {
-  tickEffects, effectMagnitude, applyElementEffect, canAct, clearInterrupt, activeEffectKeys,
+  tickEffects, effectMagnitude, applyElementEffect, applyHitStatuses,
+  canAct, clearInterrupt, activeEffectKeys,
+  applyCharm, charmerOf,
   BURN, CHILL, SHOCK, SHOCK_MANA_DRAIN,
 } = require('./effects');
 const { activeWeaponType, mitigation, equip: equipItem, unequip: unequipItem } = require('./items');
+const { unequipBlockers } = require('./equipRequirements.js');
+const { loadProgression } = require('../services/progressionStore.js');
 const { GroundItemSim } = require('./groundItems');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerStats.js');
+const { STAMINA_BASE } = require('../services/progressionConstants.js');
+const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
 
 // Bounds concurrent creature-owned projectiles per world. A swarm-density
 // world can hold 12-creature packs; twelve Ranged creatures on a 1.8s cooldown
@@ -28,13 +34,30 @@ const PLAYER_SPEED = 200; // client: this.speed(100) * speedMultiplier(2)
 const PLAYER_MAX_HP = 100;
 const PLAYER_MAX_MANA = 100;
 const PLAYER_MANA_REGEN = 10; // per second
-const PLAYER_MAX_STAMINA = 100;
+// An ALIAS for progressionConstants.STAMINA_BASE, not a second copy of 100
+// (SOMET-495). derivePlayerStats now computes maxStamina from that constant
+// plus the tree's `stamina` grants, and a player joins at `stats.maxStamina`;
+// two independent hundreds here would let a tree grant and the join value
+// disagree the moment either moved. Still exported under the old name because
+// several tests import it.
+const PLAYER_MAX_STAMINA = STAMINA_BASE;
 const PLAYER_STAMINA_REGEN = 10; // per second
 
-// A level-1 (all-base-stat) character's derived bundle. playerStats.js
-// guarantees this is an identity on the pre-A2 constants above -- maxHp 100,
-// maxMana 100, manaRegen 10, x1.0 damage, x1.0 cooldown -- so a player who
-// joins with no progression behaves exactly as before A2.
+// How fast the charm pushes a pacified player away from their charmer, in world
+// px per second. Small on purpose: spec 8.2 calls it a SOFT repel, and this
+// runs every tick for four seconds. A quarter of PLAYER_SPEED, so a player
+// walking toward the druid still closes -- slowly. It is a nudge, not a leash:
+// the player's own input is resolved first and is never overridden.
+const CHARM_REPEL_SPEED = 50;
+
+// A level-1 (all-base-stat, NO CLASS) character's derived bundle.
+// playerStats.js guarantees this is an identity on the pre-A2 constants above
+// -- maxHp 100, maxMana 100, manaRegen 10, x1.0 damage, x1.0 cooldown -- so a
+// player who joins with no progression behaves exactly as before A2.
+//
+// Deliberately class-blind (SOMET-486 passes no classPools here): this is the
+// addPlayer default for callers that have no character at all, i.e. tests and
+// synthetic players. The real join path always passes a class-derived bundle.
 const BASE_STATS = derivePlayerStats(DEFAULT_PROGRESSION);
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -50,7 +73,28 @@ function sign(v) { return v > 0.3 ? 1 : v < -0.3 ? -1 : 0; }
 // already in the air.
 function weaponDamage(p, w) {
   const mult = (w.element && w.element !== 'physical') ? p.stats.spellMult : p.stats.meleeMult;
-  return w.damage * mult;
+  return w.damage * mult * elementDamageMult(p.stats, w.element);
+}
+
+// SOMET-495. The passive tree's `damage` grants, as a PER-ELEMENT multiplier.
+//
+// "+35% fire damage" is a percentage, not a flat number, and composeStats has
+// already summed every grant on an element and turned the total into one
+// multiplier (x1.40 for +35 and +5) -- so grants stack ADDITIVELY with each
+// other and MULTIPLICATIVELY against the weapon, which is what the labels
+// promise. Doing the sum here instead would make two grants x1.4175.
+//
+// A weapon with a null element is physical, matching applyDamage's own default
+// -- the two must agree, or a bare weapon would be boosted as one element and
+// mitigated as another.
+//
+// The fallback is 1, never undefined: `w.damage * undefined` is NaN, and NaN
+// damage never satisfies hp <= 0, i.e. an unkillable target. Every real bundle
+// carries all five keys (playerStats.js's NO_DAMAGE_MULT covers the rest).
+function elementDamageMult(stats, element) {
+  const table = stats && stats.damageMult;
+  const v = table ? table[element || 'physical'] : undefined;
+  return Number.isFinite(v) ? v : 1;
 }
 
 // The ONLY place the weapon's cooldown field is read. Both attack branches
@@ -59,6 +103,42 @@ function weaponDamage(p, w) {
 // reappear.
 function applyAttackCooldown(p, w) {
   p._attackCd = w.cooldown * p.stats.cooldownMult;
+}
+
+// THE ONE ATTACK RESOURCE GATE (SOMET-472; spec 8.3: "the check lives in the
+// same place the mana check does today, so there is one cost gate, not two").
+//
+// Both canAttack -- the pre-check server.js runs BEFORE it spends ammo -- and
+// attack itself call this. Two hand-written copies of the rule is exactly how a
+// class could end up unable to fire but still losing an arrow.
+//
+// Returns null when the attack is affordable, or the name of the resource that
+// refused it. A refusal costs NOTHING: no resource is touched, no cooldown is
+// stamped. That has always been mana's rule here and it now covers life too.
+function resourceRefusal(p, w) {
+  if (p.stamina < (w.stamina_cost || 0)) return 'stamina';
+  const manaCost = w.mana_cost || 0;
+  if (manaCost <= 0) return null;
+  if (p.usesLifeCost) {
+    // p.stats is the bundle derivePlayerStats produced, and it carries the
+    // passive tree's lifeCostMultiplier (playerStats.js). Reading it off
+    // `stats` rather than off the player is what makes an allocated Blood
+    // Pact take effect the instant applyDerivedStats runs.
+    return canPayLife(p.hp, lifeCostFor(manaCost, p.stats.lifeCostMultiplier)) ? null : 'life';
+  }
+  return p.mana < manaCost ? 'mana' : null;
+}
+
+// The matching spend. Called ONLY after resourceRefusal returned null, and
+// deliberately adjacent to it: a spend that could pick a different pool from
+// the check is a way to cast for free.
+function spendResources(p, w) {
+  const staminaCost = w.stamina_cost || 0;
+  if (staminaCost) p.stamina -= staminaCost;
+  const manaCost = w.mana_cost || 0;
+  if (!manaCost) return;
+  if (p.usesLifeCost) p.hp -= lifeCostFor(manaCost, p.stats.lifeCostMultiplier);
+  else p.mana -= manaCost;
 }
 
 // Burn is fire damage, so a fire resistance mitigates the DOT exactly as it
@@ -155,7 +235,25 @@ class World {
   // disagree, server.js's onPlayerDeath is what notices and relocates. Defaulted
   // to null so every existing caller -- and every test that builds a player --
   // keeps behaving exactly as before.
-  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null, bind = null) {
+  //
+  // `classPools` (SOMET-486) is `{ maxHp, maxMana }` -- this character's
+  // CLASS base pools, carried on the player so every later re-derive
+  // (level-up, chest XP, socket, respec) starts from the same base the join
+  // did. Without it those paths would recompute pools class-blind and quietly
+  // snap a Ranger back to 100/100 on its first level-up: the same shape of
+  // defect as the buff-stone overwrite SOMET-245 Task 6 fixed. Defaults to
+  // null so a test that builds a player unchanged still gets HP_BASE/
+  // MANA_BASE via derivePlayerStats' own fallback.
+  //
+  // `usesLifeCost` (SOMET-472) is the Cultist's resource substitution: every
+  // item_types.mana_cost is paid in HP instead. Resolved ONCE at join from the
+  // character's class name (server.js) and read ONLY by resourceRefusal /
+  // spendResources above, so no other site in the sim branches on class.
+  // Defaults false, so every existing caller -- and every test that builds a
+  // player -- behaves exactly as before. HOW MUCH it costs is not here: that
+  // is stats.lifeCostMultiplier, which the tree owns and applyDerivedStats
+  // refreshes.
+  addPlayer(userId, spawn, inv = { items: [], equipment: {} }, respawn = spawn, gold = 0, stats = BASE_STATS, characterId = null, bind = null, classPools = null, usesLifeCost = false) {
     this.players.set(userId, {
       userId,
       characterId,
@@ -176,10 +274,17 @@ class World {
       maxHp: stats.maxHp,
       mana: stats.maxMana,
       maxMana: stats.maxMana,
-      stamina: PLAYER_MAX_STAMINA,
-      maxStamina: PLAYER_MAX_STAMINA,
+      // SOMET-495: from the derived bundle, like hp and mana, so a tree
+      // `+30 stamina` node is live at join rather than only after the next
+      // re-derive. `?? PLAYER_MAX_STAMINA` covers a hand-built stats object in
+      // a test that predates the field.
+      stamina: stats.maxStamina ?? PLAYER_MAX_STAMINA,
+      maxStamina: stats.maxStamina ?? PLAYER_MAX_STAMINA,
       inv,
-      mit: mitigation(inv, this.weapons),
+      // SOMET-495: armour resistances AND the tree's, merged on one scale by
+      // mitigation() itself. Rebuilt by _rebuildMit at every point either half
+      // can change -- equip, unequip, and any re-derive of `stats`.
+      mit: mitigation(inv, this.weapons, stats.resists),
       spawn: { x: respawn.x, y: respawn.y },
       // Read only by server.js (the tick loop refreshes it on village entry,
       // onPlayerDeath compares its worldId against the world the death happened
@@ -188,6 +293,9 @@ class World {
       bind,
       gold: Number(gold) || 0,
       _attackCd: 0,
+      // The creature this player's summons follow them onto (spec 8.2).
+      // Written only by attack(), read only by CreatureSim's charmed branch.
+      _charmTargetId: null,
       _doorwayCdUntil: 0,
       autoLoot: false,
       // Recently-dropped GROUND ITEM ids -> grace expiry (ms, same clock as
@@ -201,6 +309,14 @@ class World {
       // every damage, cooldown and regen site -- see weaponDamage,
       // applyAttackCooldown and tick()'s mana-regen line.
       stats,
+      // The class base pools `stats` was derived FROM. Read only by
+      // server.js's liveStats() when it re-derives; nothing in this file
+      // consults it, because every pool number this file needs is already
+      // baked into `stats`.
+      classPools,
+      // Strict boolean: a truthy string off the join path must not silently
+      // enrol a Warrior in life casting.
+      usesLifeCost: usesLifeCost === true,
     });
   }
 
@@ -216,14 +332,35 @@ class World {
     if (!p) return { hpDelta: 0, manaDelta: 0 };
     const hpDelta = stats.maxHp - p.maxHp;
     const manaDelta = stats.maxMana - p.maxMana;
+    // SOMET-495: stamina moves by the same DELTA rule as hp and mana, so
+    // allocating a stamina node mid-fight is a bonus, not a refill. Guarded
+    // with ?? for the same reason addPlayer is -- a hand-built bundle with no
+    // maxStamina must leave the pool alone rather than NaN it.
+    const staminaDelta = (stats.maxStamina ?? p.maxStamina) - p.maxStamina;
     p.maxHp = stats.maxHp;
     p.maxMana = stats.maxMana;
+    p.maxStamina = stats.maxStamina ?? p.maxStamina;
     // Lower bound 1, not 0: a respec that shrinks CON must not kill the
     // player it is being applied to.
     p.hp = clamp(p.hp + hpDelta, 1, p.maxHp);
     p.mana = clamp(p.mana + manaDelta, 0, p.maxMana);
+    p.stamina = clamp(p.stamina + staminaDelta, 0, p.maxStamina);
     p.stats = stats;
+    // SOMET-495. THE line that makes a `resist` grant live. Without it an
+    // allocated +8 fire resist would sit in `stats` and never reach `p.mit`
+    // until the player happened to re-equip something -- displayed on the
+    // sheet, inert in play, which is the exact failure this ticket exists to
+    // end. Every re-derive path (join, level-up, chest XP, socket, allocate,
+    // respec) funnels through here, so this one call covers all of them.
+    this._rebuildMit(p);
     return { hpDelta, manaDelta };
+  }
+
+  // p.mit = equipped armour + the tree's resist aggregate, on the ONE scale
+  // mitigation() owns. Called wherever either half can change; a site that
+  // rebuilt only from the inventory would silently drop the tree half.
+  _rebuildMit(p) {
+    p.mit = mitigation(p.inv, this.weapons, p.stats && p.stats.resists);
   }
 
   removePlayer(userId) { this.players.delete(userId); }
@@ -307,6 +444,26 @@ class World {
       if (f) p.facing = f;
       p.ackSeq = p.pendingSeq;
     }
+
+    // The charm's soft repel (spec 8.2). Applied AFTER each player's own
+    // movement step, deliberately: this NUDGES, it does not steer. The target's
+    // input has already moved them exactly as it always did, which is what
+    // "keeps their own movement input -- no control transfer" means, and is the
+    // whole difference between the player pacify and the creature charm.
+    //
+    // shoveAwayFrom is the same wall-aware primitive knockback and the portal
+    // bounce use, so a repel can never push anyone into terrain.
+    for (const p of this.players.values()) {
+      const charmerId = charmerOf(p, this.now);
+      if (charmerId == null) continue;
+      const src = this.players.get(charmerId);
+      // The charmer left the world (or was never in it). The pacify itself
+      // stays -- it is a timed effect, not a tether -- but there is nothing to
+      // be repelled from.
+      if (!src || src === p) continue;
+      shoveAwayFrom(this.map, src.x + src.width / 2, src.y + src.height / 2, p,
+        CHARM_REPEL_SPEED * dt);
+    }
     return { kills };
   }
 
@@ -322,7 +479,8 @@ class World {
     // no early return, nothing else in its body returns -- so the `|| {
     // killed: [], shots: [] }` fallback here could never fire. Removed.
     const {
-      killed: killedIds, shots, attacks: creatureAttacks, impacts: creatureImpacts,
+      killed: killedIds, killCredits, shots,
+      attacks: creatureAttacks, impacts: creatureImpacts,
     } = this.creatures.tick(dt, activeKeys, [...this.players.values()], this.now);
 
     for (const s of shots) {
@@ -353,12 +511,16 @@ class World {
     }
 
     // A guard's kill has no player behind it — always null, never omitted.
+    // SOMET-473: a Druid's PET is the one creature-owned kill that does have a
+    // player behind it, and CreatureSim reports that in `killCredits`. Read
+    // through `?? null` so every other path is byte-identical to before and a
+    // sim double that predates the field still works.
     // Slice D: creature attacks ride the SAME frame keys player swings do, so
     // server.js pushes them through the same two helpers and the client draws
     // them through the same path. Defaulted to [] because several tests build
     // a CreatureSim-shaped double that predates these fields.
     return {
-      kills: killedIds.map((id) => ({ id, killerUserId: null })),
+      kills: killedIds.map((id) => ({ id, killerUserId: (killCredits && killCredits.get(id)) ?? null })),
       attacks: creatureAttacks || [],
       impacts: creatureImpacts || [],
     };
@@ -370,19 +532,63 @@ class World {
     return activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
   }
 
+  // SOMET-478 (T10). The requirement context is read from the DATABASE here,
+  // once per equip action, rather than cached on the player object.
+  //
+  // Two reasons. (1) The spec's own risk table says requirements are validated
+  // on equip only, never per attack -- so one read on a player-initiated
+  // action is affordable, and the combat hot path is untouched. (2) A cached
+  // copy would have to be invalidated by every level-up, respec, passive
+  // allocation and buff-stone socket; the second one of those anybody forgets
+  // is a player wearing gear they no longer qualify for, silently.
+  //
+  // A player with no characterId is not a real session (addPlayer's default,
+  // used by pure fixtures -- server.js always passes character.id). It gets
+  // the level-1 base-stat context rather than a skipped gate: falling back to
+  // "no requirements" would make the gate inert for exactly the callers least
+  // likely to be noticed.
+  async _requirementContext(pool, characterId) {
+    if (characterId == null) {
+      return { level: DEFAULT_PROGRESSION.level, base: { ...DEFAULT_PROGRESSION } };
+    }
+    const progression = await loadProgression(pool, characterId);
+    return {
+      level: progression.level,
+      base: {
+        strength: progression.strength,
+        dexterity: progression.dexterity,
+        constitution: progression.constitution,
+        intelligence: progression.intelligence,
+        wisdom: progression.wisdom,
+        charisma: progression.charisma,
+      },
+    };
+  }
+
   async setEquipment(pool, userId, itemId, slot) {
     const p = this.players.get(userId);
     if (!p) return { ok: false, reason: 'no player' };
-    const r = await equipItem(pool, p.characterId, p.inv, this.weapons, itemId, slot);
-    if (r.ok) p.mit = mitigation(p.inv, this.weapons);
+    const req = await this._requirementContext(pool, p.characterId);
+    const r = await equipItem(pool, p.characterId, p.inv, this.weapons, itemId, slot, req);
+    if (r.ok) this._rebuildMit(p);
     return r;
   }
 
   async clearEquipment(pool, userId, slot) {
     const p = this.players.get(userId);
     if (!p) return { ok: false, reason: 'no player' };
+    // Refused BEFORE unequipItem's in-memory mutation, so the SOMET-77
+    // ordering inside it is never entered on a refusal and there is nothing to
+    // roll back. Naming B is the whole point: "unequip it first" with no
+    // subject is unactionable when eight slots could be the cause.
+    const req = await this._requirementContext(pool, p.characterId);
+    const blockers = unequipBlockers(p.inv, this.weapons, req.base, req.level, slot);
+    if (blockers.length > 0) {
+      const names = blockers.map((b) => b.name).join(', ');
+      return { ok: false, reason: `${names} would no longer meet its requirements` };
+    }
     const r = await unequipItem(pool, p.characterId, p.inv, slot);
-    if (r.ok) p.mit = mitigation(p.inv, this.weapons);
+    if (r.ok) this._rebuildMit(p);
     return r;
   }
 
@@ -391,18 +597,30 @@ class World {
   // irreversible (ammo), since an attack refused for cooldown must not have
   // already destroyed an arrow. `attack` keeps performing these same checks
   // itself — this is additive, and attack() stays correct called directly.
+  // SOMET-494 added `reason`. A caller that only asks "may this fire?" reads
+  // `ok` exactly as before; the reason exists because holding the mouse to
+  // attack has to tell two refusals apart that used to look identical from
+  // outside: `cooldown` is the normal rhythm of holding and the hold must
+  // continue through it, while `resource` means the player has run out and the
+  // hold must stop.
+  //
+  // `resource` covers mana, life AND stamina as ONE value on purpose. SOMET-472
+  // AC2 requires a Cultist's life refusal to be indistinguishable from a mana
+  // refusal ("or a client would have to learn a second shape"), and that
+  // invariant is pinned by a test that deep-equals the two answers. Splitting
+  // them here to make a prettier message would quietly break it, and nothing
+  // downstream needs the distinction: every resource refusal stops the hold.
   canAttack(userId) {
     const p = this.players.get(userId);
-    if (!p || p._attackCd > 0) return { ok: false, weapon: null };
+    if (!p) return { ok: false, weapon: null, reason: 'unknown' };
+    if (p._attackCd > 0) return { ok: false, weapon: null, reason: 'cooldown' };
     // Interrupted: refused BEFORE the weapon is even resolved, so the caller
     // never spends ammo on a swing the interrupt is about to eat.
-    if (!canAct(p, this.now)) return { ok: false, weapon: null };
+    if (!canAct(p, this.now)) return { ok: false, weapon: null, reason: 'interrupted' };
     const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
-    if (!w) return { ok: false, weapon: null };
-    if (p.mana < (w.mana_cost || 0) || p.stamina < (w.stamina_cost || 0)) {
-      return { ok: false, weapon: w };
-    }
-    return { ok: true, weapon: w };
+    if (!w) return { ok: false, weapon: null, reason: 'unarmed' };
+    if (resourceRefusal(p, w)) return { ok: false, weapon: w, reason: 'resource' };
+    return { ok: true, weapon: w, reason: null };
   }
 
   // Attack in the aim direction with the equipped weapon. Melee resolves an arc
@@ -420,12 +638,12 @@ class World {
     const w = activeWeaponType(p.inv, this.weapons, this.defaultWeaponId);
     if (!w) return { kills: [], attacks: [], impacts: [], stoneHit: null };
 
-    const manaCost = w.mana_cost || 0;
-    const staminaCost = w.stamina_cost || 0;
     // Both resources are checked BEFORE either is deducted, and a denied
     // attack does NOT consume the cooldown — matching mana's existing rule,
     // now covering the melee branch too (melee weapons can carry a cost).
-    if (p.mana < manaCost || p.stamina < staminaCost) return { kills: [], attacks: [], impacts: [], stoneHit: null };
+    // resourceRefusal is the same call canAttack makes, so the pre-check that
+    // guards ammo and the real check cannot disagree.
+    if (resourceRefusal(p, w)) return { kills: [], attacks: [], impacts: [], stoneHit: null };
 
     const { nx, ny } = normalizeAim(ax, ay, p.facing);
     const cx = p.x + p.width / 2, cy = p.y + p.height / 2;
@@ -435,12 +653,35 @@ class World {
     // rather than a tile constant -- that substitution is the whole fix.
     // Render-only: nothing below reads it for reach, arc or line-of-sight.
     const originLift = attackLift(w, p.height);
+    // The charm pacify (spec 8.2). Resolved ONCE per attack, exactly like
+    // originLift above, so the melee arc, the player sweep and the spawned
+    // projectile all consult one value rather than three copies of the lookup.
+    // null for everyone who is not currently charmed, i.e. every attack in the
+    // game today.
+    const pacifiedFrom = charmerOf(p, this.now);
+
+    // SOMET-495: this attacker's tree-granted on-hit riders ("your hits burn"),
+    // resolved ONCE for the whole attack and threaded to every site the swing
+    // or the shot can land — exactly like `pacifiedFrom` above, and for the
+    // same reason: a shot snapshots what was true when it was fired.
+    const hitStatuses = p.stats.hitStatuses || null;
+    // SOMET-495: an augment stone's bonus is damage in the augment's OWN
+    // element, so the tree's multiplier for THAT element applies to it. Scaled
+    // once, here, rather than at each of the three sites that consume the
+    // packet — the melee arc, the melee-vs-player branch and the projectile
+    // snapshot — because three copies of the same multiply is how one of them
+    // ends up missing it.
+    const augment = w.augment
+      ? {
+        ...w.augment,
+        bonusDamage: w.augment.bonusDamage * elementDamageMult(p.stats, w.augment.element),
+      }
+      : null;
 
     if (w.kind === 'melee') {
       const f = facingFromInput(sign(nx), sign(ny));
       if (f) p.facing = f;
-      if (manaCost) p.mana -= manaCost;
-      if (staminaCost) p.stamina -= staminaCost;
+      spendResources(p, w);
       // Queried BEFORE applyMeleeArc, which deletes whatever it kills: after
       // the fact a one-shot kill would look like a miss.
       // SOMET-286: one scan, two lists -- what the swing may damage, and what
@@ -450,7 +691,7 @@ class World {
       // as it was.
       const {
         hit: creatureTargets, blocked: blockedTargets,
-      } = this.creatures.meleeArcScan(cx, cy, nx, ny, w.reach, w.arc_width);
+      } = this.creatures.meleeArcScan(cx, cy, nx, ny, w.reach, w.arc_width, pacifiedFrom);
       // Slice C (SOMET-160): where each impact happened. Captured HERE, before
       // applyMeleeArc, for exactly the reason creatureTargets is -- a
       // one-shot kill removes the creature, and reading its position
@@ -495,8 +736,18 @@ class World {
         // SOMET-332: the augment stone's bonus packet, or null. Passed rather
         // than folded into weaponDamage above so the bonus is mitigated by the
         // AUGMENT's element, not the weapon's.
-        w.augment || null,
+        augment,
+        pacifiedFrom,
+        // SOMET-495: the tree's on-hit riders, applied to every creature the
+        // arc reaches, beside the element's own rider.
+        hitStatuses,
       );
+      // What this player's summons will attack (spec 8.2: "attacks the druid's
+      // target"). The FIRST creature this swing reached, kept even if the swing
+      // killed it -- CreatureSim re-validates it every tick and drops a dead
+      // one, so a stale id costs one tick of nothing rather than needing a
+      // second write site here.
+      if (creatureTargets.length > 0) p._charmTargetId = creatureTargets[0];
       // SOMET-253 Task 9: survivors = targets minus killed. `creatureTargets`
       // was captured BEFORE applyMeleeArc ran, and applyMeleeArc deletes
       // whatever it kills -- iterating creatureTargets directly here would
@@ -523,20 +774,32 @@ class World {
       let playerHits = 0;
       for (const other of this.players.values()) {
         if (other.userId === userId) continue;
+        // Pacified: this swing cannot reach the player who charmed them.
+        // `continue`, not a zero-damage hit, so the impact list, the knockback
+        // and the client's hit cue all fall away together -- a swing that
+        // sparks off a target it did no damage to reads as a bug.
+        if (pacifiedFrom != null && other.userId === pacifiedFrom) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
         if (inArc(cx, cy, nx, ny, ocx, ocy, w.reach, w.arc_width)
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
           applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION,
             this.now, playerKey(userId));
           applyElementEffect(other, w.element, this.now, userId);
+          // SOMET-495: the tree's riders, applied ONCE per target per swing --
+          // deliberately here, next to the weapon's own element rider, and NOT
+          // repeated inside the augment branch below. Two stamps on the same
+          // target in the same swing are indistinguishable from one (refresh
+          // semantics, and the shock window swallows the second), so a second
+          // call would be noise that reads like a second effect.
+          applyHitStatuses(other, hitStatuses, this.now, userId);
           // SOMET-332: the augment's bonus as a SECOND packet, mirroring the
           // creature path in applyMeleeArc. A player and a creature must take
           // the same swing identically -- an augment that only worked against
           // creatures would be a PvP balance bug nothing else would catch.
-          if (w.augment && w.augment.bonusDamage > 0) {
-            applyDamageWithEffects(other, w.augment.bonusDamage, w.augment.element,
+          if (augment && augment.bonusDamage > 0) {
+            applyDamageWithEffects(other, augment.bonusDamage, augment.element,
               other.mit || NO_MITIGATION, this.now, playerKey(userId));
-            applyElementEffect(other, w.augment.element, this.now, userId);
+            applyElementEffect(other, augment.element, this.now, userId);
           }
           playerHits++;
           // Same list as the creature impacts above -- a player hit and a
@@ -621,10 +884,19 @@ class World {
     // projectile
     const f = facingFromInput(sign(nx), sign(ny));
     if (f) p.facing = f;
-    if (manaCost) p.mana -= manaCost;
-    if (staminaCost) p.stamina -= staminaCost;
+    spendResources(p, w);
     this.projectiles.spawn({
-      ownerId: userId, x: cx, y: cy, nx, ny, weapon: w, damage: weaponDamage(p, w),
+      ownerId: userId, x: cx, y: cy, nx, ny,
+      // SOMET-495: the weapon with its augment packet already scaled by the
+      // tree's per-element multiplier (see `augment` above). Spread rather than
+      // mutated -- `w` is the shared in-memory catalog row, and writing to it
+      // would leak one player's tree onto every other player's weapon.
+      weapon: augment === null ? w : { ...w, augment },
+      damage: weaponDamage(p, w),
+      // SOMET-495: the tree's on-hit riders, snapshotted at LAUNCH for the same
+      // reason `damage` and `pacifiedFrom` are -- a respec mid-flight must not
+      // change a shot already in the air.
+      hitStatuses,
       // Snapshotted at launch for the same reason `damage` is, and for one
       // more: the shooter can be dead or out of view before this lands, so
       // there would be no body left to measure against later.
@@ -635,6 +907,10 @@ class World {
       // weapon needs no ammo (staves, darts) or the row is missing from the
       // in-memory catalog.
       ammo: w.ammo_type_id != null ? (this.weapons.get(w.ammo_type_id) || null) : null,
+      // The pacify travels WITH the shot rather than being re-read on impact:
+      // the charm can lapse mid-flight, and an arrow loosed while pacified must
+      // not become lethal to the charmer because it took 300ms to arrive.
+      pacifiedFrom,
     });
     applyAttackCooldown(p, w);
     // Projectiles already render as a moving dot; their trail effects are

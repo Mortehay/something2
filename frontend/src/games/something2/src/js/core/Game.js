@@ -1,4 +1,5 @@
 import { GAME_WIDTH, GAME_HEIGHT } from "./constants.js";
+import { fitCanvasBox } from "./canvasFit.js";
 import { RenderSystem } from "../systems/RenderSystem.js";
 import { Player } from "../entities/Player.js";
 import { ImageManager } from "../managers/ImageManager.js";
@@ -17,12 +18,24 @@ import { PLAYER_SPEED_EFFECTIVE } from "./constants.js";
 import { aimVector, cursorToWorld } from "./aim.js";
 import { createInventory, applyJoined, applyEquipment, canEquipClient, typeOf, addItem, removeItem } from "./inventory.js";
 import { resolveDrop } from '../systems/inventoryPanel.js';
+import {
+    buildTreeIndex, hitNodeAt, clampZoom, zoomAbout, DEFAULT_ZOOM,
+} from '../systems/passiveTreePanel.js';
+import {
+    fetchPassiveTree, allocatePassive, respecPassives, fetchRespecQuote, fetchStartClass,
+} from '../net/passiveTreeClient.js';
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
+import { shouldRepeatAttack, refusalStopsHold } from "./constantAttack.js";
 import { authorityWsUrl } from "../net/authorityUrl.js";
+import {
+    emptyExtras, frameCarriesStats, mergeFrameStats, mergeSeedStats,
+    mergeLevelInfo, buildCharacterView,
+} from "./progressionExtras.js";
+import { fetchProgression } from "../net/progressionClient.js";
 import { API_URL } from "../../../../../config.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
@@ -31,7 +44,22 @@ const NO_AMMO_FLASH_MS = 600;
 
 // Fallback weapon name shown when nothing is equipped in main_hand yet
 // (mirrors the server's DEFAULT_WEAPON_NAME in authority/items.js).
-const DEFAULT_WEAPON_NAME = "dagger";
+//
+// SOMET-509: was "dagger". Under equal starts a character is handed nothing, so
+// the empty-hands case stopped being rare -- it is now every new player for the
+// whole opening stretch -- and naming a weapon they do not have, whose damage is
+// nearly three times what they are actually swinging, would be a lie.
+//
+// SAID PLAINLY, BECAUSE IT WOULD BE EASY TO OVERCLAIM THIS: fixing the constant
+// changes nothing on screen TODAY. `weaponName` is computed below, passed into
+// RenderSystem.renderHud, and never drawn -- renderHud destructures it and no
+// call site reads it (checked across the whole frontend). So this is not a HUD
+// fix; it is keeping a mirror constant true so that whoever does wire the HUD
+// up inherits the right name instead of a stale one.
+//
+// The server-side row is authored by migration 1714440517000, and
+// items.js#DEFAULT_WEAPON_NAME names it there; keep the two in step.
+const DEFAULT_WEAPON_NAME = "unarmed";
 
 // Native Map shadowed by the world Map import above; alias to keep the
 // distinction obvious at the call sites.
@@ -41,6 +69,12 @@ const NativeMap = globalThis.Map;
 // threshold every click on a cell would arm a drag, and the select-then-click-
 // a-slot flow the panel has always had would stop working.
 const DRAG_THRESHOLD_PX = 4;
+
+// SOMET-493: how long a clicked inspect target stays pinned once the cursor
+// leaves it. Long enough to read three lines and two bars, short enough that a
+// forgotten pin clears itself rather than becoming a card the player has to
+// work out how to dismiss.
+const INSPECT_PIN_MS = 6000;
 
 export class Game {
     constructor() {
@@ -74,6 +108,9 @@ export class Game {
         // projectile render store.
         this.localMana = null;
         this.localMaxMana = null;
+        // SOMET-472. Set from the `joined` frame; false until then so a
+        // pre-join frame draws the ordinary two-orb HUD.
+        this.usesLifeCost = false;
         this.localStamina = null;
         this.localMaxStamina = null;
         this.projectiles = null;
@@ -99,10 +136,38 @@ export class Game {
         this.inventoryPage = 0;
 
         // Ground items (Slice 3b-2b): render-only store of items on the
-        // ground, plus a local mirror of the server-owned auto-loot flag
-        // (used only to render the toggle's current state).
+        // ground, plus a local mirror of the server-owned auto-loot flag.
+        // SOMET-493 moved the toggle itself into the React Settings panel, so
+        // this mirror is now read BY that panel (via getSettingsSnapshot)
+        // rather than to label a canvas button -- the flag is still owned by
+        // the server and still corrected by every `state` frame.
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
+
+        // SOMET-493 -- inspect-on-hover. Off unless the player turns it on in
+        // Settings; GameSettings.jsx owns the persisted preference and pushes
+        // it here with setInspectEnabled, so localStorage is read in exactly
+        // one place instead of by both halves of the app.
+        this.inspectEnabled = false;
+        // SOMET-494 -- "Constant attack". Same ownership as inspectEnabled:
+        // GameSettings.jsx holds the persisted preference and pushes it here.
+        this.constantAttack = false;
+        // Whether the left button is currently down ON THE WORLD (a press that
+        // opened a shop or hit a panel never sets it). Cleared by the release,
+        // by losing focus, by the context menu, and by a resource refusal.
+        this._attackHeld = false;
+        this._lastAttackSentAt = 0;
+        // A left-click PINS whatever the cursor was over, so the card survives
+        // the pointer moving on. Kept as a key rather than an object: the
+        // drawable is rebuilt every frame and a held reference would keep
+        // describing a creature the server has already dropped.
+        this._inspectPinnedKey = null;
+        this._inspectPinnedUntil = 0;
+        // The /api/map/config entityTypes map (name -> def), kept whole so the
+        // card can read `prompt`/`mana`/`faction`/behaviour. decoTypes below
+        // is a FILTERED copy for the renderer and deliberately excludes
+        // creatures, so it cannot serve this.
+        this.entityDefs = null;
 
         // World chests (SOMET-372) -- the guarded, lootable kind authored into
         // a map spec or spawned by a loot map, NOT the account chest/bank
@@ -116,12 +181,34 @@ export class Game {
         // never enters the inventory (see onPicked/onWallet below).
         this.gold = 0;
 
-        // Progression (SOMET-242): the raw player_progression row (level,
-        // experience, stat_points, six stats) -- set from `joined.progression`
-        // and refreshed by `progression` push messages (kill XP, level-up,
-        // death). null until the first join lands. Nothing here derives HUD
-        // numbers from it directly; CharacterSheet.jsx is the sole reader.
+        // Progression (SOMET-242): the COMPOSED player_progression row (level,
+        // experience, the six effective stats, and since SOMET-475 the
+        // sources/modifiers/passivePoints/allocatedNodeIds composeStats
+        // produced) -- set from `joined.progression` and refreshed by
+        // `progression` push messages (kill XP, level-up, death, allocate,
+        // respec). null until the first join lands. EXACTLY ONE WRITER: the
+        // onProgression handler in initChunked. The inventory panel's Character
+        // tab and the passive-tree overlay are its readers, and both read it
+        // rather than caching a copy -- see core/progressionExtras.js.
         this.progression = null;
+
+        // The handful of fields the progression row does NOT carry: the derived
+        // stat bundle (which rides the socket frame beside the row but not the
+        // join frame) and the server's own xpFloor/xpToNext/respecCost. Never
+        // computed here -- see progressionExtras.js's header for both rules.
+        this.progressionExtras = emptyExtras();
+        // Latched true the first time a websocket frame carries the derived
+        // bundle, after which the HTTP seed may no longer write it (the F1
+        // race).
+        this._statsFromSocket = false;
+        this._progressionBundleBusy = false;
+        // The Character tab's own paging state, beside inventoryTab/Page.
+        this.characterModPage = 0;
+        // Class identity for the Character tab's header and its strong/weak
+        // tie-break. Supplied by GameShell from the resolved activeCharacter
+        // rather than the wire: listCharacters already sends both.
+        this.className = null;
+        this.mainStat = null;
 
         // Merchant + shop (Slice D): `merchants` is the join-time list of
         // village merchant markers to render; `shop` is the catalog/buyback
@@ -161,6 +248,25 @@ export class Game {
         // shopView: clicks only ever set a page the last rendered frame
         // offered.
         this.bankView = { tab: 'chest', page: 0 };
+
+        // Passive tree overlay (SOMET-476). `passiveTree` is the immutable
+        // graph, fetched ONCE on the first open; `passiveIndex` is its spatial
+        // index, rebuilt only when the graph itself changes. The ALLOCATED SET
+        // is NOT stored here -- it lives on this.progression, whose single
+        // writer is the onProgression handler above (see progressionExtras.js's
+        // F1 header for the cross-channel race that rule exists to prevent).
+        this.passiveTree = null;
+        this.passiveIndex = null;
+        this.passiveTreeOpen = false;
+        this.passiveStartClass = null;
+        this.passiveView = { panX: GAME_WIDTH / 2, panY: GAME_HEIGHT / 2, zoom: DEFAULT_ZOOM };
+        this.passiveDrag = null;
+        // Contract §6.4. The COST is the server's number, refetched on every
+        // open; it is never recomputed from respec_base_gold x level here,
+        // which is the drift systems/characterTab.js's F2 rule records.
+        this.passiveRespecCost = null;
+        this.passiveGold = null;
+        this.passiveRespecBusy = false;
 
         // Transient on-screen toast (Slice 3b fast-follow F3): the server's
         // rejection frames (equip/drop/etc "error" replies) previously only
@@ -308,7 +414,7 @@ export class Game {
         }
     }
 
-    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, spawnX = 0, spawnY = 0 }) {
+    async initChunked({ worldId, characterId, chunkSize, tileTypes, vfxEffects = null, entityTypes = null, spawnX = 0, spawnY = 0, className = null, mainStat = null }) {
         if (!this.canvas) {
             console.error("Canvas not found!");
             return;
@@ -325,6 +431,7 @@ export class Game {
             window.removeEventListener('resize', this._resizeHandler);
             this._resizeHandler = null;
         }
+        this._disconnectCanvasContainerObserver();
         if (this.animationFrameId) {
             cancelAnimationFrame(this.animationFrameId);
         }
@@ -350,6 +457,7 @@ export class Game {
         // Non-creature entity types (map decorations: rocks, bushes, ...),
         // keyed by name for RenderSystem.collectDecorations. Built once here
         // rather than re-filtered every frame in render().
+        this.entityDefs = entityTypes || null;
         this.decoTypes = new Map();
         for (const name in (entityTypes || {})) {
             const def = entityTypes[name];
@@ -366,6 +474,13 @@ export class Game {
         this.inventoryPage = 0;
         this.groundItems = new GroundItemManager();
         this.autoLoot = false;
+        // SOMET-494. The SETTING survives a join (it is the player's, not the
+        // world's); the in-flight hold does not. Walking through a doorway
+        // re-inits the world, and arriving in a new one already swinging --
+        // off a button press made in the previous one -- is not something the
+        // player asked for.
+        this._attackHeld = false;
+        this._lastAttackSentAt = 0;
         // SOMET-372. Cleared on join for the same reason merchants/landmarks
         // are: the first `chests` frame of the new world may be a few ticks
         // out, and until it lands the previous world's chests would otherwise
@@ -373,6 +488,14 @@ export class Game {
         this.worldChests = [];
         this.gold = 0;
         this.progression = null;
+        // Reset alongside the row they describe: a stale derived bundle or a
+        // stale xpFloor from the previous world would be read against the new
+        // world's row for however long it takes the first frame to land.
+        this.progressionExtras = emptyExtras();
+        this._statsFromSocket = false;
+        this.characterModPage = 0;
+        this.className = className;
+        this.mainStat = mainStat;
         this.merchants = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
@@ -393,6 +516,12 @@ export class Game {
         this.blasts = [];
         this.vfx = [];
         this.noAmmoUntil = 0;
+        // SOMET-476. The GRAPH is world-independent and deliberately survives a
+        // join (it is ~1800 rows and identical everywhere), but the open state,
+        // the pan and any in-flight drag belong to the world being left.
+        this.passiveTreeOpen = false;
+        this.passiveDrag = null;
+        this.passiveRespecBusy = false;
 
         this._inputBuffer = [];
         // Connect to the authoritative sim; spawn comes from the server. The
@@ -429,6 +558,11 @@ export class Game {
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
                     this.banks = Array.isArray(msg.banks) ? msg.banks : [];
                     this.progression = msg.progression || null;
+                    // SOMET-472 -- a Cultist pays every mana cost in HP, so
+                    // the mana orb would be a bar that never moves. Server-
+                    // supplied, never inferred from the class name here: the
+                    // client has no class catalog.
+                    this.usesLifeCost = msg.usesLifeCost === true;
                     resolve(msg.spawn);
                 },
                 onState: (msg) => this._onWorldState(msg),
@@ -451,10 +585,6 @@ export class Game {
                     if (!this.shopOpen) this.shopView = { tab: 'catalog', page: 0 };
                     this.shopOpen = true;
                 },
-                // Kill XP / level-up / death pushes. Always the server's raw
-                // row; CharacterSheet.jsx decides what changed and whether
-                // that's worth a re-render (a zero-XP kill still pushes a
-                // frame with unchanged values -- see its progressionChanged).
                 // SOMET-310. The server sends the WHOLE chest on open and again
                 // after every deposit/withdraw, so this mirrors the frame and
                 // never reconciles a delta -- the same rule onShop follows, and
@@ -486,13 +616,29 @@ export class Game {
                     if (this.inventorySelectedItemId === msg.itemId) this.inventorySelectedItemId = null;
                 },
                 onWithdrawn: (msg) => { if (msg.item) addItem(this.inventory, msg.item); },
-                onProgression: (msg) => { if (msg && msg.progression) this.progression = msg.progression; },
+                // Kill XP / level-up / death / allocate / respec pushes. The
+                // whole body is Game._applyProgressionFrame -- see there.
+                onProgression: (msg) => this._applyProgressionFrame(msg),
                 // SOMET-372. Both handlers are one line each on purpose: the
                 // rules they carry (whole-list replacement, and the item-shape
                 // mapping openChest needs) live in core/worldChests.js, where
                 // they can be tested without a canvas.
                 onChests: (msg) => { this.worldChests = chestsFromFrame(msg); },
                 onChestOpened: (msg) => this._showToast(applyChestOpened(this.inventory, this.worldChests, msg)),
+                // SOMET-482 -- a standalone presentation frame (today: the puff
+                // a ground item leaves when its lifetime runs out). It goes
+                // through the SAME addEffects/capParticles/pruneEffects path as
+                // attacks and impacts rather than a parallel list, so the
+                // lifetime and particle budget cannot drift between the two.
+                onVfx: (msg) => {
+                    if (!msg || !Number.isFinite(msg.x) || !Number.isFinite(msg.y)) return;
+                    addEffects(this.vfx, [{ v: msg.name, x: msg.x, y: msg.y }],
+                               performance.now(), this.vfxDefs);
+                    // Same budget the impacts path enforces the moment the list
+                    // grows -- a crowded floor expiring at once is exactly when
+                    // it would blow.
+                    this.vfx = capParticles(this.vfx);
+                },
                 // A trade lands its inventory/wallet effect via the existing
                 // item/gold plumbing (addItem/removeItem, wallet frame); what
                 // 'bought'/'sold' add on top is re-issuing `interact` so the
@@ -513,7 +659,15 @@ export class Game {
                 onNoAmmo: (msg) => {
                     this.noAmmoUntil = performance.now() + NO_AMMO_FLASH_MS;
                     applyAmmoCount(this.inventory, msg && msg.item_type_id, 0);
+                    // SOMET-494: an empty quiver is "the thing the attack
+                    // depends on ran out" exactly as much as an empty mana
+                    // pool is, so it ends a held attack too. It arrives on its
+                    // own frame rather than through `attackrefused` because
+                    // ammo is refused later, after the spend, and carries the
+                    // item type the HUD has to zero.
+                    this._stopConstantAttack();
                 },
+                onAttackRefused: (msg) => this._onAttackRefused(msg),
                 onAmmo: (msg) => applyAmmoCount(this.inventory, msg.item_type_id, msg.count),
                 onError: (e) => {
                     console.error('[authority]', e);
@@ -671,9 +825,191 @@ export class Game {
         return { progression: this.progression, gold: this.gold };
     }
 
+    // SOMET-483. One HTTP read of GET /api/progression, fired when the
+    // Character tab is opened and again when the level actually changes.
+    //
+    // It writes ONLY progressionExtras -- never this.progression, which would
+    // reintroduce the F1 race applyGoldResult's comment below describes. The
+    // derived-`stats` half is additionally latched off once a socket frame has
+    // carried it (mergeSeedStats), so a late response can never overwrite a
+    // newer push. xpFloor/xpToNext/respecCost have no websocket sender at all,
+    // so they are applied unconditionally.
+    //
+    // `_progressionBundleBusy` is a single-flight guard, not a cache: clicking
+    // the tab five times must not issue five requests, but the sixth click
+    // after the first settles must still refresh.
+    // The websocket `progression` frame's whole effect. A METHOD rather than a
+    // closure inside initChunked because the latch below is a rule, and a rule
+    // buried in a closure that needs a live websocket to reach is a rule
+    // nothing tests -- which is how this epic shipped nine features that were
+    // live in the database and inert in play.
+    //
+    // This is still the SINGLE writer of this.progression: an unconditional
+    // overwrite on the one channel that has a real ordering guarantee (see
+    // progressionExtras.js's header, and applyGoldResult's below).
+    //
+    // The derived bundle rides the same frame (contract §6.3) and latches the
+    // HTTP seed off once it has. A level change triggers ONE targeted refetch
+    // of the level-dependent xpFloor/xpToNext/respecCost -- a level-up is a
+    // real event, not the no-op push the original sheet was required not to
+    // refetch on.
+    _applyProgressionFrame(msg) {
+        if (!msg || !msg.progression) return;
+        const prevLevel = this.progression ? this.progression.level : null;
+        this.progression = msg.progression;
+        if (frameCarriesStats(msg)) {
+            this.progressionExtras = mergeFrameStats(this.progressionExtras, msg);
+            this._statsFromSocket = true;
+        }
+        if (msg.progression.level !== prevLevel) this._refreshProgressionBundle();
+    }
+
+    _refreshProgressionBundle() {
+        if (this._progressionBundleBusy) return;
+        this._progressionBundleBusy = true;
+        fetchProgression()
+            .then((bundle) => {
+                if (!bundle) return;
+                this.progressionExtras = mergeLevelInfo(this.progressionExtras, bundle);
+                this.progressionExtras = mergeSeedStats(
+                    this.progressionExtras, bundle, this._statsFromSocket,
+                );
+            })
+            .catch(() => { /* the next tab-open or level-up retries */ })
+            .finally(() => { this._progressionBundleBusy = false; });
+    }
+
+    // Everything the Character pane renders, assembled fresh each frame from
+    // the single-writer row plus the extras above. Not cached: a kill that
+    // levels the player up must move the bar on the very next frame.
+    characterView() {
+        return buildCharacterView({
+            progression: this.progression,
+            extras: this.progressionExtras,
+            className: this.className,
+            mainStat: this.mainStat,
+        });
+    }
+
+    // SOMET-493 -- the in-game Settings panel's read side, following the same
+    // convention as getMinimapSnapshot/getProgressionSnapshot above: React
+    // polls Game rather than reaching into engine internals, so there is one
+    // source of truth for what the settings currently are.
+    //
+    // `autoLoot` is the SERVER's value (every `state` frame overwrites it), so
+    // a panel rendering from this snapshot cannot show a flip the server never
+    // agreed to. `inspect` is a pure client preference and is simply mirrored.
+    // null when not in a playing world -- the panel then shows its controls
+    // disabled rather than lying about a world it is not in.
+    getSettingsSnapshot() {
+        if (this.state !== 'playing' || !this.chunked) return null;
+        return {
+            autoLoot: this.autoLoot === true,
+            inspect: this.inspectEnabled === true,
+            constantAttack: this.constantAttack === true,
+        };
+    }
+
+    // Ask the server to turn auto-loot on/off. Returns whether the intent
+    // actually went out: on a dead socket the send is silently dropped and no
+    // later `state` frame can correct us, so an unconditional local flip would
+    // leave the UI reading a value the server never agreed to -- the exact
+    // failure this flag's wire echo exists to prevent. The optimistic local
+    // mirror is kept (the panel would otherwise not move until the next state
+    // frame) but only on a send that left.
+    setAutoLoot(on) {
+        const want = on === true;
+        if (!this.authorityClient) return false;
+        if (!this.authorityClient.sendAutoLoot(want)) return false;
+        this.autoLoot = want;
+        return true;
+    }
+
+    // SOMET-494 -- send an attack toward wherever the cursor is NOW.
+    //
+    // The aim is recomputed per send rather than captured at mousedown, so a
+    // held attack follows the pointer: swinging at where the cursor was a
+    // second ago is not what "hold to keep attacking" means to anyone.
+    _sendAttackAtCursor() {
+        if (!this.authorityClient || !this.camera) return;
+        const pcx = this.player.x + this.player.width / 2;
+        const pcy = this.player.y + this.player.height / 2;
+        const { nx, ny } = aimVector(
+            this._cursorX ?? this.canvas.width / 2,
+            this._cursorY ?? this.canvas.height / 2,
+            this.camera, pcx, pcy,
+        );
+        this.authorityClient.sendAttack(nx, ny);
+        this._lastAttackSentAt = performance.now();
+    }
+
+    // True while any full-screen panel owns the cursor. The same three panels
+    // RenderSystem suppresses the inspect card for -- it computes that from
+    // the render params it is handed rather than calling this, since it must
+    // answer for the frame it is drawing, not for the tick that follows.
+    _anyPanelOpen() {
+        return this.inventoryOpen === true || this.shopOpen === true || this.bankOpen === true
+            || this.passiveTreeOpen === true;
+    }
+
+    // One repeat step, called from update(). Everything it decides lives in
+    // core/constantAttack.js so the conditions can be asserted directly --
+    // a stuck hold is an input bug no screenshot shows and no player can undo
+    // without reloading.
+    _tickConstantAttack() {
+        if (!this._attackHeld) return;
+        // A panel opening ENDS the hold rather than merely pausing it. Pausing
+        // would resume swinging the moment the panel closed, off a button
+        // press the player made before they went shopping.
+        if (this._anyPanelOpen()) { this._attackHeld = false; return; }
+        const should = shouldRepeatAttack({
+            enabled: this.constantAttack === true,
+            held: true,
+            playing: this.state === 'playing' && !!this.chunked && !!this.authorityClient,
+            panelOpen: false,
+            lastSentAt: this._lastAttackSentAt,
+        }, performance.now());
+        if (should) this._sendAttackAtCursor();
+    }
+
+    // The server refused an attack. Only a refusal the player cannot wait out
+    // ends the hold -- see refusalStopsHold for why a cooldown refusal must
+    // not, and why a shock interrupt must not either.
+    _onAttackRefused(msg) {
+        if (refusalStopsHold(msg && msg.reason)) this._stopConstantAttack();
+    }
+
+    // Ends a held attack. Public-ish because two different server frames reach
+    // it (`attackrefused` and `noammo`) and both mean the same thing to the
+    // player: you have run out, so the character stops.
+    _stopConstantAttack() {
+        this._attackHeld = false;
+    }
+
+    // Purely local: no server involvement, so unlike setAutoLoot this always
+    // takes. Turning it OFF drops any pinned target too, or the card would
+    // hang on screen until the pin expired.
+    setInspectEnabled(on) {
+        this.inspectEnabled = on === true;
+        if (!this.inspectEnabled) {
+            this._inspectPinnedKey = null;
+            this._inspectPinnedUntil = 0;
+        }
+        return this.inspectEnabled;
+    }
+
+    // SOMET-494. Also local. Turning it OFF drops any hold in progress, so the
+    // character stops swinging the instant the box is unticked rather than
+    // when the player happens to let go.
+    setConstantAttack(on) {
+        this.constantAttack = on === true;
+        if (!this.constantAttack) this._attackHeld = false;
+        return this.constantAttack;
+    }
+
     // Write-through cache update for gold ONLY (SOMET-242 D1 fix, narrowed by
-    // the F1 fix below). CharacterSheet.jsx calls this right after a
-    // successful respec HTTP response so the canvas-drawn gold HUD
+    // the F1 fix below). The passive-tree overlay's respec calls this right
+    // after a successful respec HTTP response so the canvas-drawn gold HUD
     // (RenderSystem reads this.gold directly) reflects the payment
     // immediately, the same way D1 originally fixed the sheet's own stale
     // display.
@@ -690,7 +1026,7 @@ export class Game {
     // ordering guarantee (a single WebSocket connection preserves send
     // order, and server.js's refreshPlayerStats -- e77d929/bbab966 -- now
     // pushes a 'progression' frame after every successful allocate/respec
-    // too, through that same ordered channel). See CharacterSheet.jsx's
+    // too, through that same ordered channel). See progressionExtras.js's
     // module header for the full reasoning, including why a naive
     // "only apply if experience increased" guard was considered and
     // rejected (death decreases experience, so that check is not a valid
@@ -709,6 +1045,7 @@ export class Game {
 
     destroy() {
         if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
+        this._disconnectCanvasContainerObserver();
         if (this._keydownHandler) window.removeEventListener('keydown', this._keydownHandler);
         if (this._keyupHandler) window.removeEventListener('keyup', this._keyupHandler);
         if (this._contextMenuHandler) window.removeEventListener('contextmenu', this._contextMenuHandler);
@@ -716,6 +1053,8 @@ export class Game {
         if (this._mouseMoveHandler) this.canvas.removeEventListener('mousemove', this._mouseMoveHandler);
         if (this._mouseDownHandler) this.canvas.removeEventListener('mousedown', this._mouseDownHandler);
         if (this._mouseUpHandler) this.canvas.removeEventListener('mouseup', this._mouseUpHandler);
+        if (this._windowMouseUpHandler) window.removeEventListener('mouseup', this._windowMouseUpHandler);
+        if (this._wheelHandler) this.canvas.removeEventListener('wheel', this._wheelHandler);
         if (this.authorityClient) this.authorityClient.disconnect();
 
         cancelAnimationFrame(this.animationFrameId);
@@ -735,6 +1074,7 @@ export class Game {
                 const s = this.authorityClient.sendInput(dx, dy, dt);
                 if (s.sent) this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt });
             }
+            this._tickConstantAttack();
             this.creatures.interpolate(dt);
             if (this.projectiles) this.projectiles.interpolate(dt);
             this.camera.update(this.player);
@@ -872,6 +1212,10 @@ export class Game {
                 projectiles: this.projectiles ? this.projectiles.all() : [],
                 mana: this.localMana,
                 maxMana: this.localMaxMana,
+                // The mana ORB is hidden outright, not fed a null pool: an
+                // empty blue orb reads as "out of mana", which is the opposite
+                // of the truth for a class that never spends it.
+                showMana: !this.usesLifeCost,
                 stamina: this.localStamina,
                 maxStamina: this.localMaxStamina,
                 weaponName: this._resolveWeaponName(),
@@ -885,10 +1229,12 @@ export class Game {
                     drag: this.inventoryDrag,
                     hoverX: this._cursorX ?? null,
                     hoverY: this._cursorY ?? null,
+                    // SOMET-483. Built fresh, never cached -- see characterView.
+                    character: this.characterView(),
+                    modPage: this.characterModPage,
                 },
                 groundItems: this.groundItems.all(),
                 worldChests: this.worldChests,
-                autoLoot: this.autoLoot,
                 gold: this.gold,
                 merchants: this.merchants,
                 landmarks: this.landmarks,
@@ -912,6 +1258,35 @@ export class Game {
                 // at their feet come from this.player.effects via drawCreature.
                 effects: this.player.effects || null,
                 progression: this.progression,
+                // SOMET-476 — the passive-tree overlay. Every field here is
+                // read straight off the single-writer progression row rather
+                // than cached anywhere: a kill that levels the player up must
+                // open new nodes on the very next frame.
+                passiveTreeOpen: this.passiveTreeOpen,
+                passiveIndex: this.passiveIndex,
+                passiveView: this.passiveView,
+                allocatedNodeIds: (this.progression && this.progression.allocatedNodeIds) || [],
+                passivePoints: (this.progression && this.progression.passivePoints) || 0,
+                startNodeId: this._passiveStartNodeId(),
+                // Contract §6.4. `passiveRespecCost` is the SERVER's number; a
+                // null keeps the button disabled rather than guessing one.
+                passiveRespecCost: this.passiveRespecCost,
+                passiveRespecBusy: this.passiveRespecBusy,
+                passiveHoverX: this.passiveTreeOpen ? (this._cursorX ?? null) : null,
+                passiveHoverY: this.passiveTreeOpen ? (this._cursorY ?? null) : null,
+                // SOMET-493. `enabled` false short-circuits the whole pass in
+                // RenderSystem, so a player who never turns it on pays one
+                // property read per frame.
+                inspect: {
+                    enabled: this.inspectEnabled === true,
+                    camera: this.camera,
+                    cursorX: this._cursorX ?? null,
+                    cursorY: this._cursorY ?? null,
+                    pinnedKey: nowMs < this._inspectPinnedUntil ? this._inspectPinnedKey : null,
+                    entityDefs: this.entityDefs,
+                    itemTypes: this.inventory ? this.inventory.types : null,
+                    localPlayer: { mana: this.localMana, maxMana: this.localMaxMana },
+                },
             });
         }
     }
@@ -949,6 +1324,115 @@ export class Game {
         this.inventoryDrag = null;
     }
 
+    // The ONE way the passive tree opens, for the same reason closeInventory
+    // is the one way the inventory closes: the P toggle is the only caller
+    // today, but the fetch/centre pair must not be duplicated at a second one.
+    openPassiveTree() {
+        this.passiveTreeOpen = true;
+        // Recentred on every open: a player who panned into a far sector last
+        // time should not reopen to an empty screen with no idea which way
+        // home is.
+        this.passiveView = { panX: GAME_WIDTH / 2, panY: GAME_HEIGHT / 2, zoom: DEFAULT_ZOOM };
+        if (!this.passiveTree) {
+            fetchPassiveTree()
+                .then((tree) => {
+                    this.passiveTree = tree;
+                    this.passiveIndex = buildTreeIndex(tree);
+                })
+                .catch((err) => this._showToast(err.message));
+        }
+        if (this.passiveStartClass == null) {
+            fetchStartClass()
+                .then((name) => { this.passiveStartClass = name; })
+                .catch(() => { this.passiveStartClass = null; });
+        }
+        this._refreshRespecQuote();
+    }
+
+    // The ONE way it closes. Escape, the panel's [X] and the 'p' toggle all
+    // land here so an in-flight PAN that outlived its panel cannot resolve
+    // against a layout that is no longer on screen -- the same hazard
+    // closeInventory's header describes for an in-flight drag.
+    closePassiveTree() {
+        this.passiveTreeOpen = false;
+        this.passiveDrag = null;
+    }
+
+    // Contract §6.4's affordability inputs, refetched rather than cached with
+    // the graph: the cost is respec_base_gold x LEVEL and the player levels up
+    // mid-session. Failure leaves the cost null, which respecDisabled reads as
+    // "disabled", never as "free".
+    _refreshRespecQuote() {
+        return fetchRespecQuote()
+            .then((q) => {
+                this.passiveRespecCost = q.respecCost;
+                this.passiveGold = q.gold;
+            })
+            .catch(() => { this.passiveRespecCost = null; });
+    }
+
+    // A press inside the open tree. Either it lands on a chrome control (the
+    // [X], the respec button) and is consumed here, or it ARMS a pan -- and
+    // whether that was a pan or a click on a node is decided on mouseup by
+    // `moved`, exactly as the inventory drag decides between a drag and a click.
+    _handlePassivePress(x, y) {
+        const layout = this.renderSystem && this.renderSystem._passiveLayout;
+        if (layout) {
+            const hit = layout.hitAreas.find(
+                (a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h
+                    && (a.kind === 'passiveclose' || a.kind === 'passiverespec'),
+            );
+            if (hit && hit.kind === 'passiveclose') { this.closePassiveTree(); return; }
+            if (hit && hit.kind === 'passiverespec') {
+                // The hit area exists ONLY while the button is enabled
+                // (layoutPassiveTree publishes it conditionally), so there is
+                // no second affordability check here to drift from the first.
+                this.passiveRespecBusy = true;
+                respecPassives()
+                    .then(({ gold }) => {
+                        // gold ONLY. The progression comes back over the
+                        // ordered websocket frame; applying the HTTP body here
+                        // would be the second writer F1 removed.
+                        if (Number.isFinite(gold)) this.gold = gold;
+                        return this._refreshRespecQuote();
+                    })
+                    .catch((err) => this._showToast(err.message))
+                    .finally(() => { this.passiveRespecBusy = false; });
+                return;
+            }
+        }
+        this.passiveDrag = { startX: x, startY: y, lastX: x, lastY: y, moved: false };
+    }
+
+    // A press that never travelled: resolve it against the node circles of the
+    // frame the player was actually looking at.
+    _handlePassiveClick(x, y) {
+        const layout = this.renderSystem && this.renderSystem._passiveLayout;
+        if (!layout) return;
+        const node = hitNodeAt(layout, x, y);
+        // A LOCKED node is not clickable. The server refuses it too
+        // (passiveRules.isAllocatable), so this is an affordance, not a gate --
+        // but firing the request anyway would toast a refusal on every stray
+        // click in the tree.
+        if (!node || node.state !== 'allocatable') return;
+        // Fire and forget. The success body is discarded on purpose: the
+        // server's ordered `progression` websocket frame is the ONLY writer of
+        // this.progression (see the onProgression handler above and
+        // core/progressionExtras.js's F1 header).
+        allocatePassive(node.id).catch((err) => this._showToast(err.message));
+    }
+
+    // The client's copy of the server's class -> start-node lookup, used ONLY
+    // to decide which nodes to DRAW as reachable. passiveTreeStore's
+    // startNodeIdFor resolves it again on every allocate and is the only thing
+    // that authorizes one. A class with no start node returns null and nothing
+    // is drawn allocatable, rather than defaulting into another class's sector.
+    _passiveStartNodeId() {
+        if (!this.passiveTree || !this.passiveStartClass) return null;
+        const start = this.passiveTree.nodes.find((n) => n.start_class === this.passiveStartClass);
+        return start ? start.id : null;
+    }
+
     // Hit-test the slot/item rects RenderSystem recorded while drawing the
     // open panel (canvas-px space, same as _cursorX/_cursorY). Clicking an
     // item selects it (click again to deselect); clicking a slot equips the
@@ -981,25 +1465,17 @@ export class Game {
         if (hit.kind === 'invtab') {
             // Page resets with the tab: page 3 of All is very likely past the
             // end of Stones, and the layout would clamp it to 0 anyway — doing
-            // it here keeps the state and the render agreeing.
+            // it here keeps the state and the render agreeing. The Character
+            // tab's own modifier page resets for the same reason.
             this.inventoryTab = hit.id;
             this.inventoryPage = 0;
+            this.characterModPage = 0;
+            if (hit.id === 'character') this._refreshProgressionBundle();
             return;
         }
         if (hit.kind === 'invpage') { this.inventoryPage = hit.id; return; }
+        if (hit.kind === 'charmodpage') { this.characterModPage = hit.id; return; }
 
-        if (hit.kind === 'autoloot') {
-            // Only mirror the flip if the intent actually reached the server.
-            // On a dead socket the send is silently dropped and no later
-            // `state` frame can correct us, so an unconditional flip would
-            // leave the label lying — the exact failure this flag's wire
-            // echo exists to prevent.
-            if (!this.authorityClient) return;
-            if (this.authorityClient.sendAutoLoot(!this.autoLoot)) {
-                this.autoLoot = !this.autoLoot;
-            }
-            return;
-        }
         if (hit.kind === 'drop') {
             if (this.authorityClient) this.authorityClient.sendDrop(hit.id);
             return;
@@ -1042,57 +1518,6 @@ export class Game {
         if (hit.kind === 'bankpage') { this.bankView = { tab: this.bankView.tab, page: hit.id }; return; }
     }
 
-    _interactClosest() {
-        if (!this.authorityClient) return;
-        const pcx = this.player.x + (this.player.width || 0) / 2;
-        const pcy = this.player.y + (this.player.height || 0) / 2;
-        const INTERACT_R = 140;
-
-        let bestKind = null;
-        let bestDist = Infinity;
-
-        // Check banks (account chest)
-        if (Array.isArray(this.banks)) {
-            for (const b of this.banks) {
-                const d = Math.hypot(b.x - pcx, b.y - pcy);
-                if (d <= INTERACT_R && d < bestDist) {
-                    bestDist = d;
-                    bestKind = 'bank';
-                }
-            }
-        }
-
-        // Check merchants
-        if (Array.isArray(this.merchants)) {
-            for (const m of this.merchants) {
-                const d = Math.hypot(m.x - pcx, m.y - pcy);
-                if (d <= INTERACT_R && d < bestDist) {
-                    bestDist = d;
-                    bestKind = 'merchant';
-                }
-            }
-        }
-
-        // Check world chests
-        if (Array.isArray(this.worldChests)) {
-            for (const c of this.worldChests) {
-                const d = Math.hypot(c.x - pcx, c.y - pcy);
-                if (d <= INTERACT_R && d < bestDist) {
-                    bestDist = d;
-                    bestKind = 'worldchest';
-                }
-            }
-        }
-
-        if (bestKind === 'bank') {
-            this.authorityClient.sendOpenBank();
-        } else if (bestKind === 'merchant') {
-            this.authorityClient.sendInteract();
-        } else if (bestKind === 'worldchest') {
-            this.authorityClient.sendOpenChest();
-        }
-    }
-
     setupInput(){
         if (this._inputAttached) return;
         this._inputAttached = true;
@@ -1101,7 +1526,7 @@ export class Game {
             KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd',
             KeyI: 'i', KeyE: 'e', KeyB: 'b', KeyG: 'g',
             KeyF: 'f', KeyM: 'm', KeyT: 't', KeyC: 'c',
-            KeyR: 'r', KeyQ: 'q', Space: ' ',
+            KeyR: 'r', KeyQ: 'q', KeyP: 'p', Space: ' ',
             ArrowUp: 'arrowup', ArrowDown: 'arrowdown', ArrowLeft: 'arrowleft', ArrowRight: 'arrowright',
             Escape: 'escape',
         };
@@ -1118,9 +1543,46 @@ export class Game {
             // weapon switch — equipping now goes through the panel). Gated on
             // !shopOpen so the two centred panels can never stack (the shop is
             // closed with 'e' or Escape first).
-            if (isKey('i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen) {
+            if (isKey('i') && this.state === 'playing' && this.chunked && !e.repeat && !this.shopOpen && !this.bankOpen
+                && !this.passiveTreeOpen) {
                 if (this.inventoryOpen) this.closeInventory();
                 else this.inventoryOpen = true;
+            }
+
+            // Character sheet (SOMET-483): C opens the inventory panel on its
+            // Character tab. The standalone popup this key used to toggle is
+            // deleted -- the key is REUSED rather than retired so the player's
+            // muscle memory survives, and hotkeyRegistry.test.js pins that
+            // nothing else claims it. Same gates as 'i', so the two centred
+            // panels can never stack.
+            //
+            // Pressing it while the panel is already open on ANOTHER tab
+            // switches to Character rather than closing: "show me my character"
+            // is the intent, and a close would make the key's effect depend on
+            // which tab happened to be showing.
+            if (isKey('c') && this.state === 'playing' && this.chunked && !e.repeat
+                && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (this.inventoryOpen && this.inventoryTab === 'character') {
+                    this.closeInventory();
+                } else {
+                    this.inventoryOpen = true;
+                    this.inventoryTab = 'character';
+                    this.inventoryPage = 0;
+                    this.characterModPage = 0;
+                    this._refreshProgressionBundle();
+                }
+            }
+
+            // Passive tree (SOMET-476). Gated on the other three panels being
+            // closed for the same reason the 'i' binding is: two centred
+            // panels must never stack. The graph is ~1800 nodes and never
+            // changes during a session, so it is fetched once, lazily, on the
+            // first open rather than on join.
+            if (isKey('p') && this.state === 'playing' && this.chunked && !e.repeat
+                && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+                if (this.passiveTreeOpen) { this.closePassiveTree(); return; }
+                this.openPassiveTree();
+                return;
             }
 
             if (isKey('escape')) {
@@ -1130,23 +1592,54 @@ export class Game {
                     this.shopOpen = false;
                 } else if (this.bankOpen) {
                     this.bankOpen = false;
+                } else if (this.passiveTreeOpen) {
+                    this.closePassiveTree();
                 } else if (this.inventoryOpen) {
                     this.closeInventory();
                 }
             }
 
-            // Universal interact ('e' or 'f'): opens whichever interactable (chest, merchant, bank) is closest
-            if ((isKey('e') || isKey('f')) && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen) {
+            // ONE INTENT PER KEY, and range is always the AUTHORITY's call.
+            //
+            // SOMET-471: a "universal interact" key that picked the NEAREST of
+            // merchant/bank/chest client-side made the loser unreachable. The
+            // bank post is derived one tile from the merchant post
+            // (backend/src/services/mapService.js villageBankPost), and the
+            // entry village's spawn point is 82px from the bank against 113px
+            // from the merchant -- both inside the authority's INTERACT_RADIUS
+            // of 120, but "nearest wins" ate every merchant press, so the shop
+            // could not be opened at all. The authority resolves the two posts
+            // with two SEPARATE proximity picks for exactly this reason; see
+            // nearestBankVillage's header in backend/src/authority/server.js.
+            //
+            // Each key therefore NAMES the interaction it wants and the server
+            // decides whether anything of that kind is in range; a refusal
+            // comes back as an `error` frame and is already toasted. Keeping
+            // the radius out of the client is also what stops a second copy of
+            // INTERACT_RADIUS from drifting from the first.
+
+            // Merchant shop ('e'): closes an open shop, or asks the server
+            // whether a merchant is in range.
+            if (isKey('e') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
                 if (this.shopOpen) { this.shopOpen = false; return; }
-                if (this.bankOpen) { this.bankOpen = false; return; }
-                this._interactClosest();
+                if (this.authorityClient) this.authorityClient.sendInteract();
                 return;
             }
 
-            // Account chest ('b'):
+            // Account chest (SOMET-310) ('b'): closes an open bank panel, or
+            // asks the server whether a bank post is in range.
             if (isKey('b') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.shopOpen) {
                 if (this.bankOpen) { this.bankOpen = false; return; }
                 if (this.authorityClient) this.authorityClient.sendOpenBank();
+                return;
+            }
+
+            // World chest (SOMET-372) ('f'): asks the server to open the
+            // nearest chest. Its own key rather than a smarter 'e' -- see the
+            // block comment above.
+            if (isKey('f') && this.state === 'playing' && this.chunked && !e.repeat
+                && !this.inventoryOpen && !this.shopOpen && !this.bankOpen) {
+                if (this.authorityClient) this.authorityClient.sendOpenChest();
                 return;
             }
 
@@ -1176,12 +1669,18 @@ export class Game {
             if (codeKey) this.keys[codeKey] = false;
         };
 
+        // Both of these also drop a held attack (SOMET-494). A right-click or a
+        // tab-away never produces the mouseup that would otherwise end the
+        // hold, and a stuck auto-attack is not something a player can undo
+        // without reloading -- the same reason both already clear this.keys.
         this._contextMenuHandler = () => {
             this.keys = {};
+            this._attackHeld = false;
         };
 
         this._blurHandler = () => {
             this.keys = {};
+            this._attackHeld = false;
         };
 
         // Mouse aim (Slice 3b): track cursor canvas-px position, and on
@@ -1196,6 +1695,21 @@ export class Game {
                 const dx = this._cursorX - this.inventoryDrag.startX;
                 const dy = this._cursorY - this.inventoryDrag.startY;
                 if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) this.inventoryDrag.armed = true;
+            }
+            if (this.passiveDrag) {
+                // Pan by the DELTA since the last move, not from the press
+                // origin: accumulating from the origin re-applies the whole
+                // offset every frame and the tree shoots off screen.
+                this.passiveView = {
+                    ...this.passiveView,
+                    panX: this.passiveView.panX + (this._cursorX - this.passiveDrag.lastX),
+                    panY: this.passiveView.panY + (this._cursorY - this.passiveDrag.lastY),
+                };
+                this.passiveDrag.lastX = this._cursorX;
+                this.passiveDrag.lastY = this._cursorY;
+                const dx = this._cursorX - this.passiveDrag.startX;
+                const dy = this._cursorY - this.passiveDrag.startY;
+                if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) this.passiveDrag.moved = true;
             }
         };
         this._mouseDownHandler = (e) => {
@@ -1219,6 +1733,10 @@ export class Game {
                 this._handleBankClick(this._cursorX ?? 0, this._cursorY ?? 0);
                 return;
             }
+            if (this.passiveTreeOpen) {
+                this._handlePassivePress(this._cursorX ?? 0, this._cursorY ?? 0);
+                return;
+            }
             if (this.inventoryOpen) {
                 const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
                 const areas = (this.renderSystem && this.renderSystem._invHitAreas) || [];
@@ -1237,44 +1755,88 @@ export class Game {
                 this._handleInventoryClick(x, y);
                 return;
             }
+            // SOMET-493 -- clicking an entity PINS its inspect card, so the
+            // card can be read without holding the mouse perfectly still. This
+            // is deliberately additive and never consumes the click: the same
+            // press still opens a merchant or swings the weapon below. It sits
+            // after the panel branches above (which all return) because a
+            // click on an open panel is not a click on the world.
+            //
+            // `_inspectHoverKey` is what the LAST rendered frame decided was
+            // under the cursor, not a fresh hit-test: re-testing here would
+            // need its own copy of the drawables list and could disagree with
+            // what the player actually saw.
+            if (this.inspectEnabled) {
+                const key = this.renderSystem ? this.renderSystem._inspectHoverKey : null;
+                // Clicking empty ground clears the pin -- that is how a player
+                // dismisses a card without waiting it out.
+                this._inspectPinnedKey = key;
+                this._inspectPinnedUntil = key ? performance.now() + INSPECT_PIN_MS : 0;
+            }
+
             const pcx = this.player.x + this.player.width / 2;
             const pcy = this.player.y + this.player.height / 2;
 
-            // Direct click on world interactables (chest, bank, merchant)
+            // Direct click on a world interactable (merchant, bank, chest).
+            //
+            // Unlike a key, a click carries WHICH ONE in the gesture itself --
+            // the player pointed at a specific marker -- so choosing a kind
+            // here is not the guess the keys must never make. The two radii do
+            // different jobs and neither is a copy of the server's range rule:
+            // MARKER_CLICK_R is a hit-test ("did they point at this marker?"),
+            // and INTERACT_CLICK_R only decides whether the click is spent on
+            // an interaction or on an attack, so it is deliberately TIGHTER
+            // than the authority's INTERACT_RADIUS (120) -- same reasoning as
+            // RenderSystem's WORLD_CHEST_PROMPT_R. A click on a marker the
+            // player is nowhere near stays an attack rather than becoming a
+            // frame the server would only refuse.
+            const MARKER_CLICK_R = 50;
+            const INTERACT_CLICK_R = 110;
             if (this.camera) {
                 const w = cursorToWorld(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera);
-                if (Array.isArray(this.banks)) {
-                    for (const b of this.banks) {
-                        if (Math.hypot(b.x - w.x, b.y - w.y) <= 50 && Math.hypot(b.x - pcx, b.y - pcy) <= 150) {
-                            if (this.authorityClient) this.authorityClient.sendOpenBank();
-                            return;
-                        }
-                    }
+                const pointedAt = (t) => Math.hypot(t.x - w.x, t.y - w.y) <= MARKER_CLICK_R
+                    && Math.hypot(t.x - pcx, t.y - pcy) <= INTERACT_CLICK_R;
+                for (const m of (Array.isArray(this.merchants) ? this.merchants : [])) {
+                    if (pointedAt(m)) { this.authorityClient.sendInteract(); return; }
                 }
-                if (Array.isArray(this.merchants)) {
-                    for (const m of this.merchants) {
-                        if (Math.hypot(m.x - w.x, m.y - w.y) <= 50 && Math.hypot(m.x - pcx, m.y - pcy) <= 150) {
-                            if (this.authorityClient) this.authorityClient.sendInteract();
-                            return;
-                        }
-                    }
+                for (const b of (Array.isArray(this.banks) ? this.banks : [])) {
+                    if (pointedAt(b)) { this.authorityClient.sendOpenBank(); return; }
                 }
-                if (Array.isArray(this.worldChests)) {
-                    for (const c of this.worldChests) {
-                        if (Math.hypot(c.x - w.x, c.y - w.y) <= 50 && Math.hypot(c.x - pcx, c.y - pcy) <= 150) {
-                            if (this.authorityClient) this.authorityClient.sendOpenChest();
-                            return;
-                        }
-                    }
+                for (const c of (Array.isArray(this.worldChests) ? this.worldChests : [])) {
+                    if (pointedAt(c)) { this.authorityClient.sendOpenChest(); return; }
                 }
             }
 
-            const { nx, ny } = aimVector(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera, pcx, pcy);
-            this.authorityClient.sendAttack(nx, ny);
+            // SOMET-494: reaching here means the press was NOT spent on a
+            // panel, a merchant, a bank or a chest -- every one of those
+            // returned above. So this is the one place a press becomes an
+            // attack, and therefore the one place a hold may start.
+            this._attackHeld = true;
+            this._sendAttackAtCursor();
+        };
+
+        // SOMET-494. Releasing over the HUD, the sidebar or outside the window
+        // never fires the canvas's own mouseup, so the hold would survive a
+        // release the player has already made. Registered on `window` for that
+        // reason and kept deliberately separate from _mouseUpHandler below,
+        // which owns inventory-drag resolution and must stay canvas-scoped.
+        this._windowMouseUpHandler = (e) => {
+            if (e.button === 0) this._attackHeld = false;
         };
 
         this._mouseUpHandler = (e) => {
             if (e.button !== 0) return;
+            if (this.passiveDrag) {
+                const pan = this.passiveDrag;
+                this.passiveDrag = null;
+                // It travelled: that was a pan, not a click on a node.
+                if (pan.moved) return;
+                // The panel closed while the button was down (Escape, a world
+                // change): there is no layout left to resolve against.
+                if (!this.passiveTreeOpen) return;
+                this._handlePassiveClick(pan.startX, pan.startY);
+                return;
+            }
             const drag = this.inventoryDrag;
             if (!drag) return;
             this.inventoryDrag = null;
@@ -1303,6 +1865,19 @@ export class Game {
             }
         };
 
+        // SOMET-476. `passive: false` because the handler calls
+        // preventDefault -- without it the browser scrolls the page behind the
+        // canvas while the player is zooming the tree.
+        this._wheelHandler = (e) => {
+            if (!this.passiveTreeOpen) return;
+            if (typeof e.preventDefault === 'function') e.preventDefault();
+            const pt = this._canvasPoint(e);
+            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+            this.passiveView = zoomAbout(
+                this.passiveView, pt.x, pt.y, clampZoom(this.passiveView.zoom * factor),
+            );
+        };
+
         window.addEventListener('keydown', this._keydownHandler);
         window.addEventListener('keyup', this._keyupHandler);
         window.addEventListener('contextmenu', this._contextMenuHandler);
@@ -1310,6 +1885,8 @@ export class Game {
         this.canvas.addEventListener('mousemove', this._mouseMoveHandler);
         this.canvas.addEventListener('mousedown', this._mouseDownHandler);
         this.canvas.addEventListener('mouseup', this._mouseUpHandler);
+        window.addEventListener('mouseup', this._windowMouseUpHandler);
+        this.canvas.addEventListener('wheel', this._wheelHandler, { passive: false });
     }
 
     startGame(){
@@ -1330,28 +1907,79 @@ export class Game {
         this.setState('menu');
     }
 
+    // The box the canvas has to fit inside. Its own parent element -- NOT the
+    // window: the canvas is a child of GameShell's content area, which is the
+    // window minus the sidebar and the header, and it clips what overflows.
+    // See canvasFit.js for the failure this measurement is fixing (SOMET-489).
+    _canvasContainerBox(){
+        const parent = this.canvas ? this.canvas.parentElement : null;
+        if (parent && typeof parent.getBoundingClientRect === 'function') {
+            const rect = parent.getBoundingClientRect();
+            // Returned even when it measures zero (a hidden container, or one
+            // read before first layout). resizeCanvas() then leaves the last
+            // good box alone -- falling back to the window HERE would restore
+            // the very overflow this method exists to prevent, at exactly the
+            // moment the container cannot contradict it.
+            return { width: rect.width, height: rect.height };
+        }
+        // No parent at all: a detached canvas (unit tests, or a node not yet
+        // inserted). The viewport is then the only box on offer.
+        return { width: window.innerWidth, height: window.innerHeight };
+    }
+
+    // A window `resize` is not the only thing that changes the box: the
+    // sidebar, the fullscreen transition and any panel around the canvas
+    // resize the container while the window stands still. Observing the
+    // container covers both, so this is the primary signal and the window
+    // listener is only the fallback for browsers without ResizeObserver.
+    // Re-attached from resizeCanvas() whenever the canvas is rebound to a new
+    // node (bindGameCanvas), so the observer can never be left watching the
+    // previous parent.
+    _observeCanvasContainer(){
+        const parent = this.canvas ? this.canvas.parentElement : null;
+        if (parent === this._observedContainer) return;
+        if (this._containerObserver) {
+            this._containerObserver.disconnect();
+            this._containerObserver = null;
+        }
+        this._observedContainer = parent || null;
+        if (!parent || typeof ResizeObserver === 'undefined') return;
+        this._containerObserver = new ResizeObserver(() => this.resizeCanvas());
+        this._containerObserver.observe(parent);
+    }
+
+    _disconnectCanvasContainerObserver(){
+        if (this._containerObserver) {
+            this._containerObserver.disconnect();
+            this._containerObserver = null;
+        }
+        this._observedContainer = null;
+    }
+
     resizeCanvas(){
         if (!this.canvas) return;
-        const ratio = 16/9;
-        let h,w;
-        const margin = 15;
+        this._observeCanvasContainer();
 
-        const availableWidth = window.innerWidth - 2 * margin;
-        const availableHeight = window.innerHeight - 2 * margin;
+        const box = this._canvasContainerBox();
+        const fit = fitCanvasBox(box.width, box.height);
+        // A container measured at zero (hidden, or pre-layout) would otherwise
+        // collapse the element to 0x0 with nothing to resize it back.
+        if (fit.width <= 0 || fit.height <= 0) return;
 
-        if(availableWidth/availableHeight > ratio){
-            h = availableHeight;
-            w = h * ratio;
-        }else{
-            w = availableWidth;
-            h = w / ratio;
-        }
+        // Guarded because assigning to width/height resets the backing store
+        // AND the 2d context state, and this now runs on every container
+        // resize rather than only on a window one.
+        if (this.canvas.width !== GAME_WIDTH) this.canvas.width = GAME_WIDTH;
+        if (this.canvas.height !== GAME_HEIGHT) this.canvas.height = GAME_HEIGHT;
 
-        this.canvas.width = GAME_WIDTH;
-        this.canvas.height = GAME_HEIGHT;
-
-        this.canvas.style.width = `${w}px`;
-        this.canvas.style.height = `${h}px`;
-        this.canvas.style.margin = `${margin}px`;
+        // Centred by absolute offsets inside the (position:relative) content
+        // area rather than by a margin: a margin box is part of the flow the
+        // container clips, which is what overflowed before.
+        this.canvas.style.position = 'absolute';
+        this.canvas.style.left = `${fit.left}px`;
+        this.canvas.style.top = `${fit.top}px`;
+        this.canvas.style.margin = '0';
+        this.canvas.style.width = `${fit.width}px`;
+        this.canvas.style.height = `${fit.height}px`;
     }
 }

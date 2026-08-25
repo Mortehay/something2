@@ -5,7 +5,7 @@
 //
 // One entry per (target, effectKey): re-applying an effect REFRESHES its
 // expiry/magnitude/source rather than adding a new entry. This bounds
-// target.effects by the number of distinct effect KINDS (currently 3), not
+// target.effects by the number of distinct effect KINDS (currently 4), not
 // by how often a weapon can trigger one — a fast-firing weapon re-applying
 // BURN every 100ms must still leave exactly one entry, not one per hit. (A
 // prior slice needed MAX_DROP_QTY to cap exactly this class of unbounded-
@@ -48,10 +48,27 @@
 // If you are reading this because the non-refreshing branch looks like a bug:
 // it is not. It is the entire point, and `shock cannot chain-lock` in
 // authority_effects.test.js fails if you "fix" it.
+//
+// THE SECOND EXCEPTION, added by SOMET-473: the Druid's charm on a PLAYER. It
+// is the same rule for the same reason -- see applyCharm below, which does not
+// re-derive it.
+//
+// SOMET-495 added a THIRD way for shock to be applied -- the passive tree's
+// "your hits shock" rider, which can ride any weapon at any rate -- and did NOT
+// add a third rule. It routes through the same stampRider/applyShockInterrupt
+// path, so the same non-refreshing window bounds it. That is what makes the
+// window's guarantee rate-independent, and it is why the rider is safe on a
+// 200ms dagger when SOMET-480 judged shock too dangerous for a debuff affix.
+
+const { PLAYER_CHARM_MS, PLAYER_CHARM_IMMUNITY_MS } = require('../services/charm.js');
 
 const BURN = 'burn';
 const CHILL = 'chill';
 const SHOCK = 'shock';
+// The Druid's pacify on a PLAYER (spec 8.2). A creature charm is NOT this: a
+// creature is taken over outright by CreatureSim (faction flip + follow), and
+// never carries an effects entry. See applyCharm below.
+const CHARMED = 'charmed';
 
 const BURN_DURATION_MS = 4000;
 const BURN_MAGNITUDE = 2;    // damage dealt per burn tick (pre-mitigation)
@@ -254,6 +271,61 @@ function canAct(target, now) {
   return !(target._interruptedUntil > now);
 }
 
+// THE SECOND EXCEPTION TO THE REFRESH RULE: the Druid's charm on a PLAYER.
+//
+// This is the shock interrupt's rule applied to a second control-affecting
+// effect, and for precisely the reason the shock note at the top of this file
+// gives at length: under sustained application, a REFRESHED effect is a
+// PERMANENT effect. A druid re-charming every second would hold a player
+// pacified forever, and every test in this file would stay green while it
+// happened -- refresh semantics working exactly as specified.
+//
+// So applyCharm returns EARLY inside the immunity window and stamps NOTHING:
+// not the effect entry, not the window. The window runs to completion from the
+// moment the charm landed, so the target is guaranteed
+// (PLAYER_CHARM_IMMUNITY_MS - PLAYER_CHARM_MS) = 4 seconds of freedom per
+// charm no matter how many druids are aiming at them. Re-stamping either field
+// here -- the natural "refresh like everything else" edit -- restores the
+// chain-lock.
+//
+// The window is per-TARGET, never per-caster. A per-caster window is two druids
+// taking turns, forever.
+//
+// Because the immunity (8000ms) is strictly longer than the duration (4000ms),
+// a second charm can never reach applyEffect while the first is still live --
+// which is what makes it safe to keep the charm in the effects Map at all, with
+// its refresh semantics intact, rather than inventing a third storage rule.
+//
+// If you are reading this because the early return looks like a bug: it is not.
+// `a charmed player cannot be chain-locked by repeated charms` in
+// authority_charm_player.test.js fails if you "fix" it.
+//
+// `charmerUserId` is the DRUID's userId, matching the sourceId convention every
+// other apply site in this file uses (applyElementEffect threads a userId, not
+// a tag). NOTHING here transfers control: the pacify's whole content is "your
+// damage cannot reach this player", enforced by the callers, plus world.js's
+// soft repel. The target's own input is never touched -- that is the difference
+// between this and the creature charm, which IS a control transfer.
+function applyCharm(target, charmerUserId, now) {
+  if (target._charmImmuneUntil > now) return false;   // undefined > now is false
+  applyEffect(target, CHARMED, {
+    durationMs: PLAYER_CHARM_MS, magnitude: 0, sourceId: charmerUserId, now,
+  });
+  target._charmImmuneUntil = now + PLAYER_CHARM_IMMUNITY_MS;
+  return true;
+}
+
+// The userId of whoever currently has `target` charmed, or null.
+//
+// The ONE reader of the charm entry. world.js's attack sweep, creatures.js's
+// melee arc and projectiles.js's two hit tests all resolve their pacify state
+// through this, so no damage path can hold a different opinion about who is
+// protected. Allocation-free, and safe on a target that has never been charmed.
+function charmerOf(target, now) {
+  const e = target && target.effects && target.effects.get(CHARMED);
+  return e && e.until > now ? e.sourceId : null;
+}
+
 // Clears an in-progress interrupt WITHOUT clearing the immunity window.
 // Used on respawn: a player who just died must not get up still staggered.
 // The immunity deliberately survives, so respawning cannot be used to shed the
@@ -293,23 +365,88 @@ const ELEMENT_EFFECTS = {
 function applyElementEffect(target, element, now, sourceId) {
   const spec = ELEMENT_EFFECTS[element];
   if (!spec) return null;
+  return stampRider(target, spec, now, sourceId);
+}
+
+// The one place a rider spec is stamped, shared by the element mapping above
+// and by the passive tree's on-hit riders below, so the two cannot disagree
+// about how a status lands -- above all about shock.
+//
+// The interrupt attempt rides along HERE, in the one rider stamp, for the same
+// reason the rider table itself does: every path that applies a rider goes
+// through this, so no path can be riderless and none can be interrupt-happy.
+// Wiring it into the projectile direct hit alone would leave the storm staff's
+// own AoE detonation — most of what it actually does — unable to interrupt.
+// applyShockInterrupt itself decides whether it lands.
+function stampRider(target, spec, now, sourceId) {
   applyEffect(target, spec.key, {
     durationMs: spec.durationMs, magnitude: spec.magnitude, sourceId, now,
   });
-  // The interrupt attempt rides along HERE, in the one element->rider mapping,
-  // for the same reason the rider table itself does: every path that deals
-  // elemental damage already calls this, so no damage path can be riderless.
-  // Wiring it into the projectile direct hit alone would leave the storm
-  // staff's own AoE detonation — most of what it actually does — unable to
-  // interrupt. applyShockInterrupt itself decides whether it lands.
   if (spec.key === SHOCK) applyShockInterrupt(target, now);
   return spec.key;
 }
 
+// status key -> the same spec the element mapping uses. Built BY INVERTING
+// ELEMENT_EFFECTS rather than by re-listing three literals, so a rider's
+// duration or magnitude has exactly one author: a tree-granted burn and a fire
+// weapon's burn are the same burn, and a rebalance of one is a rebalance of
+// both by construction.
+const STATUS_EFFECTS = Object.fromEntries(
+  Object.values(ELEMENT_EFFECTS).map((spec) => [spec.key, spec]),
+);
+
+// SOMET-495. The passive tree's `status` grants: "your hits burn", "your hits
+// chill", "Jarring Blows". `statuses` is composeStats' `hitStatuses` array,
+// snapshotted onto the attacking player's derived bundle and threaded to every
+// site where that player's hit lands — melee arc, melee-vs-player, projectile
+// direct hit and AoE detonation — beside the element rider it sits next to.
+//
+// The rider is ELEMENT-INDEPENDENT: a tree burn rides a physical sword. That is
+// the whole point of the node, and it is why this cannot be folded into
+// ELEMENT_EFFECTS.
+//
+// SHOCK IS THE DANGEROUS ONE, and it is safe here for exactly one reason: it
+// goes through stampRider, hence through applyShockInterrupt, hence through the
+// per-target NON-REFRESHING immunity window. Read the file header if that reads
+// like an implementation detail. SOMET-480 excluded shock from debuff affixes
+// because an on-hit shock with no window is a permanent stunlock, and a tree
+// rider fires far more often than any lightning weapon can: the window is what
+// makes hit RATE irrelevant, since it is stamped once per landed interrupt and
+// never pushed forward, guaranteeing the target
+// (SHOCK_IMMUNITY_MS - SHOCK_INTERRUPT_MS) = 2.6s of control per interrupt no
+// matter how fast it is being hit.
+//
+// Writing `target._interruptedUntil` directly here — the obvious inlining, and
+// the one that "simplifies away" a function call — restores the chain-lock and
+// leaves every other test in this file green. `a tree shock rider cannot
+// chain-lock a player` in authority_effects.test.js is what fails.
+//
+// Returns the keys actually stamped, so a caller can assert on the hit rather
+// than on the configuration.
+function applyHitStatuses(target, statuses, now, sourceId) {
+  if (!statuses || statuses.length === 0) return null;
+  let applied = null;
+  for (const s of statuses) {
+    const spec = STATUS_EFFECTS[s];
+    // An unknown status is skipped, not defaulted: the tree's authored set is
+    // validated at seed time, and silently substituting some other rider for a
+    // typo is how a node ends up doing the wrong thing rather than nothing.
+    if (!spec) continue;
+    stampRider(target, spec, now, sourceId);
+    (applied || (applied = [])).push(spec.key);
+  }
+  return applied;
+}
+
 module.exports = {
   applyEffect,
+  applyCharm,
+  charmerOf,
+  CHARMED,
   applyElementEffect,
+  applyHitStatuses,
   ELEMENT_EFFECTS,
+  STATUS_EFFECTS,
   tickEffects,
   hasEffect,
   effectMagnitude,

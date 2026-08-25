@@ -5,14 +5,34 @@ import { drawLandmarks } from "./landmarkRenderer.js";
 import { drawPlaceholder } from "./placeholderSprite.js";
 import { frameRect, staticFrameKey, animatedFrameKey, facingToDir, tileFrameKey, resolveTileVisual } from "./spriteAtlas.js";
 import { TileDiamondCache } from "./tileTexture.js";
+import { createTextLabelCache, drawCachedLabel } from "./textLabelCache.js";
+// domCanvasFactory lives in minimapTerrainLayer because that is where the
+// first offscreen-canvas cache needed it; it is a plain DOM helper with
+// nothing minimap-specific about it, and duplicating it here to avoid the
+// odd-looking import would be the worse trade.
+import { domCanvasFactory } from "./minimapTerrainLayer.js";
 import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
+import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
 import { effectProgress, effectAlpha, isoArcAngle, particlesAt } from "../core/vfx.js";
 import { anchorY } from "../core/attackAnchor.js";
 import { elementTint } from "../core/elements.js";
 import { normalizeEffects, effectColor, effectHudLine } from "../core/statusEffects.js";
+import {
+  canvasToCameraPoint, pickDrawable, targetKey, describeTarget, layoutCard,
+  drawableScreenRect, CARD,
+} from "./inspect.js";
+import { rarityGlowColor, withAlpha } from "../core/rarityColors.js";
+import {
+  rarityBorderColor, affixLine, clipToWidth, rowTextOffsets, AFFIX_FONT_PX,
+} from "./itemDisplay.js";
+
+// Read once from the layout module rather than restated, so the painter and
+// the layout can never disagree about where the card's left edge is.
+const CARD_PAD_X = CARD.padX;
+const CARD_BAR_LABEL = CARD.barLabelSize;
 
 // Mirrors PICKUP_RADIUS in backend/src/authority/groundItems.js — used here
 // only to decide when a ground item's name label is shown (i.e. when the
@@ -32,6 +52,17 @@ const WORLD_CHEST_PROMPT_R = 110;
 // let the player see themselves/nearby creatures behind it.
 const WALL_REVEAL_R = 150;
 
+// SOMET-445. The level tag's full visual identity, in one place: it is both
+// what gets drawn and what the label cache keys on, so the two cannot drift.
+// Stroke-then-fill because the tag sits over arbitrary terrain colours and
+// plain white text vanishes on snow.
+const LEVEL_TAG_STYLE = {
+  font: "bold 12px monospace",
+  fillStyle: "#ffd166",
+  strokeStyle: "rgba(0,0,0,0.85)",
+  lineWidth: 2,
+};
+
 export class RenderSystem {
   constructor(canvas, imageManager) {
     this.canvas = canvas;
@@ -43,6 +74,11 @@ export class RenderSystem {
     this.renderModeOverride = null;
     this.tileTexturesOff = false;
     this._tileCache = new TileDiamondCache();
+    // SOMET-445: creature level tags, rasterised once per distinct string.
+    // strokeText + fillText were the 3rd and 4th costliest entries in the
+    // whole render trace -- together ~3x the entire minimap -- redrawing a
+    // dozen identical strings once per creature per frame.
+    this._labelCache = createTextLabelCache({ createCanvas: domCanvasFactory });
     // Hit-test rects for the inventory panel, recorded while drawing it and
     // read back by Game on click. Empty whenever the panel isn't open.
     this._invHitAreas = [];
@@ -50,6 +86,12 @@ export class RenderSystem {
     this._shopHitAreas = [];
     // ...and for the account chest panel (SOMET-310).
     this._bankHitAreas = [];
+    // ...and for the passive-tree overlay (SOMET-476). `_passiveLayout` is
+    // what Game hit-tests a click against, and it is the SAME object the frame
+    // was drawn from -- re-laying it out on click could disagree with what the
+    // player saw.
+    this._passiveHitAreas = [];
+    this._passiveLayout = null;
   }
 
   // Effective render mode for an entity: the global override wins, else the
@@ -136,7 +178,11 @@ export class RenderSystem {
         // top-left put a decoration's depth key one tile toward the back of
         // its actual drawn position — wrongly occluded by an actor/wall a
         // tile closer to the camera that should have been behind it.
-        out.push({ kind: "decoration", ref: { ...type, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: type.place_order || 0, depth: depthKey(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2) });
+        // `name` is spread in from `d`, not from `type`: getEntityTypesMap
+        // keys the map BY name and does not repeat it inside the value, so a
+        // decoration drawable carried no way to say what it was until the
+        // inspect card needed one (SOMET-493).
+        out.push({ kind: "decoration", ref: { ...type, name: d.name, x, y, width: MAP_TILE_SIZE, height: MAP_TILE_SIZE }, order: type.place_order || 0, depth: depthKey(x + MAP_TILE_SIZE / 2, y + MAP_TILE_SIZE / 2) });
       }
     }
     return out;
@@ -144,10 +190,10 @@ export class RenderSystem {
 
   renderChunked({
     player, camera, chunkedMap, remotePlayers, localUserId,
-    creatures = [], projectiles = [], mana = null, maxMana = null,
+    creatures = [], projectiles = [], mana = null, maxMana = null, showMana = true,
     stamina = null, maxStamina = null,
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
-    groundItems = [], autoLoot = false, gold = null, toast = null,
+    groundItems = [], gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
@@ -170,8 +216,26 @@ export class RenderSystem {
     // arrives asynchronously, after the renderer exists.
     vfxDefs = null,
     progression = null,
+    // SOMET-493 — the inspect card. Shaped
+    // { enabled, cursorX, cursorY, pinnedKey, entityDefs, localPlayer }.
+    // Off by default, and `enabled: false` costs exactly one branch: the
+    // hit-test runs over the drawables list only when the player asked for it.
+    inspect = null,
+    // SOMET-476 -- the passive-tree overlay. `passiveIndex` is the spatial
+    // index Game built once when the graph arrived; the renderer never builds
+    // one, so a 1806-node re-index can never land in a frame.
+    passiveTreeOpen = false, passiveIndex = null, passiveView = null,
+    allocatedNodeIds = [], passivePoints = 0, startNodeId = null,
+    passiveRespecCost = null, passiveRespecBusy = false,
+    passiveHoverX = null, passiveHoverY = null,
   }) {
     if (vfxDefs) this.vfxDefs = vfxDefs;
+    // While any full-screen panel is up the cursor is being used to click ITS
+    // rows, so the inspect card must not follow it around over the top of the
+    // panel — and, more importantly, must not hit-test the world hidden behind
+    // one and let a click pin something the player cannot see.
+    const panelOpen = (inventoryOpen && !!inventory) || (shopOpen && !!shop) || (bankOpen && !!bank)
+      || (passiveTreeOpen && !!passiveIndex);
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     // Timestamp for this frame; animated tile textures advance off it (unlike
@@ -282,6 +346,13 @@ export class RenderSystem {
       else this.drawEntity(d.ref);
     }
 
+    // SOMET-493. Resolved against the SAME `drawables` list that was just
+    // painted, in the same frame, so the card can never name something that is
+    // not on screen or is buried under something else. Only the resolution
+    // happens here; the card itself is drawn at the very end of this method,
+    // in canvas pixel space, on top of the HUD.
+    this._resolveInspect(inspect, drawables, panelOpen);
+
     // Projectiles render on top — small, fast, no depth-sort needed.
     for (const pr of projectiles) {
       // Slice D (SOMET-161): the trail retires the identical 6px dot every
@@ -306,14 +377,14 @@ export class RenderSystem {
     this.drawVfx(vfx);
 
     camera.reset(this.ctx);
-    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash, effects, gold, progression });
+    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, showMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash, effects, gold, progression });
     if (toast) this.renderToast(toast);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
     // pixel space — same space Game hit-tests clicks against).
     this._invHitAreas = [];
     if (inventoryOpen && inventory) {
-      this._invLayout = this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, autoLoot, inventoryView);
+      this._invLayout = this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, inventoryView);
     }
 
     // Shop panel overlay (Slice D) — same overlay convention as the
@@ -336,6 +407,165 @@ export class RenderSystem {
       const itemTypes = inventory ? inventory.types : new Map();
       this.renderBank(this.ctx, bank, inventory, itemTypes, this._bankHitAreas, bankView);
     }
+
+    // Passive tree overlay (SOMET-476) — same convention as the three panels
+    // above: raw canvas pixel space, hit areas rebuilt every frame and only
+    // populated while the panel is open, so a click can never hit a stale rect.
+    this._passiveHitAreas = [];
+    this._passiveLayout = null;
+    if (passiveTreeOpen && passiveIndex && passiveView) {
+      this._passiveLayout = this.renderPassiveTree(this.ctx, {
+        index: passiveIndex, view: passiveView, allocatedNodeIds, passivePoints, startNodeId,
+        gold: gold ?? 0, respecCost: passiveRespecCost, respecBusy: passiveRespecBusy,
+        hoverX: passiveHoverX, hoverY: passiveHoverY,
+      }, this._passiveHitAreas);
+    }
+
+    // SOMET-493 — last of all, so the card sits on top of the HUD orbs and the
+    // toast rather than being half-covered by them. `_inspectLayout` was
+    // computed in the same frame, from the drawables that were actually drawn.
+    if (this._inspectLayout) this.drawInspectCard(this._inspectLayout);
+  }
+
+  // Decide what the inspect card is showing this frame, and lay it out.
+  //
+  // Split out of renderChunked so the pinned-target lookup and the "panel is
+  // open" suppression are one readable block rather than another twenty lines
+  // inside a 200-line method. Writes three fields:
+  //   _inspectHoverKey  what a click would pin (read by Game's mousedown)
+  //   _inspectTarget    the resolved drawable, or null
+  //   _inspectLayout    the card geometry, or null
+  _resolveInspect(inspect, drawables, panelOpen) {
+    this._inspectHoverKey = null;
+    this._inspectTarget = null;
+    this._inspectLayout = null;
+    if (!inspect || !inspect.enabled || panelOpen) return;
+    const cx = inspect.cursorX, cy = inspect.cursorY;
+    if (!Number.isFinite(cx) || !Number.isFinite(cy) || !inspect.camera) return;
+
+    const point = canvasToCameraPoint(cx, cy, inspect.camera);
+    const hover = pickDrawable(drawables, point);
+    this._inspectHoverKey = targetKey(hover);
+
+    // Hover wins over a pin: pointing at something new is an unambiguous
+    // request to look at THAT, and making the player un-pin first would be a
+    // mode nobody asked for.
+    let target = hover;
+    // A pinned target is re-found by key every frame rather than being held as
+    // an object reference — CreatureManager replaces nothing but does DELETE a
+    // creature that leaves the neighbourhood, and holding the reference would
+    // keep drawing a card for something no longer in the world.
+    if (!target && inspect.pinnedKey) {
+      target = drawables.find((d) => targetKey(d) === inspect.pinnedKey) || null;
+    }
+    if (!target) return;
+
+    const desc = describeTarget(target, {
+      entityDefs: inspect.entityDefs,
+      itemTypes: inspect.itemTypes,
+      localPlayer: inspect.localPlayer,
+    });
+    if (!desc) return;
+
+    // Anchor at the cursor while hovering; at the target itself when the card
+    // is only up because it was pinned, so a pinned card does not trail the
+    // pointer across the screen attached to nothing.
+    let ax = cx, ay = cy;
+    if (!hover) {
+      const r = drawableScreenRect(target);
+      if (r) {
+        const off = canvasToCameraPoint(0, 0, inspect.camera);
+        ax = r.x + r.w / 2 - off.x;
+        ay = r.y - off.y;
+      }
+    }
+    this._inspectTarget = target;
+    this._inspectLayout = layoutCard(desc, ax, ay, GAME_WIDTH, GAME_HEIGHT);
+  }
+
+  // Paint the geometry inspect.layoutCard produced. Deliberately dumb: every
+  // number it draws was decided by the pure module, so a layout bug is
+  // reproducible in a unit test instead of only in a screenshot.
+  drawInspectCard(layout) {
+    const ctx = this.ctx;
+    const { box } = layout;
+    ctx.save();
+    ctx.translate(box.x, box.y);
+
+    ctx.fillStyle = "rgba(12,14,24,0.92)";
+    ctx.strokeStyle = "rgba(150,160,200,0.45)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(0, 0, box.w, box.h);
+    ctx.strokeRect(0.5, 0.5, box.w - 1, box.h - 1);
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+
+    // Title, clipped to the space left of the badge so a long creature name
+    // cannot run under it.
+    if (layout.title) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(CARD_PAD_X, 0, layout.titleMaxW, box.h);
+      ctx.clip();
+      ctx.font = `bold ${layout.title.size}px sans-serif`;
+      ctx.fillStyle = "#f4f6ff";
+      ctx.fillText(layout.title.text, CARD_PAD_X, layout.title.y);
+      ctx.restore();
+    }
+
+    // The aggression badge: a filled pill in the TOP-RIGHT corner, coloured by
+    // tier so it reads at a glance without being read.
+    if (layout.badge) {
+      const b = layout.badge;
+      const bx = box.w - CARD_PAD_X - b.w;
+      ctx.fillStyle = b.color;
+      ctx.globalAlpha = 0.22;
+      ctx.fillRect(bx, b.y, b.w, b.h);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = b.color;
+      ctx.strokeRect(bx + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+      ctx.font = `bold ${b.size}px sans-serif`;
+      ctx.fillStyle = b.color;
+      ctx.textAlign = "center";
+      ctx.fillText(b.text, bx + b.w / 2, b.y + b.h - 5);
+      ctx.textAlign = "left";
+    }
+
+    if (layout.subtitle) {
+      ctx.font = `${layout.subtitle.size}px sans-serif`;
+      ctx.fillStyle = "#9aa3c7";
+      ctx.fillText(layout.subtitle.text, CARD_PAD_X, layout.subtitle.y);
+    }
+
+    for (const line of layout.lines) {
+      ctx.font = `${line.size}px sans-serif`;
+      ctx.fillStyle = "#c8cee8";
+      ctx.fillText(line.text, CARD_PAD_X, line.y);
+    }
+
+    // HP on the upper row, MP on the lower one — thin labelled strips rather
+    // than orbs, so both fit in a card this size.
+    for (const bar of layout.bars) {
+      ctx.font = `bold ${CARD_BAR_LABEL}px sans-serif`;
+      ctx.fillStyle = "#8b93b5";
+      ctx.fillText(bar.label, bar.x, bar.y + bar.h);
+      const tx = bar.x + 18;
+      const tw = bar.w - 18;
+      ctx.fillStyle = "rgba(255,255,255,0.10)";
+      ctx.fillRect(tx, bar.y, tw, bar.h);
+      if (bar.pct > 0) {
+        ctx.fillStyle = bar.color;
+        ctx.fillRect(tx, bar.y, Math.max(1, tw * bar.pct), bar.h);
+      }
+      ctx.strokeStyle = "rgba(0,0,0,0.55)";
+      ctx.strokeRect(tx + 0.5, bar.y + 0.5, tw - 1, bar.h - 1);
+      ctx.font = `${CARD_BAR_LABEL}px sans-serif`;
+      ctx.fillStyle = "#c8cee8";
+      ctx.fillText(bar.text, tx + tw + 6, bar.y + bar.h);
+    }
+
+    ctx.restore();
   }
 
   // AoE detonation rings: each expands from nothing to its full world radius
@@ -715,6 +945,13 @@ export class RenderSystem {
     const color = type && type.category === "armor" ? "#7ec8e3" : "#e3c27e";
     const r = 9;
     this.ctx.save();
+    // SOMET-490: the grade halo goes down FIRST, so the item marker below
+    // draws over it rather than under it -- a glow painted after the diamond
+    // would wash the item's own category colour out. Nothing here replaces the
+    // canvas transform (translate/scale COMPOSE with whatever the camera has
+    // already applied); the wall-side pass got that wrong once and silently
+    // dropped everything drawn before it.
+    this.drawRarityGlow(dx, dy, r, item.rarity);
     this.ctx.fillStyle = color;
     this.ctx.strokeStyle = "rgba(0,0,0,0.6)";
     this.ctx.lineWidth = 2;
@@ -736,6 +973,39 @@ export class RenderSystem {
         this.ctx.fillText(type.name, dx, dy - r - 6);
       }
     }
+    this.ctx.restore();
+  }
+
+  // The rarity halo: an iso-flattened radial gradient under a ground item.
+  //
+  // Colour comes from core/rarityColors.js, the SAME module the inventory
+  // panel tints its cells from -- the ground must never disagree with the
+  // tooltip a player opens two seconds later.
+  //
+  // A white / absent / unrecognised grade draws NOTHING and returns early, so
+  // an item that predates SOMET-480 renders exactly as it did before this
+  // method existed.
+  drawRarityGlow(dx, dy, r, rarity) {
+    const base = rarityGlowColor(rarity);
+    if (!base) return;
+    const inner = withAlpha(base, 0.55);
+    const outer = withAlpha(base, 0);
+    if (!inner || !outer) return; // malformed palette entry: draw nothing, not a black blob
+    const R = r * 2.4;
+    this.ctx.save();
+    // translate + scale, never setTransform: these MULTIPLY into the camera
+    // transform already on the stack. The 0.5 y-scale is the isometric tile
+    // ratio, so the halo reads as a pool of light lying on the ground rather
+    // than a sphere floating in front of it.
+    this.ctx.translate(dx, dy);
+    this.ctx.scale(1, 0.5);
+    const g = this.ctx.createRadialGradient(0, 0, 0, 0, 0, R);
+    g.addColorStop(0, inner);
+    g.addColorStop(1, outer);
+    this.ctx.fillStyle = g;
+    this.ctx.beginPath();
+    this.ctx.arc(0, 0, R, 0, Math.PI * 2);
+    this.ctx.fill();
     this.ctx.restore();
   }
 
@@ -773,8 +1043,8 @@ export class RenderSystem {
         this.ctx.fillStyle = "#c084fc";
         this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
         this.ctx.lineWidth = 2;
-        this.ctx.strokeText("[e] / [f] Talk", dx, dy + r + 14);
-        this.ctx.fillText("[e] / [f] Talk", dx, dy + r + 14);
+        this.ctx.strokeText("[e] Trade", dx, dy + r + 14);
+        this.ctx.fillText("[e] Trade", dx, dy + r + 14);
       }
     }
 
@@ -822,8 +1092,8 @@ export class RenderSystem {
         this.ctx.fillStyle = "#fbbf24";
         this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
         this.ctx.lineWidth = 2;
-        this.ctx.strokeText("[e] / [f] Open", dx, dy + r + 14);
-        this.ctx.fillText("[e] / [f] Open", dx, dy + r + 14);
+        this.ctx.strokeText("[b] Open", dx, dy + r + 14);
+        this.ctx.fillText("[b] Open", dx, dy + r + 14);
       }
     }
 
@@ -1165,18 +1435,24 @@ export class RenderSystem {
     // Stroke-then-fill because the label sits over arbitrary terrain colours
     // and plain white text vanishes on snow.
     if (e.level > 1) {
-      this.ctx.save();
-      this.ctx.font = "bold 12px monospace";
-      this.ctx.textAlign = "center";
-      this.ctx.lineWidth = 2;
-      this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
-      this.ctx.fillStyle = "#ffd166";
-      const label = `L${e.level}`;
       const lx = drawX + w / 2;
       const ly = drawY - 18;
-      this.ctx.strokeText(label, lx, ly);
-      this.ctx.fillText(label, lx, ly);
-      this.ctx.restore();
+      const entry = this._labelCache.get(`L${e.level}`, LEVEL_TAG_STYLE);
+      if (!drawCachedLabel(this.ctx, entry, lx, ly)) {
+        // The cache returns null for a label with no drawable extent, which
+        // is also what a stub context that cannot measure produces. Draw it
+        // directly in that case, so a test double or an exotic context still
+        // gets the tag rather than silently losing it.
+        this.ctx.save();
+        this.ctx.font = LEVEL_TAG_STYLE.font;
+        this.ctx.textAlign = "center";
+        this.ctx.lineWidth = LEVEL_TAG_STYLE.lineWidth;
+        this.ctx.strokeStyle = LEVEL_TAG_STYLE.strokeStyle;
+        this.ctx.fillStyle = LEVEL_TAG_STYLE.fillStyle;
+        this.ctx.strokeText(`L${e.level}`, lx, ly);
+        this.ctx.fillText(`L${e.level}`, lx, ly);
+        this.ctx.restore();
+      }
     }
     this._drawEffectPips(drawX, drawY, e.effects);
   }
@@ -1412,7 +1688,7 @@ export class RenderSystem {
     ctx.restore();
   }
 
-  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null, gold = null, progression = null }) {
+  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, showMana = true, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null, gold = null, progression = null }) {
     if (!player) return;
 
     const orbRadius = 48;
@@ -1422,31 +1698,54 @@ export class RenderSystem {
     const hpY = GAME_HEIGHT - orbRadius - 16;
     this._drawPoEOrb(hpX, hpY, orbRadius, player.hp, player.maxHp, "HP", "life");
 
-    // Bottom-right Mana / MP Orb (Path of Exile style)
-    const mpX = GAME_WIDTH - orbRadius - 16;
-    const mpY = GAME_HEIGHT - orbRadius - 16;
-    this._drawPoEOrb(mpX, mpY, orbRadius, mana, maxMana, "MP", "mana");
+    // Bottom-right Mana / MP Orb (Path of Exile style).
+    //
+    // SOMET-472: SKIPPED ENTIRELY for a life-cost class, not drawn with a null
+    // pool. _drawPoEOrb treats a null `current` as 0 and a null `max` as 100,
+    // so passing nulls would paint a permanently EMPTY mana orb -- which reads
+    // as "you are out of mana" rather than "you have no mana bar". The Cultist
+    // spends HP, and the HP orb to the left is the whole story.
+    if (showMana) {
+      const mpX = GAME_WIDTH - orbRadius - 16;
+      const mpY = GAME_HEIGHT - orbRadius - 16;
+      this._drawPoEOrb(mpX, mpY, orbRadius, mana, maxMana, "MP", "mana");
+    }
 
     // Bottom XP bar connecting HP and MP orbs, with central level emblem
     this._drawXpBar(progression);
+  }
+
+  // Canvas-drawn passive tree (SOMET-476). Delegates to
+  // systems/passiveTreePanel.js: the spatial-index culling, the three visual
+  // states and every rect are pure and unit-tested there, and this method only
+  // forwards state, republishes the hit areas and returns the layout for the
+  // click/hover handlers -- exactly what renderInventory below does.
+  renderPassiveTree(ctx, state, hitAreas) {
+    const layout = layoutPassiveTree(state);
+    for (const a of layout.hitAreas) hitAreas.push(a);
+    drawPassiveTree(ctx, layout);
+    return layout;
   }
 
   // Canvas-drawn inventory window. Delegates to systems/inventoryPanel.js:
   // the layout is pure and unit-tested there, and this method only forwards
   // state, republishes the hit areas the layout produced (so Game can
   // hit-test this same frame) and returns the layout for the drag handlers.
-  renderInventory(ctx, inventory, hitAreas, selectedItemId = null, autoLoot = false, view = null) {
+  renderInventory(ctx, inventory, hitAreas, selectedItemId = null, view = null) {
     const v = view || {};
     const state = {
       inventory,
       selectedItemId,
-      autoLoot,
       tab: v.tab || "all",
       page: v.page || 0,
       gold: v.gold ?? 0,
       drag: v.drag || null,
       hoverX: v.hoverX ?? null,
       hoverY: v.hoverY ?? null,
+      // SOMET-483. Forwarded, not derived: Game builds the character view from
+      // its single-writer progression row and this method stays a pass-through.
+      character: v.character || null,
+      modPage: v.modPage || 0,
       playerImage: this.imageManager ? this.imageManager.get("player") : null,
     };
     const layout = layoutInventory(state);
@@ -1508,7 +1807,7 @@ export class RenderSystem {
     ctx.fillText("Shop — [e] to close", px + 16, py + 14);
 
     // Close button — top-right of the header row, same position/sizing as
-    // the auto-loot toggle in renderInventory.
+    // the inventory panel's own footer buttons.
     const closeW = 70, closeH = 26;
     const closeX = px + panelW - 16 - closeW;
     const closeY = py + 10;
@@ -1587,15 +1886,35 @@ export class RenderSystem {
     // the row is deleted on buy, unlike the catalog's infinite stock).
     let y = rowsTop;
     for (const row of pageRows) {
+      // SOMET-500. A buyback row is a HELD INSTANCE (SOMET-484), so the shelf
+      // can say what it is holding: fetchShop now carries the rarity and the
+      // rolled affixes, and both are read here. Before this, a player's own
+      // foxy sword sat on the shelf drawn exactly like a white one and they
+      // found out only after paying.
+      //
+      // The base catalogue holds no instance and never will, so `row.rarity` is
+      // absent there, affixes is "" and BOTH the border and the two-line
+      // geometry fall back to precisely what this loop drew before.
+      const affixes = affixLine(row.affixes);
+      const at = rowTextOffsets(affixes !== "");
       ctx.fillStyle = isBuyback ? "rgba(80,60,20,0.55)" : "rgba(40,40,60,0.85)";
       ctx.fillRect(leftX, y, colW, rowH);
-      ctx.strokeStyle = isBuyback ? "#caa24a" : "#3a3a4e";
+      ctx.strokeStyle = rarityBorderColor(row.rarity, isBuyback ? "#caa24a" : "#3a3a4e");
       ctx.strokeRect(leftX, y, colW, rowH);
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(resolveName(row.itemTypeId), leftX + 8, y + 6);
+      ctx.fillText(resolveName(row.itemTypeId), leftX + 8, y + at.name);
       ctx.fillStyle = isBuyback ? "#caa24a" : "#9ca3af";
-      ctx.fillText(`${row.price} g`, leftX + 8, y + 22);
+      ctx.fillText(`${row.price} g`, leftX + 8, y + at.sub);
+      if (at.affix != null) {
+        // Clipped to the gap left of the Buy button rather than measured: see
+        // clipToWidth. Tinted with the grade so the caption and the border
+        // agree at a glance, falling back to the ordinary subline grey.
+        ctx.font = `${AFFIX_FONT_PX}px monospace`;
+        ctx.fillStyle = rarityBorderColor(row.rarity, "#9ca3af");
+        ctx.fillText(clipToWidth(affixes, colW - 16 - buyW, AFFIX_FONT_PX), leftX + 8, y + at.affix);
+        ctx.font = "12px monospace";
+      }
 
       const buyX = leftX + colW - 8 - buyW;
       const buyY = y + (rowH - buyH) / 2;
@@ -1651,7 +1970,13 @@ export class RenderSystem {
 
       ctx.fillStyle = "rgba(40,40,60,0.85)";
       ctx.fillRect(rightX, ry, rightW, rowH);
-      ctx.strokeStyle = "#3a3a4e";
+      // SOMET-500: the same border rule as the shelf opposite. These rows come
+      // straight from the live inventory, which has carried `rarity` since
+      // SOMET-480 -- so a player comparing what they are about to sell with
+      // what is already on the shelf is comparing two identically coloured
+      // rows. The ry + 22 subline is left to `bound`, which is a refusal the
+      // player needs more than a restatement of the grade.
+      ctx.strokeStyle = rarityBorderColor(item.rarity, "#3a3a4e");
       ctx.strokeRect(rightX, ry, rightW, rowH);
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
@@ -1737,7 +2062,7 @@ export class RenderSystem {
     ctx.fillStyle = "#e5e7eb";
     ctx.font = "14px monospace";
     ctx.textBaseline = "top";
-    ctx.fillText("Account Chest — [f] or [esc] to close", px + 16, py + 14);
+    ctx.fillText("Account Chest — [b] or [esc] to close", px + 16, py + 14);
 
     const closeW = 70, closeH = 26;
     const closeX = px + panelW - 16 - closeW;
@@ -1816,13 +2141,23 @@ export class RenderSystem {
 
     let y = rowsTop;
     for (const row of pageRows) {
+      // SOMET-502. Both tabs read the grade the same way, through the same
+      // helper the inventory grid uses -- that is the ticket's second
+      // acceptance criterion, and the Carry tab is where it is most visible,
+      // because those rows ARE inventory rows and a chest row beside them
+      // showing a different colour for the same item would be the drift.
+      //
+      // The chest tab could only be plain before this: fetchChest returned the
+      // three container columns and nothing about the instance underneath.
+      const affixes = affixLine(row.affixes);
+      const at = rowTextOffsets(affixes !== "");
       ctx.fillStyle = isCarry ? "rgba(40,40,60,0.85)" : "rgba(80,60,20,0.55)";
       ctx.fillRect(leftX, y, colW, rowH);
-      ctx.strokeStyle = isCarry ? "#3a3a4e" : "#caa24a";
+      ctx.strokeStyle = rarityBorderColor(row.rarity, isCarry ? "#3a3a4e" : "#caa24a");
       ctx.strokeRect(leftX, y, colW, rowH);
       ctx.fillStyle = "#e5e7eb";
       ctx.font = "12px monospace";
-      ctx.fillText(resolveName(row.typeId), leftX + 8, y + 6);
+      ctx.fillText(resolveName(row.typeId), leftX + 8, y + at.name);
 
       // Subline: quantity when a row is a real stack, and the bound marker.
       // Bound items are storable on purpose (they can never become gold, so
@@ -1834,7 +2169,15 @@ export class RenderSystem {
       if (qty > 1) notes.push(`x${qty}`);
       if (row.soulbound === true) notes.push("bound");
       ctx.fillStyle = isCarry ? "#9ca3af" : "#caa24a";
-      if (notes.length) ctx.fillText(notes.join("  ·  "), leftX + 8, y + 22);
+      if (notes.length) ctx.fillText(notes.join("  ·  "), leftX + 8, y + at.sub);
+      if (at.affix != null) {
+        // Third line, same treatment as the shop's shelf so one item does not
+        // read two ways on two screens.
+        ctx.font = `${AFFIX_FONT_PX}px monospace`;
+        ctx.fillStyle = rarityBorderColor(row.rarity, "#9ca3af");
+        ctx.fillText(clipToWidth(affixes, colW - 16 - actW, AFFIX_FONT_PX), leftX + 8, y + at.affix);
+        ctx.font = "12px monospace";
+      }
 
       const actX = leftX + colW - 8 - actW;
       const actY = y + (rowH - actH) / 2;

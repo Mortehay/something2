@@ -121,7 +121,10 @@ const { assertJwtSecretOrExit } = require('./auth/assertJwtSecret.js');
 const { assertProductionSafety } = require('./productionSafety.js');
 const authRouter = require('./auth/routes.js');
 const progressionRoutes = require('./api/progressionRoutes.js');
+const passiveTreeRoutes = require('./api/passiveTreeRoutes.js');
+const passiveNodesRoutes = require('./api/passiveNodesRoutes.js');
 const characterRoutes = require('./api/characterRoutes.js');
+const { DEFAULTS: GAME_SETTING_DEFAULTS, getSettings, setSetting } = require('./services/gameSettings.js');
 const { ownedCharacter } = require('./services/characters.js');
 const { listVisited } = require('./services/visitedWorlds.js');
 const { listWaypointsForCharacter } = require('./services/waypoints.js');
@@ -380,8 +383,22 @@ if (require.main === module) {
 // file for why the ORDER BY matters).
 
 // Helper to get entity types
+// SOMET-493: the LEFT JOIN (not INNER) is load-bearing -- entity_types.behavior_id
+// is nullable and several seeded types legitimately carry no behaviour row. An
+// INNER JOIN would silently drop those types from the map the client renders
+// with, which is a blank decoration/creature rather than a missing tooltip.
+// `e.*` is kept so every existing consumer of this shape is untouched; the
+// three behaviour columns are aliased because `name` would otherwise collide
+// with the entity type's own.
+const ENTITY_TYPES_SELECT = `
+  SELECT e.*,
+         b.name AS behavior_name, b.chase_style, b.aggro_radius
+    FROM entity_types e
+    LEFT JOIN creature_behaviors b ON b.id = e.behavior_id
+   ORDER BY e.id ASC`;
+
 async function getEntityTypesMap() {
-  const result = await pool.query('SELECT * FROM entity_types ORDER BY id ASC');
+  const result = await pool.query(ENTITY_TYPES_SELECT);
   const entityTypes = {};
   result.rows.forEach(row => {
     entityTypes[row.name] = {
@@ -412,6 +429,15 @@ async function getEntityTypesMap() {
       render_mode: row.render_mode,
       sprite: row.sprite,
       prompt: row.prompt,
+      // SOMET-493 -- what the inspect card's aggression badge is derived from.
+      // Shipped as the raw catalog facts (faction + the behaviour's chase
+      // style and aggro radius) rather than as a pre-computed tier, so the
+      // banding stays one client-side rule in systems/inspect.js instead of
+      // being duplicated on both sides of the wire.
+      faction: row.faction,
+      behaviorName: row.behavior_name || null,
+      chaseStyle: row.chase_style || null,
+      aggroRadius: row.aggro_radius != null ? Number(row.aggro_radius) : null,
       // See getTileTypesMap: versions the client's asset URLs so an approved
       // regeneration is fetched instead of served stale from the browser cache.
       updated_at: row.updated_at,
@@ -435,6 +461,17 @@ app.use('/api/auth', authRouter(guardPool));
 // an allocation or a respec. Every route is behind requireAuth and acts on
 // req.user.id -- see api/progressionRoutes.js's header comment.
 app.use('/api/progression', progressionRoutes(guardPool, refreshLivePlayerStats));
+
+// The passive tree graph (SOMET-475). Read-only and identical for every
+// player, so it is its own mount rather than a branch of /api/progression --
+// the client fetches it once per session and caches it by `version`.
+app.use('/api/passive-tree', passiveTreeRoutes(guardPool));
+
+// The admin node browser and single-node editor (SOMET-477). Separate mount
+// from /api/passive-tree because the audience is the opposite one: every route
+// under here is adminGuard'd, reads included, while /api/passive-tree is the
+// player's read-only view of the same table.
+app.use('/api/passive-nodes', passiveNodesRoutes(guardPool));
 
 // Character slots (SOMET-259): list / create / delete, plus the playable-class
 // catalog the creation form reads. Behind requireAuth, scoped to req.user.id.
@@ -1342,6 +1379,183 @@ app.delete('/api/item-types/:id', adminGuard, async (req, res) => {
   }
 });
 
+// --- Affix catalog (SOMET-480, progression epic T12) -----------------------
+// Admin-only, matching the item-types block above. Validation returns 400
+// BEFORE any query is issued, the same discipline validateItemTypeName follows:
+// a CHECK-constraint violation reaching the client as a 500 tells an admin
+// nothing about which field they got wrong.
+const AFFIX_KINDS = ['buff', 'debuff'];
+// 'white' is deliberately absent: a white item rolls no affixes at all, so an
+// affix whose minimum is white could never appear.
+const AFFIX_RARITIES = ['blue', 'yellow', 'foxy'];
+const AFFIX_EFFECT_TYPES = ['stat', 'resource', 'damage', 'resist', 'status'];
+const AFFIX_SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
+const AFFIX_STATS = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
+// The status riders authority/effects.js governs, minus the control-removing
+// one. effects.js's own header explains why that exclusion is load-bearing:
+// "refreshes rather than stacks" makes a REFRESHED effect a PERMANENT effect
+// under sustained fire, which is fine for a slow or a DOT and is a
+// permanent-lock exploit for anything that takes actions away. shock is only
+// safe because applyShockInterrupt gates it behind a non-refreshing immunity
+// window, and a passive weapon-borne rider does not go through that gate.
+const AFFIX_DEBUFF_STATUSES = ['burn', 'chill'];
+
+function validateAffixType(b) {
+  if (!b || typeof b.key !== 'string' || b.key.trim() === '') return 'key is required';
+  if (typeof b.label !== 'string' || b.label.trim() === '') return 'label is required';
+  if (!AFFIX_KINDS.includes(b.kind)) return `kind must be one of ${AFFIX_KINDS.join(', ')}`;
+  if (!b.effect || typeof b.effect !== 'object' || Array.isArray(b.effect)) return 'effect must be an object';
+  if (!AFFIX_EFFECT_TYPES.includes(b.effect.type)) return `effect.type must be one of ${AFFIX_EFFECT_TYPES.join(', ')}`;
+  // A stat affix naming a stat no character sheet has is inert: gearStatGrants
+  // skips it and nothing reports why.
+  if (b.effect.type === 'stat' && !AFFIX_STATS.includes(b.effect.stat)) {
+    return `effect.stat must be one of ${AFFIX_STATS.join(', ')}`;
+  }
+  if (!Number.isFinite(Number(b.min_value)) || !Number.isFinite(Number(b.max_value))) return 'min_value and max_value are required numbers';
+  if (Number(b.max_value) < Number(b.min_value)) return 'max_value must be >= min_value';
+  if (b.min_rarity != null && !AFFIX_RARITIES.includes(b.min_rarity)) return `min_rarity must be one of ${AFFIX_RARITIES.join(', ')}`;
+  if (b.weight != null && !(Number(b.weight) > 0)) return 'weight must be greater than 0';
+  if (b.allowed_slots != null) {
+    if (!Array.isArray(b.allowed_slots)) return 'allowed_slots must be an array';
+    for (const s of b.allowed_slots) if (!AFFIX_SLOTS.includes(s)) return `unknown slot '${s}'`;
+  }
+  if (b.min_item_level != null && !(Number(b.min_item_level) >= 1)) return 'min_item_level must be >= 1';
+  if (b.max_item_level != null && Number(b.max_item_level) < Number(b.min_item_level ?? 1)) {
+    return 'max_item_level must be >= min_item_level';
+  }
+  if (b.kind === 'debuff') {
+    // Spec 6.1: debuffs are foxy-only. authority/affixes.js refuses them below
+    // foxy at roll time regardless, so authoring one lower produces a row
+    // whose min_rarity lies about when it can appear.
+    if ((b.min_rarity ?? 'blue') !== 'foxy') return 'a debuff must have min_rarity foxy';
+    if (b.effect.type !== 'status') return 'a debuff must carry a status effect';
+    if (!AFFIX_DEBUFF_STATUSES.includes(b.effect.status)) {
+      return `effect.status must be one of ${AFFIX_DEBUFF_STATUSES.join(', ')}`;
+    }
+  }
+  return null;
+}
+
+app.get('/api/affix-types', adminGuard, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM affix_types ORDER BY id ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch affix types' });
+  }
+});
+
+app.post('/api/affix-types', adminGuard, async (req, res) => {
+  try {
+    const b = req.body;
+    const bad = validateAffixType(b);
+    if (bad) return res.status(400).json({ error: bad });
+    const result = await pool.query(
+      `INSERT INTO affix_types
+         (key, label, kind, effect, min_value, max_value, min_item_level, max_item_level,
+          allowed_slots, min_rarity, weight)
+       VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9::text[],$10,$11) RETURNING *`,
+      [b.key.trim(), b.label.trim(), b.kind, JSON.stringify(b.effect),
+        Number(b.min_value), Number(b.max_value), Number(b.min_item_level ?? 1),
+        b.max_item_level == null ? null : Number(b.max_item_level),
+        b.allowed_slots ?? [], b.min_rarity ?? 'blue', Number(b.weight ?? 100)],
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'an affix with that key already exists' });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create affix type' });
+  }
+});
+
+app.put('/api/affix-types/:id', adminGuard, async (req, res) => {
+  try {
+    const b = req.body;
+    const bad = validateAffixType(b);
+    if (bad) return res.status(400).json({ error: bad });
+    const result = await pool.query(
+      `UPDATE affix_types
+          SET key = $2, label = $3, kind = $4, effect = $5::jsonb, min_value = $6, max_value = $7,
+              min_item_level = $8, max_item_level = $9, allowed_slots = $10::text[],
+              min_rarity = $11, weight = $12
+        WHERE id = $1 RETURNING *`,
+      [req.params.id, b.key.trim(), b.label.trim(), b.kind, JSON.stringify(b.effect),
+        Number(b.min_value), Number(b.max_value), Number(b.min_item_level ?? 1),
+        b.max_item_level == null ? null : Number(b.max_item_level),
+        b.allowed_slots ?? [], b.min_rarity ?? 'blue', Number(b.weight ?? 100)],
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Affix type not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'an affix with that key already exists' });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update affix type' });
+  }
+});
+
+// Refuses rather than cascades: player_item_affixes references this row with
+// ON DELETE RESTRICT, because deleting a catalog affix must never silently
+// strip a stat off gear a player is wearing. Same posture as the item-types
+// DELETE guard above.
+//
+// The explicit pre-check exists so the admin gets a 409 with a readable reason
+// instead of a 500 off the FK's own error -- but the FK is what actually
+// enforces it, and the catch below still maps a lost race (23503) to the same
+// 409 rather than a 500.
+//
+// SOMET-501: TWO probes, because there are two places an affix can be rolled
+// and only one of them has a foreign key. `world_items` (migration
+// 1714440507000) carries a DENORMALISED `affixes` jsonb whose entries are a
+// bare `affixTypeId` integer with no FK at all, so a ground item is invisible
+// to both the probe above and the RESTRICT behind it. Deleting an affix a
+// ground item named used to succeed, and claimItem's CTE -- which re-INSERTs
+// those rows into player_item_affixes -- then failed on 23503 for the whole
+// 180-second ground lifetime: an item the player could see and could not pick
+// up. Reported separately from the held-gear case, because the two mean very
+// different things to the admin: held gear is a permanent refusal, a ground
+// item clears itself within the TTL.
+//
+// The ground probe is NOT the whole fix and must not be mistaken for one. It
+// is a pre-check with nothing behind it, and there are two windows it cannot
+// close: a drop landing between this SELECT and the DELETE, and each live
+// world's affix pool being a 60-second cache (authority/server.js
+// refreshLootTuning), so a kill can roll an affix this route legitimately
+// deleted a moment ago. claimItem tolerates a dangling id -- loudly -- for
+// exactly those two, and that tolerance is the belt to this braces.
+app.delete('/api/affix-types/:id', adminGuard, async (req, res) => {
+  try {
+    const inUse = await pool.query(
+      'SELECT 1 FROM player_item_affixes WHERE affix_type_id = $1 LIMIT 1', [req.params.id],
+    );
+    if (inUse.rowCount > 0) {
+      return res.status(409).json({ error: 'that affix is rolled on items players own' });
+    }
+    // Containment (`@>`) rather than a jsonb_array_elements scan: it matches
+    // element-wise on an array, ignores whatever else the element carries
+    // (`value`), and is the form a GIN index on world_items.affixes would
+    // serve if the table ever grew enough to want one.
+    const onGround = await pool.query(
+      'SELECT 1 FROM world_items WHERE affixes @> $1::jsonb LIMIT 1',
+      [JSON.stringify([{ affixTypeId: Number(req.params.id) }])],
+    );
+    if (onGround.rowCount > 0) {
+      return res.status(409).json({
+        error: 'that affix is rolled on an item lying on the ground; it clears within a few minutes',
+      });
+    }
+    const del = await pool.query('DELETE FROM affix_types WHERE id = $1 RETURNING id', [req.params.id]);
+    if (del.rowCount === 0) return res.status(404).json({ error: 'Affix type not found' });
+    res.json({ success: true, id: del.rows[0].id });
+  } catch (err) {
+    if (err.code === '23503') {
+      return res.status(409).json({ error: 'that affix is rolled on items players own' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete affix type' });
+  }
+});
+
 // Admin grant: give a CHARACTER an instance of an item type.
 //
 // SOMET-257 re-keyed player_items off user_id, so the path parameter is a
@@ -1416,6 +1630,38 @@ app.get('/api/weapon-catalogs', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch weapon catalogs' });
+  }
+});
+
+// --- Admin-tunable game settings (progression epic T1) ---------------------
+//
+// Both verbs are adminGuard'd, reads included: these numbers are live game
+// balance, and the list itself tells a caller which knobs exist. The service
+// owns the whitelist and the value validation so this route and the store can
+// never disagree about what is legal; a thrown error carrying .status = 400
+// is a caller mistake, anything else is a 500.
+app.get('/api/settings', adminGuard, async (req, res) => {
+  try {
+    const values = await getSettings(pool, Object.keys(GAME_SETTING_DEFAULTS));
+    res.json(Object.keys(GAME_SETTING_DEFAULTS).map((key) => ({
+      key,
+      value: values[key],
+      default_value: GAME_SETTING_DEFAULTS[key],
+    })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch game settings' });
+  }
+});
+
+app.put('/api/settings/:key', adminGuard, async (req, res) => {
+  try {
+    const row = await setSetting(pool, req.params.key, (req.body || {}).value);
+    res.json(row);
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to update game setting' });
   }
 });
 

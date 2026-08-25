@@ -112,6 +112,16 @@ const HAS_STONE_INSTANCES = `SELECT 1 FROM information_schema.tables
 // migration_stone_item_type_down_guard_db.test.js.
 const STONE_CATALOG_LOCK = "SELECT pg_advisory_xact_lock(hashtext('somet320:item_types_stone'))";
 
+// SOMET-497. Taken immediately after the advisory lock and BEFORE this
+// transaction reads or writes a single item_types row -- the advisory lock
+// only serializes the three files that ask for it, while a peer inserting a
+// stone-typed player_items row takes a FK RowShareLock on item_types and then
+// waits on a stone tuple this file's transaction is holding. That is a real
+// captured deadlock cycle, not a theory. Full lock graph and rationale live in
+// migration_stone_item_type_down_guard_db.test.js next to this same constant;
+// all three stone files must take BOTH locks, in this order.
+const STONE_CATALOG_TABLE_LOCK = 'LOCK TABLE item_types IN ACCESS EXCLUSIVE MODE';
+
 // See the header comment above for why this exists. Only 'BEGIN'/'COMMIT'/
 // 'ROLLBACK' (matched by EXACT string, same as items.js issues them -- no
 // trailing semicolon, no extra whitespace beyond a trim) are intercepted;
@@ -156,6 +166,7 @@ async function openTxClient(t) {
   }
   await client.query('BEGIN');
   await client.query(STONE_CATALOG_LOCK);
+  await client.query(STONE_CATALOG_TABLE_LOCK);
   await applyMigrationIfAbsent(client, migStoneType, HAS_STAT_BONUS_COLUMN);
   await applyMigrationIfAbsent(client, migStoneInstances, HAS_STONE_INSTANCES);
   return client;

@@ -6,7 +6,7 @@ const ITEM_SIZE = 24;
 
 export class GroundItemManager {
   constructor() {
-    this.items = new Map(); // id -> {id, typeId, x, y, width, height}
+    this.items = new Map(); // id -> {id, typeId, x, y, width, height, rarity}
   }
 
   has(id) { return this.items.has(id); }
@@ -22,10 +22,16 @@ export class GroundItemManager {
         existing.x = it.x;
         existing.y = it.y;
         existing.typeId = it.typeId;
+        // SOMET-490: updated on the EXISTING branch too, not only on create.
+        // The server re-sends every neighbourhood item on a fixed cadence, so
+        // an item is created once and updated forever after; a rarity written
+        // only in the else-branch would still be correct today by accident and
+        // wrong the first time a re-read supplies a grade the create missed.
+        existing.rarity = it.rarity;
       } else {
         this.items.set(it.id, {
           id: it.id, typeId: it.typeId, x: it.x, y: it.y,
-          width: ITEM_SIZE, height: ITEM_SIZE,
+          width: ITEM_SIZE, height: ITEM_SIZE, rarity: it.rarity,
         });
       }
     }

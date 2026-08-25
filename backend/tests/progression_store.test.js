@@ -2,8 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
 const {
-  loadProgression, awardXp, allocateStat, respec, applyDeath, XP_SOURCES,
+  loadProgression, awardXp, applyDeath, XP_SOURCES,
 } = require('../src/services/progressionStore.js');
+// SOMET-475 moved respec out of progressionStore: it now resets the PASSIVE
+// TREE rather than six columns nothing can raise. The two tests below were
+// retargeted rather than deleted -- they are the only coverage of the
+// zero-allocation respec (a character who has spent nothing still pays, and
+// still keeps every unspent point), which passive_tree_allocation_db.test.js
+// does not exercise.
+const { respecPassives } = require('../src/services/passiveTreeStore.js');
 const C = require('../src/services/progressionConstants.js');
 
 // Same skip-if-unreachable idiom as progression_migration.test.js and the
@@ -116,7 +123,8 @@ test('loadProgression creates a base row on first call and is idempotent', async
     assert.deepEqual(first, second, 'two calls must return an identical row');
     assert.equal(first.level, 1);
     assert.equal(first.experience, 0);
-    assert.equal(first.stat_points, 0);
+    assert.equal(first.passive_points, 0);
+    assert.ok(!('stat_points' in first), 'the mapped row must not carry a stat_points field');
     for (const k of C.STAT_KEYS) assert.equal(first[k], C.BASE_STAT, `${k} must start at the base stat`);
 
     const count = await pool.query('SELECT count(*)::int AS n FROM player_progression WHERE character_id = $1', [character]);
@@ -127,7 +135,7 @@ test('loadProgression creates a base row on first call and is idempotent', async
   }
 });
 
-test('awardXp levels up and grants the documented points', async (t) => {
+test('awardXp levels up and grants the documented passive points', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user and awards XP')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('awardXp leveling'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
@@ -136,11 +144,17 @@ test('awardXp levels up and grants the documented points', async (t) => {
     ({ user, character } = await createTestActor(pool, 'xp-250'));
     await loadProgression(pool, character); // start from level 1 / 0 xp
 
-    // from level 1 / 0 xp, +250 xp -> level 2 (floor 100), not level 3 (floor 300)
+    // From level 1 / 0 xp, +250 xp -> level 4 (xpFloor(4) = 141,
+    // xpFloor(5) = 255). Literal floors, hand-computed from
+    // round(18 * L^1.33): 0, 18, 63, 141, 255.
     const r = await awardXp(pool, character, 250, 'kill');
+    assert.equal(r.awarded, 250);
     assert.equal(r.leveledUp, true);
-    assert.equal(r.newLevel, 2);
+    assert.equal(r.newLevel, 4);
+    // passive_points_per_level defaults to 1, and three levels were crossed.
     assert.equal(r.pointsGained, 3);
+    assert.equal(r.progression.level, 4);
+    assert.equal(r.progression.passive_points, 3);
     // A NUMBER, not a string: experience is bigint and node-postgres returns
     // bigint as a string, but mapRow normalises it once at the boundary so no
     // caller can accidentally compute "0" + 10 === "010".
@@ -158,15 +172,19 @@ test('awardXp can cross more than one level at once', async (t) => {
   if (pool.unreachable) { const m = skipMsg('awardXp multi-level crossing'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
   let user; let character;
   try {
-    ({ user, character } = await createTestActor(pool, 'xp-600'));
+    ({ user, character } = await createTestActor(pool, 'xp-1463'));
     await loadProgression(pool, character); // start from level 1 / 0 xp
 
-    // +600 from scratch -> level 4, 9 points (3 levels x 3)
-    const r = await awardXp(pool, character, 600, 'kill');
+    // +1463 from scratch lands EXACTLY on xpFloor(10) -- the hand-computed
+    // literal cumulative total of round(18 * L^1.33) for L = 1..9. Nine levels
+    // crossed at 1 passive point each. An exact boundary on purpose: it is the
+    // input a float inverse gets wrong.
+    const r = await awardXp(pool, character, 1463, 'kill');
     assert.equal(r.leveledUp, true);
-    assert.equal(r.newLevel, 4);
+    assert.equal(r.newLevel, 10);
     assert.equal(r.pointsGained, 9);
-    assert.equal(r.progression.experience, 600);
+    assert.equal(r.progression.experience, 1463);
+    assert.equal(r.progression.passive_points, 9);
   } finally {
     await dropUser(pool, user);
     await pool.end().catch(() => {});
@@ -186,7 +204,7 @@ test('awardXp rejects an unknown source and writes nothing', async (t) => {
     const after = await loadProgression(pool, character);
     assert.equal(after.experience, before.experience);
     assert.equal(after.level, before.level);
-    assert.equal(after.stat_points, before.stat_points);
+    assert.equal(after.passive_points, before.passive_points);
   } finally {
     await dropUser(pool, user);
     await pool.end().catch(() => {});
@@ -277,8 +295,8 @@ test('awardXp is callable inside the caller\'s own transaction and rolls back wi
 // Fired via Promise.all across FIVE separate connections, each wrapped in
 // its own caller-managed transaction (matching awardXp's real contract: it
 // always runs inside a transaction the CALLER opened) -- NOT awaited one
-// after the other, for the same reason the allocateStat race above isn't
-// sequential. Both/all transactions must reach the locked read before any
+// after the other, for the same reason the (now-deleted) allocateStat race
+// wasn't sequential. Both/all transactions must reach the locked read before any
 // commits, or they never actually contend; starting every awardXp call in
 // the same Promise.all, before any has committed, is what gives them the
 // chance to race.
@@ -422,8 +440,18 @@ test('applyDeath and a concurrent awardXp for the same user serialize instead of
   try {
     ({ user, character } = await createTestActor(pgPool, 'death-race'));
     await loadProgression(pgPool, character);
-    // Level 4 (floor 600), 40 XP into the level.
-    await pgPool.query('UPDATE player_progression SET level = 4, experience = 640 WHERE character_id = $1', [character]);
+    // Level 7 (xpFloor(7) = 603, xpFloor(8) = 842), 37 XP into the level.
+    //
+    // The level and the offset are BOTH load-bearing, and the old fixture
+    // (level 4 / 640) stopped working when the curve changed. This test
+    // asserts one final number for EITHER serialization order, which only
+    // holds while the +2 award cannot cross a level boundary: applyDeath
+    // derives its loss from the level column, so an award that levels the
+    // character up makes "award then die" (loss taken at the NEW level) and
+    // "die then award" (loss taken at the OLD one) produce different totals
+    // and the assertion becomes a coin flip. Under the new curve 640 + 2 is
+    // still inside level 7, so both orders land on 630.
+    await pgPool.query('UPDATE player_progression SET level = 7, experience = 640 WHERE character_id = $1', [character]);
 
     awardClient = await pgPool.connect();
     await awardClient.query('BEGIN');
@@ -446,7 +474,10 @@ test('applyDeath and a concurrent awardXp for the same user serialize instead of
     ]);
 
     const after = await loadProgression(pgPool, character);
-    assert.equal(after.experience, 621, 'both the award and the penalty must land, in EITHER serialization order');
+    // Level 7 is WORTH 239, so a pinned draw of 0.5 costs
+    // floor(0.0525 * 239) = floor(12.5475) = 12. Award then die: 642 - 12.
+    // Die then award: 628 + 2. Both 630.
+    assert.equal(after.experience, 630, 'both the award and the penalty must land, in EITHER serialization order');
   } finally {
     if (awardClient) {
       await awardClient.query('ROLLBACK').catch(() => {}); // no-op if COMMIT already landed
@@ -457,101 +488,13 @@ test('applyDeath and a concurrent awardXp for the same user serialize instead of
   }
 });
 
-test('allocateStat spends points atomically', async (t) => {
-  if (!requireTestDb(t, 'this test creates a throwaway user and races two concurrent allocations')) return;
-  const pool = await openPool();
-  if (pool.unreachable) { const m = skipMsg('atomic allocation'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user; let character;
-  try {
-    ({ user, character } = await createTestActor(pool, 'allocate-race'));
-    await loadProgression(pool, character);
-    await pool.query('UPDATE player_progression SET stat_points = 3 WHERE character_id = $1', [character]);
-
-    // Fire TWO allocations of 2 CONCURRENTLY, via Promise.all against the
-    // shared pool (max: 4 above) -- NOT awaited one after the other. `pool`
-    // is passed directly to both calls, exactly as allocateStat's own
-    // signature expects, so node-postgres checks each call out onto its own
-    // idle physical connection and both UPDATEs are in flight at once. A
-    // sequential pair (await one, then the other) would pass even with no
-    // atomicity at all -- that exact vacuous shape has shipped on this repo
-    // before (see authority_items_loadout_db.test.js's own note on this).
-    const [a, b] = await Promise.all([
-      allocateStat(pool, character, 'strength', 2),
-      allocateStat(pool, character, 'strength', 2),
-    ]);
-    assert.equal([a.ok, b.ok].filter(Boolean).length, 1, 'exactly one must win');
-    const after = await loadProgression(pool, character);
-    assert.equal(after.stat_points, 1);
-    assert.equal(after.strength, 7);
-  } finally {
-    await dropUser(pool, user);
-    await pool.end().catch(() => {});
-  }
-});
-
-test('allocateStat refuses an unknown stat key', async (t) => {
-  if (!requireTestDb(t, 'this test creates a throwaway user and calls allocateStat with a bogus key')) return;
-  const pool = await openPool();
-  if (pool.unreachable) { const m = skipMsg('unknown stat key rejection'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user; let character;
-  try {
-    ({ user, character } = await createTestActor(pool, 'allocate-badkey'));
-    await loadProgression(pool, character);
-    await pool.query('UPDATE player_progression SET stat_points = 5 WHERE character_id = $1', [character]);
-
-    const r = await allocateStat(pool, character, 'luck', 1);
-    assert.equal(r.ok, false);
-    assert.equal(r.reason, 'unknown stat');
-
-    // A statKey that would be catastrophic if ever string-interpolated into
-    // the UPDATE's column list. This must be refused by the whitelist
-    // exactly like any other unknown key, and MUST NOT reach Postgres as
-    // part of the SQL text.
-    const injected = await allocateStat(pool, character, 'strength; DROP TABLE users; --', 1);
-    assert.equal(injected.ok, false);
-    assert.equal(injected.reason, 'unknown stat');
-
-    const after = await loadProgression(pool, character);
-    assert.equal(after.stat_points, 5, 'no points may be spent on a rejected key');
-    // Prove the table survived, i.e. the injection attempt never ran as SQL.
-    const stillThere = await pool.query('SELECT count(*)::int AS n FROM users WHERE id = $1', [user]);
-    assert.equal(stillThere.rows[0].n, 1);
-  } finally {
-    await dropUser(pool, user);
-    await pool.end().catch(() => {});
-  }
-});
-
-test('allocateStat refuses a non-positive or non-integer count', async (t) => {
-  if (!requireTestDb(t, 'this test creates a throwaway user and calls allocateStat with bad counts')) return;
-  const pool = await openPool();
-  if (pool.unreachable) { const m = skipMsg('invalid count rejection'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
-  let user; let character;
-  try {
-    ({ user, character } = await createTestActor(pool, 'allocate-badcount'));
-    await loadProgression(pool, character);
-    await pool.query('UPDATE player_progression SET stat_points = 5 WHERE character_id = $1', [character]);
-
-    for (const bad of [0, -1, 1.5, NaN]) {
-      const r = await allocateStat(pool, character, 'strength', bad);
-      assert.equal(r.ok, false, `count ${bad} must be refused`);
-      assert.equal(r.reason, 'invalid count');
-    }
-
-    const after = await loadProgression(pool, character);
-    assert.equal(after.stat_points, 5, 'no points may be spent on any rejected count');
-    assert.equal(after.strength, C.BASE_STAT);
-  } finally {
-    await dropUser(pool, user);
-    await pool.end().catch(() => {});
-  }
-});
-
-// Shared setup for both respec tests: a level-4 character (9 points granted
-// by leveling) who has spent 5 of them into strength, leaving stat_points 4
-// and strength 10. level is only ever raised by awardXp, so it's seeded
-// directly here by UPDATE rather than by grinding XP through the API (per
-// the task's ambiguity resolution). Cost is RESPEC_BASE * 4 = 200.
+// A level-4 character that has been granted 9 passive points and still holds
+// them. Nothing raises a stat column any more, so a respec's only job here is
+// the gold charge plus the reset-to-base safety net; the tree respec that
+// actually spends and refunds points arrives with T7.
+//
+// level is only ever raised by awardXp, so it's seeded directly by UPDATE
+// rather than by grinding XP through the API. Cost is RESPEC_BASE * 4 = 200.
 // Takes both ids on purpose: the stats being reset live on the CHARACTER and
 // the gold paying for the reset lives on the ACCOUNT. Seeding both through one
 // id would have silently worked while `respec` still keyed everything off
@@ -559,31 +502,38 @@ test('allocateStat refuses a non-positive or non-integer count', async (t) => {
 async function seedRespecCharacter(pool, user, character, gold) {
   await loadProgression(pool, character);
   await pool.query(
-    'UPDATE player_progression SET level = 4, strength = 10, stat_points = 4 WHERE character_id = $1',
+    'UPDATE player_progression SET level = 4, passive_points = 9 WHERE character_id = $1',
     [character],
   );
   await pool.query('UPDATE users SET gold = $2 WHERE id = $1', [user, gold]);
 }
 
-test('respec moves the gold and resets the stats in one transaction', async (t) => {
+test('respec moves the gold and credits NO points when nothing was allocated', async (t) => {
   if (!requireTestDb(t, 'this test creates a throwaway user, seeds a level-4 character and respecs it')) return;
   const pool = await openPool();
   if (pool.unreachable) { const m = skipMsg('successful respec'); if (process.env.CI) assert.fail(m); t.skip(m); return; }
   let user; let character;
   try {
     ({ user, character } = await createTestActor(pool, 'respec-ok'));
-    await seedRespecCharacter(pool, user, character, 250);
+    await seedRespecCharacter(pool, user, character, 500);
 
-    const r = await respec(pool, user, character);
+    const r = await respecPassives(pool, user, character);
     assert.equal(r.ok, true);
-    assert.equal(r.cost, 200);
-    assert.equal(r.gold, 50);
-    assert.equal(r.progression.strength, 5);
-    assert.equal(r.progression.stat_points, 9); // the 4 unspent plus the 5 refunded
-    for (const k of C.STAT_KEYS) assert.equal(r.progression[k], C.BASE_STAT, `${k} must reset to base`);
+    assert.equal(r.cost, 200);              // respec_base_gold(50) * level(4)
+    assert.equal(r.gold, 300);              // 500 - 200
+    assert.equal(r.refunded, 0, 'nothing was allocated, so nothing is refunded');
+    assert.equal(r.passivePoints, 9,
+      'a respec must not mint passive points -- the refund is exactly what was spent');
+    assert.deepEqual(r.allocatedNodeIds, []);
+
+    // The stat columns are the class-base snapshot (contract §6.1) and respec
+    // no longer touches them at all. Asserted rather than assumed: the old
+    // respec reset them, and a leftover UPDATE would be invisible otherwise.
+    const after = await loadProgression(pool, character);
+    for (const k of C.STAT_KEYS) assert.equal(after[k], C.BASE_STAT, `${k} must still be base`);
 
     const g = await pool.query('SELECT gold FROM users WHERE id = $1', [user]);
-    assert.equal(Number(g.rows[0].gold), 50, 'gold in the database must match the returned gold');
+    assert.equal(Number(g.rows[0].gold), 300, 'gold in the database must match the returned gold');
   } finally {
     await dropUser(pool, user);
     await pool.end().catch(() => {});
@@ -600,13 +550,13 @@ test('respec with insufficient gold changes nothing at all', async (t) => {
     // same character, but 199 gold against a cost of 200
     await seedRespecCharacter(pool, user, character, 199);
 
-    const r = await respec(pool, user, character);
+    const r = await respecPassives(pool, user, character);
     assert.equal(r.ok, false);
+    assert.equal(r.reason, 'not enough gold');
     assert.equal(r.cost, 200);
 
     const after = await loadProgression(pool, character);
-    assert.equal(after.strength, 10, 'a failed payment must not yield a free respec');
-    assert.equal(after.stat_points, 4, 'the points must not be refunded either');
+    assert.equal(after.passive_points, 9, 'the points must survive a failed respec');
 
     const g = await pool.query('SELECT gold FROM users WHERE id = $1', [user]);
     assert.equal(Number(g.rows[0].gold), 199, 'gold must not move');
@@ -624,20 +574,21 @@ test('applyDeath never de-levels and persists the loss', async (t) => {
   try {
     ({ user, character } = await createTestActor(pool, 'death-loss'));
     await loadProgression(pool, character);
-    // Level 3's floor is 300 and the level is worth 300, so a pinned draw of
-    // 0.5 costs 5.25% of 300 = floor(15.75) = 15. Progress is 50, comfortably
-    // more than 15, so the never-de-level clamp does not bind here -- the
-    // clamped case has its own test in player_stats.test.js.
+    // xpFloor(3) is the hand-computed literal 63 and level 3 is WORTH 78, so a
+    // pinned draw of 0.5 costs 5.25% of 78 = floor(4.095) = 4. Progress is
+    // 100 - 63 = 37, comfortably more than 4, so the never-de-level clamp does
+    // not bind here -- the clamped case has its own test in
+    // player_stats.test.js.
     await pool.query(
-      'UPDATE player_progression SET level = 3, experience = 350 WHERE character_id = $1',
+      'UPDATE player_progression SET level = 3, experience = 100 WHERE character_id = $1',
       [character],
     );
 
     const r = await applyDeath(pool, character, { rng: () => 0.5 });
-    assert.equal(r.lost, 15);
-    assert.equal(r.progression.experience, 335);
+    assert.equal(r.lost, 4);
+    assert.equal(r.progression.experience, 96);
     assert.equal(r.progression.level, 3, 'death must never change level directly');
-    assert.ok(r.progression.experience >= 300, 'the loss must never cross back below the level floor');
+    assert.ok(r.progression.experience >= 63, 'the loss must never cross back below the level floor');
   } finally {
     await dropUser(pool, user);
     await pool.end().catch(() => {});

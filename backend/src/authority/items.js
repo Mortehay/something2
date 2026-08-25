@@ -5,7 +5,54 @@
 
 const { isCompatible, stoneKind, rollDestroy } = require('../services/stones.js');
 
-const DEFAULT_WEAPON_NAME = 'dagger';
+// SOMET-509. The weapon a character holding nothing fights with.
+//
+// This was 'dagger', and nobody chose it as a balance point -- it was a
+// convenient non-null. Measured against the live catalog it was the STRONGEST
+// thing a new player could have:
+//
+//   dagger (the old default)   8 dmg / 0.30s = 26.7 dps, 0 stamina, free
+//   crude-wand  (band floor)   5 dmg / 0.70s =  7.1 dps
+//   crude-spear                8 dmg / 0.80s = 10.0 dps
+//   crude-blade                6 dmg / 0.55s = 10.9 dps
+//   short sword (Warrior kit) 11 dmg / 0.45s = 24.4 burst, 18.3 sustained
+//                                              (6 stamina throttles it; the
+//                                               dagger never throttled)
+//
+// That was survivable only because every class was handed a kit anyway. With
+// the kits gone (1714440517000 deletes every class_loadouts row) the fallback
+// becomes the whole early game, and every weapon a player finds would be a
+// DOWNGRADE -- the inversion that makes "equal starts" unplayable rather than
+// fair.
+//
+// So `unarmed` is now a real, authored catalog row (1714440517000) at 3 damage
+// on a 0.6s swing = 5.0 dps, ~70% of the 7.1 floor, costing no stamina and no
+// mana. A CATALOG ROW rather than a constant in this file, deliberately: it is
+// tunable by the same admin screens as every other weapon, it is asserted
+// against its peers by real SQL rather than by a number copied into a test, and
+// -- the part that matters here -- `resolveDefaultWeaponId` keeps meaning what
+// it always meant, so every fixture-built World that supplies its own default
+// weapon keeps behaving exactly as before.
+//
+// The dagger stays in the catalog as ordinary droppable gear. It simply stops
+// being handed out for nothing.
+const DEFAULT_WEAPON_NAME = 'unarmed';
+
+// SOMET-509. NOT the same thing as DEFAULT_WEAPON_NAME, and it used to be.
+//
+// The bare-magic-weapon branch in activeWeaponType neutralizes an unsocketed
+// magic weapon down to a plain weapon's damage, and it took that number from
+// DEFAULT_WEAPON_NAME on the reasoning that the two baselines were the same
+// row. Once the default became `unarmed` at 3 damage they stopped meaning the
+// same thing: a bare apprentice staff would have dropped to 3 / 0.55s = 5.5
+// dps, a hair above bare hands, so finding a magic weapon would barely be an
+// upgrade -- this ticket's own inversion, running the other way.
+//
+// A bare magic weapon is a real weapon the player equipped and can still
+// socket; unarmed is the floor for holding nothing at all. So the branch is
+// pinned to the dagger explicitly, which is exactly the row it always used, and
+// its behaviour is unchanged by this ticket.
+const BARE_MAGIC_BASELINE_NAME = 'dagger';
 const SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
 
 function num(v) { return v == null ? null : Number(v); }
@@ -24,7 +71,9 @@ async function loadItemTypes(pool, catalogs = null) {
             range, projectile_speed, projectile_radius, pierce, mana_cost, stamina_cost, element,
             defense, resistances, stackable, ammo_type_id, aoe_radius, vfx, knockback,
             stat_bonus_stat, stat_bonus_amount, attack_origin,
-            projectile_shape_id, impact_behavior_id, stone_mode, bonus_damage
+            projectile_shape_id, impact_behavior_id, stone_mode, bonus_damage,
+            req_level, req_strength, req_dexterity, req_constitution,
+            req_intelligence, req_wisdom, req_charisma, item_level, tier
      FROM item_types ORDER BY id ASC`,
   );
   const shapes = catalogs && catalogs.projectileShapes ? catalogs.projectileShapes : null;
@@ -115,12 +164,53 @@ async function loadItemTypes(pool, catalogs = null) {
       // host weapon, which is the exact behaviour augment exists to avoid.
       stone_mode: row.stone_mode === 'augment' ? 'augment' : 'replace',
       bonus_damage: num(row.bonus_damage),
+      // SOMET-478: the FOURTH instance of the trap the three comments above
+      // document, and this one was caught by a red test rather than in review.
+      // The migration and equipRequirements.js were both correct while the
+      // gate stayed completely inert, because req_level never made it out of
+      // this SELECT list and every in-memory type read `undefined`.
+      //
+      // Defaulted to the IDENTITY values (the same ones the migration gives
+      // the columns), not to 0/null: this loader is also fed by fixtures and
+      // by catalog snapshots predating the migration, and an item whose
+      // requirements read as undefined must be equippable by everyone rather
+      // than by nobody.
+      req_level: Number(row.req_level ?? 1),
+      req_strength: Number(row.req_strength ?? 0),
+      req_dexterity: Number(row.req_dexterity ?? 0),
+      req_constitution: Number(row.req_constitution ?? 0),
+      req_intelligence: Number(row.req_intelligence ?? 0),
+      req_wisdom: Number(row.req_wisdom ?? 0),
+      req_charisma: Number(row.req_charisma ?? 0),
+      item_level: Number(row.item_level ?? 1),
+      tier: Number(row.tier ?? 1),
     });
   }
   return m;
 }
 
-// The default active weapon: the dagger, else the first WEAPON (never armor).
+// SOMET-509. The bare-magic baseline row, looked up by name and memoized per
+// catalog object. activeWeaponType runs on the combat hot path and only this
+// branch needs the lookup, so it is done once per catalog rather than once per
+// swing; a WeakMap keyed on the catalog itself means a rebuilt catalog (a
+// re-seed, a second World) resolves afresh and the old entry is collectable.
+const bareMagicBaselineCache = new WeakMap();
+function bareMagicBaseline(itemTypes) {
+  if (bareMagicBaselineCache.has(itemTypes)) return bareMagicBaselineCache.get(itemTypes);
+  let found = null;
+  for (const t of itemTypes.values()) {
+    if (t.category === 'weapon' && t.name === BARE_MAGIC_BASELINE_NAME) { found = t; break; }
+  }
+  bareMagicBaselineCache.set(itemTypes, found);
+  return found;
+}
+
+// The default active weapon: `unarmed`, else the first WEAPON (never armor).
+//
+// The name-then-first-weapon shape is unchanged from when the name was
+// 'dagger'. It matters for the many fixture-built catalogs in the test suite
+// that contain no `unarmed` row at all: those still resolve to their own first
+// weapon, exactly as they always did.
 function resolveDefaultWeaponId(mapById) {
   let firstWeapon = null;
   for (const [id, t] of mapById) {
@@ -152,8 +242,33 @@ function resolveGoldItemTypeId(itemTypes) {
 // this character via the host_pi join predicate, matching every other
 // ownership check in this file.
 async function loadInventory(pool, characterId) {
+  // SOMET-480: rarity, item_level and the rolled affixes are hydrated HERE, in
+  // the one loader, and NOT in a second query somewhere on the equip path.
+  // `effect` rides along with each affix because a stat affix is identified by
+  // its effect payload, not by its key -- equipRequirements#gearStatGrants
+  // reads exactly that. `label` rides along (SOMET-496) because the Character
+  // tab lists every gear modifier by label, and gearAffixes.js has no second
+  // query to look one up with.
+  //
+  // The GROUP BY makes this one round trip rather than one per item. The
+  // FILTER is load-bearing: a plain jsonb_agg over a LEFT JOIN emits
+  // [{"affixTypeId":null,...}] for an unaffixed item, and that null-bearing
+  // entry would then be summed as 0 by every consumer instead of being absent.
   const ir = await pool.query(
-    'SELECT id, item_type_id, quantity, soulbound FROM player_items WHERE character_id = $1 ORDER BY created_at ASC, id ASC',
+    `SELECT pi.id, pi.item_type_id, pi.quantity, pi.soulbound, pi.rarity, pi.item_level,
+            pi.created_at,
+            COALESCE(jsonb_agg(
+              jsonb_build_object('affixTypeId', pia.affix_type_id, 'key', at.key,
+                                 'label', at.label,
+                                 'value', pia.value, 'effect', at.effect)
+              ORDER BY pia.idx
+            ) FILTER (WHERE pia.player_item_id IS NOT NULL), '[]'::jsonb) AS affixes
+       FROM player_items pi
+       LEFT JOIN player_item_affixes pia ON pia.player_item_id = pi.id
+       LEFT JOIN affix_types at ON at.id = pia.affix_type_id
+      WHERE pi.character_id = $1
+      GROUP BY pi.id
+      ORDER BY pi.created_at ASC, pi.id ASC`,
     [characterId],
   );
   const er = await pool.query(
@@ -191,6 +306,12 @@ async function loadInventory(pool, characterId) {
     typeId: r.item_type_id,
     quantity: Number(r.quantity ?? 1),
     soulbound: r.soulbound === true,
+    // SOMET-480. Carried so the panel can colour the item and so
+    // equipRequirements#gearStatGrants can read affix stat grants without a
+    // second query on the equip path.
+    rarity: r.rarity || 'white',
+    itemLevel: Number(r.item_level ?? 1),
+    affixes: Array.isArray(r.affixes) ? r.affixes : [],
   }));
   const byId = new Map(items.map((it) => [it.id, it]));
   for (const row of sr.rows) {
@@ -260,9 +381,19 @@ async function grantStartingLoadout(pool, character, itemTypes) {
     );
     if (claim.rowCount === 0) { await client.query('ROLLBACK'); return false; }
     const rows = await client.query(
-      'SELECT item_type_id, quantity FROM class_loadouts WHERE entity_type_id = $1 ORDER BY id ASC',
+      `SELECT item_type_id, quantity, equip_slot, socket_into_item_type_id
+         FROM class_loadouts WHERE entity_type_id = $1 ORDER BY id ASC`,
       [character.entityTypeId],
     );
+    // SOMET-492: item_type_id -> the player_items.id this grant just created
+    // for it, so a socket directive can name its host by TYPE (the only thing
+    // a catalog row can name) and still be wired to the exact instance. Built
+    // as the loop runs rather than re-queried afterwards for the same reason
+    // 1714440167000 threads its stone ids through a MATERIALIZED CTE: a
+    // re-join on (character_id, item_type_id) is only 1:1-correct while a
+    // class is never handed two instances of one type, which is a fact about
+    // today's content and not a guarantee.
+    const grantedByType = new Map();
     for (const row of rows.rows) {
       // The fk on class_loadouts already guarantees the item type exists in the
       // database. This guard is about the in-memory catalog the world was built
@@ -278,10 +409,80 @@ async function grantStartingLoadout(pool, character, itemTypes) {
       // Written inside this same transaction as the claim, so a grant is
       // still all-or-nothing -- there is no path that inserts a granted row
       // and leaves it unbound.
-      await client.query(
-        'INSERT INTO player_items (character_id, item_type_id, quantity, soulbound) VALUES ($1, $2, $3, true)',
+      //
+      // The granted stone is soulbound by the same INSERT as everything else,
+      // which is the ticket's third acceptance criterion: a Cultist cannot
+      // unsocket its starting stone and sell it on a delete-and-reroll loop.
+      const ins = await client.query(
+        `INSERT INTO player_items (character_id, item_type_id, quantity, soulbound)
+         VALUES ($1, $2, $3, true) RETURNING id`,
         [character.id, row.item_type_id, row.quantity],
       );
+      const playerItemId = ins.rows[0].id;
+      if (!grantedByType.has(row.item_type_id)) grantedByType.set(row.item_type_id, playerItemId);
+
+      // A stone instance needs its stone_instances row or it is inert: every
+      // socket path (socketStone, loadInventory's hydration join, loot.js's
+      // drop guard) joins player_items to that table and a stone missing from
+      // it can never be socketed, ever. Until now the conversion migration
+      // (1714440167000) was the ONLY writer of this table -- loot.js says so
+      // in as many words -- so granting a stone without this INSERT would hand
+      // the Cultist a stone it could not put in anything.
+      if (itemTypes.get(row.item_type_id).category === 'stone') {
+        await client.query('INSERT INTO stone_instances (player_item_id) VALUES ($1)', [playerItemId]);
+      }
+    }
+
+    // SOMET-492, second pass. Worn and socketed AFTER every row is inserted,
+    // not inline, because a socket directive may name a host that appears
+    // later in the loadout's own id order and a first-pass wiring would then
+    // silently no-op on ordering alone.
+    for (const row of rows.rows) {
+      const itemId = grantedByType.get(row.item_type_id);
+      if (itemId === undefined) continue;
+      if (row.equip_slot) {
+        // ON CONFLICT, not a bare INSERT, and not because a conflict is
+        // expected: the grant claims starting_loadout_granted_at once ever, so
+        // a character reaching this line has no equipment yet. It matters
+        // because of what a raw unique violation would DO here -- it throws,
+        // the catch rolls the whole transaction back INCLUDING the claim, and
+        // the next join runs the identical statements and throws again. That
+        // is a permanent, self-repeating join failure, i.e. a locked-out
+        // character, as the price of a row that is already what we want it to
+        // be.
+        //
+        // SOMET-493: DO NOTHING, where SOMET-492 wrote DO UPDATE SET item_id.
+        // The reason 492 gave for the ON CONFLICT was only "do not throw", and
+        // DO UPDATE was picked to mirror items.js#equip -- but equip is a
+        // player DELIBERATELY replacing a slot, and this is a grant, which may
+        // never replace anything. On the DO UPDATE version a character that
+        // somehow reaches its first join with a slot already filled has that
+        // item silently swapped out for starting gear, and SOMET-493 widened
+        // that from the Cultist's one hand to two slots on all six classes.
+        // DO NOTHING keeps the anti-lockout property exactly (still no throw,
+        // still no rolled-back claim) and drops the destructive half: the slot
+        // the player already has wins, and the granted item simply stays in
+        // the bag, which is where every un-directed loadout row lives anyway.
+        await client.query(
+          `INSERT INTO player_equipment (character_id, slot, item_id) VALUES ($1,$2,$3)
+           ON CONFLICT (character_id, slot) DO NOTHING`,
+          [character.id, row.equip_slot, itemId],
+        );
+      }
+      if (row.socket_into_item_type_id != null) {
+        const hostId = grantedByType.get(row.socket_into_item_type_id);
+        // A directive whose host is not in the same loadout is a content
+        // error, and it is left UNSOCKETED rather than thrown: the stone is
+        // still in the bag and the player can socket it by hand, whereas a
+        // throw here rolls back the whole grant and leaves the character
+        // permanently unable to join. The loadout tests assert the resolved
+        // socket, so the content error fails a test rather than a player.
+        if (hostId === undefined) continue;
+        await client.query(
+          'UPDATE stone_instances SET socketed_into_id = $1 WHERE player_item_id = $2',
+          [hostId, itemId],
+        );
+      }
     }
     await client.query('COMMIT');
     return true;
@@ -335,7 +536,19 @@ const HAND_SLOTS = ['main_hand', 'off_hand'];
 function findItem(inv, itemId) { return inv.items.find((it) => it.id === itemId) || null; }
 
 // Pure legality check. Returns {ok:true} or {ok:false, reason}.
-function canEquip(inv, itemTypes, itemId, slot) {
+//
+// `req` (SOMET-478, T10) is the requirement context: { level, base } where
+// `base` is the character's non-gear stat bundle. It is OPTIONAL and null
+// means "skip the level/stat gate" -- canEquip is also called from pure
+// fixtures and from the client-side mirror, neither of which holds a
+// progression row. world.setEquipment ALWAYS supplies a real one, and
+// item_requirements_db.test.js asserts a refusal THROUGH setEquipment so a
+// dropped thread fails loudly rather than silently ungating every item.
+//
+// The gate runs LAST, after the slot/category rules, so the message a player
+// sees names the first thing actually wrong with the request rather than a
+// stat requirement on an item that could never go in that slot anyway.
+function canEquip(inv, itemTypes, itemId, slot, req = null) {
   if (!SLOTS.includes(slot)) return { ok: false, reason: 'unknown slot' };
   const item = findItem(inv, itemId);
   if (!item) return { ok: false, reason: 'you do not own that item' };
@@ -350,16 +563,43 @@ function canEquip(inv, itemTypes, itemId, slot) {
       const mhType = mh ? itemTypes.get((findItem(inv, mh) || {}).typeId) : null;
       if (mhType && mhType.two_handed) return { ok: false, reason: 'a two-handed weapon is equipped' };
     }
-    return { ok: true };
+    return requirementGate(inv, itemTypes, itemId, type, req);
   }
 
   // armor: must go in its own slot
   if (type.slot !== slot) return { ok: false, reason: `that item goes in ${type.slot}` };
-  return { ok: true };
+  return requirementGate(inv, itemTypes, itemId, type, req);
+}
+
+// Split out so the two branches above cannot drift on WHICH stats the gate
+// runs against. `excludeItemId: itemId` is the circularity rule: the candidate
+// contributes nothing to the stats its own requirements are judged against.
+//
+// The require is INSIDE the function on purpose. equipRequirements.js requires
+// SLOTS from this module, so a top-level require here would be a cycle
+// resolved to a half-initialised module.
+function requirementGate(inv, itemTypes, itemId, type, req) {
+  if (!req) return { ok: true };
+  // eslint-disable-next-line global-require
+  const { effectiveStatsFor, meetsRequirements } = require('./equipRequirements.js');
+  const stats = effectiveStatsFor(inv, itemTypes, req.base, { excludeItemId: itemId });
+  return meetsRequirements(type, req.level, stats);
 }
 
 // Sum equipped ARMOR defense and merge resistances per element.
-function mitigation(inv, itemTypes) {
+//
+// SOMET-495: `extraResistances` is the passive tree's `resist` aggregate --
+// composeStats' `resists`, ALREADY CONVERTED to the fraction scale armour uses
+// (a +6 node arrives here as 0.06, not as 6). It is merged into the same map
+// by the same `+=`, deliberately, because there is exactly one resistance
+// number per element and one place damage.js reads it from; a second map added
+// later at the damage site would be a second scale waiting to be mixed up.
+//
+// Merged in a SEPARATE pass rather than seeded into `resistances` before the
+// slot walk, so an element the tree touches but no armour covers still appears
+// -- including with a NEGATIVE total, which is a drawback keystone doing its
+// job and must survive all the way to applyDamage (see RESIST_FLOOR there).
+function mitigation(inv, itemTypes, extraResistances = null) {
   let defense = 0;
   const resistances = {};
   for (const slot of SLOTS) {
@@ -373,6 +613,14 @@ function mitigation(inv, itemTypes) {
     for (const [el, v] of Object.entries(type.resistances || {})) {
       resistances[el] = (resistances[el] || 0) + v;
     }
+  }
+  for (const [el, v] of Object.entries(extraResistances || {})) {
+    // A non-finite entry is dropped rather than merged: applyDamage's own NaN
+    // guard would catch it, but a NaN sitting in this map would also poison
+    // every future read of the element and is invisible in a frame dump.
+    const n = Number(v);
+    if (!Number.isFinite(n) || n === 0) continue;
+    resistances[el] = (resistances[el] || 0) + n;
   }
   return { defense, resistances };
 }
@@ -479,12 +727,15 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
         // ever be in -- stone content-seeding is explicitly out of scope
         // this slice, so such a weapon can never be socketed at all.
         //
-        // damage falls back to DEFAULT_WEAPON_NAME's ('dagger') own damage
-        // -- not an invented number: it is the SAME reference weapon this
-        // function already falls back to wholesale a few lines down when no
-        // weapon is equipped at all, so "an unsocketed magic weapon hits
-        // like the game's own baseline ordinary weapon" is the one baseline
-        // already meaningful in this file, not a new one invented here.
+        // damage falls back to BARE_MAGIC_BASELINE_NAME's ('dagger') own
+        // damage -- not an invented number: the dagger is the catalog's plain
+        // ordinary weapon, so "an unsocketed magic weapon hits like a weapon of
+        // no particular quality" needs no new constant.
+        //
+        // SOMET-509 NOTE: this used to justify itself by being the SAME row the
+        // no-weapon fallback returned a few lines below. That is no longer
+        // true, and the two were deliberately NOT kept together -- see
+        // BARE_MAGIC_BASELINE_NAME at the top of this file for why.
         // `baseline` guards the pathological case of a catalog with no
         // default weapon at all (should never happen -- dagger is always
         // seeded): damage is left unchanged rather than crash.
@@ -509,7 +760,10 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
         // to baseline (still strictly worse than the pre-fix "free spell"
         // state) but the weapon's attack RATE is exactly what it always was
         // for a physical weapon of that kind.
-        const baseline = itemTypes.get(defaultWeaponId);
+        // SOMET-509: was `itemTypes.get(defaultWeaponId)`, which stopped being
+        // the dagger when the default became `unarmed`. Resolved by name now so
+        // this branch keeps the exact behaviour it shipped with.
+        const baseline = bareMagicBaseline(itemTypes);
         return {
           ...type,
           element: 'physical',
@@ -525,8 +779,11 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
 
 // Equip with write-through. Clears any slot the instance currently occupies and,
 // for a two-handed weapon, the off hand.
-async function equip(pool, characterId, inv, itemTypes, itemId, slot) {
-  const check = canEquip(inv, itemTypes, itemId, slot);
+async function equip(pool, characterId, inv, itemTypes, itemId, slot, req = null) {
+  // SOMET-478: the requirement gate rides inside canEquip, so it is refused
+  // BEFORE the in-memory mutation below -- the SOMET-77 snapshot/write-through
+  // ordering is entered only on a legal equip and is otherwise untouched.
+  const check = canEquip(inv, itemTypes, itemId, slot, req);
   if (!check.ok) return check;
 
   const type = itemTypes.get(findItem(inv, itemId).typeId);
@@ -612,6 +869,37 @@ async function unequip(pool, characterId, inv, slot) {
 // a later action in the same session (canEquip, a second socket attempt, and
 // eventually combat's activeWeaponType) sees the change without a reload --
 // same reason claimItem/dropItem/sellItem push/filter p.inv.items in place.
+// LOCK ORDER (SOMET-497). Read this before adding a query to this function.
+//
+// socketStone takes exactly two row locks, in this order:
+//   1. the STONE's player_items row AND its stone_instances row, together, by
+//      the one FOR UPDATE over the join below;
+//   2. the HOST's player_items row.
+// It takes NO lock on item_types at any point: the type rows come from the
+// caller's in-memory `itemTypes` map, and the only foreign key the final
+// UPDATE re-checks (stone_instances.socketed_into_id -> player_items) names a
+// row this transaction is already holding FOR UPDATE.
+//
+// Two consequences worth writing down, because SOMET-497 was filed as a
+// deadlock "inside socketStone" and the lock graph Postgres actually printed
+// for it did not name this function at all -- it was a peer test's
+// `INSERT INTO player_items` FK probe against a stone migration test's
+// `ALTER TABLE item_types`, neither of which is this code:
+//
+//   * Two concurrent socketStone calls CANNOT deadlock against each other.
+//     A cycle needs one item that is simultaneously a stone (a stone_instances
+//     row, only ever created for a category='stone' type -- see
+//     grantStartingLoadout above and 1714440167000) and a legal host
+//     (isCompatible demands category 'weapon' or 'armor'). Nothing can be
+//     both, and the character_id predicate keeps both rows inside one
+//     character regardless.
+//   * What this function DOES deadlock against is a statement that sweeps
+//     player_items in a different order -- specifically the database-wide
+//     DELETE in 1714440167000_convert_magic_weapons_to_stones.js's down(),
+//     which migration_convert_magic_weapons_db.test.js runs for real against
+//     every character's rows. That is SOMET-506, and it is reachable only from
+//     that test: down() migrations are not run in production. Fix it there,
+//     not by giving this live authority path a test-only lock.
 async function socketStone(pool, characterId, inv, stonePlayerItemId, hostPlayerItemId, itemTypes) {
   const client = await pool.connect();
   try {
@@ -733,7 +1021,8 @@ async function unsocketStone(pool, characterId, inv, stonePlayerItemId, { confir
 }
 
 module.exports = {
-  loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory,
+  loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME,
+  BARE_MAGIC_BASELINE_NAME, SLOTS, loadInventory,
   grantStartingLoadout, canEquip, mitigation, activeWeaponType, equip, unequip, socketStone, unsocketStone,
   DEFAULT_INVENTORY_SLOTS, usedSlots, capacityOf, freeSlots, hasFreeSlot,
 };

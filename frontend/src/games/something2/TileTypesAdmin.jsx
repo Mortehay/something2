@@ -197,6 +197,8 @@ const Modal = styled.div`
   border-radius: 16px;
   width: 90%;
   max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
   padding: 2.5rem;
   box-shadow: 0 0 40px var(--s2-scrim-soft);
 `;

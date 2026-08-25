@@ -101,6 +101,53 @@ test('no test file keeps its own entry-world save/restore', () => {
     'these files define their own withEntryPreserved instead of requiring tests/helpers/entryWorld.js, which bypasses its advisory lock');
 });
 
+// SOMET-505, the READER half of the same shared flag. Six live-join suites each
+// picked their target world with
+//
+//     SELECT id FROM worlds WHERE is_entry = true LIMIT 1
+//
+// which names whichever world is holding the flag at that instant -- routinely a
+// peer's throwaway fixture, which the peer then DELETES. Measured on a scratch
+// database: class_pools_db.test.js snapshotted `zz Chest Integration World` and
+// the row was gone 572ms later, failing all seven of its subtests with
+// `unknown world`, in two of four traced full-suite runs.
+//
+// Banned by SOURCE TEXT rather than left to the six files to remember, for the
+// same reason the two bans above are: this idiom spread by being copied, the
+// copies all looked correct, and every one of them was a coin flip. The
+// replacement is entryWorldForJoin() in tests/helpers/entryWorld.js.
+//
+// Narrow on purpose. `WHERE is_entry` on its own is legitimate -- this file,
+// seed_map_db and villageScreenBudget_db all read it to assert ON the flag. It
+// is `... = true LIMIT 1`, the "give me any entry world to use as a handle"
+// spelling, that is always wrong in a concurrently-running test.
+test('no test file picks a world to join out of the is_entry flag', () => {
+  const dir = __dirname;
+  const offenders = [];
+  const walk = (d) => {
+    for (const name of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, name.name);
+      if (name.isDirectory()) { walk(p); continue; }
+      if (!name.name.endsWith('.js')) continue;
+      // Comments stripped first: this ban is worth explaining in prose at the
+      // call sites it was removed from, and a guard that fires on its own
+      // documentation gets deleted rather than obeyed.
+      const src = fs.readFileSync(p, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      if (/FROM worlds\s+WHERE is_entry\s*=\s*true\s+LIMIT 1/i.test(src)) {
+        offenders.push(path.relative(dir, p));
+      }
+    }
+  };
+  walk(dir);
+
+  assert.deepEqual(offenders, [],
+    'these files resolve a world through worlds.is_entry, which peer test files '
+    + 'borrow onto throwaway worlds and then delete -- use entryWorldForJoin() '
+    + 'from tests/helpers/entryWorld.js instead (SOMET-505)');
+});
+
 const url = process.env.TEST_DATABASE_URL;
 
 test('against the live database', { skip: !url ? 'no TEST_DATABASE_URL' : false }, async (t) => {

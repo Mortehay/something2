@@ -51,7 +51,7 @@ function walk(dir, out = []) {
 //       if (key === 'g' && ...)              -- plain
 //       if (key === 'm' && e.shiftKey && ...) -- modified
 //
-//   The React panels (Minimap, CharacterSheet, WaypointTravel), each an early
+//   The React panels (Minimap, WaypointTravel), each an early
 //   return that rejects everything but its own unmodified letter:
 //       if (e.key.toLowerCase() !== 'm' || e.shiftKey || ...) return;
 //
@@ -106,10 +106,27 @@ describe('window keydown hotkeys', () => {
     // If the discovery walk breaks -- a moved directory, a renamed extension --
     // every assertion below passes over an empty list. This is the fixed point
     // that makes the rest mean something.
-    expect(listeners.length).toBeGreaterThanOrEqual(4);
+    //
+    // The bound was 4 until SOMET-483 deleted CharacterSheet.jsx, the standalone
+    // level popup, and moved its C binding into Game.js's own handler. LOWERED,
+    // not deleted -- and the three surviving claimants are named below, so a
+    // discovery walk that silently found only one of them fails here rather
+    // than passing a weakened count.
+    expect(listeners.length).toBeGreaterThanOrEqual(3);
     const files = listeners.map((l) => l.file);
+    expect(files).toContain('games/something2/Minimap.jsx');
     expect(files).toContain('games/something2/WaypointTravel.jsx');
     expect(files).toContain('games/something2/src/js/core/Game.js');
+    expect(files).not.toContain('games/something2/CharacterSheet.jsx');
+  });
+
+  it('gives C to exactly one handler -- Game.js, which opens the Character tab', () => {
+    // The deleted popup owned C. Reusing it rather than retiring it keeps the
+    // player's muscle memory, and this pins that the reuse did not create a
+    // second claimant.
+    const byFile = Object.fromEntries(listeners.map((l) => [l.file, l]));
+    expect([...byFile['games/something2/src/js/core/Game.js'].plain]).toContain('c');
+    expect(listeners.filter((l) => l.plain.has('c'))).toHaveLength(1);
   });
 
   it('parses a claim out of every file that registers one', () => {

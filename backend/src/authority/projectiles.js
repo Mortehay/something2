@@ -9,7 +9,7 @@ const {
   applyDamageWithEffects, NO_MITIGATION, playerKey, creatureKey,
 } = require('./damage');
 const { hasLineOfSight } = require('./weapons');
-const { applyElementEffect } = require('./effects');
+const { applyElementEffect, applyHitStatuses } = require('./effects');
 const { shoveAwayFrom } = require('./knockback');
 // SOMET-283: the leash-aware creature shove. The clamp is a creature-domain
 // rule and lives next to the guard constants that define what a post is, rather
@@ -52,7 +52,14 @@ function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * d
 // MIN_DAMAGE floor, i.e. 7005 landed shots to kill one, while the guard needs
 // 4 swings to kill the hostile.
 function projectileHitsCreature(p, creature) {
-  if (p.ownerKind !== 'creature') return !immuneToPlayerDamage(creature);
+  if (p.ownerKind !== 'creature') {
+    // SOMET-473 -- the Druid's player pacify (spec 8.2). The charmer's pets are
+    // off this shot's target list, snapshotted at LAUNCH (see world.js's spawn
+    // call), so a charm that lapses mid-flight cannot make an arrow already in
+    // the air lethal to the charmer's pack.
+    if (p.pacifiedFrom != null && creature.charmOwnerUserId === p.pacifiedFrom) return false;
+    return !immuneToPlayerDamage(creature);
+  }
   if (p.ownerId === creature.id) return false;        // never its own shooter
   const targetFaction = creature.faction || 'hostile';
   return p.ownerFaction !== targetFaction;            // never same faction
@@ -67,6 +74,12 @@ function projectileHitsCreature(p, creature) {
 // Keyed on the same immuneToPlayerDamage predicate the refusal itself is, so
 // the cue and the rule cannot disagree about who is a guard.
 function projectileBlockedBy(p, creature) {
+  // SOMET-473: a pacified shot passing through the charmer's pet is the same
+  // kind of refusal a guard's is -- a rule the shooter is entitled to see --
+  // so it earns the same cue. Kept in step with meleeArcScan's `blocked` list,
+  // which draws exactly this distinction for the melee half.
+  if (p.ownerKind !== 'creature' && p.pacifiedFrom != null
+      && creature.charmOwnerUserId === p.pacifiedFrom) return true;
   return p.ownerKind !== 'creature' && immuneToPlayerDamage(creature);
 }
 
@@ -129,7 +142,11 @@ function applyPlayerAugment(p, pl, scale, now) {
 }
 
 function projectileHitsPlayer(p, player) {
-  if (p.ownerKind !== 'creature') return player.userId !== p.ownerId;
+  if (p.ownerKind !== 'creature') {
+    // Same rule, other target kind: a pacified shooter cannot hit their charmer.
+    if (p.pacifiedFrom != null && player.userId === p.pacifiedFrom) return false;
+    return player.userId !== p.ownerId;
+  }
   // A guard's arrow must never hit the player it is defending.
   return p.ownerFaction === 'hostile';
 }
@@ -181,7 +198,7 @@ class ProjectileSim {
   // became -- "explosive arrows" could not be authored at all.
   spawn({
     ownerId, ownerKind = 'player', ownerFaction = null, x, y, nx, ny, weapon, damage,
-    originLift, ammo = null,
+    originLift, ammo = null, pacifiedFrom = null, hitStatuses = null,
   }) {
     const id = String(++this._id);
     // Ammo wins over the weapon where it speaks, so an explosive arrow makes
@@ -253,6 +270,11 @@ class ProjectileSim {
       // stays null, which the client reads as "use the legacy tile lift" --
       // today's appearance, never an invisible or ground-level shot.
       originLift: Number.isFinite(originLift) ? originLift : null,
+      // SOMET-473: who this shot may not hit, snapshotted at launch for the
+      // same reason `damage` is -- the charm can lapse mid-flight, and a shot
+      // loosed while pacified must not become lethal to the charmer because it
+      // took 300ms to arrive. null for every shot in the game today.
+      pacifiedFrom,
       hitIds: new Set(), // 'c:<id>' / 'p:<id>' already hit by this projectile
       // Magic Stones (SOMET-245) Task 7: the socketed spell stone's own
       // player_items.id, read straight off `weapon` (items.js's
@@ -270,6 +292,12 @@ class ProjectileSim {
       // in flight must not change because the player unsocketed mid-flight.
       // null for every unaugmented weapon and every creature ability.
       augment: weapon.augment || null,
+      // SOMET-495: the shooter's tree-granted on-hit riders ("your hits
+      // chill"), snapshotted at launch for exactly the reason `damage`,
+      // `pacifiedFrom` and `augment` are -- a respec mid-flight must not change
+      // a shot already in the air. null for every creature-fired ability, so a
+      // creature can never carry a player's riders.
+      hitStatuses,
     });
     return id;
   }
@@ -353,6 +381,11 @@ class ProjectileSim {
       // straight through as killerUserId -- the exact uuid-into-an-integer-
       // column crash killerUserIdFor exists to prevent on the direct-hit path.
       applyElementEffect(c, p.element, now, killerUserIdFor(p));
+      // SOMET-495: the shooter's tree riders, on the same terms as the element
+      // rider beside it -- full duration regardless of falloff, and the same
+      // killerUserIdFor(p) source so a later burn tick cannot report a creature
+      // uuid as a killerUserId.
+      applyHitStatuses(c, p.hitStatuses, now, killerUserIdFor(p));
     }
     for (const pl of players) {
       if (!projectileHitsPlayer(p, pl)) continue;
@@ -368,6 +401,9 @@ class ProjectileSim {
       applyDamageWithEffects(pl, p.damage * (1 - d / r), p.element, pl.mit || NO_MITIGATION,
         now, provokerKeyFor(p));
       applyElementEffect(pl, p.element, now, p.ownerId);
+      // SOMET-495: the shooter's tree riders. A player and a creature must take
+      // the same blast identically, so this mirrors the creature branch above.
+      applyHitStatuses(pl, p.hitStatuses, now, p.ownerId);
       // Survivors only -- a player never gets removed from `players` on
       // death (resolveDeaths respawns them separately), so the check here is
       // the same hp > 0 gate creatures.js uses, not a delete-happened check.
@@ -496,6 +532,10 @@ class ProjectileSim {
             // p.ownerId -- the same uuid-into-killerUserId bug, reachable
             // here via a later burn tick rather than this hit itself.
             applyElementEffect(c, p.element, now, killerUserIdFor(p));
+            // SOMET-495: the shooter's tree riders on the DIRECT hit, matching
+            // the AoE branch in _detonate. A rider wired into one and not the
+            // other is half a feature: most staves detonate, every bow does not.
+            applyHitStatuses(c, p.hitStatuses, now, killerUserIdFor(p));
             if (p.stoneItemId != null) stoneHits.push({ stoneItemId: p.stoneItemId });
             p.pierceLeft -= 1;
             if (p.pierceLeft <= 0) { dead = true; break; }
@@ -528,6 +568,10 @@ class ProjectileSim {
             applyDamageWithEffects(pl, p.damage, p.element, pl.mit || NO_MITIGATION,
               now, provokerKeyFor(p));
             applyElementEffect(pl, p.element, now, p.ownerId);
+            // SOMET-495: the shooter's tree riders on a direct PvP hit, the
+            // fourth and last projectile site (AoE-vs-creature, AoE-vs-player,
+            // direct-vs-creature, direct-vs-player).
+            applyHitStatuses(pl, p.hitStatuses, now, p.ownerId);
             // Survivors only. Origin is the projectile's own current
             // position, matching the creature branch just above.
             if (pl.hp > 0 && p.knockback > 0) shoveAwayFrom(map, p.x, p.y, pl, p.knockback);

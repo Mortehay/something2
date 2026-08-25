@@ -322,6 +322,23 @@ test('the chunk creature load SELECTs the columns CreatureSim maps into `mit`/le
   assert.match(sel, /ORDER BY\s+a\.slot/i,
     'the ability aggregate must ORDER BY a.slot — slot order IS priority order, and an '
     + 'unordered json_agg makes a creature\'s move priority depend on physical row order');
+  // SOMET-473: the Druid's charm. Exactly the same trap once more -- the two
+  // columns exist, server.js WRITES them on every charm, and dropping them from
+  // THIS select makes a persisted pet come back hostile after a chunk reload
+  // with every unit test still green. The user_id alias is checked by its exact
+  // shape because the sim keys its owner lookup on a USERID: a bare
+  // charmed_by_character_id would match `byId.get(...)` for nobody, and every
+  // restored pet would be silently released on its first tick.
+  for (const col of ['charmed_by_character_id', 'charm_expires_at']) {
+    assert.ok(new RegExp(`\\b${col}\\b`).test(sel),
+      `the world_creatures load must SELECT ${col} — without it a persisted charm never comes back`);
+  }
+  assert.match(sel, /ch\.user_id\s+AS\s+charm_owner_user_id/i,
+    'the world_creatures load must alias the charmer\'s user_id AS charm_owner_user_id — '
+    + 'CreatureSim keys its owner lookup on a userId, not a characterId');
+  assert.match(sel, /LEFT JOIN\s+characters\s+ch\s+ON\s+ch\.id\s*=\s*wc\.charmed_by_character_id/i,
+    'must LEFT JOIN characters, not INNER — an INNER JOIN would make every UNcharmed creature '
+    + '(i.e. all of them) vanish from the world entirely');
   ws.close(); handle.close(); server.close();
 });
 

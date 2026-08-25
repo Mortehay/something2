@@ -2,6 +2,7 @@ import { useState } from 'react';
 import styled from 'styled-components';
 import { usePlayableClasses, useCreateCharacter, useDeleteCharacter } from './useCharacters.js';
 import { canCreate, slotsUsed } from './characterSession.js';
+import { describeClass } from './classIdentity.js';
 
 // The character list and create form, rendered in place of the game canvas
 // until a character is chosen. Deliberately thin: every rule worth testing
@@ -92,8 +93,13 @@ const Form = styled.form`
     background: var(--color-grey-0);
     color: var(--color-grey-700);
   }
-  fieldset { border: 0; display: flex; gap: 1.6rem; flex-wrap: wrap; }
-  label { display: flex; gap: 0.5rem; align-items: center; }
+  /* SOMET-471: six classes, each with a main stat and an identity line, no
+     longer fit the wrapping row three bare names did -- the lines interleaved
+     and it stopped being obvious which line belonged to which radio. One class
+     per row instead. */
+  fieldset { border: 0; display: grid; grid-template-columns: 1fr; gap: 0.8rem; }
+  label { display: grid; grid-template-columns: auto 1fr; gap: 0.6rem; align-items: baseline; }
+  .pick { display: flex; flex-direction: column; gap: 0.2rem; }
   .why { color: var(--color-grey-500); font-size: 1.3rem; }
 `;
 
@@ -179,7 +185,26 @@ export default function CharacterSelect({ characters, maxCharacters, onPlay }) {
                   checked={chosenClass === cls.id}
                   onChange={() => setEntityTypeId(cls.id)}
                 />
-                {cls.name} <span className="why">({cls.hp} hp)</span>
+                {/* SOMET-486: these are the class's real base pools, straight
+                    off the same entity_types columns the authority derives a
+                    joining character's maxHp/maxMana from. They were decoration
+                    until 486 -- the game handed every class 100/100. Mana is
+                    shown as well as HP now that it actually differs.
+
+                    SOMET-471 adds the main stat and the one-line identity.
+                    Both come from classIdentity.js rather than from literals
+                    here, because vitest runs in a node environment and this
+                    component cannot be rendered in a test at all -- the same
+                    reason characterSession.js exists. The list itself is
+                    whatever the server says is playable, so the demoted Ranger
+                    drops out without this file naming it. */}
+                <span className="pick">
+                  <span>
+                    {cls.name}{' '}
+                    <span className="why">({cls.hp} hp / {cls.mana} mana)</span>
+                  </span>
+                  <span className="why">{describeClass(cls)}</span>
+                </span>
               </label>
             ))}
           </fieldset>

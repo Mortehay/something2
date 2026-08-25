@@ -10,7 +10,8 @@ import { useAuth } from "../../context/AuthContext";
 import WorldPreview from "./WorldPreview.jsx";
 import Minimap from "./Minimap.jsx";
 import WaypointTravel from "./WaypointTravel.jsx";
-import CharacterSheet from "./CharacterSheet.jsx";
+import GameSettings from "./GameSettings.jsx";
+import PassivePointsNudge from "./PassivePointsNudge.jsx";
 
 const UIOverlay = styled.div`
   position: absolute;
@@ -72,12 +73,13 @@ const HowToButton = styled.button`
   &:hover { background: var(--s2-panel-veil-solid); color: var(--s2-accent); }
 `;
 
-// Sits directly under "How to play", in the same always-visible in-game
-// control stack. NOT in the pause overlay: nothing in this app ever sets
-// isPaused to true, so that overlay is unreachable and a control placed there
-// would be as inert as the handler was before it had a caller at all.
+// Sits in the same always-visible in-game control stack, below "How to play"
+// and the Settings button that SOMET-493 inserted between them. NOT in the
+// pause overlay: nothing in this app ever sets isPaused to true, so that
+// overlay is unreachable and a control placed there would be as inert as the
+// handler was before it had a caller at all.
 const ChangeCharacterButton = styled(HowToButton)`
-  top: 296px;
+  top: 340px;
 `;
 
 const Panel = styled.div`
@@ -253,7 +255,6 @@ export default function GameView() {
         </FullscreenToggle>
       )}
       {isPlaying && <Minimap gameRef={gameRef} tileColors={tileColors} />}
-      {isPlaying && <CharacterSheet gameRef={gameRef} />}
       {/* SOMET-293. Mounted beside the other HUD panels rather than inside
           the canvas: it is a list of rows, and the canvas cannot render one.
           Keyed on the character, because activation is per character. */}
@@ -271,6 +272,14 @@ export default function GameView() {
       {/* SOMET-262: GameShell defined changeCharacter and referenced it
           nowhere, so switching characters was impossible without hand-clearing
           localStorage -- an acceptance criterion that shipped unreachable. */}
+      {/* SOMET-493 -- directly below "How to play", and it owns the auto-loot
+          toggle that used to live in the canvas inventory panel's footer. */}
+      {isPlaying && <GameSettings gameRef={gameRef} />}
+      {/* SOMET-483/476 follow-up: the tree and the character sheet both shipped
+          without a help row, so a player could hold unspent points with nothing
+          in the game pointing at either. This removes itself once they are
+          spent. */}
+      {isPlaying && <PassivePointsNudge gameRef={gameRef} />}
       {isPlaying && (
         <ChangeCharacterButton
           type="button"

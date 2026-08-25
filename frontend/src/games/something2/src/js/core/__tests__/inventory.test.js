@@ -104,3 +104,30 @@ describe('capacity mirror', () => {
     expect(inv.capacity).toBeNull();
   });
 });
+
+// SOMET-490. authority/items.js has sent `rarity` on every inventory item
+// since SOMET-480 -- this mirror was silently discarding it, which is why the
+// panel had no grade to colour with and why the ground glow's palette had no
+// second consumer to agree with.
+describe('rarity mirror', () => {
+  it('carries the grade off the join frame', () => {
+    const inv = createInventory();
+    applyJoined(inv, { itemTypes: [], equipment: {}, items: [{ id: 'i1', typeId: 3, rarity: 'foxy' }] });
+    expect(inv.items[0].rarity).toBe('foxy');
+  });
+
+  it('carries the grade off a granted instance', () => {
+    const inv = createInventory();
+    addItem(inv, { id: 'i1', typeId: 3, rarity: 'yellow' });
+    expect(inv.items[0].rarity).toBe('yellow');
+  });
+
+  it('defaults a frame with no grade to white rather than undefined', () => {
+    // An older server frame must read as "ordinary", not as a value a
+    // `rarity !== "white"` test would treat as graded.
+    const inv = createInventory();
+    applyJoined(inv, { itemTypes: [], equipment: {}, items: [{ id: 'i1', typeId: 3 }] });
+    addItem(inv, { id: 'i2', typeId: 3 });
+    expect(inv.items.map((i) => i.rarity)).toEqual(['white', 'white']);
+  });
+});

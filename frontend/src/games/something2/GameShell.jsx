@@ -115,15 +115,28 @@ const HELP_SECTIONS = [
     title: 'Movement & combat',
     rows: [
       { k: [['W'], ['A'], ['S'], ['D']], d: 'Move (arrow keys also work)' },
-      { k: [['Left-click']], d: 'Attack — fires toward the cursor with your equipped weapon' },
+      { k: [['Left-click']], d: 'Attack — fires toward the cursor with your equipped weapon. Turn on "Constant attack" in Settings to hold the button down instead of clicking each time' },
     ],
   },
   {
     title: 'Items & loot',
     rows: [
       { k: [['G']], d: 'Pick up the nearest ground item you are standing near' },
-      { k: [['Auto-loot']], d: 'Toggle in the HUD — walk over items to collect them without pressing G' },
+      { k: [['Auto-loot']], d: 'Toggle it in Settings (below "How to play") — walk over items to collect them without pressing G' },
       { k: [['I']], d: 'Open the inventory / paper-doll: click an item then a slot to equip, click an equipped slot to unequip, and drop from the panel' },
+      { k: [['B']], d: 'Bank — stand next to a village bank post and press B to open your account stash' },
+      { k: [['F']], d: 'Open the chest you are standing next to' },
+    ],
+  },
+  {
+    // SOMET-483 / SOMET-476. These two shipped without a help row and a player
+    // with unspent points had no way to discover the tree at all -- which is
+    // what the guard test in __tests__/helpCoversHotkeys.test.js now prevents.
+    title: 'Character & passives',
+    rows: [
+      { k: [['C']], d: 'Character sheet — your class, level, XP, and each stat broken down into where it came from (base, passive tree, gear). Opens the inventory panel on its Character tab' },
+      { k: [['P']], d: 'Passive skill tree — spend passive points. You get one per level. Drag to pan, scroll to zoom, click a lit node to allocate it; you can only take a node next to one you already own. Unspent points are shown at the top' },
+      { k: [['Respec']], d: 'The button inside the passive tree refunds every allocated point for gold, so you can rebuild from scratch' },
     ],
   },
   {
@@ -132,6 +145,14 @@ const HELP_SECTIONS = [
       { k: [['E']], d: 'Trade with a village merchant — stand next to the merchant and press E to open the market' },
       { k: [['M']], d: 'Toggle the minimap (top-right corner); click the minimap to expand it' },
       { k: [['T']], d: 'Travel — while standing on a waypoint you have lit, opens the list of other lit waypoints. Walk onto a waypoint once to light it; ones you have not found are shown but cannot be chosen' },
+    ],
+  },
+  {
+    title: 'Settings',
+    rows: [
+      { k: [['Settings']], d: 'Below "How to play" — auto-loot, inspect-on-hover, and constant attack' },
+      { k: [['Inspect']], d: 'With inspect on, hover anything in the world for a card describing it; creatures also show their level, an HP bar over an MP bar, and how aggressive they are. Click an entity to keep its card up while you read it' },
+      { k: [['Constant attack']], d: 'Hold the left mouse button to keep attacking. It stops by itself the moment you run out of mana, life, stamina or ammo — hold again once you have recovered' },
     ],
   },
   {
@@ -415,6 +436,13 @@ export default function GameShell() {
       await gameRef.current.initChunked({
         worldId,
         characterId: activeCharacter.id,
+        // SOMET-483. The Character tab's header and its strong/weak tie-break.
+        // Both already ride the resolved character (listCharacters selects
+        // e.name AS class_name and e.main_stat), so neither needs a wire field
+        // of its own. `mainStat` is allowed to be null -- the tie-break then
+        // falls back to declaration order rather than throwing.
+        className: activeCharacter.className || null,
+        mainStat: activeCharacter.mainStat || null,
         chunkSize,
         tileTypes: mapTiles,
         vfxEffects: vfxEffects || null,
@@ -597,9 +625,17 @@ export default function GameShell() {
             mounted a fresh (blank) one — the game view came back empty.
             Hiding it is enough; the rAF loop and authority socket keep running,
             so returning to /game resumes the live world instead of reloading. */}
+        {/* Geometry is owned by Game.resizeCanvas(), which letterboxes the fixed
+            1280x720 backing store into THIS element's container and centres it
+            with absolute offsets. What is declared here is only the pre-fit
+            fallback: absolute + inset 0 keeps the element inside the content
+            area (which clips) instead of overflowing it, the way a
+            window-sized box did until SOMET-489 and cut the HUD orbs off. */}
         <canvas
           ref={canvasRef}
           style={{
+            position: 'absolute',
+            inset: 0,
             width: '100%',
             height: '100%',
             display: isGameRoute && isPlaying ? 'block' : 'none',

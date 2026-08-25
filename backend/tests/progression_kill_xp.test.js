@@ -100,7 +100,7 @@ function progressionWriteRoute(row) {
   return [/^\s*UPDATE player_progression/i, (p) => {
     row.experience = Number(p[1]);
     row.level = Number(p[2]);
-    row.stat_points += Number(p[3]) || 0;
+    row.passive_points += Number(p[3]) || 0;
     return { rows: [{ ...row, experience: String(row.experience) }], rowCount: 1 };
   }];
 }
@@ -116,7 +116,7 @@ test('a kill awards XP scaled by the creature level, not a flat per-kill amount'
   // a constant regardless of which creature died. 84 only comes out if BOTH
   // levels really feed xpForKill.
   const row = {
-    user_id: 'u1', experience: 650, level: 4, stat_points: 0,
+    user_id: 'u1', experience: 150, level: 4, passive_points: 0,
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = scriptedPool([
@@ -129,11 +129,12 @@ test('a kill awards XP scaled by the creature level, not a flat per-kill amount'
   const result = await commitCreatureDeath(pool, entry, 'c1', { rng: always, ttlMs: 1000, killerUserId: 'u1' });
 
   assert.strictEqual(result.awarded, 84, 'must be the real xpForKill(6, 4) value');
-  // xpFloor(4) = 600, xpFloor(5) = 1000 -- 650 and 650+84=734 both sit inside
-  // level 4's own range, so this kill alone must not level the player up.
+  // xpFloor(4) = 141, xpFloor(5) = 255 (hand-computed literals for the
+  // round(18 * L^1.33) curve) -- 150 and 150+84 = 234 both sit inside level
+  // 4's own range, so this kill alone must not level the player up.
   assert.strictEqual(result.leveledUp, false);
   assert.strictEqual(result.newLevel, 4);
-  assert.strictEqual(result.progression.experience, 734);
+  assert.strictEqual(result.progression.experience, 234);
   assert.strictEqual(result.killerUserId, 'u1');
 
   // Finding 2/3: the transaction really is one client, and it's released.
@@ -181,7 +182,7 @@ test('a second commit of the same creature id awards nothing and returns null', 
   const entry = armEntry({ killerUserId: 'u2' });
   let deleted = false;
   const row = {
-    user_id: 'u2', experience: 0, level: 1, stat_points: 0,
+    user_id: 'u2', experience: 0, level: 1, passive_points: 0,
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
   const pool = scriptedPool([
@@ -231,7 +232,7 @@ test('a failed XP award rolls back the creature deletion', async () => {
   const creatures = new Map([['c1', { type: 'Wolf', x: 0, y: 0, level: 1 }]]);
   let pendingDelete = null;
   const row = {
-    user_id: 'u3', experience: 0, level: 1, stat_points: 0,
+    user_id: 'u3', experience: 0, level: 1, passive_points: 0,
     strength: 5, dexterity: 5, constitution: 5, intelligence: 5, wisdom: 5, charisma: 5,
   };
 
@@ -337,7 +338,7 @@ function withConnect(pool) {
 
 function fakeLevelUpPool() {
   const row = {
-    user_id: '1', experience: 290, level: 2, stat_points: 0,
+    user_id: '1', experience: 290, level: 2, passive_points: 0,
     // constitution 15 -> 10 above base -> maxHp 100 + 10*10 = 200 once
     // applyDerivedStats picks this row up. XP alone never changes this
     // column, so it is the same before and after the kill -- the tests
@@ -414,7 +415,7 @@ function fakeLevelUpPool() {
       if (/INSERT INTO world_players/i.test(sql)) return { rows: [] };
       if (/^\s*INSERT INTO player_progression/i.test(sql)) return { rows: [], rowCount: 0 };
       if (/^\s*UPDATE player_progression/i.test(sql)) {
-        row.experience = Number(params[1]); row.level = Number(params[2]); row.stat_points += Number(params[3]) || 0;
+        row.experience = Number(params[1]); row.level = Number(params[2]); row.passive_points += Number(params[3]) || 0;
         return { rows: [{ ...row, experience: String(row.experience) }], rowCount: 1 };
       }
       if (/FROM player_progression/i.test(sql)) return { rows: [{ ...row, experience: String(row.experience) }], rowCount: 1 };
@@ -464,7 +465,11 @@ test('a level-up moves the LIVE player pools (maxHp up, hp by the delta, never h
   const prog = await progressionMsgP;
 
   assert.strictEqual(prog.leveledUp, true);
-  assert.strictEqual(prog.newLevel, 3);
+  // The wolf is level 10 against a level-2 player, so xpForKill(10, 2) is
+  // clamped at XP_LEVEL_DIFF_MAX: round(10 * 10 * 2) = 200. From 290 that is
+  // 490, and xpFloor(6) = 408 / xpFloor(7) = 603, so the new level is 6.
+  // Hand-computed floors, not derived from levelForXp.
+  assert.strictEqual(prog.newLevel, 6);
   assert.strictEqual(prog.awarded, 200);
 
   let raised = false;
@@ -530,7 +535,11 @@ test('a player mid-death (hp <= 0, awaiting resolveDeaths) is not revived by the
   // Sanity: the kill and the DB-side award still happened -- this guard is
   // about the LIVE session only, never about refusing the award itself.
   assert.strictEqual(prog.leveledUp, true);
-  assert.strictEqual(prog.newLevel, 3);
+  // The wolf is level 10 against a level-2 player, so xpForKill(10, 2) is
+  // clamped at XP_LEVEL_DIFF_MAX: round(10 * 10 * 2) = 200. From 290 that is
+  // 490, and xpFloor(6) = 408 / xpFloor(7) = 603, so the new level is 6.
+  // Hand-computed floors, not derived from levelForXp.
+  assert.strictEqual(prog.newLevel, 6);
   assert.strictEqual(prog.awarded, 200);
 
   assert.strictEqual(player.hp, -5, 'a player mid-death must not be revived by their own kill leveling them up');

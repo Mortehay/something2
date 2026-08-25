@@ -13,7 +13,7 @@ import { API_URL } from '../../../../../config.js';
 // sheet renders "character_id is required" where the stats should be.
 //
 // Read from characterSession, the same store GameShell writes when a character
-// is chosen, rather than threaded down through CharacterSheet's props: this
+// is chosen, rather than threaded down through a component's props: this
 // module already reaches into localStorage for the auth token via authHeaders(),
 // so one more identity read follows the pattern instead of inventing a second
 // way to answer "who is this request for". One source, so the sheet can never
@@ -42,20 +42,12 @@ export async function fetchProgression(apiUrl = API_URL) {
   return parseOrThrow(res);
 }
 
-// { progression, stats } on success; throws with the server's `error` message
-// on a 400 (unknown stat / not enough points).
-export async function allocateStat(stat, count, apiUrl = API_URL) {
-  const res = await apiFetch(`${apiUrl}/api/progression/allocate`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ stat, count, character_id: activeCharacterId() }),
-  });
-  return parseOrThrow(res);
-}
-
 // { progression, stats, gold } on success; throws with the server's `error`
-// message on a 402 (not enough gold) -- callers should gate the button with
-// respecDisabled() first so this is a rare race, not the normal path.
+// message on a 402 (not enough gold). SOMET-470 removed the sheet's respec
+// button (there is nothing left to refund until the passive tree lands), so
+// this currently has no caller in the client -- it is kept because T7's tree
+// respec calls the same route and there is no affordability gate left to
+// pre-check against.
 export async function respec(apiUrl = API_URL) {
   const res = await apiFetch(`${apiUrl}/api/progression/respec`, {
     method: 'POST',

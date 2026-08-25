@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { RenderSystem } from '../RenderSystem.js';
-import { addEffects, BLOCK_EFFECT_DEF } from '../../core/vfx.js';
+import { addEffects, BLOCK_EFFECT_DEF, DESPAWN_EFFECT_DEF } from '../../core/vfx.js';
 import { worldToScreen } from '../../core/iso.js';
 import { anchorY } from '../../core/attackAnchor.js';
 
@@ -245,5 +245,54 @@ describe('the guard block cue', () => {
     const { ctx, ops } = fakeCtx();
     renderer(ctx).drawVfx([fx({ def: { shape: 'ring' }, reach: 0 })]);
     expect(ops).toEqual([]);          // the contrast that makes the above matter
+  });
+});
+
+// SOMET-482 -- the ground-loot despawn puff, taken through the SAME path a
+// live frame does: addEffects builds the entry from a server-shaped event and
+// drawVfx renders it. Asserting the def's fields alone would not catch the
+// thing that actually breaks this cue -- the burst shape sizes its spokes from
+// `reach`, a despawn event carries none, and blastScreenRadiusX(0) makes the
+// whole shape early-return. That failure draws nothing and throws nothing, so
+// only a draw-level assertion can see it.
+describe('item_despawn puff (SOMET-482)', () => {
+  const event = { v: 'item_despawn', x: 321, y: 654 };
+
+  it('draws visible geometry from a bare {name,x,y} server frame', () => {
+    const { ctx, ops } = fakeCtx();
+    // An EMPTY effect library, exactly as the client has before (or without)
+    // any vfx_effects rows: the built-in must still resolve.
+    // Mid-lifetime, anchored to the real clock, because drawVfx reads
+    // performance.now() itself: at t=0 a burst legitimately has zero radius,
+    // so timing the frame at its own spawn instant would pass this test for
+    // the wrong reason on the way in and fail it on the way out.
+    const list = addEffects([], [event], performance.now() - 200, {});
+    expect(list).toHaveLength(1);
+    renderer(ctx).drawVfx(list);
+    // Spokes: the burst body actually reached the canvas rather than
+    // early-returning on a zero radius.
+    expect(ops.filter((o) => o === 'stroke').length).toBeGreaterThan(0);
+    expect(ops).toContain('moveTo');
+    expect(ops).toContain('lineTo');
+  });
+
+  it('draws its particles too', () => {
+    const rects = [];
+    const { ctx, ops } = fakeCtx();
+    ctx.fillRect = (x, y, w, h) => { ops.push('fillRect'); rects.push({ x, y, w, h }); };
+    // Mid-lifetime, so the particles have travelled and are still alive.
+    const list = addEffects([], [event], 0, {});
+    // drawVfx reads performance.now() itself, and particles (unlike the body)
+    // do NOT clamp -- they are skipped outright outside their own lifetime. So
+    // the start time has to be anchored to the real clock, not to 0.
+    renderer(ctx).drawVfx(list.map((f) => ({ ...f, startedAt: performance.now() - 200 })));
+    expect(rects.length).toBe(DESPAWN_EFFECT_DEF.particle_count);
+  });
+
+  it('never throws, whatever the frame carries', () => {
+    const { ctx } = fakeCtx();
+    const r = renderer(ctx);
+    expect(() => r.drawVfx(addEffects([], [event], 0, {}))).not.toThrow();
+    expect(() => r.drawVfx(addEffects([], [{ ...event, nx: 0, ny: 0 }], 0, {}))).not.toThrow();
   });
 });
