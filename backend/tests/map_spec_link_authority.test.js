@@ -26,6 +26,9 @@ const path = require('node:path');
 const { Pool } = require('pg');
 const { applyMapSpec } = require('../scripts/seed-map.js');
 const { setLink, pruneCompassLinks } = require('../src/services/mapLinks.js');
+const { setEntryWorld } = require('../src/services/entryWorld.js');
+const { withAdvisoryLock } = require('./helpers/advisoryLock.js');
+const { ENTRY_LOCK_KEY, entryWorldForJoin } = require('./helpers/entryWorld.js');
 
 const MAPS_DIR = path.join(__dirname, '..', 'seeds', 'maps');
 const MIRROR = { N: 'S', S: 'N', E: 'W', W: 'E' };
@@ -143,73 +146,144 @@ test('applyMapSpec converges live doorways onto the spec', { skip }, async (t) =
     `SELECT ml.edge FROM map_links ml JOIN worlds w ON w.id = ml.from_world_id
       WHERE w.name = $1 AND ml.edge <> 'PORTAL' ORDER BY ml.edge`, [name])).rows.map((r) => r.edge);
 
-  // is_entry is global (setting one clears every other), so this fixture would
-  // steal it from the real map. Saved and restored around the whole test --
-  // the same guard seed_map_db.test.js wraps every one of its applies in.
-  const priorEntry = (await pool.query('SELECT name FROM worlds WHERE is_entry')).rows[0]?.name;
-  const restoreEntry = async () => {
-    if (!priorEntry) return;
-    await pool.query('UPDATE worlds SET is_entry = (name = $1)', [priorEntry]);
-  };
+  // is_entry is GLOBAL -- setting one world's flag clears every other -- and
+  // validateMapSpec requires every spec to declare exactly one entry world
+  // (seeds/mapSpec.js), so this two-world fixture cannot avoid borrowing it:
+  // applyMapSpec's setEntryWorld moves the flag onto zzLinkA and COMMITS.
+  //
+  // SOMET-508 -- WHY THIS IS NOT THE TRANSACTION FIX ITS SIBLING GOT.
+  //
+  // starting_loadout_worn_by_every_class_db.test.js closes the same class of
+  // defect -- destructive global setup with no transaction -- by doing the
+  // setup on one pooled client inside a transaction that is always ROLLBACKed,
+  // so no peer process can ever observe it and no throw can strand it. That
+  // shape is unavailable here. applyMapSpec opens its OWN transaction on its
+  // own pooled client and COMMITs it (scripts/seed-map.js), so there is no
+  // outer transaction for this file to roll back: the borrow is committed by
+  // the code under test, and removing it is not an option either, because a
+  // spec with no entry world does not validate. So this half needs the other
+  // remedy -- mutual exclusion plus a restore that is guaranteed AND correct.
+  //
+  // What was actually wrong here was the RESTORE, twice over. It used to be:
+  //
+  //     const priorEntry = (await pool.query(
+  //       'SELECT name FROM worlds WHERE is_entry')).rows[0]?.name;
+  //     await pool.query('UPDATE worlds SET is_entry = (name = $1)', [priorEntry]);
+  //
+  //   1. IT SNAPSHOTTED THE LIVE FLAG. That query does not name a world, it
+  //      names whoever holds the flag at that instant. seed_map_db.test.js
+  //      applies every shipped spec in readdir order, so p5-descent lands
+  //      before vale-region and `The Catacombs: Entry` holds the flag for a
+  //      measured 46-47 SECONDS of a full run (helpers/entryWorld.js). Snapshot
+  //      inside that window and the line above MOVES THE GAME'S ENTRY WORLD
+  //      PERMANENTLY. SOMET-505 made every READER immune to a borrowed flag, so
+  //      this stopped breaking joins -- but the writer could still relocate the
+  //      entry world for good, silently, and nothing would notice.
+  //
+  //   2. `SET is_entry = (name = $1)` MATCHES NOTHING WHEN $1 IS GONE, and
+  //      still clears every current entry row: zero entry worlds, which is the
+  //      SOMET-265 loss. A snapshot taken while a PEER's throwaway fixture held
+  //      the flag names a world that peer then deletes in its own cleanup.
+  //
+  // Both go away by not snapshotting at all. Which world should hold is_entry
+  // is not a runtime fact to be observed, it is DECLARED in the checked-in
+  // specs: entryWorldForJoin() resolves the single shipped world declaring both
+  // is_entry and allows_fast_travel -- the property SOMET-505 picked precisely
+  // because no test borrows it. That answer is correct whatever any peer is
+  // doing at the time, and its target cannot vanish mid-run. The write goes
+  // through services/entryWorld.js, one statement, EXISTS-guarded, so it can
+  // never clear the flag without setting it.
+  //
+  // ENTRY_LOCK_KEY is now held across the whole borrow, which the old code
+  // claimed to do and did not. It is the key every other is_entry writer takes
+  // (seed_map_db.test.js, seed_map_vault_chests_db.test.js and
+  // chests_integration_db.test.js, all via withEntryPreserved), and holding it
+  // is what stops one of THEM snapshotting zzLinkA while we hold the flag and
+  // then "restoring" onto a throwaway this file is about to delete -- zero
+  // entry worlds, from two helpers both behaving as written. The lock is a
+  // courtesy to peers; the correctness of OUR restore does not depend on it,
+  // which matters because withAdvisoryLock degrades to unguarded after 6s and
+  // is therefore never a substitute for a guaranteed restore.
+  const shippedEntry = await entryWorldForJoin(pool);
+  const restoreEntry = async () => { await setEntryWorld(pool, shippedEntry.id); };
 
-  try {
-    await cleanup();
-    await applyMapSpec(pool, spec);
+  await withAdvisoryLock(pool, ENTRY_LOCK_KEY, async () => {
+    // Two nested finallys, not one with two statements in it. The flag comes
+    // home BEFORE the world holding it is deleted, so there is never an instant
+    // with zero entry worlds -- and a failure in either step cannot skip the
+    // other, which the old single `finally { cleanup(); restoreEntry(); }`
+    // could not promise in either direction.
+    try {
+      try {
+        await cleanup();
+        await applyMapSpec(pool, spec);
 
-    await t.test('a hand-drawn doorway the spec does not declare is removed AND reported', async () => {
-      // Exactly what the admin graph tab does: setLink, which writes the
-      // mirror row too. 'N' is free on both worlds, so this is a second,
-      // undeclared connection rather than a rewrite of the declared 'E' one.
-      await setLink(pool, await idOf('zzLinkA'), 'N', await idOf('zzLinkB'));
-      assert.deepEqual(await edgesOf('zzLinkA'), ['E', 'N'], 'precondition: the hand-drawn link exists');
+        await t.test('a hand-drawn doorway the spec does not declare is removed AND reported', async () => {
+          // Exactly what the admin graph tab does: setLink, which writes the
+          // mirror row too. 'N' is free on both worlds, so this is a second,
+          // undeclared connection rather than a rewrite of the declared 'E' one.
+          await setLink(pool, await idOf('zzLinkA'), 'N', await idOf('zzLinkB'));
+          assert.deepEqual(await edgesOf('zzLinkA'), ['E', 'N'], 'precondition: the hand-drawn link exists');
 
-      const result = await applyMapSpec(pool, spec);
+          const result = await applyMapSpec(pool, spec);
 
-      assert.deepEqual(await edgesOf('zzLinkA'), ['E'], 'the undeclared doorway must be gone');
-      // The MIRROR too. A prune that only removed the forward row would leave
-      // a one-way doorway -- a player walks through and cannot walk back,
-      // which is the exact shape of the two half-links found live.
-      assert.deepEqual(await edgesOf('zzLinkB'), ['W'], "the undeclared doorway's mirror must be gone too");
+          assert.deepEqual(await edgesOf('zzLinkA'), ['E'], 'the undeclared doorway must be gone');
+          // The MIRROR too. A prune that only removed the forward row would leave
+          // a one-way doorway -- a player walks through and cannot walk back,
+          // which is the exact shape of the two half-links found live.
+          assert.deepEqual(await edgesOf('zzLinkB'), ['W'], "the undeclared doorway's mirror must be gone too");
 
-      const reported = result.linksRemoved.map((l) => `${l.from_name} --${l.edge}--> ${l.to_name}`).sort();
-      assert.deepEqual(reported, ['zzLinkA --N--> zzLinkB', 'zzLinkB --S--> zzLinkA'],
-        'removals must be reported BY NAME -- a silent prune is the defect this exists to prevent');
-    });
+          const reported = result.linksRemoved.map((l) => `${l.from_name} --${l.edge}--> ${l.to_name}`).sort();
+          assert.deepEqual(reported, ['zzLinkA --N--> zzLinkB', 'zzLinkB --S--> zzLinkA'],
+            'removals must be reported BY NAME -- a silent prune is the defect this exists to prevent');
+        });
 
-    await t.test('the declared doorway survives, so this is convergence and not a purge', async () => {
-      // The failure mode on the other side: a prune that deleted everything
-      // would satisfy every assertion above and leave the map with no
-      // doorways at all.
-      assert.deepEqual(await edgesOf('zzLinkA'), ['E']);
-      assert.deepEqual(await edgesOf('zzLinkB'), ['W']);
-      const again = await applyMapSpec(pool, spec);
-      assert.deepEqual(again.linksRemoved, [],
-        're-applying an already-converged spec must report nothing removed');
-      assert.deepEqual(await edgesOf('zzLinkA'), ['E']);
-    });
+        await t.test('the declared doorway survives, so this is convergence and not a purge', async () => {
+          // The failure mode on the other side: a prune that deleted everything
+          // would satisfy every assertion above and leave the map with no
+          // doorways at all.
+          assert.deepEqual(await edgesOf('zzLinkA'), ['E']);
+          assert.deepEqual(await edgesOf('zzLinkB'), ['W']);
+          const again = await applyMapSpec(pool, spec);
+          assert.deepEqual(again.linksRemoved, [],
+            're-applying an already-converged spec must report nothing removed');
+          assert.deepEqual(await edgesOf('zzLinkA'), ['E']);
+        });
 
-    await t.test('a one-way link IN from a world this spec does not own is removed', async () => {
-      // The inbound-orphan case, and the reason pruneCompassLinks runs two
-      // DELETEs. A foreign world pointing at ours cannot be repaired by
-      // pruning our own outbound rows: its row's from_world_id is not in this
-      // spec at all.
-      const foreign = await pool.query(
-        `INSERT INTO worlds (name, width, height, chunk_size, seed, biomes)
-         VALUES ('zzLinkForeign', 64, 64, 32, 7103, '["Meadow"]'::jsonb) RETURNING id`);
-      await pool.query(
-        `INSERT INTO map_links (from_world_id, edge, to_world_id) VALUES ($1, 'S', $2)`,
-        [foreign.rows[0].id, await idOf('zzLinkA')]);
+        await t.test('a one-way link IN from a world this spec does not own is removed', async () => {
+          // The inbound-orphan case, and the reason pruneCompassLinks runs two
+          // DELETEs. A foreign world pointing at ours cannot be repaired by
+          // pruning our own outbound rows: its row's from_world_id is not in this
+          // spec at all.
+          const foreign = await pool.query(
+            `INSERT INTO worlds (name, width, height, chunk_size, seed, biomes)
+             VALUES ('zzLinkForeign', 64, 64, 32, 7103, '["Meadow"]'::jsonb) RETURNING id`);
+          await pool.query(
+            `INSERT INTO map_links (from_world_id, edge, to_world_id) VALUES ($1, 'S', $2)`,
+            [foreign.rows[0].id, await idOf('zzLinkA')]);
 
-      const result = await applyMapSpec(pool, spec);
+          const result = await applyMapSpec(pool, spec);
 
-      assert.deepEqual(await edgesOf('zzLinkForeign'), [],
-        'a doorway INTO this spec that the spec does not declare must be removed');
-      assert.ok(
-        result.linksRemoved.some((l) => l.from_name === 'zzLinkForeign' && l.to_name === 'zzLinkA'),
-        'the inbound orphan must be reported too');
-    });
-  } finally {
-    await cleanup();
-    await restoreEntry();
-  }
+          assert.deepEqual(await edgesOf('zzLinkForeign'), [],
+            'a doorway INTO this spec that the spec does not declare must be removed');
+          assert.ok(
+            result.linksRemoved.some((l) => l.from_name === 'zzLinkForeign' && l.to_name === 'zzLinkA'),
+            'the inbound orphan must be reported too');
+        });
+      } finally {
+        await restoreEntry();
+      }
+    } finally {
+      await cleanup();
+    }
+
+    // The flag is home: not merely "somewhere", but on the world the shipped
+    // specs declare, with zzLinkA already deleted. Read STILL INSIDE the lock,
+    // because reading `worlds WHERE is_entry` anywhere else is the very habit
+    // SOMET-505 removed -- outside the guarded section a peer mid-borrow would
+    // make this assertion flap.
+    const entryNow = await pool.query('SELECT name FROM worlds WHERE is_entry = true');
+    assert.deepStrictEqual(entryNow.rows.map((r) => r.name), [shippedEntry.name],
+      'this file must hand the entry world back exactly as the shipped specs declare it');
+  });
 });

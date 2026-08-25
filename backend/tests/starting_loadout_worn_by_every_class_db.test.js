@@ -639,26 +639,108 @@ test('every class wears its starting kit', { skip: !DB_URL ? 'no database URL' :
     // DO NOTHING the rows below come back with the right ITEMS and no
     // directives -- inventory identical, every class inert, every row-count
     // assertion still green.
-    const before = await pool.query(
-      `SELECT cl.entity_type_id, cl.item_type_id, cl.equip_slot, cl.socket_into_item_type_id
-         FROM class_loadouts cl ORDER BY cl.entity_type_id, cl.item_type_id`);
-    assert.ok(before.rows.some((r) => r.equip_slot !== null), 'nothing to lose means nothing proved');
+    //
+    // SOMET-508 -- WHY THE WIPE NOW RUNS IN A TRANSACTION THAT IS ALWAYS
+    // ROLLED BACK. The old shape was not merely racy, it was destructive.
+    //
+    // It was `pool.query('UPDATE class_loadouts SET equip_slot = NULL,
+    // socket_into_item_type_id = NULL')`: on the POOL, so autocommit; GLOBAL,
+    // so no WHERE; with no BEGIN anywhere in this file. It relied on the
+    // seedCatalogs() call below -- the code under test -- to put back what it
+    // had destroyed.
+    //
+    // `node --test` runs test FILES as concurrent processes against ONE
+    // database, and three peer files call seedCatalogs. For the ~1s a re-seed
+    // takes to reach its class-loadout block, every other process saw a
+    // catalog in which NO class equips anything: every class back on the
+    // dagger fallback, which is the exact regression the rest of this file
+    // exists to catch. Observed failing 1 full-suite run in 10.
+    //
+    // The worse half has nothing to do with concurrency. Between the committed
+    // wipe and the restore sit two assertions and a call into the seeder. A
+    // throw from any of them skips the restore and leaves equip_slot NULL
+    // database-wide, permanently, for every class -- there is no finally block
+    // and there never was one. SOMET-491's negative control did exactly this
+    // to a scratch database and destroyed three classes.
+    //
+    // A transaction removes both failures at once. Under READ COMMITTED no
+    // other session can observe an uncommitted UPDATE, so the window is gone
+    // rather than narrowed; and ROLLBACK needs nothing to work -- not a
+    // correct seeder, not an assertion that did not throw, not even a live
+    // process, because the backend discards an open transaction when its
+    // connection drops. Everything this subtest proved before is proved
+    // unchanged, because a transaction reads its own writes: the real
+    // seedCatalogs entry point still has to restore every directive.
+    //
+    // An advisory lock is NOT an alternative and was not tried: withAdvisoryLock
+    // degrades to running UNGUARDED after 6s (helpers/advisoryLock.js), so it
+    // bounds a window instead of closing one, and it cannot help at all with
+    // the throw case.
+    //
+    // ONE connection for the whole wipe-and-restore, because a transaction
+    // lives on a connection: issuing these through `pool` would scatter them
+    // across its eight clients and strand the UPDATE in an open transaction on
+    // one of them while the assertions read a different, still-intact one --
+    // green, and proving nothing.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    await pool.query('UPDATE class_loadouts SET equip_slot = NULL, socket_into_item_type_id = NULL');
-    const wiped = await pool.query(
-      `SELECT count(*)::int AS n FROM class_loadouts
-        WHERE equip_slot IS NOT NULL OR socket_into_item_type_id IS NOT NULL`);
-    assert.strictEqual(wiped.rows[0].n, 0, 'the wipe must actually happen or the restore proves nothing');
+      const before = await client.query(
+        `SELECT cl.entity_type_id, cl.item_type_id, cl.equip_slot, cl.socket_into_item_type_id
+           FROM class_loadouts cl ORDER BY cl.entity_type_id, cl.item_type_id`);
+      assert.ok(before.rows.some((r) => r.equip_slot !== null), 'nothing to lose means nothing proved');
 
-    // eslint-disable-next-line global-require
-    const { seedCatalogs } = require('../scripts/seed-catalogs.js');
-    await seedCatalogs(pool);
+      await client.query('UPDATE class_loadouts SET equip_slot = NULL, socket_into_item_type_id = NULL');
+      const wiped = await client.query(
+        `SELECT count(*)::int AS n FROM class_loadouts
+          WHERE equip_slot IS NOT NULL OR socket_into_item_type_id IS NOT NULL`);
+      assert.strictEqual(wiped.rows[0].n, 0, 'the wipe must actually happen or the restore proves nothing');
 
-    const after = await pool.query(
-      `SELECT cl.entity_type_id, cl.item_type_id, cl.equip_slot, cl.socket_into_item_type_id
-         FROM class_loadouts cl ORDER BY cl.entity_type_id, cl.item_type_id`);
-    assert.deepStrictEqual(after.rows, before.rows,
-      'seeds/data/entityTypes.js is the second source of truth and must restore every directive');
+      // ...and prove the wipe is invisible to everybody else, which is what
+      // makes a transaction a fix rather than a smaller window. This read goes
+      // through `pool`, i.e. a DIFFERENT connection, exactly as a concurrently
+      // running peer file would. Delete the BEGIN above and it returns 0 and
+      // this subtest fails, so the guard cannot be removed and leave the file
+      // quietly green.
+      const peer = await pool.query(
+        'SELECT count(*)::int AS n FROM class_loadouts WHERE equip_slot IS NOT NULL');
+      assert.ok(peer.rows[0].n > 0,
+        'a concurrent reader must still see the equip directives: the wipe must never be committed');
+
+      // eslint-disable-next-line global-require
+      const { seedCatalogs } = require('../scripts/seed-catalogs.js');
+      await seedCatalogs(client);
+
+      const after = await client.query(
+        `SELECT cl.entity_type_id, cl.item_type_id, cl.equip_slot, cl.socket_into_item_type_id
+           FROM class_loadouts cl ORDER BY cl.entity_type_id, cl.item_type_id`);
+      assert.deepStrictEqual(after.rows, before.rows,
+        'seeds/data/entityTypes.js is the second source of truth and must restore every directive');
+    } finally {
+      // Unconditional, and unconditionally SUFFICIENT -- which the old
+      // "re-seed afterwards" cleanup could never be, because it had to run and
+      // it had to work. A failed assertion, a thrown seeder or a killed
+      // process all end with class_loadouts byte-for-byte as it was.
+      let rollbackFailed = false;
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        rollbackFailed = true;
+      }
+      // A client whose ROLLBACK did not land is not safe to hand back: the
+      // next borrower inherits an open transaction, starting with the check
+      // immediately below. release(true) destroys it and the pool opens a
+      // clean one.
+      client.release(rollbackFailed);
+    }
+
+    // Belt and braces, on a connection that is NOT the one that held the
+    // transaction: the directives this subtest wiped are still there.
+    const survived = await pool.query(
+      'SELECT count(*)::int AS n FROM class_loadouts WHERE equip_slot IS NOT NULL');
+    assert.ok(survived.rows[0].n > 0,
+      'the wipe must never outlive this subtest -- a committed one leaves every class undressed');
   });
 
   // ------------------------------------------------------------------
