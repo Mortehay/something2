@@ -323,90 +323,40 @@ const PLAYABLE_CLASSES = [
   },
 ];
 
-// Per-class starting gear, mirroring the migration's CLASS_LOADOUTS. Restoring
-// the classes without these would leave a rebuilt volume handing every new
-// character an empty inventory.
+// Per-class starting gear. EMPTY, deliberately, and this file is the reason it
+// stays empty.
 //
-// There is no shield in item_types -- no off_hand item exists at all -- so the
-// Warrior gets a one-handed sword and armour rather than sword-and-board.
-// Ranger keeps its loadout even though it is no longer playable: the rows are
-// restored for a class that already has characters in it, not for one that can
-// be rolled fresh.
+// SOMET-509 (product owner decision): every character starts UNARMED and
+// IDENTICAL. No class is handed a weapon, armour or a spell stone. All
+// differentiation comes from the passive tree and from gear the player finds --
+// classes begin statistically near-identical and diverge through the tree. This
+// reverses SOMET-492/493/503, which authored a kit for each class and equipped
+// it, and whose reasoning used to live in this comment.
 //
-// SOMET-493. Every class's kit is WORN, not carried -- `equipSlot` on every
-// weapon and every piece of armour below. Until this, only the Cultist's staff
-// carried a directive, so a freshly created character of any other class
-// joined with an empty paper doll and fought with activeWeaponType's dagger
-// fallback (8 damage, 0.30s, free) while its own kit sat in the bag.
+// WHY THIS LIST, AND NOT JUST THE MIGRATION. Migration 1714440517000 DELETEs the
+// 18 rows from databases that already have them. That handles existing
+// databases and nothing else: this list is the second source of truth, and it is
+// the one that WINS on a re-seed. seedOneClassLoadout INSERTs (and UPDATEs, ON
+// CONFLICT) every row still named here, so a single entry left behind would be
+// silently restored by the next `node scripts/seed-catalogs.js` -- with the
+// migration still recorded as applied, and every row-count test still green.
+// That is SOMET-335's trap exactly, and it has caught this table before:
+// playable_classes_db.test.js deletes and re-seeds these very rows.
 //
-// These directives are the SECOND source of truth for that fact -- migration
-// 1714440514000 is the first -- and this file is the one that wins on a
-// re-seed: playable_classes_db.test.js deletes and re-seeds these very rows,
-// and seed-catalogs.js's seedOneClassLoadout writes equip_slot and
-// socket_into_item_type_id ON CONFLICT as well as on INSERT precisely so a
-// migration-authored directive cannot be silently reverted here (SOMET-335).
-// A row added or changed in one of the two must be added or changed in both.
+// THE MECHANISM IS INTACT AND UNUSED, which is the point. class_loadouts keeps
+// its columns and constraints, grantStartingLoadout keeps both passes including
+// the socket wiring, and seedOneClassLoadout below still knows how to write
+// equipSlot and socketInto. Restoring kits is adding entries back to this array
+// (and running 1714440517000's down()), not rebuilding anything.
 //
-// `arrow` gets no slot: ammo is spent out of the BAG (authority/ammo.js), no
-// paper-doll slot holds it, and item_types.slot is NULL for the whole ammo
-// category. The Archer's 20 arrows are what make its newly-equipped bow able
-// to fire at all.
-const CLASS_LOADOUTS = [
-  { class: 'Warrior', item: 'short sword', quantity: 1, equipSlot: 'main_hand' },
-  { class: 'Warrior', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
-  { class: 'Ranger', item: 'bow', quantity: 1, equipSlot: 'main_hand' },
-  { class: 'Ranger', item: 'arrow', quantity: 20 },
-  { class: 'Ranger', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
-  // The Mage's staff needs the same stone the Cultist's does, and for the same
-  // reason: activeWeaponType zeroes a BARE magic weapon to physical damage at
-  // the dagger's baseline, so an equipped-but-unsocketed apprentice staff
-  // would hit for 8 physical on a 0.55s cooldown -- worse than the dagger it
-  // replaces, and it would leave the Mage's own passive start node (+3 ARCANE
-  // damage) permanently inert, because the class would never deal arcane
-  // damage at all. Socketed, the staff casts its own original spell: 10
-  // arcane, 8 mana, 0.55s.
-  { class: 'Mage', item: 'apprentice staff', quantity: 1, equipSlot: 'main_hand' },
-  { class: 'Mage', item: 'stone_of_apprentice staff', quantity: 1, socketInto: 'apprentice staff' },
-  { class: 'Mage', item: 'arcane-ward', quantity: 1, equipSlot: 'head' },
-  // SOMET-504. The stick is GONE from the Monk's kit, replaced by the
-  // quarterstaff that migration 1714440516000 adds to item_types. The stick
-  // made the Monk weaker for wearing its own kit -- 7 damage on 0.35s, 20.0
-  // dps, against the dagger fallback's 8 on 0.30s and 26.7 -- which is the
-  // regression 1714440514000 shipped and reported rather than hid.
-  //
-  // The quarterstaff keeps the stick's 7 damage (still the lowest per-hit of
-  // any class weapon) and its 0.7 arc, and buys the fix entirely with speed:
-  // 0.25s, the fastest swing in the catalog, for 28.0 dps. A martial artist
-  // hits more, not harder. Full reasoning -- why no existing catalog row fits,
-  // why it costs no resource, why it needs no stone, and why it cannot key off
-  // wisdom without new combat code -- is in that migration's header.
-  //
-  // REMOVING THE STICK LINE IS LOAD-BEARING, not tidying. The seeder only ever
-  // INSERTs and UPDATEs; it never deletes a row that has left this list. If the
-  // Monk kept both directives, grantStartingLoadout's second pass walks them
-  // `ORDER BY id ASC` with an ON CONFLICT DO NOTHING equip, so the OLDER row --
-  // the stick -- would win the main_hand slot and this whole change would ship
-  // live and inert. The migration DELETEs the stick row for databases that
-  // already have it; this list is what stops a re-seed putting it back.
-  { class: 'Monk', item: 'quarterstaff', quantity: 1, equipSlot: 'main_hand' },
-  { class: 'Monk', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
-  // SOMET-492. The Cultist is the one class whose loadout is WORN rather than
-  // carried, and it has to be: a Cultist casts with life instead of mana, and
-  // that identity cannot engage while the staff sits in the bag (nothing is
-  // equipped on a fresh character -- activeWeaponType falls back to the
-  // dagger) and while the staff is bare (activeWeaponType zeroes a bare
-  // weapon's mana_cost, so even an equipped staff casts free). Both halves are
-  // closed here, in data. `stone_of_apprentice staff` is the stone
-  // 1714440167000 generated FROM this staff, so its spell is the staff's own.
-  // Mirrors migration 1714440513000; keep the two in step.
-  { class: 'Cultist', item: 'apprentice staff', quantity: 1, equipSlot: 'main_hand' },
-  { class: 'Cultist', item: 'stone_of_apprentice staff', quantity: 1, socketInto: 'apprentice staff' },
-  { class: 'Cultist', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
-  { class: 'Archer', item: 'bow', quantity: 1, equipSlot: 'main_hand' },
-  { class: 'Archer', item: 'arrow', quantity: 20 },
-  { class: 'Archer', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
-  { class: 'Druid', item: 'club', quantity: 1, equipSlot: 'main_hand' },
-  { class: 'Druid', item: 'leather-vest', quantity: 1, equipSlot: 'chest' },
-];
+// The items themselves all stay in the catalog as ordinary droppable gear --
+// the Monk's quarterstaff, the Cultist's apprentice staff and its stone, the
+// Archer's bow. They simply stop being granted.
+//
+// The other half of this decision is in code: items.js#activeWeaponType returns
+// an authored UNARMED profile (3 damage / 0.6s = 5.0 dps) rather than handing
+// out the dagger row for free at 26.7 dps. Emptying this list WITHOUT that
+// change would make every weapon a player finds a downgrade from bare hands.
+const CLASS_LOADOUTS = [];
 
 module.exports = { HOSTILE_CREATURES, CREATURE_DROPS, PLAYABLE_CLASSES, CLASS_LOADOUTS };

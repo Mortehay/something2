@@ -107,7 +107,21 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
     assert.equal(r.rows[0].is_playable, false);
   });
 
-  await t.test('each class has its loadout, resolved to real item types', async () => {
+  await t.test('no class has a loadout any more -- every character starts unarmed', async () => {
+    // INVERTED BY SOMET-509. This test used to spell out the exact kit and wear
+    // directive for all seven classes ('Cultist:apprentice staffx1@main_hand',
+    // 'Mage:stone_of_apprentice staffx1>apprentice staff', ...) because
+    // SOMET-492/493 had just fixed those directives being silently absent.
+    //
+    // The product owner then chose EQUAL STARTS: no class is handed anything,
+    // and all differentiation comes from the passive tree and found gear.
+    // 1714440517000 deletes the rows; CLASS_LOADOUTS in seeds/data is empty so
+    // a re-seed cannot restore them.
+    //
+    // The SHAPE of the old assertion is kept on purpose -- it still resolves
+    // through both JOINs and still renders `@slot` and `>host` -- so if a kit
+    // ever comes back, this reports exactly which class got what, rather than
+    // just a count that moved.
     const r = await pool.query(
       `SELECT e.name AS class, i.name AS item, l.quantity, l.equip_slot, h.name AS socket_into
          FROM class_loadouts l
@@ -115,41 +129,11 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
          JOIN item_types  i ON i.id = l.item_type_id
          LEFT JOIN item_types h ON h.id = l.socket_into_item_type_id
         ORDER BY e.name, i.name`);
-    // SOMET-492: the wear directives are part of the expectation, not a
-    // separate optional check. A list that only names items would go green
-    // again the moment the Cultist's staff stopped being worn or its stone
-    // stopped being socketed -- which is exactly the state this item fixed.
-    //
-    // SOMET-493: every class now carries them, so an item losing its `@slot`
-    // here is a class silently going back to the dagger fallback. `arrow` is
-    // the one deliberate bare entry -- ammo is spent out of the bag and no
-    // paper-doll slot holds it.
     const got = r.rows.map((x) => `${x.class}:${x.item}x${x.quantity}`
       + (x.equip_slot ? `@${x.equip_slot}` : '')
       + (x.socket_into ? `>${x.socket_into}` : ''));
-    // Ranger is still here after SOMET-471's demotion: characters are wearing
-    // this gear, and a rebuilt volume that restored the class without it would
-    // leave them with nothing.
-    assert.deepEqual(got, [
-      'Archer:arrowx20',
-      'Archer:bowx1@main_hand',
-      'Archer:leather-vestx1@chest',
-      'Cultist:apprentice staffx1@main_hand',
-      'Cultist:leather-vestx1@chest',
-      'Cultist:stone_of_apprentice staffx1>apprentice staff',
-      'Druid:clubx1@main_hand',
-      'Druid:leather-vestx1@chest',
-      'Mage:apprentice staffx1@main_hand',
-      'Mage:arcane-wardx1@head',
-      'Mage:stone_of_apprentice staffx1>apprentice staff',
-      'Monk:leather-vestx1@chest',
-      'Monk:quarterstaffx1@main_hand',
-      'Ranger:arrowx20',
-      'Ranger:bowx1@main_hand',
-      'Ranger:leather-vestx1@chest',
-      'Warrior:leather-vestx1@chest',
-      'Warrior:short swordx1@main_hand',
-    ]);
+    assert.deepEqual(got, [],
+      'SOMET-509: every character starts unarmed, so no class may carry a loadout row');
   });
 
   // The Wolf lesson (see seeds/data/entityTypes.js's header): an entity type
@@ -262,15 +246,17 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
     // well as on INSERT. Strip the `@slot`s from this table and the test still
     // passes against a seeder that hands every class its gear loose in the
     // bag -- i.e. against exactly the inert state this epic fixed.
+    // SOMET-509 emptied every one of these. They are kept as a per-class table
+    // of EMPTY arrays rather than collapsed to a single `[]`, because the
+    // assert.ok below reads this map to refuse a class nobody wrote an
+    // expectation for -- collapsing it would let a seventh class pass
+    // vacuously, which is the exact failure this map exists to prevent.
+    //
+    // What is being proved is now the opposite of what it was: that restoring a
+    // deleted class does NOT hand it gear. A seeder that still knew the old
+    // kits would put them back here and go red.
     const expectedLoadout = {
-      Warrior: ['leather-vestx1@chest', 'short swordx1@main_hand'],
-      Mage: ['apprentice staffx1@main_hand', 'arcane-wardx1@head',
-        'stone_of_apprentice staffx1>apprentice staff'],
-      Monk: ['leather-vestx1@chest', 'quarterstaffx1@main_hand'],
-      Cultist: ['apprentice staffx1@main_hand', 'leather-vestx1@chest',
-        'stone_of_apprentice staffx1>apprentice staff'],
-      Archer: ['arrowx20', 'bowx1@main_hand', 'leather-vestx1@chest'],
-      Druid: ['clubx1@main_hand', 'leather-vestx1@chest'],
+      Warrior: [], Mage: [], Monk: [], Cultist: [], Archer: [], Druid: [],
     }[victim];
     const expectedMainStat = {
       Warrior: 'strength', Mage: 'intelligence', Monk: 'wisdom',
@@ -343,11 +329,13 @@ test('playable classes', { skip: !url ? 'no database URL' : false }, async (t) =
       // because the Mage's staff now carries a spell stone row of its own.
       await seedCatalogs(client);
       const after = await client.query('SELECT count(*)::int AS n FROM class_loadouts');
-      // 18 = Warrior 2 + Ranger 3 + Mage 3 + Monk 2 + Cultist 3 + Archer 3
-      // + Druid 2. Ranger's three rows are still seeded: it is not playable
-      // any more, but characters are still wearing that gear. The Cultist's
-      // and the Mage's third rows are their spell stones (SOMET-492/493).
-      assert.equal(after.rows[0].n, 18, 'a repeat run must not duplicate loadout rows');
+      // Was 18 (Warrior 2 + Ranger 3 + Mage 3 + Monk 2 + Cultist 3 + Archer 3
+      // + Druid 2). SOMET-509 emptied the table, so the property this asserts
+      // has changed from "a repeat run must not DUPLICATE rows" to "a repeat
+      // run must not CREATE any" -- the stronger of the two, and the one that
+      // catches a seeder still carrying the old kit list.
+      assert.equal(after.rows[0].n, 0,
+        'SOMET-509: re-seeding must not hand any class a starting kit');
     } finally {
       // Unconditional, and unconditionally sufficient. A failed assertion, a
       // thrown seeder, a crashed process -- every one of them ends with the

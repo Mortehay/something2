@@ -44,7 +44,22 @@ const NO_AMMO_FLASH_MS = 600;
 
 // Fallback weapon name shown when nothing is equipped in main_hand yet
 // (mirrors the server's DEFAULT_WEAPON_NAME in authority/items.js).
-const DEFAULT_WEAPON_NAME = "dagger";
+//
+// SOMET-509: was "dagger". Under equal starts a character is handed nothing, so
+// the empty-hands case stopped being rare -- it is now every new player for the
+// whole opening stretch -- and naming a weapon they do not have, whose damage is
+// nearly three times what they are actually swinging, would be a lie.
+//
+// SAID PLAINLY, BECAUSE IT WOULD BE EASY TO OVERCLAIM THIS: fixing the constant
+// changes nothing on screen TODAY. `weaponName` is computed below, passed into
+// RenderSystem.renderHud, and never drawn -- renderHud destructures it and no
+// call site reads it (checked across the whole frontend). So this is not a HUD
+// fix; it is keeping a mirror constant true so that whoever does wire the HUD
+// up inherits the right name instead of a stale one.
+//
+// The server-side row is authored by migration 1714440517000, and
+// items.js#DEFAULT_WEAPON_NAME names it there; keep the two in step.
+const DEFAULT_WEAPON_NAME = "unarmed";
 
 // Native Map shadowed by the world Map import above; alias to keep the
 // distinction obvious at the call sites.

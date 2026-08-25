@@ -112,6 +112,89 @@ const STONE_CATALOG_LOCK = "SELECT pg_advisory_xact_lock(hashtext('somet320:item
 // all three stone files must take BOTH locks, in this order.
 const STONE_CATALOG_TABLE_LOCK = 'LOCK TABLE item_types IN ACCESS EXCLUSIVE MODE';
 
+// SOMET-504 / SOMET-506. The two locks above cover item_types. Neither covers
+// the table this file's SUBJECT migration actually rewrites.
+//
+// 1714440167000's up() and down() are both WHOLE-TABLE statements over
+// player_items -- by design, because they are a one-time production conversion
+// of every real player's magic weapons, and the header above explains at
+// length why this file applies them for real rather than mocking them. The
+// consequence is that they sweep rows belonging to whatever peer test files
+// `node --test` happens to be running concurrently. Two distinct, separately
+// measured failures came out of that:
+//
+//   SOMET-506  down()'s `DELETE FROM player_items WHERE item_type_id IN
+//              (...stone_of_...)` walks the table in physical order while a
+//              peer's socketStone takes FOR UPDATE on the stone row and then
+//              on the host row. Opposite acquisition orders, so Postgres picks
+//              a deadlock victim -- and when it picks the peer, the failure is
+//              reported in a file that has nothing wrong with it.
+//
+//   SOMET-504  up()'s `targets` CTE is filtered by NOT EXISTS over
+//              stone_instances. Under READ COMMITTED that snapshot is taken at
+//              statement start while the FK and unique checks run against live
+//              data, so a peer committing a socketStone (23505) or a cascading
+//              DELETE FROM users (23503) after the snapshot turns it red.
+//
+// Both are one root fact -- peer rows are visible to whole-table migration SQL
+// -- and both disappear if no peer can write those tables while this
+// transaction is open.
+//
+// EXCLUSIVE, NOT SHARE. SHARE is what SOMET-504 proposed and it is not enough:
+// SHARE does not conflict with ROW SHARE, so a peer could still take
+// `SELECT ... FOR UPDATE` row locks on player_items, block on its own next
+// write, and re-form SOMET-506's cycle through ROW locks instead of table
+// locks. EXCLUSIVE conflicts with ROW SHARE and everything above it while
+// still permitting plain SELECT -- the weakest mode that actually closes this.
+//
+// ORDER: player_items/stone_instances BEFORE item_types, per SOMET-504, so the
+// common case matches the implicit order `INSERT INTO player_items` takes when
+// its FK probe reaches item_types.
+const CONVERSION_TABLE_LOCK = 'LOCK TABLE player_items, stone_instances IN EXCLUSIVE MODE';
+
+// ...but the ORDER alone can never be right for every peer, and it is
+// important not to believe otherwise. Peers take these locks implicitly and in
+// BOTH orders: grantStartingLoadout reads item_types and then inserts
+// player_items, while socketStone touches player_items and then probes
+// item_types. Whichever order this file picks, some peer holds the other.
+//
+// So the order above is an optimisation, and what makes it SAFE is that this
+// transaction never waits long enough to be part of a deadlock at all.
+// deadlock_timeout on this server is 1s (verified with SHOW deadlock_timeout).
+// A lock_timeout strictly below it guarantees this transaction aborts its own
+// wait BEFORE Postgres' detector ever runs, so a cycle through this file is
+// always broken by our timeout and the PEER is never chosen as a victim. We
+// then ROLLBACK -- which releases the advisory lock and every table lock -- and
+// begin the whole transaction again. That is why a timeout here is a retry and
+// not a failure, and why the retry must restart from BEGIN rather than
+// re-issuing the one LOCK that timed out.
+const LOCK_TIMEOUT = '750ms';
+const LOCK_ATTEMPTS = 40;
+const RETRYABLE_LOCK_CODES = new Set(['55P03', '40P01']);
+
+// Opens the transaction and takes every lock, in order. Throws on the first
+// failure, leaving the transaction aborted for the caller to roll back.
+async function beginLocked(client) {
+  await client.query('BEGIN');
+  // Bounded ONLY while locks are being taken. Restored to the server default
+  // (0 = wait indefinitely) once they are all held, so the test BODY can never
+  // fail on a short lock wait -- a timeout there would be an unretried, and
+  // therefore genuinely flaky, failure of the thing under test.
+  await client.query(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`);
+  await client.query(STONE_CATALOG_LOCK);
+  // stone_instances does not exist on a virgin database -- it is created by
+  // migStoneInstances a few lines below, inside this same transaction, which
+  // means no peer can even see the table until a COMMIT that never comes. So
+  // its absence needs no lock; naming it unconditionally would just fail with
+  // 42P01 on exactly the database where the lock is unnecessary.
+  const stonesExist = await client.query(HAS_STONE_INSTANCES);
+  await client.query(stonesExist.rowCount > 0
+    ? CONVERSION_TABLE_LOCK
+    : 'LOCK TABLE player_items IN EXCLUSIVE MODE');
+  await client.query(STONE_CATALOG_TABLE_LOCK);
+  await client.query('SET LOCAL lock_timeout = 0');
+}
+
 async function openTxClient(t) {
   const client = new Client({ connectionString: DB_URL, connectionTimeoutMillis: 3000 });
   try {
@@ -122,9 +205,34 @@ async function openTxClient(t) {
     t.skip(msg);
     return null;
   }
-  await client.query('BEGIN');
-  await client.query(STONE_CATALOG_LOCK);
-  await client.query(STONE_CATALOG_TABLE_LOCK);
+
+  let lockErr = null;
+  for (let attempt = 1; attempt <= LOCK_ATTEMPTS; attempt += 1) {
+    try {
+      await beginLocked(client);
+      lockErr = null;
+      break;
+    } catch (err) {
+      lockErr = err;
+      await client.query('ROLLBACK').catch(() => {});
+      // Anything that is not a lock wait is a real error and must surface on
+      // the first occurrence -- retrying it 40 times would only bury it.
+      if (!RETRYABLE_LOCK_CODES.has(err.code)) break;
+      await new Promise((resolve) => { setTimeout(resolve, 25 * attempt); });
+    }
+  }
+  if (lockErr) {
+    await client.end().catch(() => {});
+    if (RETRYABLE_LOCK_CODES.has(lockErr.code)) {
+      // Deliberately loud and specific. Exhausting the retries is NOT the
+      // flake this ticket fixed coming back -- it means a peer held a
+      // conflicting lock across the entire window, which is a different
+      // problem (a long-running writer) and should be read as one.
+      assert.fail(`could not take the player_items/stone_instances/item_types locks in ${LOCK_ATTEMPTS} attempts`
+        + ` (last: ${lockErr.code} ${lockErr.message}) -- a peer held a conflicting lock for the whole window.`);
+    }
+    throw lockErr;
+  }
   // Bring this transaction's view of the schema up to Task 1 before testing
   // Task 2's conversion migration, which depends on both. Rolled back along
   // with everything else -- the real deploy of Task 1's migrations is a
