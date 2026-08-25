@@ -305,3 +305,70 @@ cannot already read `DATABASE_URL` out of compose.
 | `this provider returns a single image` | Pre-SOMET-346 message; configure a sprite-sheet layout |
 | Job never finishes after a restart | In-memory registry; the job is gone. Regenerate |
 | `refusing to call …: scheme file: is not allowed` | `base_url` is not http(s) |
+
+---
+
+## Texturing the whole tile catalog
+
+Doing this through the admin UI is fifty modals. Three make targets do it for
+the catalog, and only the first needs a GPU.
+
+```
+make tiles-generate PROVIDER="desktop gpu"    # pin, pick biomes, draw what's missing
+make tiles-export                             # MinIO -> backend/seeds/textures/tiles/
+make tiles-seed                               # committed PNGs -> MinIO, on any machine
+```
+
+`tiles-generate` does what the UI does, in the same order: it pins every tile to
+the provider (**Generation service**), gives each tile a biome art context if it
+has none, then draws on that provider (**Generate with**) and points the catalog
+row at the result — the Approve step. It is idempotent; an already-textured tile
+is skipped.
+
+| Variable | Effect |
+|---|---|
+| `PROVIDER=` | Provider name or id. Omit to use whichever is active |
+| `FORCE=1` | Redraw tiles that already have a texture |
+| `ONLY=grass,sand` | Limit to named tiles |
+| `DRY=1` | Print what would happen, change nothing |
+| `NOPIN=1` | Generate without changing each tile's saved provider |
+
+**Biome choice** is deterministic: the lowest-id biome whose `terrain_tiles`
+lists the tile. A tile no biome claims — roads, gates, `wooden_wall` — keeps no
+context rather than borrowing an unrelated palette. `cave_wall` is the exception
+that looks like a mistake and is not: it is banded into the deep biomes on
+purpose, so it does take one.
+
+### Moving textures to a machine with no GPU
+
+`tiles-export` writes one PNG per textured tile to `backend/seeds/textures/tiles/`
+with a manifest recording the prompt and biome each was drawn from. Commit those,
+and on the other machine `make seed-catalogs && make tiles-seed` reproduces the
+art with no provider configured at all.
+
+Seeded textures get a stable key — `<bucket>/tiles/<name>/seeded/static.png` —
+deliberately *not* the original job-scoped key, so one machine's job ids never
+reappear on another. `tiles-seed` leaves a locally-generated texture alone unless
+`FORCE=1`.
+
+The catalog is roughly 15–20 MB of PNG at 512px. That is the price of not needing
+a GPU to see the game as intended.
+
+### Writing a tile prompt
+
+Measured against SDXL, and counter-intuitive enough to be worth stating: **the
+words that sound right are the ones that break it.**
+
+| Don't say | Because it draws |
+|---|---|
+| `tile`, `seamless`, `repeating pattern` | stripes, or a sheet of separate assets |
+| `isometric`, `ground tile` | an entire village scene |
+| `road`, `track`, `ruts`, `rippling` | an aerial street grid, or venetian blinds |
+| `void`, `chasm`, `blighted` and other moods | generic stone, or nothing coherent |
+| `<x> floor` | a bordered dungeon-tileset panel |
+
+Name the **material** and the **camera angle** instead — "dry tan earth with fine
+gravel and dust". The styling suffix is applied by
+`backend/seeds/data/tileTypes.js`, so a tile's own prompt stays a plain subject.
+`sprite-gen`'s local `build_tile_prompt` uses the opposite vocabulary because
+sd-turbo responds to it differently; the two are not interchangeable.

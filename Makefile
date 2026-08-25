@@ -1,6 +1,7 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
+        tiles-generate tiles-export tiles-seed \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
@@ -232,6 +233,36 @@ admin-password-rotate:
 
 seed-catalogs:
 	$(COMPOSE) exec -T backend node scripts/seed-catalogs.js
+
+# --- Tile textures -------------------------------------------------------
+#
+# Three targets, in the order you use them. The first needs an AI provider and
+# the GPU it points at; the other two need neither, which is the whole point.
+#
+#   make tiles-generate PROVIDER="desktop gpu"
+#       Pin every tile to that provider, give each one a biome art context if
+#       it has none, and draw the textures that are missing. Idempotent: an
+#       already-textured tile is skipped unless FORCE=1. Add ONLY=grass,sand to
+#       limit it, DRY=1 to see what it would do.
+#   make tiles-export
+#       Copy the generated PNGs out of MinIO into seeds/textures/tiles/ so they
+#       can be committed.
+#   make tiles-seed
+#       Replay those committed PNGs into MinIO on a machine that has no GPU,
+#       and point the catalog at them. FORCE=1 overwrites local art.
+#
+# PROVIDER accepts the provider's name or its id; omit it to use whichever
+# provider is active in Settings.
+tiles-generate:
+	$(COMPOSE) exec -T backend node scripts/generate-tile-textures.js \
+		$(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(FORCE),--force) \
+		$(if $(ONLY),--only "$(ONLY)") $(if $(DRY),--dry-run) $(if $(NOPIN),--no-pin) $(if $(NOBIOME),--no-biome)
+
+tiles-export:
+	$(COMPOSE) exec -T backend node scripts/export-tile-textures.js
+
+tiles-seed:
+	$(COMPOSE) exec -T backend node scripts/seed-tile-textures.js $(if $(FORCE),--force)
 # Regenerate the passive tree and upsert it. Safe to re-run: nodes are upserted
 # by their stable generated key, never deleted, so no character_passives row is
 # ever orphaned. An admin's edited kind/label/grants survive a plain run --
