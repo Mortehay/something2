@@ -72,3 +72,7 @@ backend/.migration-backups/
 # PUBLIC, so anything landing here would be world-readable the moment it was
 # pushed. Ignored in the same change that created the directory.
 compose/orangepi/secrets/
+
+# Python bytecode from the tools/ scripts
+__pycache__/
+*.pyc
