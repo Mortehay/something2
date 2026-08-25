@@ -292,10 +292,9 @@ const SecondaryButton = styled.button`
   &:hover { background: var(--s2-overlay); }
 `;
 
-function TileSpritePanel({ tile }) {
+function TileSpritePanel({ tile, biome, onBiomeChange }) {
   const [mode, setMode] = useState(null);     // 'image' | 'animated' while a job runs
   const [jobId, setJobId] = useState(null);
-  const [biome, setBiome] = useState('');     // '' = no biome art context
   // '' = follow the active provider; 'local' = pin to sprite-gen; '<id>' = pin
   // to that provider. See generationJobPayload.withOptionalProvider.
   //
@@ -365,7 +364,7 @@ function TileSpritePanel({ tile }) {
         </label>
         <select
           value={biome}
-          onChange={(e) => setBiome(e.target.value)}
+          onChange={(e) => onBiomeChange(e.target.value)}
           disabled={isLoadingBiomes}
           style={{ background: 'var(--s2-bg)', border: '1px solid var(--s2-accent-tint-strong)', color: 'var(--s2-text-strong)', padding: '0.6rem', borderRadius: 8, fontSize: '1.2rem' }}
         >
@@ -444,7 +443,11 @@ function TileTypesAdmin() {
         valid_neighbors: editingTile.valid_neighbors || [],
         // SOMET-342: the stored pin as one <select> value; split back into
         // ai_provider_mode/ai_provider_id on submit.
-        provider_pin: pinToSelectValue(editingTile.ai_provider_mode, editingTile.ai_provider_id)
+        provider_pin: pinToSelectValue(editingTile.ai_provider_mode, editingTile.ai_provider_id),
+        // The biome art context the texture was generated with. Lives in the
+        // generation panel below but is saved by THIS form, so it is held here
+        // and passed down rather than kept as panel-local state.
+        art_biome: editingTile.art_biome || ''
       });
     } else {
       setFormData({
@@ -457,7 +460,8 @@ function TileTypesAdmin() {
         image: '',
         prompt: '',
         valid_neighbors: [],
-        provider_pin: ''
+        provider_pin: '',
+        art_biome: ''
       });
     }
   }, [editingTile, isModalOpen]);
@@ -631,7 +635,14 @@ function TileTypesAdmin() {
               {/* Keyed by id so switching tiles remounts the panel: without it
                   React reuses the instance and the next tile inherits this
                   one's provider choice, biome and in-flight job id. */}
-              {editingTile && <TileSpritePanel key={editingTile.id} tile={editingTile} />}
+              {editingTile && (
+                <TileSpritePanel
+                  key={editingTile.id}
+                  tile={editingTile}
+                  biome={formData.art_biome ?? ''}
+                  onBiomeChange={(v) => setFormData({ ...formData, art_biome: v })}
+                />
+              )}
 
               <div style={{ display: 'flex', gap: '2rem' }}>
                 <CheckboxGroup>
