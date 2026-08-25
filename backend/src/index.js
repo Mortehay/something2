@@ -1867,7 +1867,8 @@ app.post('/api/tile-types', adminGuard, async (req, res) => {
 app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order } = req.body;
+    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order,
+      art_biome } = req.body;
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
     }
@@ -1913,11 +1914,15 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
         wall_height = $8, place_order = $9,
         ai_provider_mode = CASE WHEN $10::boolean THEN $11 ELSE tile_types.ai_provider_mode END,
         ai_provider_id = CASE WHEN $10::boolean THEN $12 ELSE tile_types.ai_provider_id END,
+        -- COALESCE, so a caller that omits the key keeps the stored context;
+        -- an explicit '' is the user choosing "— none —" and DOES clear it.
+        art_biome = COALESCE($13, tile_types.art_biome),
         updated_at = CURRENT_TIMESTAMP
-       WHERE id = $13 RETURNING *`,
+       WHERE id = $14 RETURNING *`,
       [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '',
         Number(wall_height) || 0, Number(place_order) || 0,
-        pinSent, pin.mode, pin.id, id]
+        pinSent, pin.mode, pin.id,
+        typeof art_biome === 'string' ? art_biome : null, id]
     );
     
     if (result.rows.length === 0) {
@@ -3712,6 +3717,11 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
     ]);
     const worldCfg = buildWorldGenConfig({
       row: world, tileTypes, doorways: linkRows.map((l) => l.edge), villages, biomes,
+      // SOMET-510: `links` is what carries the PORTAL endpoints the blocking-
+      // decoration clearance keeps clear. The authority passes the same rows to
+      // the same builder, so this endpoint's generateChunkDecorations call still
+      // agrees with the authority's field-for-field.
+      links: linkRows,
     });
 
     // Cache hit?
@@ -3750,11 +3760,12 @@ app.get('/api/worlds/:id/preview', async (req, res) => {
     if (!world) return res.status(404).json({ error: 'world not found' });
 
     const tileTypes = await getTileTypesMap();
-    const doorways = (await fetchLinks(pool, world.id)).map((l) => l.edge);
+    const links = await fetchLinks(pool, world.id);
+    const doorways = links.map((l) => l.edge);
     const villages = await fetchVillages(pool, world.id);
     const biomes = await loadBiomes(pool, world.biomes);
     const data = generateWorldPreview(
-      buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes }),
+      buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes, links }),
       PREVIEW_DIM,
     );
     worldPreviewCache.set(worldId, data);
@@ -3781,13 +3792,14 @@ app.get('/api/worlds/:id/overview', async (req, res) => {
     if (!world) return res.status(404).json({ error: 'world not found' });
 
     const tileTypes = await getTileTypesMap();
-    const doorways = (await fetchLinks(pool, world.id))
+    const links = await fetchLinks(pool, world.id);
+    const doorways = links
       .filter((l) => l.edge !== 'PORTAL')
       .map((l) => ({ edge: l.edge, toName: l.to_name }));
     const villages = await fetchVillages(pool, world.id);
     const biomes = await loadBiomes(pool, world.biomes);
     const data = generateWorldOverview(
-      buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes }),
+      buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes, links }),
       centerCol, centerRow, OVERVIEW_SPAN, OVERVIEW_STEP,
     );
     // Chests are point entities with a real stored world-pixel x/y (mapChestRow),

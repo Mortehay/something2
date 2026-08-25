@@ -36,9 +36,9 @@ test('coerces the seed to a number (the column is bigint -> string)', () => {
 
 test('carries every field the generator reads', () => {
   const c = buildWorldGenConfig(cfgArgs());
-  assert.deepEqual(Object.keys(c).sort(), [
+  assert.deepStrictEqual(Object.keys(c).sort(), [
     'authoredRoads', 'biomeCell', 'biomes', 'chunkSize', 'doorways', 'entry_spawn',
-    'height', 'levelMax', 'levelMin', 'safeRects', 'safeRoadRadius',
+    'height', 'levelMax', 'levelMin', 'portals', 'safeRects', 'safeRoadRadius',
     'seed', 'tileTypes', 'villages', 'width',
   ]);
   assert.equal(c.chunkSize, 16);
@@ -46,6 +46,32 @@ test('carries every field the generator reads', () => {
   assert.equal(c.height, 30);
   assert.deepEqual(c.entry_spawn, { x: 1500, y: 1500 });
   assert.deepEqual(c.biomes, BIOMES);
+});
+
+// SOMET-510. `portals` feeds generateChunkDecorations' blocking-decoration
+// exclusion, so /chunk and the authority must derive it identically or they
+// place different blockers and the client rubber-bands. Only the world's OWN
+// outgoing PORTAL rows count: a compass link has no from_x/from_y worth
+// reading, and a link row for a different world would clear ground here at the
+// far world's coordinates.
+test('maps a world\'s own PORTAL links to the portal points the clearance rule reads', () => {
+  const c = buildWorldGenConfig(cfgArgs({
+    links: [
+      { edge: 'N', to_world_id: 'x', from_x: null, from_y: null },
+      { edge: 'PORTAL', to_world_id: 'y', from_x: 1250, from_y: 2350 },
+      { edge: 'PORTAL', to_world_id: 'z', from_x: '400', from_y: '900' },
+    ],
+  }));
+  assert.deepStrictEqual(c.portals, [{ x: 1250, y: 2350 }, { x: 400, y: 900 }]);
+});
+
+test('a caller with no links, or junk coordinates, gets no portals rather than undefined', () => {
+  assert.deepStrictEqual(buildWorldGenConfig(cfgArgs()).portals, []);
+  assert.deepStrictEqual(buildWorldGenConfig(cfgArgs({ links: null })).portals, []);
+  assert.deepStrictEqual(
+    buildWorldGenConfig(cfgArgs({
+      links: [{ edge: 'PORTAL', from_x: null, from_y: 100 }, { edge: 'PORTAL' }],
+    })).portals, []);
 });
 
 test('maps level_min/level_max to the levelMin/levelMax the spawn paths read', () => {

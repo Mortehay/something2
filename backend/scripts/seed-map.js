@@ -43,6 +43,7 @@ const { populateWorld } = require('../src/services/worldPopulation.js');
 const { assertNavigable } = require('../src/services/navigability.js');
 const { buildWorldGenConfig } = require('../src/services/worldGenConfig.js');
 const { loadTileTypes } = require('../src/services/tileTypes.js');
+const { loadDecorationDefs } = require('../src/services/decorationDefs.js');
 const { loadBiomes } = require('../src/services/biomes.js');
 const { setEntryWorld } = require('../src/services/entryWorld.js');
 
@@ -656,6 +657,7 @@ async function applyMapSpec(pool, spec) {
         doorways: worldLinks.filter((l) => l.edge !== 'PORTAL').map((l) => l.edge),
         villages: await fetchVillages(client, worldId),
         biomes: await loadBiomes(client, row.biomes),
+        links: worldLinks,
       });
 
       for (const [i, pen] of pens.entries()) {
@@ -723,6 +725,12 @@ async function applyMapSpec(pool, spec) {
     // dungeon nobody can enter -- and walking into it is the only other way to
     // find out. Generation is deterministic, so checking here is exact.
     const tileTypes = await loadTileTypes(client);
+    // SOMET-510. Loaded ONCE for the whole check: assertNavigable's decoration
+    // pass needs the same def list the authority and /chunk place from, and
+    // loadDecorationDefs is the single loader that keeps the three in the same
+    // ORDER BY id (which decides which def wins a shared tile, and therefore
+    // whether that tile blocks).
+    const decorationDefs = await loadDecorationDefs(client);
     for (const w of spec.worlds) {
       const worldId = idByKey.get(w.key);
       const wr = await client.query('SELECT * FROM worlds WHERE id = $1', [worldId]);
@@ -731,7 +739,7 @@ async function applyMapSpec(pool, spec) {
       const doorways = worldLinks.filter((l) => l.edge !== 'PORTAL').map((l) => l.edge);
       const biomes = await loadBiomes(client, row.biomes);
       const villages = await fetchVillages(client, worldId);
-      const cfg = buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes });
+      const cfg = buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes, links: worldLinks });
 
       // JUDGE THE TERRAIN, NOT THE ROADS (SOMET-349 review).
       //
@@ -753,7 +761,13 @@ async function applyMapSpec(pool, spec) {
       const terrainOnly = { ...cfg, noGeneratedRoads: true };
 
       const required = requiredTilesFor(w, spec, row, doorways);
-      const problems = assertNavigable(terrainOnly, required);
+      // Roads off for the DECORATION pass too, and for the same reason
+      // (SOMET-510). generateChunkDecorations skips carved path cells, so with
+      // the connector network on, every doorway and village gate already sits at
+      // the end of a decoration-free corridor -- a road-carved corridor is
+      // precisely what was hiding this defect. Judged road-free, the rule has to
+      // hold on its own.
+      const problems = assertNavigable(terrainOnly, required, { decorationDefs });
       if (problems.length) {
         throw new Error(
           `world "${w.key}" is not navigable:\n  - ${problems.join('\n  - ')}`);

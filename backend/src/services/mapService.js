@@ -571,12 +571,50 @@ const SPAWN_CLEAR_RADIUS = 1;     // Chebyshev tiles around entry spawn kept cle
 const GATE_CORRIDOR_LENGTH = DECO_CELL;
 const GATE_CORRIDOR_HALFWIDTH = 1;
 
+// SOMET-510 — the ring of cells just outside a village footprint, in Chebyshev
+// tiles. One, because the footprint is a solid wall with exactly one gate: a
+// blocker touching the wall cannot seal anything on its own, but a blocker on
+// the ring beside the gate narrows the mouth of the gate corridor, which can.
+const VILLAGE_RING = 1;
+
+// SOMET-510 — Chebyshev tiles around a PORTAL endpoint kept clear of blockers.
+//
+// Deliberately the same number as SPAWN_CLEAR_RADIUS, and deliberately NOT the
+// doorway corridor's length. A portal endpoint and an entry spawn are the same
+// kind of object: a point in open interior ground where a player materialises,
+// free to leave in any of the four directions. A doorway is not — it sits on
+// the wall ring, so three of its four sides are permanently wall and the only
+// way out is a corridor running inward. Same rule for the same geometry, a
+// different rule where the geometry differs.
+const PORTAL_CLEAR_RADIUS = SPAWN_CLEAR_RADIUS;
+
 // Entry-spawn tile (row,col) for a bounded world, or null. entry_spawn is world
 // pixels; MAP_TILE_SIZE-agnostic here (100 px/tile, matching collision.js).
 function spawnTileCell(world) {
   const sp = world.entry_spawn;
   if (!sp || typeof sp.x !== 'number' || typeof sp.y !== 'number') return null;
   return { row: Math.floor(sp.y / 100), col: Math.floor(sp.x / 100) };
+}
+
+// SOMET-510 — every PORTAL endpoint in this world, as (row,col) tiles.
+//
+// `world.portals` is world PIXELS, matching entry_spawn above and the
+// from_x/from_y columns it is built from (worldGenConfig.js). Both ends of a
+// portal are covered without a second query because setPortalLink
+// (services/mapLinks.js) writes a MIRROR row: the far endpoint is the
+// `from_x/from_y` of its own world's outgoing PORTAL row. A hand-inserted
+// unmirrored row would leave its far end unprotected, which is why
+// decoration_clearance_db.test.js asserts the mirror holds for every live row
+// rather than trusting the writer.
+function portalTileCells(world) {
+  const raw = world && world.portals;
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const p of raw) {
+    if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') continue;
+    out.push({ row: Math.floor(p.y / 100), col: Math.floor(p.x / 100) });
+  }
+  return out;
 }
 
 // SOMET-339 — true when this absolute cell lies in the lane running outward
@@ -604,10 +642,22 @@ function inGateCorridor(v, gRow, gCol) {
   return false;
 }
 
-// True when a BLOCKING decoration must not occupy this absolute cell: within the
-// spawn clear radius, inside a village footprint, or in the lane leading out of a
-// village gate. (Path cells are excluded by the caller for ALL decorations,
-// blocking or not.)
+// THE DECORATION CLEARANCE RULE (SOMET-510). True when a BLOCKING decoration
+// must not occupy this absolute cell.
+//
+// The invariant, stated once so it can be tested: EVERY POINT A PLAYER CAN
+// ARRIVE AT MUST HAVE A BLOCKER-FREE WAY OUT OF IT. The arrival points are the
+// entry spawn, a village spawn behind its gate, each map doorway, and each
+// portal endpoint -- exactly the list seed-map.js's requiredTilesFor builds and
+// scan-decoration-seals.js's arrivalPoints rebuilds from the live rows. Each
+// gets clearance shaped like its own geometry:
+//
+//   entry spawn      SPAWN_CLEAR_RADIUS   Chebyshev ring, open ground
+//   portal endpoint  PORTAL_CLEAR_RADIUS  Chebyshev ring, open ground
+//   village          footprint + VILLAGE_RING + the outward gate corridor
+//   map doorway      the gap + DOORWAY_CLEAR_LENGTH of inward corridor
+//
+// (Path cells are excluded by the caller for ALL decorations, blocking or not.)
 //
 // The gate corridor is the SOMET-339 fix. Sparing only the footprint left the
 // ground outside the gate fair game, so the clump field could wall a village in
@@ -616,17 +666,35 @@ function inGateCorridor(v, gRow, gCol) {
 // reachable area of nine tiles. It was survivable while players spawned outside
 // a village (a sealed gate merely meant "cannot get in"); SOMET-335 moved the
 // entry spawn inside one and turned it into "cannot play the game".
-function isExcludedBlockerCell(cfg, spawn, gRow, gCol) {
+//
+// Doorways and portals were left out until SOMET-510, and the omission was
+// MASKED rather than harmless: SOMET-349's connector roads run between every
+// pair of doorways, and the caller skips carved path cells, so the roads
+// incidentally carved decoration-free corridors to the very places that could
+// seal. Measured on the 100 live worlds with the connector network switched
+// off: 11 arrival points across 10 worlds -- including the entry world's own E
+// doorway -- had a blocking decoration sitting ON the arrival tile. This rule
+// is what makes that structural instead of a side effect of a road.
+//
+// This rule is prophylactic, not a proof. It cannot promise the far mouth of a
+// corridor is open, only that the corridor exists; assertNavigable's decoration
+// pass is the thing that fails seeding when a residual seal survives it.
+function isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol) {
   if (spawn && Math.max(Math.abs(gRow - spawn.row), Math.abs(gCol - spawn.col)) <= SPAWN_CLEAR_RADIUS) {
     return true;
   }
+  for (const p of portals || []) {
+    if (Math.max(Math.abs(gRow - p.row), Math.abs(gCol - p.col)) <= PORTAL_CLEAR_RADIUS) return true;
+  }
   if (cfg.villages) {
     for (const v of cfg.villages) {
-      if (gRow >= v.minRow && gRow < v.minRow + v.height &&
-          gCol >= v.minCol && gCol < v.minCol + v.width) return true;
+      // Footprint PLUS the ring immediately outside it (SOMET-510).
+      if (gRow >= v.minRow - VILLAGE_RING && gRow < v.minRow + v.height + VILLAGE_RING &&
+          gCol >= v.minCol - VILLAGE_RING && gCol < v.minCol + v.width + VILLAGE_RING) return true;
       if (inGateCorridor(v, gRow, gCol)) return true;
     }
   }
+  if (inDoorwayApproach(cfg.bounds, gRow, gCol)) return true;
   return false;
 }
 
@@ -642,6 +710,7 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
   const rMin = cy * N, cMin = cx * N;
   const paths = collectPathCells(cfg, rMin, cMin, N, N);
   const spawn = spawnTileCell(world);
+  const portals = portalTileCells(world);
   const out = [];
   for (let r = 0; r < N; r++) {
     if (!tiles[r]) continue;
@@ -679,7 +748,7 @@ function generateChunkDecorations(world, cx, cy, tiles, decorationDefs) {
       const blocking = picked.walkable === false;
       // A blocking pick near spawn / in a village would trap the player -> skip
       // the tile entirely (leave it open) rather than force a passable type.
-      if (blocking && isExcludedBlockerCell(cfg, spawn, gRow, gCol)) continue;
+      if (blocking && isExcludedBlockerCell(cfg, spawn, portals, gRow, gCol)) continue;
       out.push({ name: picked.name, row: r, col: c, blocking });
     }
   }
@@ -1150,6 +1219,55 @@ function isDoorwayCell(gRow, gCol, width, height, doorways) {
   if (doorways.has('S') && gRow === height - 1 && gCol >= midCol - half && gCol <= midCol + half) return true;
   if (doorways.has('W') && gCol === 0 && gRow >= midRow - half && gRow <= midRow + half) return true;
   if (doorways.has('E') && gCol === width - 1 && gRow >= midRow - half && gRow <= midRow + half) return true;
+  return false;
+}
+
+// SOMET-510 — the doorway clearance corridor: the gap itself plus the lane
+// running INWARD from it, kept free of blocking decorations.
+//
+// LENGTH is DECO_CELL, for the same reason GATE_CORRIDOR_LENGTH is: DECO_CELL is
+// the clump cell size, so a lane that long is guaranteed to span at least one
+// whole density-field cell and cannot terminate inside the single clump sitting
+// on the doorway. Two different numbers for the same geometric problem is how
+// the two rules would drift apart.
+//
+// HALFWIDTH is DERIVED from DOORWAY_TILES rather than written down, so the
+// corridor is exactly as wide as the gap it serves and widening the gap widens
+// the corridor with it. It is 1 today (a 3-tile gap, a 3-tile corridor).
+//
+// A HALFWIDTH of 0 was measured and is not enough: clearing only the centre
+// column leaves the arrival tile with one way forward, and on the 100 live
+// worlds that produced a 4-CELL POCKET at three doorways -- the exact failure
+// SOMET-366 reported on a live map. At halfwidth 1 the same measurement gives
+// zero sealed points and zero pockets, with the smallest reachable region
+// 4753 cells.
+//
+// BOUNDARY. The corridor is closed at both ends: blockers resume at distance
+// LENGTH+1 inward, and at offset HALFWIDTH+1 sideways. So the worst case this
+// rule permits is a fully-clumped mouth at distance LENGTH+1, leaving the
+// arriving player in a (2*HALFWIDTH+1) * (LENGTH+1) = 3x7 = 21-cell pocket.
+// That is under the ~4000-cell floor assertNavigable's decoration pass applies
+// to a 64x64 world, so such a world FAILS SEEDING with a named message rather
+// than shipping. Narrowing the odds is this rule's job; refusing the residue is
+// the guard's.
+const DOORWAY_CLEAR_LENGTH = DECO_CELL;
+const DOORWAY_CLEAR_HALFWIDTH = Math.floor(DOORWAY_TILES / 2);
+
+// `bounds` is cfg.bounds (worldConfig), whose `doorways` is always a Set. An
+// unbounded world has no ring, no doorway and therefore no corridor.
+function inDoorwayApproach(bounds, gRow, gCol) {
+  if (!bounds || !bounds.doorways) return false;
+  const { width, height, doorways } = bounds;
+  const midCol = Math.floor(width / 2);
+  const midRow = Math.floor(height / 2);
+  const L = DOORWAY_CLEAR_LENGTH;
+  const H = DOORWAY_CLEAR_HALFWIDTH;
+  // d = 0 is the gap on the wall ring itself, d = 1 the arrival tile
+  // (mapService.arrivalPoint), d = L the far end of the lane.
+  if (doorways.has('N') && gRow >= 0 && gRow <= L && Math.abs(gCol - midCol) <= H) return true;
+  if (doorways.has('S') && gRow <= height - 1 && gRow >= height - 1 - L && Math.abs(gCol - midCol) <= H) return true;
+  if (doorways.has('W') && gCol >= 0 && gCol <= L && Math.abs(gRow - midRow) <= H) return true;
+  if (doorways.has('E') && gCol <= width - 1 && gCol >= width - 1 - L && Math.abs(gRow - midRow) <= H) return true;
   return false;
 }
 
@@ -1652,6 +1770,20 @@ module.exports = {
     villageMerchantPost,
     villageBankPost,
     DOORWAY_TILES,
+    // SOMET-510: the decoration clearance rule and the geometry it is built
+    // from, exported so the rule can be tested cell-by-cell rather than only
+    // through a whole generated world.
+    isExcludedBlockerCell,
+    inDoorwayApproach,
+    inGateCorridor,
+    portalTileCells,
+    spawnTileCell,
+    DOORWAY_CLEAR_LENGTH,
+    DOORWAY_CLEAR_HALFWIDTH,
+    PORTAL_CLEAR_RADIUS,
+    SPAWN_CLEAR_RADIUS,
+    VILLAGE_RING,
+    DECO_CELL,
     oppositeEdge,
     edgeOfDoorwayTile,
     arrivalPoint,

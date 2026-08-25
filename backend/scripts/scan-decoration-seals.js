@@ -16,9 +16,8 @@
 // Usage:  node scripts/scan-decoration-seals.js [--json] [--world <name>]
 
 const { Pool } = require('pg');
-const {
-  worldConfig, generateRegion, generateChunkDecorations,
-} = require('../src/services/mapService');
+const { worldConfig, generateRegion } = require('../src/services/mapService');
+const { blockingDecorationCells } = require('../src/services/navigability');
 const { buildWorldGenConfig } = require('../src/services/worldGenConfig');
 const { loadDecorationDefs } = require('../src/services/decorationDefs');
 const { loadBiomes } = require('../src/services/biomes');
@@ -27,10 +26,13 @@ const { fetchVillages } = require('../src/services/villages');
 const MAP_TILE_SIZE = 100;
 
 // Build the walkability grid a PLAYER actually meets: terrain, minus every
-// blocking decoration the runtime would generate over it. Deliberately built
-// from the same two functions the authority uses, not a reimplementation --
-// a scan that models placement its own way would find its own bugs, not the
-// game's.
+// blocking decoration the runtime would generate over it.
+//
+// The decoration half is services/navigability.js's blockingDecorationCells,
+// which is also what assertNavigable's decoration pass floods over. This script
+// used to carry its own copy of that chunk walk; SOMET-510 gave the seeding
+// guard the same job, and two implementations of "where do the blockers land"
+// is exactly how a scan ends up finding its own bugs rather than the game's.
 function buildWalkGrid(world, tileTypes, decorationDefs) {
   const cfg = worldConfig(world);
   const { width, height } = cfg.bounds;
@@ -46,19 +48,10 @@ function buildWalkGrid(world, tileTypes, decorationDefs) {
     walk.push(row);
   }
 
-  // Decorations are generated per chunk, so walk the chunks that cover the map.
-  const N = cfg.chunkSize;
   let blockers = 0;
-  for (let cy = 0; cy * N < height; cy++) {
-    for (let cx = 0; cx * N < width; cx++) {
-      const tiles = generateRegion(world, cy * N, cx * N, N, N);
-      for (const d of generateChunkDecorations(world, cx, cy, tiles, decorationDefs)) {
-        if (!d.blocking) continue;
-        const gRow = cy * N + d.row, gCol = cx * N + d.col;
-        if (gRow < 0 || gRow >= height || gCol < 0 || gCol >= width) continue;
-        if (walk[gRow][gCol] === 1) { walk[gRow][gCol] = 0; blockers++; }
-      }
-    }
+  for (const key of blockingDecorationCells(world, decorationDefs)) {
+    const [gRow, gCol] = key.split(',').map(Number);
+    if (walk[gRow][gCol] === 1) { walk[gRow][gCol] = 0; blockers++; }
   }
   return { walk, width, height, blockers, terrain: grid };
 }
@@ -145,7 +138,15 @@ async function scanWorld(pool, row, decorationDefs) {
   const portalRows = linkRows.filter((l) => l.edge === 'PORTAL');
   const villages = await fetchVillages(pool, row.id);
   const biomes = await loadBiomes(pool, row.biomes);
-  const world = buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes });
+  // `links` must be THIS world's OUTGOING rows, the shape fetchLinks returns:
+  // buildWorldGenConfig reads from_x/from_y off them, and this scan's query is
+  // deliberately wider (it also pulls the mirror rows, to label a portal
+  // "arrival" as well as "source"). Feeding the mirrors in would hand the
+  // clearance rule the FAR world's coordinates.
+  const world = buildWorldGenConfig({
+    row, tileTypes, doorways, villages, biomes,
+    links: linkRows.filter((l) => l.from_world_id === row.id),
+  });
 
   const { walk, width, height, blockers } = buildWalkGrid(world, tileTypes, decorationDefs);
   const points = arrivalPoints(row, doorways, portalRows, villages);

@@ -22,15 +22,25 @@ const { CHEST_LOOT } = require('../seeds/data/chestLoot.js');
 
 // COALESCE, not plain EXCLUDED, for the four columns below.
 //
-// Every existing terrain tile carries a prompt in the database that is NOT in
-// DEFAULT_TILE_TYPES -- `grass` reads "lush green meadow grass", and so on for
-// all eleven. Those were authored in the admin UI. Writing EXCLUDED
-// unconditionally would wipe every one of them on the next `make
-// seed-catalogs`, which is precisely what this file's header rule forbids.
+// A seed entry that OMITS a field passes NULL and COALESCE keeps whatever the
+// row already holds; a seed entry that SPECIFIES one overwrites. New tiles (no
+// existing row) fall to the column defaults via the same COALESCE.
 //
-// So a seed entry that OMITS a field passes NULL and COALESCE keeps whatever
-// the row already holds; a seed entry that SPECIFIES one overwrites. New tiles
-// (no existing row) fall to the column defaults via the same COALESCE.
+// PROMPTS ARE NOW ALWAYS SPECIFIED, and that is a deliberate reversal.
+//
+// This comment used to say the opposite: the eleven original terrain prompts
+// ("lush green meadow grass" and friends) lived only in the database, authored
+// in the admin UI, and DEFAULT_TILE_TYPES omitted them precisely so a re-seed
+// could not wipe them. That protected them, but it also meant the seeder could
+// not FIX them -- and they needed fixing, because a bare subject with no camera
+// or style wording generates an image the renderer cannot use (see the prompt
+// notes in seeds/data/tileTypes.js).
+//
+// So every one of the 50 entries now carries a prompt, which makes this file
+// authoritative for prompts and means `make seed-catalogs` OVERWRITES any
+// prompt edited in the admin UI. A prompt worth keeping belongs in
+// seeds/data/tileTypes.js, not only in the database. This is the one column
+// where that trade was made on purpose; the other three still preserve.
 async function seedOneTile(db, t) {
   await db.query(
     `INSERT INTO tile_types (name, color, walkable, speed, image, valid_neighbors,
