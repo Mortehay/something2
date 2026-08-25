@@ -4,11 +4,26 @@ import styled from 'styled-components';
 import { fetchWorldOverview, needsRefetch } from './src/js/net/worldOverviewClient.js';
 import { renderFrame } from './src/js/systems/minimapFrame.js';
 import { createTerrainLayerCache, domCanvasFactory } from './src/js/systems/minimapTerrainLayer.js';
+import { createMinimapLoop } from './src/js/systems/minimapLoop.js';
 import { MAP_TILE_SIZE } from './src/js/core/constants.js';
 
 const SIZE = 180;         // minimap box (css px)
 const CELL_PX = 12;       // iso diamond width per coarse cell
 const REFETCH_MARGIN = 40; // tiles from window edge that trigger a refetch
+
+// SOMET-361/444. The overview window and the creature snapshot behind the map
+// only change at roughly 5Hz, so redrawing at the full animation frame rate was
+// re-compositing an unchanged picture -- cheap for the 180px docked box, and
+// half the frame rate for the 640px expand modal.
+//
+// 15Hz rather than the 5Hz data rate: the map is player-centred, so the terrain
+// scrolls continuously under a walking player even when no new data has
+// arrived, and at 5Hz that scroll visibly judders.
+//
+// This is a CAP, not an exact rate -- a draw happens on the first frame at or
+// after the interval, so at 60fps the effective rate is 12-15Hz.
+const MINIMAP_DRAW_HZ = 15;
+const MINIMAP_DRAW_INTERVAL_MS = 1000 / MINIMAP_DRAW_HZ;
 
 const LS_KEY = 'something2:minimapVisible';
 
@@ -109,9 +124,30 @@ export default function Minimap({ gameRef, tileColors }) {
   const visibleRef = useRef(visible);
   useEffect(() => { visibleRef.current = visible; });
 
-  // rAF draw loop — runs whenever visible. Reads a fresh snapshot each frame and
-  // lazily (re)fetches the overview window when the player nears its edge or the
-  // world changes.
+  // Keep a ref of `expanded` so the one draw loop can pick the modal canvas up
+  // and drop it again WITHOUT being torn down and restarted. Restarting the
+  // effect on expand/collapse is precisely what used to spawn the second loop.
+  const expandedRef = useRef(expanded);
+  useEffect(() => { expandedRef.current = expanded; });
+
+  // The minimap's ONE animation loop. It runs whenever the minimap is visible
+  // and draws into whichever canvases are mounted -- the docked box, plus the
+  // expand modal while it is open.
+  //
+  // SOMET-361/444. Ticking and drawing are deliberately separated:
+  //
+  //   every frame        getMinimapSnapshot() runs. It is not just a read: it
+  //                      updates Game._minimapDir, which the heading arrow
+  //                      draws from, and it feeds the overview refetch edge
+  //                      check that streams the map as the player walks.
+  //                      Throttling it would stop the arrow tracking and stall
+  //                      map streaming -- with every test still green.
+  //
+  //   <= MINIMAP_DRAW_HZ the canvases are redrawn.
+  //
+  // The data behind the map only changes at ~5Hz, so redrawing a 640px canvas
+  // 60 times a second was re-compositing an unchanged picture -- which is where
+  // the expanded map's frame time went (SOMET-444).
   useEffect(() => {
     if (!visible) return undefined;
     const canvas = canvasRef.current;
@@ -120,8 +156,14 @@ export default function Minimap({ gameRef, tileColors }) {
     const dpr = window.devicePixelRatio || 1;
     canvas.width = SIZE * dpr;
     canvas.height = SIZE * dpr;
-    let raf = 0;
-    const layerCache = createTerrainLayerCache(domCanvasFactory);
+
+    const dockedCache = createTerrainLayerCache(domCanvasFactory);
+    // Set up lazily on the frame the modal's canvas first appears, and dropped
+    // when it goes away -- which frees its ~1.2MB terrain bitmap. Its own cache
+    // rather than the docked map's: the two draw at different cellW, so one
+    // shared cache would rebuild the bitmap on alternating frames, strictly
+    // worse than no cache at all.
+    let modal = null; // { el, ctx, box, cache }
 
     const maybeFetch = (worldId, pCol, pRow) => {
       const cached = overviewRef.current;
@@ -135,19 +177,50 @@ export default function Minimap({ gameRef, tileColors }) {
         .finally(() => { fetchingRef.current = false; });
     };
 
-    const frame = () => {
-      raf = requestAnimationFrame(frame);
-      const snap = gameRef.current && gameRef.current.getMinimapSnapshot
-        ? gameRef.current.getMinimapSnapshot() : null;
-      if (snap) {
-        const pCol = snap.player.x / MAP_TILE_SIZE;
-        const pRow = snap.player.y / MAP_TILE_SIZE;
-        maybeFetch(snap.worldId, pCol, pRow);
-      }
-      renderFrame(ctx, dpr, SIZE, CELL_PX, { gameRef, overviewRef, tileColors: tileColorsRef.current, layerCache });
+    const drawModal = () => {
+      if (!modal) return;
+      renderFrame(modal.ctx, dpr, modal.box, CELL_PX * 1.6, {
+        gameRef, overviewRef, tileColors: tileColorsRef.current, layerCache: modal.cache,
+      });
     };
-    raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+
+    // Attach/detach the modal surface. Runs on every tick, not on the draw
+    // cadence, so opening the map paints immediately instead of showing up to
+    // one throttle interval of blank canvas.
+    const syncModal = () => {
+      const el = expandedRef.current ? modalCanvasRef.current : null;
+      if (!el) { modal = null; return; }
+      if (modal && modal.el === el) return;
+      const box = Math.min(640, Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.8));
+      el.width = box * dpr; el.height = box * dpr;
+      el.style.width = `${box}px`; el.style.height = `${box}px`;
+      modal = { el, ctx: el.getContext('2d'), box, cache: createTerrainLayerCache(domCanvasFactory) };
+      drawModal();
+    };
+
+    const loop = createMinimapLoop({
+      requestFrame: (cb) => window.requestAnimationFrame(cb),
+      cancelFrame: (h) => window.cancelAnimationFrame(h),
+      drawIntervalMs: MINIMAP_DRAW_INTERVAL_MS,
+      onTick: () => {
+        const snap = gameRef.current && gameRef.current.getMinimapSnapshot
+          ? gameRef.current.getMinimapSnapshot() : null;
+        if (snap) {
+          maybeFetch(snap.worldId, snap.player.x / MAP_TILE_SIZE, snap.player.y / MAP_TILE_SIZE);
+        }
+        syncModal();
+      },
+      onDraw: () => {
+        // The docked box keeps drawing while the modal is open: the backdrop
+        // over it is only 60% opaque, so it stays faintly visible.
+        renderFrame(ctx, dpr, SIZE, CELL_PX, {
+          gameRef, overviewRef, tileColors: tileColorsRef.current, layerCache: dockedCache,
+        });
+        drawModal();
+      },
+    });
+    loop.start();
+    return () => { loop.stop(); modal = null; };
   }, [visible, gameRef]);
 
   // Esc, while the modal is open, closes it instead of pausing the game.
@@ -164,31 +237,6 @@ export default function Minimap({ gameRef, tileColors }) {
     window.addEventListener('keydown', onKey, true); // capture
     return () => window.removeEventListener('keydown', onKey, true);
   }, [expanded, visible]);
-
-  // Modal rAF draw loop — larger box, wider window via a bigger cellW. Reuses
-  // the same overviewRef as the small minimap; no extra fetching. Guarded on
-  // `visible` too, for the same reason as the Esc listener above.
-  useEffect(() => {
-    if (!expanded || !visible) return undefined;
-    const canvas = modalCanvasRef.current;
-    if (!canvas) return undefined;
-    const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
-    const box = Math.min(640, Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.8));
-    canvas.width = box * dpr; canvas.height = box * dpr;
-    canvas.style.width = `${box}px`; canvas.style.height = `${box}px`;
-    let raf = 0;
-    // Its own cache, not the docked map's: the two draw at different cellW, so
-    // one shared cache would rebuild the bitmap on every alternating frame --
-    // strictly worse than no cache at all. This one dies with the modal.
-    const layerCache = createTerrainLayerCache(domCanvasFactory);
-    const frame = () => {
-      raf = requestAnimationFrame(frame);
-      renderFrame(ctx, dpr, box, CELL_PX * 1.6, { gameRef, overviewRef, tileColors: tileColorsRef.current, layerCache });
-    };
-    raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
-  }, [expanded, visible, gameRef]);
 
   if (!visible) {
     return <ShowButton type="button" title="Show minimap (M)" aria-label="Show minimap" onClick={() => persistVisible(true)}>🗺</ShowButton>;
