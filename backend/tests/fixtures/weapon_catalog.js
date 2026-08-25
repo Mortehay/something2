@@ -21,8 +21,9 @@
 // from 1714440019000_weapon_catalog.js, with stamina_cost rebalanced per
 // 1714440020000_rebalance_stamina.js, plus the ammo/aoe columns and the 3
 // ammo rows from 1714440021000_aoe_ammo.js. 22 weapons + 3 ammo = 25 rows,
-// plus the Monk's `quarterstaff` from 1714440516000 (SOMET-504) and the gear
-// ladder's 30 weapons from 1714440506000 -- 53 weapons + 3 ammo = 56 rows.
+// plus the Monk's `quarterstaff` from 1714440516000 (SOMET-504), `unarmed`
+// from 1714440517000 (SOMET-509) and the gear ladder's 30 weapons from
+// 1714440506000 -- 54 weapons + 3 ammo = 57 rows.
 // Keep in sync with the migrations: 'the live item_types catalog matches
 // SEED_ROWS' reports ANY weapon or ammo row in the database that is missing
 // here, so a migration that adds a weapon must add it to this list too.
@@ -146,6 +147,26 @@ const SEED_ROWS = [
   // damage. See that migration's header for the whole argument.
   { id: 25, name: 'quarterstaff', category: 'weapon', kind: 'melee', damage: 7, cooldown: 0.25,
     reach: 110, arc_width: 0.7, range: null, projectile_speed: null, projectile_radius: null,
+    pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
+    stackable: false, ammo_type_id: null, aoe_radius: null },
+
+  // --- the weapon a character holding NOTHING fights with, from
+  // 1714440517000_equal_starts_no_starting_kit (SOMET-509) ---
+  //
+  // items.js#DEFAULT_WEAPON_NAME names this row, so it is what
+  // activeWeaponType returns for an empty main hand. It is a real catalog row
+  // rather than a constant in code precisely so it shows up here and is held to
+  // the same standard as every other weapon.
+  //
+  // 3 damage on 0.6s = 5.0 dps, against a starting-band floor of 7.1
+  // (crude-wand), so every authored weapon is an upgrade. Free, in both pools:
+  // this is where a player lands when the mana is gone or the quiver is empty,
+  // and a cost on the floor would mean a drained player cannot attack at all.
+  // Plain physical for the same reason the quarterstaff is -- a mana_cost or a
+  // non-physical element would route it through activeWeaponType's
+  // bare-magic-weapon branch, which is for equipped weapons, not for fists.
+  { id: 26, name: 'unarmed', category: 'weapon', kind: 'melee', damage: 3, cooldown: 0.6,
+    reach: 55, arc_width: 0.5, range: null, projectile_speed: null, projectile_radius: null,
     pierce: null, mana_cost: 0, stamina_cost: 0, element: null,
     stackable: false, ammo_type_id: null, aoe_radius: null },
 

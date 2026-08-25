@@ -5,7 +5,54 @@
 
 const { isCompatible, stoneKind, rollDestroy } = require('../services/stones.js');
 
-const DEFAULT_WEAPON_NAME = 'dagger';
+// SOMET-509. The weapon a character holding nothing fights with.
+//
+// This was 'dagger', and nobody chose it as a balance point -- it was a
+// convenient non-null. Measured against the live catalog it was the STRONGEST
+// thing a new player could have:
+//
+//   dagger (the old default)   8 dmg / 0.30s = 26.7 dps, 0 stamina, free
+//   crude-wand  (band floor)   5 dmg / 0.70s =  7.1 dps
+//   crude-spear                8 dmg / 0.80s = 10.0 dps
+//   crude-blade                6 dmg / 0.55s = 10.9 dps
+//   short sword (Warrior kit) 11 dmg / 0.45s = 24.4 burst, 18.3 sustained
+//                                              (6 stamina throttles it; the
+//                                               dagger never throttled)
+//
+// That was survivable only because every class was handed a kit anyway. With
+// the kits gone (1714440517000 deletes every class_loadouts row) the fallback
+// becomes the whole early game, and every weapon a player finds would be a
+// DOWNGRADE -- the inversion that makes "equal starts" unplayable rather than
+// fair.
+//
+// So `unarmed` is now a real, authored catalog row (1714440517000) at 3 damage
+// on a 0.6s swing = 5.0 dps, ~70% of the 7.1 floor, costing no stamina and no
+// mana. A CATALOG ROW rather than a constant in this file, deliberately: it is
+// tunable by the same admin screens as every other weapon, it is asserted
+// against its peers by real SQL rather than by a number copied into a test, and
+// -- the part that matters here -- `resolveDefaultWeaponId` keeps meaning what
+// it always meant, so every fixture-built World that supplies its own default
+// weapon keeps behaving exactly as before.
+//
+// The dagger stays in the catalog as ordinary droppable gear. It simply stops
+// being handed out for nothing.
+const DEFAULT_WEAPON_NAME = 'unarmed';
+
+// SOMET-509. NOT the same thing as DEFAULT_WEAPON_NAME, and it used to be.
+//
+// The bare-magic-weapon branch in activeWeaponType neutralizes an unsocketed
+// magic weapon down to a plain weapon's damage, and it took that number from
+// DEFAULT_WEAPON_NAME on the reasoning that the two baselines were the same
+// row. Once the default became `unarmed` at 3 damage they stopped meaning the
+// same thing: a bare apprentice staff would have dropped to 3 / 0.55s = 5.5
+// dps, a hair above bare hands, so finding a magic weapon would barely be an
+// upgrade -- this ticket's own inversion, running the other way.
+//
+// A bare magic weapon is a real weapon the player equipped and can still
+// socket; unarmed is the floor for holding nothing at all. So the branch is
+// pinned to the dagger explicitly, which is exactly the row it always used, and
+// its behaviour is unchanged by this ticket.
+const BARE_MAGIC_BASELINE_NAME = 'dagger';
 const SLOTS = ['main_hand', 'off_hand', 'head', 'chest', 'hands', 'feet', 'ring1', 'ring2'];
 
 function num(v) { return v == null ? null : Number(v); }
@@ -142,7 +189,28 @@ async function loadItemTypes(pool, catalogs = null) {
   return m;
 }
 
-// The default active weapon: the dagger, else the first WEAPON (never armor).
+// SOMET-509. The bare-magic baseline row, looked up by name and memoized per
+// catalog object. activeWeaponType runs on the combat hot path and only this
+// branch needs the lookup, so it is done once per catalog rather than once per
+// swing; a WeakMap keyed on the catalog itself means a rebuilt catalog (a
+// re-seed, a second World) resolves afresh and the old entry is collectable.
+const bareMagicBaselineCache = new WeakMap();
+function bareMagicBaseline(itemTypes) {
+  if (bareMagicBaselineCache.has(itemTypes)) return bareMagicBaselineCache.get(itemTypes);
+  let found = null;
+  for (const t of itemTypes.values()) {
+    if (t.category === 'weapon' && t.name === BARE_MAGIC_BASELINE_NAME) { found = t; break; }
+  }
+  bareMagicBaselineCache.set(itemTypes, found);
+  return found;
+}
+
+// The default active weapon: `unarmed`, else the first WEAPON (never armor).
+//
+// The name-then-first-weapon shape is unchanged from when the name was
+// 'dagger'. It matters for the many fixture-built catalogs in the test suite
+// that contain no `unarmed` row at all: those still resolve to their own first
+// weapon, exactly as they always did.
 function resolveDefaultWeaponId(mapById) {
   let firstWeapon = null;
   for (const [id, t] of mapById) {
@@ -659,12 +727,15 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
         // ever be in -- stone content-seeding is explicitly out of scope
         // this slice, so such a weapon can never be socketed at all.
         //
-        // damage falls back to DEFAULT_WEAPON_NAME's ('dagger') own damage
-        // -- not an invented number: it is the SAME reference weapon this
-        // function already falls back to wholesale a few lines down when no
-        // weapon is equipped at all, so "an unsocketed magic weapon hits
-        // like the game's own baseline ordinary weapon" is the one baseline
-        // already meaningful in this file, not a new one invented here.
+        // damage falls back to BARE_MAGIC_BASELINE_NAME's ('dagger') own
+        // damage -- not an invented number: the dagger is the catalog's plain
+        // ordinary weapon, so "an unsocketed magic weapon hits like a weapon of
+        // no particular quality" needs no new constant.
+        //
+        // SOMET-509 NOTE: this used to justify itself by being the SAME row the
+        // no-weapon fallback returned a few lines below. That is no longer
+        // true, and the two were deliberately NOT kept together -- see
+        // BARE_MAGIC_BASELINE_NAME at the top of this file for why.
         // `baseline` guards the pathological case of a catalog with no
         // default weapon at all (should never happen -- dagger is always
         // seeded): damage is left unchanged rather than crash.
@@ -689,7 +760,10 @@ function activeWeaponType(inv, itemTypes, defaultWeaponId) {
         // to baseline (still strictly worse than the pre-fix "free spell"
         // state) but the weapon's attack RATE is exactly what it always was
         // for a physical weapon of that kind.
-        const baseline = itemTypes.get(defaultWeaponId);
+        // SOMET-509: was `itemTypes.get(defaultWeaponId)`, which stopped being
+        // the dagger when the default became `unarmed`. Resolved by name now so
+        // this branch keeps the exact behaviour it shipped with.
+        const baseline = bareMagicBaseline(itemTypes);
         return {
           ...type,
           element: 'physical',
@@ -947,7 +1021,8 @@ async function unsocketStone(pool, characterId, inv, stonePlayerItemId, { confir
 }
 
 module.exports = {
-  loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME, SLOTS, loadInventory,
+  loadItemTypes, resolveDefaultWeaponId, resolveGoldItemTypeId, DEFAULT_WEAPON_NAME,
+  BARE_MAGIC_BASELINE_NAME, SLOTS, loadInventory,
   grantStartingLoadout, canEquip, mitigation, activeWeaponType, equip, unequip, socketStone, unsocketStone,
   DEFAULT_INVENTORY_SLOTS, usedSlots, capacityOf, freeSlots, hasFreeSlot,
 };

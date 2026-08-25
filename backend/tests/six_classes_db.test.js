@@ -154,41 +154,72 @@ test('six playable classes', { skip: !url ? 'no database URL' : false }, async (
     assert.equal(new Set(seen).size, 6, `six distinct pool pairs, got ${seen.join(', ')}`);
   });
 
-  await t.test('every new class has a loadout resolved to real item types', async () => {
-    // The JOIN is the point. class_loadouts rows are inserted by a guarded
-    // cross-join on NAMES, so a typo'd item name inserts nothing at all and
-    // leaves the class with empty hands; counting rows in class_loadouts would
-    // not notice, and neither would a LEFT JOIN.
+  await t.test('NO class is handed a starting kit, and that is the product decision', async () => {
+    // INVERTED BY SOMET-509, not deleted. This used to be two subtests
+    // asserting the exact kit each class was handed -- 'Archer:bowx1',
+    // 'Monk:quarterstaffx1' and so on -- and that every playable class had one.
+    //
+    // The product owner has since chosen EQUAL STARTS: every character begins
+    // unarmed and identical, and all differentiation comes from the passive
+    // tree and from gear the player finds. Migration 1714440517000 deletes
+    // every row in this table and seeds/data/entityTypes.js's CLASS_LOADOUTS
+    // list is empty so a re-seed cannot put them back.
+    //
+    // Keeping the old assertions beside this one would have meant asserting
+    // both directions at once, so they are REPLACED. This is the guard that
+    // makes re-adding a grant visible: put one kit row back, by migration or by
+    // re-seed, and this goes red naming the class and the item.
     const r = await pool.query(
       `SELECT e.name AS class, i.name AS item, l.quantity
          FROM class_loadouts l
          JOIN entity_types e ON e.id = l.entity_type_id
          JOIN item_types  i ON i.id = l.item_type_id
-        WHERE e.name IN ('Monk', 'Cultist', 'Archer', 'Druid')
         ORDER BY e.name, i.name`);
-    assert.deepEqual(r.rows.map((x) => `${x.class}:${x.item}x${x.quantity}`), [
-      'Archer:arrowx20',
-      'Archer:bowx1',
-      'Archer:leather-vestx1',
-      'Cultist:apprentice staffx1',
-      'Cultist:leather-vestx1',
-      'Cultist:stone_of_apprentice staffx1',  // SOMET-492
-      'Druid:clubx1',
-      'Druid:leather-vestx1',
-      'Monk:leather-vestx1',
-      'Monk:quarterstaffx1',
-    ]);
+    assert.deepEqual(r.rows.map((x) => `${x.class}:${x.item}x${x.quantity}`), [],
+      'every character starts unarmed (SOMET-509) -- a kit row here means someone re-armed a class');
+
+    // Said separately and over the raw table, because the JOIN above would
+    // silently report [] for a row whose item_type_id or entity_type_id points
+    // at nothing -- which is a DIFFERENT defect wearing the same green.
+    const raw = await pool.query('SELECT count(*)::int AS n FROM class_loadouts');
+    assert.strictEqual(raw.rows[0].n, 0, 'class_loadouts must be empty, not merely unresolvable');
   });
 
-  await t.test('no playable class has an empty loadout', async () => {
-    // The literal above covers the four new rows; this covers all six, so a
-    // seventh class added later without gear cannot slip through.
-    const r = await pool.query(
-      `SELECT e.name FROM entity_types e
-        WHERE e.is_playable = true
-          AND NOT EXISTS (SELECT 1 FROM class_loadouts l WHERE l.entity_type_id = e.id)
-        ORDER BY e.name`);
-    assert.deepEqual(r.rows.map((x) => x.name), []);
+  await t.test('the kit MECHANISM survives, so restoring kits stays a data change', async () => {
+    // SOMET-509 is explicit that the mechanism is kept and left unused rather
+    // than ripped out. Without this, someone tidying up "dead" columns would
+    // find an empty table, delete equip_slot and socket_into_item_type_id, and
+    // turn a future reversal into a re-implementation -- with every test above
+    // still green, because an empty table satisfies them all.
+    //
+    // Checked inside a transaction that is always rolled back: the row below
+    // must never be visible to a peer, and must never survive this test.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const cols = await client.query(
+        `SELECT column_name FROM information_schema.columns
+          WHERE table_name = 'class_loadouts'
+            AND column_name IN ('equip_slot', 'socket_into_item_type_id')
+          ORDER BY column_name`);
+      assert.deepEqual(cols.rows.map((c) => c.column_name),
+        ['equip_slot', 'socket_into_item_type_id'],
+        'the worn/socketed directive columns must still exist');
+
+      // And still ACCEPT a directive -- the columns being present says nothing
+      // about the CHECK constraints still admitting a legal row.
+      const ins = await client.query(
+        `INSERT INTO class_loadouts (entity_type_id, item_type_id, quantity, equip_slot)
+         SELECT e.id, i.id, 1, 'main_hand'
+           FROM entity_types e, item_types i
+          WHERE e.name = 'Warrior' AND i.name = 'short sword'
+         RETURNING equip_slot`);
+      assert.strictEqual(ins.rowCount, 1, 'a kit row must still be insertable');
+      assert.strictEqual(ins.rows[0].equip_slot, 'main_hand');
+    } finally {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+    }
   });
 
   await t.test('every loadout row resolves to a real item type', async () => {

@@ -1,7 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { loadItemTypes, grantStartingLoadout } = require('../src/authority/items.js');
 const { sellItem } = require('../src/authority/trade.js');
 const { dropItem, claimItem } = require('../src/authority/loot.js');
 
@@ -92,15 +91,54 @@ async function cleanup(pool, userId) {
 // The granted instance worth the most gold (the short sword, for a Warrior),
 // read out of the catalog rather than hardcoded so this states "the valuable
 // piece of the class's loadout" instead of "item type 10".
+// A soulbound instance, granted.
+//
+// SOMET-509 CHANGED WHERE THIS COMES FROM, AND THE TICKET SAYS WHY IT MUST STILL
+// EXIST. This used to run grantStartingLoadout and then pick the most valuable
+// single-quantity item out of the kit it handed over. Every character now starts
+// unarmed -- class_loadouts is empty -- so grantStartingLoadout creates nothing
+// and there is no kit item to find.
+//
+// SOMET-509 is explicit that SOMET-277's guard is only MOOT FOR NEW CHARACTERS
+// and must not be deleted: it still applies to anything else granted soulbound,
+// and the exploit it closes (grant it, sell it, delete the character, keep the
+// account-wide gold) is a property of the soulbound FLAG, not of starting kits.
+//
+// So the instance is now granted directly, with soulbound = true, exactly as
+// grantStartingLoadout's own INSERT writes it -- and everything downstream, the
+// whole reason this file exists, is unchanged. What is no longer covered here
+// is the narrower claim that grantStartingLoadout marks its own instances
+// soulbound; with no rows to act on, that claim has no observable behaviour
+// left to assert, and asserting it against a hand-inserted row would be a test
+// checking its own fixture.
 async function grantedSellable(pool, characterId) {
   const r = await pool.query(
-    `SELECT pi.id, pi.item_type_id, pi.soulbound, it.value
-       FROM player_items pi JOIN item_types it ON it.id = pi.item_type_id
-      WHERE pi.character_id = $1 AND pi.quantity = 1 AND it.value > 0
-      ORDER BY it.value DESC, pi.id ASC LIMIT 1`,
+    `INSERT INTO player_items (character_id, item_type_id, quantity, soulbound)
+     SELECT $1, it.id, 1, true
+       FROM item_types it
+      WHERE it.category = 'weapon' AND it.value > 0
+      ORDER BY it.value DESC, it.id ASC
+      LIMIT 1
+     RETURNING id, item_type_id, soulbound`,
     [characterId],
   );
-  assert.equal(r.rowCount, 1, 'the class loadout granted no single-quantity item with a value');
+  assert.equal(r.rowCount, 1, 'the catalog has no valued weapon to grant, so nothing below is tested');
+  assert.equal(r.rows[0].soulbound, true,
+    'the granted instance must be soulbound -- without this the guard has nothing to refuse');
+
+  // ...and WORN, because SOMET-493's grant equipped what it handed over and the
+  // first test below depends on that: sellItem's SOMET-484 backstop ('unequip
+  // it first') sits AHEAD of the soulbound refusal, and both are exercised in
+  // order precisely so the soulbound branch cannot be deleted while the equip
+  // check keeps the test green. An unworn fixture would skip straight past the
+  // first guard and quietly stop testing the ordering.
+  const eq = await pool.query(
+    `INSERT INTO player_equipment (character_id, slot, item_id)
+     SELECT $1, it.slot, $2 FROM item_types it WHERE it.id = $3
+     RETURNING slot`,
+    [characterId, r.rows[0].id, r.rows[0].item_type_id],
+  );
+  assert.equal(eq.rowCount, 1, 'the granted instance must end up on the paper doll');
   return r.rows[0];
 }
 
@@ -189,13 +227,11 @@ test('SOMET-277: a GRANTED starting-loadout instance cannot be sold, and the ide
   try {
     const fx = await createFixture(pool, 'sell');
     userId = fx.userId;
-    const itemTypes = await loadItemTypes(pool);
 
-    assert.equal(await grantStartingLoadout(pool, fx.character, itemTypes), true, 'grant must succeed');
-
+    // SOMET-509: no grantStartingLoadout call any more -- with class_loadouts
+    // empty it grants nothing. grantedSellable creates the soulbound instance
+    // directly; see its header.
     const granted = await grantedSellable(pool, fx.character.id);
-    assert.equal(granted.soulbound, true,
-      'grantStartingLoadout must mark the instances it creates soulbound -- without this the guard has nothing to refuse');
     const looted = await lootedTwin(pool, fx.character.id, granted.item_type_id);
 
     const items = [
@@ -287,9 +323,8 @@ test('SOMET-277/SOMET-480: a GRANTED instance survives a drop-and-repick still B
   try {
     const fx = await createFixture(pool, 'drop');
     userId = fx.userId;
-    const itemTypes = await loadItemTypes(pool);
-    assert.equal(await grantStartingLoadout(pool, fx.character, itemTypes), true, 'grant must succeed');
-
+    // SOMET-509: no grantStartingLoadout call -- class_loadouts is empty, so it
+    // grants nothing. grantedSellable creates the soulbound instance directly.
     const granted = await grantedSellable(pool, fx.character.id);
     const looted = await lootedTwin(pool, fx.character.id, granted.item_type_id);
     const items = [
