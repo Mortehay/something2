@@ -2,6 +2,7 @@
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
         tiles-generate tiles-export tiles-seamless tiles-seed \
+        entities-generate entities-export entities-cutout entities-seed \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
@@ -274,6 +275,46 @@ tiles-seamless:
 
 tiles-seed:
 	$(COMPOSE) exec -T backend node scripts/seed-tile-textures.js $(if $(FORCE),--force)
+
+# --- Entity art ----------------------------------------------------------
+#
+# The same four steps for props and creatures, with one swap: tiles are ground
+# and get made seamless, entities are silhouettes and get their backdrop cut
+# out instead. Skipping entities-cutout ships every prop inside an opaque white
+# square, so entities-seed refuses art that has not been through it.
+#
+#   make entities-generate PROVIDER="desktop gpu" OBJECTS=1   # 11 props first
+#   make entities-export
+#   make entities-cutout
+#   make entities-seed
+#
+# OBJECTS=1 limits the run to world props; CREATURES=1 to the bestiary (293 of
+# them). Same PROVIDER/FORCE/ONLY/DRY/NOPIN as the tile target. Each entity
+# gets ONE STILL -- directional walk sets remain a sprite-gen job.
+#
+# LOCAL=1 generates through the in-compose sprite-gen service instead of a
+# remote provider, and for entities that is usually what you want. The remote
+# SDXL + pixel-art model draws ground textures beautifully and refuses to draw
+# an isolated object: ask it for one tree and it returns a tileset of trees or
+# a framed gallery card on a checkered backdrop, which no cutout can rescue.
+# sprite-gen asks for an isolated subject on a flat field and keys the
+# background out itself, so its output arrives already transparent and needs
+# no entities-cutout pass. It is sd-turbo on CPU -- about a minute an entity
+# against the remote's five seconds.
+entities-generate:
+	$(COMPOSE) exec -T backend node scripts/generate-entity-textures.js \
+		$(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(FORCE),--force) \
+		$(if $(ONLY),--only "$(ONLY)") $(if $(DRY),--dry-run) $(if $(NOPIN),--no-pin) \
+		$(if $(OBJECTS),--objects-only) $(if $(CREATURES),--creatures-only) $(if $(LOCAL),--local)
+
+entities-export:
+	$(COMPOSE) exec -T backend node scripts/export-entity-textures.js
+
+entities-cutout:
+	python3 tools/cutout-entity-textures.py $(if $(CHECK),--check) $(if $(FORCE),--force)
+
+entities-seed:
+	$(COMPOSE) exec -T backend node scripts/seed-entity-textures.js $(if $(FORCE),--force)
 # Regenerate the passive tree and upsert it. Safe to re-run: nodes are upserted
 # by their stable generated key, never deleted, so no character_passives row is
 # ever orphaned. An admin's edited kind/label/grants survive a plain run --

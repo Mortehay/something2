@@ -474,17 +474,25 @@ async function seedCatalogs(pool) {
 
   let decorations = 0;
   for (const d of NEW_DECORATIONS) {
-    // Column list and ON CONFLICT behaviour mirror
-    // 1714440042000_decoration_types.js's INSERT exactly: DO NOTHING, not DO
-    // UPDATE, so an admin who has already edited one of these decoration
-    // entity types is never overwritten back to the seed defaults.
+    // Was DO NOTHING, mirroring 1714440042000_decoration_types.js, so an admin
+    // who edited one of these was never overwritten back to seed defaults.
+    //
+    // That policy also made a gap unfixable: these four rows were seeded with
+    // no prompt, so `make entities-generate` could never draw them and they
+    // rendered as solid coloured squares forever. DO NOTHING meant adding a
+    // prompt to the seed file could not reach an existing database either.
+    //
+    // The narrowest fix that keeps the policy: fill prompt ONLY when the
+    // stored one is empty. An edited prompt still wins; every other column is
+    // still left alone.
     await pool.query(
       `INSERT INTO entity_types
-        (name, is_creature, walkable, render_mode, spawn_tiles, chance, display_width, display_height, color)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9)
-       ON CONFLICT (name) DO NOTHING`,
+        (name, is_creature, walkable, render_mode, spawn_tiles, chance, display_width, display_height, color, prompt)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,COALESCE($10, ''))
+       ON CONFLICT (name) DO UPDATE
+         SET prompt = COALESCE(NULLIF(entity_types.prompt, ''), EXCLUDED.prompt)`,
       [d.name, d.is_creature, d.walkable, d.render_mode, JSON.stringify(d.spawn_tiles),
-       d.chance, d.display_width, d.display_height, d.color],
+       d.chance, d.display_width, d.display_height, d.color, d.prompt ?? null],
     );
     decorations += 1;
   }
