@@ -1,7 +1,7 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
-        tiles-generate tiles-export tiles-seed \
+        tiles-generate tiles-export tiles-seamless tiles-seed \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
@@ -260,6 +260,16 @@ tiles-generate:
 
 tiles-export:
 	$(COMPOSE) exec -T backend node scripts/export-tile-textures.js
+
+# Make the exported textures tile against themselves. Runs on the HOST (needs
+# Pillow), not in a container, because no service image carries an image
+# library and adding one to shrink a seed asset is a poor trade.
+#
+# Order matters: generate -> export -> seamless -> seed. CHECK=1 measures the
+# seam score without writing (0 is perfect); PREVIEW=grass writes a 2x2 tiling
+# to /tmp so a seam is visible if one survives.
+tiles-seamless:
+	python3 tools/make-tiles-seamless.py $(if $(CHECK),--check) $(if $(PREVIEW),--preview "$(PREVIEW)")
 
 tiles-seed:
 	$(COMPOSE) exec -T backend node scripts/seed-tile-textures.js $(if $(FORCE),--force)

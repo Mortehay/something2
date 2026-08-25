@@ -30,6 +30,19 @@ const assetStore = require('../src/services/assetStore.js');
 const OUT_DIR = path.resolve(__dirname, '../seeds/textures/tiles');
 const MANIFEST = path.resolve(__dirname, '../seeds/textures/tiles.json');
 
+// The export runs as root inside the backend container and writes onto a bind
+// mount, so without this every exported PNG lands root-owned and the host user
+// cannot re-touch it -- `make tiles-seamless`, an editor, or a plain rm all
+// fail with EPERM. Match whatever owns seeds/, which is the host user who
+// cloned the repo. Best effort: on a setup where the ids do not apply this is
+// simply a no-op rather than a failed export.
+function matchOwner(target, referenceDir) {
+  try {
+    const ref = fs.statSync(referenceDir);
+    fs.chownSync(target, ref.uid, ref.gid);
+  } catch (_) { /* not fatal -- the bytes are written either way */ }
+}
+
 async function readObject(key) {
   const stream = await assetStore.getObjectStream(key);
   const chunks = [];
@@ -52,7 +65,9 @@ async function exportTileTextures(pool, { only = null } = {}) {
     try {
       const buf = await readObject(tile.image);
       const file = `${tile.name}.png`;
-      fs.writeFileSync(path.join(OUT_DIR, file), buf);
+      const dest = path.join(OUT_DIR, file);
+      fs.writeFileSync(dest, buf);
+      matchOwner(dest, path.resolve(__dirname, '../seeds'));
       bytes += buf.length;
       // The prompt and biome ride along so a future reader can tell what a
       // committed PNG was drawn from without digging through the database it
@@ -71,6 +86,8 @@ async function exportTileTextures(pool, { only = null } = {}) {
   }
   manifest.sort((a, b) => a.name.localeCompare(b.name));
   fs.writeFileSync(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
+  matchOwner(MANIFEST, path.resolve(__dirname, '../seeds'));
+  matchOwner(OUT_DIR, path.resolve(__dirname, '../seeds'));
   return { exported: manifest.length, bytes, failed };
 }
 

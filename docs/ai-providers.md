@@ -316,6 +316,7 @@ the catalog, and only the first needs a GPU.
 ```
 make tiles-generate PROVIDER="desktop gpu"    # pin, pick biomes, draw what's missing
 make tiles-export                             # MinIO -> backend/seeds/textures/tiles/
+make tiles-seamless                           # make each texture tile against itself
 make tiles-seed                               # committed PNGs -> MinIO, on any machine
 ```
 
@@ -353,6 +354,39 @@ reappear on another. `tiles-seed` leaves a locally-generated texture alone unles
 
 The catalog is roughly 15–20 MB of PNG at 512px. That is the price of not needing
 a GPU to see the game as intended.
+
+### Seamless tiling
+
+A raw generated texture has arbitrary edges, so a field of one tile reads as a
+grid of stamps. Three things are worth knowing.
+
+**The provider cannot do it.** A1111 generates seamless textures with circular
+padding in the conv layers; this service's `txt2img` exposes no `tiling`
+parameter, so that route is closed. And asking in words makes things worse —
+see the table below.
+
+**Diamonds need ordinary wrap-seamlessness, not something special.** The square
+is stretched into the iso diamond and a tile's neighbour is drawn at exactly a
+half-tile offset, so the pixel across a shared diamond edge is the same texture
+sampled at `(x - W/2, y - H/2)`. Continuity under wraparound gives continuity
+across every diamond edge.
+
+**So it is done afterwards**, by `make tiles-seamless`: wrap the image by half
+its size, which moves the four edges into the middle as a cross and leaves two
+formerly-adjacent columns as the new border; heal that cross by blending the
+un-offset image back over a feathered band; then weld the borders so opposite
+edges are pixel-identical rather than merely close.
+
+```
+make tiles-seamless CHECK=1              # measure only; 0 is a perfect seam
+make tiles-seamless PREVIEW=grass        # 2x2 tiling written to /tmp
+```
+
+Measured over the 50-tile catalog: mean seam score **21.1 → 3.7**. Two things
+that sound better and are not — a second offset-heal pass (measured *worse*,
+7.7 → 12.0, it blurs twice) and a whole-image cross-fade with a mirrored copy
+(matching edges, but it ghosts the whole texture and imposes kaleidoscope
+symmetry).
 
 ### Writing a tile prompt
 
