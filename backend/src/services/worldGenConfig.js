@@ -31,7 +31,39 @@ function toSafeRects(raw) {
     : s));
 }
 
-function buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes }) {
+// SOMET-510. The PORTAL endpoints inside this world, as world-pixel points.
+//
+// Callers hand this the same `fetchLinks(pool, worldId)` rows they already use
+// for `doorways`, so no call site grows a query. A world's own outgoing PORTAL
+// rows carry BOTH ends of every portal that touches it, because setPortalLink
+// (services/mapLinks.js) writes a mirror row -- the far endpoint is the
+// from_x/from_y of the mirror, in the mirror's own world.
+//
+// Why this is mapped HERE and not read off the row: it feeds
+// generateChunkDecorations' blocker exclusion, so the REST /chunk preview and
+// the authority's ServerMap must both have it or they place different
+// decorations and rubber-band. That is exactly the silent divergence this
+// module's header exists to prevent, and decoration_clearance.test.js pins
+// every call site by source text the way the authority's SELECT is pinned.
+function toPortalPoints(links) {
+  if (!Array.isArray(links)) return [];
+  const out = [];
+  for (const l of links) {
+    if (!l || l.edge !== 'PORTAL') continue;
+    // `l.from_x == null` FIRST, before Number(): a compass row has NULL
+    // coordinates and Number(null) is 0, which Number.isFinite happily accepts.
+    // Left to it, a row with a missing coordinate would declare a portal at
+    // tile (0,0) and strip the blockers off the map's north-west corner for no
+    // reason at all -- a silent, invisible wrong answer.
+    if (l.from_x == null || l.from_y == null) continue;
+    const x = Number(l.from_x), y = Number(l.from_y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    out.push({ x, y });
+  }
+  return out;
+}
+
+function buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes, links }) {
   return {
     seed: Number(row.seed),
     chunkSize: row.chunk_size,
@@ -41,6 +73,10 @@ function buildWorldGenConfig({ row, tileTypes, doorways, villages, biomes }) {
     doorways: doorways || [],
     villages: villages || [],
     entry_spawn: row.entry_spawn,
+    // SOMET-510. A caller that omits `links` gets [], never undefined: a
+    // missing mapping must present as "this world has no portals", which is
+    // what a world with no PORTAL rows produces anyway.
+    portals: toPortalPoints(links),
     biomes: biomes || [],
     // null (not undefined) so worldConfig's derive-from-bounds branch runs.
     biomeCell: Number.isFinite(row.biome_cell) ? row.biome_cell : null,

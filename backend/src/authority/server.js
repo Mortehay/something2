@@ -678,6 +678,10 @@ function attachAuthority(httpServer, pool, opts = {}) {
         // empty") before ever reaching a placement.
         const mapGenConfig = buildWorldGenConfig({
           row, tileTypes, doorways: [...links.keys()], villages, biomes,
+          // SOMET-510: PORTAL endpoints for the blocking-decoration clearance.
+          // The SAME rows /api/worlds/:id/chunk passes, so the ServerMap overlay
+          // and the REST preview cannot disagree about which tiles block.
+          links: linkRows,
         });
         const compassDoorways = compassRows.map((l) => ({ edge: l.edge, toWorldId: l.to_world_id, toName: l.to_name || l.to_world_id }));
         const map = new ServerMap({ ...mapGenConfig, decorationDefs });
