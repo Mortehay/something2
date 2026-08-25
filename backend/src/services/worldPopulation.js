@@ -177,10 +177,10 @@ async function populateWorld(client, worldRow, { rngSeed }) {
 
   const tileTypes = await loadTileTypes(client);
   const villages = await fetchVillages(client, worldRow.id);
-  const doorways = (await fetchLinks(client, worldRow.id))
-    .filter((l) => l.edge !== 'PORTAL').map((l) => l.edge);
+  const links = await fetchLinks(client, worldRow.id);
+  const doorways = links.filter((l) => l.edge !== 'PORTAL').map((l) => l.edge);
   const biomes = await loadBiomes(client, worldRow.biomes);
-  const cfg = buildWorldGenConfig({ row: worldRow, tileTypes, doorways, villages, biomes });
+  const cfg = buildWorldGenConfig({ row: worldRow, tileTypes, doorways, villages, biomes, links });
 
   const scatter = placeMapCreatures(cfg, density.scatterCount, hostileTypes, rngSeed);
   const packed = placeCreaturePacks(

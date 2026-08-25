@@ -3712,6 +3712,11 @@ app.get('/api/worlds/:id/chunk', async (req, res) => {
     ]);
     const worldCfg = buildWorldGenConfig({
       row: world, tileTypes, doorways: linkRows.map((l) => l.edge), villages, biomes,
+      // SOMET-510: `links` is what carries the PORTAL endpoints the blocking-
+      // decoration clearance keeps clear. The authority passes the same rows to
+      // the same builder, so this endpoint's generateChunkDecorations call still
+      // agrees with the authority's field-for-field.
+      links: linkRows,
     });
 
     // Cache hit?
@@ -3750,11 +3755,12 @@ app.get('/api/worlds/:id/preview', async (req, res) => {
     if (!world) return res.status(404).json({ error: 'world not found' });
 
     const tileTypes = await getTileTypesMap();
-    const doorways = (await fetchLinks(pool, world.id)).map((l) => l.edge);
+    const links = await fetchLinks(pool, world.id);
+    const doorways = links.map((l) => l.edge);
     const villages = await fetchVillages(pool, world.id);
     const biomes = await loadBiomes(pool, world.biomes);
     const data = generateWorldPreview(
-      buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes }),
+      buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes, links }),
       PREVIEW_DIM,
     );
     worldPreviewCache.set(worldId, data);
@@ -3781,13 +3787,14 @@ app.get('/api/worlds/:id/overview', async (req, res) => {
     if (!world) return res.status(404).json({ error: 'world not found' });
 
     const tileTypes = await getTileTypesMap();
-    const doorways = (await fetchLinks(pool, world.id))
+    const links = await fetchLinks(pool, world.id);
+    const doorways = links
       .filter((l) => l.edge !== 'PORTAL')
       .map((l) => ({ edge: l.edge, toName: l.to_name }));
     const villages = await fetchVillages(pool, world.id);
     const biomes = await loadBiomes(pool, world.biomes);
     const data = generateWorldOverview(
-      buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes }),
+      buildWorldGenConfig({ row: world, tileTypes, doorways, villages, biomes, links }),
       centerCol, centerRow, OVERVIEW_SPAN, OVERVIEW_STEP,
     );
     // Chests are point entities with a real stored world-pixel x/y (mapChestRow),
