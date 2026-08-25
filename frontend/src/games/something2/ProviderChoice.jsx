@@ -70,7 +70,9 @@ export function ProviderChoice({ value, onChange }) {
         ))}
       </select>
       <div style={{ fontSize: '1rem', opacity: 0.6, marginTop: '0.25rem' }}>
-        Which service draws this image. "Default" follows the active provider in AI Providers settings.
+        Which service draws this image, for this generation only — Save Changes does not
+        store it. The saved choice is "Generation service" below. "Default" follows the
+        active provider in AI Providers settings.
       </div>
     </div>
   );

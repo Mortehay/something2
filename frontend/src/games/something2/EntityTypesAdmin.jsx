@@ -597,8 +597,12 @@ const KeyLabel = styled.span`
 function SpritePanel({ entity, capability, capabilityDown }) {
   const [expanded, setExpanded] = useState(false);
   const [backend, setBackend] = useState('auto');
-  // SOMET-331/346: which service draws this directional sprite set.
-  const [provider, setProvider] = useState('');
+  // SOMET-331/346: which service draws this directional sprite set. Seeded
+  // from the entity's SAVED pin so this one-job selector and the stored
+  // "Generation service" agree on open -- see the note in TileTypesAdmin.
+  const [provider, setProvider] = useState(
+    () => pinToSelectValue(entity.ai_provider_mode, entity.ai_provider_id),
+  );
   // The local service being offline must not block a job bound for a remote
   // provider. See willUseLocal.
   const runsLocally = useWillUseLocal(provider);
@@ -762,8 +766,11 @@ function EntityTexturePanel({ entity, prompt }) {
   const [jobId, setJobId] = useState(null);
   const [biome, setBiome] = useState('');     // '' = no biome art context
   // '' = follow the active provider; 'local' = pin to sprite-gen; '<id>' = pin
-  // to that provider. See generationJobPayload.withOptionalProvider.
-  const [provider, setProvider] = useState('');
+  // to that provider. See generationJobPayload.withOptionalProvider. Seeded
+  // from the entity's SAVED pin for the same reason as the sprite panel above.
+  const [provider, setProvider] = useState(
+    () => pinToSelectValue(entity.ai_provider_mode, entity.ai_provider_id),
+  );
   const { data: capability } = useSpriteCapability();
   const { biomes, isLoadingBiomes } = useBiomes();
   const generate = useGenerateEntityJob();
@@ -1350,7 +1357,14 @@ function EntityTypesAdmin() {
               {/* Generation needs a saved row to attach the result to, so it
                   only appears once the entity exists. */}
               {editingEntity && (
-                <EntityTexturePanel entity={liveEditingEntity} prompt={formData.prompt} />
+                /* Keyed by id for the same reason as the tile panel: without
+                   it React reuses the instance and the next entity inherits
+                   this one's provider choice, biome and in-flight job id. */
+                <EntityTexturePanel
+                  key={editingEntity.id}
+                  entity={liveEditingEntity}
+                  prompt={formData.prompt}
+                />
               )}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>

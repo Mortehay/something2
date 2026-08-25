@@ -298,7 +298,16 @@ function TileSpritePanel({ tile }) {
   const [biome, setBiome] = useState('');     // '' = no biome art context
   // '' = follow the active provider; 'local' = pin to sprite-gen; '<id>' = pin
   // to that provider. See generationJobPayload.withOptionalProvider.
-  const [provider, setProvider] = useState('');
+  //
+  // Seeded from the tile's SAVED pin rather than always ''. This selector is a
+  // one-job override and Save Changes does not write it -- but two dropdowns a
+  // few rows apart, one of which persists and one of which silently does not,
+  // reads as a bug every time. Starting it on whatever the tile is actually
+  // pinned to makes the two agree on open, so changing it is visibly a
+  // deviation from the saved choice instead of a setting that "didn't save".
+  const [provider, setProvider] = useState(
+    () => pinToSelectValue(tile.ai_provider_mode, tile.ai_provider_id),
+  );
   const { data: capability } = useSpriteCapability();
   const { biomes, isLoadingBiomes } = useBiomes();
   const generate = useGenerateTileJob();
@@ -619,7 +628,10 @@ function TileTypesAdmin() {
                 />
               </FormGroup>
 
-              {editingTile && <TileSpritePanel tile={editingTile} />}
+              {/* Keyed by id so switching tiles remounts the panel: without it
+                  React reuses the instance and the next tile inherits this
+                  one's provider choice, biome and in-flight job id. */}
+              {editingTile && <TileSpritePanel key={editingTile.id} tile={editingTile} />}
 
               <div style={{ display: 'flex', gap: '2rem' }}>
                 <CheckboxGroup>
