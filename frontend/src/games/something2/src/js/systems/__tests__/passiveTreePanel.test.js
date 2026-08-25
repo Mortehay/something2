@@ -67,14 +67,12 @@ describe("world <-> screen", () => {
 
   it("clamps zoom to the declared range", () => {
     expect(MIN_ZOOM).toBe(0.2);
-    expect(MAX_ZOOM).toBe(2);
-    expect(DEFAULT_ZOOM).toBe(0.35);
-    expect(clampZoom(0.01)).toBe(0.2);
-    expect(clampZoom(50)).toBe(2);
-    expect(clampZoom(0.75)).toBe(0.75);
-    // A NaN zoom would make every subsequent coordinate non-finite, and Canvas
-    // 2D silently drops non-finite coords -- the whole layer would vanish with
-    // no error at all (SOMET-488).
+    expect(MAX_ZOOM).toBe(2.5);
+    expect(DEFAULT_ZOOM).toBe(0.55);
+    expect(clampZoom(1)).toBe(1);
+    expect(clampZoom(0.05)).toBe(0.2);
+    expect(clampZoom(5)).toBe(2.5);
+    expect(clampZoom("not-a-number")).toBe(DEFAULT_ZOOM);
     expect(clampZoom(Number.NaN)).toBe(DEFAULT_ZOOM);
   });
 
@@ -425,7 +423,7 @@ describe("the single-writer rule survives this feature", () => {
     // Both HTTP calls are fire-and-forget by construction: allocatePassive
     // resolves to `true`, respecPassives to `{gold}` only, so there is no
     // progression object in the client's hands to assign in the first place.
-    expect(client).toMatch(/await parseOrThrow\(res\);\n\s*return true;/);
+    expect(client).toMatch(/await parseOrThrow\(res\);\r?\n\s*return true;/);
     expect(client).toMatch(/return \{ gold: body\.gold \};/);
     expect(game).not.toMatch(/allocatePassive\([\s\S]{0,200}?this\.progression\s*=/);
     expect(game).not.toMatch(/respecPassives\(\)[\s\S]{0,400}?this\.progression\s*=/);

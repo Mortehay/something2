@@ -51,9 +51,10 @@ test('guard 4: 1806 nodes — 1530 minor, 240 notable, 30 keystone, 6 start', ()
   assert.strictEqual(tree.nodes.filter((n) => n.sector === 'core').length, 30);
 });
 
-test('every key is unique, and 2142 edges are produced', () => {
-  assert.strictEqual(new Set(tree.nodes.map((n) => n.key)).size, 1806);
-  assert.strictEqual(tree.edges.length, 2142);
+test('every key is unique, and 2382 edges are produced', () => {
+  const keys = new Set(tree.nodes.map((n) => n.key));
+  assert.strictEqual(keys.size, 1806);
+  assert.strictEqual(tree.edges.length, 2382);
 });
 
 test('the six start nodes are the only nodes carrying a start_class', () => {

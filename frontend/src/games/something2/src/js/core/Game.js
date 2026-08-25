@@ -22,7 +22,7 @@ import {
     buildTreeIndex, hitNodeAt, clampZoom, zoomAbout, DEFAULT_ZOOM,
 } from '../systems/passiveTreePanel.js';
 import {
-    fetchPassiveTree, allocatePassive, respecPassives, fetchRespecQuote, fetchStartClass,
+    fetchPassiveTree, allocatePassive, unallocatePassive, respecPassives, fetchRespecQuote, fetchStartClass,
 } from '../net/passiveTreeClient.js';
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
@@ -261,6 +261,8 @@ export class Game {
         this.passiveStartClass = null;
         this.passiveView = { panX: GAME_WIDTH / 2, panY: GAME_HEIGHT / 2, zoom: DEFAULT_ZOOM };
         this.passiveDrag = null;
+        this.passiveSearchText = "";
+        this.passiveSearchFocused = false;
         // Contract §6.4. The COST is the server's number, refetched on every
         // open; it is never recomputed from respec_base_gold x level here,
         // which is the drift systems/characterTab.js's F2 rule records.
@@ -558,6 +560,7 @@ export class Game {
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
                     this.banks = Array.isArray(msg.banks) ? msg.banks : [];
                     this.progression = msg.progression || null;
+                    this._refreshProgressionBundle();
                     // SOMET-472 -- a Cultist pays every mana cost in HP, so
                     // the mana orb would be a bar that never moves. Server-
                     // supplied, never inferred from the class name here: the
@@ -1257,7 +1260,11 @@ export class Game {
                 // The local player's own effects, for the HUD line. The rings
                 // at their feet come from this.player.effects via drawCreature.
                 effects: this.player.effects || null,
-                progression: this.progression,
+                progression: this.progression ? {
+                    ...this.progression,
+                    xpFloor: this.progressionExtras.xpFloor,
+                    xpToNext: this.progressionExtras.xpToNext,
+                } : null,
                 // SOMET-476 — the passive-tree overlay. Every field here is
                 // read straight off the single-writer progression row rather
                 // than cached anywhere: a kill that levels the player up must
@@ -1274,6 +1281,8 @@ export class Game {
                 passiveRespecBusy: this.passiveRespecBusy,
                 passiveHoverX: this.passiveTreeOpen ? (this._cursorX ?? null) : null,
                 passiveHoverY: this.passiveTreeOpen ? (this._cursorY ?? null) : null,
+                passiveSearchText: this.passiveSearchText,
+                passiveSearchFocused: this.passiveSearchFocused,
                 // SOMET-493. `enabled` false short-circuits the whole pass in
                 // RenderSystem, so a player who never turns it on pays one
                 // property read per frame.
@@ -1356,6 +1365,7 @@ export class Game {
     closePassiveTree() {
         this.passiveTreeOpen = false;
         this.passiveDrag = null;
+        this.passiveSearchFocused = false;
     }
 
     // Contract §6.4's affordability inputs, refetched rather than cached with
@@ -1375,24 +1385,27 @@ export class Game {
     // [X], the respec button) and is consumed here, or it ARMS a pan -- and
     // whether that was a pan or a click on a node is decided on mouseup by
     // `moved`, exactly as the inventory drag decides between a drag and a click.
-    _handlePassivePress(x, y) {
+    _handlePassivePress(x, y, isRightClick = false, shiftKey = false) {
         const layout = this.renderSystem && this.renderSystem._passiveLayout;
         if (layout) {
+            if (isRightClick) {
+                const node = hitNodeAt(layout, x, y);
+                if (node && node.state === 'allocated' && node.kind !== 'start') {
+                    unallocatePassive(node.id).catch((err) => this._showToast(err.message));
+                }
+                return;
+            }
+
             const hit = layout.hitAreas.find(
-                (a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h
-                    && (a.kind === 'passiveclose' || a.kind === 'passiverespec'),
+                (a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h,
             );
             if (hit && hit.kind === 'passiveclose') { this.closePassiveTree(); return; }
+            if (hit && hit.kind === 'passivesearch') { this.passiveSearchFocused = true; return; }
+            if (hit && hit.kind === 'passivesearchclear') { this.passiveSearchText = ""; return; }
             if (hit && hit.kind === 'passiverespec') {
-                // The hit area exists ONLY while the button is enabled
-                // (layoutPassiveTree publishes it conditionally), so there is
-                // no second affordability check here to drift from the first.
                 this.passiveRespecBusy = true;
                 respecPassives()
                     .then(({ gold }) => {
-                        // gold ONLY. The progression comes back over the
-                        // ordered websocket frame; applying the HTTP body here
-                        // would be the second writer F1 removed.
                         if (Number.isFinite(gold)) this.gold = gold;
                         return this._refreshRespecQuote();
                     })
@@ -1401,24 +1414,21 @@ export class Game {
                 return;
             }
         }
+        if (this.passiveSearchFocused) this.passiveSearchFocused = false;
         this.passiveDrag = { startX: x, startY: y, lastX: x, lastY: y, moved: false };
     }
 
-    // A press that never travelled: resolve it against the node circles of the
-    // frame the player was actually looking at.
-    _handlePassiveClick(x, y) {
+    _handlePassiveClick(x, y, shiftKey = false) {
         const layout = this.renderSystem && this.renderSystem._passiveLayout;
         if (!layout) return;
         const node = hitNodeAt(layout, x, y);
-        // A LOCKED node is not clickable. The server refuses it too
-        // (passiveRules.isAllocatable), so this is an affordance, not a gate --
-        // but firing the request anyway would toast a refusal on every stray
-        // click in the tree.
+
+        if (shiftKey && node && layout.hover && layout.hover.id === node.id && layout.hover.path && layout.hover.path.length > 0) {
+            allocatePassive(layout.hover.path[0]).catch((err) => this._showToast(err.message));
+            return;
+        }
+
         if (!node || node.state !== 'allocatable') return;
-        // Fire and forget. The success body is discarded on purpose: the
-        // server's ordered `progression` websocket frame is the ONLY writer of
-        // this.progression (see the onProgression handler above and
-        // core/progressionExtras.js's F1 header).
         allocatePassive(node.id).catch((err) => this._showToast(err.message));
     }
 
@@ -1585,6 +1595,24 @@ export class Game {
                 return;
             }
 
+            if (this.passiveTreeOpen && this.passiveSearchFocused) {
+                if (e.key === 'Escape' || e.key === 'Enter') {
+                    this.passiveSearchFocused = false;
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    return;
+                }
+                if (e.key === 'Backspace') {
+                    this.passiveSearchText = (this.passiveSearchText || '').slice(0, -1);
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    return;
+                }
+                if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                    this.passiveSearchText = (this.passiveSearchText || '') + e.key;
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    return;
+                }
+            }
+
             if (isKey('escape')) {
                 if (typeof e.preventDefault === 'function') e.preventDefault();
                 console.log("Escape pressed, current state:", this.state);
@@ -1673,9 +1701,13 @@ export class Game {
         // tab-away never produces the mouseup that would otherwise end the
         // hold, and a stuck auto-attack is not something a player can undo
         // without reloading -- the same reason both already clear this.keys.
-        this._contextMenuHandler = () => {
+        this._contextMenuHandler = (e) => {
             this.keys = {};
             this._attackHeld = false;
+            if (this.passiveTreeOpen) {
+                if (typeof e?.preventDefault === 'function') e.preventDefault();
+                this._handlePassivePress(this._cursorX ?? 0, this._cursorY ?? 0, true);
+            }
         };
 
         this._blurHandler = () => {
@@ -1713,7 +1745,7 @@ export class Game {
             }
         };
         this._mouseDownHandler = (e) => {
-            if (e.button !== 0) return;
+            if (e.button !== 0 && e.button !== 2) return;
             if (this.state !== 'playing' || !this.chunked || !this.authorityClient) return;
             // Locate the press by its own event and keep the tracked cursor in
             // step, so every path below (panel hit-tests and the attack aim)
@@ -1721,6 +1753,18 @@ export class Game {
             const pt = this._canvasPoint(e);
             this._cursorX = pt.x;
             this._cursorY = pt.y;
+
+            if (this.passiveTreeOpen) {
+                if (e.button === 2) {
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    this._handlePassivePress(this._cursorX ?? 0, this._cursorY ?? 0, true);
+                    return;
+                }
+                this._handlePassivePress(this._cursorX ?? 0, this._cursorY ?? 0, false, e.shiftKey);
+                return;
+            }
+            if (e.button !== 0) return;
+
             // While a panel is open, clicks hit-test it and must NOT also
             // fire an attack. Shop is checked first — the two panels never
             // stack (see the 'e'/'i' key handlers above), but if they ever
@@ -1731,10 +1775,6 @@ export class Game {
             }
             if (this.bankOpen) {
                 this._handleBankClick(this._cursorX ?? 0, this._cursorY ?? 0);
-                return;
-            }
-            if (this.passiveTreeOpen) {
-                this._handlePassivePress(this._cursorX ?? 0, this._cursorY ?? 0);
                 return;
             }
             if (this.inventoryOpen) {
@@ -1834,7 +1874,7 @@ export class Game {
                 // The panel closed while the button was down (Escape, a world
                 // change): there is no layout left to resolve against.
                 if (!this.passiveTreeOpen) return;
-                this._handlePassiveClick(pan.startX, pan.startY);
+                this._handlePassiveClick(pan.startX, pan.startY, pan.shiftKey);
                 return;
             }
             const drag = this.inventoryDrag;

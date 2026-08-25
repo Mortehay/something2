@@ -72,16 +72,22 @@ async function seedPassiveTree(db, { force = false, quiet = false } = {}) {
   }
   log(`passive_nodes: ${nodes.length} upserted${force ? ' (--force: labels/kinds/grants overwritten)' : ''}`);
 
-  // A node in the database that the generator no longer produces is REPORTED,
-  // never deleted: someone may already have spent a point on it.
+  // A node in the database that the generator no longer produces:
   const stale = await db.query(
-    'SELECT key FROM passive_nodes WHERE key <> ALL($1::text[]) ORDER BY key',
+    'SELECT id, key FROM passive_nodes WHERE key <> ALL($1::text[]) ORDER BY key',
     [nodes.map((n) => n.key)],
   );
   if (stale.rows.length) {
-    log(`WARNING: ${stale.rows.length} node(s) exist in the database but not in the spec.`);
-    log('They were LEFT IN PLACE (a character may have allocated them). Remove them by hand if that is really what you want:');
-    for (const r of stale.rows.slice(0, 20)) log(`  ${r.key}`);
+    if (force) {
+      const staleIds = stale.rows.map(r => r.id);
+      await db.query('DELETE FROM character_passives WHERE node_id = ANY($1::int[])', [staleIds]);
+      await db.query('DELETE FROM passive_edges WHERE a_id = ANY($1::int[]) OR b_id = ANY($1::int[])', [staleIds]);
+      await db.query('DELETE FROM passive_nodes WHERE id = ANY($1::int[])', [staleIds]);
+      log(`passive_nodes: ${stale.rows.length} stale node(s) pruned from database`);
+    } else {
+      log(`WARNING: ${stale.rows.length} node(s) exist in the database but not in the spec.`);
+      log('They were LEFT IN PLACE (pass --force to prune).');
+    }
   }
 
   // Edges are not admin-editable, so they are reconciled in full. The generator

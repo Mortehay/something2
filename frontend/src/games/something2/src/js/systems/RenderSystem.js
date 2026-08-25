@@ -63,6 +63,32 @@ const LEVEL_TAG_STYLE = {
   lineWidth: 2,
 };
 
+const XP_BASE = 18;
+const XP_EXPONENT = 1.33;
+const MAX_LEVEL = 150;
+
+function levelWorth(level) {
+  const l = Math.min(MAX_LEVEL, Math.max(1, Math.floor(Number(level) || 1)));
+  return Math.round(XP_BASE * Math.pow(l, XP_EXPONENT));
+}
+
+const XP_FLOORS = (() => {
+  const floors = new Array(MAX_LEVEL + 1);
+  floors[1] = 0;
+  for (let l = 2; l <= MAX_LEVEL; l++) floors[l] = floors[l - 1] + levelWorth(l - 1);
+  return floors;
+})();
+
+function getXpFloor(level) {
+  const l = Math.min(MAX_LEVEL, Math.max(1, Math.floor(Number(level) || 1)));
+  return XP_FLOORS[l];
+}
+
+function getXpToNext(level) {
+  const l = Math.min(MAX_LEVEL, Math.max(1, Math.floor(Number(level) || 1)));
+  return l >= MAX_LEVEL ? Infinity : levelWorth(l);
+}
+
 export class RenderSystem {
   constructor(canvas, imageManager) {
     this.canvas = canvas;
@@ -228,6 +254,7 @@ export class RenderSystem {
     allocatedNodeIds = [], passivePoints = 0, startNodeId = null,
     passiveRespecCost = null, passiveRespecBusy = false,
     passiveHoverX = null, passiveHoverY = null,
+    passiveSearchText = "", passiveSearchFocused = false,
   }) {
     if (vfxDefs) this.vfxDefs = vfxDefs;
     // While any full-screen panel is up the cursor is being used to click ITS
@@ -418,6 +445,7 @@ export class RenderSystem {
         index: passiveIndex, view: passiveView, allocatedNodeIds, passivePoints, startNodeId,
         gold: gold ?? 0, respecCost: passiveRespecCost, respecBusy: passiveRespecBusy,
         hoverX: passiveHoverX, hoverY: passiveHoverY,
+        searchText: passiveSearchText, searchFocused: passiveSearchFocused,
       }, this._passiveHitAreas);
     }
 
@@ -1594,11 +1622,16 @@ export class RenderSystem {
     const level = (progression && progression.level) ? Number(progression.level) : 1;
     const experience = (progression && progression.experience != null) ? Number(progression.experience) : 0;
 
-    // XP curve calculations: base 100 per level
-    const xpFloor = 100 * (level - 1) * level / 2;
-    const xpToNext = 100 * level;
-    const into = Math.max(0, experience - xpFloor);
-    const pct = xpToNext > 0 ? Math.min(1, Math.max(0, into / xpToNext)) : 1;
+    const floor = (progression && typeof progression.xpFloor === "number")
+      ? progression.xpFloor
+      : getXpFloor(level);
+    const toNext = (progression && typeof progression.xpToNext === "number")
+      ? progression.xpToNext
+      : getXpToNext(level);
+
+    const isMax = !Number.isFinite(toNext) || level >= MAX_LEVEL;
+    const into = Math.max(0, experience - floor);
+    const pct = isMax ? 1 : (toNext > 0 ? Math.min(1, Math.max(0, into / toNext)) : 0);
 
     const orbRadius = 48;
     const barStartX = orbRadius * 2 + 36;
@@ -1610,26 +1643,33 @@ export class RenderSystem {
     ctx.save();
 
     // 1. Dark background track
-    ctx.fillStyle = "rgba(10, 12, 22, 0.85)";
+    ctx.fillStyle = "rgba(14, 10, 26, 0.9)";
     ctx.fillRect(barStartX, barY, barW, barH);
-    ctx.strokeStyle = "#334155";
+    ctx.strokeStyle = "#4c1d95";
     ctx.lineWidth = 1.5;
     ctx.strokeRect(barStartX, barY, barW, barH);
 
-    // 2. XP progress fill
+    // 2. XP progress fill (Rich vibrant purple / violet gradient filling left to right)
     const fillW = Math.max(0, Math.min(barW - 2, (barW - 2) * pct));
     if (fillW > 0) {
       const grad = ctx.createLinearGradient(barStartX, barY, barStartX, barY + barH);
-      grad.addColorStop(0, "#fbbf24");
-      grad.addColorStop(0.5, "#f59e0b");
-      grad.addColorStop(1, "#b45309");
+      grad.addColorStop(0, "#d8b4fe");  // Light lavender glow
+      grad.addColorStop(0.3, "#c084fc");
+      grad.addColorStop(0.7, "#9333ea"); // Vibrant purple
+      grad.addColorStop(1, "#581c87");  // Deep purple shadow
 
       ctx.fillStyle = grad;
       ctx.fillRect(barStartX + 1, barY + 1, fillW, barH - 2);
 
       // Top specular glow line on the fill
-      ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
       ctx.fillRect(barStartX + 1, barY + 1, fillW, 2);
+
+      // Leading edge highlight
+      if (!isMax && fillW < barW - 4) {
+        ctx.fillStyle = "rgba(232, 121, 249, 0.8)";
+        ctx.fillRect(barStartX + fillW - 1, barY + 1, 2, barH - 2);
+      }
     }
 
     // 3. Central Level Emblem Circle
@@ -1640,14 +1680,14 @@ export class RenderSystem {
     // Dark backdrop for the circle
     ctx.beginPath();
     ctx.arc(centerX, centerY, levelR, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(15, 17, 28, 0.95)";
+    ctx.fillStyle = "rgba(18, 12, 34, 0.96)";
     ctx.fill();
 
-    // Golden / metallic bezel
+    // Arcane / Purple-metallic bezel
     const lvlBezel = ctx.createLinearGradient(centerX - levelR, centerY - levelR, centerX + levelR, centerY + levelR);
-    lvlBezel.addColorStop(0, "#fbbf24");
-    lvlBezel.addColorStop(0.5, "#78350f");
-    lvlBezel.addColorStop(1, "#f59e0b");
+    lvlBezel.addColorStop(0, "#e9d5ff");
+    lvlBezel.addColorStop(0.5, "#6b21a8");
+    lvlBezel.addColorStop(1, "#c084fc");
 
     ctx.lineWidth = 2.5;
     ctx.strokeStyle = lvlBezel;
@@ -1670,14 +1710,16 @@ export class RenderSystem {
     ctx.strokeText(`${level}`, centerX, centerY);
     ctx.fillText(`${level}`, centerX, centerY);
 
-    // 4. Subtle XP numbers readout above the bar
+    // 4. XP numbers readout above the bar
     ctx.font = "10px monospace";
     ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
-    ctx.fillStyle = "#cbd5e1";
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
+    ctx.fillStyle = "#e9d5ff";
     ctx.textBaseline = "bottom";
 
-    const leftLabel = `${into} / ${xpToNext} XP (${Math.round(pct * 100)}%)`;
+    const leftLabel = isMax
+      ? `MAX LEVEL (${experience} XP)`
+      : `${into} / ${toNext} XP (${Math.round(pct * 100)}%)`;
     ctx.strokeText(leftLabel, (barStartX + centerX) / 2, barY - 3);
     ctx.fillText(leftLabel, (barStartX + centerX) / 2, barY - 3);
 

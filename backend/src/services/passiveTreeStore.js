@@ -190,6 +190,75 @@ async function allocateNode(pool, characterId, nodeId) {
   }
 }
 
+// Single node refund/unallocation.
+// Checks reachability: removing this node must NOT disconnect remaining allocated nodes.
+async function unallocateNode(pool, characterId, nodeId) {
+  const id = Math.floor(Number(nodeId));
+  if (!Number.isInteger(id) || id < 1) return { ok: false, reason: 'invalid node' };
+
+  const [tree, startNodeId] = await Promise.all([
+    loadTree(pool),
+    startNodeIdFor(pool, characterId),
+  ]);
+  const node = tree.byId.get(id);
+  if (!node) return { ok: false, reason: 'unknown node' };
+  if (node.kind === 'start') return { ok: false, reason: 'start node cannot be refunded' };
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await progressionStore().loadProgression(client, characterId, { forUpdate: true });
+    const allocated = await loadAllocatedIds(client, characterId);
+    if (!allocated.includes(id)) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'node is not allocated' };
+    }
+
+    const remaining = allocated.filter((x) => x !== id);
+    if (remaining.length > 0 && startNodeId != null) {
+      const remainingSet = new Set(remaining);
+      const visited = new Set();
+      const queue = [startNodeId];
+      visited.add(startNodeId);
+      while (queue.length > 0) {
+        const cur = queue.shift();
+        for (const neighbor of tree.adjacency.get(cur) || []) {
+          if (remainingSet.has(neighbor) && !visited.has(neighbor)) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+      for (const remId of remaining) {
+        if (!visited.has(remId)) {
+          await client.query('ROLLBACK');
+          return { ok: false, reason: 'cannot unallocate a bridge node (would disconnect remaining nodes)' };
+        }
+      }
+    }
+
+    await client.query(
+      'DELETE FROM character_passives WHERE character_id = $1 AND node_id = $2',
+      [characterId, id],
+    );
+    const refund = await client.query(
+      `UPDATE player_progression
+          SET passive_points = passive_points + 1, updated_at = now()
+        WHERE character_id = $1
+      RETURNING passive_points`,
+      [characterId],
+    );
+    const after = await loadAllocatedIds(client, characterId);
+    await client.query('COMMIT');
+    return { ok: true, allocatedNodeIds: after, passivePoints: Number(refund.rows[0].passive_points) };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // All-or-nothing (spec §5.4). Takes BOTH ids for the same reason the old
 // progressionStore.respec did: the allocation reset is per-CHARACTER, the gold
 // that pays for it is per-ACCOUNT.
@@ -308,8 +377,8 @@ module.exports = {
   invalidateTreeCache,
   startNodeIdFor,
   loadAllocatedIds,
-  passiveBundle,
   allocateNode,
+  unallocateNode,
   respecPassives,
   respecQuote,
   composeProgression,

@@ -6,21 +6,11 @@
 // order is not fixed by an array in the spec. Two runs are byte-identical, so
 // a tree change is a reviewable diff.
 //
-// SHAPE (spec §5.2). A shared core disc, six 60-degree sectors radiating out
-// of it, three ring bands per sector. Each ring band is a rows x cols polar
-// grid: rows are concentric arcs, columns are angular positions.
-//
-// EDGES. Rows are paths (col j <-> col j+1). Rungs join row i to row i+1 every
-// LAYOUT.rungStride columns STARTING AT COLUMN 0 -- starting at 0 is what makes
-// every row reachable from row 0, and therefore what makes the whole ring
-// reachable from the one edge that enters it. Three transition edges carry each
-// ring to the next at its left edge, middle and right edge, so a player has
-// real routing choice rather than a single mandatory corridor.
+// SHAPE: Authentic Path of Exile celestial passive tree.
+// True "через 1" double-spacing layout with rich shortcuts, expressway radial
+// elevators between rings, star spoke hubs, and cross-class bridges.
 const DEG = Math.PI / 180;
 
-// Math.round(-0.4) is -0. -0 serialises to 0 in JSON but compares false under
-// Object.is, so a determinism test that uses Object.is (and the one next door
-// does) would flag it. `|| 0` normalises it before the divide.
 function round2(v) {
   return (Math.round(v * 100) || 0) / 100;
 }
@@ -32,21 +22,12 @@ function polar(radius, angleDeg) {
   };
 }
 
-// `count` positions spread evenly over `total` slots, each at the centre of
-// its share. Integer arithmetic on the same inputs every time -- no rng, no
-// accumulating float drift.
 function spreadIndices(total, count) {
   const out = [];
   for (let k = 0; k < count; k += 1) out.push(Math.floor(((k + 0.5) * total) / count));
   return out;
 }
 
-// Which flat index in a ring gets which kind. Keystones are placed first (they
-// are the scarcest and the most position-sensitive), then notables, then
-// everything else is a minor. The forward-scan collision handling is a safety
-// net rather than the mechanism: with the authored numbers the placements do
-// not collide, and the guard test's exact per-kind counts would fail loudly if
-// a future retune made them collide in a way this loop could not resolve.
 function ringKinds(total, notableCount, keystoneCount, layout) {
   const kinds = new Array(total).fill('minor');
   const taken = new Set();
@@ -57,26 +38,18 @@ function ringKinds(total, notableCount, keystoneCount, layout) {
     kinds[i] = kind;
   };
   spreadIndices(total, keystoneCount).forEach((i, k) => {
-    // Without the offset and stagger, total/count divides evenly for both
-    // rings that carry keystones, so every keystone in a sector would land in
-    // the same column -- one radial line of keystones and nothing elsewhere.
     place(i + layout.keystoneOffset + k * layout.keystoneStagger, 'keystone');
   });
   spreadIndices(total, notableCount).forEach((i) => place(i, 'notable'));
   return kinds;
 }
 
-// `sectors: '*'` means every stat sector and never the core: a core node has
-// no sector stat, so a '@sector' template would have nothing to substitute.
 function templatePool(templates, kind, sector, ring) {
   return templates.filter((t) => t.kind === kind
     && (t.sectors === '*' ? sector !== 'core' : t.sectors.includes(sector))
     && t.rings.includes(ring));
 }
 
-// Fresh objects every time: the same template object serves ~100 nodes, and a
-// shared reference would let one admin edit (or one test mutation) rewrite
-// every node built from that template.
 function grantsFor(template, sector) {
   return template.grants.map((g) => (g.stat === '@sector' ? { ...g, stat: sector } : { ...g }));
 }
@@ -86,12 +59,8 @@ function generatePassiveTree(spec) {
   const nodes = [];
   const edgeKeys = new Set();
 
-  // '|' separator: every generated key is lowercase letters, digits and
-  // dashes, so a pipe cannot occur inside one and the join is unambiguous.
-  // (Do NOT reach for a control character here: a NUL in a source file makes
-  // grep treat the whole file as binary and skip it silently.)
   const addEdge = (a, b) => {
-    if (a === b) return;
+    if (!a || !b || a === b) return;
     const [lo, hi] = a < b ? [a, b] : [b, a];
     edgeKeys.add(`${lo}|${hi}`);
   };
@@ -120,15 +89,14 @@ function generatePassiveTree(spec) {
       kind: 'minor', label: t.label, grants: grantsFor(t, 'core'), start_class: null,
     }));
   }
-  // Row A is a cycle, row B is a cycle, and six spokes tie them together. Two
-  // cycles plus the spokes is what makes the core a single component that
-  // every sector can cross to reach every other sector.
   const spokeStep = layout.core.rowB.count / layout.core.rowA.count; // 24 / 6 = 4
   for (let i = 0; i < rowA.length; i += 1) {
     addEdge(rowA[i], rowA[(i + 1) % rowA.length]);
     addEdge(rowA[i], rowB[i * spokeStep]);
   }
   for (let k = 0; k < rowB.length; k += 1) addEdge(rowB[k], rowB[(k + 1) % rowB.length]);
+
+  const sectorRings = {};
 
   // ---- sectors ----------------------------------------------------------
   for (let s = 0; s < sectors.length; s += 1) {
@@ -138,16 +106,6 @@ function generatePassiveTree(spec) {
 
     const startDef = startNodes.find((n) => n.sector === sector);
     const sp = polar(layout.startRadius, axis);
-    // ring 0 means "not in a ring band" -- the core and the six starts.
-    //
-    // SOMET-471 (contract 6.11): a start node is GRANTED rather than allocated,
-    // and it now carries its class's MECHANICAL identity -- never a pool bonus,
-    // which is entity_types' job. The grants are copied element-wise, exactly
-    // as the keystone branch below does: sharing the objects would let one
-    // mutation reach through into seeds/data/passiveTree.js's module-level
-    // spec and change what every LATER call to this generator produces, which
-    // would break its determinism guard in a way that only shows up on the
-    // second call in a process.
     const startKey = push({
       key: `start-${sector}`, sector, ring: 0, x: sp.x, y: sp.y,
       kind: 'start', label: startDef.label, start_class: startDef.start_class,
@@ -155,20 +113,220 @@ function generatePassiveTree(spec) {
     });
     addEdge(startKey, rowB[s * spokeStep]);
 
-    const keys = {};
     let keystoneSeq = 0;
+    sectorRings[s] = {};
+
     for (let ring = 1; ring <= 3; ring += 1) {
       const rg = layout.rings[ring];
       const total = rg.rows * rg.cols;
       const kinds = ringKinds(total, rg.notable, rg.keystone, layout);
-      keys[ring] = [];
-      for (let row = 0; row < rg.rows; row += 1) {
-        keys[ring][row] = [];
-        for (let col = 0; col < rg.cols; col += 1) {
-          const flat = row * rg.cols + col;
-          const kind = kinds[flat];
-          const angle = axis - half + (col * layout.sectorSpanDeg) / (rg.cols - 1);
-          const { x, y } = polar(rg.baseRadius + row * rg.rowStep, angle);
+
+      // "Через 1" on the highway: 9, 15, 19 highway nodes
+      let numHighwayCols = 9;
+      let numClusters = 6;
+      if (ring === 2) {
+        numHighwayCols = 15;
+        numClusters = 6;
+      } else if (ring === 3) {
+        numHighwayCols = 19;
+        numClusters = 6;
+      }
+
+      const highwayNodes = [];
+      let flatIdx = 0;
+
+      // 1. Generate arterial highway on Row 0 with wide double spacing:
+      for (let col = 0; col < numHighwayCols; col += 1) {
+        const flat = flatIdx;
+        flatIdx += 1;
+        let kind = kinds[flat];
+        if (kind !== 'minor' && flat < numHighwayCols) {
+          const swapIdx = kinds.lastIndexOf('minor');
+          if (swapIdx >= numHighwayCols) {
+            kinds[flat] = 'minor';
+            kinds[swapIdx] = kind;
+            kind = 'minor';
+          }
+        }
+
+        const hAngle = axis - half + (col * layout.sectorSpanDeg) / (numHighwayCols - 1);
+        const hp = polar(rg.baseRadius, hAngle);
+
+        let label;
+        let grants;
+        if (kind === 'keystone') {
+          const ks = keystones[sector][keystoneSeq];
+          keystoneSeq += 1;
+          label = ks.label;
+          grants = ks.grants.map((g) => ({ ...g }));
+        } else {
+          const pool = templatePool(templates, kind, sector, ring);
+          const t = pool[flat % pool.length];
+          label = t.label;
+          grants = grantsFor(t, sector);
+        }
+
+        const row = 0;
+        const key = push({
+          key: `${sector}-r${ring}-${row}-${col}`, sector, ring, x: hp.x, y: hp.y,
+          kind, label, grants, start_class: null,
+        });
+        highwayNodes.push(key);
+      }
+
+      // Connect highway nodes sequentially:
+      for (let col = 0; col + 1 < highwayNodes.length; col += 1) {
+        addEdge(highwayNodes[col], highwayNodes[col + 1]);
+      }
+
+      // 2. Distribute all extra nodes into 6 spacious constellation wheels:
+      const remainingNodesCount = total - numHighwayCols;
+      const clusterWheels = [];
+
+      for (let c = 0; c < numClusters; c += 1) {
+        const cStart = Math.floor((c * remainingNodesCount) / numClusters);
+        const cEnd = Math.floor(((c + 1) * remainingNodesCount) / numClusters);
+        const cSize = cEnd - cStart;
+
+        const frac = 0.15 + (c / (numClusters - 1 || 1)) * 0.70;
+        let cRadius;
+        if (ring === 1) {
+          cRadius = (c % 2 === 0) ? 320 : 395;
+        } else if (ring === 2) {
+          cRadius = (c % 2 === 0) ? 540 : 620;
+        } else {
+          cRadius = (c % 2 === 0) ? 760 : 785;
+        }
+
+        const hIdx = Math.min(highwayNodes.length - 1, Math.round(frac * (highwayNodes.length - 1)));
+        const cAngle = axis - half + frac * layout.sectorSpanDeg;
+        const cp = polar(cRadius, cAngle);
+
+        // Collect kinds for this cluster:
+        const clusterKinds = [];
+        for (let j = 0; j < cSize; j += 1) {
+          clusterKinds.push(kinds[flatIdx + j]);
+        }
+        const keystonesInCluster = clusterKinds.filter(k => k === 'keystone');
+        const notablesInCluster = clusterKinds.filter(k => k === 'notable');
+        const minors = clusterKinds.filter(k => k === 'minor');
+
+        // Central hub gets a minor node:
+        let hubKind = 'minor';
+        if (minors.length > 0) {
+          minors.shift();
+        } else if (notablesInCluster.length > 0) {
+          hubKind = notablesInCluster.shift();
+        } else if (keystonesInCluster.length > 0) {
+          hubKind = keystonesInCluster.shift();
+        }
+
+        const totalPetals = cSize - 1;
+        let innerCount = 0;
+        let outerCount = totalPetals;
+        let rInner = 0;
+        let rOuter = Math.max(34, Math.ceil(11.0 / Math.sin(Math.PI / outerCount)));
+
+        if (totalPetals >= 12) {
+          innerCount = 5;
+          outerCount = totalPetals - innerCount;
+          rInner = 20;
+          rOuter = (ring === 3) ? 40 : 42;
+        }
+
+        const outerKinds = new Array(outerCount).fill('minor');
+        const innerKinds = new Array(innerCount).fill('minor');
+
+        // Place Keystone strictly at outer apex:
+        const apex = Math.floor(outerCount / 2);
+        if (keystonesInCluster.length > 0) {
+          outerKinds[apex] = keystonesInCluster.shift();
+        }
+
+        // Place Notables strictly at alternating even offsets:
+        const outerOffsets = [2, -2, 4, -4, 6, -6];
+        for (const off of outerOffsets) {
+          const idx = apex + off;
+          if (idx > 0 && idx < outerCount && notablesInCluster.length > 0) {
+            outerKinds[idx] = notablesInCluster.shift();
+          }
+        }
+        if (outerKinds[apex] === 'minor' && notablesInCluster.length > 0) {
+          outerKinds[apex] = notablesInCluster.shift();
+        }
+
+        // Place any remaining notables on inner orbit:
+        if (innerCount > 0) {
+          const innerApex = Math.floor(innerCount / 2);
+          const innerOffsets = [0, 2, -2];
+          for (const off of innerOffsets) {
+            const idx = innerApex + off;
+            if (idx >= 0 && idx < innerCount && notablesInCluster.length > 0) {
+              innerKinds[idx] = notablesInCluster.shift();
+            }
+          }
+        }
+
+        // Place any remaining keystones or notables:
+        while (keystonesInCluster.length > 0) {
+          const k = keystonesInCluster.shift();
+          let placed = false;
+          for (let j = 1; j < outerCount; j += 1) {
+            if (outerKinds[j] === 'minor') { outerKinds[j] = k; placed = true; break; }
+          }
+          if (!placed && innerCount > 0) {
+            for (let j = 0; j < innerCount; j += 1) {
+              if (innerKinds[j] === 'minor') { innerKinds[j] = k; placed = true; break; }
+            }
+          }
+        }
+        while (notablesInCluster.length > 0) {
+          const n = notablesInCluster.shift();
+          let placed = false;
+          for (let j = 1; j < outerCount; j += 1) {
+            if (outerKinds[j] === 'minor') { outerKinds[j] = n; placed = true; break; }
+          }
+          if (!placed && innerCount > 0) {
+            for (let j = 0; j < innerCount; j += 1) {
+              if (innerKinds[j] === 'minor') { innerKinds[j] = n; placed = true; break; }
+            }
+          }
+        }
+
+        // 1. Create central hub node:
+        const hubFlat = flatIdx;
+        flatIdx += 1;
+        let hubLabel;
+        let hubGrants;
+        if (hubKind === 'keystone') {
+          const ks = keystones[sector][keystoneSeq];
+          keystoneSeq += 1;
+          hubLabel = ks.label;
+          hubGrants = ks.grants.map((g) => ({ ...g }));
+        } else {
+          const pool = templatePool(templates, hubKind, sector, ring);
+          const t = pool[hubFlat % pool.length];
+          hubLabel = t.label;
+          hubGrants = grantsFor(t, sector);
+        }
+        const hubRow = 1 + Math.floor((hubFlat - numHighwayCols) / rg.cols);
+        const hubCol = (hubFlat - numHighwayCols) % rg.cols;
+        const hubKey = push({
+          key: `${sector}-r${ring}-${hubRow}-${hubCol}`, sector, ring, x: cp.x, y: cp.y,
+          kind: hubKind, label: hubLabel, grants: hubGrants, start_class: null,
+        });
+
+        // 2. Create inner orbit nodes:
+        const innerKeys = [];
+        for (let j = 0; j < innerCount; j += 1) {
+          const flat = flatIdx;
+          flatIdx += 1;
+          const kind = innerKinds[j];
+          const nodeR = kind === 'keystone' ? rInner + 8 : rInner;
+          const wheelDir = cAngle * DEG + Math.PI + (j / innerCount) * Math.PI * 2;
+          let wx = round2(cp.x + nodeR * Math.cos(wheelDir));
+          let wy = round2(cp.y + nodeR * Math.sin(wheelDir));
+
           let label;
           let grants;
           if (kind === 'keystone') {
@@ -182,44 +340,136 @@ function generatePassiveTree(spec) {
             label = t.label;
             grants = grantsFor(t, sector);
           }
-          keys[ring][row][col] = push({
-            key: `${sector}-r${ring}-${row}-${col}`, sector, ring, x, y,
+
+          const row = 1 + Math.floor((flat - numHighwayCols) / rg.cols);
+          const col = (flat - numHighwayCols) % rg.cols;
+          const key = push({
+            key: `${sector}-r${ring}-${row}-${col}`, sector, ring, x: wx, y: wy,
             kind, label, grants, start_class: null,
           });
+          innerKeys.push(key);
         }
+
+        // 3. Create outer petal nodes with wide spacing:
+        const outerKeys = [];
+        for (let j = 0; j < outerCount; j += 1) {
+          const flat = flatIdx;
+          flatIdx += 1;
+          const kind = outerKinds[j];
+          const nodeR = kind === 'keystone' ? rOuter + 8 : rOuter;
+          const wheelDir = cAngle * DEG + Math.PI + (j / outerCount) * Math.PI * 2;
+          let wx = round2(cp.x + nodeR * Math.cos(wheelDir));
+          let wy = round2(cp.y + nodeR * Math.sin(wheelDir));
+
+          let label;
+          let grants;
+          if (kind === 'keystone') {
+            const ks = keystones[sector][keystoneSeq];
+            keystoneSeq += 1;
+            label = ks.label;
+            grants = ks.grants.map((g) => ({ ...g }));
+          } else {
+            const pool = templatePool(templates, kind, sector, ring);
+            const t = pool[flat % pool.length];
+            label = t.label;
+            grants = grantsFor(t, sector);
+          }
+
+          const row = 1 + Math.floor((flat - numHighwayCols) / rg.cols);
+          const col = (flat - numHighwayCols) % rg.cols;
+          const key = push({
+            key: `${sector}-r${ring}-${row}-${col}`, sector, ring, x: wx, y: wy,
+            kind, label, grants, start_class: null,
+          });
+          outerKeys.push(key);
+        }
+
+        // Inner loop edges:
+        for (let j = 0; j < innerKeys.length; j += 1) {
+          addEdge(innerKeys[j], innerKeys[(j + 1) % innerKeys.length]);
+        }
+        // Outer loop edges:
+        for (let j = 0; j < outerKeys.length; j += 1) {
+          addEdge(outerKeys[j], outerKeys[(j + 1) % outerKeys.length]);
+        }
+
+        // Radial shortcuts through the central hub:
+        if (innerKeys.length > 0) {
+          // Hub connects to entry petal, apex petal, and side petals:
+          addEdge(hubKey, innerKeys[0]);
+          const innerApex = Math.floor(innerKeys.length / 2);
+          addEdge(hubKey, innerKeys[innerApex]);
+          if (innerKeys.length >= 4) {
+            addEdge(hubKey, innerKeys[1]);
+            addEdge(hubKey, innerKeys[innerKeys.length - 1]);
+          }
+
+          // Inner-to-outer radial spoke bridges:
+          addEdge(innerKeys[0], outerKeys[0]);
+          const outerApex = Math.floor(outerKeys.length / 2);
+          addEdge(innerKeys[innerApex], outerKeys[outerApex]);
+        } else if (outerKeys.length > 0) {
+          addEdge(hubKey, outerKeys[0]);
+          const outerApex = Math.floor(outerKeys.length / 2);
+          addEdge(hubKey, outerKeys[outerApex]);
+        }
+
+        // Radial connection from highway to wheel entry:
+        if (outerKeys.length > 0) {
+          addEdge(highwayNodes[hIdx], outerKeys[0]);
+        }
+
+        clusterWheels.push({ hub: hubKey, inner: innerKeys, outer: outerKeys, cp, cAngle, cRadius });
       }
-      for (let row = 0; row < rg.rows; row += 1) {
-        for (let col = 0; col + 1 < rg.cols; col += 1) {
-          addEdge(keys[ring][row][col], keys[ring][row][col + 1]);
-        }
+
+      sectorRings[s][ring] = { highway: highwayNodes, clusters: clusterWheels };
+    }
+
+    // Start node connects to Ring 1 middle highway node:
+    const midH1 = Math.floor(sectorRings[s][1].highway.length / 2);
+    addEdge(startKey, sectorRings[s][1].highway[midH1]);
+
+    // Elevator shortcuts between Ring 1 clusters and Ring 2 highway / Ring 2 clusters and Ring 3 highway:
+    const r1Clusters = sectorRings[s][1].clusters;
+    const r2Clusters = sectorRings[s][2].clusters;
+    const r2H = sectorRings[s][2].highway;
+    const r3H = sectorRings[s][3].highway;
+
+    for (let c of [1, 3, 5]) {
+      if (r1Clusters[c]) {
+        const c1Apex = Math.floor(r1Clusters[c].outer.length / 2);
+        const frac = 0.15 + (c / (6 - 1 || 1)) * 0.70;
+        const hIdx2 = Math.min(r2H.length - 1, Math.round(frac * (r2H.length - 1)));
+        addEdge(r1Clusters[c].outer[c1Apex], r2H[hIdx2]);
       }
-      for (let row = 0; row + 1 < rg.rows; row += 1) {
-        for (let col = 0; col < rg.cols; col += layout.rungStride) {
-          addEdge(keys[ring][row][col], keys[ring][row + 1][col]);
-        }
+      if (r2Clusters[c]) {
+        const c2Apex = Math.floor(r2Clusters[c].outer.length / 2);
+        const frac = 0.15 + (c / (6 - 1 || 1)) * 0.70;
+        const hIdx3 = Math.min(r3H.length - 1, Math.round(frac * (r3H.length - 1)));
+        addEdge(r2Clusters[c].outer[c2Apex], r3H[hIdx3]);
       }
     }
 
-    // The start node enters ring 1 at the middle column of its first row.
-    addEdge(startKey, keys[1][0][Math.floor((layout.rings[1].cols - 1) / 2)]);
+    // Inter-ring highway radial spokes at sector boundaries:
+    const r1H = sectorRings[s][1].highway;
+    addEdge(r1H[0], r2H[0]);
+    addEdge(r1H[r1H.length - 1], r2H[r2H.length - 1]);
 
-    // Ring transitions at the left edge, middle and right edge, so a build has
-    // three ways outward instead of one mandatory corridor.
-    for (const [from, to] of [[1, 2], [2, 3]]) {
-      const f = layout.rings[from];
-      const t = layout.rings[to];
-      for (const frac of [0, 0.5, 1]) {
-        addEdge(
-          keys[from][f.rows - 1][Math.round(frac * (f.cols - 1))],
-          keys[to][0][Math.round(frac * (t.cols - 1))],
-        );
-      }
+    addEdge(r2H[0], r3H[0]);
+    addEdge(r2H[r2H.length - 1], r3H[r3H.length - 1]);
+  }
+
+  // Cross-sector highways connecting adjacent classes on all 3 rings:
+  for (let s = 0; s < sectors.length; s += 1) {
+    const nextS = (s + 1) % sectors.length;
+    for (let ring = 1; ring <= 3; ring += 1) {
+      const curH = sectorRings[s][ring].highway;
+      const nextH = sectorRings[nextS][ring].highway;
+      addEdge(curH[curH.length - 1], nextH[0]);
     }
   }
 
-  // Sorted rather than left in insertion order: the contract fixes the output
-  // ordering, and sorting makes it independent of the traversal above, so a
-  // future reordering of the build loops is not a spurious diff.
+  // Sorted rather than left in insertion order:
   const edges = [...edgeKeys]
     .map((k) => k.split('|'))
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));

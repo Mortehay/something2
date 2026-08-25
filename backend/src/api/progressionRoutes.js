@@ -30,7 +30,7 @@
 const express = require('express');
 const { requireAuth } = require('../auth/middleware.js');
 const { loadProgression } = require('../services/progressionStore.js');
-const { allocateNode, respecPassives, respecQuote } = require('../services/passiveTreeStore.js');
+const { allocateNode, unallocateNode, respecPassives, respecQuote } = require('../services/passiveTreeStore.js');
 const { derivePlayerStats, xpFloor, xpToNext } = require('../services/playerStats.js');
 const { ownedCharacter } = require('../services/characters.js');
 const { loadInventory } = require('../authority/items.js');
@@ -147,16 +147,27 @@ module.exports = function progressionRoutes(pool, refreshLivePlayerStats = () =>
       if (!r.ok) return res.status(400).json({ error: r.reason });
       const progression = await gearFramed(character.id, await loadProgression(pool, character.id));
       const stats = derivePlayerStats(progression, character.classPools);
-      // Best-effort, same contract as before: this is what sends the ordered
-      // websocket `progression` frame the client treats as its ONLY writer of
-      // progression state (CharacterSheet.jsx's F1 header). The HTTP body
-      // below is for the caller's own error handling; the client must not
-      // write it into Game.progression.
       refreshLivePlayerStats(req.user.id, progression, stats);
       return res.status(200).json({ progression, stats });
     } catch (err) {
       console.error('passive allocate failed:', err);
       return res.status(500).json({ error: 'allocate failed' });
+    }
+  });
+
+  router.delete('/passives/:nodeId', guard, async (req, res) => {
+    try {
+      const character = await resolveCharacter(req, res);
+      if (!character) return undefined;
+      const r = await unallocateNode(pool, character.id, req.params.nodeId);
+      if (!r.ok) return res.status(400).json({ error: r.reason });
+      const progression = await gearFramed(character.id, await loadProgression(pool, character.id));
+      const stats = derivePlayerStats(progression, character.classPools);
+      refreshLivePlayerStats(req.user.id, progression, stats);
+      return res.status(200).json({ progression, stats });
+    } catch (err) {
+      console.error('passive unallocate failed:', err);
+      return res.status(500).json({ error: 'unallocate failed' });
     }
   });
 

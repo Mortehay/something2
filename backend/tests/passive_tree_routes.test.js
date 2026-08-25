@@ -33,8 +33,7 @@ test('the passive-tree router is mounted, and only once', () => {
 });
 
 test('every passive-tree and progression route sits behind an auth guard', () => {
-  // A walk that matched nothing would pass vacuously, so the counts are
-  // asserted first. Three progression routes now: GET /, POST /passives/:nodeId
+  // Four progression routes now: GET /, POST /passives/:nodeId, DELETE /passives/:nodeId
   // and POST /respec.
   const routers = app._router.stack.filter((l) => l.name === 'router' && l.handle
     && Array.isArray(l.handle.stack));
@@ -42,8 +41,8 @@ test('every passive-tree and progression route sits behind an auth guard', () =>
     .some((rl) => rl.route && rl.route.path === '/passives/:nodeId'));
   assert.ok(progression, 'could not locate the mounted progression router');
   const layers = progression.handle.stack.filter((rl) => rl.route);
-  assert.strictEqual(layers.length, 3,
-    `expected exactly 3 progression routes, found ${layers.map((l) => l.route.path).join(', ')}`);
+  assert.strictEqual(layers.length, 4,
+    `expected exactly 4 progression routes, found ${layers.map((l) => l.route.path).join(', ')}`);
   const unguarded = layers
     .filter((l) => !l.route.stack.some((h) => h.handle && h.handle.isAuthGuard))
     .map((l) => l.route.path);
@@ -107,8 +106,8 @@ test('the composed progression bundle survives the whole HTTP path', { skip }, a
     const res = await request(app).get('/api/passive-tree').set(auth);
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.nodes.length, 1806);
-    assert.strictEqual(res.body.edges.length, 2142);
-    assert.strictEqual(res.body.version, '1806:2142');
+    assert.strictEqual(res.body.edges.length, 2382);
+    assert.strictEqual(res.body.version, '1806:2382');
     // The node shape the overlay draws from -- an omitted x/y or grants would
     // leave T8 with an unrenderable graph and no test to say so.
     const start = res.body.nodes.find((x) => x.key === 'start-strength');
