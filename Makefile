@@ -72,8 +72,8 @@ dev:
 # that names a missing package.
 
 dev-stop:
-	@$(COMPOSE) exec -T backend sh -c 'pkill -f "nodemon src/index.js" || true' 2>/dev/null || true
-	@$(COMPOSE) exec -T frontend sh -c 'pkill -f "[v]ite" || true' 2>/dev/null || true
+	-@$(COMPOSE) exec -T backend pkill -f "nodemon src/index.js"
+	-@$(COMPOSE) exec -T frontend pkill -f "vite"
 
 # Reports what is actually LISTENING, not what make thinks it started: an
 # `exec -d` that dies a second later still exits 0, so a started-successfully

@@ -52,6 +52,19 @@ export async function allocatePassive(nodeId, apiUrl = API_URL) {
   return true;
 }
 
+export async function unallocatePassive(nodeId, apiUrl = API_URL) {
+  const res = await apiFetch(
+    `${apiUrl}/api/progression/passives/${encodeURIComponent(nodeId)}`,
+    {
+      method: 'DELETE',
+      headers: authHeaders(),
+      body: JSON.stringify({ character_id: activeCharacterId() }),
+    },
+  );
+  await parseOrThrow(res);
+  return true;
+}
+
 // Contract §6.4: respec is a passive-tree action now. Same discard rule as
 // allocatePassive -- the ordered websocket frame updates progression, not this
 // response. `gold` is the one field with no websocket echo (refreshPlayerStats
