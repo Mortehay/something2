@@ -34,14 +34,25 @@ function hslToHex(h, s, l) {
 // the line supplies its element (if any) and name.
 const SIZE_WORD = ['tiny', 'small', 'lean', 'armed', 'skilled', 'hulking', 'armoured', 'commanding', 'towering'];
 
+// "a armoured" -- English, and it was wrong for every armed/armoured rung.
+function article(word) {
+  return /^[aeiou]/i.test(word) ? 'an' : 'a';
+}
+
 function promptFor(line, rung) {
   const sizeWord = SIZE_WORD[rung.index];
-  const elementWord = line.element ? `${line.element}-touched ` : '';
+  // An element that repeats its own line name ("stone-touched stoneborn")
+  // stops describing a creature and starts describing masonry -- Stoneborn
+  // Heavy came back as a shrine until this was dropped.
+  const name = line.name.toLowerCase();
+  const redundant = line.element
+    && (name.includes(line.element.toLowerCase()) || line.element.toLowerCase().includes(name));
+  const elementWord = line.element && !redundant ? `${line.element}-touched ` : '';
   // Styled here, not at generation time, so the prompt in the catalog says
   // what it will actually draw. See seeds/data/spritePrompt.js for why the
   // wording is what it is -- and for the two additions that were measured
   // making it worse.
-  return styleEntityPrompt(`a ${sizeWord} ${elementWord}${line.name.toLowerCase()} creature`);
+  return styleEntityPrompt(`${article(sizeWord)} ${sizeWord} ${elementWord}${name} creature`);
 }
 
 // SOMET-290. The rung normally decides behaviour (behavior_name below), but a

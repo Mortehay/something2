@@ -58,7 +58,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 22,
     "defense": 1,
     "resistances": {},
-    "prompt": "pixel art, a armed beast creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed beast creature, single object, solid transparent background",
     "level_min": 5,
     "level_max": 6,
     "behavior_name": "Ranged"
@@ -103,7 +103,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {},
-    "prompt": "pixel art, a armoured beast creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured beast creature, single object, solid transparent background",
     "level_min": 9,
     "level_max": 10,
     "behavior_name": "Heavy"
@@ -193,7 +193,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 22,
     "defense": 1,
     "resistances": {},
-    "prompt": "pixel art, a armed woodland creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed woodland creature, single object, solid transparent background",
     "level_min": 5,
     "level_max": 6,
     "behavior_name": "Ranged"
@@ -238,7 +238,7 @@ const BESTIARY_P4_CREATURES = [
     "max_hp": 60,
     "defense": 8,
     "resistances": {},
-    "prompt": "pixel art, a armoured woodland creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured woodland creature, single object, solid transparent background",
     "level_min": 9,
     "level_max": 10,
     "behavior_name": "Heavy"
@@ -334,7 +334,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "pixel art, a armed fire-touched desert creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed fire-touched desert creature, single object, solid transparent background",
     "level_min": 5,
     "level_max": 6,
     "behavior_name": "Ranged"
@@ -387,7 +387,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured fire-touched desert creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured fire-touched desert creature, single object, solid transparent background",
     "level_min": 9,
     "level_max": 10,
     "behavior_name": "Heavy"
@@ -489,7 +489,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "pixel art, a armed ice-touched tundra creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed ice-touched tundra creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 13,
     "behavior_name": "Ranged"
@@ -542,7 +542,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured ice-touched tundra creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured ice-touched tundra creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 21,
     "behavior_name": "Heavy"
@@ -644,7 +644,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "pixel art, a armed physical-touched swamp creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed physical-touched swamp creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 13,
     "behavior_name": "Ranged"
@@ -695,7 +695,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "pixel art, a armoured physical-touched swamp creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured physical-touched swamp creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 21,
     "behavior_name": "Heavy"
@@ -795,7 +795,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "pixel art, a armed physical-touched highland creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed physical-touched highland creature, single object, solid transparent background",
     "level_min": 14,
     "level_max": 16,
     "behavior_name": "Ranged"
@@ -846,7 +846,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "pixel art, a armoured physical-touched highland creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured physical-touched highland creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 22,
     "behavior_name": "Heavy"
@@ -946,7 +946,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.4
     },
-    "prompt": "pixel art, a armed lightning-touched jungle creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed lightning-touched jungle creature, single object, solid transparent background",
     "level_min": 14,
     "level_max": 16,
     "behavior_name": "Ranged"
@@ -999,7 +999,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured lightning-touched jungle creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured lightning-touched jungle creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 22,
     "behavior_name": "Heavy"
@@ -1101,7 +1101,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.4
     },
-    "prompt": "pixel art, a armed lightning-touched storm creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed lightning-touched storm creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -1154,7 +1154,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured lightning-touched storm creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured lightning-touched storm creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -1256,7 +1256,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "pixel art, a armed ice-touched ruin creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed ice-touched ruin creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -1309,7 +1309,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured ice-touched ruin creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured ice-touched ruin creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -1411,7 +1411,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "pixel art, a armed fire-touched volcanic creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed fire-touched volcanic creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -1464,7 +1464,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured fire-touched volcanic creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured fire-touched volcanic creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -1566,7 +1566,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "pixel art, a armed ice-touched undead creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed ice-touched undead creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 13,
     "behavior_name": "Ranged"
@@ -1619,7 +1619,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured ice-touched undead creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured ice-touched undead creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 21,
     "behavior_name": "Heavy"
@@ -1721,7 +1721,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "pixel art, a armed ice-touched bonelord creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed ice-touched bonelord creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -1774,7 +1774,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured ice-touched bonelord creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured ice-touched bonelord creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -1876,7 +1876,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "pixel art, a armed physical-touched cave creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed physical-touched cave creature, single object, solid transparent background",
     "level_min": 10,
     "level_max": 13,
     "behavior_name": "Ranged"
@@ -1927,7 +1927,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "pixel art, a armoured physical-touched cave creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured physical-touched cave creature, single object, solid transparent background",
     "level_min": 18,
     "level_max": 21,
     "behavior_name": "Heavy"
@@ -2027,7 +2027,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.4
     },
-    "prompt": "pixel art, a armed lightning-touched fungal creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed lightning-touched fungal creature, single object, solid transparent background",
     "level_min": 14,
     "level_max": 16,
     "behavior_name": "Ranged"
@@ -2080,7 +2080,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured lightning-touched fungal creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured lightning-touched fungal creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 22,
     "behavior_name": "Heavy"
@@ -2182,7 +2182,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "pixel art, a armed fire-touched ember creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed fire-touched ember creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -2235,7 +2235,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured fire-touched ember creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured fire-touched ember creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -2337,7 +2337,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "pixel art, a armed ice-touched rime creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed ice-touched rime creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -2390,7 +2390,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured ice-touched rime creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured ice-touched rime creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -2492,7 +2492,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "pixel art, a armed physical-touched construct creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed physical-touched construct creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 28,
     "behavior_name": "Ranged"
@@ -2543,7 +2543,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "pixel art, a armoured physical-touched construct creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured physical-touched construct creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Heavy"
@@ -2643,7 +2643,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "pixel art, a armed physical-touched hive creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed physical-touched hive creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -2694,7 +2694,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "pixel art, a armoured physical-touched hive creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured physical-touched hive creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -2794,7 +2794,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "pixel art, a armed ice-touched drowned creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed ice-touched drowned creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -2847,7 +2847,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured ice-touched drowned creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured ice-touched drowned creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -2949,7 +2949,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "pixel art, a armed physical-touched umbral creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed physical-touched umbral creature, single object, solid transparent background",
     "level_min": 31,
     "level_max": 34,
     "behavior_name": "Ranged"
@@ -3000,7 +3000,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "pixel art, a armoured physical-touched umbral creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured physical-touched umbral creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 46,
     "behavior_name": "Heavy"
@@ -3100,7 +3100,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.4
     },
-    "prompt": "pixel art, a armed lightning-touched crystal creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed lightning-touched crystal creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 28,
     "behavior_name": "Ranged"
@@ -3153,7 +3153,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured lightning-touched crystal creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured lightning-touched crystal creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Heavy"
@@ -3255,7 +3255,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "pixel art, a armed physical-touched blight creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed physical-touched blight creature, single object, solid transparent background",
     "level_min": 19,
     "level_max": 22,
     "behavior_name": "Ranged"
@@ -3306,7 +3306,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "pixel art, a armoured physical-touched blight creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured physical-touched blight creature, single object, solid transparent background",
     "level_min": 29,
     "level_max": 32,
     "behavior_name": "Heavy"
@@ -3406,7 +3406,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "pixel art, a armed ice-touched gloom creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed ice-touched gloom creature, single object, solid transparent background",
     "level_min": 14,
     "level_max": 16,
     "behavior_name": "Ranged"
@@ -3459,7 +3459,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured ice-touched gloom creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured ice-touched gloom creature, single object, solid transparent background",
     "level_min": 20,
     "level_max": 22,
     "behavior_name": "Heavy"
@@ -3561,7 +3561,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "pixel art, a armed fire-touched stoneborn creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed fire-touched stoneborn creature, single object, solid transparent background",
     "level_min": 26,
     "level_max": 28,
     "behavior_name": "Ranged"
@@ -3614,7 +3614,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured fire-touched stoneborn creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured fire-touched stoneborn creature, single object, solid transparent background",
     "level_min": 32,
     "level_max": 34,
     "behavior_name": "Heavy"
@@ -3725,7 +3725,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.3,
       "lightning": 0.3
     },
-    "prompt": "pixel art, a armed physical-touched void creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed physical-touched void creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -3785,7 +3785,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.4,
       "lightning": 0.4
     },
-    "prompt": "pixel art, a armoured physical-touched void creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured physical-touched void creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"
@@ -3891,7 +3891,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "pixel art, a armed fire-touched demonic creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed fire-touched demonic creature, single object, solid transparent background",
     "level_min": 31,
     "level_max": 34,
     "behavior_name": "Ranged"
@@ -3944,7 +3944,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured fire-touched demonic creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured fire-touched demonic creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 46,
     "behavior_name": "Heavy"
@@ -4046,7 +4046,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "lightning": 0.4
     },
-    "prompt": "pixel art, a armed lightning-touched chaos creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed lightning-touched chaos creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -4099,7 +4099,7 @@ const BESTIARY_P4_CREATURES = [
       "lightning": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured lightning-touched chaos creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured lightning-touched chaos creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"
@@ -4201,7 +4201,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "ice": 0.4
     },
-    "prompt": "pixel art, a armed ice-touched fallen creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed ice-touched fallen creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -4254,7 +4254,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured ice-touched fallen creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured ice-touched fallen creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"
@@ -4356,7 +4356,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "pixel art, a armed physical-touched nightmare creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed physical-touched nightmare creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -4407,7 +4407,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "pixel art, a armoured physical-touched nightmare creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured physical-touched nightmare creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"
@@ -4507,7 +4507,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.4
     },
-    "prompt": "pixel art, a armed physical-touched titan creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed physical-touched titan creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -4558,7 +4558,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "physical": 0.65
     },
-    "prompt": "pixel art, a armoured physical-touched titan creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured physical-touched titan creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"
@@ -4658,7 +4658,7 @@ const BESTIARY_P4_CREATURES = [
     "resistances": {
       "fire": 0.4
     },
-    "prompt": "pixel art, a armed fire-touched plague creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed fire-touched plague creature, single object, solid transparent background",
     "level_min": 31,
     "level_max": 34,
     "behavior_name": "Ranged"
@@ -4711,7 +4711,7 @@ const BESTIARY_P4_CREATURES = [
       "fire": 0.65,
       "physical": 0.25
     },
-    "prompt": "pixel art, a armoured fire-touched plague creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured fire-touched plague creature, single object, solid transparent background",
     "level_min": 43,
     "level_max": 46,
     "behavior_name": "Heavy"
@@ -4822,7 +4822,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.3,
       "lightning": 0.3
     },
-    "prompt": "pixel art, a armed physical-touched eldritch creature, single object, solid transparent background",
+    "prompt": "pixel art, an armed physical-touched eldritch creature, single object, solid transparent background",
     "level_min": 39,
     "level_max": 41,
     "behavior_name": "Ranged"
@@ -4882,7 +4882,7 @@ const BESTIARY_P4_CREATURES = [
       "ice": 0.4,
       "lightning": 0.4
     },
-    "prompt": "pixel art, a armoured physical-touched eldritch creature, single object, solid transparent background",
+    "prompt": "pixel art, an armoured physical-touched eldritch creature, single object, solid transparent background",
     "level_min": 46,
     "level_max": 48,
     "behavior_name": "Heavy"

@@ -2,23 +2,47 @@
   {
     "name": "bush",
     "file": "bush.png",
-    "bytes": 81105,
+    "bytes": 82825,
     "prompt": "pixel art, a round leafy green shrub, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
+    "name": "Crystal Champion",
+    "file": "Crystal_Champion.png",
+    "bytes": 182120,
+    "prompt": "pixel art, a commanding lightning-touched crystal creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "dead_tree",
     "file": "dead_tree.png",
-    "bytes": 120270,
+    "bytes": 116757,
     "prompt": "pixel art, a bare dead tree with broken branches, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
+    "name": "Gloom Skirmisher",
+    "file": "Gloom_Skirmisher.png",
+    "bytes": 85130,
+    "prompt": "pixel art, a small ice-touched gloom creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
+    "name": "Hive Champion",
+    "file": "Hive_Champion.png",
+    "bytes": 239016,
+    "prompt": "pixel art, a commanding physical-touched hive creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "IceRock",
     "file": "IceRock.png",
-    "bytes": 98810,
+    "bytes": 96327,
     "prompt": "pixel art, a jagged pale blue ice boulder, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -26,15 +50,23 @@
   {
     "name": "pine_tree",
     "file": "pine_tree.png",
-    "bytes": 67989,
+    "bytes": 67632,
     "prompt": "pixel art, a tall dark green pine tree with a straight trunk, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
+    "name": "Plague Heavy",
+    "file": "Plague_Heavy.png",
+    "bytes": 220162,
+    "prompt": "pixel art, a armoured fire-touched plague creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "rose_bush",
     "file": "rose_bush.png",
-    "bytes": 122665,
+    "bytes": 121626,
     "prompt": "pixel art, a green shrub covered in red roses, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -42,15 +74,23 @@
   {
     "name": "Stone",
     "file": "Stone.png",
-    "bytes": 265904,
+    "bytes": 46703,
     "prompt": "pixel art, a large grey rock covered in green moss, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
+    "name": "Stoneborn Heavy",
+    "file": "Stoneborn_Heavy.png",
+    "bytes": 248289,
+    "prompt": "pixel art, a armoured fire-touched stoneborn creature, single object, solid transparent background",
+    "is_creature": true,
+    "cutout": true
+  },
+  {
     "name": "Tree",
     "file": "Tree.png",
-    "bytes": 156508,
+    "bytes": 155276,
     "prompt": "pixel art, a tall broadleaf tree with a thick trunk, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
