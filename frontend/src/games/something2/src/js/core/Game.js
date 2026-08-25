@@ -36,6 +36,7 @@ import {
     mergeLevelInfo, buildCharacterView,
 } from "./progressionExtras.js";
 import { fetchProgression } from "../net/progressionClient.js";
+import { getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill, isDruidExclusiveSkill } from "./skillsData.js";
 import { API_URL } from "../../../../../config.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
@@ -134,6 +135,20 @@ export class Game {
         this.inventoryDrag = null;
         this.inventoryTab = 'all';
         this.inventoryPage = 0;
+
+        // Skills panel & Hotbar (1-9)
+        this.skillsOpen = false;
+        this.skillsTab = 'all';
+        this.skillsClassFilter = 'all';
+        this.skillsPage = 0;
+        this.selectedSkillId = null;
+        this.skillDrag = null;
+        this.skillHoverSlot = null;
+        this.hotbarSkills = new Map();
+        this.activeForm = null;
+        this.hotbarFlashSlot = null;
+        this.hotbarFlashUntil = 0;
+        this.skillCooldowns = new Map();
 
         // Ground items (Slice 3b-2b): render-only store of items on the
         // ground, plus a local mirror of the server-owned auto-loot flag.
@@ -496,7 +511,8 @@ export class Game {
         this.progressionExtras = emptyExtras();
         this._statsFromSocket = false;
         this.characterModPage = 0;
-        this.className = className;
+        this.className = className || this.passiveStartClass || null;
+        if (className) this.passiveStartClass = className;
         this.mainStat = mainStat;
         this.merchants = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
@@ -935,11 +951,13 @@ export class Game {
     // second ago is not what "hold to keep attacking" means to anyone.
     _sendAttackAtCursor() {
         if (!this.authorityClient || !this.camera) return;
-        const pcx = this.player.x + this.player.width / 2;
-        const pcy = this.player.y + this.player.height / 2;
+        const pcx = (this.player && this.player.x != null) ? (this.player.x + (this.player.width || 32) / 2) : 0;
+        const pcy = (this.player && this.player.y != null) ? (this.player.y + (this.player.height || 32) / 2) : 0;
+        const canW = (this.canvas && this.canvas.width) || 800;
+        const canH = (this.canvas && this.canvas.height) || 600;
         const { nx, ny } = aimVector(
-            this._cursorX ?? this.canvas.width / 2,
-            this._cursorY ?? this.canvas.height / 2,
+            this._cursorX ?? canW / 2,
+            this._cursorY ?? canH / 2,
             this.camera, pcx, pcy,
         );
         this.authorityClient.sendAttack(nx, ny);
@@ -1225,6 +1243,19 @@ export class Game {
                 inventory: this.inventory,
                 inventoryOpen: this.inventoryOpen,
                 selectedItemId: this.inventorySelectedItemId,
+                // Skills & Hotbar
+                skillsOpen: this.skillsOpen,
+                skillsTab: this.skillsTab,
+                skillsClassFilter: this.skillsClassFilter,
+                skillsPage: this.skillsPage,
+                selectedSkillId: this.selectedSkillId,
+                skillDrag: this.skillDrag,
+                skillHoverSlot: this.skillHoverSlot,
+                hotbarSkills: this.hotbarSkills,
+                activeForm: this.activeForm,
+                flashSlot: (nowMs < this.hotbarFlashUntil) ? this.hotbarFlashSlot : null,
+                skillCooldowns: this.skillCooldowns,
+                playerClass: this.className || this.passiveStartClass || (this.player && this.player.className) || "Druid",
                 inventoryView: {
                     tab: this.inventoryTab,
                     page: this.inventoryPage,
@@ -1528,6 +1559,147 @@ export class Game {
         if (hit.kind === 'bankpage') { this.bankView = { tab: this.bankView.tab, page: hit.id }; return; }
     }
 
+    _activateHotbarSkill(slotNum) {
+        const s = this.hotbarSkills.get(slotNum);
+        if (!s) {
+            if (!this.className && !this.passiveStartClass) {
+                fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
+            }
+            this.skillsOpen = true;
+            if (this.showToast) this.showToast(`Slot ${slotNum} is empty — select a skill`);
+            return;
+        }
+
+        const nowMs = performance.now();
+        this.hotbarFlashSlot = slotNum;
+        this.hotbarFlashUntil = nowMs + 250;
+
+        const playerClass = this.className || this.passiveStartClass || (this.player && this.player.className) || "Druid";
+
+        // 1. Check Druid exclusivity for transformations and form-dependent skills
+        if (isDruidExclusiveSkill(s) && playerClass !== "Druid") {
+            if (this.showToast) this.showToast(`Cannot cast ${s.nameEn}: Exclusive to Druid class! 🌿`);
+            return;
+        }
+
+        const px = (this.player && this.player.x) || 0;
+        const py = (this.player && this.player.y) || 0;
+        const canW = (this.canvas && this.canvas.width) || 800;
+        const canH = (this.canvas && this.canvas.height) || 600;
+        let targetX = px + 35, targetY = py + 35, aimAngle = 0;
+        if (this.camera) {
+            try {
+                const w = cursorToWorld(this._cursorX ?? canW / 2, this._cursorY ?? canH / 2, this.camera);
+                if (w && Number.isFinite(w.x) && Number.isFinite(w.y)) {
+                    targetX = w.x;
+                    targetY = w.y;
+                    const aim = aimVector(this._cursorX ?? canW / 2, this._cursorY ?? canH / 2, this.camera, px, py);
+                    if (aim && (aim.nx !== 0 || aim.ny !== 0)) {
+                        aimAngle = Math.atan2(aim.ny, aim.nx);
+                    }
+                }
+            } catch (_) {}
+        }
+
+        // 2. Check if skill is a transformation
+        const transformForm = isTransformationSkill(s);
+        if (transformForm) {
+            if (this.activeForm === transformForm) {
+                this.activeForm = null;
+                addBlasts(this.blasts, [{ x: px, y: py, radius: 50, element: 'physical' }], nowMs);
+                if (this.showToast) this.showToast(`Exited ${transformForm.toUpperCase()} Form (Returned to Normal Form)`);
+            } else {
+                this.activeForm = transformForm;
+                const emoji = transformForm === 'bear' ? '🐻' : (transformForm === 'hawk' ? '🦅' : '🐺');
+                const perks = transformForm === 'bear' ? '+200 HP, +50 Armor, +30 Strength' : (transformForm === 'hawk' ? '+35% Move Speed, +25% Evasion, +30 Dex' : '+35% Attack Speed, +15% Crit, +20 Str/Dex');
+                
+                // Transformation VFX
+                const elem = transformForm === 'bear' ? 'fire' : (transformForm === 'hawk' ? 'ice' : 'shadow');
+                addBlasts(this.blasts, [{ x: px, y: py, radius: 95, element: elem }], nowMs);
+                addEffects(this.vfx, [
+                    { shape: 'burst', x: px, y: py, reach: 95, element: elem },
+                    { shape: 'ring', x: px, y: py, reach: 65, element: elem }
+                ], nowMs);
+
+                if (this.showToast) this.showToast(`Transformed into ${transformForm.toUpperCase()} Form! ${emoji} (${perks})`);
+            }
+            return;
+        }
+
+        // 3. Check form requirement
+        const reqForm = getRequiredForm(s);
+        if (reqForm && this.activeForm !== reqForm) {
+            const formName = reqForm.toUpperCase();
+            const emoji = reqForm === 'bear' ? '🐻' : (reqForm === 'hawk' ? '🦅' : '🐺');
+            if (this.showToast) this.showToast(`Cannot cast ${s.nameEn}: Requires ${formName} Form! ${emoji}`);
+            return;
+        }
+
+        // 4. Check cooldown
+        const readyAt = this.skillCooldowns.get(s.id) || 0;
+        if (nowMs < readyAt) {
+            const remaining = ((readyAt - nowMs) / 1000).toFixed(1);
+            if (this.showToast) this.showToast(`⏳ ${s.nameEn} on cooldown (${remaining}s)`);
+            return;
+        }
+
+        // 5. Check and deduct resource cost
+        const cost = s.cost || 0;
+        if (s.costType === 'mana' && cost > 0) {
+            const currentMana = this.localMana != null ? this.localMana : 100;
+            if (currentMana < cost) {
+                if (this.showToast) this.showToast(`⚠️ Not enough Mana! (Need ${cost} MP, have ${Math.round(currentMana)})`);
+                return;
+            }
+            this.localMana = Math.max(0, currentMana - cost);
+        } else if (s.costType === 'stamina' && cost > 0) {
+            const currentStamina = this.localStamina != null ? this.localStamina : 100;
+            if (currentStamina < cost) {
+                if (this.showToast) this.showToast(`⚠️ Not enough Stamina! (Need ${cost} SP, have ${Math.round(currentStamina)})`);
+                return;
+            }
+            this.localStamina = Math.max(0, currentStamina - cost);
+        } else if (s.costType === 'hp' && cost > 0) {
+            const currentHp = (this.player && this.player.hp != null) ? this.player.hp : 100;
+            if (currentHp <= cost) {
+                if (this.showToast) this.showToast(`⚠️ Not enough Life!`);
+                return;
+            }
+            this.player.hp = Math.max(1, currentHp - cost);
+        }
+
+        // 6. Set cooldown
+        const cdSec = s.cooldown || 1;
+        this.skillCooldowns.set(s.id, nowMs + cdSec * 1000);
+
+        // 7. Trigger skill visual effects based on skill category
+        if (s.type === 'melee') {
+            addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 45, element: s.element || 'physical' }], nowMs);
+            addEffects(this.vfx, [{ shape: 'arc', x: px, y: py, reach: 55, angle: aimAngle, spread: Math.PI * 0.6, element: s.element || 'physical' }], nowMs);
+        } else if (s.type === 'magic') {
+            const elem = s.element || (s.class === 'Mage' ? 'fire' : (s.class === 'Druid' ? 'lightning' : 'holy'));
+            addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 70, element: elem }], nowMs);
+            addEffects(this.vfx, [{ shape: 'burst', x: targetX, y: targetY, reach: 70, element: elem }], nowMs);
+        } else if (s.type === 'buff') {
+            addBlasts(this.blasts, [{ x: px, y: py, radius: 55, element: 'holy' }], nowMs);
+            addEffects(this.vfx, [
+                { shape: 'ring', x: px, y: py, reach: 65, element: 'holy' },
+                { shape: 'burst', x: px, y: py, reach: 45, element: 'holy' }
+            ], nowMs);
+        } else if (s.type === 'debuff') {
+            addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 60, element: 'shadow' }], nowMs);
+            addEffects(this.vfx, [{ shape: 'burst', x: targetX, y: targetY, reach: 60, element: 'shadow' }], nowMs);
+        }
+
+        // 8. Dispatch real attack to server so creatures take real damage
+        if (s.type === 'melee' || s.type === 'magic' || s.type === 'debuff') {
+            this._sendAttackAtCursor();
+        }
+
+        // Normal skill cast toast
+        if (this.showToast) this.showToast(`Cast: ${s.nameEn} ${s.icon || '✨'} (-${cost} ${s.costType.toUpperCase()})`);
+    }
+
     setupInput(){
         if (this._inputAttached) return;
         this._inputAttached = true;
@@ -1613,10 +1785,39 @@ export class Game {
                 }
             }
 
+            // Skills panel ('k')
+            if (isKey('k') && this.state === 'playing' && this.chunked && !e.repeat
+                && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
+                if (!this.className && !this.passiveStartClass) {
+                    fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
+                }
+                this.skillsOpen = !this.skillsOpen;
+            }
+
+            // Hotbar keys (1..9)
+            if (/^[1-9]$/.test(key) && this.state === 'playing' && this.chunked && !e.repeat) {
+                const slotNum = parseInt(key, 10);
+                if (this.skillsOpen && this.selectedSkillId) {
+                    const s = getSkillById(this.selectedSkillId);
+                    if (s) {
+                        this.hotbarSkills.set(slotNum, s);
+                        if (this.showToast) this.showToast(`Bound: ${s.nameEn} -> Slot ${slotNum}`);
+                    }
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    return;
+                } else if (!this.skillsOpen && !this.inventoryOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                    this._activateHotbarSkill(slotNum);
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    return;
+                }
+            }
+
             if (isKey('escape')) {
                 if (typeof e.preventDefault === 'function') e.preventDefault();
                 console.log("Escape pressed, current state:", this.state);
-                if (this.shopOpen) {
+                if (this.skillsOpen) {
+                    this.skillsOpen = false;
+                } else if (this.shopOpen) {
                     this.shopOpen = false;
                 } else if (this.bankOpen) {
                     this.bankOpen = false;
@@ -1721,6 +1922,22 @@ export class Game {
             const rect = this.canvas.getBoundingClientRect();
             this._cursorX = (e.clientX - rect.left) * (this.canvas.width / rect.width);
             this._cursorY = (e.clientY - rect.top) * (this.canvas.height / rect.height);
+            if (this.skillDrag) {
+                this.skillDrag.x = this._cursorX;
+                this.skillDrag.y = this._cursorY;
+                const dx = this._cursorX - this.skillDrag.startX;
+                const dy = this._cursorY - this.skillDrag.startY;
+                if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) this.skillDrag.armed = true;
+
+                const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
+                const slotHit = slotAreas.find((a) => this._cursorX >= a.box.x && this._cursorX <= a.box.x + a.box.w && this._cursorY >= a.box.y && this._cursorY <= a.box.y + a.box.h);
+                this.skillDrag.targetSlot = slotHit ? slotHit.slot : null;
+                this.skillHoverSlot = slotHit ? slotHit.slot : null;
+            } else {
+                const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
+                const slotHit = slotAreas.find((a) => this._cursorX >= a.box.x && this._cursorX <= a.box.x + a.box.w && this._cursorY >= a.box.y && this._cursorY <= a.box.y + a.box.h);
+                this.skillHoverSlot = slotHit ? slotHit.slot : null;
+            }
             if (this.inventoryDrag) {
                 this.inventoryDrag.x = this._cursorX;
                 this.inventoryDrag.y = this._cursorY;
@@ -1763,6 +1980,70 @@ export class Game {
                 this._handlePassivePress(this._cursorX ?? 0, this._cursorY ?? 0, false, e.shiftKey);
                 return;
             }
+
+            // Skills Panel Hit Areas
+            if (this.skillsOpen) {
+                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+                const areas = (this.renderSystem && this.renderSystem._skillsHitAreas) || [];
+                const hit = areas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
+                if (hit) {
+                    if (hit.kind === 'skills_close') {
+                        this.skillsOpen = false;
+                        return;
+                    }
+                    if (hit.kind === 'skills_class_filter') {
+                        this.skillsClassFilter = hit.key;
+                        this.skillsPage = 0;
+                        return;
+                    }
+                    if (hit.kind === 'skills_tab') {
+                        this.skillsTab = hit.key;
+                        this.skillsPage = 0;
+                        return;
+                    }
+                    if (hit.kind === 'skills_page_prev') {
+                        this.skillsPage = Math.max(0, this.skillsPage - 1);
+                        return;
+                    }
+                    if (hit.kind === 'skills_page_next') {
+                        this.skillsPage = this.skillsPage + 1;
+                        return;
+                    }
+                    if (hit.kind === 'skills_item') {
+                        this.selectedSkillId = hit.skillId;
+                        this.skillDrag = {
+                            skillId: hit.skillId,
+                            skill: hit.skill,
+                            x, y, startX: x, startY: y,
+                            armed: false,
+                        };
+                        return;
+                    }
+                }
+            }
+
+            // Hotbar Slot Hit Areas
+            const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
+            const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+            const slotHit = slotAreas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
+            if (slotHit) {
+                if (e.button === 2) {
+                    this.hotbarSkills.delete(slotHit.slot);
+                    if (this.showToast) this.showToast(`Slot ${slotHit.slot} cleared`);
+                    return;
+                }
+                if (this.selectedSkillId) {
+                    const s = getSkillById(this.selectedSkillId);
+                    if (s) {
+                        this.hotbarSkills.set(slotHit.slot, s);
+                        if (this.showToast) this.showToast(`Bound: ${s.nameEn} -> Slot ${slotHit.slot}`);
+                    }
+                    return;
+                }
+                this._activateHotbarSkill(slotHit.slot);
+                return;
+            }
+
             if (e.button !== 0) return;
 
             // While a panel is open, clicks hit-test it and must NOT also
@@ -1778,7 +2059,6 @@ export class Game {
                 return;
             }
             if (this.inventoryOpen) {
-                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
                 const areas = (this.renderSystem && this.renderSystem._invHitAreas) || [];
                 const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
                 // A press on a cell or a slot is a drag CANDIDATE: it arms only
@@ -1866,6 +2146,18 @@ export class Game {
 
         this._mouseUpHandler = (e) => {
             if (e.button !== 0) return;
+            if (this.skillDrag) {
+                const sDrag = this.skillDrag;
+                this.skillDrag = null;
+                if (sDrag.armed && sDrag.targetSlot) {
+                    const s = sDrag.skill || getSkillById(sDrag.skillId);
+                    if (s) {
+                        this.hotbarSkills.set(sDrag.targetSlot, s);
+                        if (this.showToast) this.showToast(`Bound: ${s.nameEn} -> Slot ${sDrag.targetSlot}`);
+                    }
+                }
+                return;
+            }
             if (this.passiveDrag) {
                 const pan = this.passiveDrag;
                 this.passiveDrag = null;
@@ -1905,6 +2197,10 @@ export class Game {
             }
         };
 
+        this._handleKeyDown = (e) => this._keydownHandler(e);
+        this._handleMouseDown = (e) => this._mouseDownHandler(e);
+        this._handleMouseUp = (e) => this._mouseUpHandler(e);
+
         // SOMET-476. `passive: false` because the handler calls
         // preventDefault -- without it the browser scrolls the page behind the
         // canvas while the player is zooming the tree.
@@ -1918,15 +2214,19 @@ export class Game {
             );
         };
 
-        window.addEventListener('keydown', this._keydownHandler);
-        window.addEventListener('keyup', this._keyupHandler);
-        window.addEventListener('contextmenu', this._contextMenuHandler);
-        window.addEventListener('blur', this._blurHandler);
-        this.canvas.addEventListener('mousemove', this._mouseMoveHandler);
-        this.canvas.addEventListener('mousedown', this._mouseDownHandler);
-        this.canvas.addEventListener('mouseup', this._mouseUpHandler);
-        window.addEventListener('mouseup', this._windowMouseUpHandler);
-        this.canvas.addEventListener('wheel', this._wheelHandler, { passive: false });
+        if (typeof window !== 'undefined') {
+            window.addEventListener('keydown', this._keydownHandler);
+            window.addEventListener('keyup', this._keyupHandler);
+            window.addEventListener('contextmenu', this._contextMenuHandler);
+            window.addEventListener('blur', this._blurHandler);
+            window.addEventListener('mouseup', this._windowMouseUpHandler);
+        }
+        if (this.canvas && typeof this.canvas.addEventListener === 'function') {
+            this.canvas.addEventListener('mousemove', this._mouseMoveHandler);
+            this.canvas.addEventListener('mousedown', this._mouseDownHandler);
+            this.canvas.addEventListener('mouseup', this._mouseUpHandler);
+            this.canvas.addEventListener('wheel', this._wheelHandler, { passive: false });
+        }
     }
 
     startGame(){

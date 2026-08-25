@@ -208,9 +208,9 @@ const KEYSTONES = {
     { key: 'ks_con_blood_pact', label: 'Blood Pact — life costs are reduced 25%', grants: [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.75 }] },
   ],
   charisma: [
-    { key: 'ks_cha_silver_tongue', label: 'Silver Tongue — +40 CHA', grants: [{ type: 'stat', stat: 'charisma', value: 40 }] },
-    { key: 'ks_cha_wild_growth', label: 'Wild Growth — +25 CHA and +150 maximum life', grants: [{ type: 'stat', stat: 'charisma', value: 25 }, { type: 'resource', pool: 'hp', value: 150 }] },
-    { key: 'ks_cha_venomous_bond', label: 'Venomous Bond — your hits burn', grants: [{ type: 'status', status: 'burn', value: 1 }] },
+    { key: 'ks_cha_eternal_bear', label: 'Eternal Bear — Infinite Bear Form (+30 STR and +200 HP)', grants: [{ type: 'stat', stat: 'strength', value: 30 }, { type: 'resource', pool: 'hp', value: 200 }] },
+    { key: 'ks_cha_eternal_hawk', label: 'Eternal Hawk — Infinite Hawk Form (+30 DEX and +20% ice resistance)', grants: [{ type: 'stat', stat: 'dexterity', value: 30 }, { type: 'resist', element: 'ice', value: 20 }] },
+    { key: 'ks_cha_eternal_wolf', label: 'Eternal Wolf — Infinite Wolf Form (+20 STR, +20 DEX and +20 CHA)', grants: [{ type: 'stat', stat: 'strength', value: 20 }, { type: 'stat', stat: 'dexterity', value: 20 }, { type: 'stat', stat: 'charisma', value: 20 }] },
     { key: 'ks_cha_pack_leader', label: 'Pack Leader — +3 to your charm budget', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 3 }] },
     { key: 'ks_cha_beast_bond', label: 'Beast Bond — +5 to your charm budget', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }] },
   ],

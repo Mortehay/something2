@@ -15,6 +15,8 @@ import { chunkTileCells } from "../core/chunkTiles.js";
 import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
+import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
+import { isTransformationSkill, getRequiredForm } from "../core/skillsData.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
 import { effectProgress, effectAlpha, isoArcAngle, particlesAt } from "../core/vfx.js";
 import { anchorY } from "../core/attackAnchor.js";
@@ -255,6 +257,11 @@ export class RenderSystem {
     passiveRespecCost = null, passiveRespecBusy = false,
     passiveHoverX = null, passiveHoverY = null,
     passiveSearchText = "", passiveSearchFocused = false,
+    // Skills panel & Hotbar
+    skillsOpen = false, skillsTab = "all", skillsPage = 0, skillsClassFilter = "all",
+    selectedSkillId = null, skillDrag = null, hotbarSkills = null,
+    skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
+    skillCooldowns = null,
   }) {
     if (vfxDefs) this.vfxDefs = vfxDefs;
     // While any full-screen panel is up the cursor is being used to click ITS
@@ -404,7 +411,13 @@ export class RenderSystem {
     this.drawVfx(vfx);
 
     camera.reset(this.ctx);
-    this.renderHud({ player, remotePlayers, localUserId, mana, maxMana, showMana, stamina, maxStamina, weaponName, ammo, noAmmoFlash, effects, gold, progression });
+    this._skillSlotHitAreas = [];
+    this.renderHud({
+      player, remotePlayers, localUserId, mana, maxMana, showMana, stamina, maxStamina,
+      weaponName, ammo, noAmmoFlash, effects, gold, progression,
+      skills: hotbarSkills, hitAreas: this._skillSlotHitAreas, hoverSlot: skillHoverSlot, drag: skillDrag,
+      activeForm, flashSlot, skillCooldowns,
+    });
     if (toast) this.renderToast(toast);
 
     // Inventory panel overlay (drawn last, on top of the HUD, in raw canvas
@@ -412,6 +425,37 @@ export class RenderSystem {
     this._invHitAreas = [];
     if (inventoryOpen && inventory) {
       this._invLayout = this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, inventoryView);
+    }
+
+    // Skills panel overlay — same convention as inventory/shop panels
+    this._skillsHitAreas = [];
+    this._skillsLayout = null;
+    if (skillsOpen) {
+      this._skillsLayout = this.renderSkillsPanel(this.ctx, {
+        className: playerClass || (player && player.className) || "Druid",
+        classFilter: skillsClassFilter || "all",
+        tab: skillsTab || "all",
+        page: skillsPage || 0,
+        selectedSkillId,
+        drag: skillDrag,
+      }, this._skillsHitAreas);
+    }
+
+    // Floating drag preview when dragging a skill onto the hotbar
+    if (skillDrag && skillDrag.armed && skillDrag.skill) {
+      const s = skillDrag.skill;
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.fillStyle = "rgba(18, 12, 32, 0.9)";
+      ctx.fillRect(skillDrag.x - 20, skillDrag.y - 20, 40, 40);
+      ctx.strokeStyle = "#fbbf24";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(skillDrag.x - 20, skillDrag.y - 20, 40, 40);
+      ctx.font = "20px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(s.icon || "⚔️", skillDrag.x, skillDrag.y);
+      ctx.restore();
     }
 
     // Shop panel overlay (Slice D) — same overlay convention as the
@@ -1730,28 +1774,275 @@ export class RenderSystem {
     ctx.restore();
   }
 
-  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, showMana = true, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null, gold = null, progression = null }) {
+  _drawSkillBar(skills = null, hitAreas = null, hoverSlot = null, drag = null, activeForm = null, flashSlot = null, skillCooldowns = null) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+
+    const slotCount = 9;
+    const slotSize = 36;
+    const gap = 5;
+    const padX = 6;
+    const padY = 5;
+
+    const canW = (this.canvas && this.canvas.width) || GAME_WIDTH;
+    const canH = (this.canvas && this.canvas.height) || GAME_HEIGHT;
+
+    const panelW = padX * 2 + slotCount * slotSize + (slotCount - 1) * gap;
+    const panelH = slotSize + padY * 2;
+    const panelX = Math.round((canW - panelW) / 2);
+    // Level / XP bar is at bottom - 22 (height 8). Sit directly above it.
+    const panelY = canH - 22 - 14 - panelH;
+    const r = 6;
+
+    ctx.save();
+
+    // 0. Active Form Indicator Badge above Hotbar
+    if (activeForm) {
+      const badgeW = 150;
+      const badgeH = 18;
+      const badgeX = Math.round((canW - badgeW) / 2);
+      const badgeY = panelY - badgeH - 3;
+      const formEmoji = activeForm === 'bear' ? '🐻' : (activeForm === 'hawk' ? '🦅' : '🐺');
+      const formColor = activeForm === 'bear' ? '#ea580c' : (activeForm === 'hawk' ? '#0284c7' : '#7c3aed');
+
+      ctx.fillStyle = "rgba(15, 10, 25, 0.92)";
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+      else ctx.rect(badgeX, badgeY, badgeW, badgeH);
+      ctx.fill();
+      ctx.strokeStyle = formColor;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = "#fef08a";
+      ctx.font = "bold 9px monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`★ ${activeForm.toUpperCase()} FORM ${formEmoji} ACTIVE`, badgeX + badgeW / 2, badgeY + badgeH / 2);
+    }
+
+    // 1. Hotbar Panel Background Frame
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(panelX, panelY, panelW, panelH, r);
+    } else {
+      ctx.rect(panelX, panelY, panelW, panelH);
+    }
+    const bgGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
+    bgGrad.addColorStop(0, "rgba(24, 15, 42, 0.95)");
+    bgGrad.addColorStop(1, "rgba(10, 6, 20, 0.98)");
+    ctx.fillStyle = bgGrad;
+    ctx.fill();
+
+    // Panel border
+    const borderGrad = ctx.createLinearGradient(panelX, panelY, panelX + panelW, panelY + panelH);
+    borderGrad.addColorStop(0, "rgba(147, 112, 219, 0.6)");
+    borderGrad.addColorStop(0.5, "rgba(76, 29, 149, 0.8)");
+    borderGrad.addColorStop(1, "rgba(147, 112, 219, 0.6)");
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = borderGrad;
+    ctx.stroke();
+
+    // Top highlight rim on panel
+    ctx.beginPath();
+    ctx.moveTo(panelX + r, panelY + 1);
+    ctx.lineTo(panelX + panelW - r, panelY + 1);
+    ctx.strokeStyle = "rgba(233, 213, 255, 0.25)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 2. Individual Skill Slots (1 to 9)
+    const nowMs = performance.now();
+    for (let i = 0; i < slotCount; i++) {
+      const keyNum = i + 1;
+      const sx = panelX + padX + i * (slotSize + gap);
+      const sy = panelY + padY;
+      const sr = 4;
+
+      const skill = (skills && typeof skills.get === 'function')
+        ? skills.get(keyNum)
+        : (Array.isArray(skills) ? skills[i] : (skills && skills[keyNum]));
+
+      if (hitAreas) {
+        hitAreas.push({ kind: "hotbar_slot", slot: keyNum, skill, box: { x: sx, y: sy, w: slotSize, h: slotSize } });
+      }
+
+      const isHovered = hoverSlot === keyNum || (drag && drag.targetSlot === keyNum);
+      const isFormActive = skill && isTransformationSkill(skill) === activeForm;
+      const isFlashed = flashSlot === keyNum;
+      const reqForm = skill ? getRequiredForm(skill) : null;
+      const isFormLocked = reqForm && reqForm !== activeForm;
+
+      // Cooldown state
+      const readyAt = (skill && skillCooldowns)
+        ? (typeof skillCooldowns.get === 'function' ? skillCooldowns.get(skill.id) : skillCooldowns[skill.id])
+        : null;
+      const isOnCd = readyAt && nowMs < readyAt;
+      const remainingMs = isOnCd ? (readyAt - nowMs) : 0;
+
+      // Slot background
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(sx, sy, slotSize, slotSize, sr);
+      } else {
+        ctx.rect(sx, sy, slotSize, slotSize);
+      }
+
+      const slotGrad = ctx.createLinearGradient(sx, sy, sx, sy + slotSize);
+      if (isFlashed) {
+        slotGrad.addColorStop(0, "rgba(250, 204, 21, 0.95)");
+        slotGrad.addColorStop(1, "rgba(234, 88, 12, 0.95)");
+      } else if (isFormActive) {
+        slotGrad.addColorStop(0, "rgba(21, 128, 61, 0.95)");
+        slotGrad.addColorStop(1, "rgba(22, 101, 52, 0.98)");
+      } else if (isHovered) {
+        slotGrad.addColorStop(0, "rgba(76, 29, 149, 0.95)");
+        slotGrad.addColorStop(1, "rgba(46, 16, 101, 0.98)");
+      } else {
+        slotGrad.addColorStop(0, "rgba(30, 20, 50, 0.9)");
+        slotGrad.addColorStop(1, "rgba(14, 9, 24, 0.95)");
+      }
+      ctx.fillStyle = slotGrad;
+      ctx.fill();
+
+      // Slot border
+      if (isFlashed) {
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "#ffffff";
+      } else if (isFormActive) {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#4ade80";
+      } else if (isHovered) {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#fbbf24";
+      } else {
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = skill ? (skill.iconColor || "#a855f7") : "rgba(109, 40, 217, 0.65)";
+      }
+      ctx.stroke();
+
+      // Slot inner inset lines for 3D bevel look
+      ctx.beginPath();
+      ctx.moveTo(sx + 1, sy + slotSize - 1);
+      ctx.lineTo(sx + 1, sy + 1);
+      ctx.lineTo(sx + slotSize - 1, sy + 1);
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+      ctx.stroke();
+
+      // Skill slot content or placeholder glyph
+      if (skill && (skill.nameUk || skill.nameEn || skill.name)) {
+        const sName = skill.nameUk || skill.nameEn || skill.name;
+        if (skill.icon) {
+          ctx.font = "18px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(skill.icon, sx + slotSize / 2, sy + slotSize / 2 + 1);
+        } else {
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "bold 11px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(sName.slice(0, 2).toUpperCase(), sx + slotSize / 2, sy + slotSize / 2);
+        }
+
+        // If form requirement is not met, show dimmed lock overlay
+        if (isFormLocked) {
+          ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+          ctx.fillRect(sx, sy, slotSize, slotSize);
+          ctx.font = "10px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("🔒", sx + slotSize / 2, sy + slotSize / 2);
+        }
+
+        // If on cooldown, draw translucent cooldown veil + countdown text
+        if (isOnCd) {
+          const cdTotal = (skill.cooldown || 1) * 1000;
+          const cdFrac = Math.max(0, Math.min(1, remainingMs / cdTotal));
+          ctx.fillStyle = "rgba(8, 4, 18, 0.72)";
+          ctx.fillRect(sx, sy + slotSize * (1 - cdFrac), slotSize, slotSize * cdFrac);
+
+          const secText = remainingMs >= 10000
+            ? `${Math.ceil(remainingMs / 1000)}s`
+            : `${(remainingMs / 1000).toFixed(1)}s`;
+          ctx.font = "bold 10px monospace";
+          ctx.lineWidth = 2.5;
+          ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
+          ctx.fillStyle = "#fef08a";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.strokeText(secText, sx + slotSize / 2, sy + slotSize / 2);
+          ctx.fillText(secText, sx + slotSize / 2, sy + slotSize / 2);
+        }
+
+        // Active form badge on bottom-right of active transformation slot
+        if (isFormActive) {
+          ctx.fillStyle = "#22c55e";
+          ctx.font = "bold 8px monospace";
+          ctx.textAlign = "right";
+          ctx.textBaseline = "bottom";
+          ctx.fillText("ON", sx + slotSize - 2, sy + slotSize - 1);
+        }
+      } else {
+        // Subtle decorative arcane cross / diamond in empty slot
+        const midX = sx + slotSize / 2;
+        const midY = sy + slotSize / 2;
+        ctx.beginPath();
+        ctx.moveTo(midX, midY - 4);
+        ctx.lineTo(midX + 4, midY);
+        ctx.lineTo(midX, midY + 4);
+        ctx.lineTo(midX - 4, midY);
+        ctx.closePath();
+        ctx.fillStyle = isHovered ? "rgba(251, 191, 36, 0.25)" : "rgba(192, 132, 252, 0.12)";
+        ctx.fill();
+        ctx.strokeStyle = isHovered ? "#fbbf24" : "rgba(192, 132, 252, 0.25)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      // Hotkey badge (1..9) in top-left
+      ctx.font = "bold 10px monospace";
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.95)";
+      ctx.fillStyle = isHovered ? "#fef08a" : "#d8b4fe";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.strokeText(`${keyNum}`, sx + 3, sy + 2);
+      ctx.fillText(`${keyNum}`, sx + 3, sy + 2);
+    }
+
+    ctx.restore();
+  }
+
+  renderSkillsPanel(ctx, state, hitAreas) {
+    const layout = layoutSkillsPanel(state);
+    for (const a of layout.hitAreas) hitAreas.push(a);
+    drawSkillsPanel(ctx, layout, state);
+    return layout;
+  }
+
+  renderHud({ player, remotePlayers, localUserId, mana = null, maxMana = null, showMana = true, stamina = null, maxStamina = null, weaponName = null, ammo = null, noAmmoFlash = false, effects = null, gold = null, progression = null, skills = null, hitAreas = null, hoverSlot = null, drag = null, activeForm = null, flashSlot = null, skillCooldowns = null }) {
     if (!player) return;
 
     const orbRadius = 48;
 
-    // Bottom-left Life / HP Orb (Path of Exile style)
+    // Bottom-left Life / HP Orb (Path of Exile style) with Bear Form +200 HP bonus
     const hpX = orbRadius + 16;
     const hpY = GAME_HEIGHT - orbRadius - 16;
-    this._drawPoEOrb(hpX, hpY, orbRadius, player.hp, player.maxHp, "HP", "life");
+    const hpBonus = activeForm === 'bear' ? 200 : 0;
+    const effectiveMaxHp = (player.maxHp || 100) + hpBonus;
+    const effectiveHp = player.hp != null ? player.hp + hpBonus : effectiveMaxHp;
+    this._drawPoEOrb(hpX, hpY, orbRadius, effectiveHp, effectiveMaxHp, "HP", "life");
 
-    // Bottom-right Mana / MP Orb (Path of Exile style).
-    //
-    // SOMET-472: SKIPPED ENTIRELY for a life-cost class, not drawn with a null
-    // pool. _drawPoEOrb treats a null `current` as 0 and a null `max` as 100,
-    // so passing nulls would paint a permanently EMPTY mana orb -- which reads
-    // as "you are out of mana" rather than "you have no mana bar". The Cultist
-    // spends HP, and the HP orb to the left is the whole story.
+    // Bottom-right Mana / MP Orb (Path of Exile style)
     if (showMana) {
       const mpX = GAME_WIDTH - orbRadius - 16;
       const mpY = GAME_HEIGHT - orbRadius - 16;
       this._drawPoEOrb(mpX, mpY, orbRadius, mana, maxMana, "MP", "mana");
     }
+
+    // Skills panel (slots 1-9) right above the level bar
+    this._drawSkillBar(skills, hitAreas, hoverSlot, drag, activeForm, flashSlot, skillCooldowns);
 
     // Bottom XP bar connecting HP and MP orbs, with central level emblem
     this._drawXpBar(progression);

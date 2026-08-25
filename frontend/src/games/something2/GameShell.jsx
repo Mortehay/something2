@@ -135,6 +135,7 @@ const HELP_SECTIONS = [
     title: 'Character & passives',
     rows: [
       { k: [['C']], d: 'Character sheet — your class, level, XP, and each stat broken down into where it came from (base, passive tree, gear). Opens the inventory panel on its Character tab' },
+      { k: [['K']], d: 'Skills and abilities — opens the skill book. Drag skills to hotbar slots (1-9) or select a skill and press 1-9 to bind it' },
       { k: [['P']], d: 'Passive skill tree — spend passive points. You get one per level. Drag to pan, scroll to zoom, click a lit node to allocate it; you can only take a node next to one you already own. Unspent points are shown at the top' },
       { k: [['Respec']], d: 'The button inside the passive tree refunds every allocated point for gold, so you can rebuild from scratch' },
     ],
