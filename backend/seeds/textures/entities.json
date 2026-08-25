@@ -1,0 +1,58 @@
+[
+  {
+    "name": "bush",
+    "file": "bush.png",
+    "bytes": 104152,
+    "prompt": "a round leafy green shrub",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "dead_tree",
+    "file": "dead_tree.png",
+    "bytes": 101785,
+    "prompt": "a bare dead tree with broken branches",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "IceRock",
+    "file": "IceRock.png",
+    "bytes": 59510,
+    "prompt": "a jagged pale blue ice boulder",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "pine_tree",
+    "file": "pine_tree.png",
+    "bytes": 114299,
+    "prompt": "a tall dark green pine tree with a straight trunk",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "rose_bush",
+    "file": "rose_bush.png",
+    "bytes": 79336,
+    "prompt": "a green shrub covered in red roses",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "Stone",
+    "file": "Stone.png",
+    "bytes": 119491,
+    "prompt": "a mossy grey boulder",
+    "is_creature": false,
+    "cutout": true
+  },
+  {
+    "name": "Tree",
+    "file": "Tree.png",
+    "bytes": 131963,
+    "prompt": "a tall broadleaf tree with a thick trunk",
+    "is_creature": false,
+    "cutout": true
+  }
+]

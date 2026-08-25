@@ -292,6 +292,13 @@ tiles-seed:
 # them). Same PROVIDER/FORCE/ONLY/DRY/NOPIN as the tile target. Each entity
 # gets ONE STILL -- directional walk sets remain a sprite-gen job.
 #
+# CORE=1 is the one that works. It calls the remote service's own concept
+# endpoint (/api/generate_core) instead of its A1111 txt2img shim, and the same
+# box with the same model answers that endpoint with ONE object, centred, on a
+# FLAT backdrop -- which entities-cutout can key out. txt2img on the same box
+# returns tilesets and framed cards on checkered backdrops that nothing can
+# key. Slower than txt2img, far better output.
+#
 # LOCAL=1 generates through the in-compose sprite-gen service instead of a
 # remote provider, and for entities that is usually what you want. The remote
 # SDXL + pixel-art model draws ground textures beautifully and refuses to draw
@@ -305,7 +312,7 @@ entities-generate:
 	$(COMPOSE) exec -T backend node scripts/generate-entity-textures.js \
 		$(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(FORCE),--force) \
 		$(if $(ONLY),--only "$(ONLY)") $(if $(DRY),--dry-run) $(if $(NOPIN),--no-pin) \
-		$(if $(OBJECTS),--objects-only) $(if $(CREATURES),--creatures-only) $(if $(LOCAL),--local)
+		$(if $(OBJECTS),--objects-only) $(if $(CREATURES),--creatures-only) $(if $(LOCAL),--local) $(if $(CORE),--core)
 
 entities-export:
 	$(COMPOSE) exec -T backend node scripts/export-entity-textures.js

@@ -145,7 +145,7 @@ def flood_from_border(px, w, h, mask, tol):
     return removed, backdrop
 
 
-def cutout(img, tol=60, feather=1, passes=4):
+def cutout(img, tol=60, feather=1, passes=8):
     """Peel the background away layer by layer, then crop to what is left.
 
     ONE FLOOD FILL IS NOT ENOUGH, which is the whole reason this is iterative.
@@ -166,7 +166,7 @@ def cutout(img, tol=60, feather=1, passes=4):
     backdrop = (255, 0, 255)
     for _ in range(passes):
         removed, backdrop = flood_from_border(px, w, h, mask, tol)
-        if removed < (w * h) * 0.005:          # nothing meaningful left to peel
+        if removed < (w * h) * 0.002:          # nothing meaningful left to peel
             break
 
     if feather:
@@ -185,8 +185,55 @@ def cutout(img, tol=60, feather=1, passes=4):
         side = max(sub.size)
         square = Image.new('RGBA', (side, side), (0, 0, 0, 0))
         square.paste(sub, ((side - sub.size[0]) // 2, (side - sub.size[1]) // 2))
-        out = square.resize((w, h), Image.LANCZOS)
+        # Kept at the SUBJECT's own resolution, never scaled back up to the
+        # canvas it was drawn on. A concept generator centres a small object in
+        # a large frame, so restoring the original size would upscale a ~70px
+        # boulder to 512 and turn crisp pixel art into blur. The renderer
+        # scales to display_width/display_height regardless, so the only thing
+        # an upscale here buys is lost detail.
+        out = square
     return out
+
+
+def border_opacity(img):
+    """How much of the outer ring is still opaque. 0 means a clean cutout.
+
+    This is the acceptance test, not a diagnostic. "The background is gone" is
+    exactly the claim that the frame of the image is transparent, and checking
+    it directly is what stops a subject-in-a-box shipping as finished art.
+    """
+    a = img.getchannel('A')
+    w, h = img.size
+    ring = []
+    for x in range(w):
+        ring.append(a.getpixel((x, 0)))
+        ring.append(a.getpixel((x, h - 1)))
+    for y in range(h):
+        ring.append(a.getpixel((0, y)))
+        ring.append(a.getpixel((w - 1, y)))
+    return sum(1 for v in ring if v > 16) / float(len(ring))
+
+
+def cutout_until_clean(img, feather=1):
+    """Escalate the key tolerance until the border really is transparent.
+
+    One fixed tolerance cannot serve every image: a flat backdrop keys at 40, a
+    dithered or lightly shaded one needs 100+, and using the high value
+    everywhere eats subjects that share a tone with their backdrop. So this
+    walks up and stops at the first result that both clears the border AND
+    keeps a plausible amount of subject.
+    """
+    best = None
+    for tol in (40, 60, 80, 100, 130, 160):
+        out = cutout(img, tol=tol, feather=feather)
+        cov = coverage(out)
+        border = border_opacity(out)
+        if best is None or (border, -cov) < (best[1], -best[2]):
+            best = (out, border, cov, tol)
+        # A subject under 3% is a sprite that has been erased, not cut out.
+        if border <= 0.02 and cov >= 0.03:
+            return out, border, cov, tol
+    return best
 
 
 def coverage(img):
@@ -223,16 +270,17 @@ def main():
             else:
                 print(f'  {name[:-4]}: opaque {img.mode}')
             continue
-        out = cutout(img, args.tol, args.feather)
-        cov = coverage(out)
+        out, border, cov, tol = cutout_until_clean(img, args.feather)
         out.save(path)
         # Two failure shapes worth naming rather than silently shipping: almost
         # nothing removed (the backdrop was not flat, so the subject is still
         # in a box) and almost everything removed (the subject was the same
         # colour as its backdrop and has been erased).
-        if cov > 0.92 or cov < 0.05:
-            suspicious.append((name[:-4], cov))
-        print(f'  {name[:-4]}: {cov * 100:.0f}% opaque')
+        # The border test is the one that matters; coverage only catches the
+        # opposite failure, a subject erased along with its backdrop.
+        if border > 0.02 or cov < 0.03:
+            suspicious.append((name[:-4], cov, border))
+        print(f'  {name[:-4]}: {cov * 100:.0f}% subject, border {border * 100:.1f}% opaque (tol {tol})')
 
     if not args.check and manifest:
         for entry in manifest:
@@ -242,10 +290,13 @@ def main():
             fh.write('\n')
 
     if suspicious:
-        print('\nCHECK THESE -- the cutout probably did the wrong thing:')
-        for nm, cov in suspicious:
-            what = 'backdrop not removed' if cov > 0.92 else 'subject mostly erased'
-            print(f'  {nm}: {cov * 100:.0f}% opaque ({what})')
+        print('\nNOT TRANSPARENT -- these still carry a background:')
+        for nm, cov, border in suspicious:
+            what = 'subject erased' if cov < 0.03 else f'{border * 100:.0f}% of the border is opaque'
+            print(f'  {nm}: {what}')
+        # Loud and non-zero: seeding these would put a box behind every prop,
+        # and a warning nobody reads is how that ships.
+        sys.exit(1)
 
 
 if __name__ == '__main__':

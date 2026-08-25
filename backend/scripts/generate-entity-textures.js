@@ -155,6 +155,86 @@ async function generateLocally(pool, entity, { pollMs = 5000, maxWaitMs = 120000
   }
 }
 
+// Generate through the sprite service's CONCEPT endpoint (step 1 of its own
+// two-step pipeline) rather than the A1111-compatible txt2img shim.
+//
+// THIS IS VENDOR-SPECIFIC and deliberately not part of the generic provider
+// contract: it posts form-encoded fields to /api/generate_core, then finds the
+// result by polling that service's asset list. Nothing about that is portable,
+// which is why it sits behind --core rather than becoming another provider
+// mode. The service URL is taken from the provider's base_url origin, so the
+// admin still configures one thing in one place.
+//
+// WHY IT IS WORTH THE SPECIAL CASE: the same box, same model, same LoRA
+// answers /api/generate_core with exactly what txt2img refuses to give -- ONE
+// object, centred, on a flat uniform backdrop. Flat is the whole game: a
+// backdrop that is one colour can be keyed out, and the checkered and textured
+// backdrops txt2img returns cannot. That difference is what makes entity art
+// possible here at all.
+async function generateViaCore(pool, provider, entity, { pollMs = 5000, maxWaitMs = 900000 } = {}) {
+  const origin = new URL(provider.base_url).origin;
+  const assetsUrl = `${origin}/api/assets?source=image&kind=core&limit=1`;
+
+  // Remember the newest concept BEFORE submitting. The submit call answers
+  // with a task id that the asset list does not carry, so "which row is mine"
+  // has to be answered by "the one that did not exist a moment ago" -- and
+  // matching on the title instead would pick up a re-run of the same subject.
+  const before = await fetch(assetsUrl).then((r) => r.json()).catch(() => ({ items: [] }));
+  const beforeId = before.items && before.items[0] ? Number(before.items[0].id) : 0;
+
+  const body = new URLSearchParams({
+    // NAMING AN EXCLUSION ADDS IT. /api/generate_core takes no negative
+    // prompt, so the obvious move is to write the exclusions into the
+    // sentence -- and that was measured making things worse: "no pot, no
+    // planter" produced potted plants, "no person" produced a person, and the
+    // longer prompt also started returning several objects instead of one.
+    // Diffusion attends to the nouns, not the negation in front of them.
+    //
+    // So this stays short and positive. What keeps it isolated is the
+    // endpoint, not the adjectives: /api/generate_core answers with one
+    // centred subject on a flat backdrop where txt2img on the same box
+    // returns tilesets and framed cards.
+    prompt: `pixel art, ${entity.prompt}, single object, solid transparent background`,
+    llm_name: provider.model || '',
+  });
+  const submit = await fetch(`${origin}/api/generate_core`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  if (!submit.ok) return { ok: false, error: `generate_core answered ${submit.status}` };
+
+  const started = Date.now();
+  for (;;) {
+    if (Date.now() - started > maxWaitMs) return { ok: false, error: 'timed out waiting for a concept' };
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => setTimeout(r, pollMs));
+    // eslint-disable-next-line no-await-in-loop
+    const list = await fetch(assetsUrl).then((r) => r.json()).catch(() => null);
+    const newest = list && list.items && list.items[0];
+    if (!newest || Number(newest.id) <= beforeId) continue;
+
+    // eslint-disable-next-line no-await-in-loop
+    const img = await fetch(`${origin}${newest.url}`);
+    if (!img.ok) return { ok: false, error: `could not fetch ${newest.url}: ${img.status}` };
+    // eslint-disable-next-line no-await-in-loop
+    const buf = Buffer.from(await img.arrayBuffer());
+
+    const store = require('../src/services/assetStore.js');
+    const safe = String(entity.name).replace(/[^A-Za-z0-9_-]/g, '_');
+    const key = `${store.BUCKET()}/${safe}/concept/static.png`;
+    // eslint-disable-next-line no-await-in-loop
+    await store.putObject(key, buf, 'image/png');
+    // eslint-disable-next-line no-await-in-loop
+    await pool.query(
+      `UPDATE entity_types SET image = $1, sprite = NULL, render_mode = 'static',
+        updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [key, entity.id],
+    );
+    return { ok: true, key };
+  }
+}
+
 async function generateOne(pool, provider, entity) {
   const jobId = remoteImageProvider.createJob();
   await remoteImageProvider.runGeneration(jobId, provider, {
@@ -225,9 +305,10 @@ async function generateEntityTextures(pool, args) {
     }
 
     const started = Date.now();
-    const res = args.local
-      ? await generateLocally(pool, entity)
-      : await generateOne(pool, provider, entity);
+    let res;
+    if (args.local) res = await generateLocally(pool, entity);
+    else if (args.core) res = await generateViaCore(pool, provider, entity);
+    else res = await generateOne(pool, provider, entity);
     const secs = ((Date.now() - started) / 1000).toFixed(0);
     if (res.ok) {
       console.log(`  ${entity.name}: ok (${secs}s)`);
@@ -240,7 +321,7 @@ async function generateEntityTextures(pool, args) {
   return stats;
 }
 
-module.exports = { generateEntityTextures, buildObjectPrompt, BACKDROP, generateLocally };
+module.exports = { generateEntityTextures, buildObjectPrompt, BACKDROP, generateLocally, generateViaCore };
 
 if (require.main === module) {
   const env = dotenv.config({ path: path.resolve(__dirname, '../../.env') }).parsed || {};
@@ -250,6 +331,7 @@ if (require.main === module) {
   const args = parseArgs(argv);
   args.objectsOnly = argv.includes('--objects-only');
   args.local = argv.includes('--local');
+  args.core = argv.includes('--core');
   args.creaturesOnly = argv.includes('--creatures-only');
   const pool = new Pool({ connectionString: url });
   generateEntityTextures(pool, args)
