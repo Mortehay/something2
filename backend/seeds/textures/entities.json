@@ -2,7 +2,7 @@
   {
     "name": "bush",
     "file": "bush.png",
-    "bytes": 248396,
+    "bytes": 81105,
     "prompt": "pixel art, a round leafy green shrub, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -10,7 +10,7 @@
   {
     "name": "dead_tree",
     "file": "dead_tree.png",
-    "bytes": 184197,
+    "bytes": 120270,
     "prompt": "pixel art, a bare dead tree with broken branches, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -18,7 +18,7 @@
   {
     "name": "IceRock",
     "file": "IceRock.png",
-    "bytes": 292772,
+    "bytes": 98810,
     "prompt": "pixel art, a jagged pale blue ice boulder, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -26,7 +26,7 @@
   {
     "name": "pine_tree",
     "file": "pine_tree.png",
-    "bytes": 107154,
+    "bytes": 67989,
     "prompt": "pixel art, a tall dark green pine tree with a straight trunk, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -34,7 +34,7 @@
   {
     "name": "rose_bush",
     "file": "rose_bush.png",
-    "bytes": 259656,
+    "bytes": 122665,
     "prompt": "pixel art, a green shrub covered in red roses, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
@@ -42,15 +42,15 @@
   {
     "name": "Stone",
     "file": "Stone.png",
-    "bytes": 204781,
-    "prompt": "pixel art, a mossy grey boulder, single object, solid transparent background",
+    "bytes": 265904,
+    "prompt": "pixel art, a large grey rock covered in green moss, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
   },
   {
     "name": "Tree",
     "file": "Tree.png",
-    "bytes": 257679,
+    "bytes": 156508,
     "prompt": "pixel art, a tall broadleaf tree with a thick trunk, single object, solid transparent background",
     "is_creature": false,
     "cutout": true
