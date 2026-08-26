@@ -17,6 +17,12 @@
 
 const crypto = require('node:crypto');
 const { selectOne } = require('./pointerPath');
+// Shared with discovery on purpose: a credential that works for GET /models
+// must go out on POST /txt2img in the identical header. These were two copies
+// of the same rule, and both dropped a token stored without a header name --
+// fixing only the discovery copy would have made Refresh succeed while every
+// generation still came back 401.
+const { authHeaders } = require('./providerDiscovery');
 const assetStore = require('./assetStore');
 const { safeFetch, redactUrl, readCapped, readJsonCapped } = require('./safeFetch');
 const { manifestForSheet } = require('./spriteSheet');
@@ -229,13 +235,6 @@ function storageKey({ bucket, kind, subject, jobId, file = 'static.png' }) {
 // is taller than it is wide.
 function defaultSize(kind) {
   return kind === 'tile' ? { width: 128, height: 128 } : { width: 128, height: 160 };
-}
-
-function authHeaders(provider) {
-  if (provider.auth_header_name && provider.auth_token) {
-    return { [provider.auth_header_name]: provider.auth_token };
-  }
-  return {};
 }
 
 // --- Generation ----------------------------------------------------------
