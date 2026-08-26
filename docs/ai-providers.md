@@ -305,3 +305,201 @@ cannot already read `DATABASE_URL` out of compose.
 | `this provider returns a single image` | Pre-SOMET-346 message; configure a sprite-sheet layout |
 | Job never finishes after a restart | In-memory registry; the job is gone. Regenerate |
 | `refusing to call …: scheme file: is not allowed` | `base_url` is not http(s) |
+
+---
+
+## Texturing the whole tile catalog
+
+Doing this through the admin UI is fifty modals. Three make targets do it for
+the catalog, and only the first needs a GPU.
+
+```
+make tiles-generate PROVIDER="desktop gpu"    # pin, pick biomes, draw what's missing
+make tiles-export                             # MinIO -> backend/seeds/textures/tiles/
+make tiles-seamless                           # make each texture tile against itself
+make tiles-seed                               # committed PNGs -> MinIO, on any machine
+```
+
+`tiles-generate` does what the UI does, in the same order: it pins every tile to
+the provider (**Generation service**), gives each tile a biome art context if it
+has none, then draws on that provider (**Generate with**) and points the catalog
+row at the result — the Approve step. It is idempotent; an already-textured tile
+is skipped.
+
+| Variable | Effect |
+|---|---|
+| `PROVIDER=` | Provider name or id. Omit to use whichever is active |
+| `FORCE=1` | Redraw tiles that already have a texture |
+| `ONLY=grass,sand` | Limit to named tiles |
+| `DRY=1` | Print what would happen, change nothing |
+| `NOPIN=1` | Generate without changing each tile's saved provider |
+
+**Biome choice** is deterministic: the lowest-id biome whose `terrain_tiles`
+lists the tile. A tile no biome claims — roads, gates, `wooden_wall` — keeps no
+context rather than borrowing an unrelated palette. `cave_wall` is the exception
+that looks like a mistake and is not: it is banded into the deep biomes on
+purpose, so it does take one.
+
+### Moving textures to a machine with no GPU
+
+`tiles-export` writes one PNG per textured tile to `backend/seeds/textures/tiles/`
+with a manifest recording the prompt and biome each was drawn from. Commit those,
+and on the other machine `make seed-catalogs && make tiles-seed` reproduces the
+art with no provider configured at all.
+
+Seeded textures get a stable key — `<bucket>/tiles/<name>/seeded/static.png` —
+deliberately *not* the original job-scoped key, so one machine's job ids never
+reappear on another. `tiles-seed` leaves a locally-generated texture alone unless
+`FORCE=1`.
+
+The catalog is roughly 15–20 MB of PNG at 512px. That is the price of not needing
+a GPU to see the game as intended.
+
+### Seamless tiling
+
+A raw generated texture has arbitrary edges, so a field of one tile reads as a
+grid of stamps. Three things are worth knowing.
+
+**The provider cannot do it.** A1111 generates seamless textures with circular
+padding in the conv layers; this service's `txt2img` exposes no `tiling`
+parameter, so that route is closed. And asking in words makes things worse —
+see the table below.
+
+**Diamonds need ordinary wrap-seamlessness, not something special.** The square
+is stretched into the iso diamond and a tile's neighbour is drawn at exactly a
+half-tile offset, so the pixel across a shared diamond edge is the same texture
+sampled at `(x - W/2, y - H/2)`. Continuity under wraparound gives continuity
+across every diamond edge.
+
+**So it is done afterwards**, by `make tiles-seamless`: wrap the image by half
+its size, which moves the four edges into the middle as a cross and leaves two
+formerly-adjacent columns as the new border; heal that cross by blending the
+un-offset image back over a feathered band; then weld the borders so opposite
+edges are pixel-identical rather than merely close.
+
+```
+make tiles-seamless CHECK=1              # measure only; 0 is a perfect seam
+make tiles-seamless PREVIEW=grass        # 2x2 tiling written to /tmp
+make tiles-seamless REPEAT=3             # shrink features further (default 2)
+```
+
+**Feature scale is fixed in the same pass.** A tile diamond is 128x64 and the
+texture is 512x512, so the renderer squashes it 4x across and 8x down. A
+generator draws a handful of large elements per image, which lands as three or
+four boulders filling one tile — scenery, not ground. `REPEAT=N` tiles an
+N-times-downscaled copy, dividing apparent feature size by N and multiplying
+the count by N². It is free because the texture is already seamless, so the
+internal repeat seams are continuous too. N=2 is the default; N=3 starts to
+read as a pattern.
+
+**Running it twice on one export is refused**, and that guard matters:
+`tiles-seed` writes the PROCESSED textures back to the object store, so the
+next `tiles-export` pulls those down and a second pass heals, welds and
+shrinks an already-processed image — progressively blurrier and more
+repetitive, with the file shrinking each time. The manifest carries a
+`seamless` marker that export clears and this pass sets. To redo the
+processing, regenerate and export again; the pass needs raw pixels.
+
+Measured over the 50-tile catalog: mean seam score **21.1 → 3.7**. Two things
+that sound better and are not — a second offset-heal pass (measured *worse*,
+7.7 → 12.0, it blurs twice) and a whole-image cross-fade with a mirrored copy
+(matching edges, but it ghosts the whole texture and imposes kaleidoscope
+symmetry).
+
+### Writing a tile prompt
+
+Measured against SDXL, and counter-intuitive enough to be worth stating: **the
+words that sound right are the ones that break it.**
+
+| Don't say | Because it draws |
+|---|---|
+| `tile`, `seamless`, `repeating pattern` | stripes, or a sheet of separate assets |
+| `isometric`, `ground tile` | an entire village scene |
+| `road`, `track`, `ruts`, `rippling` | an aerial street grid, or venetian blinds |
+| `void`, `chasm`, `blighted` and other moods | generic stone, or nothing coherent |
+| `<x> floor` | a bordered dungeon-tileset panel |
+
+Name the **material** and the **camera angle** instead — "dry tan earth with fine
+gravel and dust". The styling suffix is applied by
+`backend/seeds/data/tileTypes.js`, so a tile's own prompt stays a plain subject.
+`sprite-gen`'s local `build_tile_prompt` uses the opposite vocabulary because
+sd-turbo responds to it differently; the two are not interchangeable.
+
+---
+
+## Entity art (props and creatures)
+
+Same four steps as tiles with one swap -- tiles are ground and get made
+seamless, entities are silhouettes and get their backdrop cut out:
+
+```
+make entities-generate PROVIDER="desktop gpu (objects)" CORE=1 OBJECTS=1
+make entities-export
+make entities-cutout
+make entities-seed
+```
+
+### CORE=1 is not optional on this provider
+
+`/sdapi/v1/txt2img` cannot draw an isolated object. Asked for one tree it
+returns a tileset of trees, a framed gallery card, or the tree on a checkered
+backdrop. Four prompt revisions and four cutout strategies were measured
+against that and none of them worked, because a textured backdrop has no key
+colour to remove.
+
+`/api/generate_core` on the **same box with the same model** returns one
+object, centred, on a **flat** backdrop, in about ten seconds. Flat is the
+whole game: one colour can be keyed out. That endpoint is step one of the
+service's own two-step pipeline, and the error that looks like a dead end --
+`no concept_image; prompt-to-concept is not wired yet` from `POST /api/jobs` --
+only means step two will not call step one for you.
+
+### Keep the prompt short
+
+Writing exclusions into the prompt makes it worse, measured: "no pot, no
+planter" produced potted plants, "no person" produced a person, and the longer
+prompt started returning several objects instead of one. Diffusion attends to
+the nouns, not the negation in front of them. What keeps the subject isolated
+is the endpoint, not the adjectives.
+
+### Transparency is enforced, not hoped for
+
+`entities-cutout` escalates its key tolerance (40 up to 160) until the outer
+ring of the image is genuinely transparent while the subject survives, and
+**exits non-zero** naming any file that still carries a background. A fixed
+tolerance cannot serve every image: a flat backdrop keys at 40, a dithered one
+needs 100+, and using the high value everywhere eats subjects that share a tone
+with their backdrop.
+
+It also quantizes to a small palette (`--colors`, default 32) and hardens alpha
+to a threshold. That is what makes the output actually pixel art rather than a
+smooth render in a pixel-art style -- and the sprite service agrees: it
+measured an unquantized sprite at 24,268 colours and marked it
+`usable: false` as a style reference, then accepted the quantized one at 24.
+
+### Reference images as style templates
+
+Reachable, and worth knowing how the pieces fit:
+
+```
+POST /api/references            multipart: kind, file, label -> measured, usable true/false
+POST /api/style-profiles/derive {name, reference_ids}        -> palette + cell + outline rules
+POST /api/jobs                  {concept_image, style_profile, directions, frames, cell, colors}
+```
+
+Only `usable` references contribute, which is why the quantization above
+matters twice over: it is what makes our own sprites acceptable as references.
+Derive from **your own** reference ids -- the box carries other sessions'
+uploads, and deriving from everything produced a palette of their greys.
+
+`/api/jobs` needs a `concept_image` (a filename under the service's images/,
+which `generate_core` produces) and takes about 393 s per cell against
+`generate_core`'s 10 s -- style-constrained sheets at forty times the cost.
+
+**It will not take a prop.** A boulder concept was rejected with `concept does
+not look like an isolated character: not taller than wide (aspect 1.09)
+(coverage 2%)`. The sheet builder validates that its input is a character
+silhouette -- taller than wide, filling a reasonable share of the frame -- and
+a rock is neither. So the reference/style-profile route is for CREATURES, and
+props are served by `generate_core` plus `entities-cutout`, which is both the
+cheaper path and the only one that accepts them.

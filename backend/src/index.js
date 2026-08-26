@@ -270,6 +270,7 @@ const aiProviders = require('./services/aiProviders');
 const providerDiscovery = require('./services/providerDiscovery');
 const remoteImageProvider = require('./services/remoteImageProvider');
 const { resolveGenerationTarget, loadTypeOverride } = require('./services/generationTarget');
+const bulkImageRegeneration = require('./services/bulkImageRegeneration');
 const {
   pinProvided, providerPinFieldError, providerPinError, providerPinValues,
 } = require('./services/providerPin.js');
@@ -2844,6 +2845,54 @@ app.get('/api/entity-jobs/:jobId', async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch job' });
   }
+});
+
+// --- Bulk catalog regeneration (the admin's "Regenerate all" buttons) -----
+//
+// One long run of many single-image generations, driven by the service so the
+// CLI (scripts/regenerate-catalog-images.js) and these routes cannot drift
+// apart. The request returns as soon as the run is planned; the UI polls
+// GET /current for progress, exactly as it already polls a single job.
+//
+// SPRITES ARE NOT IN SCOPE HERE. Every generation is frames = 1 and no sprite
+// column is written -- see services/bulkImageRegeneration.js.
+app.post('/api/bulk-image-jobs', adminGuard, async (req, res) => {
+  try {
+    const run = await bulkImageRegeneration.startRun(pool, {
+      kind: req.body.kind,
+      includeRect: req.body.include_rect === true,
+      seed: Number.isInteger(req.body.seed) ? req.body.seed : 0,
+      providerForDefault: Number.isInteger(req.body.provider_for_default)
+        ? req.body.provider_for_default
+        : null,
+    });
+    res.status(201).json(run);
+  } catch (err) {
+    // A second click while a run is going is an ordinary thing for an admin to
+    // do, not a server fault: 409 with the run they already have.
+    if (err.code === 'ALREADY_RUNNING') {
+      return res.status(409).json({
+        error: err.message, run: bulkImageRegeneration.getRun(),
+      });
+    }
+    if (err.code === 'BAD_REQUEST') return res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to start bulk regeneration' });
+  }
+});
+
+// null when nothing has run since the backend started. The UI treats that as
+// "idle", which is also what it shows after a restart dropped an in-flight
+// run -- the images already committed are unaffected.
+app.get('/api/bulk-image-jobs/current', adminGuard, (req, res) => {
+  res.json(bulkImageRegeneration.getRun());
+});
+
+// Stops after the subject in flight. Idempotent: cancelling an idle or
+// already-finished run answers cancelled:false rather than erroring.
+app.post('/api/bulk-image-jobs/cancel', adminGuard, (req, res) => {
+  const cancelled = bulkImageRegeneration.cancelRun();
+  res.json({ cancelled, run: bulkImageRegeneration.getRun() });
 });
 
 // Shared by entity-types/:id/image, tile-types/:id/image and

@@ -110,6 +110,11 @@ function ProviderCard({ provider, isOnlyActive }) {
           placeholder={form.has_token && !form.token_touched ? '•••••• stored — leave blank to keep' : 'token (optional)'}
         />
       </Row>
+      <Hint>
+        Leave the header name blank and the token goes out as
+        {' '}<code>Authorization: Bearer &lt;token&gt;</code>. Name a header and the token is sent
+        under it exactly as typed.
+      </Hint>
       {form.has_token && !form.token_touched && (
         <Hint>A token is stored. Leave the field untouched to keep it; clear it and save to remove it.</Hint>
       )}

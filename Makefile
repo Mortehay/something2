@@ -1,6 +1,9 @@
 .PHONY: up down build logs restart rebuild clean nuke shell-backend shell-frontend db-shell \
         engine-build engine-test engine-up engine-down engine-logs engine-shell engine-rebuild \
         redis-shell admin-password admin-password-rotate seed-catalogs seed-map seed-passive-tree \
+        tiles-generate tiles-export tiles-seamless tiles-seed \
+        entities-generate entities-export entities-cutout entities-seed \
+        entities-restyle-prompts \
         clear-maps list-maps list-specs reseed-map dev dev-stop dev-status \
         migrate-up migrate-status migrate-repair tunnel tunnel-stop verify-routing \
         pi-keygen pi-provision pi-deploy pi-up pi-down pi-restart pi-logs pi-status \
@@ -232,6 +235,100 @@ admin-password-rotate:
 
 seed-catalogs:
 	$(COMPOSE) exec -T backend node scripts/seed-catalogs.js
+
+# --- Tile textures -------------------------------------------------------
+#
+# Three targets, in the order you use them. The first needs an AI provider and
+# the GPU it points at; the other two need neither, which is the whole point.
+#
+#   make tiles-generate PROVIDER="desktop gpu"
+#       Pin every tile to that provider, give each one a biome art context if
+#       it has none, and draw the textures that are missing. Idempotent: an
+#       already-textured tile is skipped unless FORCE=1. Add ONLY=grass,sand to
+#       limit it, DRY=1 to see what it would do.
+#   make tiles-export
+#       Copy the generated PNGs out of MinIO into seeds/textures/tiles/ so they
+#       can be committed.
+#   make tiles-seed
+#       Replay those committed PNGs into MinIO on a machine that has no GPU,
+#       and point the catalog at them. FORCE=1 overwrites local art.
+#
+# PROVIDER accepts the provider's name or its id; omit it to use whichever
+# provider is active in Settings.
+tiles-generate:
+	$(COMPOSE) exec -T backend node scripts/generate-tile-textures.js \
+		$(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(FORCE),--force) \
+		$(if $(ONLY),--only "$(ONLY)") $(if $(DRY),--dry-run) $(if $(NOPIN),--no-pin) $(if $(NOBIOME),--no-biome)
+
+tiles-export:
+	$(COMPOSE) exec -T backend node scripts/export-tile-textures.js
+
+# Make the exported textures tile against themselves. Runs on the HOST (needs
+# Pillow), not in a container, because no service image carries an image
+# library and adding one to shrink a seed asset is a poor trade.
+#
+# Order matters: generate -> export -> seamless -> seed. CHECK=1 measures the
+# seam score without writing (0 is perfect); PREVIEW=grass writes a 2x2 tiling
+# to /tmp so a seam is visible if one survives.
+tiles-seamless:
+	python3 tools/make-tiles-seamless.py $(if $(CHECK),--check) $(if $(PREVIEW),--preview "$(PREVIEW)") \
+		$(if $(REPEAT),--repeat $(REPEAT),--repeat 2) $(if $(FORCE),--force)
+
+tiles-seed:
+	$(COMPOSE) exec -T backend node scripts/seed-tile-textures.js $(if $(FORCE),--force)
+
+# --- Entity art ----------------------------------------------------------
+#
+# The same four steps for props and creatures, with one swap: tiles are ground
+# and get made seamless, entities are silhouettes and get their backdrop cut
+# out instead. Skipping entities-cutout ships every prop inside an opaque white
+# square, so entities-seed refuses art that has not been through it.
+#
+#   make entities-generate PROVIDER="desktop gpu" OBJECTS=1   # 11 props first
+#   make entities-export
+#   make entities-cutout
+#   make entities-seed
+#
+# OBJECTS=1 limits the run to world props; CREATURES=1 to the bestiary (293 of
+# them). Same PROVIDER/FORCE/ONLY/DRY/NOPIN as the tile target. Each entity
+# gets ONE STILL -- directional walk sets remain a sprite-gen job.
+#
+# CORE=1 is the one that works. It calls the remote service's own concept
+# endpoint (/api/generate_core) instead of its A1111 txt2img shim, and the same
+# box with the same model answers that endpoint with ONE object, centred, on a
+# FLAT backdrop -- which entities-cutout can key out. txt2img on the same box
+# returns tilesets and framed cards on checkered backdrops that nothing can
+# key. Slower than txt2img, far better output.
+#
+# LOCAL=1 generates through the in-compose sprite-gen service instead of a
+# remote provider, and for entities that is usually what you want. The remote
+# SDXL + pixel-art model draws ground textures beautifully and refuses to draw
+# an isolated object: ask it for one tree and it returns a tileset of trees or
+# a framed gallery card on a checkered backdrop, which no cutout can rescue.
+# sprite-gen asks for an isolated subject on a flat field and keys the
+# background out itself, so its output arrives already transparent and needs
+# no entities-cutout pass. It is sd-turbo on CPU -- about a minute an entity
+# against the remote's five seconds.
+# One-time (re-runnable) correction: bring every entity_types.prompt in the
+# database up to the styled form. The creature seeder is DO NOTHING by design,
+# so a seed-file change cannot reach rows that already exist. DRY=1 to preview.
+entities-restyle-prompts:
+	$(COMPOSE) exec -T backend node scripts/restyle-entity-prompts.js $(if $(DRY),--dry-run)
+
+entities-generate:
+	$(COMPOSE) exec -T backend node scripts/generate-entity-textures.js \
+		$(if $(PROVIDER),--provider "$(PROVIDER)") $(if $(FORCE),--force) \
+		$(if $(ONLY),--only "$(ONLY)") $(if $(DRY),--dry-run) $(if $(NOPIN),--no-pin) \
+		$(if $(OBJECTS),--objects-only) $(if $(CREATURES),--creatures-only) $(if $(LOCAL),--local) $(if $(CORE),--core)
+
+entities-export:
+	$(COMPOSE) exec -T backend node scripts/export-entity-textures.js
+
+entities-cutout:
+	python3 tools/cutout-entity-textures.py $(if $(CHECK),--check) $(if $(FORCE),--force)
+
+entities-seed:
+	$(COMPOSE) exec -T backend node scripts/seed-entity-textures.js $(if $(FORCE),--force)
 # Regenerate the passive tree and upsert it. Safe to re-run: nodes are upserted
 # by their stable generated key, never deleted, so no character_passives row is
 # ever orphaned. An admin's edited kind/label/grants survive a plain run --

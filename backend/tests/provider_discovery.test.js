@@ -96,12 +96,31 @@ test('resolveUrl joins base and path regardless of slashes', () => {
   assert.strictEqual(resolveUrl('http://h:7860', ''), 'http://h:7860/');
 });
 
-test('the auth header is sent only when both name and value are present', () => {
+test('an explicitly named auth header is sent verbatim, and only with a value', () => {
   assert.deepStrictEqual(authHeaders({ auth_header_name: 'X-Key', auth_token: 'v' }), { 'X-Key': 'v' });
   // A name with no token would otherwise go out as "X-Key: undefined".
   assert.deepStrictEqual(authHeaders({ auth_header_name: 'X-Key', auth_token: null }), {});
-  assert.deepStrictEqual(authHeaders({ auth_header_name: null, auth_token: 'v' }), {});
   assert.deepStrictEqual(authHeaders({}), {});
+  // An explicit name means the admin is telling us the exact wire format, so
+  // the value is never rewritten -- a raw key under Authorization stays raw.
+  assert.deepStrictEqual(authHeaders({ auth_header_name: 'Authorization', auth_token: 'raw-key' }),
+    { Authorization: 'raw-key' });
+});
+
+test('a token with no header name is sent as Authorization: Bearer, not dropped', () => {
+  // SOMET-325 follow-up. The header-name box is optional in the admin form, so
+  // pasting a key and nothing else is the obvious thing to do -- and used to
+  // send NO header at all, which reads at the far end as "you forgot to
+  // authenticate" and at this end as a stale model list that never refreshes.
+  assert.deepStrictEqual(authHeaders({ auth_header_name: null, auth_token: 'k' }),
+    { Authorization: 'Bearer k' });
+  assert.deepStrictEqual(authHeaders({ auth_header_name: '   ', auth_token: 'k' }),
+    { Authorization: 'Bearer k' });
+  // A value that already names its scheme is passed through unchanged, so
+  // "Bearer k" does not become "Bearer Bearer k" and Basic still works.
+  assert.deepStrictEqual(authHeaders({ auth_token: 'Bearer k' }), { Authorization: 'Bearer k' });
+  assert.deepStrictEqual(authHeaders({ auth_token: 'Basic dXNlcjpwdw==' }),
+    { Authorization: 'Basic dXNlcjpwdw==' });
 });
 
 // --- fetchModels end to end (stubbed transport) --------------------------
