@@ -2374,3 +2374,211 @@ export function resolveSkillDamage(skill) {
   };
 }
 
+export function enrichSkillGems(list) {
+  const classCounters = {};
+  for (const s of list) {
+    const cls = s.class || 'Warrior';
+    classCounters[cls] = (classCounters[cls] || 0) + 1;
+    const idx = classCounters[cls]; // 1..50
+    
+    // Level requirement curve: Level 1 to 50
+    let reqLvl = 1;
+    if (idx <= 5) reqLvl = 1 + (idx - 1) * 2; // 1, 3, 5, 7, 9
+    else if (idx <= 15) reqLvl = 10 + (idx - 6) * 2; // 10..28
+    else if (idx <= 35) reqLvl = 30 + Math.floor((idx - 16) * 0.8); // 30..45
+    else reqLvl = 45 + Math.min(15, idx - 35); // 45..60
+
+    s.reqLvl = reqLvl;
+    s.isGem = true;
+
+    // Gem Color & 6-Attribute Requirements (Strength, Dexterity, Constitution, Intelligence, Wisdom, Charisma)
+    if (cls === 'Warrior') {
+      s.gemColor = 'red';
+      s.reqStr = Math.max(10, Math.round(10 + reqLvl * 1.5));
+      s.reqCon = Math.max(8, Math.round(8 + reqLvl * 1.0));
+      s.reqDex = Math.round(5 + reqLvl * 0.3);
+      s.reqInt = 0;
+      s.reqWis = 0;
+      s.reqCha = 0;
+      s.reqWeapon = s.type === 'melee' ? 'melee' : (s.type === 'magic' ? 'melee' : 'any');
+    } else if (cls === 'Archer') {
+      s.gemColor = 'green';
+      s.reqDex = Math.max(10, Math.round(10 + reqLvl * 1.5));
+      s.reqWis = Math.max(8, Math.round(8 + reqLvl * 0.8));
+      s.reqCon = Math.round(6 + reqLvl * 0.6);
+      s.reqStr = 0;
+      s.reqInt = 0;
+      s.reqCha = 0;
+      const isDagger = s.id.includes('knife') || s.id.includes('dagger') || s.id.includes('stab') || s.id.includes('shadow_step');
+      const isBow = s.id.includes('arrow') || s.id.includes('shot') || s.id.includes('barrage') || s.id.includes('snipe') || s.id.includes('volley') || s.id.includes('strafe') || s.id.includes('quiver');
+      s.reqWeapon = isBow ? 'bow' : (isDagger ? 'dagger' : (s.type === 'melee' ? 'dagger' : (s.type === 'buff' ? 'any' : 'bow')));
+    } else if (cls === 'Mage') {
+      s.gemColor = 'blue';
+      s.reqInt = Math.max(10, Math.round(10 + reqLvl * 1.5));
+      s.reqWis = Math.max(8, Math.round(8 + reqLvl * 0.9));
+      s.reqCon = Math.round(5 + reqLvl * 0.4);
+      s.reqStr = 0;
+      s.reqDex = 0;
+      s.reqCha = 0;
+      s.reqWeapon = s.type === 'buff' ? 'any' : 'staff_wand';
+    } else if (cls === 'Cultist') {
+      s.gemColor = 'purple';
+      s.reqCha = Math.max(10, Math.round(10 + reqLvl * 1.3));
+      s.reqInt = Math.max(10, Math.round(10 + reqLvl * 1.1));
+      s.reqCon = Math.round(8 + reqLvl * 0.9);
+      s.reqStr = 0;
+      s.reqDex = 0;
+      s.reqWis = 0;
+      s.reqWeapon = s.type === 'buff' ? 'any' : (s.type === 'melee' ? 'dagger' : 'staff_wand');
+    } else if (cls === 'Monk') {
+      s.gemColor = 'orange';
+      s.reqDex = Math.max(10, Math.round(10 + reqLvl * 1.1));
+      s.reqWis = Math.max(10, Math.round(10 + reqLvl * 1.1));
+      s.reqStr = Math.round(8 + reqLvl * 0.7);
+      s.reqCon = Math.round(8 + reqLvl * 0.7);
+      s.reqInt = 0;
+      s.reqCha = 0;
+      s.reqWeapon = s.type === 'buff' ? 'any' : 'unarmed';
+    } else if (cls === 'Druid') {
+      s.gemColor = 'hybrid';
+      s.reqWis = Math.max(10, Math.round(10 + reqLvl * 1.2));
+      s.reqCon = Math.max(10, Math.round(10 + reqLvl * 1.0));
+      s.reqStr = Math.round(8 + reqLvl * 0.8);
+      s.reqDex = Math.round(6 + reqLvl * 0.6);
+      s.reqInt = 0;
+      s.reqCha = 0;
+      const isTransform = s.id.includes('form') || s.id.includes('shapeshift') || s.id.includes('bear') || s.id.includes('wolf') || s.id.includes('hawk');
+      s.reqWeapon = isTransform ? 'any' : (s.type === 'magic' ? 'staff_wand' : 'any');
+    }
+
+    // Gem Price in Gold for Gem Merchant (25g to 250g)
+    s.gemPrice = Math.max(25, Math.min(300, Math.round(25 + reqLvl * 4.5)));
+
+    // Gem Tags
+    const tags = [];
+    if (s.reqStr > 0) tags.push('Strength');
+    if (s.reqDex > 0) tags.push('Dexterity');
+    if (s.reqCon > 0) tags.push('Constitution');
+    if (s.reqInt > 0) tags.push('Intelligence');
+    if (s.reqWis > 0) tags.push('Wisdom');
+    if (s.reqCha > 0) tags.push('Charisma');
+
+    if (s.type === 'melee') tags.push('Attack', 'Melee');
+    else if (s.type === 'magic') tags.push('Spell');
+    else if (s.type === 'buff') tags.push('Buff', 'Aura');
+    else if (s.type === 'debuff') tags.push('Curse', 'Debuff');
+
+    if (s.reqWeapon === 'bow') tags.push('Bow');
+    if (s.reqWeapon === 'staff_wand') tags.push('Staff/Wand');
+    if (s.reqWeapon === 'unarmed') tags.push('Martial');
+
+    s.gemTags = tags;
+  }
+}
+
+enrichSkillGems(SKILLS);
+
+export function getWeaponCategory(item) {
+  if (!item || !item.name || item.name === 'unarmed') return 'unarmed';
+  const n = (item.name || '').toLowerCase();
+  if (n.includes('bow') || n.includes('arbalest') || n.includes('sling') || n.includes('dart') || item.ammo_type_id) {
+    return 'bow';
+  }
+  if (n.includes('staff') || n.includes('wand') || n.includes('magic-bolt') || n.includes('scepter')) {
+    return 'staff_wand';
+  }
+  if (n.includes('dagger') || n.includes('knife')) {
+    return 'dagger';
+  }
+  if (n.includes('sword') || n.includes('blade') || n.includes('spear') || n.includes('halberd') ||
+      n.includes('scythe') || n.includes('club') || n.includes('stick') || n.includes('quarterstaff') ||
+      n.includes('morning star') || n.includes('pike')) {
+    return 'melee';
+  }
+  if (item.category === 'weapon') {
+    return item.kind === 'projectile' ? 'staff_wand' : 'melee';
+  }
+  return 'unarmed';
+}
+
+export function isWeaponCompatible(reqWeapon, weaponCategory) {
+  if (!reqWeapon || reqWeapon === 'any') return true;
+  if (reqWeapon === 'unarmed') return weaponCategory === 'unarmed' || weaponCategory === 'melee' || weaponCategory === 'dagger';
+  if (reqWeapon === 'melee') return weaponCategory === 'melee' || weaponCategory === 'dagger';
+  if (reqWeapon === 'bow') return weaponCategory === 'bow';
+  if (reqWeapon === 'staff_wand') return weaponCategory === 'staff_wand';
+  if (reqWeapon === 'dagger') return weaponCategory === 'dagger';
+  return true;
+}
+
+export function getWeaponRequirementName(reqWeapon) {
+  if (reqWeapon === 'bow') return 'Bow / Crossbow';
+  if (reqWeapon === 'melee') return 'Melee Weapon (Sword, Axe, Spear)';
+  if (reqWeapon === 'staff_wand') return 'Staff or Wand';
+  if (reqWeapon === 'dagger') return 'Dagger or Knife';
+  if (reqWeapon === 'unarmed') return 'Unarmed or Fists/Quarterstaff';
+  return 'Any Weapon';
+}
+
+export function checkGemRequirements(gem, playerProgression, equippedWeapon) {
+  if (!gem) return { ok: true, errors: [] };
+  const lvl = playerProgression?.level ?? playerProgression?.lvl ?? 1;
+  const str = playerProgression?.strength ?? playerProgression?.str ?? playerProgression?.baseStrength ?? 10;
+  const dex = playerProgression?.dexterity ?? playerProgression?.dex ?? playerProgression?.baseDexterity ?? 10;
+  const con = playerProgression?.constitution ?? playerProgression?.con ?? playerProgression?.baseConstitution ?? 10;
+  const int = playerProgression?.intelligence ?? playerProgression?.int ?? playerProgression?.baseIntelligence ?? 10;
+  const wis = playerProgression?.wisdom ?? playerProgression?.wis ?? playerProgression?.baseWisdom ?? 10;
+  const cha = playerProgression?.charisma ?? playerProgression?.cha ?? playerProgression?.baseCharisma ?? 10;
+
+  const weaponCategory = getWeaponCategory(equippedWeapon);
+  const weaponOk = isWeaponCompatible(gem.reqWeapon, weaponCategory);
+  const levelOk = lvl >= (gem.reqLvl || 1);
+  const strOk = str >= (gem.reqStr || 0);
+  const dexOk = dex >= (gem.reqDex || 0);
+  const conOk = con >= (gem.reqCon || 0);
+  const intOk = int >= (gem.reqInt || 0);
+  const wisOk = wis >= (gem.reqWis || 0);
+  const chaOk = cha >= (gem.reqCha || 0);
+
+  const errors = [];
+  if (!weaponOk) {
+    errors.push(`Requires ${getWeaponRequirementName(gem.reqWeapon)} (Equipped: ${equippedWeapon?.name || 'Unarmed'})`);
+  }
+  if (!levelOk) {
+    errors.push(`Requires Level ${gem.reqLvl} (You are Level ${lvl})`);
+  }
+  if (!strOk) {
+    errors.push(`Requires ${gem.reqStr} Strength (You have ${str})`);
+  }
+  if (!dexOk) {
+    errors.push(`Requires ${gem.reqDex} Dexterity (You have ${dex})`);
+  }
+  if (!conOk) {
+    errors.push(`Requires ${gem.reqCon} Constitution (You have ${con})`);
+  }
+  if (!intOk) {
+    errors.push(`Requires ${gem.reqInt} Intelligence (You have ${int})`);
+  }
+  if (!wisOk) {
+    errors.push(`Requires ${gem.reqWis} Wisdom (You have ${wis})`);
+  }
+  if (!chaOk) {
+    errors.push(`Requires ${gem.reqCha} Charisma (You have ${cha})`);
+  }
+
+  return {
+    ok: errors.length === 0,
+    weaponOk,
+    levelOk,
+    strOk,
+    dexOk,
+    conOk,
+    intOk,
+    wisOk,
+    chaOk,
+    weaponCategory,
+    reqWeaponName: getWeaponRequirementName(gem.reqWeapon),
+    errors,
+  };
+}
+

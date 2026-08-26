@@ -50,14 +50,31 @@ const GEAR_TIERS = [
 // `damage`/`defense` here are the TIER-1 values; the generator multiplies by
 // the tier's `power`. `req_stat` names which stat the family gates on.
 const GEAR_FAMILIES = [
-  // main_hand -- three, because the weapon slot is the one that decides how a
-  // class actually plays.
+  // main_hand -- weapons for all combat archetypes and skill gem requirements
   { key: 'blade',  slot: 'main_hand', category: 'weapon', kind: 'melee',      req_stat: 'strength',
     two_handed: false, damage: 6, cooldown: 0.55, reach: 80,  arc_width: 1.2 },
+  { key: 'sword',  slot: 'main_hand', category: 'weapon', kind: 'melee',      req_stat: 'strength',
+    two_handed: false, damage: 7, cooldown: 0.6,  reach: 85,  arc_width: 1.3 },
+  { key: 'axe',    slot: 'main_hand', category: 'weapon', kind: 'melee',      req_stat: 'strength',
+    two_handed: false, damage: 8, cooldown: 0.7,  reach: 75,  arc_width: 1.4 },
+  { key: 'mace',   slot: 'main_hand', category: 'weapon', kind: 'melee',      req_stat: 'constitution',
+    two_handed: false, damage: 8, cooldown: 0.7,  reach: 70,  arc_width: 1.2 },
   { key: 'spear',  slot: 'main_hand', category: 'weapon', kind: 'melee',      req_stat: 'dexterity',
     two_handed: true,  damage: 8, cooldown: 0.8,  reach: 150, arc_width: 0.7 },
+  { key: 'dagger', slot: 'main_hand', category: 'weapon', kind: 'melee',      req_stat: 'dexterity',
+    two_handed: false, damage: 5, cooldown: 0.45, reach: 65,  arc_width: 1.0 },
+  { key: 'quarterstaff', slot: 'main_hand', category: 'weapon', kind: 'melee', req_stat: 'wisdom',
+    two_handed: true,  damage: 7, cooldown: 0.6,  reach: 95,  arc_width: 1.1 },
+  { key: 'bow',    slot: 'main_hand', category: 'weapon', kind: 'projectile', req_stat: 'dexterity',
+    two_handed: true,  damage: 7, cooldown: 0.75, range: 450, projectile_speed: 550, projectile_radius: 5 },
+  { key: 'crossbow', slot: 'main_hand', category: 'weapon', kind: 'projectile', req_stat: 'dexterity',
+    two_handed: true,  damage: 9, cooldown: 0.95, range: 480, projectile_speed: 600, projectile_radius: 6 },
   { key: 'wand',   slot: 'main_hand', category: 'weapon', kind: 'projectile', req_stat: 'intelligence',
     two_handed: false, damage: 5, cooldown: 0.7,  range: 420, projectile_speed: 520, projectile_radius: 6 },
+  { key: 'staff',  slot: 'main_hand', category: 'weapon', kind: 'projectile', req_stat: 'intelligence',
+    two_handed: true,  damage: 8, cooldown: 0.85, range: 400, projectile_speed: 480, projectile_radius: 8 },
+  { key: 'scepter', slot: 'main_hand', category: 'weapon', kind: 'projectile', req_stat: 'charisma',
+    two_handed: false, damage: 6, cooldown: 0.65, range: 380, projectile_speed: 500, projectile_radius: 7 },
 
   // off_hand -- armor, not weapons: canEquip already refuses a two-handed
   // weapon's off hand and a second weapon has no combat meaning today.

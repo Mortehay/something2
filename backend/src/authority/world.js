@@ -19,7 +19,7 @@ const { GroundItemSim } = require('./groundItems');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerStats.js');
 const { STAMINA_BASE } = require('../services/progressionConstants.js');
 const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
-const { getSkillById } = require('../../seeds/data/skills.js');
+const { getSkillById, checkGemRequirements } = require('../../seeds/data/skills.js');
 
 // Bounds concurrent creature-owned projectiles per world. A swarm-density
 // world can hold 12-creature packs; twelve Ranged creatures on a 1.8s cooldown
@@ -940,6 +940,16 @@ class World {
     if (!p) return { ok: false, kills: [] };
     const skill = getSkillById(skillId);
     if (!skill) return { ok: false, kills: [] };
+
+    // Weapon compatibility verification for Skill Gems
+    if (p.inv && p.inv.equipment) {
+      const equippedWeapon = p.inv.equipment.main_hand || null;
+      const req = checkGemRequirements(skill, p.stats, equippedWeapon);
+      // If equipped weapon does not meet gem's weapon requirement (and equipment exists)
+      if (equippedWeapon && !req.weaponOk) {
+        return { ok: false, kills: [], reason: 'weapon_mismatch', error: req.errors[0] };
+      }
+    }
 
     // Check resources on player
     const cost = Number(skill.cost) || 0;

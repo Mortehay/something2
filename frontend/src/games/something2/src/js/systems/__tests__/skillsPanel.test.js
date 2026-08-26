@@ -1,7 +1,7 @@
 // frontend/src/games/something2/src/js/systems/__tests__/skillsPanel.test.js
 import { describe, it, expect } from "vitest";
-import { layoutSkillsPanel, drawSkillsPanel, PANEL_W, PANEL_H, SKILL_TABS } from "../skillsPanel.js";
-import { getSkillsForClass, getSkillById, SKILLS, SKILLS_BY_CLASS } from "../../core/skillsData.js";
+import { layoutSkillsPanel, drawSkillsPanel, PANEL_W, PANEL_H, GEM_FILTER_TABS } from "../skillsPanel.js";
+import { getSkillsForClass, getSkillById, SKILLS } from "../../core/skillsData.js";
 
 describe("Skills Catalog Data (300 skills total)", () => {
   it("contains exactly 300 skills across all 6 classes (50 each)", () => {
@@ -38,46 +38,55 @@ describe("Skills Catalog Data (300 skills total)", () => {
   });
 });
 
-describe("Skills Panel Layout & Render", () => {
-  it("creates a centered layout with class tabs, category tabs, rows, and pagination controls", () => {
+describe("Skill Gem Socketing Board (Hotbar Sockets 1-9) Layout & Render", () => {
+  it("creates a 9-socket board with 9 hotbar sockets and inventory gems", () => {
+    const hotbar = new Map();
+    const fireball = getSkillById("mag_fireball");
+    hotbar.set(1, fireball);
+
+    const invGems = [
+      getSkillById("mag_fireball"),
+      getSkillById("mag_frost_nova"),
+      getSkillById("arc_barrage"),
+    ];
+
     const layout = layoutSkillsPanel({
-      className: "Druid",
-      classFilter: "all",
-      tab: "all",
+      tab: "inventory",
       page: 0,
-      selectedSkillId: "dru_maul",
+      selectedSkillId: "mag_fireball",
+      hotbarSkills: hotbar,
+      inventoryGems: invGems,
+      playerStats: { level: 20, str: 20, dex: 20, con: 20, int: 50, wis: 30, cha: 20 },
+      equippedWeapon: { id: 1, name: "wand", category: "weapon", kind: "projectile" },
     });
 
     expect(layout.panel.w).toBe(PANEL_W);
     expect(layout.panel.h).toBe(PANEL_H);
-    expect(layout.classTabs.length).toBe(7); // All + 6 classes
-    expect(layout.tabs.length).toBe(SKILL_TABS.length);
-    expect(layout.rows.length).toBe(5); // 5 per page
-    expect(layout.totalCount).toBe(300);
-    expect(layout.totalPages).toBe(60); // ceil(300/5) = 60
-    expect(layout.nextBtn).toBeTruthy();
+    expect(layout.sockets.length).toBe(9); // Sockets 1..9
+    expect(layout.sockets[0].gem).toBe(fireball);
+    expect(layout.sockets[0].unsocketBtn).toBeDefined();
+    expect(layout.sockets[1].gem).toBeNull(); // Socket 2 is empty
 
-    const selectedRow = layout.rows.find(r => r.skill.id === "dru_maul");
-    // dru_maul is further in page index for all skills, or on its specific page
+    expect(layout.tabs.length).toBe(GEM_FILTER_TABS.length);
+    expect(layout.gemRows.length).toBe(3); // 3 inventory gems visible
+    expect(layout.gemRows[0].quickButtons.length).toBe(9); // Quick buttons for slots 1-9
+    expect(layout.gemRows[0].socketedInSlot).toBe(1);
   });
 
-  it("filters skills by class and tab category", () => {
-    const meleeLayout = layoutSkillsPanel({
-      className: "Warrior",
-      classFilter: "Warrior",
-      tab: "melee",
+  it("filters gems in catalog by attribute tabs (STR, DEX, CON, INT, WIS, CHA)", () => {
+    const strLayout = layoutSkillsPanel({
+      tab: "str",
       page: 0,
     });
-    expect(meleeLayout.totalCount).toBe(20);
-    expect(meleeLayout.rows.every(r => r.skill.class === "Warrior" && r.skill.type === "melee")).toBe(true);
+    expect(strLayout.totalCount).toBeGreaterThan(0);
+    expect(strLayout.gemRows.every(r => r.gem.reqStr > 0)).toBe(true);
 
-    const buffLayout = layoutSkillsPanel({
-      className: "Mage",
-      classFilter: "Mage",
-      tab: "buff",
+    const intLayout = layoutSkillsPanel({
+      tab: "int",
       page: 0,
     });
-    expect(buffLayout.rows.every(r => r.skill.class === "Mage" && r.skill.type === "buff")).toBe(true);
+    expect(intLayout.totalCount).toBeGreaterThan(0);
+    expect(intLayout.gemRows.every(r => r.gem.reqInt > 0)).toBe(true);
   });
 
   it("renders without canvas errors", () => {
@@ -96,12 +105,13 @@ describe("Skills Panel Layout & Render", () => {
       fill: () => {},
       createLinearGradient: () => ({ addColorStop: () => {} }),
       measureText: () => ({ width: 60 }),
+      setLineDash: () => {},
     };
 
     const layout = layoutSkillsPanel({
-      className: "Archer",
       tab: "all",
       page: 0,
+      hotbarSkills: new Map([[1, getSkillById("mag_fireball")]]),
     });
 
     expect(() => drawSkillsPanel(ctx, layout, {})).not.toThrow();

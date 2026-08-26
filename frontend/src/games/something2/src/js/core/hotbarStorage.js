@@ -20,22 +20,12 @@ function getStorage() {
 const memoryStorage = new Map();
 
 /**
- * Returns default starter active skills for a given class in slots 1, 2, 3.
+ * Returns default starter active skills for a given class (0 starter skills by default).
  * @param {string} className
  * @returns {Map<number, object>} Map of slot (1..9) -> Skill object
  */
 export function getDefaultHotbarForClass(className) {
-  const result = new Map();
-  const classSkills = getSkillsForClass(className || 'Warrior');
-  if (!classSkills || classSkills.length === 0) return result;
-
-  // Prefer first 3 active skills of the class
-  const starterSkills = classSkills.slice(0, 3);
-  starterSkills.forEach((skill, idx) => {
-    result.set(idx + 1, skill);
-  });
-
-  return result;
+  return new Map();
 }
 
 /**
@@ -66,30 +56,23 @@ export function loadHotbarForCharacter(characterId, className = 'Warrior') {
     try {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
-        let count = 0;
         for (let slot = 1; slot <= 9; slot++) {
           const skillId = parsed[slot] || parsed[String(slot)];
           if (skillId) {
             const skill = getSkillById(skillId);
             if (skill) {
               result.set(slot, skill);
-              count++;
             }
           }
         }
-        if (count > 0) {
-          return result;
-        }
+        return result;
       }
     } catch {
-      // JSON parse error, fall back to default
+      // JSON parse error, fall back to empty map
     }
   }
 
-  // If no saved hotbar exists yet for this character, initialize with class defaults
-  const defaults = getDefaultHotbarForClass(className);
-  saveHotbarForCharacter(characterId, defaults);
-  return defaults;
+  return new Map();
 }
 
 /**

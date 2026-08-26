@@ -57,7 +57,7 @@ test('the ladder covers the whole level range', async (t) => {
 // rows satisfy item_types' CHECK constraints: a row that violated
 // weapon_fields/armor_fields/slot/req_level/tier would have aborted the
 // migration, so its absence here is the failure signal.
-test('all 150 generated rows are in the catalog with the generator numbers', async (t) => {
+test('all generated ladder rows are in the catalog with the generator numbers', async (t) => {
   const pool = await openPool();
   if (pool.unreachable) { t.skip(pool.unreachable); return; }
   t.after(async () => { await pool.end().catch(() => {}); });
@@ -72,7 +72,7 @@ test('all 150 generated rows are in the catalog with the generator numbers', asy
        FROM item_types WHERE name = ANY($1::text[])`,
     [names],
   );
-  assert.strictEqual(r.rows.length, 150, 'every ladder row must exist in the catalog');
+  assert.strictEqual(r.rows.length, rows.length, 'every ladder row must exist in the catalog');
 
   const stored = new Map(r.rows.map((row) => [row.name, row]));
   for (const want of rows) {
@@ -324,11 +324,11 @@ test('re-running the ladder upsert inserts nothing and leaves the row count unch
   const before = await countLadder();
 
   const first = await upsertGearLadder(pool, rows);
-  assert.deepStrictEqual(first, { inserted: 0, skipped: 150 },
+  assert.deepStrictEqual(first, { inserted: 0, skipped: rows.length },
     'the migration already seeded these; a second run must insert nothing');
 
   const second = await upsertGearLadder(pool, rows);
-  assert.deepStrictEqual(second, { inserted: 0, skipped: 150 });
+  assert.deepStrictEqual(second, { inserted: 0, skipped: rows.length });
 
   const after = await countLadder();
   assert.strictEqual(after, before, 'two extra seed runs must not change the ladder row count');

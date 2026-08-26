@@ -225,3 +225,39 @@ test('castSkill executes Gravity Singularity and pulls creatures towards center'
   // Mob pulled closer to center (x decreased from 350 towards 300)
   assert.equal(mob.x < 350, true);
 });
+
+test('castSkill validates weapon requirements for skill gems and rejects mismatches', () => {
+  const world = makeTestWorld();
+  const userId = 'u_archer_equip';
+  
+  // Equip a melee dagger in main_hand
+  const inv = {
+    items: [],
+    equipment: {
+      main_hand: { id: 'item_dagger', name: 'dagger', category: 'weapon', kind: 'melee' },
+    },
+  };
+  world.addPlayer(userId, { x: 100, y: 100 }, inv);
+
+  const player = world.getPlayer(userId);
+  player.stamina = 100;
+  player.mana = 100;
+
+  // 1. Trying to cast a bow skill (arc_barrage) with a dagger -> rejected with weapon_mismatch
+  const bowRes = world.castSkill(userId, 'arc_barrage', 300, 100, 1, 0);
+  assert.equal(bowRes.ok, false);
+  assert.equal(bowRes.reason, 'weapon_mismatch');
+
+  // 2. Equip a bow in main_hand
+  player.inv.equipment.main_hand = { id: 'item_bow', name: 'bow', category: 'weapon', kind: 'projectile', ammo_type_id: 101 };
+  
+  // Casting bow skill now succeeds
+  const bowRes2 = world.castSkill(userId, 'arc_barrage', 300, 100, 1, 0);
+  assert.equal(bowRes2.ok, true);
+
+  // 3. Trying to cast a melee crushing blow with a bow -> rejected
+  const meleeRes = world.castSkill(userId, 'war_crushing_blow', 140, 100, 1, 0);
+  assert.equal(meleeRes.ok, false);
+  assert.equal(meleeRes.reason, 'weapon_mismatch');
+});
+

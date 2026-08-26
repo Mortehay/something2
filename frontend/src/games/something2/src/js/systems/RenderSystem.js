@@ -16,6 +16,7 @@ import { SLOTS, typeOf, canEquipClient } from "../core/inventory.js";
 import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
+import { layoutGemShopPanel, drawGemShopPanel } from "./gemShopPanel.js";
 import { isTransformationSkill, getRequiredForm, resolveSkillDamage } from "../core/skillsData.js";
 import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
 import { effectProgress, effectAlpha, isoArcAngle, particlesAt } from "../core/vfx.js";
@@ -225,6 +226,9 @@ export class RenderSystem {
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
     skillVisuals = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
+    // Dedicated Skill Gem Merchant
+    gemMerchants = [], gemShopOpen = false, gemShopColorFilter = "all", gemShopClassFilter = "all",
+    gemShopPage = 0, gemShopSelectedGemId = null,
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
     banks = [], bank = null, bankOpen = false, bankView = null,
     // SOMET-372 -- WORLD chests (guarded, lootable), not the account chest
@@ -245,6 +249,7 @@ export class RenderSystem {
     // arrives asynchronously, after the renderer exists.
     vfxDefs = null,
     progression = null,
+    equippedWeapon = null, playerStats = null,
     // SOMET-493 — the inspect card. Shaped
     // { enabled, cursorX, cursorY, pinnedKey, entityDefs, localPlayer }.
     // Off by default, and `enabled: false` costs exactly one branch: the
@@ -259,8 +264,8 @@ export class RenderSystem {
     passiveHoverX = null, passiveHoverY = null,
     passiveSearchText = "", passiveSearchFocused = false,
     // Skills panel & Hotbar
-    skillsOpen = false, skillsTab = "all", skillsPage = 0, skillsClassFilter = "all",
-    selectedSkillId = null, skillDrag = null, hotbarSkills = null,
+    skillsOpen = false, skillsTab = "inventory", skillsPage = 0, skillsClassFilter = "all",
+    selectedSkillId = null, skillDrag = null, hotbarSkills = null, inventoryGems = [],
     skillHoverSlot = null, playerClass = null, activeForm = null, flashSlot = null,
     skillCooldowns = null, activeBuffs = [],
     hoveredSkill = null, cursorX = null, cursorY = null,
@@ -271,7 +276,7 @@ export class RenderSystem {
     // panel — and, more importantly, must not hit-test the world hidden behind
     // one and let a click pin something the player cannot see.
     const panelOpen = (inventoryOpen && !!inventory) || (shopOpen && !!shop) || (bankOpen && !!bank)
-      || (passiveTreeOpen && !!passiveIndex);
+      || (passiveTreeOpen && !!passiveIndex) || skillsOpen || gemShopOpen;
     this.ctx.fillStyle = "#0f3460";
     this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     // Timestamp for this frame; animated tile textures advance off it (unlike
@@ -351,6 +356,10 @@ export class RenderSystem {
     for (const m of merchants) {
       drawables.push({ kind: "merchant", ref: m, order: 0, depth: depthKey(m.x, m.y) });
     }
+    // Dedicated Skill Gem Merchant posts
+    for (const gm of gemMerchants) {
+      drawables.push({ kind: "gem_merchant", ref: gm, order: 0, depth: depthKey(gm.x, gm.y) });
+    }
     // Bank posts are the same kind of fixed world point as merchants, and go
     // through the same depth sort — a chest one tile behind the merchant must
     // draw behind them, which a separate later pass would get wrong.
@@ -376,6 +385,7 @@ export class RenderSystem {
       else if (d.kind === "remote") this.drawCreature(d.ref, "player", 0.85, d.userId);
       else if (d.kind === "grounditem") this.drawGroundItem(d.ref, inventory, player);
       else if (d.kind === "merchant") this.drawMerchant(d.ref, player);
+      else if (d.kind === "gem_merchant") this.drawGemMerchant(d.ref, player);
       else if (d.kind === "bank") this.drawBank(d.ref, player);
       else if (d.kind === "worldchest") this.drawWorldChest(d.ref, player);
       else if (d.kind === "decoration") this.drawEntity(d.ref);
@@ -430,17 +440,21 @@ export class RenderSystem {
       this._invLayout = this.renderInventory(this.ctx, inventory, this._invHitAreas, selectedItemId, inventoryView);
     }
 
-    // Skills panel overlay — same convention as inventory/shop panels
+    // Skills panel overlay — Skill Gem Sockets (Hotbar 1-9) & Inventory Gems
     this._skillsHitAreas = [];
     this._skillsLayout = null;
     if (skillsOpen) {
       this._skillsLayout = this.renderSkillsPanel(this.ctx, {
         className: playerClass || (player && player.className) || "Druid",
         classFilter: skillsClassFilter || "all",
-        tab: skillsTab || "all",
+        tab: skillsTab || "inventory",
         page: skillsPage || 0,
         selectedSkillId,
         drag: skillDrag,
+        playerStats,
+        equippedWeapon,
+        hotbarSkills: hotbarSkills || new Map(),
+        inventoryGems: inventoryGems || [],
       }, this._skillsHitAreas);
     }
 
@@ -459,6 +473,21 @@ export class RenderSystem {
       ctx.textBaseline = "middle";
       ctx.fillText(s.icon || "⚔️", skillDrag.x, skillDrag.y);
       ctx.restore();
+    }
+
+    // Skill Gem Merchant Shop panel overlay
+    this._gemShopHitAreas = [];
+    this._gemShopLayout = null;
+    if (gemShopOpen) {
+      this._gemShopLayout = this.renderGemShopPanel(this.ctx, {
+        colorFilter: gemShopColorFilter || "all",
+        classFilter: gemShopClassFilter || "all",
+        page: gemShopPage || 0,
+        playerGold: gold != null ? gold : 0,
+        playerStats,
+        equippedWeapon,
+        selectedGemId: gemShopSelectedGemId,
+      }, this._gemShopHitAreas);
     }
 
     // Shop panel overlay (Slice D) — same overlay convention as the
@@ -2092,6 +2121,57 @@ export class RenderSystem {
     this.ctx.restore();
   }
 
+  // Dedicated Skill Gem Merchant NPC (PoE-Style Gemcutter in settlement)
+  drawGemMerchant(gm, player = null) {
+    const s = worldToScreen(gm.x, gm.y);
+    const dx = s.x, dy = s.y;
+    const r = 11;
+    this.ctx.save();
+    this.ctx.fillStyle = "#06b6d4";
+    this.ctx.strokeStyle = "rgba(0,0,0,0.65)";
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(dx, dy - r);
+    this.ctx.lineTo(dx + r, dy);
+    this.ctx.lineTo(dx, dy + r);
+    this.ctx.lineTo(dx - r, dy);
+    this.ctx.closePath();
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    // Inner diamond facet
+    this.ctx.fillStyle = "#a5f3fc";
+    this.ctx.beginPath();
+    this.ctx.moveTo(dx, dy - r * 0.45);
+    this.ctx.lineTo(dx + r * 0.45, dy);
+    this.ctx.lineTo(dx, dy + r * 0.45);
+    this.ctx.lineTo(dx - r * 0.45, dy);
+    this.ctx.closePath();
+    this.ctx.fill();
+
+    this.ctx.fillStyle = "#ecfeff";
+    this.ctx.font = "bold 12px sans-serif";
+    this.ctx.textAlign = "center";
+    this.ctx.fillText("Gem Merchant", dx, dy - r - 6);
+
+    // Show prompt when player is within interact range
+    if (player) {
+      const pcx = player.x + (player.width || 0) / 2;
+      const pcy = player.y + (player.height || 0) / 2;
+      const d = Math.hypot(gm.x - pcx, gm.y - pcy);
+      if (d <= WORLD_CHEST_PROMPT_R) {
+        this.ctx.font = "bold 11px sans-serif";
+        this.ctx.fillStyle = "#22d3ee";
+        this.ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeText("[e] Skill Gems", dx, dy + r + 14);
+        this.ctx.fillText("[e] Skill Gems", dx, dy + r + 14);
+      }
+    }
+
+    this.ctx.restore();
+  }
+
   // SOMET-310 — the account chest's world marker, drawn beside the merchant it
   // shares a village with. Same diamond footprint and label placement as
   // drawMerchant above so the two read as a matched pair of village services;
@@ -2987,6 +3067,13 @@ export class RenderSystem {
     const layout = layoutSkillsPanel(state);
     for (const a of layout.hitAreas) hitAreas.push(a);
     drawSkillsPanel(ctx, layout, state);
+    return layout;
+  }
+
+  renderGemShopPanel(ctx, state, hitAreas) {
+    const layout = layoutGemShopPanel(state);
+    for (const a of layout.hitAreas) hitAreas.push(a);
+    drawGemShopPanel(ctx, layout, state);
     return layout;
   }
 

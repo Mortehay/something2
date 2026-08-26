@@ -1444,6 +1444,65 @@ function villageBankPost(v, merchant = null) {
   return { x: col * 100 + 50, y: row * 100 + 50 };
 }
 
+function villageGemMerchantPost(v, merchant = null) {
+  const rMax = v.minRow + v.height - 1;
+  const cMax = v.minCol + v.width - 1;
+  const loR = v.minRow + 1, hiR = rMax - 1;
+  const loC = v.minCol + 1, hiC = cMax - 1;
+  const clampR = (r) => Math.min(hiR, Math.max(loR, r));
+  const clampC = (c) => Math.min(hiC, Math.max(loC, c));
+  const m = (merchant && Number.isFinite(merchant.x) && Number.isFinite(merchant.y))
+    ? merchant
+    : villageMerchantPost(v);
+  const mRow = clampR(Math.floor(m.y / 100));
+  const mCol = clampC(Math.floor(m.x / 100));
+
+  const bank = villageBankPost(v, m);
+  const bRow = clampR(Math.floor(bank.y / 100));
+  const bCol = clampC(Math.floor(bank.x / 100));
+
+  // Candidate positions in priority order (never matching merchant or bank tile)
+  const candidates = [];
+  if (v.gateEdge === 'S' || v.gateEdge === 'N') {
+    candidates.push({ r: mRow, c: mCol - 1 });
+    candidates.push({ r: mRow - 1, c: mCol });
+    candidates.push({ r: mRow + 1, c: mCol });
+    candidates.push({ r: mRow - 1, c: mCol - 1 });
+    candidates.push({ r: mRow - 1, c: mCol + 1 });
+    candidates.push({ r: mRow + 1, c: mCol - 1 });
+    candidates.push({ r: mRow + 1, c: mCol + 1 });
+  } else {
+    candidates.push({ r: mRow - 1, c: mCol });
+    candidates.push({ r: mRow + 1, c: mCol });
+    candidates.push({ r: mRow, c: mCol - 1 });
+    candidates.push({ r: mRow, c: mCol + 1 });
+    candidates.push({ r: mRow - 1, c: mCol - 1 });
+    candidates.push({ r: mRow - 1, c: mCol + 1 });
+    candidates.push({ r: mRow + 1, c: mCol - 1 });
+    candidates.push({ r: mRow + 1, c: mCol + 1 });
+  }
+
+  for (const cand of candidates) {
+    if (cand.r >= loR && cand.r <= hiR && cand.c >= loC && cand.c <= hiC) {
+      if ((cand.r !== mRow || cand.c !== mCol) && (cand.r !== bRow || cand.c !== bCol)) {
+        return { x: cand.c * 100 + 50, y: cand.r * 100 + 50 };
+      }
+    }
+  }
+
+  // Scan all interior tiles to find any empty tile
+  for (let r = loR; r <= hiR; r++) {
+    for (let c = loC; c <= hiC; c++) {
+      if ((r !== mRow || c !== mCol) && (r !== bRow || c !== bCol)) {
+        return { x: c * 100 + 50, y: r * 100 + 50 };
+      }
+    }
+  }
+
+  // Degenerate 3x3 fallback
+  return { x: mCol * 100 + 50, y: mRow * 100 + 50 };
+}
+
 function stampVillage(grid, rMin, cMin, rows, cols, village) {
   const { minRow, minCol, width, height, wallTile, gateTile } = village;
   const rMax = minRow + height - 1;
@@ -1769,6 +1828,7 @@ module.exports = {
     villageGateCell,
     villageMerchantPost,
     villageBankPost,
+    villageGemMerchantPost,
     DOORWAY_TILES,
     // SOMET-510: the decoration clearance rule and the geometry it is built
     // from, exported so the rule can be tested cell-by-cell rather than only

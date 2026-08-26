@@ -205,6 +205,33 @@ async function spawnDrops(pool, entry, dead, {
   const dropX = dead.x + CREATURE_SIZE / 2;
   const dropY = dead.y + CREATURE_SIZE / 2;
   const droppedItemTypeIds = [...rollDrops(dr.rows, rng), ...rollDrops(br.rows, rng)];
+
+  // High tier weapons and armor drop from creatures in the wild based on level
+  const cLevel = Math.min(150, Math.max(1, Math.round(Number(dead.level)) || 1));
+  const gearRollChance = 0.30;
+  if (rng() < gearRollChance) {
+    try {
+      const gRes = await pool.query(
+        `SELECT id FROM item_types
+          WHERE category IN ('weapon', 'armor')
+            AND tier IS NOT NULL
+            AND req_level <= $1
+          ORDER BY req_level DESC
+          LIMIT 15`,
+        [cLevel],
+      );
+      if (gRes.rows && gRes.rows.length > 0) {
+        const pickIdx = Math.floor(rng() * gRes.rows.length);
+        const picked = gRes.rows[pickIdx];
+        if (picked && picked.id) {
+          droppedItemTypeIds.push(picked.id);
+        }
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
   if (droppedItemTypeIds.length) {
     // SOMET-96: ONE multi-row INSERT, not an awaited INSERT per dropped unit.
     // Bounded by MAX_DROP_QTY and off the tick path, so this was never urgent

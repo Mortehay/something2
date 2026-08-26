@@ -36,7 +36,10 @@ import {
     mergeLevelInfo, buildCharacterView,
 } from "./progressionExtras.js";
 import { fetchProgression } from "../net/progressionClient.js";
-import { getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill, isDruidExclusiveSkill, resolveSkillVfx } from "./skillsData.js";
+import {
+    getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill,
+    isDruidExclusiveSkill, resolveSkillVfx, checkGemRequirements, getWeaponCategory,
+} from "./skillsData.js";
 import { loadHotbarForCharacter, saveHotbarForCharacter } from "./hotbarStorage.js";
 import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
 import { API_URL } from "../../../../../config.js";
@@ -235,6 +238,13 @@ export class Game {
         // and `shopOpen` gates the panel render/input independently of
         // `shop` itself staying populated across a close/reopen.
         this.merchants = [];
+        // Dedicated Skill Gem Merchant in settlement
+        this.gemMerchants = [];
+        this.gemShopOpen = false;
+        this.gemShopColorFilter = 'all';
+        this.gemShopClassFilter = 'all';
+        this.gemShopPage = 0;
+        this.gemShopSelectedGemId = null;
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
         this.landmarks = [];
@@ -579,6 +589,7 @@ export class Game {
                     this.autoLoot = msg.autoLoot === true;
                     this.gold = Number(msg.gold) || 0;
                     this.merchants = Array.isArray(msg.merchants) ? msg.merchants : [];
+                    this.gemMerchants = Array.isArray(msg.gemMerchants) ? msg.gemMerchants : (this.merchants.map(m => ({ villageId: m.villageId, x: m.x - 100, y: m.y })));
                     this.landmarks = Array.isArray(msg.landmarks) ? msg.landmarks : [];
                     this.doorways = Array.isArray(msg.doorways) ? msg.doorways : [];
                     this.banks = Array.isArray(msg.banks) ? msg.banks : [];
@@ -1308,6 +1319,7 @@ export class Game {
                 skillDrag: this.skillDrag,
                 skillHoverSlot: this.skillHoverSlot,
                 hotbarSkills: this.hotbarSkills,
+                inventoryGems: this.getInventoryGems(),
                 activeForm: this.activeForm,
                 activeBuffs: this.activeBuffs ? Array.from(this.activeBuffs.values()) : [],
                 flashSlot: (nowMs < this.hotbarFlashUntil) ? this.hotbarFlashSlot : null,
@@ -1331,6 +1343,14 @@ export class Game {
                 worldChests: this.worldChests,
                 gold: this.gold,
                 merchants: this.merchants,
+                gemMerchants: this.gemMerchants,
+                gemShopOpen: this.gemShopOpen,
+                gemShopColorFilter: this.gemShopColorFilter,
+                gemShopClassFilter: this.gemShopClassFilter,
+                gemShopPage: this.gemShopPage,
+                gemShopSelectedGemId: this.gemShopSelectedGemId,
+                equippedWeapon: this.inventory?.equipment?.main_hand || null,
+                playerStats: this.characterView()?.stats || this.progression || null,
                 landmarks: this.landmarks,
                 doorways: this.doorways,
                 shop: this.shop,
@@ -1637,6 +1657,52 @@ export class Game {
     loadHotbar(characterId, className) {
         this.characterId = characterId;
         this.hotbarSkills = loadHotbarForCharacter(characterId, className || this.className || 'Warrior');
+        if (!this.ownedGems) this.ownedGems = new Map();
+        if (this.hotbarSkills) {
+            for (const [, gem] of this.hotbarSkills.entries()) {
+                if (gem) this.ownedGems.set(gem.id, gem);
+            }
+        }
+    }
+
+    getInventoryGems() {
+        const list = [];
+        const seen = new Set();
+
+        // 1. From physical inventory items
+        if (this.inventory && Array.isArray(this.inventory.items)) {
+            for (const it of this.inventory.items) {
+                if (it && (it.gem || it.kind === 'skill_gem' || it.isGem || it.category === 'stone')) {
+                    const g = it.gem || getSkillById(it.skillId);
+                    if (g && !seen.has(g.id)) {
+                        list.push(g);
+                        seen.add(g.id);
+                    }
+                }
+            }
+        }
+
+        // 2. From ownedGems tracker
+        if (this.ownedGems && this.ownedGems instanceof Map) {
+            for (const [, g] of this.ownedGems.entries()) {
+                if (g && !seen.has(g.id)) {
+                    list.push(g);
+                    seen.add(g.id);
+                }
+            }
+        }
+
+        // 3. From hotbar skills
+        if (this.hotbarSkills && this.hotbarSkills instanceof Map) {
+            for (const [, g] of this.hotbarSkills.entries()) {
+                if (g && !seen.has(g.id)) {
+                    list.push(g);
+                    seen.add(g.id);
+                }
+            }
+        }
+
+        return list;
     }
 
     _activateHotbarSkill(slotNum) {
@@ -1655,6 +1721,29 @@ export class Game {
         this.hotbarFlashUntil = nowMs + 250;
 
         const playerClass = this.className || this.passiveStartClass || (this.player && this.player.className) || "Druid";
+
+        // 0. PoE Skill Gem Requirements (Weapon, Level, Attributes)
+        const equippedWeapon = this.inventory?.equipment?.main_hand || null;
+        if (equippedWeapon) {
+            const playerProg = this.characterView()?.stats || this.progression;
+            const gemReq = checkGemRequirements(s, playerProg, equippedWeapon);
+            if (!gemReq.weaponOk) {
+                if (this.showToast) this.showToast(`❌ Cannot cast ${s.nameEn}: ${gemReq.errors[0]}`);
+                return;
+            }
+            if (this.progression && !gemReq.levelOk) {
+                if (this.showToast) this.showToast(`❌ Cannot cast ${s.nameEn}: Requires Level ${s.reqLvl} (You are Lv ${this.progression.level || 1})`);
+                return;
+            }
+            if (this.progression && (!gemReq.strOk || !gemReq.dexOk || !gemReq.conOk || !gemReq.intOk || !gemReq.wisOk || !gemReq.chaOk)) {
+                const statErrors = gemReq.errors.filter(e =>
+                    e.includes('Strength') || e.includes('Dexterity') || e.includes('Constitution') ||
+                    e.includes('Intelligence') || e.includes('Wisdom') || e.includes('Charisma')
+                );
+                if (this.showToast) this.showToast(`❌ Cannot cast ${s.nameEn}: ${statErrors.join(', ')}`);
+                return;
+            }
+        }
 
         // 1. Check Druid exclusivity for transformations and form-dependent skills
         if (isDruidExclusiveSkill(s) && playerClass !== "Druid") {
@@ -1987,7 +2076,9 @@ export class Game {
             if (isKey('escape')) {
                 if (typeof e.preventDefault === 'function') e.preventDefault();
                 console.log("Escape pressed, current state:", this.state);
-                if (this.skillsOpen) {
+                if (this.gemShopOpen) {
+                    this.gemShopOpen = false;
+                } else if (this.skillsOpen) {
                     this.skillsOpen = false;
                 } else if (this.shopOpen) {
                     this.shopOpen = false;
@@ -2019,10 +2110,21 @@ export class Game {
             // the radius out of the client is also what stops a second copy of
             // INTERACT_RADIUS from drifting from the first.
 
-            // Merchant shop ('e'): closes an open shop, or asks the server
-            // whether a merchant is in range.
+            // Merchant shop / Gem Merchant ('e'): closes an open shop, or opens
+            // Gem Shop if in range of Gem Merchant, or asks the server for general merchant.
             if (isKey('e') && this.state === 'playing' && this.chunked && !e.repeat && !this.inventoryOpen && !this.bankOpen) {
+                if (this.gemShopOpen) { this.gemShopOpen = false; return; }
                 if (this.shopOpen) { this.shopOpen = false; return; }
+
+                const pcx = (this.player && this.player.x) || 0;
+                const pcy = (this.player && this.player.y) || 0;
+                const nearGm = Array.isArray(this.gemMerchants) && this.gemMerchants.find(gm => Math.hypot(gm.x - pcx, gm.y - pcy) <= 120);
+                if (nearGm) {
+                    this.gemShopOpen = true;
+                    this.skillsOpen = false;
+                    return;
+                }
+
                 if (this.authorityClient) this.authorityClient.sendInteract();
                 return;
             }
@@ -2153,7 +2255,89 @@ export class Game {
                 return;
             }
 
-            // Skills Panel Hit Areas
+            // Gem Shop Panel Hit Areas
+            if (this.gemShopOpen) {
+                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+                const areas = (this.renderSystem && this.renderSystem._gemShopHitAreas) || [];
+                const hit = areas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
+                if (hit) {
+                    if (hit.kind === 'gem_shop_close') {
+                        this.gemShopOpen = false;
+                        return;
+                    }
+                    if (hit.kind === 'gem_shop_color_filter') {
+                        this.gemShopColorFilter = hit.key;
+                        this.gemShopPage = 0;
+                        return;
+                    }
+                    if (hit.kind === 'gem_shop_class_filter') {
+                        this.gemShopClassFilter = hit.key;
+                        this.gemShopPage = 0;
+                        return;
+                    }
+                    if (hit.kind === 'gem_shop_page_prev') {
+                        this.gemShopPage = Math.max(0, this.gemShopPage - 1);
+                        return;
+                    }
+                    if (hit.kind === 'gem_shop_page_next') {
+                        this.gemShopPage = this.gemShopPage + 1;
+                        return;
+                    }
+                    if (hit.kind === 'gem_shop_item') {
+                        this.gemShopSelectedGemId = hit.gemId;
+                        return;
+                    }
+                    if (hit.kind === 'gem_shop_buy') {
+                        const price = hit.price || 35;
+                        if ((this.gold || 0) < price) {
+                            if (this.showToast) this.showToast(`⚠️ Not enough Gold! Need 🪙 ${price}`);
+                            return;
+                        }
+                        this.gold = Math.max(0, (this.gold || 0) - price);
+
+                        // 1. Add physical Skill Gem item to inventory
+                        if (!this.inventory) this.inventory = { items: [], types: new Map(), equipment: {} };
+                        if (!Array.isArray(this.inventory.items)) this.inventory.items = [];
+
+                        const gemItem = {
+                            id: `gem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                            typeId: 9000,
+                            category: 'stone',
+                            kind: 'skill_gem',
+                            isGem: true,
+                            name: hit.gem.nameEn || hit.gem.nameUk,
+                            skillId: hit.gem.id,
+                            gem: hit.gem,
+                            gemColor: hit.gem.gemColor,
+                            icon: hit.gem.icon,
+                            quantity: 1,
+                            rarity: 'rare',
+                        };
+                        this.inventory.items.push(gemItem);
+
+                        if (!this.ownedGems) this.ownedGems = new Map();
+                        this.ownedGems.set(hit.gem.id, hit.gem);
+
+                        // 2. Socket into first available hotbar slot or slot 1
+                        let targetSlot = 1;
+                        for (let i = 1; i <= 9; i++) {
+                            if (!this.hotbarSkills.has(i)) {
+                                targetSlot = i;
+                                break;
+                            }
+                        }
+                        this.hotbarSkills.set(targetSlot, hit.gem);
+                        this.saveHotbar();
+                        if (this.showToast) {
+                            this.showToast(`💎 Acquired ${hit.gem.nameEn || hit.gem.nameUk} in inventory & socketed into Slot ${targetSlot} (🪙 -${price}g)!`);
+                        }
+                        return;
+                    }
+                }
+                return;
+            }
+
+            // Skills Panel (Skill Gem Sockets 1-9 & Inventory Gems Board)
             if (this.skillsOpen) {
                 const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
                 const areas = (this.renderSystem && this.renderSystem._skillsHitAreas) || [];
@@ -2163,14 +2347,32 @@ export class Game {
                         this.skillsOpen = false;
                         return;
                     }
-                    if (hit.kind === 'skills_class_filter') {
-                        this.skillsClassFilter = hit.key;
-                        this.skillsPage = 0;
-                        return;
-                    }
                     if (hit.kind === 'skills_tab') {
                         this.skillsTab = hit.key;
                         this.skillsPage = 0;
+                        return;
+                    }
+                    if (hit.kind === 'skills_unsocket') {
+                        this.hotbarSkills.delete(hit.slot);
+                        this.saveHotbar();
+                        if (this.showToast) this.showToast(`💎 Unsocketed Gem from Slot ${hit.slot}`);
+                        return;
+                    }
+                    if (hit.kind === 'skills_quick_socket') {
+                        this.hotbarSkills.set(hit.slot, hit.gem);
+                        this.saveHotbar();
+                        if (this.showToast) this.showToast(`💎 Socketed: ${hit.gem.nameEn || hit.gem.nameUk} -> Slot ${hit.slot}`);
+                        return;
+                    }
+                    if (hit.kind === 'skills_socket_target') {
+                        if (this.selectedSkillId) {
+                            const gem = getSkillById(this.selectedSkillId) || (this.ownedGems && this.ownedGems.get(this.selectedSkillId));
+                            if (gem) {
+                                this.hotbarSkills.set(hit.slot, gem);
+                                this.saveHotbar();
+                                if (this.showToast) this.showToast(`💎 Socketed: ${gem.nameEn || gem.nameUk} -> Slot ${hit.slot}`);
+                            }
+                        }
                         return;
                     }
                     if (hit.kind === 'skills_page_prev') {
@@ -2182,6 +2384,10 @@ export class Game {
                         return;
                     }
                     if (hit.kind === 'skills_item') {
+                        if (hit.isOwned === false) {
+                            if (this.showToast) this.showToast(`⚠️ You do not own this Skill Gem! Buy it from the Gem Merchant in town (🪙 35g).`);
+                            return;
+                        }
                         this.selectedSkillId = hit.skillId;
                         this.skillDrag = {
                             skillId: hit.skillId,
@@ -2273,6 +2479,9 @@ export class Game {
                 const INTERACT_CLICK_R = 110;
                 const pointedAt = (t) => Math.hypot(t.x - w.x, t.y - w.y) <= MARKER_CLICK_R
                     && Math.hypot(t.x - pcx, t.y - pcy) <= INTERACT_CLICK_R;
+                for (const gm of (Array.isArray(this.gemMerchants) ? this.gemMerchants : [])) {
+                    if (pointedAt(gm)) { this.gemShopOpen = true; this.skillsOpen = false; return; }
+                }
                 for (const m of (Array.isArray(this.merchants) ? this.merchants : [])) {
                     if (pointedAt(m)) { this.authorityClient.sendInteract(); return; }
                 }
@@ -2306,16 +2515,21 @@ export class Game {
             if (this.skillDrag) {
                 const sDrag = this.skillDrag;
                 this.skillDrag = null;
-                const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
                 const pt = this._canvasPoint(e);
+
+                const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
                 const hit = slotAreas.find((a) => pt.x >= a.box.x && pt.x <= a.box.x + a.box.w && pt.y >= a.box.y && pt.y <= a.box.y + a.box.h);
-                const targetSlot = sDrag.targetSlot || (hit ? hit.slot : null);
+
+                const skillAreas = (this.renderSystem && this.renderSystem._skillsHitAreas) || [];
+                const socketHit = skillAreas.find((a) => a.kind === 'skills_socket_target' && pt.x >= a.box.x && pt.x <= a.box.x + a.box.w && pt.y >= a.box.y && pt.y <= a.box.y + a.box.h);
+
+                const targetSlot = sDrag.targetSlot || (socketHit ? socketHit.slot : (hit ? hit.slot : null));
                 if (targetSlot) {
-                    const s = sDrag.skill || getSkillById(sDrag.skillId);
+                    const s = sDrag.skill || getSkillById(sDrag.skillId) || (this.ownedGems && this.ownedGems.get(sDrag.skillId));
                     if (s) {
                         this.hotbarSkills.set(targetSlot, s);
                         this.saveHotbar();
-                        if (this.showToast) this.showToast(`Bound: ${s.nameEn} -> Slot ${targetSlot}`);
+                        if (this.showToast) this.showToast(`💎 Socketed: ${s.nameEn || s.nameUk} -> Slot ${targetSlot}`);
                     }
                 }
                 return;

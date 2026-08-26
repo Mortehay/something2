@@ -1680,6 +1680,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
 
         ws.worldId = entry.worldId; // canonical (F-014), not the client's raw spelling
         ws.characterId = character.id;
+        ws.characterClassName = character.className || character.class_name || null;
         // spawn.bind (SOMET-294) is the player_binds row as loaded, world id and
         // all -- distinct from spawn.respawn, which is always a point in THIS
         // world. See loadSpawn for why the two are separate facts.
@@ -1780,6 +1781,9 @@ function attachAuthority(httpServer, pool, opts = {}) {
           banks: (entry.villages || [])
             .filter((v) => v.bankX != null && v.bankY != null)
             .map((v) => ({ villageId: v.id, x: v.bankX, y: v.bankY })),
+          gemMerchants: (entry.villages || [])
+            .filter((v) => v.gemMerchantX != null && v.gemMerchantY != null)
+            .map((v) => ({ villageId: v.id, x: v.gemMerchantX, y: v.gemMerchantY })),
           // SOMET-297. Built from the Maps loadWorld already holds, plus one
           // per-join read of this character's activations -- no second loader.
           //
@@ -2388,7 +2392,7 @@ function attachAuthority(httpServer, pool, opts = {}) {
         if (!village) { send(ws, { type: 'error', message: 'no merchant nearby' }); return; }
         // ws.userId, not ws.characterId: merchant_stock.seller_user_id is a
         // users.id and buyback is account-scoped (SOMET-280 — see fetchShop).
-        const shop = await fetchShop(pool, village.id, ws.userId);
+        const shop = await fetchShop(pool, village.id, ws.userId, ws.characterClassName);
         send(ws, { type: 'shop', villageId: village.id, catalog: shop.catalog, buyback: shop.buyback });
       });
     },

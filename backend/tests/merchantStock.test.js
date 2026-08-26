@@ -133,3 +133,29 @@ test('insertBuyback stores the sold price, the seller, and an expiry', async () 
   assert.match(sql, /interval/i, 'expiry computed in SQL');
   assert.deepEqual(params, ['w1', 'v1', 3, 5, 7, BUYBACK_DAYS]);
 });
+
+test('fetchShop filters merchant catalog to class-tailored items when viewerClass is specified', async () => {
+  const pool = { query: async (sql) => {
+    if (/DELETE FROM merchant_stock/i.test(sql)) return { rowCount: 0 };
+    if (/SELECT[\s\S]*FROM merchant_stock/i.test(sql)) {
+      return { rows: [
+        { id: 'c1', item_type_id: 1, price: 10, quantity: 1, seller_user_id: null, item_name: 'crude-bow', item_category: 'weapon', item_tier: 1 },
+        { id: 'c2', item_type_id: 2, price: 10, quantity: 1, seller_user_id: null, item_name: 'crude-wand', item_category: 'weapon', item_tier: 1 },
+        { id: 'c3', item_type_id: 3, price: 10, quantity: 1, seller_user_id: null, item_name: 'crude-sword', item_category: 'weapon', item_tier: 1 },
+      ] };
+    }
+    throw new Error('unexpected ' + sql);
+  } };
+
+  const archerShop = await fetchShop(pool, 'v1', 7, 'Archer');
+  assert.equal(archerShop.catalog.length, 1);
+  assert.equal(archerShop.catalog[0].itemTypeId, 1); // crude-bow
+
+  const mageShop = await fetchShop(pool, 'v1', 7, 'Mage');
+  assert.equal(mageShop.catalog.length, 1);
+  assert.equal(mageShop.catalog[0].itemTypeId, 2); // crude-wand
+
+  const warriorShop = await fetchShop(pool, 'v1', 7, 'Warrior');
+  assert.equal(warriorShop.catalog.length, 1);
+  assert.equal(warriorShop.catalog[0].itemTypeId, 3); // crude-sword
+});
