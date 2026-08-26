@@ -236,7 +236,7 @@ def cutout_until_clean(img, feather=1):
     return best
 
 
-def pixelize(img, colors=32, alpha_cut=128):
+def pixelize(img, colors=32, alpha_cut=96):
     """Reduce to a small palette and a hard alpha edge -- i.e. actual pixel art.
 
     THE SPRITES WERE NOT PIXEL ART, which the sprite service said out loud: it
@@ -249,6 +249,12 @@ def pixelize(img, colors=32, alpha_cut=128):
     palette the style depends on. Hardening alpha to a threshold removes the
     semi-transparent rim -- pixel art has no partial coverage, and a soft rim
     over grass reads as a dirty halo rather than an outline.
+
+    The threshold sits at 96 rather than the midpoint. At 128 it cut thin
+    structures away entirely: a pine tree's branch tips and a shrub's outer
+    leaves are mostly partial-coverage pixels, so the sprite came back wiry and
+    see-through -- 11% of its own frame. Lower keeps those tips; much lower
+    starts keeping the feathered halo this is meant to remove.
     """
     rgb = img.convert('RGB').quantize(colors=colors, method=Image.MEDIANCUT).convert('RGB')
     alpha = img.getchannel('A').point(lambda v: 255 if v >= alpha_cut else 0)
@@ -312,8 +318,20 @@ def main():
         print(f'  {name[:-4]}: {cov * 100:.0f}% subject, border {border * 100:.1f}% opaque (tol {tol})')
 
     if not args.check and manifest:
+        # Record WHICH entries failed, not just that some did. The art is
+        # generated in bulk and a handful always come back wrong; without a
+        # per-entry flag the only options are to ship the bad ones or to hold
+        # back the whole batch, and holding back 193 good sprites because 10
+        # are wrong is how an hour of generation gets thrown away.
+        # seed-entity-textures.js skips anything flagged here.
+        failed = {n for n, _c, _b in suspicious}
         for entry in manifest:
             entry['cutout'] = True
+            stem = entry['file'][:-4] if entry['file'].endswith('.png') else entry['file']
+            if stem in failed:
+                entry['needs_regen'] = True
+            else:
+                entry.pop('needs_regen', None)
         with open(MANIFEST, 'w') as fh:
             json.dump(manifest, fh, indent=2)
             fh.write('\n')
@@ -328,8 +346,11 @@ def main():
             else:
                 what = f'{border * 100:.0f}% of the border is opaque'
             print(f'  {nm}: {what}')
-        # Loud and non-zero: seeding these would put a box behind every prop,
-        # and a warning nobody reads is how that ships.
+        # Still loud and non-zero -- a failed batch must not look like a clean
+        # one in CI or in a script -- but the manifest now carries the detail,
+        # so the good sprites remain seedable while these wait for a redraw.
+        print(f'\n{len(suspicious)} flagged needs_regen in the manifest; '
+              'the rest are unaffected and will still seed.')
         sys.exit(1)
 
 

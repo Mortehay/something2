@@ -183,13 +183,26 @@ async function generateLocally(pool, entity, { pollMs = 5000, maxWaitMs = 120000
 // possible here at all.
 async function generateViaCore(pool, provider, entity, { pollMs = 5000, maxWaitMs = 900000 } = {}) {
   const origin = new URL(provider.base_url).origin;
+
+  // The provider's configured auth header, on EVERY call to that service.
+  //
+  // This route bypasses safeFetch (it talks to vendor endpoints rather than
+  // the generic provider contract), and in doing so it originally bypassed
+  // authentication too -- which went unnoticed for as long as the service
+  // happened to be open. The moment it enforced keys, all ten regenerations
+  // failed with 401 while the txt2img path, which does send the header, would
+  // have kept working. Same credential, same row, all three calls below.
+  const auth = provider.auth_header_name && provider.auth_token
+    ? { [provider.auth_header_name]: provider.auth_token }
+    : {};
   const assetsUrl = `${origin}/api/assets?source=image&kind=core&limit=1`;
 
   // Remember the newest concept BEFORE submitting. The submit call answers
   // with a task id that the asset list does not carry, so "which row is mine"
   // has to be answered by "the one that did not exist a moment ago" -- and
   // matching on the title instead would pick up a re-run of the same subject.
-  const before = await fetch(assetsUrl).then((r) => r.json()).catch(() => ({ items: [] }));
+  const before = await fetch(assetsUrl, { headers: auth })
+    .then((r) => r.json()).catch(() => ({ items: [] }));
   const beforeId = before.items && before.items[0] ? Number(before.items[0].id) : 0;
 
   const body = new URLSearchParams({
@@ -203,10 +216,19 @@ async function generateViaCore(pool, provider, entity, { pollMs = 5000, maxWaitM
   });
   const submit = await fetch(`${origin}/api/generate_core`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...auth },
     body,
   });
-  if (!submit.ok) return { ok: false, error: `generate_core answered ${submit.status}` };
+  if (!submit.ok) {
+    // 401 here means the service now enforces keys and this provider row has
+    // no token, or the wrong one. Say that rather than the bare status, which
+    // reads like a bug in the request.
+    const hint = submit.status === 401
+      ? ' -- the service requires a key; set the auth header and token on this'
+        + ' provider in Settings (it is sent verbatim, so include any "Bearer " prefix)'
+      : '';
+    return { ok: false, error: `generate_core answered ${submit.status}${hint}` };
+  }
 
   const started = Date.now();
   for (;;) {
@@ -214,12 +236,13 @@ async function generateViaCore(pool, provider, entity, { pollMs = 5000, maxWaitM
     // eslint-disable-next-line no-await-in-loop
     await new Promise((r) => setTimeout(r, pollMs));
     // eslint-disable-next-line no-await-in-loop
-    const list = await fetch(assetsUrl).then((r) => r.json()).catch(() => null);
+    const list = await fetch(assetsUrl, { headers: auth })
+      .then((r) => r.json()).catch(() => null);
     const newest = list && list.items && list.items[0];
     if (!newest || Number(newest.id) <= beforeId) continue;
 
     // eslint-disable-next-line no-await-in-loop
-    const img = await fetch(`${origin}${newest.url}`);
+    const img = await fetch(`${origin}${newest.url}`, { headers: auth });
     if (!img.ok) return { ok: false, error: `could not fetch ${newest.url}: ${img.status}` };
     // eslint-disable-next-line no-await-in-loop
     const buf = Buffer.from(await img.arrayBuffer());

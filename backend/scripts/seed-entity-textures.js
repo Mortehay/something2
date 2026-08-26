@@ -46,9 +46,17 @@ async function seedEntityTextures(pool, { force = false, only = null } = {}) {
 
   await assetStore.ensureBucket();
   const bucket = assetStore.BUCKET();
-  const stats = { uploaded: 0, linked: 0, skipped: 0, missingFile: 0, missingEntity: 0 };
+  const stats = { uploaded: 0, linked: 0, skipped: 0, missingFile: 0, missingEntity: 0, needsRegen: 0 };
 
   for (const entry of wanted) {
+    // Flagged by the cutout pass as still carrying a background or as an
+    // erased subject. Seeding one puts a visible box or a blank where a
+    // sprite should be, which is worse than the coloured rectangle it would
+    // replace -- so it waits for a redraw instead.
+    if (entry.needs_regen) {
+      stats.needsRegen += 1;
+      continue;
+    }
     const file = path.join(IN_DIR, entry.file);
     if (!fs.existsSync(file)) {
       console.log(`  ${entry.name}: FAILED ${entry.file} is in the manifest but not on disk`);
@@ -93,8 +101,8 @@ if (require.main === module) {
   seedEntityTextures(pool, { force })
     .then((s) => {
       console.log(`seeded ${s.linked} entity images (${s.uploaded} uploaded), `
-        + `${s.skipped} already had art, ${s.missingFile} missing files, `
-        + `${s.missingEntity} unknown entities`);
+        + `${s.skipped} already had art, ${s.needsRegen} awaiting a redraw, `
+        + `${s.missingFile} missing files, ${s.missingEntity} unknown entities`);
     })
     .catch((e) => { console.error(e.message); process.exitCode = 1; })
     .finally(() => pool.end());
