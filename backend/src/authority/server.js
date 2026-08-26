@@ -1991,6 +1991,24 @@ function attachAuthority(httpServer, pool, opts = {}) {
       }, { notify: false });
     },
 
+    castSkill(ws, msg) {
+      const entry = worlds.get(ws.worldId);
+      if (!entry) return;
+      const { ok, kills } = entry.world.castSkill(
+        ws.userId,
+        msg.skillId,
+        finiteOr(msg.targetX, 0),
+        finiteOr(msg.targetY, 0),
+        finiteOr(msg.ax, 0),
+        finiteOr(msg.ay, 0)
+      );
+      if (ok && kills && kills.length > 0) {
+        for (const k of dedupeKillsById(kills)) {
+          onCreatureDeath(entry, k.id, k.killerUserId);
+        }
+      }
+    },
+
     equip: equipOrUnequip,
     unequip: equipOrUnequip,
 

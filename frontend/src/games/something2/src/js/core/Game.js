@@ -36,6 +36,9 @@ import {
     mergeLevelInfo, buildCharacterView,
 } from "./progressionExtras.js";
 import { fetchProgression } from "../net/progressionClient.js";
+import { getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill, isDruidExclusiveSkill, resolveSkillVfx } from "./skillsData.js";
+import { loadHotbarForCharacter, saveHotbarForCharacter } from "./hotbarStorage.js";
+import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
 import { API_URL } from "../../../../../config.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
@@ -134,6 +137,22 @@ export class Game {
         this.inventoryDrag = null;
         this.inventoryTab = 'all';
         this.inventoryPage = 0;
+
+        // Skills panel & Hotbar (1-9)
+        this.characterId = null;
+        this.skillsOpen = false;
+        this.skillsTab = 'all';
+        this.skillsClassFilter = 'all';
+        this.skillsPage = 0;
+        this.selectedSkillId = null;
+        this.skillDrag = null;
+        this.skillHoverSlot = null;
+        this.hotbarSkills = new Map();
+        this.skillVisuals = [];
+        this.activeForm = null;
+        this.hotbarFlashSlot = null;
+        this.hotbarFlashUntil = 0;
+        this.skillCooldowns = new Map();
 
         // Ground items (Slice 3b-2b): render-only store of items on the
         // ground, plus a local mirror of the server-owned auto-loot flag.
@@ -496,8 +515,12 @@ export class Game {
         this.progressionExtras = emptyExtras();
         this._statsFromSocket = false;
         this.characterModPage = 0;
-        this.className = className;
+        this.characterId = characterId;
+        this.className = className || this.passiveStartClass || null;
+        if (className) this.passiveStartClass = className;
         this.mainStat = mainStat;
+        this.hotbarSkills = loadHotbarForCharacter(characterId, this.className || className || 'Warrior');
+        this.skillVisuals = [];
         this.merchants = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
@@ -935,11 +958,13 @@ export class Game {
     // second ago is not what "hold to keep attacking" means to anyone.
     _sendAttackAtCursor() {
         if (!this.authorityClient || !this.camera) return;
-        const pcx = this.player.x + this.player.width / 2;
-        const pcy = this.player.y + this.player.height / 2;
+        const pcx = (this.player && this.player.x != null) ? (this.player.x + (this.player.width || 32) / 2) : 0;
+        const pcy = (this.player && this.player.y != null) ? (this.player.y + (this.player.height || 32) / 2) : 0;
+        const canW = (this.canvas && this.canvas.width) || 800;
+        const canH = (this.canvas && this.canvas.height) || 600;
         const { nx, ny } = aimVector(
-            this._cursorX ?? this.canvas.width / 2,
-            this._cursorY ?? this.canvas.height / 2,
+            this._cursorX ?? canW / 2,
+            this._cursorY ?? canH / 2,
             this.camera, pcx, pcy,
         );
         this.authorityClient.sendAttack(nx, ny);
@@ -1078,6 +1103,13 @@ export class Game {
                 if (s.sent) this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt });
             }
             this._tickConstantAttack();
+            if (this.skillVisuals && this.skillVisuals.length > 0) {
+                const nowMs = performance.now();
+                this.skillVisuals = pruneSkillVisuals(this.skillVisuals, nowMs);
+                updateSkillVisuals(this.skillVisuals, dt, nowMs, (expX, expY, expElem, expRad) => {
+                    addBlasts(this.blasts, [{ x: expX, y: expY, radius: expRad, element: expElem }], nowMs);
+                });
+            }
             this.creatures.interpolate(dt);
             if (this.projectiles) this.projectiles.interpolate(dt);
             this.camera.update(this.player);
@@ -1203,8 +1235,50 @@ export class Game {
             // Expire finished blasts once per frame, on the same clock the
             // ring animation reads.
             const nowMs = performance.now();
+            if (this.skillVisuals && this.skillVisuals.length > 0) {
+                this.skillVisuals = updateSkillVisuals(this.skillVisuals, 0.016, nowMs, (proj) => {
+                    // Trigger arrival explosion / impact VFX & blast when the projectile reaches its destination!
+                    const elem = proj.element || 'fire';
+                    const vfxName = proj.vfxName || 'fireball_blast';
+                    const reach = proj.reach || (proj.radius ? proj.radius * 3.5 : 80);
+                    addEffects(this.vfx, [{
+                        v: vfxName,
+                        x: proj.toX,
+                        y: proj.toY,
+                        nx: proj.aimNx || Math.cos(proj.aimAngle || 0),
+                        ny: proj.aimNy || Math.sin(proj.aimAngle || 0),
+                        reach,
+                        arc: Math.PI * 2,
+                        el: elem,
+                        hit: true,
+                    }], nowMs, this.vfxDefs);
+                    addBlasts(this.blasts, [{ x: proj.toX, y: proj.toY, radius: Math.max(80, reach), element: elem }], nowMs);
+                    this.vfx = capParticles(this.vfx);
+                });
+                this.skillVisuals = pruneSkillVisuals(this.skillVisuals, nowMs);
+            }
+            if (this.activeBuffs && this.activeBuffs.size > 0) {
+                for (const [id, b] of this.activeBuffs) {
+                    if (nowMs >= b.expiresAt) this.activeBuffs.delete(id);
+                }
+            }
             this.blasts = pruneBlasts(this.blasts, nowMs);
             this.vfx = pruneEffects(this.vfx, nowMs);
+            // Resolve hovered skill for the tooltip
+            let hoveredSkill = null;
+            if (this._cursorX != null && this._cursorY != null && !(this.skillDrag && this.skillDrag.armed)) {
+                if (this.skillsOpen) {
+                    const areas = (this.renderSystem && this.renderSystem._skillsHitAreas) || [];
+                    const itemHit = areas.find((a) => a.kind === 'skills_item' && this._cursorX >= a.box.x && this._cursorX <= a.box.x + a.box.w && this._cursorY >= a.box.y && this._cursorY <= a.box.y + a.box.h);
+                    if (itemHit) hoveredSkill = itemHit.skill;
+                }
+                if (!hoveredSkill) {
+                    const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
+                    const slotHit = slotAreas.find((a) => this._cursorX >= a.box.x && this._cursorX <= a.box.x + a.box.w && this._cursorY >= a.box.y && this._cursorY <= a.box.y + a.box.h);
+                    if (slotHit && slotHit.skill) hoveredSkill = slotHit.skill;
+                }
+            }
+
             this.renderSystem.renderChunked({
                 player: this.player,
                 camera: this.camera,
@@ -1225,6 +1299,23 @@ export class Game {
                 inventory: this.inventory,
                 inventoryOpen: this.inventoryOpen,
                 selectedItemId: this.inventorySelectedItemId,
+                // Skills & Hotbar
+                skillsOpen: this.skillsOpen,
+                skillsTab: this.skillsTab,
+                skillsClassFilter: this.skillsClassFilter,
+                skillsPage: this.skillsPage,
+                selectedSkillId: this.selectedSkillId,
+                skillDrag: this.skillDrag,
+                skillHoverSlot: this.skillHoverSlot,
+                hotbarSkills: this.hotbarSkills,
+                activeForm: this.activeForm,
+                activeBuffs: this.activeBuffs ? Array.from(this.activeBuffs.values()) : [],
+                flashSlot: (nowMs < this.hotbarFlashUntil) ? this.hotbarFlashSlot : null,
+                skillCooldowns: this.skillCooldowns,
+                playerClass: this.className || this.passiveStartClass || (this.player && this.player.className) || "Druid",
+                hoveredSkill,
+                cursorX: this._cursorX,
+                cursorY: this._cursorY,
                 inventoryView: {
                     tab: this.inventoryTab,
                     page: this.inventoryPage,
@@ -1253,6 +1344,7 @@ export class Game {
                 toast: this.toast,
                 blasts: this.blasts,
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
+                skillVisuals: this.skillVisuals,
                 // null whenever the equipped weapon needs no ammo — the HUD
                 // then draws no ammo line at all.
                 ammo: resolveAmmoHud(this.inventory),
@@ -1320,10 +1412,18 @@ export class Game {
     // event: a browser always sends a mousemove first, but depending on that
     // makes the press silently wrong whenever it does not.
     _canvasPoint(e) {
-        const rect = this.canvas.getBoundingClientRect();
+        if (this.canvas && typeof this.canvas.getBoundingClientRect === 'function' && e && e.clientX != null && e.clientY != null) {
+            const rect = this.canvas.getBoundingClientRect();
+            if (rect && rect.width > 0 && rect.height > 0) {
+                return {
+                    x: (e.clientX - rect.left) * (this.canvas.width / rect.width),
+                    y: (e.clientY - rect.top) * (this.canvas.height / rect.height),
+                };
+            }
+        }
         return {
-            x: (e.clientX - rect.left) * (this.canvas.width / rect.width),
-            y: (e.clientY - rect.top) * (this.canvas.height / rect.height),
+            x: this._cursorX ?? 0,
+            y: this._cursorY ?? 0,
         };
     }
 
@@ -1528,6 +1628,258 @@ export class Game {
         if (hit.kind === 'bankpage') { this.bankView = { tab: this.bankView.tab, page: hit.id }; return; }
     }
 
+    saveHotbar() {
+        if (this.characterId != null) {
+            saveHotbarForCharacter(this.characterId, this.hotbarSkills);
+        }
+    }
+
+    loadHotbar(characterId, className) {
+        this.characterId = characterId;
+        this.hotbarSkills = loadHotbarForCharacter(characterId, className || this.className || 'Warrior');
+    }
+
+    _activateHotbarSkill(slotNum) {
+        const s = this.hotbarSkills.get(slotNum);
+        if (!s) {
+            if (!this.className && !this.passiveStartClass) {
+                fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
+            }
+            this.skillsOpen = true;
+            if (this.showToast) this.showToast(`Slot ${slotNum} is empty — select a skill`);
+            return;
+        }
+
+        const nowMs = performance.now();
+        this.hotbarFlashSlot = slotNum;
+        this.hotbarFlashUntil = nowMs + 250;
+
+        const playerClass = this.className || this.passiveStartClass || (this.player && this.player.className) || "Druid";
+
+        // 1. Check Druid exclusivity for transformations and form-dependent skills
+        if (isDruidExclusiveSkill(s) && playerClass !== "Druid") {
+            if (this.showToast) this.showToast(`Cannot cast ${s.nameEn}: Exclusive to Druid class! 🌿`);
+            return;
+        }
+
+        // 2. Check if skill is a transformation
+        const px = (this.player && this.player.x) || 0;
+        const py = (this.player && this.player.y) || 0;
+
+        const transformForm = isTransformationSkill(s);
+        if (transformForm) {
+            if (this.activeForm === transformForm) {
+                this.activeForm = null;
+                addBlasts(this.blasts, [{ x: px, y: py, radius: 50, element: 'physical' }], nowMs);
+                if (this.showToast) this.showToast(`Exited ${transformForm.toUpperCase()} Form (Returned to Normal Form)`);
+            } else {
+                this.activeForm = transformForm;
+                const emoji = transformForm === 'bear' ? '🐻' : (transformForm === 'hawk' ? '🦅' : '🐺');
+                const perks = transformForm === 'bear' ? '+200 HP, +50 Armor, +30 Strength' : (transformForm === 'hawk' ? '+35% Move Speed, +25% Evasion, +30 Dex' : '+35% Attack Speed, +15% Crit, +20 Str/Dex');
+                
+                // Transformation VFX
+                const elem = transformForm === 'bear' ? 'fire' : (transformForm === 'hawk' ? 'ice' : 'shadow');
+                addBlasts(this.blasts, [{ x: px, y: py, radius: 95, element: elem }], nowMs);
+                addEffects(this.vfx, [
+                    { shape: 'burst', x: px, y: py, reach: 95, element: elem },
+                    { shape: 'ring', x: px, y: py, reach: 65, element: elem }
+                ], nowMs);
+
+                if (this.showToast) this.showToast(`Transformed into ${transformForm.toUpperCase()} Form! ${emoji} (${perks})`);
+            }
+            return;
+        }
+
+        // 3. Check form requirement
+        const reqForm = getRequiredForm(s);
+        if (reqForm && this.activeForm !== reqForm) {
+            const formName = reqForm.toUpperCase();
+            const emoji = reqForm === 'bear' ? '🐻' : (reqForm === 'hawk' ? '🦅' : '🐺');
+            if (this.showToast) this.showToast(`Cannot cast ${s.nameEn}: Requires ${formName} Form! ${emoji}`);
+            return;
+        }
+
+        // 4. Check cooldown
+        const readyAt = this.skillCooldowns.get(s.id) || 0;
+        if (nowMs < readyAt) {
+            const remaining = ((readyAt - nowMs) / 1000).toFixed(1);
+            if (this.showToast) this.showToast(`⏳ ${s.nameEn} on cooldown (${remaining}s)`);
+            return;
+        }
+
+        // 5. Check and deduct resource cost
+        const cost = s.cost || 0;
+        if (s.costType === 'mana' && cost > 0) {
+            const currentMana = this.localMana != null ? this.localMana : 100;
+            if (currentMana < cost) {
+                if (this.showToast) this.showToast(`⚠️ Not enough Mana! (Need ${cost} MP, have ${Math.round(currentMana)})`);
+                return;
+            }
+            this.localMana = Math.max(0, currentMana - cost);
+        } else if (s.costType === 'stamina' && cost > 0) {
+            const currentStamina = this.localStamina != null ? this.localStamina : 100;
+            if (currentStamina < cost) {
+                if (this.showToast) this.showToast(`⚠️ Not enough Stamina! (Need ${cost} SP, have ${Math.round(currentStamina)})`);
+                return;
+            }
+            this.localStamina = Math.max(0, currentStamina - cost);
+        } else if (s.costType === 'hp' && cost > 0) {
+            const currentHp = (this.player && this.player.hp != null) ? this.player.hp : 100;
+            if (currentHp <= cost) {
+                if (this.showToast) this.showToast(`⚠️ Not enough Life!`);
+                return;
+            }
+            this.player.hp = Math.max(1, currentHp - cost);
+        }
+
+        // 6. Target resolution & Max Range enforcement (prevents casting across the whole screen)
+        const canW = (this.canvas && this.canvas.width) || 800;
+        const canH = (this.canvas && this.canvas.height) || 600;
+        let targetX = px + 35, targetY = py + 35, aimAngle = 0;
+        if (this.camera) {
+            try {
+                const w = cursorToWorld(this._cursorX ?? canW / 2, this._cursorY ?? canH / 2, this.camera);
+                if (w && Number.isFinite(w.x) && Number.isFinite(w.y)) {
+                    targetX = w.x;
+                    targetY = w.y;
+                    const aim = aimVector(this._cursorX ?? canW / 2, this._cursorY ?? canH / 2, this.camera, px, py);
+                    if (aim && (aim.nx !== 0 || aim.ny !== 0)) {
+                        aimAngle = Math.atan2(aim.ny, aim.nx);
+                    }
+                }
+            } catch (_) {}
+        }
+
+        const maxRange = Number(s.range) || (s.type === 'melee' ? 55 : (s.type === 'buff' ? 0 : 220));
+        if (maxRange > 0) {
+            const dx = targetX - px;
+            const dy = targetY - py;
+            const dist = Math.hypot(dx, dy);
+            if (dist > maxRange) {
+                const ratio = maxRange / dist;
+                targetX = px + dx * ratio;
+                targetY = py + dy * ratio;
+            }
+        }
+
+        // 6. Set cooldown
+        const cdSec = s.cooldown || 1;
+        this.skillCooldowns.set(s.id, nowMs + cdSec * 1000);
+
+        // 7. Trigger distinct skill visual effects through the Attack Effects (vfx_effects) library
+        const visual = createSkillVisual(s, px, py, targetX, targetY, aimAngle, nowMs);
+        const elem = s.element || (s.class === 'Mage' ? 'fire' : (s.class === 'Druid' ? 'lightning' : (s.class === 'Cultist' ? 'shadow' : 'physical')));
+        const nx = Math.cos(aimAngle);
+        const ny = Math.sin(aimAngle);
+        const vfxName = resolveSkillVfx(s);
+        const reach = s.type === 'melee' ? (Number(s.range) || 90) : (Number(s.radius) || 80) * 1.5;
+
+        if (visual) {
+            const list = Array.isArray(visual) ? visual : [visual];
+            if (!this.skillVisuals) this.skillVisuals = [];
+            for (const vis of list) {
+                vis.vfxName = vfxName;
+                vis.aimNx = nx;
+                vis.aimNy = ny;
+                vis.reach = reach;
+                this.skillVisuals.push(vis);
+            }
+        }
+
+        // If the visual is a flying projectile, the blast & impact explosion will trigger upon impact/arrival!
+        // For non-projectile skills (melee, holy pillar, point-blank nova, self-buffs), trigger immediately.
+        const firstVis = Array.isArray(visual) ? visual[0] : visual;
+        const isFlyingProjectile = firstVis && firstVis.kind === 'projectile';
+        if (!isFlyingProjectile) {
+            addEffects(this.vfx, [{
+                v: vfxName,
+                x: s.type === 'melee' ? px : targetX,
+                y: s.type === 'melee' ? py : targetY,
+                nx, ny,
+                reach,
+                arc: s.type === 'melee' ? Math.PI * 0.75 : Math.PI * 2,
+                el: elem,
+                hit: true,
+            }], nowMs, this.vfxDefs);
+            this.vfx = capParticles(this.vfx);
+
+            // Blasts for ground impacts
+            if (s.type === 'melee') {
+                addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 70, element: elem }], nowMs);
+            } else if (s.type === 'buff') {
+                addBlasts(this.blasts, [{ x: px, y: py, radius: 75, element: 'holy' }], nowMs);
+            } else if (s.type === 'debuff') {
+                addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 85, element: 'shadow' }], nowMs);
+            } else {
+                addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 95, element: elem }], nowMs);
+            }
+        }
+
+        // Special: Blink / Teleport movement
+        if (s.id.includes('blink') || s.id.includes('teleport') || s.id.includes('shadow_step')) {
+            const blinkDist = Math.min(260, Number(s.range) || 240);
+            const targetBlinkX = px + nx * blinkDist;
+            const targetBlinkY = py + ny * blinkDist;
+            if (this.player) {
+                this.player.x = targetBlinkX;
+                this.player.y = targetBlinkY;
+                if (this.camera) {
+                    this.camera.x = targetBlinkX;
+                    this.camera.y = targetBlinkY;
+                }
+            }
+            // Flash blast at origin and destination
+            addBlasts(this.blasts, [
+                { x: px, y: py, radius: 45, element: 'holy' },
+                { x: targetBlinkX, y: targetBlinkY, radius: 65, element: 'holy' }
+            ], nowMs);
+        }
+
+        // Apply local buff effects (healing, mana restoration, stats, buff panel registration)
+        if (s.type === 'buff') {
+            const desc = (s.descUk || '') + ' ' + (s.descEn || '');
+            const isHeal = desc.includes('HP') || desc.includes('зцілює') || desc.includes('відновлює') ||
+                           s.id.includes('heal') || s.id.includes('regrowth') || s.id.includes('rejuvenation') ||
+                           s.id.includes('flash_of_light') || s.id.includes('holy_light') || s.id.includes('unstoppable');
+            if (isHeal && this.player) {
+                const maxHp = this.player.maxHp || 100;
+                this.player.hp = Math.min(maxHp, (this.player.hp || maxHp) + Math.max(15, Math.round(maxHp * 0.25)));
+            }
+
+            const isManaRestore = s.id.includes('mana') || s.id.includes('evocation') || desc.includes('мана') || desc.includes('ману');
+            if (isManaRestore) {
+                this.localMana = Math.min(this.localMaxMana, this.localMana + 35);
+            }
+
+            const isStaminaRestore = s.id.includes('stamina') || s.id.includes('adrenaline') || desc.includes('витривал');
+            if (isStaminaRestore) {
+                this.localStamina = Math.min(this.localMaxStamina, this.localStamina + 30);
+            }
+
+            if (!this.activeBuffs) this.activeBuffs = new Map();
+            const durSec = Number(s.duration) || (s.cooldown ? Math.max(8, Math.min(45, s.cooldown * 1.5)) : 20);
+            const durMs = durSec * 1000;
+            this.activeBuffs.set(s.id, {
+                id: s.id,
+                nameUk: s.nameUk,
+                nameEn: s.nameEn,
+                icon: s.icon || '✨',
+                iconColor: s.iconColor || '#fbbf24',
+                startedAt: nowMs,
+                durationMs: durMs,
+                expiresAt: nowMs + durMs,
+            });
+        }
+
+        // 8. Dispatch real skill cast to server so creatures take real damage and server deducts resources / applies buffs
+        if (this.authorityClient && (s.type === 'melee' || s.type === 'magic' || s.type === 'debuff' || s.type === 'buff')) {
+            this.authorityClient.sendCastSkill(s.id, targetX, targetY, nx, ny);
+        }
+
+        // Normal skill cast toast
+        if (this.showToast) this.showToast(`Cast: ${s.nameEn} ${s.icon || '✨'} (-${cost} ${s.costType.toUpperCase()})`);
+    }
+
     setupInput(){
         if (this._inputAttached) return;
         this._inputAttached = true;
@@ -1613,10 +1965,31 @@ export class Game {
                 }
             }
 
+            // Skills panel ('k')
+            if (isKey('k') && this.state === 'playing' && this.chunked && !e.repeat
+                && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen && !this.inventoryOpen) {
+                if (!this.className && !this.passiveStartClass) {
+                    fetchStartClass().then((name) => { if (name) { this.className = name; this.passiveStartClass = name; } }).catch(() => {});
+                }
+                this.skillsOpen = !this.skillsOpen;
+            }
+
+            // Hotbar keys (1..9)
+            if (/^[1-9]$/.test(key) && this.state === 'playing' && this.chunked && !e.repeat) {
+                const slotNum = parseInt(key, 10);
+                if (!this.skillsOpen && !this.inventoryOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                    this._activateHotbarSkill(slotNum);
+                    if (typeof e.preventDefault === 'function') e.preventDefault();
+                    return;
+                }
+            }
+
             if (isKey('escape')) {
                 if (typeof e.preventDefault === 'function') e.preventDefault();
                 console.log("Escape pressed, current state:", this.state);
-                if (this.shopOpen) {
+                if (this.skillsOpen) {
+                    this.skillsOpen = false;
+                } else if (this.shopOpen) {
                     this.shopOpen = false;
                 } else if (this.bankOpen) {
                     this.bankOpen = false;
@@ -1721,6 +2094,22 @@ export class Game {
             const rect = this.canvas.getBoundingClientRect();
             this._cursorX = (e.clientX - rect.left) * (this.canvas.width / rect.width);
             this._cursorY = (e.clientY - rect.top) * (this.canvas.height / rect.height);
+            if (this.skillDrag) {
+                this.skillDrag.x = this._cursorX;
+                this.skillDrag.y = this._cursorY;
+                const dx = this._cursorX - this.skillDrag.startX;
+                const dy = this._cursorY - this.skillDrag.startY;
+                if (Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) this.skillDrag.armed = true;
+
+                const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
+                const slotHit = slotAreas.find((a) => this._cursorX >= a.box.x && this._cursorX <= a.box.x + a.box.w && this._cursorY >= a.box.y && this._cursorY <= a.box.y + a.box.h);
+                this.skillDrag.targetSlot = slotHit ? slotHit.slot : null;
+                this.skillHoverSlot = slotHit ? slotHit.slot : null;
+            } else {
+                const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
+                const slotHit = slotAreas.find((a) => this._cursorX >= a.box.x && this._cursorX <= a.box.x + a.box.w && this._cursorY >= a.box.y && this._cursorY <= a.box.y + a.box.h);
+                this.skillHoverSlot = slotHit ? slotHit.slot : null;
+            }
             if (this.inventoryDrag) {
                 this.inventoryDrag.x = this._cursorX;
                 this.inventoryDrag.y = this._cursorY;
@@ -1763,6 +2152,65 @@ export class Game {
                 this._handlePassivePress(this._cursorX ?? 0, this._cursorY ?? 0, false, e.shiftKey);
                 return;
             }
+
+            // Skills Panel Hit Areas
+            if (this.skillsOpen) {
+                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+                const areas = (this.renderSystem && this.renderSystem._skillsHitAreas) || [];
+                const hit = areas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
+                if (hit) {
+                    if (hit.kind === 'skills_close') {
+                        this.skillsOpen = false;
+                        return;
+                    }
+                    if (hit.kind === 'skills_class_filter') {
+                        this.skillsClassFilter = hit.key;
+                        this.skillsPage = 0;
+                        return;
+                    }
+                    if (hit.kind === 'skills_tab') {
+                        this.skillsTab = hit.key;
+                        this.skillsPage = 0;
+                        return;
+                    }
+                    if (hit.kind === 'skills_page_prev') {
+                        this.skillsPage = Math.max(0, this.skillsPage - 1);
+                        return;
+                    }
+                    if (hit.kind === 'skills_page_next') {
+                        this.skillsPage = this.skillsPage + 1;
+                        return;
+                    }
+                    if (hit.kind === 'skills_item') {
+                        this.selectedSkillId = hit.skillId;
+                        this.skillDrag = {
+                            skillId: hit.skillId,
+                            skill: hit.skill,
+                            x, y, startX: x, startY: y,
+                            armed: false,
+                        };
+                        return;
+                    }
+                }
+            }
+
+            // Hotbar Slot Hit Areas
+            const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
+            const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
+            const slotHit = slotAreas.find((a) => x >= a.box.x && x <= a.box.x + a.box.w && y >= a.box.y && y <= a.box.y + a.box.h);
+            if (slotHit) {
+                if (e.button === 2) {
+                    this.hotbarSkills.delete(slotHit.slot);
+                    this.saveHotbar();
+                    if (this.showToast) this.showToast(`Slot ${slotHit.slot} cleared`);
+                    return;
+                }
+                if (!this.skillsOpen) {
+                    this._activateHotbarSkill(slotHit.slot);
+                }
+                return;
+            }
+
             if (e.button !== 0) return;
 
             // While a panel is open, clicks hit-test it and must NOT also
@@ -1778,7 +2226,6 @@ export class Game {
                 return;
             }
             if (this.inventoryOpen) {
-                const x = this._cursorX ?? 0, y = this._cursorY ?? 0;
                 const areas = (this.renderSystem && this.renderSystem._invHitAreas) || [];
                 const hit = areas.find((a) => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h);
                 // A press on a cell or a slot is a drag CANDIDATE: it arms only
@@ -1816,24 +2263,14 @@ export class Game {
 
             const pcx = this.player.x + this.player.width / 2;
             const pcy = this.player.y + this.player.height / 2;
+            const w = this.camera ? cursorToWorld(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera) : { x: pcx, y: pcy };
 
-            // Direct click on a world interactable (merchant, bank, chest).
-            //
-            // Unlike a key, a click carries WHICH ONE in the gesture itself --
-            // the player pointed at a specific marker -- so choosing a kind
-            // here is not the guess the keys must never make. The two radii do
-            // different jobs and neither is a copy of the server's range rule:
-            // MARKER_CLICK_R is a hit-test ("did they point at this marker?"),
-            // and INTERACT_CLICK_R only decides whether the click is spent on
-            // an interaction or on an attack, so it is deliberately TIGHTER
-            // than the authority's INTERACT_RADIUS (120) -- same reasoning as
-            // RenderSystem's WORLD_CHEST_PROMPT_R. A click on a marker the
-            // player is nowhere near stays an attack rather than becoming a
-            // frame the server would only refuse.
-            const MARKER_CLICK_R = 50;
-            const INTERACT_CLICK_R = 110;
-            if (this.camera) {
-                const w = cursorToWorld(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera);
+            // Left-click interact with markers (Slice 4b) -- highest priority
+            // after open panels: if a click lands on a merchant or bank marker
+            // within the interaction radius, open it and do not also swing.
+            if (this.authorityClient) {
+                const MARKER_CLICK_R = 50;
+                const INTERACT_CLICK_R = 110;
                 const pointedAt = (t) => Math.hypot(t.x - w.x, t.y - w.y) <= MARKER_CLICK_R
                     && Math.hypot(t.x - pcx, t.y - pcy) <= INTERACT_CLICK_R;
                 for (const m of (Array.isArray(this.merchants) ? this.merchants : [])) {
@@ -1866,6 +2303,23 @@ export class Game {
 
         this._mouseUpHandler = (e) => {
             if (e.button !== 0) return;
+            if (this.skillDrag) {
+                const sDrag = this.skillDrag;
+                this.skillDrag = null;
+                const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
+                const pt = this._canvasPoint(e);
+                const hit = slotAreas.find((a) => pt.x >= a.box.x && pt.x <= a.box.x + a.box.w && pt.y >= a.box.y && pt.y <= a.box.y + a.box.h);
+                const targetSlot = sDrag.targetSlot || (hit ? hit.slot : null);
+                if (targetSlot) {
+                    const s = sDrag.skill || getSkillById(sDrag.skillId);
+                    if (s) {
+                        this.hotbarSkills.set(targetSlot, s);
+                        this.saveHotbar();
+                        if (this.showToast) this.showToast(`Bound: ${s.nameEn} -> Slot ${targetSlot}`);
+                    }
+                }
+                return;
+            }
             if (this.passiveDrag) {
                 const pan = this.passiveDrag;
                 this.passiveDrag = null;
@@ -1905,6 +2359,10 @@ export class Game {
             }
         };
 
+        this._handleKeyDown = (e) => this._keydownHandler(e);
+        this._handleMouseDown = (e) => this._mouseDownHandler(e);
+        this._handleMouseUp = (e) => this._mouseUpHandler(e);
+
         // SOMET-476. `passive: false` because the handler calls
         // preventDefault -- without it the browser scrolls the page behind the
         // canvas while the player is zooming the tree.
@@ -1918,15 +2376,19 @@ export class Game {
             );
         };
 
-        window.addEventListener('keydown', this._keydownHandler);
-        window.addEventListener('keyup', this._keyupHandler);
-        window.addEventListener('contextmenu', this._contextMenuHandler);
-        window.addEventListener('blur', this._blurHandler);
-        this.canvas.addEventListener('mousemove', this._mouseMoveHandler);
-        this.canvas.addEventListener('mousedown', this._mouseDownHandler);
-        this.canvas.addEventListener('mouseup', this._mouseUpHandler);
-        window.addEventListener('mouseup', this._windowMouseUpHandler);
-        this.canvas.addEventListener('wheel', this._wheelHandler, { passive: false });
+        if (typeof window !== 'undefined') {
+            window.addEventListener('keydown', this._keydownHandler);
+            window.addEventListener('keyup', this._keyupHandler);
+            window.addEventListener('contextmenu', this._contextMenuHandler);
+            window.addEventListener('blur', this._blurHandler);
+            window.addEventListener('mouseup', this._windowMouseUpHandler);
+        }
+        if (this.canvas && typeof this.canvas.addEventListener === 'function') {
+            this.canvas.addEventListener('mousemove', this._mouseMoveHandler);
+            this.canvas.addEventListener('mousedown', this._mouseDownHandler);
+            this.canvas.addEventListener('mouseup', this._mouseUpHandler);
+            this.canvas.addEventListener('wheel', this._wheelHandler, { passive: false });
+        }
     }
 
     startGame(){

@@ -5,6 +5,7 @@ import {
   useGenerateSprite, useSpriteJob, useApproveSprite, useSpriteCapability,
   useGenerateEntityJob, useEntityJob, useApproveEntityImage, useSpriteManifest,
 } from './useSprites.js';
+import BulkRegenerateButton from './BulkRegenerateButton.jsx';
 import { assetUrlVersioned } from './useTileSprites.js';
 import { useBiomes } from './useBiomes.js';
 import { useCreatureBehaviors } from './useCreatureBehaviors.js';
@@ -189,6 +190,10 @@ const EntityCard = styled.div`
     transform: translateY(-2px);
     box-shadow: 0 4px 20px var(--s2-selected-tint);
   }
+`;
+
+const HeaderActions = styled.div`
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
 `;
 
 const EntityHeader = styled.div`
@@ -1093,10 +1098,22 @@ function EntityTypesAdmin() {
     <AdminContainer>
       <Header>
         <h2>Entity Types Registry</h2>
-        <MainButton onClick={handleOpenAdd}>
-          <HiOutlinePlus style={{ marginRight: '8px' }} />
-          Add New Entity
-        </MainButton>
+        <HeaderActions>
+          {/* offerIncludeRect: 114 of these draw as plain colour boxes and have
+              never had art, so sweeping them in is a deliberate tick, not the
+              default reading of "regenerate all". */}
+          <BulkRegenerateButton
+            kind="entities"
+            noun="entities"
+            count={(entityTypes || []).filter(e => e.render_mode !== 'rect').length}
+            countIncludingRect={entityTypes?.length || 0}
+            offerIncludeRect
+          />
+          <MainButton onClick={handleOpenAdd}>
+            <HiOutlinePlus style={{ marginRight: '8px' }} />
+            Add New Entity
+          </MainButton>
+        </HeaderActions>
       </Header>
 
       <CapabilityBanner $variant={capabilityDown ? 'down' : capability?.tier}>

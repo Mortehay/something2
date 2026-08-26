@@ -11,6 +11,7 @@ import { validateTileType } from './catalogValidation.js';
 import { entityTypesReferencingTile } from './catalogReferences.js';
 import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
 import { ProviderChoice, ProviderAnimationNote } from './ProviderChoice.jsx';
+import BulkRegenerateButton from './BulkRegenerateButton.jsx';
 
 const AdminContainer = styled.div`
   padding: 2rem;
@@ -32,6 +33,10 @@ const Header = styled.div`
     font-size: 2.4rem;
     color: var(--s2-accent);
   }
+`;
+
+const HeaderActions = styled.div`
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
 `;
 
 const TileGrid = styled.div`
@@ -534,10 +539,13 @@ function TileTypesAdmin() {
     <AdminContainer>
       <Header>
         <h2>Tile Types Registry</h2>
-        <MainButton onClick={handleOpenAdd}>
-          <HiOutlinePlus style={{ marginRight: '8px' }} />
-          Add New Tile
-        </MainButton>
+        <HeaderActions>
+          <BulkRegenerateButton kind="tiles" noun="tiles" count={tileTypes?.length || 0} />
+          <MainButton onClick={handleOpenAdd}>
+            <HiOutlinePlus style={{ marginRight: '8px' }} />
+            Add New Tile
+          </MainButton>
+        </HeaderActions>
       </Header>
 
       <TileGrid>

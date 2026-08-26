@@ -25,14 +25,30 @@ const MAX_DISCOVERY_BYTES = () => parseInt(process.env.AI_PROVIDER_MAX_DISCOVERY
 // gets its own much longer budget in SOMET-327.
 const TIMEOUT_MS = () => parseInt(process.env.AI_PROVIDER_DISCOVERY_TIMEOUT_MS || '10000', 10);
 
-// Only sent when BOTH halves are present: a header name with no value is a
-// misconfiguration that would otherwise go out as `Authorization: undefined`
-// and come back as a confusing 401 from the far end.
+// A header name with no value is a misconfiguration that would otherwise go
+// out as `Authorization: undefined` and come back as a confusing 401, so that
+// half still requires both.
+//
+// The reverse -- a token with no header name -- used to send NOTHING, and that
+// was the worse bug of the two: the header-name box is optional in the admin
+// form, so pasting a key and leaving the name blank is the obvious thing to
+// do. The credential was then silently dropped, the service answered "missing
+// token", and the model dropdown quietly kept serving a cache from the last
+// time discovery had worked. A configured-but-unsent credential has no valid
+// reading, so it now defaults to the near-universal one.
+//
+// Only this defaulted path adds `Bearer`. An explicitly named header means the
+// admin is stating the exact wire format, and their value is never rewritten.
 function authHeaders(provider) {
-  if (provider.auth_header_name && provider.auth_token) {
-    return { [provider.auth_header_name]: provider.auth_token };
-  }
-  return {};
+  const name = (provider.auth_header_name || '').trim();
+  const token = provider.auth_token;
+  if (!token) return {};
+  if (name) return { [name]: token };
+  // `Bearer k` / `Basic dXNlcjpwdw==` already name a scheme; a bare key does
+  // not, and a bare key under Authorization is not a credential any service
+  // can read.
+  const hasScheme = /^\S+\s+\S/.test(String(token));
+  return { Authorization: hasScheme ? token : `Bearer ${token}` };
 }
 
 // `new URL(path, base)` rather than string concatenation: it gets the
