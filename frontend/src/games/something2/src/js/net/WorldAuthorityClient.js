@@ -183,6 +183,10 @@ export class WorldAuthorityClient {
 
   sendAttack(ax, ay) { this._send({ type: 'attack', ax, ay }); }
 
+  sendCastSkill(skillId, targetX, targetY, ax, ay) {
+    return this._send({ type: 'castSkill', skillId, targetX, targetY, ax, ay });
+  }
+
   sendEquip(itemId, slot) { this._send({ type: 'equip', itemId, slot }); }
 
   sendUnequip(slot) { this._send({ type: 'unequip', slot }); }

@@ -19,6 +19,7 @@ const { GroundItemSim } = require('./groundItems');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerStats.js');
 const { STAMINA_BASE } = require('../services/progressionConstants.js');
 const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
+const { getSkillById } = require('../../seeds/data/skills.js');
 
 // Bounds concurrent creature-owned projectiles per world. A swarm-density
 // world can hold 12-creature packs; twelve Ranged creatures on a 1.8s cooldown
@@ -189,6 +190,14 @@ function stepEffects(target, dtMs, now, dealBurn) {
   if (target.baseSpeed === undefined) target.baseSpeed = target.speed;
   const chill = effectMagnitude(target, CHILL, now);
   target.speed = chill ? target.baseSpeed * chill : target.baseSpeed;
+
+  // Prune expired player buffs
+  if (target.buffs) {
+    for (const [bid, b] of target.buffs) {
+      if (now >= b.expiresAt) target.buffs.delete(bid);
+    }
+  }
+
   return died;
 }
 
@@ -926,6 +935,206 @@ class World {
     return { kills: [], attacks: [], impacts: [], stoneHit: null };
   }
 
+  castSkill(userId, skillId, targetX, targetY, ax, ay) {
+    const p = this.players.get(userId);
+    if (!p) return { ok: false, kills: [] };
+    const skill = getSkillById(skillId);
+    if (!skill) return { ok: false, kills: [] };
+
+    // Check resources on player
+    const cost = Number(skill.cost) || 0;
+    if (skill.costType === 'mana' && p.mana < cost) return { ok: false, kills: [], reason: 'mana' };
+    if (skill.costType === 'stamina' && p.stamina < cost) return { ok: false, kills: [], reason: 'stamina' };
+    if (skill.costType === 'hp' && p.hp <= cost) return { ok: false, kills: [], reason: 'hp' };
+
+    // Deduct resource
+    if (skill.costType === 'mana') p.mana = Math.max(0, p.mana - cost);
+    else if (skill.costType === 'stamina') p.stamina = Math.max(0, p.stamina - cost);
+    else if (skill.costType === 'hp') p.hp = Math.max(1, p.hp - cost);
+
+    const px = p.x + p.width / 2;
+    const py = p.y + p.height / 2;
+
+    const baseMult = (skill.type === 'melee') ? (p.stats.meleeMult || 1) : (p.stats.spellMult || 1);
+    const elemMult = elementDamageMult(p.stats, skill.element);
+    
+    // Resolve base damage and hit counts (e.g. Barrage deals individual damage per arrow)
+    let baseDamage = Number(skill.damage) || 12;
+    let hitCount = 1;
+    if (skill.id === 'arc_barrage') {
+      baseDamage = 5; // Each of the 12 arrows deals its own damage
+      hitCount = 12;
+    } else if (skill.id === 'arc_fan_of_knives') {
+      baseDamage = 6;
+      hitCount = 8;
+    } else if (skill.id === 'mag_magic_missiles') {
+      baseDamage = 6;
+      hitCount = 5;
+    } else if (skill.id === 'mag_meteor_shower') {
+      baseDamage = 14;
+      hitCount = 4;
+    } else if (skill.id === 'arc_rain_of_arrows' || skill.id === 'arc_volley') {
+      baseDamage = 5;
+      hitCount = 14;
+    } else if (skill.id.includes('multishot') || skill.id.includes('triple')) {
+      baseDamage = 8;
+      hitCount = 3;
+    } else if (skill.id === 'war_flurry_of_steel') {
+      baseDamage = 7;
+      hitCount = 4;
+    } else if (skill.id === 'war_twin_slash') {
+      baseDamage = 8;
+      hitCount = 2;
+    } else {
+      // General skill damage rebalanced / halved to prevent instant kills
+      const desc = (skill.descEn || '') + ' ' + (skill.descUk || '');
+      const pctMatch = desc.match(/(\d+)%/);
+      if (pctMatch) {
+        const pct = parseInt(pctMatch[1], 10);
+        baseDamage = Math.round(10 * (pct / 100) * 0.55);
+      } else {
+        baseDamage = (skill.type === 'melee') ? 12 : 14;
+      }
+      baseDamage = Math.max(4, Math.min(28, baseDamage));
+    }
+
+    const damage = Math.max(2, Math.round(baseDamage * baseMult * elemMult));
+    const element = skill.element || (skill.class === 'Mage' ? 'fire' : (skill.class === 'Druid' ? 'lightning' : (skill.class === 'Cultist' ? 'shadow' : 'physical')));
+
+    const kills = [];
+    const pacifiedFrom = charmerOf(p, this.now);
+
+    // Special: Blink / Teleport movement
+    if (skill.id.includes('blink') || skill.id.includes('teleport') || skill.id.includes('shadow_step')) {
+      const blinkDist = Math.min(260, Number(skill.range) || 240);
+      const { nx, ny } = normalizeAim(ax, ay, p.facing);
+      p.x = Math.max(0, p.x + nx * blinkDist);
+      p.y = Math.max(0, p.y + ny * blinkDist);
+    }
+
+    if (skill.type === 'melee') {
+      const { nx, ny } = normalizeAim(ax, ay, p.facing);
+      const reach = Math.max(90, (Number(skill.range) || 90) * 1.3);
+      const arc = Math.PI * 0.75;
+      for (let h = 0; h < hitCount; h++) {
+        const killed = this.creatures.applyMeleeArc(
+          px, py, nx, ny, reach, arc, damage, element, this.now + h * 40, userId,
+          null, pacifiedFrom, p.stats.hitStatuses || null
+        );
+        for (const kid of killed) {
+          if (!kills.some(k => k.id === kid)) kills.push({ id: kid, killerUserId: userId });
+        }
+      }
+    } else if (skill.type === 'magic' || skill.type === 'debuff') {
+      const aoeRadius = Math.max(90, (Number(skill.radius) || 80) * 1.5);
+      const isBarrage = skill.id === 'arc_barrage';
+      const isDirectionalShotgun = isBarrage || skill.id.includes('multishot') || skill.id.includes('split_shot') || skill.id.includes('aimed_shot') || skill.id.includes('piercing');
+      const isFrostNova = skill.id === 'mag_frost_nova' || skill.id.includes('frost_nova');
+      const isSingularity = skill.id.includes('gravity') || skill.id.includes('singularity') || skill.id.includes('black_hole');
+
+      // Singularity: Pull nearby creatures towards the center
+      if (isSingularity) {
+        for (const c of this.creatures.all()) {
+          const cx = c.x + CREATURE_SIZE / 2;
+          const cy = c.y + CREATURE_SIZE / 2;
+          const dist = Math.hypot(cx - targetX, cy - targetY);
+          if (dist <= 190 && dist > 10) {
+            const pullRatio = 0.45;
+            c.x = c.x + (targetX - cx) * pullRatio;
+            c.y = c.y + (targetY - cy) * pullRatio;
+          }
+        }
+      }
+
+      if (isDirectionalShotgun) {
+        // Shotgun cone effect: all enemies in the cone or directly in front of the player (point-blank) take shotgun hits from all arrows!
+        const { nx, ny } = normalizeAim(ax, ay, p.facing);
+        const aimAngle = Math.atan2(ny, nx);
+        const maxRange = Math.max(120, Number(skill.range) || 440);
+
+        for (const c of this.creatures.all()) {
+          const cx = c.x + CREATURE_SIZE / 2;
+          const cy = c.y + CREATURE_SIZE / 2;
+          const tdx = cx - px;
+          const tdy = cy - py;
+          const dist = Math.hypot(tdx, tdy);
+
+          if (dist <= maxRange) {
+            const angleToTarget = Math.atan2(tdy, tdx);
+            let angleDiff = Math.abs(angleToTarget - aimAngle);
+            if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+
+            // In cone (within +/- 40 deg) OR point-blank in front of archer (dist <= 85)
+            if (angleDiff <= 0.70 || dist <= 85) {
+              for (let h = 0; h < hitCount; h++) {
+                const died = this.creatures.damageCreatureById(c.id, damage, element, this.now + h * 30, playerKey(userId));
+                if (died && !kills.some(k => k.id === c.id)) {
+                  kills.push({ id: c.id, killerUserId: userId });
+                  break;
+                }
+              }
+            }
+          }
+        }
+      } else {
+        // Radial spells, Frost Nova (centered on caster px, py), Rain of Arrows, and targeted AoEs
+        const aoeCenterX = isFrostNova ? px : targetX;
+        const aoeCenterY = isFrostNova ? py : targetY;
+
+        for (let h = 0; h < hitCount; h++) {
+          for (const c of this.creatures.all()) {
+            const cx = c.x + CREATURE_SIZE / 2;
+            const cy = c.y + CREATURE_SIZE / 2;
+            const dist = Math.hypot(cx - aoeCenterX, cy - aoeCenterY);
+            if (dist <= aoeRadius) {
+              const died = this.creatures.damageCreatureById(c.id, damage, element, this.now + h * 40, playerKey(userId));
+              if (died && !kills.some(k => k.id === c.id)) {
+                kills.push({ id: c.id, killerUserId: userId });
+              }
+            }
+          }
+        }
+      }
+    } else if (skill.type === 'buff') {
+      // 1. Instant recovery/heal effects
+      const desc = (skill.descUk || '') + ' ' + (skill.descEn || '');
+      const isHeal = desc.includes('HP') || desc.includes('зцілює') || desc.includes('відновлює') ||
+                     skill.id.includes('heal') || skill.id.includes('regrowth') || skill.id.includes('rejuvenation') ||
+                     skill.id.includes('flash_of_light') || skill.id.includes('holy_light') || skill.id.includes('unstoppable');
+      if (isHeal) {
+        const healAmt = Math.max(15, Math.round(p.maxHp * 0.25));
+        p.hp = Math.min(p.maxHp, p.hp + healAmt);
+      }
+
+      const isManaRestore = skill.id.includes('mana') || skill.id.includes('evocation') || desc.includes('мана') || desc.includes('ману');
+      if (isManaRestore) {
+        p.mana = Math.min(p.maxMana, p.mana + 35);
+      }
+
+      const isStaminaRestore = skill.id.includes('stamina') || skill.id.includes('adrenaline') || desc.includes('витривал');
+      if (isStaminaRestore) {
+        p.stamina = Math.min(p.maxStamina, p.stamina + 30);
+      }
+
+      // 2. Active duration buff registration
+      if (!p.buffs) p.buffs = new Map();
+      const durSec = Number(skill.duration) || (skill.cooldown ? Math.max(8, Math.min(45, skill.cooldown * 1.5)) : 20);
+      const durMs = durSec * 1000;
+      p.buffs.set(skill.id, {
+        id: skill.id,
+        nameUk: skill.nameUk,
+        nameEn: skill.nameEn,
+        icon: skill.icon || '✨',
+        iconColor: skill.iconColor || '#fbbf24',
+        startedAt: this.now,
+        durationMs: durMs,
+        expiresAt: this.now + durMs,
+      });
+    }
+
+    return { ok: true, kills };
+  }
+
   // Returns the whole step result — { kills, detonations, stoneHits, blocks }
   // — so AoE blasts (and SOMET-286's guard block cues) reach the broadcast.
   // Returning only the kills (as this used to for ids)
@@ -991,6 +1200,17 @@ class World {
         // activeEffectKeys. Read on the client as `p.effects || []`.
         const fx = activeEffectKeys(p, this.now);
         if (fx) out.effects = fx;
+        if (p.buffs && p.buffs.size > 0) {
+          out.buffs = Array.from(p.buffs.values()).map((b) => ({
+            id: b.id,
+            nameUk: b.nameUk,
+            nameEn: b.nameEn,
+            icon: b.icon,
+            iconColor: b.iconColor,
+            expiresAt: b.expiresAt,
+            remainingSec: Math.max(0, Math.ceil((b.expiresAt - this.now) / 1000)),
+          }));
+        }
         return out;
       }),
       projectiles: this.projectiles.snapshot(),

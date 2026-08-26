@@ -166,6 +166,17 @@ function EffectCard({ effect, onDone }) {
 export default function VfxEffectsAdmin() {
   const { effects, isLoadingEffects } = useVfxEffectsAdmin();
   const [adding, setAdding] = useState(false);
+  const [search, setSearch] = useState('');
+  const [shapeFilter, setShapeFilter] = useState('all');
+
+  const filteredEffects = (effects || []).filter(e => {
+    if (shapeFilter !== 'all' && e.shape !== shapeFilter) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return (e.name && e.name.toLowerCase().includes(q)) || (e.shape && e.shape.toLowerCase().includes(q));
+    }
+    return true;
+  });
 
   return (
     <AdminContainer>
@@ -177,14 +188,35 @@ export default function VfxEffectsAdmin() {
       </Header>
       <p style={{ color: 'var(--s2-text-muted)', marginTop: 0 }}>
         Retune an effect and the change reaches the running game without a deploy. Renaming or
-        deleting an effect that a weapon or creature still binds is refused, with the bindings named.
+        deleting an effect that a weapon, skill or creature still binds is refused, with the bindings named.
       </p>
+
+      <Row style={{ marginBottom: '1.2rem', gap: '0.8rem' }}>
+        <Input
+          placeholder="Search effects..."
+          $w="240px"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <Select value={shapeFilter} onChange={e => setShapeFilter(e.target.value)}>
+          <option value="all">All Shapes ({effects ? effects.length : 0})</option>
+          {VFX_SHAPES.map(s => (
+            <option key={s} value={s}>
+              {s.toUpperCase()} ({effects ? effects.filter(e => e.shape === s).length : 0})
+            </option>
+          ))}
+        </Select>
+      </Row>
+
       {adding && <EffectCard effect={null} onDone={() => setAdding(false)} />}
       {isLoadingEffects && <p style={{ color: 'var(--s2-text-muted)' }}>Loading…</p>}
-      {effects.map(e => <EffectCard key={e.id} effect={e} />)}
-      {!isLoadingEffects && effects.length === 0 && !adding && (
-        <p style={{ color: 'var(--s2-text-muted)' }}>No effects yet.</p>
+      {filteredEffects.map(e => <EffectCard key={e.id} effect={e} />)}
+      {!isLoadingEffects && filteredEffects.length === 0 && !adding && (
+        <p style={{ color: 'var(--s2-text-muted)' }}>
+          {effects && effects.length > 0 ? 'No effects match your filter.' : 'No effects yet.'}
+        </p>
       )}
     </AdminContainer>
   );
 }
+

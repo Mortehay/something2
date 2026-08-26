@@ -36,7 +36,9 @@ import {
     mergeLevelInfo, buildCharacterView,
 } from "./progressionExtras.js";
 import { fetchProgression } from "../net/progressionClient.js";
-import { getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill, isDruidExclusiveSkill } from "./skillsData.js";
+import { getSkillById, getSkillsForClass, getRequiredForm, isTransformationSkill, isDruidExclusiveSkill, resolveSkillVfx } from "./skillsData.js";
+import { loadHotbarForCharacter, saveHotbarForCharacter } from "./hotbarStorage.js";
+import { createSkillVisual, updateSkillVisuals, pruneSkillVisuals } from "./skillVisuals.js";
 import { API_URL } from "../../../../../config.js";
 
 // How long the "out of ammo" HUD flash stays up after the server's `noammo`
@@ -137,6 +139,7 @@ export class Game {
         this.inventoryPage = 0;
 
         // Skills panel & Hotbar (1-9)
+        this.characterId = null;
         this.skillsOpen = false;
         this.skillsTab = 'all';
         this.skillsClassFilter = 'all';
@@ -145,6 +148,7 @@ export class Game {
         this.skillDrag = null;
         this.skillHoverSlot = null;
         this.hotbarSkills = new Map();
+        this.skillVisuals = [];
         this.activeForm = null;
         this.hotbarFlashSlot = null;
         this.hotbarFlashUntil = 0;
@@ -511,9 +515,12 @@ export class Game {
         this.progressionExtras = emptyExtras();
         this._statsFromSocket = false;
         this.characterModPage = 0;
+        this.characterId = characterId;
         this.className = className || this.passiveStartClass || null;
         if (className) this.passiveStartClass = className;
         this.mainStat = mainStat;
+        this.hotbarSkills = loadHotbarForCharacter(characterId, this.className || className || 'Warrior');
+        this.skillVisuals = [];
         this.merchants = [];
         // SOMET-297. Empty until a `joined` frame arrives, and reset here on
         // the same line merchants is -- both are per-world join payload.
@@ -1096,6 +1103,13 @@ export class Game {
                 if (s.sent) this._inputBuffer.push({ seq: s.seq, dx: s.dx, dy: s.dy, dt: s.dt });
             }
             this._tickConstantAttack();
+            if (this.skillVisuals && this.skillVisuals.length > 0) {
+                const nowMs = performance.now();
+                this.skillVisuals = pruneSkillVisuals(this.skillVisuals, nowMs);
+                updateSkillVisuals(this.skillVisuals, dt, nowMs, (expX, expY, expElem, expRad) => {
+                    addBlasts(this.blasts, [{ x: expX, y: expY, radius: expRad, element: expElem }], nowMs);
+                });
+            }
             this.creatures.interpolate(dt);
             if (this.projectiles) this.projectiles.interpolate(dt);
             this.camera.update(this.player);
@@ -1221,8 +1235,50 @@ export class Game {
             // Expire finished blasts once per frame, on the same clock the
             // ring animation reads.
             const nowMs = performance.now();
+            if (this.skillVisuals && this.skillVisuals.length > 0) {
+                this.skillVisuals = updateSkillVisuals(this.skillVisuals, 0.016, nowMs, (proj) => {
+                    // Trigger arrival explosion / impact VFX & blast when the projectile reaches its destination!
+                    const elem = proj.element || 'fire';
+                    const vfxName = proj.vfxName || 'fireball_blast';
+                    const reach = proj.reach || (proj.radius ? proj.radius * 3.5 : 80);
+                    addEffects(this.vfx, [{
+                        v: vfxName,
+                        x: proj.toX,
+                        y: proj.toY,
+                        nx: proj.aimNx || Math.cos(proj.aimAngle || 0),
+                        ny: proj.aimNy || Math.sin(proj.aimAngle || 0),
+                        reach,
+                        arc: Math.PI * 2,
+                        el: elem,
+                        hit: true,
+                    }], nowMs, this.vfxDefs);
+                    addBlasts(this.blasts, [{ x: proj.toX, y: proj.toY, radius: Math.max(80, reach), element: elem }], nowMs);
+                    this.vfx = capParticles(this.vfx);
+                });
+                this.skillVisuals = pruneSkillVisuals(this.skillVisuals, nowMs);
+            }
+            if (this.activeBuffs && this.activeBuffs.size > 0) {
+                for (const [id, b] of this.activeBuffs) {
+                    if (nowMs >= b.expiresAt) this.activeBuffs.delete(id);
+                }
+            }
             this.blasts = pruneBlasts(this.blasts, nowMs);
             this.vfx = pruneEffects(this.vfx, nowMs);
+            // Resolve hovered skill for the tooltip
+            let hoveredSkill = null;
+            if (this._cursorX != null && this._cursorY != null && !(this.skillDrag && this.skillDrag.armed)) {
+                if (this.skillsOpen) {
+                    const areas = (this.renderSystem && this.renderSystem._skillsHitAreas) || [];
+                    const itemHit = areas.find((a) => a.kind === 'skills_item' && this._cursorX >= a.box.x && this._cursorX <= a.box.x + a.box.w && this._cursorY >= a.box.y && this._cursorY <= a.box.y + a.box.h);
+                    if (itemHit) hoveredSkill = itemHit.skill;
+                }
+                if (!hoveredSkill) {
+                    const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
+                    const slotHit = slotAreas.find((a) => this._cursorX >= a.box.x && this._cursorX <= a.box.x + a.box.w && this._cursorY >= a.box.y && this._cursorY <= a.box.y + a.box.h);
+                    if (slotHit && slotHit.skill) hoveredSkill = slotHit.skill;
+                }
+            }
+
             this.renderSystem.renderChunked({
                 player: this.player,
                 camera: this.camera,
@@ -1253,9 +1309,13 @@ export class Game {
                 skillHoverSlot: this.skillHoverSlot,
                 hotbarSkills: this.hotbarSkills,
                 activeForm: this.activeForm,
+                activeBuffs: this.activeBuffs ? Array.from(this.activeBuffs.values()) : [],
                 flashSlot: (nowMs < this.hotbarFlashUntil) ? this.hotbarFlashSlot : null,
                 skillCooldowns: this.skillCooldowns,
                 playerClass: this.className || this.passiveStartClass || (this.player && this.player.className) || "Druid",
+                hoveredSkill,
+                cursorX: this._cursorX,
+                cursorY: this._cursorY,
                 inventoryView: {
                     tab: this.inventoryTab,
                     page: this.inventoryPage,
@@ -1284,6 +1344,7 @@ export class Game {
                 toast: this.toast,
                 blasts: this.blasts,
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
+                skillVisuals: this.skillVisuals,
                 // null whenever the equipped weapon needs no ammo — the HUD
                 // then draws no ammo line at all.
                 ammo: resolveAmmoHud(this.inventory),
@@ -1351,10 +1412,18 @@ export class Game {
     // event: a browser always sends a mousemove first, but depending on that
     // makes the press silently wrong whenever it does not.
     _canvasPoint(e) {
-        const rect = this.canvas.getBoundingClientRect();
+        if (this.canvas && typeof this.canvas.getBoundingClientRect === 'function' && e && e.clientX != null && e.clientY != null) {
+            const rect = this.canvas.getBoundingClientRect();
+            if (rect && rect.width > 0 && rect.height > 0) {
+                return {
+                    x: (e.clientX - rect.left) * (this.canvas.width / rect.width),
+                    y: (e.clientY - rect.top) * (this.canvas.height / rect.height),
+                };
+            }
+        }
         return {
-            x: (e.clientX - rect.left) * (this.canvas.width / rect.width),
-            y: (e.clientY - rect.top) * (this.canvas.height / rect.height),
+            x: this._cursorX ?? 0,
+            y: this._cursorY ?? 0,
         };
     }
 
@@ -1559,6 +1628,17 @@ export class Game {
         if (hit.kind === 'bankpage') { this.bankView = { tab: this.bankView.tab, page: hit.id }; return; }
     }
 
+    saveHotbar() {
+        if (this.characterId != null) {
+            saveHotbarForCharacter(this.characterId, this.hotbarSkills);
+        }
+    }
+
+    loadHotbar(characterId, className) {
+        this.characterId = characterId;
+        this.hotbarSkills = loadHotbarForCharacter(characterId, className || this.className || 'Warrior');
+    }
+
     _activateHotbarSkill(slotNum) {
         const s = this.hotbarSkills.get(slotNum);
         if (!s) {
@@ -1582,26 +1662,10 @@ export class Game {
             return;
         }
 
+        // 2. Check if skill is a transformation
         const px = (this.player && this.player.x) || 0;
         const py = (this.player && this.player.y) || 0;
-        const canW = (this.canvas && this.canvas.width) || 800;
-        const canH = (this.canvas && this.canvas.height) || 600;
-        let targetX = px + 35, targetY = py + 35, aimAngle = 0;
-        if (this.camera) {
-            try {
-                const w = cursorToWorld(this._cursorX ?? canW / 2, this._cursorY ?? canH / 2, this.camera);
-                if (w && Number.isFinite(w.x) && Number.isFinite(w.y)) {
-                    targetX = w.x;
-                    targetY = w.y;
-                    const aim = aimVector(this._cursorX ?? canW / 2, this._cursorY ?? canH / 2, this.camera, px, py);
-                    if (aim && (aim.nx !== 0 || aim.ny !== 0)) {
-                        aimAngle = Math.atan2(aim.ny, aim.nx);
-                    }
-                }
-            } catch (_) {}
-        }
 
-        // 2. Check if skill is a transformation
         const transformForm = isTransformationSkill(s);
         if (transformForm) {
             if (this.activeForm === transformForm) {
@@ -1668,32 +1732,148 @@ export class Game {
             this.player.hp = Math.max(1, currentHp - cost);
         }
 
+        // 6. Target resolution & Max Range enforcement (prevents casting across the whole screen)
+        const canW = (this.canvas && this.canvas.width) || 800;
+        const canH = (this.canvas && this.canvas.height) || 600;
+        let targetX = px + 35, targetY = py + 35, aimAngle = 0;
+        if (this.camera) {
+            try {
+                const w = cursorToWorld(this._cursorX ?? canW / 2, this._cursorY ?? canH / 2, this.camera);
+                if (w && Number.isFinite(w.x) && Number.isFinite(w.y)) {
+                    targetX = w.x;
+                    targetY = w.y;
+                    const aim = aimVector(this._cursorX ?? canW / 2, this._cursorY ?? canH / 2, this.camera, px, py);
+                    if (aim && (aim.nx !== 0 || aim.ny !== 0)) {
+                        aimAngle = Math.atan2(aim.ny, aim.nx);
+                    }
+                }
+            } catch (_) {}
+        }
+
+        const maxRange = Number(s.range) || (s.type === 'melee' ? 55 : (s.type === 'buff' ? 0 : 220));
+        if (maxRange > 0) {
+            const dx = targetX - px;
+            const dy = targetY - py;
+            const dist = Math.hypot(dx, dy);
+            if (dist > maxRange) {
+                const ratio = maxRange / dist;
+                targetX = px + dx * ratio;
+                targetY = py + dy * ratio;
+            }
+        }
+
         // 6. Set cooldown
         const cdSec = s.cooldown || 1;
         this.skillCooldowns.set(s.id, nowMs + cdSec * 1000);
 
-        // 7. Trigger skill visual effects based on skill category
-        if (s.type === 'melee') {
-            addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 45, element: s.element || 'physical' }], nowMs);
-            addEffects(this.vfx, [{ shape: 'arc', x: px, y: py, reach: 55, angle: aimAngle, spread: Math.PI * 0.6, element: s.element || 'physical' }], nowMs);
-        } else if (s.type === 'magic') {
-            const elem = s.element || (s.class === 'Mage' ? 'fire' : (s.class === 'Druid' ? 'lightning' : 'holy'));
-            addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 70, element: elem }], nowMs);
-            addEffects(this.vfx, [{ shape: 'burst', x: targetX, y: targetY, reach: 70, element: elem }], nowMs);
-        } else if (s.type === 'buff') {
-            addBlasts(this.blasts, [{ x: px, y: py, radius: 55, element: 'holy' }], nowMs);
-            addEffects(this.vfx, [
-                { shape: 'ring', x: px, y: py, reach: 65, element: 'holy' },
-                { shape: 'burst', x: px, y: py, reach: 45, element: 'holy' }
-            ], nowMs);
-        } else if (s.type === 'debuff') {
-            addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 60, element: 'shadow' }], nowMs);
-            addEffects(this.vfx, [{ shape: 'burst', x: targetX, y: targetY, reach: 60, element: 'shadow' }], nowMs);
+        // 7. Trigger distinct skill visual effects through the Attack Effects (vfx_effects) library
+        const visual = createSkillVisual(s, px, py, targetX, targetY, aimAngle, nowMs);
+        const elem = s.element || (s.class === 'Mage' ? 'fire' : (s.class === 'Druid' ? 'lightning' : (s.class === 'Cultist' ? 'shadow' : 'physical')));
+        const nx = Math.cos(aimAngle);
+        const ny = Math.sin(aimAngle);
+        const vfxName = resolveSkillVfx(s);
+        const reach = s.type === 'melee' ? (Number(s.range) || 90) : (Number(s.radius) || 80) * 1.5;
+
+        if (visual) {
+            const list = Array.isArray(visual) ? visual : [visual];
+            if (!this.skillVisuals) this.skillVisuals = [];
+            for (const vis of list) {
+                vis.vfxName = vfxName;
+                vis.aimNx = nx;
+                vis.aimNy = ny;
+                vis.reach = reach;
+                this.skillVisuals.push(vis);
+            }
         }
 
-        // 8. Dispatch real attack to server so creatures take real damage
-        if (s.type === 'melee' || s.type === 'magic' || s.type === 'debuff') {
-            this._sendAttackAtCursor();
+        // If the visual is a flying projectile, the blast & impact explosion will trigger upon impact/arrival!
+        // For non-projectile skills (melee, holy pillar, point-blank nova, self-buffs), trigger immediately.
+        const firstVis = Array.isArray(visual) ? visual[0] : visual;
+        const isFlyingProjectile = firstVis && firstVis.kind === 'projectile';
+        if (!isFlyingProjectile) {
+            addEffects(this.vfx, [{
+                v: vfxName,
+                x: s.type === 'melee' ? px : targetX,
+                y: s.type === 'melee' ? py : targetY,
+                nx, ny,
+                reach,
+                arc: s.type === 'melee' ? Math.PI * 0.75 : Math.PI * 2,
+                el: elem,
+                hit: true,
+            }], nowMs, this.vfxDefs);
+            this.vfx = capParticles(this.vfx);
+
+            // Blasts for ground impacts
+            if (s.type === 'melee') {
+                addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 70, element: elem }], nowMs);
+            } else if (s.type === 'buff') {
+                addBlasts(this.blasts, [{ x: px, y: py, radius: 75, element: 'holy' }], nowMs);
+            } else if (s.type === 'debuff') {
+                addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 85, element: 'shadow' }], nowMs);
+            } else {
+                addBlasts(this.blasts, [{ x: targetX, y: targetY, radius: 95, element: elem }], nowMs);
+            }
+        }
+
+        // Special: Blink / Teleport movement
+        if (s.id.includes('blink') || s.id.includes('teleport') || s.id.includes('shadow_step')) {
+            const blinkDist = Math.min(260, Number(s.range) || 240);
+            const targetBlinkX = px + nx * blinkDist;
+            const targetBlinkY = py + ny * blinkDist;
+            if (this.player) {
+                this.player.x = targetBlinkX;
+                this.player.y = targetBlinkY;
+                if (this.camera) {
+                    this.camera.x = targetBlinkX;
+                    this.camera.y = targetBlinkY;
+                }
+            }
+            // Flash blast at origin and destination
+            addBlasts(this.blasts, [
+                { x: px, y: py, radius: 45, element: 'holy' },
+                { x: targetBlinkX, y: targetBlinkY, radius: 65, element: 'holy' }
+            ], nowMs);
+        }
+
+        // Apply local buff effects (healing, mana restoration, stats, buff panel registration)
+        if (s.type === 'buff') {
+            const desc = (s.descUk || '') + ' ' + (s.descEn || '');
+            const isHeal = desc.includes('HP') || desc.includes('зцілює') || desc.includes('відновлює') ||
+                           s.id.includes('heal') || s.id.includes('regrowth') || s.id.includes('rejuvenation') ||
+                           s.id.includes('flash_of_light') || s.id.includes('holy_light') || s.id.includes('unstoppable');
+            if (isHeal && this.player) {
+                const maxHp = this.player.maxHp || 100;
+                this.player.hp = Math.min(maxHp, (this.player.hp || maxHp) + Math.max(15, Math.round(maxHp * 0.25)));
+            }
+
+            const isManaRestore = s.id.includes('mana') || s.id.includes('evocation') || desc.includes('мана') || desc.includes('ману');
+            if (isManaRestore) {
+                this.localMana = Math.min(this.localMaxMana, this.localMana + 35);
+            }
+
+            const isStaminaRestore = s.id.includes('stamina') || s.id.includes('adrenaline') || desc.includes('витривал');
+            if (isStaminaRestore) {
+                this.localStamina = Math.min(this.localMaxStamina, this.localStamina + 30);
+            }
+
+            if (!this.activeBuffs) this.activeBuffs = new Map();
+            const durSec = Number(s.duration) || (s.cooldown ? Math.max(8, Math.min(45, s.cooldown * 1.5)) : 20);
+            const durMs = durSec * 1000;
+            this.activeBuffs.set(s.id, {
+                id: s.id,
+                nameUk: s.nameUk,
+                nameEn: s.nameEn,
+                icon: s.icon || '✨',
+                iconColor: s.iconColor || '#fbbf24',
+                startedAt: nowMs,
+                durationMs: durMs,
+                expiresAt: nowMs + durMs,
+            });
+        }
+
+        // 8. Dispatch real skill cast to server so creatures take real damage and server deducts resources / applies buffs
+        if (this.authorityClient && (s.type === 'melee' || s.type === 'magic' || s.type === 'debuff' || s.type === 'buff')) {
+            this.authorityClient.sendCastSkill(s.id, targetX, targetY, nx, ny);
         }
 
         // Normal skill cast toast
@@ -1797,15 +1977,7 @@ export class Game {
             // Hotbar keys (1..9)
             if (/^[1-9]$/.test(key) && this.state === 'playing' && this.chunked && !e.repeat) {
                 const slotNum = parseInt(key, 10);
-                if (this.skillsOpen && this.selectedSkillId) {
-                    const s = getSkillById(this.selectedSkillId);
-                    if (s) {
-                        this.hotbarSkills.set(slotNum, s);
-                        if (this.showToast) this.showToast(`Bound: ${s.nameEn} -> Slot ${slotNum}`);
-                    }
-                    if (typeof e.preventDefault === 'function') e.preventDefault();
-                    return;
-                } else if (!this.skillsOpen && !this.inventoryOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
+                if (!this.skillsOpen && !this.inventoryOpen && !this.shopOpen && !this.bankOpen && !this.passiveTreeOpen) {
                     this._activateHotbarSkill(slotNum);
                     if (typeof e.preventDefault === 'function') e.preventDefault();
                     return;
@@ -2029,18 +2201,13 @@ export class Game {
             if (slotHit) {
                 if (e.button === 2) {
                     this.hotbarSkills.delete(slotHit.slot);
+                    this.saveHotbar();
                     if (this.showToast) this.showToast(`Slot ${slotHit.slot} cleared`);
                     return;
                 }
-                if (this.selectedSkillId) {
-                    const s = getSkillById(this.selectedSkillId);
-                    if (s) {
-                        this.hotbarSkills.set(slotHit.slot, s);
-                        if (this.showToast) this.showToast(`Bound: ${s.nameEn} -> Slot ${slotHit.slot}`);
-                    }
-                    return;
+                if (!this.skillsOpen) {
+                    this._activateHotbarSkill(slotHit.slot);
                 }
-                this._activateHotbarSkill(slotHit.slot);
                 return;
             }
 
@@ -2096,24 +2263,14 @@ export class Game {
 
             const pcx = this.player.x + this.player.width / 2;
             const pcy = this.player.y + this.player.height / 2;
+            const w = this.camera ? cursorToWorld(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera) : { x: pcx, y: pcy };
 
-            // Direct click on a world interactable (merchant, bank, chest).
-            //
-            // Unlike a key, a click carries WHICH ONE in the gesture itself --
-            // the player pointed at a specific marker -- so choosing a kind
-            // here is not the guess the keys must never make. The two radii do
-            // different jobs and neither is a copy of the server's range rule:
-            // MARKER_CLICK_R is a hit-test ("did they point at this marker?"),
-            // and INTERACT_CLICK_R only decides whether the click is spent on
-            // an interaction or on an attack, so it is deliberately TIGHTER
-            // than the authority's INTERACT_RADIUS (120) -- same reasoning as
-            // RenderSystem's WORLD_CHEST_PROMPT_R. A click on a marker the
-            // player is nowhere near stays an attack rather than becoming a
-            // frame the server would only refuse.
-            const MARKER_CLICK_R = 50;
-            const INTERACT_CLICK_R = 110;
-            if (this.camera) {
-                const w = cursorToWorld(this._cursorX ?? this.canvas.width / 2, this._cursorY ?? this.canvas.height / 2, this.camera);
+            // Left-click interact with markers (Slice 4b) -- highest priority
+            // after open panels: if a click lands on a merchant or bank marker
+            // within the interaction radius, open it and do not also swing.
+            if (this.authorityClient) {
+                const MARKER_CLICK_R = 50;
+                const INTERACT_CLICK_R = 110;
                 const pointedAt = (t) => Math.hypot(t.x - w.x, t.y - w.y) <= MARKER_CLICK_R
                     && Math.hypot(t.x - pcx, t.y - pcy) <= INTERACT_CLICK_R;
                 for (const m of (Array.isArray(this.merchants) ? this.merchants : [])) {
@@ -2149,11 +2306,16 @@ export class Game {
             if (this.skillDrag) {
                 const sDrag = this.skillDrag;
                 this.skillDrag = null;
-                if (sDrag.armed && sDrag.targetSlot) {
+                const slotAreas = (this.renderSystem && this.renderSystem._skillSlotHitAreas) || [];
+                const pt = this._canvasPoint(e);
+                const hit = slotAreas.find((a) => pt.x >= a.box.x && pt.x <= a.box.x + a.box.w && pt.y >= a.box.y && pt.y <= a.box.y + a.box.h);
+                const targetSlot = sDrag.targetSlot || (hit ? hit.slot : null);
+                if (targetSlot) {
                     const s = sDrag.skill || getSkillById(sDrag.skillId);
                     if (s) {
-                        this.hotbarSkills.set(sDrag.targetSlot, s);
-                        if (this.showToast) this.showToast(`Bound: ${s.nameEn} -> Slot ${sDrag.targetSlot}`);
+                        this.hotbarSkills.set(targetSlot, s);
+                        this.saveHotbar();
+                        if (this.showToast) this.showToast(`Bound: ${s.nameEn} -> Slot ${targetSlot}`);
                     }
                 }
                 return;
