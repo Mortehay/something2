@@ -43,12 +43,15 @@ describe('visibleSections', () => {
     expect(items.every((i) => !i.adminType)).toBe(true);
   });
 
-  it('shows an admin the two player screens plus all ten admin screens', () => {
+  it('shows an admin the two player screens plus all eleven admin screens', () => {
     const items = allItems(visibleSections(true));
-    expect(items).toHaveLength(12);
+    expect(items).toHaveLength(13);
     expect(items.map((i) => i.path)).toEqual([
       '/game', '/game/map', '/game/tiles', '/game/entities', '/game/items',
       '/game/maps', '/game/biomes', '/game/creature-behaviors', '/game/vfx', '/game/world-map',
+      // Regions from the remote world-spec generator, beside the map editors
+      // because an admin opens it to look at content, not to configure a host.
+      '/game/generated-worlds',
       // Progression epic T1: game_settings editor, plus the mount points the
       // affix (T12) and passive-node (T9) admin sections land in. It is NOT at
       // /game/settings -- that path is already AI Providers.

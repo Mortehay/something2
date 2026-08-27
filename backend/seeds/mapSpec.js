@@ -938,4 +938,60 @@ function validateMapSpec(spec, {
   return errors;
 }
 
-module.exports = { validateMapSpec, EDGE_DELTA, villagesOf };
+
+// A world that declares no `level_band` is SEEDED AS 1-1, not as "unspecified"
+// -- scripts/seed-map.js writes `w.level_band ? w.level_band[0] : 1`. That
+// default is deliberate and load-bearing: vale-region's surface ring omits the
+// key because that ring IS the level-1 starting area, and p5-descent declares
+// one everywhere. Both are correct and neither should have to change.
+//
+// The failure it enables is a spec that omits the band on worlds which are NOT
+// meant to be level 1, and there is nothing to notice it afterwards: 1-1 is a
+// perfectly valid band, so the seeded world is indistinguishable from one that
+// asked for exactly that. A generated region hit this -- three worlds of a
+// descent silently pinned to level 1 while the fourth declared [3,5].
+//
+// NOT an error, and deliberately not part of validateMapSpec's return: the
+// omission is legal, and two checked-in specs rely on it. This reports the one
+// arrangement that is almost certainly unintended -- an implicit 1-1 world
+// joined by a WALKABLE compass link to a world whose band starts above 2, so
+// the implicit floor does not join up with the declared ramp.
+//
+// PORTAL LINKS ARE EXCLUDED, and that exclusion is what makes this quiet on
+// vale-region. Its surface ring reaches cata_entry [3,6], hollow_entry [5,9]
+// and rime_hub [12,18] -- all three by GUARDED portal, which is an intentional
+// difficulty gate that joinPolicy enforces, not a step in a ramp. Without the
+// exclusion this fires three times on a spec that is right, and a warning that
+// cries wolf on the known-good case is worse than no warning.
+//
+// Verified against all four available specs: quiet on vale-region and
+// p5-descent, and on the corrected generated region; fires on the version that
+// carried the defect.
+function implicitBandBoundaries(spec) {
+  const worlds = Array.isArray(spec && spec.worlds) ? spec.worlds : [];
+  const links = Array.isArray(spec && spec.links) ? spec.links : [];
+  const byKey = new Map(worlds.map((w) => [w.key, w]));
+  const bandOf = (w) => (w && w.level_band !== undefined && w.level_band !== null
+    ? w.level_band : null);
+  const out = new Map();
+  for (const l of links) {
+    if (l.kind === 'portal') continue;
+    const pair = [[byKey.get(l.from), byKey.get(l.to)], [byKey.get(l.to), byKey.get(l.from)]];
+    for (const [implicit, declared] of pair) {
+      if (!implicit || !declared) continue;
+      if (bandOf(implicit) !== null) continue;
+      const b = bandOf(declared);
+      if (!Array.isArray(b) || !Number.isInteger(b[0]) || b[0] <= 2) continue;
+      out.set(`${implicit.key}->${declared.key}`, {
+        world: implicit.key,
+        neighbour: declared.key,
+        neighbourBand: b,
+        message: `world "${implicit.key}" declares no level_band, so it seeds as 1-1, but it `
+          + `connects by doorway to "${declared.key}" at ${JSON.stringify(b)}`,
+      });
+    }
+  }
+  return [...out.values()];
+}
+
+module.exports = { validateMapSpec, implicitBandBoundaries, EDGE_DELTA, villagesOf };

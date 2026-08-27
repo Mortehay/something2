@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { STARTER_BIOMES } = require('../seeds/data/biomes.js');
 const { HOSTILE_CREATURES } = require('../seeds/data/entityTypes.js');
+const { BESTIARY_P4_CREATURES } = require('../seeds/data/bestiaryP4.js');
 
 // Terrain tile names that exist in the catalog (migrations 1714440002000,
 // 1714440027000, 1714440029000). A biome naming a tile outside this set would
@@ -21,7 +22,18 @@ const LIVE_FLORA = new Set(['Tree', 'Stone', 'IceRock', 'bush', 'rose_bush', 'pi
 // green through the entire period the reference was dangling. Reading the
 // creature catalog instead means deleting a creature from
 // seeds/data/entityTypes.js now fails every biome that references it.
-const LIVE_CREATURES = new Set(HOSTILE_CREATURES.map((c) => c.name));
+// BOTH catalogs, for the same reason this set is derived at all. The biomes
+// reference creatures by name across two source files: the four legacy types
+// in entityTypes.js and the 288 "{Line} {Rung}" types in bestiaryP4.js. When
+// only the legacy file was read, every P4 name in a biome read as "unknown
+// creature" -- which is why the 27 P3 biomes' Cave/Ember/Rime fauna was never
+// checked by this test at all, and why the original five could not gain their
+// P4 line without a spurious failure. Deleting a creature from EITHER file now
+// fails every biome that references it.
+const LIVE_CREATURES = new Set([
+  ...HOSTILE_CREATURES.map((c) => c.name),
+  ...BESTIARY_P4_CREATURES.map((c) => c.name),
+]);
 
 test('the five original starter biomes are still the first five, in order', () => {
   assert.deepEqual(

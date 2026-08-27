@@ -16,6 +16,7 @@ import ItemTypesAdmin from "./games/something2/ItemTypesAdmin";
 import MapsAdmin from "./games/something2/MapsAdmin";
 import BiomesAdmin from "./games/something2/BiomesAdmin";
 import MapGraphAdmin from "./games/something2/MapGraphAdmin";
+import WorldGenAdmin from "./games/something2/WorldGenAdmin";
 import SettingsAdmin from "./games/something2/SettingsAdmin";
 import PlayerWorldMap from "./games/something2/PlayerWorldMap";
 import CreatureBehaviorsAdmin from "./games/something2/CreatureBehaviorsAdmin";
@@ -65,6 +66,7 @@ function App() {
                       <Route path="creature-behaviors" element={<CreatureBehaviorsAdmin />} />
                       <Route path="vfx" element={<VfxEffectsAdmin />} />
                       <Route path="world-map" element={<MapGraphAdmin />} />
+                      <Route path="generated-worlds" element={<WorldGenAdmin />} />
                       <Route path="admin/progression" element={<ProgressionAdmin />} />
                       <Route path="settings" element={<SettingsAdmin />} />
                     </Route>

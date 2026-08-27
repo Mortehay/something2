@@ -9,6 +9,13 @@ const fs = require('fs');
 const path = require('path');
 const { generateChunk, generateChunkDecorations, generateWorldPreview, isBoundedWorld, CREATURE_TILE_PX, generateWorldOverview, overviewOrigin } = require('./services/mapService');
 const { fetchLinks, setLink, clearLink } = require('./services/mapLinks');
+const worldGen = require('./services/worldGenService.js');
+const { validateMapSpec } = require('../seeds/mapSpec.js');
+// applyMapSpec is the seeding script's own applier, imported rather than
+// reimplemented so the admin seed route and `make seed-map` cannot drift into
+// applying a spec two different ways. seed-map.js guards its CLI body behind
+// require.main === module, so importing it starts nothing.
+const { applyMapSpec } = require('../scripts/seed-map.js');
 const {
   fetchVillages, createVillage, rederiveVillageGuards, VILLAGE_LIMITS, villageGeometryError,
 } = require('./services/villages');
@@ -2690,6 +2697,224 @@ app.post('/api/ai-providers/:id/test', adminGuard, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to test AI provider' });
+  }
+});
+
+// --- World-spec service (remote region generator) -------------------------
+//
+// A separate remote service from the image providers, reached over the SAME
+// host and credential -- see services/worldGenService.js for why it does not
+// ride the AI-provider path (it carries JSON, not images) and why the token is
+// read from an ai_providers row rather than duplicated into its own record.
+//
+// EVERY route is adminGuard'd, reads included, for the same reason the
+// ai-providers reads are: the responses name a host inside the operator's own
+// network, and seeding a region rewrites the world graph players navigate.
+//
+// The browser never receives the bearer token. The preview PNG is PROXIED
+// through this process rather than linked directly, because an <img src>
+// pointing at the generator would either need the credential in a query string
+// or fail -- and a token in a URL ends up in history and logs.
+
+// The two catalog reads validateMapSpec needs, identical to the ones
+// scripts/seed-map.js's applyMapSpec performs. Kept here rather than imported
+// so this route does not depend on the seeding script for a read-only check.
+async function mapSpecCatalogs(db) {
+  const biomeRows = (await db.query('SELECT name, creature_types FROM biomes')).rows;
+  return {
+    biomeNames: new Set(biomeRows.map((r) => r.name)),
+    biomeCreatureTypes: new Map(
+      biomeRows.map((r) => [r.name, Array.isArray(r.creature_types) ? r.creature_types : []])),
+    creatureTypeNames: new Set(
+      (await db.query('SELECT name FROM entity_types WHERE is_creature = true')).rows.map((r) => r.name)),
+  };
+}
+
+// One place that turns a WorldGenError into a response, so every route reports
+// an auth failure and an unreachable host as a MESSAGE with a status, never as
+// an empty body. The generator's own author shipped the opposite -- both
+// failures rendering as an empty list, indistinguishable from "nothing
+// generated yet" -- and it is the failure mode this whole surface is most
+// likely to reproduce.
+function sendWorldGenError(res, err, fallback) {
+  if (err && err.name === 'WorldGenError') {
+    return res.status(err.status).json({ error: err.message, code: err.code });
+  }
+  console.error(err);
+  return res.status(500).json({ error: fallback });
+}
+
+app.get('/api/world-gen/worlds', adminGuard, async (req, res) => {
+  try {
+    res.json(await worldGen.listWorlds(pool));
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to list generated regions');
+  }
+});
+
+app.get('/api/world-gen/worlds/:name', adminGuard, async (req, res) => {
+  try {
+    const spec = await worldGen.getWorldSpec(pool, req.params.name);
+    // Validated on the way through, so the UI can show "this will not seed"
+    // BEFORE anyone downloads it. The spec is returned either way -- a spec
+    // that fails validation is exactly the one an author needs to look at.
+    const errors = validateMapSpec(spec, await mapSpecCatalogs(pool));
+    res.json({ spec, valid: errors.length === 0, errors });
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to fetch region spec');
+  }
+});
+
+app.get('/api/world-gen/worlds/:name/report', adminGuard, async (req, res) => {
+  try {
+    res.json(await worldGen.getWorldReport(pool, req.params.name));
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to fetch region report');
+  }
+});
+
+app.get('/api/world-gen/worlds/:name/preview.png', adminGuard, async (req, res) => {
+  try {
+    const { buffer, contentType } = await worldGen.getPreview(pool, req.params.name);
+    res.set('Content-Type', contentType);
+    // The generator rewrites a region in place on PATCH and keeps the URL, so
+    // a cached preview would show the state before an edit -- which is the one
+    // thing the edit flow's acceptance criterion asks a person to look at.
+    res.set('Cache-Control', 'no-store');
+    res.send(buffer);
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to fetch region preview');
+  }
+});
+
+app.post('/api/world-gen/worlds', adminGuard, async (req, res) => {
+  try {
+    res.status(201).json(await worldGen.createWorld(pool, req.body));
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to create region');
+  }
+});
+
+app.patch('/api/world-gen/worlds/:name', adminGuard, async (req, res) => {
+  try {
+    res.json(await worldGen.patchWorld(pool, req.params.name, req.body));
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to edit region');
+  }
+});
+
+app.delete('/api/world-gen/worlds/:name', adminGuard, async (req, res) => {
+  try {
+    res.json(await worldGen.deleteWorld(pool, req.params.name));
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to delete region');
+  }
+});
+
+// Download: fetch the spec, VALIDATE IT, and only then write it into
+// seeds/maps/ where `make seed-map SPEC=<name>` can find it.
+//
+// Validation before writing, not after: seeds/maps/ is a checked-in authoring
+// directory, and a file that cannot seed sitting beside ones that can is a
+// trap for whoever next runs the seeder. The refusal returns the errors so
+// they can be sent back to whoever generated the spec.
+app.post('/api/world-gen/worlds/:name/download', adminGuard, async (req, res) => {
+  try {
+    const name = worldGen.assertName(req.params.name);
+    const spec = await worldGen.getWorldSpec(pool, name);
+    const errors = validateMapSpec(spec, await mapSpecCatalogs(pool));
+    if (errors.length) {
+      return res.status(422).json({
+        error: `"${name}" does not validate, so it was not written`,
+        code: 'invalid_spec',
+        errors,
+      });
+    }
+    // path.join with a name already constrained to [A-Za-z0-9_-] by
+    // assertName; the regex is what makes this safe, not the join.
+    const file = path.join(__dirname, '..', 'seeds', 'maps', `${name}.map.json`);
+    const existed = fs.existsSync(file);
+    fs.writeFileSync(file, `${JSON.stringify(spec, null, 2)}\n`, 'utf8');
+    res.json({
+      written: `seeds/maps/${name}.map.json`,
+      overwrote: existed,
+      worlds: Array.isArray(spec.worlds) ? spec.worlds.length : 0,
+      seedCommand: `make seed-map SPEC=${name}`,
+    });
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to download region spec');
+  }
+});
+
+// Seed: apply a downloaded spec to THIS database.
+//
+// GUARDED BY AN ECHOED NAME, not a boolean. This is the most destructive
+// button in the admin UI: applyMapSpec removes live doorway rows the spec does
+// not declare, and the README's one-spec-per-database rule means seeding a
+// second region leaves the first one's worlds unreachable. A `confirm: true`
+// checkbox is too easy to click past for an action that can strand every
+// player in the current world, so the caller must send back the region's own
+// name.
+//
+// `linksRemoved` is returned rather than logged, for the reason SOMET-355
+// gives at the seeding script's own warning: an operator has to be able to see
+// WHICH connections the players lost.
+app.post('/api/world-gen/worlds/:name/seed', adminGuard, async (req, res) => {
+  try {
+    const name = worldGen.assertName(req.params.name);
+    if (!req.body || req.body.confirm !== name) {
+      return res.status(400).json({
+        error: `To seed "${name}" send {"confirm": "${name}"}. Seeding rewrites the world `
+          + 'graph players navigate and removes any live doorway this spec does not declare.',
+        code: 'confirm_required',
+      });
+    }
+    const spec = await worldGen.getWorldSpec(pool, name);
+
+    // THE FRONT DOOR. A spec that declares is_entry moves it: setEntryWorld
+    // sets the target true and every other world false in one statement, so
+    // seeding a generated region takes the entry away from whatever holds it
+    // and players land in the new region instead. The existing worlds keep
+    // rendering and stay in the database -- they simply stop being where the
+    // game begins, which is the part nobody notices until they log in.
+    //
+    // A generated region is an ADDITIONAL option, not a replacement for the
+    // authored maps, so this is opt-in per request rather than implied by
+    // seeding. `keep_entry` defaults to TRUE: the safe reading of "add this
+    // region" is the one that does not move the front door.
+    const claimsEntry = Array.isArray(spec.worlds) && spec.worlds.some((w) => w.is_entry);
+    const keepEntry = req.body.keep_entry !== false;
+    const before = claimsEntry
+      ? (await pool.query('SELECT id, name FROM worlds WHERE is_entry')).rows[0] || null
+      : null;
+
+    const applied = await applyMapSpec(pool, spec);
+
+    // Restored immediately after the apply rather than by suppressing the
+    // spec's own flag: applyMapSpec is the shared applier the CLI uses too, and
+    // a route that fed it a doctored spec would be seeding something other than
+    // what it validated and what the file on disk says.
+    let entry = null;
+    if (before && keepEntry && before.id) {
+      await setEntryWorld(pool, before.id);
+      entry = { kept: before.name, note: `"${name}" declared an entry world; it was NOT made the `
+        + `game's entry. "${before.name}" still is. Pass {"keep_entry": false} to hand it over.` };
+    } else if (before && !keepEntry) {
+      entry = { moved_from: before.name, note: 'THE GAME\'S ENTRY WORLD HAS MOVED. Players now '
+        + `start in "${name}". "${before.name}" and its region are still present and still render, `
+        + 'but nothing routes players there on login.' };
+    }
+
+    res.json({
+      seeded: name,
+      ...applied,
+      entry,
+      note: 'RESTART THE BACKEND: this process cannot clear its world-preview cache, its '
+        + 'minimap overview cache, or its in-memory copy of a live world, so those keep '
+        + 'serving the old terrain.',
+    });
+  } catch (err) {
+    sendWorldGenError(res, err, 'Failed to seed region');
   }
 });
 

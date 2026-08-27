@@ -1,7 +1,7 @@
 import {
   HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker,
   HiOutlineCube, HiOutlineMap, HiOutlineGlobeAlt, HiOutlineShare, HiOutlineBolt, HiOutlineSparkles,
-  HiOutlineCpuChip, HiOutlineChartBar,
+  HiOutlineCpuChip, HiOutlineChartBar, HiOutlineGlobeAmericas,
 } from "react-icons/hi2";
 
 // One source of truth for the sidebar: label, route, icon and the admin colour
@@ -38,6 +38,12 @@ export const NAV_SECTIONS = [
       // Relabelled, not moved: the id is referenced elsewhere and the path is
       // the admin route. See the player entry in the section above.
       { id: 'worldmap', label: 'World Map Editor', path: '/game/world-map', Icon: HiOutlineShare, adminType: 'maps' },
+      // Regions fetched from the remote world-spec generator. Sits beside the
+      // map editors rather than next to AI Providers: an admin comes here to
+      // look at CONTENT -- what a region holds, whether it will seed -- and
+      // the connector it happens to be reached through is configuration they
+      // set once. adminType 'maps' for the same reason.
+      { id: 'generated-worlds', label: 'Generated Worlds', path: '/game/generated-worlds', Icon: HiOutlineGlobeAmericas, adminType: 'maps' },
       // Progression epic T1 (SOMET-469): the game_settings editor, plus the
       // mount points the affix (T12) and passive-node (T9) admin sections
       // land in. Content rather than configuration, so it sits above the
