@@ -67,12 +67,13 @@ console.log(describePolicy(process.env.CORS_ORIGINS));
 // route, none of which had any limiter at all. Factored out (default limit
 // applied below) so a test can build a much lower-ceiling instance on a
 // scratch app instead of firing 300 real requests to prove it works.
-function apiRateLimiter(limit = 300, windowMs = 60 * 1000) {
+function apiRateLimiter(limit = 300, windowMs = 60 * 1000, { skip } = {}) {
   return rateLimit({
     windowMs,
     limit,
     standardHeaders: true,
     legacyHeaders: false,
+    ...(skip ? { skip } : {}),
     // SOMET-437. The default key is req.ip, which behind cloudflared -> caddy
     // is the Caddy container for every player, making this one ceiling shared
     // by everybody. clientIpKey resolves the real client where the deployment
@@ -81,7 +82,31 @@ function apiRateLimiter(limit = 300, windowMs = 60 * 1000) {
     keyGenerator: (req) => clientIpKey(req),
   });
 }
-app.use(apiRateLimiter());
+
+// Static generated art does NOT belong in the API budget. /api/assets/* is a
+// read-only MinIO passthrough for job-id-scoped, immutable blobs, and joining a
+// world preloads ONE image per sprited entity type -- 194 of them against the
+// live catalog today (Game.preloadSprites), plus the tile textures, in a single
+// burst. That alone is most of a 300/min ceiling before the player has taken a
+// step, and the burst was starving the calls that actually matter: confirmed
+// live from the browser console, where the sprite flood was followed by 429s on
+// /api/worlds/:id/overview and /api/player/waypoints, so the minimap and the
+// travel list stayed dead for the whole session.
+//
+// So assets get their own, much higher ceiling and the global limiter skips
+// them. Note the ORDER and the skip together: mounting a path limiter alone
+// would not help, because the request falls through to the global limiter
+// afterwards and gets counted there anyway.
+//
+// A separate ceiling, not none: this route is unauthenticated, so leaving it
+// unlimited turns it into a bandwidth amplifier. 1200/min per client covers
+// several world joins inside one window (and /api/assets sends
+// Cache-Control: max-age=300, so a reload inside 5 minutes mostly never
+// reaches us).
+const ASSET_PATH_PREFIX = '/api/assets/';
+const isAssetRequest = (req) => req.path.startsWith(ASSET_PATH_PREFIX);
+app.use(ASSET_PATH_PREFIX.slice(0, -1), apiRateLimiter(1200, 60 * 1000));
+app.use(apiRateLimiter(300, 60 * 1000, { skip: isAssetRequest }));
 
 // Body-size ceiling (SOMET-189 / F-009). express.json/urlencoded ran as
 // app-level middleware ahead of routing AND ahead of every auth guard at a

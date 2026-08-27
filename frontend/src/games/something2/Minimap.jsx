@@ -1,7 +1,7 @@
 // frontend/src/games/something2/Minimap.jsx
 import { useEffect, useRef, useState, useCallback } from 'react';
 import styled from 'styled-components';
-import { fetchWorldOverview, needsRefetch } from './src/js/net/worldOverviewClient.js';
+import { createOverviewFetcher } from './src/js/net/worldOverviewClient.js';
 import { renderFrame } from './src/js/systems/minimapFrame.js';
 import { createTerrainLayerCache, domCanvasFactory } from './src/js/systems/minimapTerrainLayer.js';
 import { createMinimapLoop } from './src/js/systems/minimapLoop.js';
@@ -96,7 +96,6 @@ export default function Minimap({ gameRef, tileColors }) {
   const canvasRef = useRef(null);
   const modalCanvasRef = useRef(null);
   const overviewRef = useRef(null);   // last fetched overview payload
-  const fetchingRef = useRef(false);
   const tileColorsRef = useRef(tileColors);
   useEffect(() => { tileColorsRef.current = tileColors; });
 
@@ -165,17 +164,9 @@ export default function Minimap({ gameRef, tileColors }) {
     // worse than no cache at all.
     let modal = null; // { el, ctx, box, cache }
 
-    const maybeFetch = (worldId, pCol, pRow) => {
-      const cached = overviewRef.current;
-      const stale = cached && cached.world_id !== worldId;
-      if (fetchingRef.current) return;
-      if (!stale && !needsRefetch(cached, pCol, pRow, REFETCH_MARGIN)) return;
-      fetchingRef.current = true;
-      fetchWorldOverview(worldId, Math.round(pCol), Math.round(pRow))
-        .then((ov) => { overviewRef.current = ov; })
-        .catch(() => { /* keep last window; retry on the next frame that still needs it */ })
-        .finally(() => { fetchingRef.current = false; });
-    };
+    // Backoff-guarded; see createOverviewFetcher for why a failure here must
+    // not simply fall through to the next frame.
+    const maybeFetch = createOverviewFetcher({ store: overviewRef, margin: REFETCH_MARGIN });
 
     const drawModal = () => {
       if (!modal) return;
@@ -202,11 +193,11 @@ export default function Minimap({ gameRef, tileColors }) {
       requestFrame: (cb) => window.requestAnimationFrame(cb),
       cancelFrame: (h) => window.cancelAnimationFrame(h),
       drawIntervalMs: MINIMAP_DRAW_INTERVAL_MS,
-      onTick: () => {
+      onTick: (now) => {
         const snap = gameRef.current && gameRef.current.getMinimapSnapshot
           ? gameRef.current.getMinimapSnapshot() : null;
         if (snap) {
-          maybeFetch(snap.worldId, snap.player.x / MAP_TILE_SIZE, snap.player.y / MAP_TILE_SIZE);
+          maybeFetch(snap.worldId, snap.player.x / MAP_TILE_SIZE, snap.player.y / MAP_TILE_SIZE, now);
         }
         syncModal();
       },

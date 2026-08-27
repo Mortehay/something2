@@ -69,6 +69,7 @@ const dotenv = require('dotenv');
 const { Pool } = require('pg');
 const aiProviders = require('../src/services/aiProviders.js');
 const remoteImageProvider = require('../src/services/remoteImageProvider.js');
+const { authHeaders } = require('../src/services/providerDiscovery.js');
 const spriteGen = require('../src/services/spriteGen.js');
 const { resolveProvider, parseArgs } = require('./generate-tile-textures.js');
 
@@ -192,9 +193,15 @@ async function generateViaCore(pool, provider, entity, { pollMs = 5000, maxWaitM
   // happened to be open. The moment it enforced keys, all ten regenerations
   // failed with 401 while the txt2img path, which does send the header, would
   // have kept working. Same credential, same row, all three calls below.
-  const auth = provider.auth_header_name && provider.auth_token
-    ? { [provider.auth_header_name]: provider.auth_token }
-    : {};
+  // Shared with discovery and txt2img rather than re-derived here. This was a
+  // THIRD copy of the rule, and it carried the same defect the other two had:
+  // requiring both halves meant a token stored with no header name -- which the
+  // admin form allows, since the header-name box is optional -- was silently
+  // dropped, and every call here answered 401 while the message blamed a
+  // missing key. authHeaders() defaults a nameless token to
+  // `Authorization: Bearer <token>` and leaves an explicitly named header
+  // verbatim.
+  const auth = authHeaders(provider);
   const assetsUrl = `${origin}/api/assets?source=image&kind=core&limit=1`;
 
   // Remember the newest concept BEFORE submitting. The submit call answers
