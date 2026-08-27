@@ -167,13 +167,30 @@ test('passive node admin routes', { skip }, async (t) => {
   await t.test('a LIKE wildcard in the search is matched literally', async () => {
     // Parameterising a query does NOT escape `%` and `_` -- they are pattern
     // syntax inside ILIKE, not SQL syntax. A bare `%` typed into the search box
-    // would otherwise match all 1806 rows and read as "search is broken".
-    // 13 authored labels contain a literal per-cent sign ("+35% fire damage"),
-    // so an ESCAPED `%` finds exactly those. An UNESCAPED one is a wildcard and
-    // finds all 1806 -- which is the bug, and is what this number distinguishes.
+    // would otherwise match every row and read as "search is broken". An
+    // ESCAPED `%` finds only the labels that literally contain one ("+35% fire
+    // damage"); an UNESCAPED one is a wildcard and finds them all.
+    //
+    // The expected count is COUNTED, not written down. It used to be the
+    // literal 13, which is authored content: adding one node whose label
+    // mentions a percentage broke this test with "14 !== 13", a failure that
+    // says nothing about escaping and everything about the tree having grown.
+    //
+    // The oracle is deliberately JavaScript's `includes`, not another LIKE:
+    // `includes` has no pattern syntax at all, so it cannot share the very bug
+    // under test. Counting with `LIKE '%\\%%'` would be comparing the query
+    // against a restatement of itself.
+    const allLabels = (await pool.query('SELECT label FROM passive_nodes')).rows;
+    const literalPct = allLabels.filter((r) => String(r.label).includes('%')).length;
+    assert.ok(literalPct > 0 && literalPct < allLabels.length,
+      `the discrimination needs some-but-not-all labels to contain a literal % `
+      + `(got ${literalPct} of ${allLabels.length})`);
+
     const pct = await request(app).get(`/api/passive-nodes?search=${encodeURIComponent('%')}`)
       .set('Authorization', `Bearer ${admin}`);
-    assert.strictEqual(pct.body.total, 13);
+    assert.strictEqual(pct.body.total, literalPct);
+    assert.notStrictEqual(pct.body.total, allLabels.length,
+      'an unescaped % matched every row -- the wildcard is reaching ILIKE as pattern syntax');
     const underscore = await request(app).get(`/api/passive-nodes?search=${encodeURIComponent('start_strength')}`)
       .set('Authorization', `Bearer ${admin}`);
     assert.strictEqual(underscore.body.total, 0,

@@ -100,7 +100,28 @@ test('the composed progression bundle survives the whole HTTP path', { skip }, a
   };
 
   const tree = await loadTree(pool);
-  const adjacent = tree.nodes.find((x) => x.key === 'strength-r1-0-8').id;
+  // DERIVED from the graph, not written down. This used to be the literal key
+  // `strength-r1-0-8`, chosen when that node happened to sit one step from the
+  // Warrior's start. The generator's ring-0 fan-out changed and it no longer
+  // does -- start-strength now neighbours core-b-12 and strength-r1-0-4 -- so
+  // the store correctly refused an unreachable node and the test read as
+  // "allocation is broken" (400 !== 200) when allocation was fine.
+  //
+  // Picked as a neighbour granting exactly ONE modifier, because the
+  // assertions below count modifiers; `expectedModifiers` is then derived from
+  // that node rather than hardcoded, so neither number can go stale again.
+  const startNode = tree.nodes.find((x) => x.key === 'start-strength');
+  const neighbourIds = tree.edges
+    .filter(([a, b]) => a === startNode.id || b === startNode.id)
+    .map(([a, b]) => (a === startNode.id ? b : a));
+  const adjacentNode = tree.nodes
+    .filter((n) => neighbourIds.includes(n.id) && !n.start_class)
+    .find((n) => Array.isArray(n.grants) && n.grants.length === 1);
+  assert.ok(adjacentNode,
+    'no non-start neighbour of start-strength grants exactly one modifier -- the tree shape '
+    + 'changed enough that this test needs rethinking, not renumbering');
+  const adjacent = adjacentNode.id;
+  const expectedModifiers = startNode.grants.length + adjacentNode.grants.length;
 
   await t.test('GET /api/passive-tree ships the whole graph and a version', async () => {
     const res = await request(app).get('/api/passive-tree').set(auth);
@@ -160,10 +181,11 @@ test('the composed progression bundle survives the whole HTTP path', { skip }, a
     const after = await request(app).get('/api/progression').query({ character_id: characterId }).set(auth);
     assert.deepStrictEqual(after.body.allocatedNodeIds, [adjacent]);
     assert.strictEqual(after.body.passivePoints, 4);
-    // TWO now: the Warrior's start-node grant plus the node just allocated.
-    // Both are 'tree'; the start grant is the damage one, so assert the
-    // allocated node actually ADDED something rather than just counting.
-    assert.strictEqual(after.body.modifiers.length, 2);
+    // The Warrior's start-node grant plus the node just allocated, counted from
+    // those two nodes' own grants rather than written down. Both are 'tree';
+    // the start grant is the damage one, so assert the allocated node actually
+    // ADDED something rather than just counting.
+    assert.strictEqual(after.body.modifiers.length, expectedModifiers);
     assert.ok(after.body.modifiers.every((m) => m.source === 'tree'));
     assert.ok(
       after.body.modifiers.some((m) => m.kind === 'damage' && m.detail === 'physical'),

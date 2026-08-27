@@ -70,9 +70,39 @@ test('passive allocation', { skip }, async (t) => {
 
   const tree = await loadTree(pool);
   const byKey = new Map(tree.nodes.map((x) => [x.key, x]));
+  const byId = new Map(tree.nodes.map((x) => [x.id, x]));
   const startStr = byKey.get('start-strength').id;
-  const adjacent = byKey.get('strength-r1-0-8').id;      // the start's ring-1 entry
-  const twoAway = byKey.get('strength-r1-0-9').id;       // one further along the row
+
+  // DERIVED FROM THE GRAPH, not written down. These were the literal keys
+  // `strength-r1-0-8` and `strength-r1-0-9`, chosen when they sat one and two
+  // steps from the Warrior's start. The generator's ring-0 fan-out changed:
+  // `strength-r1-0-9` no longer exists at all, so byKey.get(...).id threw
+  // TypeError and the whole file died before a single assertion ran -- a
+  // rename in generated content taking out a suite that tests reachability,
+  // which has nothing to do with either key.
+  //
+  // What these tests actually need is a topology, not names: one node the
+  // start can reach in a single step, one exactly two steps out, and one in a
+  // sector the start cannot reach at all.
+  const neighboursOf = (id) => tree.edges
+    .filter(([a, b]) => a === id || b === id)
+    .map(([a, b]) => (a === id ? b : a));
+
+  const startNeighbours = neighboursOf(startStr);
+  const adjacent = startNeighbours.find((id) => !byId.get(id).start_class);
+  assert.ok(adjacent, 'start-strength has no non-start neighbour to allocate');
+  // Two edges out: adjacent to `adjacent`, but NOT adjacent to the start --
+  // otherwise "refuses one two edges out" would be handed a node that is
+  // actually one edge out and would pass for the wrong reason.
+  const twoAwayAll = neighboursOf(adjacent)
+    .filter((id) => id !== startStr && !startNeighbours.includes(id) && !byId.get(id).start_class);
+  const [twoAway, twoAwayAlt] = twoAwayAll;
+  assert.ok(twoAway, 'no node sits exactly two edges from start-strength');
+  // The concurrency test needs TWO nodes that both become legal once `adjacent`
+  // is allocated, so it can race them against a one-point wallet.
+  assert.ok(twoAwayAlt,
+    'need two distinct nodes two edges out to race a single passive point between');
+
   const otherSector = byKey.get('wisdom-r1-0-8').id;
 
   await t.test('resolves a start node from the character class, not from main_stat', async () => {
@@ -163,8 +193,11 @@ test('passive allocation', { skip }, async (t) => {
     // both legal, nodes at once; exactly one must win. Without the guard in
     // the UPDATE's WHERE clause both read "1 available" and both insert.
     const w = await makeCharacter(warriorType.rows[0].id, { points: 2 });
-    const a = byKey.get('strength-r1-0-7').id;
-    const b = byKey.get('strength-r1-0-9').id;
+    // Both derived, for the reason the block near the top of this file gives:
+    // these were literal keys and one of them ("strength-r1-0-9") no longer
+    // exists in the generated tree.
+    const a = twoAway;
+    const b = twoAwayAlt;
     await allocateNode(pool, w.characterId, adjacent); // 2 -> 1, and opens a and b
     const results = await Promise.all([
       allocateNode(pool, w.characterId, a),

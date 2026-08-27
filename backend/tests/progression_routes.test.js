@@ -40,13 +40,25 @@ function progressionRouteLayers() {
 test('every progression route is behind an auth guard', () => {
   const layers = progressionRouteLayers();
   // A walk that matches zero routes would pass vacuously -- assert the real
-  // surface first. SOMET-475 added POST /passives/:nodeId, so the surface is
-  // GET /, POST /passives/:nodeId and POST /respec; POST /allocate is still
-  // gone. The mount is now located BY that new path rather than by ['/',
+  // surface first. SOMET-475 added POST /passives/:nodeId; POST /allocate is
+  // still gone. The mount is located BY that path rather than by ['/',
   // '/respec'], which several routers in this app share.
+  //
+  // METHOD AND PATH, not path alone. POST and DELETE both live on
+  // /passives/:nodeId (allocate and unallocate), so a path-only list carried it
+  // twice and read as a duplicate registration -- which is how the DELETE route
+  // landed without this assertion being updated, and why it then failed for a
+  // reason that looked cosmetic. Naming the verb makes the surface unambiguous
+  // and means a new route cannot be mistaken for a repeat of an existing one.
   assert.deepEqual(
-    layers.map((l) => l.route.path).sort(),
-    ['/', '/passives/:nodeId', '/respec'],
+    layers.flatMap((l) => Object.keys(l.route.methods).map(
+      (m) => `${m.toUpperCase()} ${l.route.path}`)).sort(),
+    [
+      'DELETE /passives/:nodeId',
+      'GET /',
+      'POST /passives/:nodeId',
+      'POST /respec',
+    ],
     'the progression route surface changed',
   );
   const unguarded = layers
