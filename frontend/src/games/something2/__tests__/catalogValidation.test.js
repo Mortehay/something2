@@ -29,6 +29,28 @@ describe('validateEntityType', () => {
     expect(problem).toMatch(/max_hp/);
   });
 
+  // The entity dialog reported "Update failed: display_width must be an integer
+  // between 1 and 400" on Save Changes for entities nobody had ever given an
+  // explicit size. display_width/display_height are OPTIONAL overrides of the
+  // renderer default and are NULL for 301 of the 308 rows; the form loaded that
+  // NULL as 0 and validated it as a plain non-negative stat, so 0 passed here
+  // and was rejected by the API, which bounds the column to 1..400.
+  it('accepts an unset display size, because unset is not zero', () => {
+    expect(validateEntityType(baseEntityForm({ display_width: '', display_height: '' }))).toBeNull();
+    expect(validateEntityType(baseEntityForm({ display_width: null, display_height: null }))).toBeNull();
+  });
+
+  it('rejects a zero display size instead of letting the API reject it', () => {
+    // 0 is not a meaningful sprite size, and it is precisely the value the form
+    // used to produce for an unset dimension.
+    expect(validateEntityType(baseEntityForm({ display_width: 0 }))).toMatch(/display_width/);
+  });
+
+  it('rejects a display size outside the range the API enforces', () => {
+    expect(validateEntityType(baseEntityForm({ display_height: 401 }))).toMatch(/display_height/);
+    expect(validateEntityType(baseEntityForm({ display_width: 12.5 }))).toMatch(/display_width/);
+  });
+
   it('rejects a chance above 1', () => {
     expect(validateEntityType(baseEntityForm({ chance: 1.5 }))).toMatch(/chance/i);
   });

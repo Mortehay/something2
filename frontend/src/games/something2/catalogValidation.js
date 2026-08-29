@@ -25,8 +25,28 @@ function isNonNegInt(n) {
 const ENTITY_STAT_FIELDS = [
   'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma',
   'hp', 'max_hp', 'hp_regen_rate', 'mana', 'max_mana', 'mana_regen_rate',
-  'display_width', 'display_height',
 ];
+
+// Display size is NOT a stat. It is an optional per-entity override of the
+// renderer default, stored as NULL when unset, and the API rejects 0 outright
+// (SOMET-338 bounded it to 1..400). Validating it as "a non-negative number"
+// accepted the 0 the form produced for every entity that had never been given
+// an explicit size, and the save then failed server-side instead.
+export const MAX_ENTITY_DISPLAY_PX = 400;
+const ENTITY_DISPLAY_FIELDS = ['display_width', 'display_height'];
+
+// Empty means "unset" and is sent as null. Anything else must satisfy the same
+// bound the server enforces, so the admin is told here rather than by a 400.
+function displayFieldError(f) {
+  for (const key of ENTITY_DISPLAY_FIELDS) {
+    const v = f[key];
+    if (v === '' || v == null || Number.isNaN(v)) continue;
+    if (!Number.isInteger(v) || v < 1 || v > MAX_ENTITY_DISPLAY_PX) {
+      return `${key} must be an integer between 1 and ${MAX_ENTITY_DISPLAY_PX}`;
+    }
+  }
+  return null;
+}
 
 export function validateEntityType(f) {
   if (!f.name.trim()) return 'Name is required';
@@ -35,6 +55,8 @@ export function validateEntityType(f) {
   for (const key of ENTITY_STAT_FIELDS) {
     if (!isNonNegFinite(f[key])) return `${key} must be a non-negative number`;
   }
+  const displayErr = displayFieldError(f);
+  if (displayErr) return displayErr;
   if (!isNonNegInt(f.place_order)) return 'Place Order must be a non-negative integer';
   return null;
 }

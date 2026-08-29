@@ -952,8 +952,10 @@ function EntityTypesAdmin() {
     mana: 0,
     max_mana: 0,
     mana_regen_rate: 0,
-    display_width: 0,
-    display_height: 0,
+    // '' is "unset" -- see the edit branch below. NOT 0: the API stores unset
+    // as NULL and rejects 0.
+    display_width: '',
+    display_height: '',
     place_order: 0,
     behavior_id: null,
     attack_element: 'physical'
@@ -983,8 +985,16 @@ function EntityTypesAdmin() {
         mana: editingEntity.mana || 0,
         max_mana: editingEntity.max_mana || 0,
         mana_regen_rate: editingEntity.mana_regen_rate || 0,
-        display_width: editingEntity.display_width || 0,
-        display_height: editingEntity.display_height || 0,
+        // `|| 0` here is what made Save Changes fail with "display_width must
+        // be an integer between 1 and 400" on almost every entity. These two
+        // are OPTIONAL overrides of the renderer default and are NULL for an
+        // entity that was never given an explicit size (301 of 308 of them).
+        // `||` turned that NULL into 0, the form sent 0 back, and SOMET-338
+        // bounded the column to 1..400 -- so a save that changed nothing about
+        // the size was rejected because of it. '' keeps the input empty, which
+        // is what "unset" should look like, and handleSubmit sends null.
+        display_width: editingEntity.display_width ?? '',
+        display_height: editingEntity.display_height ?? '',
         place_order: editingEntity.place_order || 0,
         // null means "no behavior profile assigned" and must survive as null,
         // not fall back to a truthy default -- same rule as damage_override.
@@ -1064,7 +1074,16 @@ function EntityTypesAdmin() {
     // columns it splits into. Sent on every save, including when it is '',
     // because that IS how an admin unpins a type.
     const { provider_pin, ...rest } = formData;
-    const body = { ...rest, ...selectValueToPin(provider_pin) };
+    // null is the API's sentinel for "no explicit size, use the renderer
+    // default" (entityTypeFieldError skips null and rejects 0), so an empty
+    // input has to travel as null rather than as '' or NaN.
+    const optionalPx = (v) => (v === '' || v == null || Number.isNaN(v) ? null : v);
+    const body = {
+      ...rest,
+      ...selectValueToPin(provider_pin),
+      display_width: optionalPx(rest.display_width),
+      display_height: optionalPx(rest.display_height),
+    };
 
     if (editingEntity) {
       updateMutation.mutate({ id: editingEntity.id, ...body }, {
@@ -1403,8 +1422,10 @@ function EntityTypesAdmin() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <FormGroup><label>Display Width</label><input type="number" value={formData.display_width} onChange={e => setFormData({...formData, display_width: parseInt(e.target.value)})}/></FormGroup>
-                <FormGroup><label>Display Height</label><input type="number" value={formData.display_height} onChange={e => setFormData({...formData, display_height: parseInt(e.target.value)})}/></FormGroup>
+                {/* Empty is a real state here ("use the renderer default"), so an
+                    emptied input stays '' instead of collapsing to NaN. */}
+                <FormGroup><label>Display Width</label><input type="number" placeholder="default" value={formData.display_width} onChange={e => setFormData({...formData, display_width: e.target.value === '' ? '' : parseInt(e.target.value, 10)})}/></FormGroup>
+                <FormGroup><label>Display Height</label><input type="number" placeholder="default" value={formData.display_height} onChange={e => setFormData({...formData, display_height: e.target.value === '' ? '' : parseInt(e.target.value, 10)})}/></FormGroup>
               </div>
 
               <FormGroup>
