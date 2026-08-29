@@ -442,7 +442,13 @@ test('a huge error body is truncated rather than pasted into the dialog', async 
   });
   const job = getJob(jobId);
   assert.strictEqual(job.status, 'error');
-  assert.ok(job.error.length < 300, `expected a short message, got ${job.error.length} chars`);
+  // Bounded by the module's own cap plus the short "provider answered NNN: "
+  // prefix, rather than a magic number that has to be remembered whenever the
+  // cap is retuned -- which is exactly what went stale when it moved 200->400.
+  const { MAX_ERROR_EXCERPT_CHARS } = require('../src/services/remoteImageProvider');
+  assert.ok(job.error.length <= MAX_ERROR_EXCERPT_CHARS + 40,
+    `expected a bounded message, got ${job.error.length} chars`);
+  assert.ok(job.error.length > 100, 'the excerpt must still carry something useful');
   assert.match(job.error, /\.\.\.$/, 'a truncated excerpt must say so');
 });
 

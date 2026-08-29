@@ -45,7 +45,13 @@ const MAX_IMAGE_BYTES = () => parseInt(process.env.AI_PROVIDER_MAX_IMAGE_BYTES |
 // hostile service cannot make this buffer, the excerpt is on the characters so
 // the admin dialog stays readable.
 const MAX_ERROR_BODY_BYTES = 65536;
-const MAX_ERROR_EXCERPT_CHARS = 200;
+// 200 was too tight and cost real information the first time this fired: the
+// cutout refusal reads "...This would be an opaque square. Reword to isolate
+// the subject on a flat background, or request with cutout disabled." -- the
+// diagnosis fits in 200 chars, the REMEDY does not, and the remedy is the half
+// the admin needs. A provider explaining how to fix the request should get to
+// finish the sentence.
+const MAX_ERROR_EXCERPT_CHARS = 400;
 
 // Never throws and never rejects the job on its own: this runs on a path that
 // has ALREADY failed, and an unreadable body must degrade to the old bare
