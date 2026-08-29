@@ -13,6 +13,11 @@ function mockPool(handlers) {
     query: async (sql, params) => {
       if (isUserLookup(sql)) return ADMIN_USER_ROW;
       calls.push({ sql, params });
+      // Generation now derives its seed from how many times this subject has
+      // already been generated (see resolveGenerationSeed), so every job POST
+      // makes this count. Answered here so these tests exercise the real seed
+      // path instead of its fallback.
+      if (/SELECT COUNT\(\*\)::int AS n FROM sprite_sets/i.test(sql)) return { rows: [{ n: 0 }] };
       for (const [re, fn] of handlers) if (re.test(sql)) return fn(params);
       throw new Error(`unexpected query: ${sql}`);
     },

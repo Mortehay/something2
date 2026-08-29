@@ -301,7 +301,9 @@ function evictOrWarn(worldId) {
 const aiProviders = require('./services/aiProviders');
 const providerDiscovery = require('./services/providerDiscovery');
 const remoteImageProvider = require('./services/remoteImageProvider');
-const { resolveGenerationTarget, loadTypeOverride } = require('./services/generationTarget');
+const {
+  resolveGenerationTarget, loadTypeOverride, typeTableForKind,
+} = require('./services/generationTarget');
 const bulkImageRegeneration = require('./services/bulkImageRegeneration');
 const {
   pinProvided, providerPinFieldError, providerPinError, providerPinValues,
@@ -2945,9 +2947,50 @@ app.get('/api/sprite-capability', async (req, res) => {
 // When the caller doesn't pin a backend/tier we auto-select the tier from
 // detected hardware; the sprite-gen recipe then fills backend/frames/steps
 // for that tier.
+// The seed a single interactive generation should use.
+//
+// Replaces a flat `seed = 0`, which was wrong in two ways that only look like
+// one. bulkImageRegeneration.seedFor's comment carries the measurement for the
+// first: at seed 0 every subject starts from the SAME noise, and four tiles so
+// generated had a mean pairwise structural correlation of +0.83 (two of them
+// +0.94, effectively one picture). That reads as the model collapsing and is
+// actually the caller's fault -- which is why the bulk path stopped doing it.
+//
+// The second only shows up on this interactive path. Generation is fully
+// deterministic: the same request twice returns a byte-identical PNG (verified
+// against the LAN provider -- same sha256, same 81.9% cutout transparency). So
+// pressing "Generate image" again reproduced the previous picture exactly, and
+// a provider-side refusal like "cutout produced no transparency (0.0%)" was
+// PERMANENT for that subject -- no number of retries could ever differ, and
+// the only escape was rewording the prompt.
+//
+// Hence: the bulk path's per-subject seed, shifted by how many generations this
+// subject has already had. The first attempt is reproducible and agrees with a
+// bulk run; every retry genuinely resamples. An explicit seed from the caller
+// still wins, so a reproduction is still expressible.
+async function resolveGenerationSeed(db, requested, kind, subject) {
+  if (requested != null && requested !== '' && Number.isFinite(Number(requested))) {
+    return Number(requested);
+  }
+  let attempts = 0;
+  try {
+    const r = await db.query(
+      'SELECT COUNT(*)::int AS n FROM sprite_sets WHERE creature = $1', [subject],
+    );
+    attempts = (r.rows[0] && r.rows[0].n) || 0;
+  } catch (err) {
+    // Counting is an improvement to the seed, not a precondition of generating
+    // at all: a failure here falls back to the plain per-subject seed rather
+    // than failing a generation the admin asked for.
+    console.error('seed attempt-count lookup failed:', err);
+  }
+  return bulkImageRegeneration.seedFor({ table: typeTableForKind(kind), name: subject }, attempts);
+}
+
 async function startGenerationJob(req, res, { subject, kind, defaultFrames, failureMessage }) {
   try {
-    const { base_prompt, biome, backend, frames, seed = 0, tier } = req.body;
+    const { base_prompt, biome, backend, frames, tier } = req.body;
+    const seed = await resolveGenerationSeed(pool, req.body.seed, kind, subject);
     // Biome art context (palette / style / exclusions) is composed into the
     // base prompt HERE so all three job kinds get it and sprite-gen's
     // prompts.py stays untouched. An unknown biome name degrades to the plain
