@@ -1900,7 +1900,7 @@ app.post('/api/tile-types', adminGuard, async (req, res) => {
 app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, color, walkable, speed, image, valid_neighbors, prompt, wall_height, place_order,
+    const { name, color, walkable, speed, valid_neighbors, prompt, wall_height, place_order,
       art_biome } = req.body;
     if (catalogNameTooLong(name)) {
       return res.status(400).json({ error: `name must be ${MAX_CATALOG_NAME_LEN} characters or fewer` });
@@ -1937,22 +1937,31 @@ app.put('/api/tile-types/:id', adminGuard, async (req, res) => {
     }
 
     // image/render_mode/sprite are owned by the generate+approve flow, NOT this
-    // property-edit form. The form captures `image` at modal-open (often empty,
-    // before the user approves a texture), so writing it verbatim would clobber a
-    // just-approved texture back to ''. COALESCE(NULLIF(...)) preserves the stored
-    // image when the form sends '' or nothing; an explicit key still updates it.
+    // property-edit form, and this route therefore does not write them AT ALL.
+    //
+    // It used to write `image = COALESCE(NULLIF($5, ''), image)`, which guarded
+    // only half the problem. The form has no image input; it snapshots
+    // `image: editingTile.image || ''` when the modal opens and sends it back
+    // untouched. For a tile with NO texture yet that snapshot is '' and the
+    // NULLIF saved it -- which is the case the guard was written for and
+    // tested against. For a tile that ALREADY has one, the snapshot is the
+    // PRE-approval key, NULLIF passes it straight through, and Save Changes
+    // silently reverts a texture the user just approved. Both requests answer
+    // 200, so nothing anywhere reports a failure. That is the regeneration
+    // case -- the common one -- and it is what SOMET made "generation works
+    // but the result doesn't save" look like a generator problem.
     const result = await pool.query(
       `UPDATE tile_types SET name = $1, color = $2, walkable = $3, speed = $4,
-        image = COALESCE(NULLIF($5, ''), image), valid_neighbors = $6, prompt = $7,
-        wall_height = $8, place_order = $9,
-        ai_provider_mode = CASE WHEN $10::boolean THEN $11 ELSE tile_types.ai_provider_mode END,
-        ai_provider_id = CASE WHEN $10::boolean THEN $12 ELSE tile_types.ai_provider_id END,
+        valid_neighbors = $5, prompt = $6,
+        wall_height = $7, place_order = $8,
+        ai_provider_mode = CASE WHEN $9::boolean THEN $10 ELSE tile_types.ai_provider_mode END,
+        ai_provider_id = CASE WHEN $9::boolean THEN $11 ELSE tile_types.ai_provider_id END,
         -- COALESCE, so a caller that omits the key keeps the stored context;
         -- an explicit '' is the user choosing "— none —" and DOES clear it.
-        art_biome = COALESCE($13, tile_types.art_biome),
+        art_biome = COALESCE($12, tile_types.art_biome),
         updated_at = CURRENT_TIMESTAMP
-       WHERE id = $14 RETURNING *`,
-      [name, color, walkable, speed, image, JSON.stringify(valid_neighbors), prompt || '',
+       WHERE id = $13 RETURNING *`,
+      [name, color, walkable, speed, JSON.stringify(valid_neighbors), prompt || '',
         Number(wall_height) || 0, Number(place_order) || 0,
         pinSent, pin.mode, pin.id,
         typeof art_biome === 'string' ? art_biome : null, id]
