@@ -374,3 +374,121 @@ test('a __proto__ key in a template is sent, not silently dropped', async () => 
   // And nothing global is harmed.
   assert.notStrictEqual({}.a, 1);
 });
+
+// --- What a failed generation actually tells the admin --------------------
+// A wedged generator on the LAN answered every request with a 504 carrying
+// {"detail":"Generation did not finish within 240s"} while its own /,
+// /sdapi/v1/sd-models and /api/jobs-health all returned 200. The status code
+// alone could not distinguish that from a bad URL or a stopped service, and
+// the sentence that could was being discarded.
+
+// Unlike okJson, this stub carries a real body -- the excerpt cannot be tested
+// against a stub that has none, which is exactly why the old non-2xx test
+// passed while the message was useless.
+function errBody(status, text, contentType = 'application/json') {
+  const bytes = Buffer.from(text, 'utf8');
+  return {
+    ok: false,
+    status,
+    headers: { get: () => contentType },
+    arrayBuffer: async () => bytes.buffer.slice(
+      bytes.byteOffset, bytes.byteOffset + bytes.byteLength,
+    ),
+  };
+}
+
+test('a non-2xx carries the provider\'s own explanation, not just the status', async (t) => {
+  t.after(__resetJobs);
+  const store = fakeStore();
+  const jobId = createJob();
+  await runGeneration(jobId, provider, { subject: 'rocks', kind: 'tile', prompt: 'r' }, {
+    fetchImpl: async () => errBody(504,
+      '{"detail":"Generation did not finish within 240s: The operation timed out."}'),
+    store,
+  });
+  const job = getJob(jobId);
+  assert.strictEqual(job.status, 'error');
+  assert.match(job.error, /504/, 'the status must survive');
+  assert.match(job.error, /did not finish within 240s/,
+    'the provider said what was wrong; the job must repeat it');
+  assert.strictEqual(store.written.size, 0);
+});
+
+test('an error body that echoes the token does not leak it into the job', async (t) => {
+  t.after(__resetJobs);
+  const jobId = createJob();
+  // A provider that echoes the request it received is a real shape (several
+  // validation-error responses do). auth_token never leaves the process --
+  // aiProviders.js enforces that on every read path, and this is a path it
+  // never sees.
+  await runGeneration(jobId, provider, { subject: 'r', kind: 'tile', prompt: 'r' }, {
+    fetchImpl: async () => errBody(400,
+      `{"error":"bad request","sent_headers":{"Authorization":"Bearer ${provider.auth_token}"}}`),
+    store: fakeStore(),
+  });
+  const job = getJob(jobId);
+  assert.strictEqual(job.status, 'error');
+  assert.ok(!job.error.includes(provider.auth_token),
+    `the stored token must not appear in a job document: ${job.error}`);
+  assert.match(job.error, /redacted/);
+});
+
+test('a huge error body is truncated rather than pasted into the dialog', async (t) => {
+  t.after(__resetJobs);
+  const jobId = createJob();
+  await runGeneration(jobId, provider, { subject: 'r', kind: 'tile', prompt: 'r' }, {
+    fetchImpl: async () => errBody(500, `<html><body>${'x'.repeat(20000)}</body></html>`, 'text/html'),
+    store: fakeStore(),
+  });
+  const job = getJob(jobId);
+  assert.strictEqual(job.status, 'error');
+  assert.ok(job.error.length < 300, `expected a short message, got ${job.error.length} chars`);
+  assert.match(job.error, /\.\.\.$/, 'a truncated excerpt must say so');
+});
+
+test('an unreadable error body degrades to the bare status instead of throwing', async (t) => {
+  t.after(__resetJobs);
+  const jobId = createJob();
+  // No body, no arrayBuffer: the shape a 204-ish or hand-written response has.
+  await runGeneration(jobId, provider, { subject: 'r', kind: 'tile', prompt: 'r' }, {
+    fetchImpl: async () => ({ ok: false, status: 502, headers: { get: () => null } }),
+    store: fakeStore(),
+  });
+  const job = getJob(jobId);
+  assert.strictEqual(job.status, 'error');
+  assert.strictEqual(job.error, 'provider answered 502',
+    'an unreadable body must not replace the provider status with our own error');
+});
+
+test('our own deadline reports as a timeout, not as an unreachable provider', async (t) => {
+  t.after(__resetJobs);
+  process.env.AI_PROVIDER_GENERATE_TIMEOUT_MS = '90000';
+  t.after(() => { delete process.env.AI_PROVIDER_GENERATE_TIMEOUT_MS; });
+  const jobId = createJob();
+  await runGeneration(jobId, provider, { subject: 'r', kind: 'tile', prompt: 'r' }, {
+    fetchImpl: async () => {
+      // What AbortSignal.timeout actually raises.
+      const err = new Error('The operation was aborted due to timeout');
+      err.name = 'TimeoutError';
+      throw err;
+    },
+    store: fakeStore(),
+  });
+  const job = getJob(jobId);
+  assert.strictEqual(job.status, 'error');
+  assert.doesNotMatch(job.error, /could not reach/,
+    'a provider that answers /docs but never finishes is reachable; saying otherwise sends the admin to the wrong problem');
+  assert.match(job.error, /did not answer within 90s/);
+});
+
+test('a genuinely refused connection still reads as unreachable', async (t) => {
+  t.after(__resetJobs);
+  const jobId = createJob();
+  await runGeneration(jobId, provider, { subject: 'r', kind: 'tile', prompt: 'r' }, {
+    fetchImpl: async () => { throw new Error('ECONNREFUSED'); },
+    store: fakeStore(),
+  });
+  const job = getJob(jobId);
+  assert.match(getJob(jobId).error, /could not reach/);
+  assert.match(job.error, /ECONNREFUSED/);
+});

@@ -36,6 +36,44 @@ const GENERATE_TIMEOUT_MS = () => parseInt(process.env.AI_PROVIDER_GENERATE_TIME
 // unbounded memory. 32 MB is far above any plausible PNG at sprite sizes.
 const MAX_IMAGE_BYTES = () => parseInt(process.env.AI_PROVIDER_MAX_IMAGE_BYTES || '33554432', 10);
 
+// A non-2xx body is a diagnosis, not a payload. Providers routinely explain
+// themselves there -- the box on the LAN answers a wedged generator with
+// {"detail":"Generation did not finish within 240s"} -- and keeping only the
+// status code threw that sentence away, leaving the admin a bare
+// "provider answered 504" that cannot distinguish a dead worker from a wrong
+// URL. Read generously, report briefly: the cap is on the transport bytes so a
+// hostile service cannot make this buffer, the excerpt is on the characters so
+// the admin dialog stays readable.
+const MAX_ERROR_BODY_BYTES = 65536;
+const MAX_ERROR_EXCERPT_CHARS = 200;
+
+// Never throws and never rejects the job on its own: this runs on a path that
+// has ALREADY failed, and an unreadable body must degrade to the old bare
+// status rather than replace the provider's error with one of ours.
+async function errorExcerpt(res, provider) {
+  let text;
+  try {
+    const read = await readCapped(res, MAX_ERROR_BODY_BYTES);
+    if (read.error || !read.buffer) return '';
+    text = read.buffer.toString('utf8');
+  } catch {
+    return '';
+  }
+  // services/aiProviders.js exists to enforce one rule -- auth_token never
+  // leaves the process -- and an error body is a way out of it that the
+  // serializer never sees: a provider that echoes the request it was sent
+  // would hand the token to anyone who can read a job document.
+  if (provider && provider.auth_token) {
+    text = text.split(provider.auth_token).join('[redacted]');
+  }
+  // Collapsed to one line because this lands inside a single <span> in the
+  // tile and entity dialogs; a raw HTML error page would otherwise smear
+  // across the panel.
+  const flat = text.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (flat.length <= MAX_ERROR_EXCERPT_CHARS) return flat;
+  return `${flat.slice(0, MAX_ERROR_EXCERPT_CHARS)}...`;
+}
+
 // Remote job ids are prefixed so the shared /api/*-jobs/:jobId routes can tell
 // which backend owns a job without a database lookup. The suffix is hex, which
 // keeps the whole id inside the existing traversal-safe id pattern.
@@ -284,14 +322,30 @@ async function runGeneration(jobId, provider, req, deps = {}) {
       signal: AbortSignal.timeout(GENERATE_TIMEOUT_MS()),
     }, { fetchImpl });
   } catch (err) {
+    // AbortSignal.timeout raises a TimeoutError, which the old wording folded
+    // into "could not reach" -- indistinguishable from a refused connection
+    // even though the provider was reachable and simply never answered. The
+    // two failures have different next steps (raise the deadline vs. go fix
+    // the box), so they get different sentences, and the deadline is named
+    // because otherwise there is no way to tell which one elapsed.
+    const timedOut = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
     setJob(jobId, {
       status: 'error',
-      error: `could not reach ${redactUrl(provider.base_url)}: ${err.message}`,
+      error: timedOut
+        ? `${redactUrl(provider.base_url)} did not answer within `
+          + `${Math.round(GENERATE_TIMEOUT_MS() / 1000)}s`
+        : `could not reach ${redactUrl(provider.base_url)}: ${err.message}`,
     });
     return;
   }
   if (!res.ok) {
-    setJob(jobId, { status: 'error', error: `provider answered ${res.status}` });
+    const excerpt = await errorExcerpt(res, provider);
+    setJob(jobId, {
+      status: 'error',
+      error: excerpt
+        ? `provider answered ${res.status}: ${excerpt}`
+        : `provider answered ${res.status}`,
+    });
     return;
   }
 
@@ -402,4 +456,6 @@ module.exports = {
   MAX_JOBS,
   GENERATE_TIMEOUT_MS,
   MAX_IMAGE_BYTES,
+  errorExcerpt,
+  MAX_ERROR_EXCERPT_CHARS,
 };
