@@ -12,6 +12,7 @@ import { useCreatureBehaviors } from './useCreatureBehaviors.js';
 import { HiOutlineTrash, HiOutlinePencil, HiOutlinePlus, HiOutlineXMark, HiOutlineChevronDown, HiOutlineChevronUp } from "react-icons/hi2";
 import toast from 'react-hot-toast';
 import { validateEntityType } from './catalogValidation.js';
+import { syncApprovedAsset } from './entityAssetSync.js';
 import { orphanedSpawnTiles } from './catalogReferences.js';
 import { withOptionalBiome, withOptionalProvider } from './generationJobPayload.js';
 import { ProviderChoice, ProviderAnimationNote, useWillUseLocal } from './ProviderChoice.jsx';
@@ -1040,14 +1041,12 @@ function EntityTypesAdmin() {
   // Approving a generated image/animation changes render_mode + image (and
   // clears sprite) server-side while this form is open. Pull those back in, or
   // pressing Save Changes afterwards writes the pre-approval values over them
-  // and silently reverts the entity to a colored rectangle.
+  // and silently reverts the entity to a colored rectangle. The rule itself
+  // lives in entityAssetSync.js so it can be tested -- there is no DOM in this
+  // suite, so nothing here is reachable from a test.
   useEffect(() => {
     if (!editingEntity || !liveEditingEntity) return;
-    const mode = liveEditingEntity.render_mode || 'rect';
-    const image = liveEditingEntity.image || '';
-    setFormData(prev =>
-      prev.render_mode === mode && prev.image === image ? prev : { ...prev, render_mode: mode, image }
-    );
+    setFormData(prev => syncApprovedAsset(prev, liveEditingEntity));
   }, [editingEntity, liveEditingEntity?.render_mode, liveEditingEntity?.image]);
 
   const handleOpenAdd = () => {
