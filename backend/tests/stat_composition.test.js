@@ -30,7 +30,7 @@ test('with no passives and no gear the base passes straight through', () => {
     lifeCostMultiplier: 1, treeCharmBonus: 0, cooldownFloor: null, regenLifeShare: 0,
     attackSpeedMult: 1, castSpeedMult: 1, meleeReachBonus: 0, meleeArcBonus: 0,
     projectileCount: 0, pierceBonus: 0, projectileSpeedMult: 1,
-    auraLeech: 0, auraRadius: 0,
+    auraLeech: 0, auraRadius: 0, meleeDamageMult: 1,
   });
 });
 

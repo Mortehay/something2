@@ -69,6 +69,22 @@ const PROJECTILE_FAN_RAD = 0.16;
 // hostile creature standing inside it, and a world can hold 12-creature packs
 // -- uncapped, walking into a pack would be unkillable sustain. Six is the
 // most a single node may be worth.
+// SOMET-527. Floors for a melee swing's geometry.
+//
+// meleeReachBonus and meleeArcBonus are both `sum`, which is what lets a shape
+// node NARROW or SHORTEN a swing by authoring a negative -- Spearpoint trades
+// arc for reach, Sweep trades reach for arc. Without a floor, stacking
+// negatives produces a swing that cannot hit anything (reach <= 0) or one whose
+// half-angle is negative, which makes inArc's cos(arc/2) comparison
+// meaningless rather than merely narrow.
+//
+// MIN_MELEE_REACH is set so a floored swing still reaches a creature standing
+// against you: a creature is 48px and measurement is centre-to-centre.
+const MIN_MELEE_REACH = 48;
+// ~17 degrees. Narrow enough to be a real drawback, wide enough to remain a
+// usable weapon rather than a bug report.
+const MIN_MELEE_ARC = 0.3;
+
 const AURA_BASE_RADIUS = 120;
 const AURA_MAX_TARGETS = 6;
 // The aura resolves once a second rather than per frame, so its cost does not
@@ -143,6 +159,7 @@ module.exports = {
   HP_BASE, HP_PER_CON, MANA_BASE, MANA_PER_INT, STAMINA_BASE,
   MELEE_PER_STR, SPELL_PER_INT, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
   PROJECTILE_FAN_RAD, AURA_BASE_RADIUS, AURA_MAX_TARGETS, AURA_INTERVAL_S,
+  MIN_MELEE_REACH, MIN_MELEE_ARC,
   MANA_REGEN_BASE, MANA_REGEN_PER_WIS,
   PRICE_PER_CHA, SELL_FRACTION_BASE, SELL_FRACTION_MAX,
   XP_BASE, XP_EXPONENT, XP_KILL_BASE, XP_LEVEL_DIFF_SLOPE, XP_LEVEL_DIFF_MAX,

@@ -785,3 +785,116 @@ test('the wire reports the same radius the heal used', () => {
   const { world } = packWorld({ auraLeech: 2, auraRadius: 40 }, 1);
   assert.equal(world.snapshot().players[0].aura, 160, 'AURA_BASE_RADIUS 120 + 40');
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-527: melee shape variants.
+//
+// meleeArcBonus and meleeReachBonus are `sum`, so a shape node narrows or
+// shortens a swing by authoring a NEGATIVE. That is the payoff for choosing
+// `sum` in SOMET-520, and it needs floors: enough negatives otherwise give a
+// swing that reaches nothing, or a negative half-angle, which makes inArc's
+// cos(arc/2) test meaningless rather than merely tight.
+//
+// blade (id 1): reach 190, arc_width 1.8. Floors: reach 48, arc 0.3.
+// ---------------------------------------------------------------------------
+
+// A creature whose CENTRE sits `dist` from the player's, at `angle` radians
+// off the aim vector (which is due east in these tests).
+function creatureAt(world, dist, angle = 0) {
+  const p = world.getPlayer('u1');
+  const cx = p.x + p.width / 2;
+  const cy = p.y + p.height / 2;
+  const half = CREATURE_BOX / 2;
+  return {
+    id: 'c1', type: 'wolf',
+    x: cx + Math.cos(angle) * dist - half,
+    y: cy + Math.sin(angle) * dist - half,
+    hp: 50, facing: 'S', color: '#f00',
+  };
+}
+
+function swingAt(rules, dist, angle) {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 400, y: 400 }, invFor(1), undefined, 0,
+    rules ? withRules(rules) : BASE_STATS);
+  w.creatures.addCreatures([creatureAt(w, dist, angle)]);
+  const out = w.attack('u1', 1, 0);
+  const c = w.creatures.all().find((x) => x.id === 'c1');
+  return { hit: !c || c.hp < 50, hp: c ? c.hp : 0, descriptor: out.attacks[0] };
+}
+
+// Spearpoint: reach +64, arc -0.9. It must gain range AND lose coverage --
+// asserting only the range would pass on a node that was a pure upgrade,
+// which is the exact bug this ticket exists to fix.
+test('Spearpoint trades arc for reach, and BOTH halves of the trade are real', () => {
+  const spear = { meleeReachBonus: 64, meleeArcBonus: -0.9 };
+  // Further out than the base 190 reach: base misses, Spearpoint connects.
+  assert.equal(swingAt(null, 220, 0).hit, false, 'base reach must miss at 220px');
+  assert.equal(swingAt(spear, 220, 0).hit, true, 'Spearpoint must reach 220px');
+  // Off-axis at 0.7 rad: inside the base 1.8 arc (half-angle 0.9), outside
+  // Spearpoint's 0.9 arc (half-angle 0.45).
+  assert.equal(swingAt(null, 150, 0.7).hit, true, 'the base arc covers 0.7 rad off-axis');
+  assert.equal(swingAt(spear, 150, 0.7).hit, false,
+    'Spearpoint must GIVE UP the off-axis target -- otherwise it is a pure upgrade');
+});
+
+// Sweep: arc +2, reach -24. The mirror image.
+test('Sweep trades reach for arc, and BOTH halves of the trade are real', () => {
+  const sweep = { meleeArcBonus: 2, meleeReachBonus: -24 };
+  // 1.3 rad off-axis: outside the base 1.8 arc, inside Sweep's 3.8.
+  assert.equal(swingAt(null, 120, 1.3).hit, false, 'the base arc misses 1.3 rad off-axis');
+  assert.equal(swingAt(sweep, 120, 1.3).hit, true, 'Sweep must cover 1.3 rad off-axis');
+  // At 180px the base reach (190) connects and Sweep's (166) does not.
+  assert.equal(swingAt(null, 180, 0).hit, true, 'base reach covers 180px');
+  assert.equal(swingAt(sweep, 180, 0).hit, false,
+    'Sweep must GIVE UP the distant target');
+});
+
+// THE FLOORS, asserted AT the floor rather than near it.
+test('stacked negatives cannot produce an unusable or inverted swing', () => {
+  const absurd = { meleeReachBonus: -10000, meleeArcBonus: -10000 };
+  const d = swingAt(absurd, 40, 0).descriptor;
+  assert.equal(d.reach, 48, 'reach floors at MIN_MELEE_REACH, never 0 or negative');
+  assert.equal(d.arc, 0.3, 'arc floors at MIN_MELEE_ARC, never 0 or negative');
+  // A floored swing is narrow and short, but it still WORKS: a creature
+  // standing against the player is hit.
+  assert.equal(swingAt(absurd, 40, 0).hit, true,
+    'a floored swing must still hit a target pressed against the attacker');
+});
+
+// Whirlwind's price. Without this the circle is a strict upgrade, which is the
+// balance risk SOMET-520 shipped with and this ticket closes.
+test('meleeDamageMult is the price a wide swing pays, and it is real damage', () => {
+  const base = swingAt(null, 100, 0);
+  const penal = swingAt({ meleeDamageMult: 0.7 }, 100, 0);
+  assert.ok(base.hit && penal.hit, 'both must connect, or the comparison is empty');
+  assert.ok(penal.hp > base.hp,
+    `a penalised swing must deal LESS: base left ${base.hp}, penalised left ${penal.hp}`);
+  // blade damage 10 at meleeMult 1 -> 10; at 0.7 -> 7.
+  assert.equal(base.hp, 40);
+  assert.equal(penal.hp, 43);
+});
+
+// The penalty is for SWINGING, so it must not touch a bow. Same reading as
+// applyAttackCooldown's branch; asserting only the melee side would pass on a
+// formula that quietly nerfed every attack in the game.
+test('meleeDamageMult does not touch a projectile', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 400, y: 400 }, invFor(4), undefined, 0,
+    withRules({ meleeDamageMult: 0.5 }));
+  w.attack('u1', 1, 0);
+  assert.equal(w.projectiles.projectiles[0].damage, 10,
+    'a bow is not swung, so the shape penalty must not apply');
+});
+
+// A stone-augmented sword is still a sword: the penalty follows the WEAPON's
+// kind, not its element. Weapon 2 is a melee blade with a fire stone.
+test('the penalty follows the weapon kind, not its element', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 400, y: 400 }, invFor(2), undefined, 0,
+    withRules({ meleeDamageMult: 0.5 }));
+  w.creatures.addCreatures([creatureAt(w, 100, 0)]);
+  w.attack('u1', 1, 0);
+  const c = w.creatures.all().find((x) => x.id === 'c1');
+  assert.equal(c.hp, 45, 'fire blade 10 damage, halved by the shape penalty');
+});

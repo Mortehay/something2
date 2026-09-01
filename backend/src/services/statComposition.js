@@ -56,6 +56,12 @@ const RULE_COMBINE = {
   // and flat pixels of radius to their hub.
   auraLeech: 'sum',
   auraRadius: 'sum',
+  // SOMET-527. A multiplier on SWUNG damage, so a shape node can pay for its
+  // coverage. `product`, and authored below 1: Whirlwind's full circle costs
+  // damage, which is what stops it being a strict upgrade over a narrower arc.
+  // Applied on weapon KIND, not element -- the cost is for swinging in a
+  // circle, whatever the blade is enchanted with.
+  meleeDamageMult: 'product',
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
 

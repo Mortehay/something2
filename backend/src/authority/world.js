@@ -20,6 +20,7 @@ const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerSt
 const {
   STAMINA_BASE, PROJECTILE_FAN_RAD,
   AURA_BASE_RADIUS, AURA_MAX_TARGETS, AURA_INTERVAL_S,
+  MIN_MELEE_REACH, MIN_MELEE_ARC,
 } = require('../services/progressionConstants.js');
 const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
 const { getSkillById } = require('../../seeds/data/skills.js');
@@ -82,7 +83,18 @@ function sign(v) { return v > 0.3 ? 1 : v < -0.3 ? -1 : 0; }
 // already in the air.
 function weaponDamage(p, w) {
   const mult = (w.element && w.element !== 'physical') ? p.stats.spellMult : p.stats.meleeMult;
-  return w.damage * mult * elementDamageMult(p.stats, w.element);
+  // SOMET-527. THE CONSUMER of `meleeDamageMult`: the price a shape node pays
+  // for its coverage, so a full circle is a trade rather than a strict upgrade.
+  //
+  // Branched on w.kind, NOT on element -- the same reading applyAttackCooldown
+  // uses. The cost is for swinging in a wide arc; a stone-augmented sword is
+  // still a sword. Note this deliberately differs from the `mult` line above,
+  // which IS element-based because it is asking a different question (does STR
+  // or INT scale this?).
+  //
+  // Identity is 1, so every weapon with no shape node allocated is unmoved.
+  const shape = w.kind === 'melee' ? (p.stats.rules.meleeDamageMult || 1) : 1;
+  return w.damage * mult * elementDamageMult(p.stats, w.element) * shape;
 }
 
 // SOMET-495. The passive tree's `damage` grants, as a PER-ELEMENT multiplier.
@@ -799,12 +811,22 @@ class World {
       //
       // Bonuses are in PIXELS and RADIANS -- the units w.reach and w.arc_width
       // already use. A tile is 64px, so the brief's "+0.5m" is +32.
-      const reach = w.reach + (p.stats.rules.meleeReachBonus || 0);
+      // FLOORED (SOMET-527). The bonus is a `sum`, so a shape node can author a
+      // NEGATIVE to trade reach away -- Sweep does. Without the floor, enough
+      // negatives give a swing that reaches nothing at all.
+      const reach = Math.max(MIN_MELEE_REACH, w.reach + (p.stats.rules.meleeReachBonus || 0));
       // Clamped at a full turn: past 2*PI a wider arc means nothing (inArc
       // compares against cos(arc/2), and half a turn already reaches behind
       // the attacker), but an unclamped value would keep growing and read as
       // if further stacking still helped.
-      const arc = Math.min(TAU, w.arc_width + (p.stats.rules.meleeArcBonus || 0));
+      // Clamped at BOTH ends (SOMET-527). The upper bound is a full turn: past
+      // it a wider arc means nothing, but an unclamped value would keep growing
+      // and read as if more stacking still helped. The lower bound matters more
+      // -- Spearpoint narrows the arc deliberately, and a negative half-angle
+      // makes inArc's `dot >= cos(arc/2)` test meaningless rather than merely
+      // tight, which is a swing that behaves inexplicably rather than narrowly.
+      const arc = Math.min(TAU,
+        Math.max(MIN_MELEE_ARC, w.arc_width + (p.stats.rules.meleeArcBonus || 0)));
       // Queried BEFORE applyMeleeArc, which deletes whatever it kills: after
       // the fact a one-shot kill would look like a miss.
       // SOMET-286: one scan, two lists -- what the swing may damage, and what

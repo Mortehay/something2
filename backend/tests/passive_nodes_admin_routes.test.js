@@ -105,13 +105,13 @@ test('passive node admin routes', { skip }, async (t) => {
       .set('Authorization', `Bearer ${admin}`);
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.nodes.length, 25);
-    assert.strictEqual(res.body.total, 1843);
+    assert.strictEqual(res.body.total, 1849);
     assert.deepStrictEqual(Object.keys(res.body.nodes[0]).sort(),
       ['grants', 'id', 'key', 'kind', 'label', 'ring', 'sector', 'start_class', 'x', 'y']);
   });
 
   await t.test('offset walks the same ordering without repeating or skipping a row', async () => {
-    // AC1's real content: 1843 rows must not arrive in one pass, and the pages
+    // AC1's real content: 1849 rows must not arrive in one pass, and the pages
     // must tile. A LIMIT with no ORDER BY, or an offset the route ignores,
     // both fail here rather than in the browser at page 12.
     const head = (await request(app).get('/api/passive-nodes?limit=10&offset=0')
@@ -131,7 +131,7 @@ test('passive node admin routes', { skip }, async (t) => {
     assert.strictEqual(res.status, 200);
     assert.ok(res.body.nodes.length <= 200,
       `expected the limit to be capped, got ${res.body.nodes.length} rows`);
-    assert.strictEqual(res.body.total, 1843);
+    assert.strictEqual(res.body.total, 1849);
   });
 
   await t.test('filters by sector, by kind and by a key/label search', async () => {
@@ -204,7 +204,7 @@ test('passive node admin routes', { skip }, async (t) => {
     const res = await request(app).get('/api/passive-nodes?sector=nowhere&kind=legendary&limit=1')
       .set('Authorization', `Bearer ${admin}`);
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.body.total, 1843);
+    assert.strictEqual(res.body.total, 1849);
   });
 
   await t.test('updates label, kind and grants', async () => {

@@ -115,6 +115,11 @@ const RULE_KEYS = {
     combine: 'sum',
     consumer: 'backend/src/authority/world.js — tick()\'s aura pass, pixels on top of AURA_BASE_RADIUS',
   },
+  // SOMET-527. The price a wide swing pays.
+  meleeDamageMult: {
+    combine: 'product',
+    consumer: 'backend/src/authority/world.js — weaponDamage(), melee branch only',
+  },
 };
 
 // Clockwise from straight up, matching the spec §5.2 diagram exactly. ORDER IS
@@ -362,12 +367,46 @@ const CLUSTERS = [
     key: 'clu_str_whirlwind', sector: 'strength', hubLabel: 'Whirlwind',
     // 6.3 rad on top of a typical 1.8 arc clamps to a full turn at the
     // authority, so this reads as "your swing becomes circular".
-    hubGrants: [{ type: 'rule', rule: 'meleeArcBonus', value: 6.3 }],
+    //
+    // SOMET-527 ADDED THE PENALTY. Shipped in SOMET-520 as a pure upgrade --
+    // a circle that cost nothing but points, and therefore not a choice. It
+    // now trades 30% of swung damage for hitting everything around you, which
+    // is what makes Spearpoint and Sweep worth considering against it.
+    hubGrants: [
+      { type: 'rule', rule: 'meleeArcBonus', value: 6.3 },
+      { type: 'rule', rule: 'meleeDamageMult', value: 0.7 },
+    ],
     satellites: [
       { label: 'Momentum', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
       { label: 'Follow-Through', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
       { label: 'Whirling Step', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
       { label: 'Unending Swing', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
+    ],
+  },
+  {
+    // SOMET-527. The opposite trade to Whirlwind: everything in one direction.
+    // The negative arc is why meleeArcBonus was made a `sum` rather than a
+    // product -- narrowing is just an authored minus sign.
+    key: 'clu_str_spearpoint', sector: 'strength', hubLabel: 'Spearpoint',
+    hubGrants: [
+      { type: 'rule', rule: 'meleeReachBonus', value: 64 },
+      { type: 'rule', rule: 'meleeArcBonus', value: -0.9 },
+    ],
+    satellites: [
+      { label: 'Lunge', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 32 }] },
+      { label: 'Pike Drill', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 32 }] },
+    ],
+  },
+  {
+    // Wide but close: crowd control that gives up the range Spearpoint buys.
+    key: 'clu_str_sweep', sector: 'strength', hubLabel: 'Sweep',
+    hubGrants: [
+      { type: 'rule', rule: 'meleeArcBonus', value: 2 },
+      { type: 'rule', rule: 'meleeReachBonus', value: -24 },
+    ],
+    satellites: [
+      { label: 'Wide Stance', grants: [{ type: 'rule', rule: 'meleeArcBonus', value: 0.5 }] },
+      { label: 'Scything Blow', grants: [{ type: 'rule', rule: 'meleeArcBonus', value: 0.5 }] },
     ],
   },
   {
