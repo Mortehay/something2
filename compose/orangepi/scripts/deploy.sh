@@ -167,6 +167,31 @@ seed_catalogs() {
 }
 run_step_soft "restore any missing catalog rows" seed_catalogs
 
+# --- The passive tree, which is a catalog that needs --force ---------------
+#
+# SOMET-524. Unlike seed-catalogs above, seed-passive-tree does NOT restore
+# what is missing by default: its upsert writes `grants` only under --force
+# (`CASE WHEN $10 OR EXCLUDED.kind = 'start'`), because the admin UI can
+# hand-tune a node and an ordinary reseed must not cost an admin that edit.
+#
+# So a retune of the checked-in spec reaches the board ONLY with --force. A
+# deploy that ran the unforced variant would ship a tree that is retuned in the
+# repo and unchanged in the database -- and EVERY TEST WOULD STILL PASS, since
+# the tests read the generator, not the board. That is the failure mode this
+# step exists to prevent, and it is why --force is not optional here.
+#
+# The refund migration (1714440521000) has already run in the migrate step
+# above, which is the required order: --force prunes nodes the generator no
+# longer produces and deletes their character_passives rows on the way, so the
+# refund must count them first.
+#
+# Soft, like the catalogs: a tree that fails to reseed leaves the previous tree
+# in place and the game playable.
+seed_passive_tree() {
+  pi_ssh "$IMAGE_ENV $COMPOSE run --rm --no-deps backend node scripts/seed-passive-tree.js --force"
+}
+run_step_soft "reseed the passive tree (--force)" seed_passive_tree
+
 # --- Restart ---------------------------------------------------------------
 
 # Stop then start, never an overlap: the authority holds an in-memory tick
