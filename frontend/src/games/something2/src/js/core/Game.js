@@ -26,6 +26,7 @@ import {
 } from '../net/passiveTreeClient.js';
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
+import { remotePlayerFromFrame } from './worldPlayers.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
@@ -1126,7 +1127,11 @@ export class Game {
         let mine = null;
         for (const p of (msg.players || [])) {
             if (p.id === this.localUserId) { mine = p; continue; }
-            next.set(p.id, { x: p.x, y: p.y, facing: p.facing, hp: p.hp, maxHp: p.maxHp, effects: p.effects || null });
+            // The field list lives in worldPlayers.js so a test can hold it:
+            // this map is built from named fields, not a spread, so anything
+            // the server sends and the list omits is dropped SILENTLY. See
+            // that module's header for the bug that taught us.
+            next.set(p.id, remotePlayerFromFrame(p));
         }
         this.remotePlayers = next;
         if (mine) {
@@ -1136,6 +1141,11 @@ export class Game {
             // server omits the field — otherwise a `if (mine.effects)` guard
             // would leave the HUD reading "Burning" long after the burn ended.
             this.player.effects = mine.effects || null;
+            // SOMET-523. Assigned on EVERY frame for the same reason `effects`
+            // is one line up: the server OMITS the field entirely when the
+            // player has no aura, so a guarded assignment would leave a ring
+            // on screen after a respec removed the node.
+            this.player.aura = mine.aura || 0;
             const out = reconcile(
                 { x: mine.x, y: mine.y },
                 msg.ackSeq || 0,
