@@ -28,7 +28,12 @@ function spreadIndices(total, count) {
   return out;
 }
 
-function ringKinds(total, notableCount, keystoneCount, layout) {
+// SOMET-517 added `greaterCount`. Keystones are placed first (they are the
+// scarcest and must land on their staggered positions), then greaters, then
+// notables fill what is left -- `place` walks forward off a taken slot, so the
+// LAST kind placed is the one that gets displaced, and notables are the kind
+// there are most of and which care least where they sit.
+function ringKinds(total, notableCount, keystoneCount, layout, greaterCount = 0) {
   const kinds = new Array(total).fill('minor');
   const taken = new Set();
   const place = (raw, kind) => {
@@ -39,6 +44,12 @@ function ringKinds(total, notableCount, keystoneCount, layout) {
   };
   spreadIndices(total, keystoneCount).forEach((i, k) => {
     place(i + layout.keystoneOffset + k * layout.keystoneStagger, 'keystone');
+  });
+  // Offset and staggered like the keystones, and for the identical reason:
+  // total/count divides evenly, so without a nudge every greater in a sector
+  // would stack on one radial line.
+  spreadIndices(total, greaterCount).forEach((i, k) => {
+    place(i + layout.greaterOffset + k * layout.greaterStagger, 'greater');
   });
   spreadIndices(total, notableCount).forEach((i) => place(i, 'notable'));
   return kinds;
@@ -174,7 +185,7 @@ function generatePassiveTree(spec) {
     for (let ring = 1; ring <= 3; ring += 1) {
       const rg = layout.rings[ring];
       const total = rg.rows * rg.cols;
-      const kinds = ringKinds(total, rg.notable, rg.keystone, layout);
+      const kinds = ringKinds(total, rg.notable, rg.keystone, layout, rg.greater || 0);
 
       // "Через 1" on the highway: 9, 15, 19 highway nodes
       let numHighwayCols = 9;
@@ -264,6 +275,12 @@ function generatePassiveTree(spec) {
         }
         const keystonesInCluster = clusterKinds.filter(k => k === 'keystone');
         const notablesInCluster = clusterKinds.filter(k => k === 'notable');
+        // SOMET-517. Greaters are carried through this distribution explicitly.
+        // These filters are exhaustive by construction -- a kind that matches
+        // none of them is DROPPED silently and the ring quietly loses nodes,
+        // which is exactly what happened when `greater` was first added and the
+        // tree generated zero of them while every existing test stayed green.
+        const greatersInCluster = clusterKinds.filter(k => k === 'greater');
         const minors = clusterKinds.filter(k => k === 'minor');
 
         // Central hub gets a minor node:
@@ -272,6 +289,8 @@ function generatePassiveTree(spec) {
           minors.shift();
         } else if (notablesInCluster.length > 0) {
           hubKind = notablesInCluster.shift();
+        } else if (greatersInCluster.length > 0) {
+          hubKind = greatersInCluster.shift();
         } else if (keystonesInCluster.length > 0) {
           hubKind = keystonesInCluster.shift();
         }
@@ -296,6 +315,25 @@ function generatePassiveTree(spec) {
         const apex = Math.floor(outerCount / 2);
         if (keystonesInCluster.length > 0) {
           outerKinds[apex] = keystonesInCluster.shift();
+        }
+
+        // SOMET-517. Greaters sit at odd offsets from the apex, so they
+        // interleave with the notables below rather than competing for the
+        // same slots and being dropped when those are taken.
+        for (const off of [1, -1, 3, -3, 5, -5]) {
+          const idx = apex + off;
+          if (idx > 0 && idx < outerCount && greatersInCluster.length > 0
+              && outerKinds[idx] === 'minor') {
+            outerKinds[idx] = greatersInCluster.shift();
+          }
+        }
+        // Anything that still did not fit goes to the first free outer slot --
+        // a greater that fell off the end would be silently lost.
+        for (let i = 0; i < outerCount && greatersInCluster.length > 0; i += 1) {
+          if (outerKinds[i] === 'minor') outerKinds[i] = greatersInCluster.shift();
+        }
+        for (let i = 0; i < innerCount && greatersInCluster.length > 0; i += 1) {
+          if (innerKinds[i] === 'minor') innerKinds[i] = greatersInCluster.shift();
         }
 
         // Place Notables strictly at alternating even offsets:

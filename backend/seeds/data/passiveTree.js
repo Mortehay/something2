@@ -17,7 +17,9 @@
 // the one piece of indirection: a minor/notable template written for "the
 // sector's own stat" writes `stat: '@sector'`, and the generator substitutes
 // the sector key. That is what lets one template serve all six sectors, which
-// is the whole reason 40 templates cover 1770 sector nodes.
+// is the whole reason ~50 templates cover 1770 sector nodes. SOMET-516 added
+// `@other`, which resolves to one of the five stats a sector is NOT named
+// after -- see generatePassiveTree.js's nextOtherStat.
 
 // Element names are NOT re-declared here. They are read from the damage
 // authority so this file can never drift from the five elements the combat
@@ -148,11 +150,15 @@ const LAYOUT = {
   // which would otherwise stack every keystone in a sector on one radial line.
   keystoneOffset: 7,
   keystoneStagger: 5,
+  // SOMET-517. Same idea for the `greater` tier, with different constants so
+  // greaters and keystones do not land on each other's nudged positions.
+  greaterOffset: 11,
+  greaterStagger: 3,
   rings: [
     null, // index 0 is the core + the start nodes, which are not laid out on a grid
     { rows: 4, cols: 17, baseRadius: 260, rowStep: 45, minor: 60, notable: 8, keystone: 0 },
     { rows: 4, cols: 29, baseRadius: 460, rowStep: 55, minor: 100, notable: 14, keystone: 2 },
-    { rows: 3, cols: 37, baseRadius: 700, rowStep: 70, minor: 90, notable: 18, keystone: 3 },
+    { rows: 3, cols: 37, baseRadius: 700, rowStep: 70, minor: 84, notable: 18, keystone: 3, greater: 6 },
   ],
 };
 
@@ -244,6 +250,22 @@ const TEMPLATES = [
   { key: 'not_searing_blows', kind: 'notable', sectors: '*', rings: [3], label: 'Searing Blows', grants: [{ type: 'status', status: 'burn', value: 1 }] },
   { key: 'not_numbing_blows', kind: 'notable', sectors: '*', rings: [3], label: 'Numbing Blows', grants: [{ type: 'status', status: 'chill', value: 1 }] },
   { key: 'not_jarring_blows', kind: 'notable', sectors: '*', rings: [3], label: 'Jarring Blows', grants: [{ type: 'status', status: 'shock', value: 1 }] },
+
+  // --- greaters (SOMET-517) -------------------------------------------------
+  //
+  // A fourth tier between a notable and a keystone, RING 3 ONLY. Before this
+  // the biggest stat node in the tree was not_apotheosis at +16, and the next
+  // step up was one of a sector's five keystones -- nothing in between, and no
+  // repeatable reward for going deep.
+  //
+  // A greater grants +25 or +30 of a SINGLE stat, own or off. Ring 3 is where
+  // it belongs: a +30 INT for a Cultist should be a genuine cross-map
+  // commitment, not a freebie two nodes from the start. The off-stat variants
+  // are what make a real cross-class build reachable at all.
+  { key: 'grt_ascendance', kind: 'greater', sectors: '*', rings: [3], weight: 3, label: 'Ascendance', grants: [{ type: 'stat', stat: '@sector', value: 25 }] },
+  { key: 'grt_paragon', kind: 'greater', sectors: '*', rings: [3], weight: 2, label: 'Paragon', grants: [{ type: 'stat', stat: '@sector', value: 30 }] },
+  { key: 'grt_wanderers_gift', kind: 'greater', sectors: '*', rings: [3], weight: 2, label: "Wanderer's Gift", grants: [{ type: 'stat', stat: '@other', value: 25 }] },
+  { key: 'grt_apostasy', kind: 'greater', sectors: '*', rings: [3], weight: 1, label: 'Apostasy', grants: [{ type: 'stat', stat: '@other', value: 30 }] },
 ];
 
 // --- Keystones -------------------------------------------------------------

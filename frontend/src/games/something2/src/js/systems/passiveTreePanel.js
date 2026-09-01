@@ -23,7 +23,25 @@ export const MIN_ZOOM = 0.2;
 export const MAX_ZOOM = 2.5;
 export const DEFAULT_ZOOM = 0.55;
 
-export const NODE_R = { minor: 7, notable: 12, keystone: 18, start: 16 };
+export const NODE_R = { minor: 7, notable: 12, greater: 15, keystone: 18, start: 16 };
+
+// SOMET-517. The radius for a kind this build has never heard of.
+//
+// NOT DEFENSIVE PADDING -- this is the difference between a visible node and
+// no node at all. `NODE_R[n.kind] * view.zoom` on an unknown kind is
+// `undefined * zoom` = NaN, and Canvas 2D SILENTLY DROPS a path with
+// non-finite coordinates: no error, no warning, nothing drawn. The hit area is
+// computed from the same r, so the node is also unclickable. A server that
+// starts sending a new kind before the client is redeployed would lose those
+// nodes entirely and look like a rendering glitch rather than a version skew.
+//
+// Falling back to the minor radius means an unrecognised node is drawn small
+// and plain, which is wrong but visible and clickable.
+export const NODE_R_FALLBACK = NODE_R.minor;
+export function nodeRadius(kind) {
+  const r = NODE_R[kind];
+  return Number.isFinite(r) ? r : NODE_R_FALLBACK;
+}
 
 const STATE_FILL = {
   allocated: "#166534",
@@ -292,7 +310,7 @@ export function layoutPassiveTree(state) {
     let nodeState = "locked";
     if (id === startNodeId || allocated.has(id)) nodeState = "allocated";
     else if (allocatable.has(id)) nodeState = "allocatable";
-    const r = NODE_R[n.kind] * view.zoom;
+    const r = nodeRadius(n.kind) * view.zoom;
     const isSearchMatch = hasSearch ? nodeMatchesSearch(n, searchText) : false;
 
     nodes.push({
@@ -503,6 +521,13 @@ export function drawPassiveTree(ctx, layout) {
       ctx.lineWidth = 3;
       ctx.strokeStyle = n.state === "allocated" ? "#4ade80" : "#fde047";
       ctx.stroke();
+    } else if (n.kind === "greater") {
+      // SOMET-517. Between a notable and a keystone in weight, and given its
+      // own violet rim so a +30 stat node is not mistaken for a +12 one at a
+      // glance -- the two sit in the same ring.
+      ctx.lineWidth = 2.6;
+      ctx.strokeStyle = n.state === "allocated" ? "#4ade80" : "#c084fc";
+      ctx.stroke();
     } else if (n.kind === "notable") {
       ctx.lineWidth = 2.2;
       ctx.strokeStyle = n.state === "allocated" ? "#4ade80" : "#f59e0b";
@@ -557,7 +582,9 @@ export function drawPassiveTree(ctx, layout) {
     const ty = Math.min(h.sy + 14, GAME_HEIGHT - boxH - 4);
     ctx.fillStyle = "rgba(10,10,18,0.96)";
     ctx.fillRect(tx, ty, w, boxH);
-    ctx.strokeStyle = h.kind === "keystone" ? "#fde68a" : h.kind === "notable" ? "#f59e0b" : "#4a9eff";
+    ctx.strokeStyle = h.kind === "keystone" ? "#fde68a"
+      : h.kind === "greater" ? "#c084fc"
+        : h.kind === "notable" ? "#f59e0b" : "#4a9eff";
     ctx.lineWidth = 1;
     ctx.strokeRect(tx, ty, w, boxH);
     ctx.fillStyle = "#e5e7eb";
