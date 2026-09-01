@@ -39,6 +39,12 @@ const RULE_COMBINE = {
   // taking. Read by world.js's applyAttackCooldown.
   attackSpeedMult: 'product',
   castSpeedMult: 'product',
+  // SOMET-520. Melee geometry, in the units the weapon row already uses:
+  // reach in PIXELS (a tile is 64), arc in RADIANS. `sum` because a cluster's
+  // satellites add flat increments to a hub, and because an arc must be able
+  // to reach a full turn by addition rather than by compounding toward it.
+  meleeReachBonus: 'sum',
+  meleeArcBonus: 'sum',
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
 

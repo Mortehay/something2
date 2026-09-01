@@ -79,6 +79,17 @@ const RULE_KEYS = {
     combine: 'product',
     consumer: 'backend/src/authority/world.js — applyAttackCooldown(), projectile branch',
   },
+  // SOMET-520. Resolved ONCE at the top of attack()'s melee branch and passed
+  // to all four sites that need it -- including the attack descriptor, so the
+  // client draws the same arc the server hit-tested.
+  meleeReachBonus: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — attack(), melee branch `reach` (pixels)',
+  },
+  meleeArcBonus: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — attack(), melee branch `arc` (radians, clamped at TAU)',
+  },
 };
 
 // Clockwise from straight up, matching the spec §5.2 diagram exactly. ORDER IS

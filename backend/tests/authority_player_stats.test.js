@@ -441,3 +441,120 @@ test('a zero or missing speed multiplier is a no-op, never a division by zero', 
       `attackSpeedMult ${String(bad)} must leave the cooldown untouched`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-520: meleeReachBonus / meleeArcBonus.
+//
+// blade (id 1) has reach 190 and arc_width 1.8 rad. A creature at distance d
+// on the aim vector is hit iff d <= reach; one BEHIND the attacker is hit only
+// once the arc opens past PI.
+// ---------------------------------------------------------------------------
+
+function swing(rules, creatures) {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, invFor(1), undefined, 0,
+    rules ? withRules(rules) : BASE_STATS);
+  w.creatures.addCreatures(creatures);
+  const out = w.attack('u1', 1, 0); // aiming due EAST
+  return { world: w, out };
+}
+
+// Places a creature so its CENTRE sits exactly `dx` from the player's centre on
+// the aim vector. Both boxes are top-left anchored -- a creature is 48x48 and
+// meleeArcScan measures centre-to-centre, so passing the raw offset puts the
+// target 25px further out AND 24px off-axis, which is enough to miss for
+// reasons that have nothing to do with the rule under test. (It did: the first
+// draft of these tests failed here while the bonus was working correctly.)
+const CREATURE_BOX = 48;
+function eastOf(world, dx) {
+  const p = world.getPlayer('u1');
+  const half = CREATURE_BOX / 2;
+  return { x: p.x + p.width / 2 + dx - half, y: p.y + p.height / 2 - half };
+}
+
+test('a creature beyond the catalog reach is missed, and reached with the bonus', () => {
+  // 220px east, centre to centre: outside blade's 190 reach, inside 190 + 64.
+  const far = (world) => [{
+    id: 'c1', type: 'wolf', ...eastOf(world, 220), hp: 50, facing: 'S', color: '#f00',
+  }];
+  {
+    const w = armWorld();
+    w.addPlayer('u1', { x: 100, y: 100 }, invFor(1), undefined, 0, BASE_STATS);
+    w.creatures.addCreatures(far(w));
+    w.attack('u1', 1, 0);
+    assert.equal(w.creatures.all().find((c) => c.id === 'c1').hp, 50,
+      'without the bonus a target at 220px is out of a 190px reach');
+  }
+  {
+    const w = armWorld();
+    w.addPlayer('u1', { x: 100, y: 100 }, invFor(1), undefined, 0,
+      withRules({ meleeReachBonus: 64 }));
+    w.creatures.addCreatures(far(w));
+    w.attack('u1', 1, 0);
+    assert.ok(w.creatures.all().find((c) => c.id === 'c1').hp < 50,
+      'meleeReachBonus must extend the swing');
+  }
+});
+
+// The Whirlwind node. blade's 1.8 rad arc reaches +-0.9 rad of the aim vector,
+// nowhere near behind; a full turn reaches everything.
+test('meleeArcBonus opens the swing to a full circle and hits behind the player', () => {
+  const behind = (world) => [{
+    id: 'c1', type: 'wolf', ...eastOf(world, -120), hp: 50, facing: 'S', color: '#f00',
+  }];
+  {
+    const w = armWorld();
+    w.addPlayer('u1', { x: 100, y: 100 }, invFor(1), undefined, 0, BASE_STATS);
+    w.creatures.addCreatures(behind(w));
+    w.attack('u1', 1, 0);
+    assert.equal(w.creatures.all().find((c) => c.id === 'c1').hp, 50,
+      'a 1.8 rad arc aimed east must not reach a target due west');
+  }
+  {
+    const w = armWorld();
+    w.addPlayer('u1', { x: 100, y: 100 }, invFor(1), undefined, 0,
+      withRules({ meleeArcBonus: 5 })); // 1.8 + 5 clamps to TAU
+    w.creatures.addCreatures(behind(w));
+    w.attack('u1', 1, 0);
+    assert.ok(w.creatures.all().find((c) => c.id === 'c1').hp < 50,
+      'a circular swing must reach a target directly behind the attacker');
+  }
+});
+
+// THE TEST THE TICKET WAS WRITTEN AROUND. The descriptor's reach/arc are what
+// the CLIENT draws the swing with. If they carry the catalog values while the
+// server hit-tested widened ones, the swing connects outside its own animation
+// -- invisible to every other test here, and obvious to the first human who
+// plays it.
+test('the descriptor reports the SAME geometry the hit-test used', () => {
+  const { out } = swing({ meleeReachBonus: 64, meleeArcBonus: 0.4 }, []);
+  const d = out.attacks[0];
+  assert.equal(d.reach, 190 + 64, 'the client must be told the widened reach');
+  assert.equal(d.arc, 1.8 + 0.4, 'the client must be told the widened arc');
+});
+
+test('an unallocated player still gets exactly the catalog geometry', () => {
+  const { out } = swing(null, []);
+  assert.equal(out.attacks[0].reach, 190);
+  assert.equal(out.attacks[0].arc, 1.8);
+});
+
+// Past a full turn a wider arc means nothing, but an unclamped value would
+// keep growing and read as if further stacking still helped.
+test('the arc is clamped at a full turn no matter how much is stacked', () => {
+  for (const bonus of [5, 50, 1000]) {
+    const { out } = swing({ meleeArcBonus: bonus }, []);
+    assert.equal(out.attacks[0].arc, Math.PI * 2, `arc bonus ${bonus} must clamp to TAU`);
+  }
+});
+
+// world.js must not read w.reach/w.arc_width anywhere below the one place the
+// swing geometry is resolved -- a fifth site added later would silently use the
+// catalog value and reintroduce exactly the mismatch above.
+test('the swing geometry is resolved once, not re-read from the catalog', () => {
+  const src = fs.readFileSync(require.resolve('../src/authority/world.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const reads = src.match(/w\.reach|w\.arc_width/g) || [];
+  assert.equal(reads.length, 2,
+    `w.reach/w.arc_width read at ${reads.length} sites (expected 2: the single reach and arc resolution)`);
+});

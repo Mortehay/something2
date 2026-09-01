@@ -28,7 +28,7 @@ test('with no passives and no gear the base passes straight through', () => {
   // times a `product` rule is NaN.
   assert.deepStrictEqual(r.rules, {
     lifeCostMultiplier: 1, treeCharmBonus: 0, cooldownFloor: null, regenLifeShare: 0,
-    attackSpeedMult: 1, castSpeedMult: 1,
+    attackSpeedMult: 1, castSpeedMult: 1, meleeReachBonus: 0, meleeArcBonus: 0,
   });
 });
 

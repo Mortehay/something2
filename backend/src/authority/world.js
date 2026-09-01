@@ -32,6 +32,11 @@ const MAX_CREATURE_PROJECTILES = 120;
 const PLAYER_W = 64;
 const PLAYER_H = 64;
 const PLAYER_SPEED = 200; // client: this.speed(100) * speedMultiplier(2)
+// SOMET-520. A full turn, the ceiling on a widened melee arc. inArc compares
+// against cos(arc/2), so half a turn already reaches behind the attacker and
+// anything past a full turn is meaningless -- but an unclamped arc would keep
+// growing and read as if more stacking still helped.
+const TAU = Math.PI * 2;
 const PLAYER_MAX_HP = 100;
 const PLAYER_MAX_MANA = 100;
 const PLAYER_MANA_REGEN = 10; // per second
@@ -731,6 +736,27 @@ class World {
       const f = facingFromInput(sign(nx), sign(ny));
       if (f) p.facing = f;
       spendResources(p, w);
+      // SOMET-520. This swing's geometry, resolved ONCE, exactly like
+      // originLift and pacifiedFrom above and for a stronger reason: these two
+      // numbers are read at FOUR sites below -- the creature arc scan, the
+      // damage application, the player sweep, and the attack DESCRIPTOR the
+      // client draws the swing from.
+      //
+      // The descriptor is the one that matters. If the server hit-tests a
+      // widened arc while the client draws the catalog's, the swing connects
+      // outside its own animation: invisible to every unit test and obvious to
+      // the first human who plays it. Resolving once and passing `reach`/`arc`
+      // everywhere makes that mismatch impossible rather than merely unlikely,
+      // which is why w.reach and w.arc_width must not appear below this line.
+      //
+      // Bonuses are in PIXELS and RADIANS -- the units w.reach and w.arc_width
+      // already use. A tile is 64px, so the brief's "+0.5m" is +32.
+      const reach = w.reach + (p.stats.rules.meleeReachBonus || 0);
+      // Clamped at a full turn: past 2*PI a wider arc means nothing (inArc
+      // compares against cos(arc/2), and half a turn already reaches behind
+      // the attacker), but an unclamped value would keep growing and read as
+      // if further stacking still helped.
+      const arc = Math.min(TAU, w.arc_width + (p.stats.rules.meleeArcBonus || 0));
       // Queried BEFORE applyMeleeArc, which deletes whatever it kills: after
       // the fact a one-shot kill would look like a miss.
       // SOMET-286: one scan, two lists -- what the swing may damage, and what
@@ -740,7 +766,7 @@ class World {
       // as it was.
       const {
         hit: creatureTargets, blocked: blockedTargets,
-      } = this.creatures.meleeArcScan(cx, cy, nx, ny, w.reach, w.arc_width, pacifiedFrom);
+      } = this.creatures.meleeArcScan(cx, cy, nx, ny, reach, arc, pacifiedFrom);
       // Slice C (SOMET-160): where each impact happened. Captured HERE, before
       // applyMeleeArc, for exactly the reason creatureTargets is -- a
       // one-shot kill removes the creature, and reading its position
@@ -781,7 +807,7 @@ class World {
         }
       }
       const killed = this.creatures.applyMeleeArc(
-        cx, cy, nx, ny, w.reach, w.arc_width, weaponDamage(p, w), w.element, this.now, userId,
+        cx, cy, nx, ny, reach, arc, weaponDamage(p, w), w.element, this.now, userId,
         // SOMET-332: the augment stone's bonus packet, or null. Passed rather
         // than folded into weaponDamage above so the bonus is mitigated by the
         // AUGMENT's element, not the weapon's.
@@ -829,7 +855,7 @@ class World {
         // sparks off a target it did no damage to reads as a bug.
         if (pacifiedFrom != null && other.userId === pacifiedFrom) continue;
         const ocx = other.x + other.width / 2, ocy = other.y + other.height / 2;
-        if (inArc(cx, cy, nx, ny, ocx, ocy, w.reach, w.arc_width)
+        if (inArc(cx, cy, nx, ny, ocx, ocy, reach, arc)
             && hasLineOfSight(this.map, cx, cy, ocx, ocy)) {
           applyDamageWithEffects(other, weaponDamage(p, w), w.element, other.mit || NO_MITIGATION,
             this.now, playerKey(userId));
@@ -906,7 +932,7 @@ class World {
           // this attacker's feet. See attackOrigin.js for why a resolved
           // number travels rather than the authored origin NAME.
           o: originLift,
-          reach: w.reach, arc: w.arc_width,
+          reach, arc,
           hit: landed,
         }],
         // Slice C: exactly the targets this swing damaged, each with the
