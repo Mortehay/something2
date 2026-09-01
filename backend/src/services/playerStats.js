@@ -224,6 +224,15 @@ function derivePlayerStats(progression, classPools = null) {
       cooldownFloorOf(progression),
       round4(1 / (1 + C.HASTE_PER_DEX * above('dexterity'))),
     ),
+    // SOMET-519. The RESOLVED floor, carried so the authority can bound the
+    // cooldown AFTER it has applied attackSpeedMult/castSpeedMult.
+    //
+    // Flooring `cooldownMult` above is not enough on its own: the authority
+    // divides it by a speed multiplier, and `Math.max(floor, x) / speed` is
+    // unbounded below. Exposing the same resolved number both places read is
+    // what stops world.js re-deriving its own floor from C.MIN_COOLDOWN_MULT
+    // and silently ignoring a player's cooldownFloor node.
+    cooldownFloor: cooldownFloorOf(progression),
     manaRegen: round4(C.MANA_REGEN_BASE + C.MANA_REGEN_PER_WIS * above('wisdom')),
     // The fraction of an item's value a merchant pays. Capped strictly below
     // 1.0: see SELL_FRACTION_MAX in progressionConstants.js -- this is a

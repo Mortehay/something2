@@ -372,3 +372,72 @@ test('the rider never overheals past maxHp', () => {
   w.tick(1);
   assert.equal(p.hp, p.maxHp);
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-519: attackSpeedMult / castSpeedMult.
+//
+// Two rules rather than one, branching on the WEAPON's kind. Both directions
+// are asserted for each branch: a test that only checked "melee got faster"
+// would pass just as well on a formula that ignored w.kind entirely and sped
+// up everything, which is precisely the bug the split exists to prevent.
+//
+// blade (id 1) has cooldown 0.5; bow (id 4) has cooldown 0.6.
+// ---------------------------------------------------------------------------
+
+function cdAfterAttack(typeId, rules) {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, invFor(typeId), undefined, 0,
+    rules ? withRules(rules) : BASE_STATS);
+  w.attack('u1', 1, 0);
+  return w.getPlayer('u1')._attackCd;
+}
+
+test('with no speed nodes the cooldown is exactly the weapon catalog value', () => {
+  assert.equal(cdAfterAttack(1, null), 0.5);
+  assert.equal(cdAfterAttack(4, null), 0.6);
+});
+
+test('attackSpeedMult speeds up melee and leaves projectiles alone', () => {
+  assert.equal(cdAfterAttack(1, { attackSpeedMult: 2 }), 0.25);
+  assert.equal(cdAfterAttack(4, { attackSpeedMult: 2 }), 0.6,
+    'a melee attack-speed node must not accelerate a bow');
+});
+
+test('castSpeedMult speeds up projectiles and leaves melee alone', () => {
+  assert.equal(cdAfterAttack(4, { castSpeedMult: 2 }), 0.3);
+  assert.equal(cdAfterAttack(1, { castSpeedMult: 2 }), 0.5,
+    'a cast-speed node must not accelerate a sword');
+});
+
+// items.js's activeWeaponType spreads `...type` and overrides only element,
+// mana_cost, damage and cooldown -- so `kind` is ALWAYS the weapon's own and a
+// stone-augmented sword stays melee. Weapon 2 is exactly that: a melee blade
+// with a fire stone socketed. The weapon decides whether you swing or shoot.
+test('a socketed spell stone on a melee weapon follows the MELEE branch', () => {
+  assert.equal(cdAfterAttack(2, { attackSpeedMult: 2 }), 0.25,
+    'the weapon is still melee, so attackSpeedMult applies');
+  assert.equal(cdAfterAttack(2, { castSpeedMult: 2 }), 0.5,
+    'a socketed stone does not make a sword a spell for attack-rate purposes');
+});
+
+// THE BOUND. cooldownMult arrives already floored, but floor/speed is
+// unbounded below -- flooring one factor does not bound a product. At
+// attackSpeedMult 4 the scaled multiplier (0.25) is under the 0.4 floor, so
+// the floor must clamp it: 0.5 * 0.4 = 0.2, not 0.5/4 = 0.125.
+test('no stack of speed nodes can drive the interval below the floor', () => {
+  assert.equal(cdAfterAttack(1, { attackSpeedMult: 4 }), 0.2);
+  assert.equal(cdAfterAttack(1, { attackSpeedMult: 100 }), 0.2);
+});
+
+// And the floor that clamps it is the PLAYER'S floor, not the bare constant.
+// An Archer at cooldownFloor 0.32 keeps more of their haste.
+test('the clamp honours a cooldownFloor node rather than the constant', () => {
+  assert.equal(cdAfterAttack(1, { attackSpeedMult: 100, cooldownFloor: 0.32 }), 0.16);
+});
+
+test('a zero or missing speed multiplier is a no-op, never a division by zero', () => {
+  for (const bad of [0, null, undefined, NaN, -1]) {
+    assert.equal(cdAfterAttack(1, { attackSpeedMult: bad }), 0.5,
+      `attackSpeedMult ${String(bad)} must leave the cooldown untouched`);
+  }
+});

@@ -31,6 +31,14 @@ const RULE_COMBINE = {
   treeCharmBonus: 'sum',
   cooldownFloor: 'min',
   regenLifeShare: 'sum',
+  // SOMET-519. Attack rate, split in two so a Warrior's attack-speed nodes
+  // cannot accelerate a socketed spell stone and a Mage's cast-speed nodes
+  // cannot speed up a sword. `product` because each node is authored as a
+  // multiplier (1.10 = +10%), so four of them compound rather than adding to
+  // +40% -- which is what makes a cluster's fourth satellite still feel worth
+  // taking. Read by world.js's applyAttackCooldown.
+  attackSpeedMult: 'product',
+  castSpeedMult: 'product',
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
 

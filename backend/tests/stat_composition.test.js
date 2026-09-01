@@ -23,8 +23,13 @@ test('with no passives and no gear the base passes straight through', () => {
   assert.strictEqual(r.charisma, 5);
   assert.deepStrictEqual(r.sources.strength, { base: 5, tree: 0, gear: 0 });
   assert.deepStrictEqual(r.modifiers, []);
-  assert.deepStrictEqual(r.rules,
-    { lifeCostMultiplier: 1, treeCharmBonus: 0, cooldownFloor: null, regenLifeShare: 0 });
+  // Every rule at its identity. EXHAUSTIVE: a rule added to RULE_COMBINE with
+  // the wrong identity would reach its consumer as undefined, and undefined
+  // times a `product` rule is NaN.
+  assert.deepStrictEqual(r.rules, {
+    lifeCostMultiplier: 1, treeCharmBonus: 0, cooldownFloor: null, regenLifeShare: 0,
+    attackSpeedMult: 1, castSpeedMult: 1,
+  });
 });
 
 test('base + tree + gear, itemised — STR 19 = 5 base + 10 tree + 4 gear', () => {

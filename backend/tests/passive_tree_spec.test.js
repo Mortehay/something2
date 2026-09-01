@@ -99,8 +99,11 @@ test('the element vocabulary is the authority\'s, not a second copy that can dri
 });
 
 test('every rule key names the module that consumes it and how duplicates combine', () => {
+  // EXHAUSTIVE on purpose: adding a rule must be a deliberate edit here, not
+  // something that slips in. SOMET-519 added the two speed rules.
   assert.deepStrictEqual(Object.keys(RULE_KEYS).sort(),
-    ['cooldownFloor', 'lifeCostMultiplier', 'regenLifeShare', 'treeCharmBonus']);
+    ['attackSpeedMult', 'castSpeedMult', 'cooldownFloor', 'lifeCostMultiplier',
+      'regenLifeShare', 'treeCharmBonus']);
   for (const [key, def] of Object.entries(RULE_KEYS)) {
     assert.ok(['sum', 'product', 'min'].includes(def.combine), `${key}.combine`);
     assert.ok(typeof def.consumer === 'string' && def.consumer.length > 0, `${key}.consumer`);
@@ -108,6 +111,11 @@ test('every rule key names the module that consumes it and how duplicates combin
   assert.strictEqual(RULE_KEYS.lifeCostMultiplier.combine, 'product');
   assert.strictEqual(RULE_KEYS.treeCharmBonus.combine, 'sum');
   assert.strictEqual(RULE_KEYS.cooldownFloor.combine, 'min');
+  // SOMET-519: `product`, so four +10% satellites compound to x1.46 rather
+  // than adding to +40%. That is what keeps a cluster's last satellite worth
+  // taking.
+  assert.strictEqual(RULE_KEYS.attackSpeedMult.combine, 'product');
+  assert.strictEqual(RULE_KEYS.castSpeedMult.combine, 'product');
 });
 
 test('PASSIVE_TREE_SPEC is the single bundle the generator takes', () => {

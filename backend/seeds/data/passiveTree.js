@@ -56,13 +56,28 @@ const RULE_KEYS = {
     combine: 'sum',
     consumer: 'backend/src/services/charm.js — charmBudget() (contract §2, Group B T5)',
   },
+  // SOMET-514 WIRED THESE TWO. Both previously said "wiring is a follow-up"
+  // here and had no consumer at all, which made the Archer and Monk start
+  // nodes -- whose only grants these are -- grant nothing whatsoever. The
+  // `consumer` field below is now true, and passive_rules.test.js's source
+  // gate reads backend/src/ to keep it true.
   cooldownFloor: {
     combine: 'min',
-    consumer: 'backend/src/services/playerStats.js — MIN_COOLDOWN_MULT (wiring is a follow-up: playerStats.js belongs to Group A T2 under the contract)',
+    consumer: 'backend/src/services/playerStats.js — cooldownFloorOf(), floors cooldownMult',
   },
   regenLifeShare: {
     combine: 'sum',
-    consumer: 'backend/src/authority/world.js — the mana-regen tick (wiring is a follow-up)',
+    consumer: 'backend/src/authority/world.js — tick()\'s mana-regen line, heals a share of the mana actually regenerated',
+  },
+  // SOMET-519. Two rules, not one, so the weapon KIND decides which applies:
+  // a Warrior's attack-speed nodes must not accelerate a socketed spell stone.
+  attackSpeedMult: {
+    combine: 'product',
+    consumer: 'backend/src/authority/world.js — applyAttackCooldown(), melee branch',
+  },
+  castSpeedMult: {
+    combine: 'product',
+    consumer: 'backend/src/authority/world.js — applyAttackCooldown(), projectile branch',
   },
 };
 

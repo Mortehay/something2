@@ -103,7 +103,28 @@ function elementDamageMult(stats, element) {
 // exactly one reference to that field so a third site cannot silently
 // reappear.
 function applyAttackCooldown(p, w) {
-  p._attackCd = w.cooldown * p.stats.cooldownMult;
+  // SOMET-519. The tree's attack-rate rules, applied at the ONE site that
+  // reads w.cooldown (a test asserts there is exactly one).
+  //
+  // THE BRANCH IS THE FEATURE. `kind` is always the WEAPON's own -- items.js's
+  // activeWeaponType spreads `...type` and overrides only element, mana_cost,
+  // damage and cooldown, so a socketed spell stone on a sword is still
+  // kind:'melee'. That is the intended reading: the weapon decides whether you
+  // are swinging or shooting, so a Warrior's attack-speed cluster speeds up
+  // that stone-augmented sword, and a Mage's Quickcast does not.
+  //
+  // Without the branch these would be one stat wearing two labels.
+  const speed = w.kind === 'melee'
+    ? p.stats.rules.attackSpeedMult
+    : p.stats.rules.castSpeedMult;
+  const scaled = p.stats.cooldownMult / (speed > 0 ? speed : 1);
+  // FLOORED HERE, not in derivePlayerStats. cooldownMult arrives already
+  // floored, but `floor / speed` is unbounded below -- flooring one factor
+  // does not bound a product, and a stack of speed nodes would otherwise drive
+  // the attack interval toward zero. stats.cooldownFloor is the SAME resolved
+  // number derivePlayerStats used, so a player's cooldownFloor node is honored
+  // here rather than being replaced by the bare constant.
+  p._attackCd = w.cooldown * Math.max(p.stats.cooldownFloor, scaled);
 }
 
 // THE ONE ATTACK RESOURCE GATE (SOMET-472; spec 8.3: "the check lives in the
