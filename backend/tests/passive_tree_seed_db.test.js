@@ -31,9 +31,9 @@ test('passive tree seeder', { skip }, async (t) => {
 
     await t.test('inserts exactly the generated graph', async () => {
       const n = await pool.query('SELECT count(*)::int AS c FROM passive_nodes');
-      assert.strictEqual(n.rows[0].c, 1806);
+      assert.strictEqual(n.rows[0].c, 1843);
       const e = await pool.query('SELECT count(*)::int AS c FROM passive_edges');
-      assert.strictEqual(e.rows[0].c, 2382);
+      assert.strictEqual(e.rows[0].c, 2419);
       const k = await pool.query("SELECT count(*)::int AS c FROM passive_nodes WHERE kind = 'keystone'");
       assert.strictEqual(k.rows[0].c, 30);
       const s = await pool.query('SELECT count(*)::int AS c FROM passive_nodes WHERE start_class IS NOT NULL');
@@ -49,9 +49,9 @@ test('passive tree seeder', { skip }, async (t) => {
       const before = await pool.query('SELECT id FROM passive_nodes WHERE key = $1', ['start-strength']);
       await seedPassiveTree(pool, { quiet: true });
       const n = await pool.query('SELECT count(*)::int AS c FROM passive_nodes');
-      assert.strictEqual(n.rows[0].c, 1806);
+      assert.strictEqual(n.rows[0].c, 1843);
       const e = await pool.query('SELECT count(*)::int AS c FROM passive_edges');
-      assert.strictEqual(e.rows[0].c, 2382);
+      assert.strictEqual(e.rows[0].c, 2419);
       const after = await pool.query('SELECT id FROM passive_nodes WHERE key = $1', ['start-strength']);
       // Same id, so a character_passives row pointing at it survives a reseed.
       assert.strictEqual(after.rows[0].id, before.rows[0].id);
