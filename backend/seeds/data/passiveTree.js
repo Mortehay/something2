@@ -90,6 +90,20 @@ const RULE_KEYS = {
     combine: 'sum',
     consumer: 'backend/src/authority/world.js — attack(), melee branch `arc` (radians, clamped at TAU)',
   },
+  // SOMET-521. The volley. Cost and cooldown are paid once per volley, not per
+  // projectile -- see attack()'s projectile branch.
+  projectileCount: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — attack(), projectile branch spawns 1 + this, fanned',
+  },
+  projectileSpeedMult: {
+    combine: 'product',
+    consumer: 'backend/src/authority/world.js — attack(), scales shotWeapon.projectile_speed',
+  },
+  pierceBonus: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — attack(), shotWeapon.pierce, applied BEFORE spawn\'s aoe clamp',
+  },
 };
 
 // Clockwise from straight up, matching the spec §5.2 diagram exactly. ORDER IS

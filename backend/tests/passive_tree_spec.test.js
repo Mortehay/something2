@@ -103,7 +103,8 @@ test('every rule key names the module that consumes it and how duplicates combin
   // something that slips in. SOMET-519 added the two speed rules.
   assert.deepStrictEqual(Object.keys(RULE_KEYS).sort(),
     ['attackSpeedMult', 'castSpeedMult', 'cooldownFloor', 'lifeCostMultiplier',
-      'meleeArcBonus', 'meleeReachBonus', 'regenLifeShare', 'treeCharmBonus']);
+      'meleeArcBonus', 'meleeReachBonus', 'pierceBonus', 'projectileCount',
+      'projectileSpeedMult', 'regenLifeShare', 'treeCharmBonus']);
   for (const [key, def] of Object.entries(RULE_KEYS)) {
     assert.ok(['sum', 'product', 'min'].includes(def.combine), `${key}.combine`);
     assert.ok(typeof def.consumer === 'string' && def.consumer.length > 0, `${key}.consumer`);
@@ -120,6 +121,10 @@ test('every rule key names the module that consumes it and how duplicates combin
   // full turn by addition rather than compounding toward it forever.
   assert.strictEqual(RULE_KEYS.meleeReachBonus.combine, 'sum');
   assert.strictEqual(RULE_KEYS.meleeArcBonus.combine, 'sum');
+  // SOMET-521: whole extra shots and whole extra targets add; speed compounds.
+  assert.strictEqual(RULE_KEYS.projectileCount.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.pierceBonus.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.projectileSpeedMult.combine, 'product');
 });
 
 test('PASSIVE_TREE_SPEC is the single bundle the generator takes', () => {

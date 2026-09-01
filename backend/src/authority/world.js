@@ -17,7 +17,7 @@ const { unequipBlockers } = require('./equipRequirements.js');
 const { loadProgression } = require('../services/progressionStore.js');
 const { GroundItemSim } = require('./groundItems');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerStats.js');
-const { STAMINA_BASE } = require('../services/progressionConstants.js');
+const { STAMINA_BASE, PROJECTILE_FAN_RAD } = require('../services/progressionConstants.js');
 const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
 const { getSkillById } = require('../../seeds/data/skills.js');
 
@@ -959,14 +959,55 @@ class World {
     // projectile
     const f = facingFromInput(sign(nx), sign(ny));
     if (f) p.facing = f;
+    // SOMET-521: spent ONCE, for the whole volley, and deliberately left above
+    // the loop below. A volley that charged per projectile would make Volley a
+    // DOWNGRADE -- three shots for three times the mana -- and moving the spawn
+    // into a loop is exactly the edit that sweeps the cost in with it.
+    // applyAttackCooldown is likewise called once, after the loop. Ammo is
+    // spent by server.js before attack() runs, so one shot costs one arrow
+    // however many projectiles leave the bow.
     spendResources(p, w);
-    this.projectiles.spawn({
-      ownerId: userId, x: cx, y: cy, nx, ny,
+
+    // SOMET-521. This volley's weapon, adjusted by the tree's projectile rules.
+    // Built ONCE and shared by every shot: `w` is the shared in-memory catalog
+    // row, so it is spread rather than mutated -- writing to it would leak one
+    // player's tree onto every other player's weapon (the same reason the
+    // augment packet is spread).
+    //
+    // pierce is adjusted BEFORE spawn's merged-state clamp, which is the
+    // correct side: a contact detonator still collapses to 1, so pierceBonus
+    // cannot hand an AoE shot the pierce that item_types_aoe_pierce_check
+    // exists to forbid. A max_range shot keeps the bonus, because that shot is
+    // DEFINED by flying through what it meets.
+    const shotRules = p.stats.rules;
+    const speedMult = shotRules.projectileSpeedMult > 0 ? shotRules.projectileSpeedMult : 1;
+    const pierceBonus = Math.max(0, Math.floor(shotRules.pierceBonus || 0));
+    const shotWeapon = {
+      ...(augment === null ? w : { ...w, augment }),
+      projectile_speed: w.projectile_speed * speedMult,
+      pierce: w.pierce + pierceBonus,
+    };
+
+    // 1 + the tree's extra shots, fanned symmetrically about the aim vector so
+    // three projectiles are centre/left/right rather than three on one line.
+    const extraShots = Math.max(0, Math.floor(shotRules.projectileCount || 0));
+    const shots = 1 + extraShots;
+    for (let i = 0; i < shots; i += 1) {
+      // Symmetric about 0: a single shot gets offset 0 and flies exactly where
+      // it was aimed, so an unallocated player's shot is byte-identical to
+      // before this ticket.
+      const offset = (i - (shots - 1) / 2) * PROJECTILE_FAN_RAD;
+      const cosO = Math.cos(offset);
+      const sinO = Math.sin(offset);
+      const fnx = nx * cosO - ny * sinO;
+      const fny = nx * sinO + ny * cosO;
+      this.projectiles.spawn({
+      ownerId: userId, x: cx, y: cy, nx: fnx, ny: fny,
       // SOMET-495: the weapon with its augment packet already scaled by the
       // tree's per-element multiplier (see `augment` above). Spread rather than
       // mutated -- `w` is the shared in-memory catalog row, and writing to it
       // would leak one player's tree onto every other player's weapon.
-      weapon: augment === null ? w : { ...w, augment },
+      weapon: shotWeapon,
       damage: weaponDamage(p, w),
       // SOMET-495: the tree's on-hit riders, snapshotted at LAUNCH for the same
       // reason `damage` and `pacifiedFrom` are -- a respec mid-flight must not
@@ -986,7 +1027,8 @@ class World {
       // the charm can lapse mid-flight, and an arrow loosed while pacified must
       // not become lethal to the charmer because it took 300ms to arrive.
       pacifiedFrom,
-    });
+      });
+    }
     applyAttackCooldown(p, w);
     // Projectiles already render as a moving dot; their trail effects are
     // slice D, so slice A emits no descriptor for them. A projectile never

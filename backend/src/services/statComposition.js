@@ -45,6 +45,13 @@ const RULE_COMBINE = {
   // to reach a full turn by addition rather than by compounding toward it.
   meleeReachBonus: 'sum',
   meleeArcBonus: 'sum',
+  // SOMET-521. Projectile rules. count and pierce are `sum` because they are
+  // whole extra shots and whole extra targets -- +1 and +1 is +2, never x1.
+  // Speed is `product` for the same reason the attack-rate rules are: each
+  // node is authored as a multiplier.
+  projectileCount: 'sum',
+  pierceBonus: 'sum',
+  projectileSpeedMult: 'product',
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
 

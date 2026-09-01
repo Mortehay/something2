@@ -558,3 +558,122 @@ test('the swing geometry is resolved once, not re-read from the catalog', () => 
   assert.equal(reads.length, 2,
     `w.reach/w.arc_width read at ${reads.length} sites (expected 2: the single reach and arc resolution)`);
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-521: projectileCount / projectileSpeedMult / pierceBonus.
+//
+// bow (id 4) has cooldown 0.6, projectile_speed 900, pierce 1, mana_cost 0.
+// ---------------------------------------------------------------------------
+
+function fire(rules, weaponId = 4) {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, invFor(weaponId), undefined, 0,
+    rules ? withRules(rules) : BASE_STATS);
+  w.attack('u1', 1, 0);
+  return w;
+}
+
+test('one shot by default, 1 + projectileCount with the nodes', () => {
+  assert.equal(fire(null).projectiles.projectiles.length, 1);
+  assert.equal(fire({ projectileCount: 1 }).projectiles.projectiles.length, 2);
+  // Volley plus both satellites: the full +3 the cluster is authored to reach.
+  assert.equal(fire({ projectileCount: 3 }).projectiles.projectiles.length, 4);
+});
+
+// A single shot must fly EXACTLY where it was aimed -- the fan is symmetric
+// about 0, so an unallocated player's shot is unchanged by this ticket.
+test('an unallocated shot flies exactly on the aim vector', () => {
+  const [shot] = fire(null).projectiles.projectiles;
+  assert.equal(shot.vx, 900);
+  assert.equal(shot.vy, 0);
+});
+
+// Three shots are centre/left/right, not three stacked on one line. The centre
+// one keeps the aim vector; the outer two mirror each other.
+test('a volley is fanned symmetrically about the aim vector', () => {
+  const shots = fire({ projectileCount: 2 }).projectiles.projectiles;
+  assert.equal(shots.length, 3);
+  const [left, centre, right] = shots;
+  assert.equal(centre.vy, 0, 'the middle shot keeps the aim vector');
+  assert.ok(left.vy < 0 && right.vy > 0, 'the outer shots must diverge');
+  assert.ok(Math.abs(left.vy + right.vy) < 1e-9, 'the fan must be symmetric');
+  // All three keep the same speed -- fanning rotates, it must not rescale.
+  for (const s of shots) {
+    assert.ok(Math.abs(Math.hypot(s.vx, s.vy) - 900) < 1e-9, 'fanning must not change speed');
+  }
+});
+
+// THE COST TEST. Moving the spawn into a loop is exactly the edit that sweeps
+// spendResources in with it, and a volley that charged per projectile would
+// make Volley a DOWNGRADE -- three shots for three times the cost.
+//
+// IT MEASURES STAMINA, NOT MANA, AND THAT IS LOAD-BEARING. items.js's
+// activeWeaponType ZEROES mana_cost on an unsocketed weapon, so a fixture
+// wand with mana_cost 20 is charged nothing at runtime. The first draft of
+// this test did exactly that and passed against a deliberately broken build
+// with spendResources moved inside the loop -- it was measuring a cost the
+// game never charges. spendResources takes stamina unconditionally
+// (world.js's own `const staminaCost = w.stamina_cost || 0`), so stamina is
+// the pool that can actually witness a double-spend.
+test('a volley costs one shot of resources and one cooldown, however many fly', () => {
+  const costly = new Map(TYPES);
+  costly.set(9, {
+    id: 9, name: 'sling', category: 'weapon', kind: 'projectile', damage: 10, cooldown: 0.6,
+    range: 700, projectile_speed: 900, projectile_radius: 8, pierce: 1,
+    mana_cost: 0, stamina_cost: 20, element: null,
+  });
+  const run = (count) => {
+    const w = new World(stubMap(), costly, 1);
+    w.addPlayer('u1', { x: 100, y: 100 },
+      { items: [{ id: 'i9', typeId: 9 }], equipment: { main_hand: 'i9' } },
+      undefined, 0, withRules({ projectileCount: count }));
+    w.attack('u1', 1, 0);
+    const p = w.getPlayer('u1');
+    return { stamina: p.stamina, cd: p._attackCd, shots: w.projectiles.projectiles.length };
+  };
+  const one = run(0);
+  const four = run(3);
+  assert.equal(one.shots, 1);
+  assert.equal(four.shots, 4);
+  // The fixture must actually cost something, or everything below is vacuous.
+  assert.ok(one.stamina < 100, 'the fixture weapon must really charge stamina');
+  assert.equal(four.stamina, one.stamina, 'four projectiles must cost one shot of stamina');
+  assert.equal(four.cd, one.cd, 'four projectiles must stamp one cooldown');
+});
+
+test('projectileSpeedMult scales the shot, pierceBonus adds targets', () => {
+  const [fast] = fire({ projectileSpeedMult: 1.5 }).projectiles.projectiles;
+  assert.equal(Math.hypot(fast.vx, fast.vy), 1350);
+  const [pierced] = fire({ pierceBonus: 2 }).projectiles.projectiles;
+  assert.equal(pierced.pierceLeft, 3, 'bow pierce 1 + 2');
+});
+
+// spawn's merged-state clamp collapses a CONTACT detonator to pierce 1,
+// because item_types_aoe_pierce_check ("a detonating projectile may not also
+// pierce") is a row-level check that cannot see merged state. pierceBonus is
+// applied BEFORE that clamp, so it cannot hand an AoE shot the pierce the
+// constraint exists to forbid.
+test('pierceBonus cannot restore pierce on a detonating projectile', () => {
+  const boom = new Map(TYPES);
+  boom.set(8, {
+    id: 8, name: 'grenade-launcher', category: 'weapon', kind: 'projectile', damage: 10,
+    cooldown: 0.6, range: 700, projectile_speed: 900, projectile_radius: 8, pierce: 1,
+    aoe_radius: 60, mana_cost: 0, element: null,
+  });
+  const w = new World(stubMap(), boom, 1);
+  w.addPlayer('u1', { x: 100, y: 100 },
+    { items: [{ id: 'i8', typeId: 8 }], equipment: { main_hand: 'i8' } },
+    undefined, 0, withRules({ pierceBonus: 5 }));
+  w.attack('u1', 1, 0);
+  assert.equal(w.projectiles.projectiles[0].pierceLeft, 1,
+    'a contact detonator must still collapse to a single target');
+});
+
+test('a zero or missing projectile rule leaves the shot untouched', () => {
+  for (const bad of [0, null, undefined, NaN, -3]) {
+    const w = fire({ projectileCount: bad, projectileSpeedMult: bad, pierceBonus: bad });
+    assert.equal(w.projectiles.projectiles.length, 1, `count ${String(bad)}`);
+    assert.equal(w.projectiles.projectiles[0].vx, 900, `speed ${String(bad)}`);
+    assert.equal(w.projectiles.projectiles[0].pierceLeft, 1, `pierce ${String(bad)}`);
+  }
+});

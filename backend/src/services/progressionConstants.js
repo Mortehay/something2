@@ -56,6 +56,13 @@ const SPELL_PER_INT = 0.05;
 const HASTE_PER_DEX = 0.03;
 const MIN_COOLDOWN_MULT = 0.4;
 
+// SOMET-521. The angle between adjacent projectiles in a multi-shot volley,
+// in radians (~9 degrees). A volley is fanned symmetrically about the aim
+// vector, so three shots are centre/left/right rather than three stacked on
+// one line -- which is what makes +2 projectiles read as a spread rather than
+// as one thicker arrow.
+const PROJECTILE_FAN_RAD = 0.16;
+
 // WIS -> mana regen. Base matches PLAYER_MANA_REGEN (authority/world.js:19).
 // Contrary to the design doc, mana regen ALREADY EXISTS -- WIS scales a live
 // constant here, it does not introduce a new tick.
@@ -123,6 +130,7 @@ module.exports = {
   BASE_STAT, STAT_KEYS, MAX_LEVEL,
   HP_BASE, HP_PER_CON, MANA_BASE, MANA_PER_INT, STAMINA_BASE,
   MELEE_PER_STR, SPELL_PER_INT, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
+  PROJECTILE_FAN_RAD,
   MANA_REGEN_BASE, MANA_REGEN_PER_WIS,
   PRICE_PER_CHA, SELL_FRACTION_BASE, SELL_FRACTION_MAX,
   XP_BASE, XP_EXPONENT, XP_KILL_BASE, XP_LEVEL_DIFF_SLOPE, XP_LEVEL_DIFF_MAX,

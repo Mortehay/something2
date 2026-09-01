@@ -29,6 +29,7 @@ test('with no passives and no gear the base passes straight through', () => {
   assert.deepStrictEqual(r.rules, {
     lifeCostMultiplier: 1, treeCharmBonus: 0, cooldownFloor: null, regenLifeShare: 0,
     attackSpeedMult: 1, castSpeedMult: 1, meleeReachBonus: 0, meleeArcBonus: 0,
+    projectileCount: 0, pierceBonus: 0, projectileSpeedMult: 1,
   });
 });
 
