@@ -37,13 +37,20 @@ describe('vocabulary', () => {
     expect(GRANT_TYPES.map((g) => g.type)).toEqual(
       ['stat', 'resource', 'damage', 'resist', 'status', 'rule'],
     );
-    expect(KINDS).toEqual(['minor', 'notable', 'keystone']);
+    // SOMET-517's greater tier. 'start' stays absent: a start node is granted,
+    // not allocated, and must never be authorable in the admin form.
+    expect(KINDS).toEqual(['minor', 'notable', 'greater', 'keystone']);
     expect(SECTORS).toEqual(
       ['core', 'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'],
     );
-    expect(RULE_KEYS).toEqual(
-      ['lifeCostMultiplier', 'treeCharmBonus', 'cooldownFloor', 'regenLifeShare'],
-    );
+    // Hand-written, so adding a rule stays a deliberate edit in three places:
+    // the backend seed, the form, and here.
+    expect(RULE_KEYS).toEqual([
+      'lifeCostMultiplier', 'treeCharmBonus', 'cooldownFloor', 'regenLifeShare',
+      'attackSpeedMult', 'castSpeedMult', 'meleeReachBonus', 'meleeArcBonus',
+      'projectileCount', 'projectileSpeedMult', 'pierceBonus',
+      'auraLeech', 'auraRadius',
+    ]);
   });
 
   // A copied vocabulary that drifts is the quietest failure this editor can

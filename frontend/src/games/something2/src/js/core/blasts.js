@@ -67,3 +67,34 @@ export function blastScreenRadiusX(worldRadius) {
 // PATH, and `elementColor` from blasts.js is what the draw loop, the status
 // tint and their tests already reach for.
 export { elementColor } from "./elements.js";
+
+
+// SOMET-523. The screen geometry of a player's leech aura, as a pure function.
+//
+// Split out of RenderSystem so it can be tested without a canvas -- the ring
+// is the only thing that tells a Cultist which creatures are feeding them, and
+// "it looked right in one screenshot" is not a test.
+//
+// Returns null when there is nothing to draw. A NULL RETURN IS THE FEATURE:
+// Canvas 2D silently DROPS a path with non-finite coordinates -- no error,
+// nothing rendered -- so a missing or malformed `aura` reaching ellipse() as
+// NaN would delete the draw, and depending on ordering can take the rest of
+// the pass with it. Everything is filtered here rather than trusted, and
+// ellipse() additionally THROWS on a negative radius (see RenderSystem's own
+// note), which would break the whole frame rather than one ring.
+export function auraRingGeometry(player, worldToScreen) {
+  if (!player) return null;
+  const radius = Number(player.aura);
+  if (!Number.isFinite(radius) || radius <= 0) return null;
+  const cx = Number(player.x);
+  const cy = Number(player.y);
+  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+  const s = worldToScreen(cx, cy);
+  if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) return null;
+  // A world circle projects to a 2:1 ellipse on the iso ground plane, never a
+  // circle: stroking a circle here would claim the aura reaches further
+  // north/south than it actually leeches.
+  const rx = blastScreenRadiusX(radius);
+  if (!Number.isFinite(rx) || rx <= 0) return null;
+  return { x: s.x, y: s.y, rx, ry: rx / 2 };
+}

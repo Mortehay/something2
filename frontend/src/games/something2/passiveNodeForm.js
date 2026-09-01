@@ -14,13 +14,23 @@
 // server rejects, and nobody can explain; a stat name that exists there and not
 // here is a grant the editor silently cannot express.
 
-export const KINDS = ['minor', 'notable', 'keystone'];
+// SOMET-517 added `greater`. 'start' is deliberately absent: a start node is
+// structural, granted rather than allocated, and must not be authorable here.
+export const KINDS = ['minor', 'notable', 'greater', 'keystone'];
 export const SECTORS = ['core', 'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 export const STATS = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 export const POOLS = ['hp', 'mana', 'stamina'];
 export const ELEMENTS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
 export const STATUSES = ['burn', 'chill', 'shock'];
-export const RULE_KEYS = ['lifeCostMultiplier', 'treeCharmBonus', 'cooldownFloor', 'regenLifeShare'];
+// Mirrors backend/seeds/data/passiveTree.js RULE_KEYS; passiveNodeForm.test.js
+// asserts the two lists agree, so a rule the backend understands but this form
+// omits is a rule no admin can author. Grew from 4 to 13 across SOMET-514..522.
+export const RULE_KEYS = [
+  'lifeCostMultiplier', 'treeCharmBonus', 'cooldownFloor', 'regenLifeShare',
+  'attackSpeedMult', 'castSpeedMult', 'meleeReachBonus', 'meleeArcBonus',
+  'projectileCount', 'projectileSpeedMult', 'pierceBonus',
+  'auraLeech', 'auraRadius',
+];
 
 // `field` is the extra key this grant type carries, and `options` is what the
 // editor's dropdown for it offers. One table drives the form, the payload

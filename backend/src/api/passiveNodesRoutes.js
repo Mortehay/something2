@@ -25,7 +25,11 @@ const { GRANT_TYPES, RULE_KEYS } = require('../../seeds/data/passiveTree.js');
 // 'start' is deliberately absent: kind = 'start' and a non-null start_class
 // are the same fact (passive_nodes_start_class_check), so an editor that could
 // set it would either violate that CHECK or hand a class a second start node.
-const KINDS = ['minor', 'notable', 'keystone'];
+// SOMET-517 added `greater`. Without it this route REJECTS an admin editing a
+// greater node -- the tree can generate them but nobody can touch one, and the
+// failure would be a 400 on save rather than anything visible in the editor.
+// The admin form's own KINDS list is asserted against this one.
+const KINDS = ['minor', 'notable', 'greater', 'keystone'];
 const SECTORS = ['core', 'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 // Filters may name 'start' even though the editor may not write it -- an admin
 // still needs to be able to LOOK at the six start nodes.

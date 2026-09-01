@@ -17,7 +17,9 @@ import { layoutInventory, drawInventory } from "./inventoryPanel.js";
 import { layoutPassiveTree, drawPassiveTree } from "./passiveTreePanel.js";
 import { layoutSkillsPanel, drawSkillsPanel } from "./skillsPanel.js";
 import { isTransformationSkill, getRequiredForm, resolveSkillDamage } from "../core/skillsData.js";
-import { blastProgress, blastScreenRadiusX, elementColor } from "../core/blasts.js";
+import {
+  blastProgress, blastScreenRadiusX, elementColor, auraRingGeometry,
+} from "../core/blasts.js";
 import { effectProgress, effectAlpha, isoArcAngle, particlesAt } from "../core/vfx.js";
 import { anchorY } from "../core/attackAnchor.js";
 import { elementTint } from "../core/elements.js";
@@ -330,6 +332,13 @@ export class RenderSystem {
     // renderer never reads a clock itself.
     drawLandmarks(this.ctx, { landmarks, phase: this.nowMs, halfW, halfH });
     this.drawDoorways(doorways, chunkedMap, player);
+
+    // SOMET-523. The leech aura's ground ring, drawn BEFORE the depth-sorted
+    // pass below so it sits under every actor -- including the creatures
+    // standing in it, which is the whole point: the ring marks the ground
+    // those creatures are feeding the player from. It deliberately does not
+    // join the sort, because it is not a body with a depth of its own.
+    this._drawAuraRings(player, remotePlayers);
 
     // Players + creatures + ground items + walls, all depth-sorted together
     // (Pass B) — ground items must join the same sort rather than being
@@ -824,6 +833,35 @@ export class RenderSystem {
       this.ctx.ellipse(s.x, cy, rx, rx / 2, 0, 0, Math.PI * 2);
       this.ctx.stroke();
     }
+    this.ctx.restore();
+  }
+
+  // SOMET-523. The leech aura's ground ring, for the local player and for any
+  // remote player carrying one.
+  //
+  // Drawn on the GROUND PLANE, under the actors, because it marks an area
+  // rather than a body -- and as a 2:1 ellipse, the same projection every
+  // other ground circle here uses. A stroked circle would claim the aura
+  // reaches further north/south than it leeches.
+  //
+  // The radius arrives RESOLVED from the server (world.js's snapshot), so the
+  // client never needs the passive catalog to know how big the ring is, and
+  // the ring is exactly the area the server's heal counted -- both come from
+  // auraRadiusOf.
+  _drawAuraRings(player, remotePlayers) {
+    const draw = (p) => {
+      const g = auraRingGeometry(p, worldToScreen);
+      if (!g) return;                       // null covers absent, 0, NaN and negatives
+      this.ctx.beginPath();
+      this.ctx.ellipse(g.x, g.y, g.rx, g.ry, 0, 0, Math.PI * 2);
+      this.ctx.stroke();
+    };
+    this.ctx.save();
+    this.ctx.strokeStyle = "#b91c1c";
+    this.ctx.lineWidth = 2;
+    this.ctx.globalAlpha = 0.55;
+    draw(player);
+    if (remotePlayers) for (const [, p] of remotePlayers) draw(p);
     this.ctx.restore();
   }
 
