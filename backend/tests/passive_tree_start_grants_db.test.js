@@ -21,6 +21,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
 const { seedPassiveTree } = require('../scripts/seed-passive-tree.js');
+const {
+  withAdvisoryLock, PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS,
+} = require('./helpers/advisoryLock.js');
 
 const url = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
@@ -40,6 +43,19 @@ test('start-node grants reach passive_nodes', { skip: !url ? 'no database URL' :
   const pool = new Pool({ connectionString: url });
   t.after(() => pool.end());
 
+  // SOMET-529. LOCKED across the WHOLE file, not just its seeds.
+  //
+  // This file's own comment below already says its subtests "MUTATE THE WHOLE
+  // TREE and then repair it" -- which is precisely the window a peer's
+  // `--force` reseed must not land in. It took no lock at all, while two other
+  // files that touch the same table did. Two of four participating is not a
+  // discipline, and the symptom was a flake whose pass count varied between
+  // runs because files aborted partway rather than merely asserting wrong.
+  //
+  // The lock spans the read below too: the precondition assertion ("this
+  // database needs a seeded passive tree") is itself a read of shared state,
+  // and it was the thing most likely to observe a peer mid-prune.
+  await withAdvisoryLock(pool, PASSIVE_TREE_LOCK_KEY, async () => {
   const seeded = await pool.query(
     "SELECT count(*)::int AS n FROM passive_nodes WHERE kind = 'start'");
   assert.equal(seeded.rows[0].n, 6,
@@ -153,4 +169,5 @@ test('start-node grants reach passive_nodes', { skip: !url ? 'no database URL' :
       "SELECT count(*)::int AS n FROM passive_nodes WHERE start_class = 'Ranger'");
     assert.equal(r.rows[0].n, 0);
   });
+  }, { waitMs: PASSIVE_TREE_LOCK_WAIT_MS });
 });

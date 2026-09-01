@@ -48,28 +48,53 @@ async function seedPassiveTree(db, { force = false, quiet = false } = {}) {
   const log = quiet ? () => {} : (...a) => console.log(...a);
   const { nodes, edges } = generatePassiveTree(PASSIVE_TREE_SPEC);
 
-  for (const n of nodes) {
-    await db.query(
-      `INSERT INTO passive_nodes (key, sector, ring, x, y, kind, label, grants, start_class)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)
-       ON CONFLICT (key) DO UPDATE
-         SET sector = EXCLUDED.sector,
-             ring = EXCLUDED.ring,
-             x = EXCLUDED.x,
-             y = EXCLUDED.y,
-             start_class = EXCLUDED.start_class,
-             kind   = CASE WHEN $10 THEN EXCLUDED.kind   ELSE passive_nodes.kind   END,
-             label  = CASE WHEN $10 THEN EXCLUDED.label  ELSE passive_nodes.label  END,
-             -- $10 is --force. The second arm is SOMET-471's carve-out: a start
-             -- node's grants are structural (see the header), so they are
-             -- written on every reseed, forced or not. EXCLUDED.kind rather
-             -- than passive_nodes.kind, because the row being inserted is the
-             -- generator's and that is the authority on what a start node is.
-             grants = CASE WHEN $10 OR EXCLUDED.kind = 'start'
-                           THEN EXCLUDED.grants ELSE passive_nodes.grants END`,
-      [n.key, n.sector, n.ring, n.x, n.y, n.kind, n.label, JSON.stringify(n.grants), n.start_class, force],
-    );
-  }
+  // ONE round trip for all ~1850 rows, via unnest -- the same shape the edge
+  // reconcile below already uses.
+  //
+  // WHY THIS IS NOT PREMATURE OPTIMISATION (SOMET-529). This ran as one INSERT
+  // per node: ~1850 sequential round trips, 3.2s unforced and 6.0s forced on an
+  // idle machine. Two test files hold PASSIVE_TREE_LOCK_KEY across several
+  // seeds each, so those seconds were the critical section -- and under
+  // full-suite parallel load they stretched past the lock helper's bounded
+  // wait, which then degraded to "run unguarded" and let a peer's force-reseed
+  // land mid-assertion in another file. The fix for a lock held too long is to
+  // make the work under it fast, not to wait longer.
+  //
+  // The ON CONFLICT body is unchanged, including SOMET-471's start-node
+  // carve-out; only the number of round trips differs.
+  await db.query(
+    `INSERT INTO passive_nodes (key, sector, ring, x, y, kind, label, grants, start_class)
+     SELECT * FROM unnest(
+       $1::text[], $2::text[], $3::int[], $4::real[], $5::real[],
+       $6::text[], $7::text[], $8::jsonb[], $9::text[])
+     ON CONFLICT (key) DO UPDATE
+       SET sector = EXCLUDED.sector,
+           ring = EXCLUDED.ring,
+           x = EXCLUDED.x,
+           y = EXCLUDED.y,
+           start_class = EXCLUDED.start_class,
+           kind   = CASE WHEN $10 THEN EXCLUDED.kind   ELSE passive_nodes.kind   END,
+           label  = CASE WHEN $10 THEN EXCLUDED.label  ELSE passive_nodes.label  END,
+           -- $10 is --force. The second arm is SOMET-471's carve-out: a start
+           -- node's grants are structural (see the header), so they are
+           -- written on every reseed, forced or not. EXCLUDED.kind rather
+           -- than passive_nodes.kind, because the row being inserted is the
+           -- generator's and that is the authority on what a start node is.
+           grants = CASE WHEN $10 OR EXCLUDED.kind = 'start'
+                         THEN EXCLUDED.grants ELSE passive_nodes.grants END`,
+    [
+      nodes.map((n) => n.key),
+      nodes.map((n) => n.sector),
+      nodes.map((n) => n.ring),
+      nodes.map((n) => n.x),
+      nodes.map((n) => n.y),
+      nodes.map((n) => n.kind),
+      nodes.map((n) => n.label),
+      nodes.map((n) => JSON.stringify(n.grants)),
+      nodes.map((n) => n.start_class),
+      force,
+    ],
+  );
   log(`passive_nodes: ${nodes.length} upserted${force ? ' (--force: labels/kinds/grants overwritten)' : ''}`);
 
   // A node in the database that the generator no longer produces:

@@ -17,6 +17,9 @@ const {
 } = require('../src/services/passiveTreeStore.js');
 const { loadProgression } = require('../src/services/progressionStore.js');
 const { seedPassiveTree } = require('../scripts/seed-passive-tree.js');
+const {
+  withAdvisoryLock, PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS,
+} = require('./helpers/advisoryLock.js');
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url
@@ -34,6 +37,18 @@ test('passive allocation', { skip }, async (t) => {
     await pool.end();
   });
 
+  // SOMET-529. LOCKED, like passive_tree_seed_db and passive_nodes_admin_routes.
+  //
+  // This file seeds the shared tree and then allocates against it. Without the
+  // lock, a peer's `--force` reseed lands mid-file: force PRUNES nodes the
+  // generator no longer produces and DELETEs their character_passives rows, so
+  // an allocation made two lines earlier can vanish under the assertion that
+  // reads it. That produced a flake whose PASS COUNT VARIED between runs --
+  // files aborting partway, not merely asserting wrong.
+  //
+  // Two of the four files that seed this table took the lock and two did not,
+  // which is not a discipline; it is a coin flip. All four take it now.
+  await withAdvisoryLock(pool, PASSIVE_TREE_LOCK_KEY, async () => {
   await seedPassiveTree(pool, { quiet: true });
 
   const warriorType = await pool.query("SELECT id FROM entity_types WHERE name = 'Warrior'");
@@ -338,4 +353,5 @@ test('passive allocation', { skip }, async (t) => {
     const afterStats = derivePlayerStats(afterRow);
     assert.notStrictEqual(afterStats.meleeMult, beforeStats.meleeMult);
   });
+  }, { waitMs: PASSIVE_TREE_LOCK_WAIT_MS });
 });

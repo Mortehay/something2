@@ -24,6 +24,9 @@ const skip = !url
 // the SHIPPED sql rather than of a copy pasted into the test -- a copy would
 // keep passing after the migration was edited.
 const MIGRATION = path.join(__dirname, '..', 'migrations', '1714440521000_passive_tree_v2_respec.js');
+const {
+  withAdvisoryLock, PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS,
+} = require('./helpers/advisoryLock.js');
 
 test('passive tree v2 respec migration', { skip }, async (t) => {
   const pool = new Pool({ connectionString: url, max: 4 });
@@ -39,6 +42,19 @@ test('passive tree v2 respec migration', { skip }, async (t) => {
 
   const { up } = require(MIGRATION);
   const runMigration = () => up({ db: { query: (sql) => pool.query(sql) } });
+
+  // SOMET-529. LOCKED, and this file is the most destructive of the set.
+  //
+  // The migration under test ends with an UNCONDITIONAL
+  // `DELETE FROM character_passives` -- correct for a global respec, and
+  // catastrophic for a peer: it wipes the allocations
+  // passive_tree_allocation_db.test.js made two lines earlier, in another
+  // process. Running it unlocked is why a group run could report 69 passes and
+  // 2 failures where a solo run reported 71 and 0.
+  //
+  // Wrapping every subtest rather than each runMigration() call: the fixtures
+  // are created BEFORE the migration runs and read AFTER it, so the whole
+  // create-migrate-assert sequence is the critical section.
 
   // A character with `alloc` allocations and `banked` points already in hand.
   // `withProgression: false` reproduces the state 3 of 26 real characters are
@@ -85,6 +101,7 @@ test('passive tree v2 respec migration', { skip }, async (t) => {
     return r.rows[0].n;
   };
 
+  await withAdvisoryLock(pool, PASSIVE_TREE_LOCK_KEY, async () => {
   await t.test('refunds exactly the rows each character held', async () => {
     const spender = await makeCharacter({ alloc: 5, banked: 2 });
     const saver = await makeCharacter({ alloc: 0, banked: 7 });
@@ -129,4 +146,5 @@ test('passive tree v2 respec migration', { skip }, async (t) => {
     const r = await pool.query('SELECT count(*)::int n FROM character_passives');
     assert.equal(r.rows[0].n, 0, 'the reseed must not find a stale allocation');
   });
+  }, { waitMs: PASSIVE_TREE_LOCK_WAIT_MS });
 });
