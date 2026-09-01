@@ -677,3 +677,111 @@ test('a zero or missing projectile rule leaves the shot untouched', () => {
     assert.equal(w.projectiles.projectiles[0].pierceLeft, 1, `pierce ${String(bad)}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-522: the leech aura.
+//
+// AURA_BASE_RADIUS 120, AURA_MAX_TARGETS 6, resolved once per second.
+// It HEALS and never drains, so nothing here may lower hp.
+// ---------------------------------------------------------------------------
+
+function packWorld(rules, n, dist = 60) {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 400, y: 400 }, undefined, undefined, 0,
+    rules ? withRules(rules) : BASE_STATS);
+  const p = w.getPlayer('u1');
+  const cx = p.x + p.width / 2;
+  const cy = p.y + p.height / 2;
+  // Spread around the player on a circle of radius `dist`, all well inside the
+  // base radius unless `dist` says otherwise.
+  w.creatures.addCreatures(Array.from({ length: n }, (_, i) => {
+    const a = (i / n) * Math.PI * 2;
+    return {
+      id: `c${i}`, type: 'wolf',
+      x: cx + Math.cos(a) * dist - 24, y: cy + Math.sin(a) * dist - 24,
+      hp: 50, facing: 'S', color: '#f00',
+    };
+  }));
+  return { world: w, player: p };
+}
+
+test('a player with no aura node is entirely unaffected', () => {
+  const { world, player } = packWorld(null, 4);
+  player.hp = 10;
+  world.tick(1);
+  assert.equal(player.hp, 10);
+  assert.equal(world.snapshot().players[0].aura, undefined,
+    'no aura means no wire field at all');
+});
+
+test('the aura heals per hostile inside it, once a second', () => {
+  const { world, player } = packWorld({ auraLeech: 2 }, 3);
+  player.hp = 10;
+  world.tick(1);
+  assert.equal(player.hp, 16, '3 creatures * 2 life');
+});
+
+// Sub-second frames must accumulate rather than each firing a full second's
+// worth -- otherwise the aura is sixty times stronger on a 60Hz server.
+test('the aura is per second, not per frame', () => {
+  const { world, player } = packWorld({ auraLeech: 2 }, 3);
+  player.hp = 10;
+  for (let i = 0; i < 10; i += 1) world.tick(0.1); // 1.0s total
+  assert.equal(player.hp, 16, 'ten 0.1s frames must heal exactly one second');
+});
+
+// THE CAP. A world can hold 12-creature packs; uncapped this is unkillable
+// sustain. The heal must stop rising past AURA_MAX_TARGETS.
+test('the heal stops at the target cap', () => {
+  const six = packWorld({ auraLeech: 2 }, 6);
+  six.player.hp = 10;
+  six.world.tick(1);
+  const sixHeal = six.player.hp - 10;
+
+  const twelve = packWorld({ auraLeech: 2 }, 12);
+  twelve.player.hp = 10;
+  twelve.world.tick(1);
+  assert.equal(twelve.player.hp - 10, sixHeal,
+    'twelve creatures must heal exactly what six do');
+  assert.equal(sixHeal, 12, '6 capped creatures * 2 life');
+});
+
+test('creatures outside the radius do not count, and auraRadius extends it', () => {
+  {
+    const { world, player } = packWorld({ auraLeech: 2 }, 3, 160); // outside 120
+    player.hp = 10;
+    world.tick(1);
+    assert.equal(player.hp, 10, 'creatures at 160px are outside the 120px base radius');
+  }
+  {
+    const { world, player } = packWorld({ auraLeech: 2, auraRadius: 80 }, 3, 160);
+    player.hp = 10;
+    world.tick(1);
+    assert.equal(player.hp, 16, 'auraRadius 80 must bring 160px inside');
+  }
+});
+
+test('the aura never overheals and never lowers hp', () => {
+  const { world, player } = packWorld({ auraLeech: 50 }, 6);
+  player.hp = player.maxHp - 1;
+  world.tick(1);
+  assert.equal(player.hp, player.maxHp);
+  const full = packWorld({ auraLeech: 50 }, 6);
+  full.player.hp = full.player.maxHp;
+  full.world.tick(1);
+  assert.equal(full.player.hp, full.player.maxHp, 'a full player must not lose hp');
+});
+
+test('a dead player does not leech', () => {
+  const { world, player } = packWorld({ auraLeech: 2 }, 3);
+  player.hp = 0;
+  world.tick(1);
+  assert.equal(player.hp, 0);
+});
+
+// The ring the client draws must be the area that actually leeches -- one
+// function feeds both, so they cannot disagree.
+test('the wire reports the same radius the heal used', () => {
+  const { world } = packWorld({ auraLeech: 2, auraRadius: 40 }, 1);
+  assert.equal(world.snapshot().players[0].aura, 160, 'AURA_BASE_RADIUS 120 + 40');
+});

@@ -102,9 +102,9 @@ test('every rule key names the module that consumes it and how duplicates combin
   // EXHAUSTIVE on purpose: adding a rule must be a deliberate edit here, not
   // something that slips in. SOMET-519 added the two speed rules.
   assert.deepStrictEqual(Object.keys(RULE_KEYS).sort(),
-    ['attackSpeedMult', 'castSpeedMult', 'cooldownFloor', 'lifeCostMultiplier',
-      'meleeArcBonus', 'meleeReachBonus', 'pierceBonus', 'projectileCount',
-      'projectileSpeedMult', 'regenLifeShare', 'treeCharmBonus']);
+    ['attackSpeedMult', 'auraLeech', 'auraRadius', 'castSpeedMult', 'cooldownFloor',
+      'lifeCostMultiplier', 'meleeArcBonus', 'meleeReachBonus', 'pierceBonus',
+      'projectileCount', 'projectileSpeedMult', 'regenLifeShare', 'treeCharmBonus']);
   for (const [key, def] of Object.entries(RULE_KEYS)) {
     assert.ok(['sum', 'product', 'min'].includes(def.combine), `${key}.combine`);
     assert.ok(typeof def.consumer === 'string' && def.consumer.length > 0, `${key}.consumer`);
@@ -125,6 +125,9 @@ test('every rule key names the module that consumes it and how duplicates combin
   assert.strictEqual(RULE_KEYS.projectileCount.combine, 'sum');
   assert.strictEqual(RULE_KEYS.pierceBonus.combine, 'sum');
   assert.strictEqual(RULE_KEYS.projectileSpeedMult.combine, 'product');
+  // SOMET-522: satellites add flat life-per-enemy and flat pixels of radius.
+  assert.strictEqual(RULE_KEYS.auraLeech.combine, 'sum');
+  assert.strictEqual(RULE_KEYS.auraRadius.combine, 'sum');
 });
 
 test('PASSIVE_TREE_SPEC is the single bundle the generator takes', () => {

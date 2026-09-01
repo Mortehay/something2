@@ -52,6 +52,10 @@ const RULE_COMBINE = {
   projectileCount: 'sum',
   pierceBonus: 'sum',
   projectileSpeedMult: 'product',
+  // SOMET-522. The leech aura. Both `sum`: satellites add flat life-per-enemy
+  // and flat pixels of radius to their hub.
+  auraLeech: 'sum',
+  auraRadius: 'sum',
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
 

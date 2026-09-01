@@ -63,6 +63,18 @@ const MIN_COOLDOWN_MULT = 0.4;
 // as one thicker arrow.
 const PROJECTILE_FAN_RAD = 0.16;
 
+// SOMET-522. The leech aura (the Cultist's Sanguine Aura cluster).
+//
+// AURA_MAX_TARGETS is the balance, not a performance guard. The aura heals per
+// hostile creature standing inside it, and a world can hold 12-creature packs
+// -- uncapped, walking into a pack would be unkillable sustain. Six is the
+// most a single node may be worth.
+const AURA_BASE_RADIUS = 120;
+const AURA_MAX_TARGETS = 6;
+// The aura resolves once a second rather than per frame, so its cost does not
+// scale with tick rate and its numbers are authored in life-per-second.
+const AURA_INTERVAL_S = 1;
+
 // WIS -> mana regen. Base matches PLAYER_MANA_REGEN (authority/world.js:19).
 // Contrary to the design doc, mana regen ALREADY EXISTS -- WIS scales a live
 // constant here, it does not introduce a new tick.
@@ -130,7 +142,7 @@ module.exports = {
   BASE_STAT, STAT_KEYS, MAX_LEVEL,
   HP_BASE, HP_PER_CON, MANA_BASE, MANA_PER_INT, STAMINA_BASE,
   MELEE_PER_STR, SPELL_PER_INT, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
-  PROJECTILE_FAN_RAD,
+  PROJECTILE_FAN_RAD, AURA_BASE_RADIUS, AURA_MAX_TARGETS, AURA_INTERVAL_S,
   MANA_REGEN_BASE, MANA_REGEN_PER_WIS,
   PRICE_PER_CHA, SELL_FRACTION_BASE, SELL_FRACTION_MAX,
   XP_BASE, XP_EXPONENT, XP_KILL_BASE, XP_LEVEL_DIFF_SLOPE, XP_LEVEL_DIFF_MAX,

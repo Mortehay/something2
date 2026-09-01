@@ -17,7 +17,10 @@ const { unequipBlockers } = require('./equipRequirements.js');
 const { loadProgression } = require('../services/progressionStore.js');
 const { GroundItemSim } = require('./groundItems');
 const { derivePlayerStats, DEFAULT_PROGRESSION } = require('../services/playerStats.js');
-const { STAMINA_BASE, PROJECTILE_FAN_RAD } = require('../services/progressionConstants.js');
+const {
+  STAMINA_BASE, PROJECTILE_FAN_RAD,
+  AURA_BASE_RADIUS, AURA_MAX_TARGETS, AURA_INTERVAL_S,
+} = require('../services/progressionConstants.js');
 const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
 const { getSkillById } = require('../../seeds/data/skills.js');
 
@@ -107,6 +110,16 @@ function elementDamageMult(stats, element) {
 // (melee and projectile) call this; a test asserts the source contains
 // exactly one reference to that field so a third site cannot silently
 // reappear.
+// SOMET-522. This player's aura radius in pixels, or 0 when they have no aura
+// node allocated. ONE definition, read by the tick that applies the heal and by
+// the snapshot that tells the client what ring to draw -- two copies is how the
+// drawn ring stops matching the healed area.
+function auraRadiusOf(p) {
+  const rules = p.stats.rules;
+  if (!(rules.auraLeech > 0)) return 0;
+  return AURA_BASE_RADIUS + (rules.auraRadius || 0);
+}
+
 function applyAttackCooldown(p, w) {
   // SOMET-519. The tree's attack-rate rules, applied at the ONE site that
   // reads w.cooldown (a test asserts there is exactly one).
@@ -491,6 +504,41 @@ class World {
         }
       }
       if (p.stamina < p.maxStamina) p.stamina = Math.min(p.maxStamina, p.stamina + PLAYER_STAMINA_REGEN * dt);
+      // SOMET-522. THE LEECH AURA -- the Cultist's Sanguine Aura cluster.
+      //
+      // Resolved once a SECOND, not once a frame: the numbers are authored as
+      // life-per-enemy-per-second, so a per-frame heal would scale with tick
+      // rate and quietly become sixty times stronger on a faster server.
+      //
+      // Always on. Allocating the hub turns it on permanently -- no toggle, no
+      // new input, no toggle state on the wire.
+      //
+      // It HEALS and never drains, so there is no path by which it can kill
+      // its owner while they stand idle, and nothing here can lower hp.
+      const leech = p.stats.rules.auraLeech;
+      if (leech > 0 && p.hp > 0) {
+        p._auraAcc = (p._auraAcc || 0) + dt;
+        // EPSILON, and it is not cosmetic. dt arrives as a float and ten
+        // 0.1s frames sum to 0.9999999999999999, so a bare `>=` never fires
+        // on an exact-second boundary -- at 60Hz the aura would land a frame
+        // late every second and read as slightly slower than advertised. A
+        // test that ticks 10x0.1s caught this; it is left in place below.
+        if (p._auraAcc >= AURA_INTERVAL_S - 1e-9) {
+          // Whole seconds only; the remainder carries so a 0.4s tick rate
+          // still fires exactly once per second rather than drifting.
+          const seconds = Math.max(1, Math.floor(p._auraAcc / AURA_INTERVAL_S + 1e-9));
+          p._auraAcc -= seconds * AURA_INTERVAL_S;
+          if (p.hp < p.maxHp) {
+            const counted = this.creatures.countHostilesWithin(
+              p.x + p.width / 2, p.y + p.height / 2,
+              auraRadiusOf(p), AURA_MAX_TARGETS, this.now, p.userId,
+            );
+            if (counted > 0) {
+              p.hp = Math.min(p.maxHp, p.hp + leech * counted * seconds);
+            }
+          }
+        }
+      }
       const r = resolveMove(this.map, p, p.input.dx, p.input.dy, dt);
       p.x = r.x;
       p.y = r.y;
@@ -1308,6 +1356,15 @@ class World {
         // activeEffectKeys. Read on the client as `p.effects || []`.
         const fx = activeEffectKeys(p, this.now);
         if (fx) out.effects = fx;
+        // SOMET-522. The aura ring's radius, RESOLVED, for the same reason
+        // attackLift travels resolved: the client must never need the passive
+        // catalog. Omitted entirely when the player has no aura, so a quiet
+        // frame costs no bytes -- the client reads `p.aura || 0`.
+        //
+        // It comes from auraRadiusOf, the SAME function the heal uses, so the
+        // ring the player sees is exactly the area that leeches.
+        const auraR = auraRadiusOf(p);
+        if (auraR > 0) out.aura = auraR;
         if (p.buffs && p.buffs.size > 0) {
           out.buffs = Array.from(p.buffs.values()).map((b) => ({
             id: b.id,

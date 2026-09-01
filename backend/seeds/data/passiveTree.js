@@ -104,6 +104,15 @@ const RULE_KEYS = {
     combine: 'sum',
     consumer: 'backend/src/authority/world.js — attack(), shotWeapon.pierce, applied BEFORE spawn\'s aoe clamp',
   },
+  // SOMET-522. The Cultist's leech aura, resolved once a second in tick().
+  auraLeech: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — tick()\'s aura pass, life per hostile per second',
+  },
+  auraRadius: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — tick()\'s aura pass, pixels on top of AURA_BASE_RADIUS',
+  },
 };
 
 // Clockwise from straight up, matching the spec §5.2 diagram exactly. ORDER IS
