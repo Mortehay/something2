@@ -265,3 +265,55 @@ test('the stat-point system leaves no trace on the default progression', () => {
   assert.equal(DEFAULT_PROGRESSION.passive_points, 0);
   assert.equal(require('../src/services/playerStats.js').refundedPoints, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-513: the `rules` passthrough.
+//
+// The nine rules SOMET-512 adds reach the authority through this ONE field, so
+// its two failure modes both get a test: a populated map must arrive intact
+// (not merged, not filtered, not re-derived), and an absent one must arrive as
+// every rule at its identity rather than as `undefined`.
+// ---------------------------------------------------------------------------
+
+const { RULE_COMBINE, RULE_IDENTITIES } = require('../src/services/statComposition.js');
+
+test('rules ride the derived bundle unchanged', () => {
+  const rules = { lifeCostMultiplier: 0.75, treeCharmBonus: 3, cooldownFloor: 0.32, regenLifeShare: 0.2 };
+  const s = derivePlayerStats(at({ rules }));
+  assert.deepEqual(s.rules, rules);
+});
+
+// The identity fallback is the half that actually breaks things when it is
+// wrong: a `product` rule read as undefined multiplies to NaN, and NaN damage
+// is an immortal target. Asserting `!== undefined` per key is the point --
+// deepEqual against RULE_IDENTITIES alone would pass if BOTH sides were empty.
+test('a progression with no tree context gets every rule at its identity', () => {
+  for (const p of [DEFAULT_PROGRESSION, at({}), {}, null, undefined]) {
+    const s = derivePlayerStats(p);
+    assert.deepEqual(s.rules, RULE_IDENTITIES, 'fallback must be the identity map');
+    for (const key of Object.keys(RULE_COMBINE)) {
+      assert.ok(key in s.rules, `rule ${key} missing from the identity fallback`);
+    }
+  }
+});
+
+// RULE_IDENTITIES is DERIVED from RULE_COMBINE, which is the whole reason it is
+// imported rather than written out by hand. This pins that: a rule added to
+// RULE_COMBINE with no identity would arrive at every consumer as undefined.
+test('every combinable rule has an identity, at the value its mode means', () => {
+  const expected = { product: 1, sum: 0, min: null };
+  for (const [key, mode] of Object.entries(RULE_COMBINE)) {
+    assert.ok(key in RULE_IDENTITIES, `rule ${key} has no identity`);
+    assert.equal(RULE_IDENTITIES[key], expected[mode],
+      `rule ${key} combines by ${mode}, so its identity must be ${expected[mode]}`);
+  }
+});
+
+// The named lifeCostMultiplier field is kept for its existing call sites. It
+// and rules.lifeCostMultiplier are the same value from the same source, and a
+// future edit that re-derives one of them separately must fail here.
+test('lifeCostMultiplier agrees with its entry in the rules map', () => {
+  const s = derivePlayerStats(at({ rules: { ...RULE_IDENTITIES, lifeCostMultiplier: 0.75 } }));
+  assert.equal(s.lifeCostMultiplier, 0.75);
+  assert.equal(s.lifeCostMultiplier, s.rules.lifeCostMultiplier);
+});

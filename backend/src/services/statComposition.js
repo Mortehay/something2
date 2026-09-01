@@ -34,6 +34,22 @@ const RULE_COMBINE = {
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
 
+// SOMET-513. The "no tree context" rules map: every rule at its identity.
+//
+// Built from RULE_COMBINE at module load rather than written out by hand, so a
+// rule added above is automatically present here at the right identity. A
+// hand-maintained second literal is how a new rule ends up reaching a consumer
+// as `undefined` -- which multiplies to NaN for a `product` rule, and NaN
+// damage is an immortal target (see damage.js's own note).
+//
+// Frozen and shared, for the same reason NO_DAMAGE_MULT / NO_RESISTS /
+// NO_STATUSES in playerStats.js are: it is handed to every progression row
+// that has no tree context, and a mutable shared default is a cross-player
+// leak waiting to happen.
+const RULE_IDENTITIES = Object.freeze(
+  Object.fromEntries(Object.entries(RULE_COMBINE).map(([key, mode]) => [key, RULE_IDENTITY[mode]])),
+);
+
 // SOMET-495. The other four grant kinds, each with the ONE consumer that reads
 // the aggregate this module produces. Re-declared here rather than imported
 // from seeds/data/passiveTree.js or from the authority for the same reason
@@ -261,6 +277,6 @@ function withComposedStats(row, composed) {
 
 module.exports = {
   composeStats, withComposedStats, modifierToEntry, detailOf,
-  STAT_KEYS, RULE_COMBINE, BASE_STAT,
+  STAT_KEYS, RULE_COMBINE, RULE_IDENTITIES, BASE_STAT,
   POOL_KEYS, ELEMENT_KEYS, STATUS_KEYS, PERCENT, DETAIL_KEY,
 };

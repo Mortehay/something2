@@ -12,6 +12,11 @@
 // the game handed everyone 100.
 
 const C = require('./progressionConstants.js');
+// SOMET-513. statComposition.js is a PURE leaf module (no requires of its own),
+// so this cannot cycle. RULE_IDENTITIES is imported rather than re-declared
+// precisely because it is derived from RULE_COMBINE: a rule added there is
+// present here automatically, and the two cannot drift.
+const { RULE_IDENTITIES } = require('./statComposition.js');
 
 const DEFAULT_PROGRESSION = Object.freeze({
   experience: 0,
@@ -134,6 +139,33 @@ function hitStatusesOf(progression) {
   return Array.isArray(s) ? s : NO_STATUSES;
 }
 
+// SOMET-513. composeStats' whole `rules` aggregate, carried onto the derived
+// bundle UNCHANGED -- this module composes nothing from it, it is only the
+// courier, exactly like damageMult/resists/hitStatuses above.
+//
+// WHY ONE PASSTHROUGH OBJECT AND NOT ONE NAMED FIELD PER RULE. The passive
+// tree epic (SOMET-512) takes the vocabulary from four rules to thirteen.
+// `ruleLifeCostMultiplier` below is the pre-495 shape -- one accessor per rule
+// -- and nine more copies of it would be nine copies of the same three-line
+// guard, each an independent chance to forget one. The aggregates SOMET-495
+// added chose the other shape and that is the one that scales.
+//
+// WHY IT RIDES `stats` AT ALL. `stats` is the only bundle every re-derive path
+// already refreshes -- join, level-up, chest XP, socket, allocate, respec all
+// go through derivePlayerStats and then applyDerivedStats. A rule written onto
+// the player object instead would be set once at join and go stale the moment
+// a node was allocated: the silent half-wired shape this epic exists to stop.
+//
+// A progression object with no tree context -- DEFAULT_PROGRESSION, a unit-test
+// literal, a row read before the tree was seeded -- has no `rules` and gets
+// RULE_IDENTITIES: every rule present, at the value that means "no node
+// allocated". Consumers therefore read `stats.rules.attackSpeedMult` and get a
+// number, never `undefined` (which multiplies to NaN).
+function rulesOf(progression) {
+  const r = progression == null ? null : progression.rules;
+  return r && typeof r === 'object' ? r : RULE_IDENTITIES;
+}
+
 // The single source of every number a stat affects.
 //
 // `classPools` is `{ maxHp, maxMana }` -- the class's BASE pools, before any
@@ -177,7 +209,16 @@ function derivePlayerStats(progression, classPools = null) {
     // NOT derived from any stat -- it is a passive-tree rule, carried here
     // only so it reaches the authority by the same route every other derived
     // number does.
+    //
+    // SOMET-513: this is now ALSO reachable as `rules.lifeCostMultiplier`. The
+    // named field is kept deliberately -- lifeCost.js and its call sites read
+    // it, and rewriting them is not this epic's business. The two are the same
+    // value from the same source (`progression.rules`), so they cannot
+    // disagree; do not add a second named field for any other rule.
     lifeCostMultiplier: ruleLifeCostMultiplier(progression),
+    // SOMET-513. The whole rules aggregate, for the nine rules SOMET-512 adds.
+    // See rulesOf's header for why this is one object rather than nine fields.
+    rules: rulesOf(progression),
     // SOMET-495, carried the same way and for the same reason. Read by
     // world.js's weaponDamage (damageMult), by the mitigation rebuild in
     // world.js (resists) and by effects.js's applyHitStatuses at every player
