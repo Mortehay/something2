@@ -8,7 +8,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { generatePassiveTree } = require('../seeds/generatePassiveTree.js');
-const { PASSIVE_TREE_SPEC, RULE_KEYS, TEMPLATES } = require('../seeds/data/passiveTree.js');
+const {
+  PASSIVE_TREE_SPEC, RULE_KEYS, TEMPLATES, CLUSTERS,
+} = require('../seeds/data/passiveTree.js');
 const { ELEMENTS } = require('../src/authority/damage.js');
 
 // The whole vocabulary, hand-written. Deliberately NOT imported from
@@ -20,7 +22,16 @@ const STATS = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom'
 const POOLS = ['hp', 'mana', 'stamina'];
 const ELS = ['physical', 'arcane', 'fire', 'ice', 'lightning'];
 const STATUSES = ['burn', 'chill', 'shock'];
-const RULES = ['lifeCostMultiplier', 'treeCharmBonus', 'cooldownFloor', 'regenLifeShare'];
+// Hand-written, like every other expectation here -- importing RULE_COMBINE
+// would make this a tautology. Grew from 4 to 13 across SOMET-514..522; a rule
+// authored into a node but missing from this list fails guard 3, which is the
+// point.
+const RULES = [
+  'lifeCostMultiplier', 'treeCharmBonus', 'cooldownFloor', 'regenLifeShare',
+  'attackSpeedMult', 'castSpeedMult', 'meleeReachBonus', 'meleeArcBonus',
+  'projectileCount', 'projectileSpeedMult', 'pierceBonus',
+  'auraLeech', 'auraRadius',
+];
 
 const tree = generatePassiveTree(PASSIVE_TREE_SPEC);
 
@@ -29,12 +40,15 @@ test('the hand-written element list still matches the combat authority', () => {
 });
 
 // ---- guard 4: node count within 5% of 1800, keystones exactly as specced ----
-test('guard 4: 1806 nodes — 1530 minor, 240 notable, 30 keystone, 6 start', () => {
-  assert.strictEqual(tree.nodes.length, 1806);
+test('guard 4: 1843 nodes — 1494 minor, 268 notable, 36+9 greater, 30 keystone, 6 start', () => {
+  assert.strictEqual(tree.nodes.length, 1843);
 
   const byKind = {};
   for (const n of tree.nodes) byKind[n.kind] = (byKind[n.kind] || 0) + 1;
-  assert.deepStrictEqual(byKind, { minor: 1530, notable: 240, keystone: 30, start: 6 });
+  // greater 45 = 36 placed on the ring-3 grid (SOMET-517) + 9 cluster hubs
+  // (SOMET-518). notable 268 = 240 grid + 28 cluster satellites.
+  assert.deepStrictEqual(byKind,
+    { minor: 1494, notable: 268, greater: 45, keystone: 30, start: 6 });
 
   // The spec's own tolerance, restated as a literal band rather than a formula.
   assert.ok(tree.nodes.length >= 1710 && tree.nodes.length <= 1890,
@@ -42,19 +56,32 @@ test('guard 4: 1806 nodes — 1530 minor, 240 notable, 30 keystone, 6 start', ()
 
   // Per sector, so a bug that loses one whole sector cannot hide inside a
   // total that some other sector's overcount restores.
+  // SOMET-518: a sector now also carries its epic clusters, and they are NOT
+  // evenly distributed (strength/dexterity/intelligence have two each, the
+  // rest one). The expected contribution is counted from the AUTHORED cluster
+  // list, which makes this a cross-check that the generator emitted exactly
+  // what the spec asked for -- not a tautology, since the two are produced by
+  // different code.
+  const clusterNodesIn = (sector) => CLUSTERS
+    .filter((c) => c.sector === sector)
+    .reduce((a, c) => a + 1 + c.satellites.length, 0);
   for (const sector of ['wisdom', 'intelligence', 'dexterity', 'strength', 'constitution', 'charisma']) {
     const inSector = tree.nodes.filter((n) => n.sector === sector);
-    assert.strictEqual(inSector.length, 296, `${sector} node count`); // 295 ring nodes + 1 start
+    // 295 ring nodes + 1 start, plus this sector's cluster nodes.
+    assert.strictEqual(inSector.length, 296 + clusterNodesIn(sector), `${sector} node count`);
     assert.strictEqual(inSector.filter((n) => n.kind === 'keystone').length, 5, `${sector} keystones`);
-    assert.strictEqual(inSector.filter((n) => n.kind === 'notable').length, 40, `${sector} notables`);
+    const satellites = CLUSTERS.filter((c) => c.sector === sector)
+      .reduce((a, c) => a + c.satellites.length, 0);
+    assert.strictEqual(inSector.filter((n) => n.kind === 'notable').length, 40 + satellites,
+      `${sector} notables`);
   }
   assert.strictEqual(tree.nodes.filter((n) => n.sector === 'core').length, 30);
 });
 
-test('every key is unique, and 2382 edges are produced', () => {
+test('every key is unique, and 2419 edges are produced', () => {
   const keys = new Set(tree.nodes.map((n) => n.key));
-  assert.strictEqual(keys.size, 1806);
-  assert.strictEqual(tree.edges.length, 2382);
+  assert.strictEqual(keys.size, 1843);
+  assert.strictEqual(tree.edges.length, 2419);
 });
 
 test('the six start nodes are the only nodes carrying a start_class', () => {
@@ -115,7 +142,7 @@ test('guard 1: every node is reachable from every one of the six start nodes', (
     const unreachable = tree.nodes.map((n) => n.key).filter((k) => !seen.has(k));
     assert.deepStrictEqual(unreachable.slice(0, 10), [],
       `${unreachable.length} node(s) unreachable from ${start}`);
-    assert.strictEqual(seen.size, 1806, `reachable-from-${start} count`);
+    assert.strictEqual(seen.size, 1843, `reachable-from-${start} count`);
   }
 });
 
@@ -141,6 +168,8 @@ test('guard 3: every grant validates against the known grant vocabulary', () => 
       }
       // '@sector' must be substituted by the generator, never persisted.
       if (g.stat === '@sector') fail('unsubstituted @sector placeholder');
+      // SOMET-516's second placeholder, same rule: it must never be persisted.
+      if (g.stat === '@other') fail('unsubstituted @other placeholder');
     }
   }
   assert.deepStrictEqual(bad.slice(0, 10), []);
@@ -254,8 +283,12 @@ test('coordinates are rounded to 2dp and stay inside the specced radius', () => 
   for (const n of tree.nodes) {
     assert.strictEqual(Math.round(n.x * 100) / 100, n.x, `${n.key} x is not 2dp`);
     assert.strictEqual(Math.round(n.y * 100) / 100, n.y, `${n.key} y is not 2dp`);
-    // Outer ring is baseRadius 700 + 2 * rowStep 70 = 840; nothing may exceed it.
-    assert.ok(Math.hypot(n.x, n.y) <= 840.01, `${n.key} is outside the outer ring`);
+    // Outer ring is baseRadius 700 + 2 * rowStep 70 = 840. SOMET-518's epic
+    // clusters sit deliberately OUTSIDE that, at clusterRadius 960 with
+    // satellites 62px around their hub, so the outermost thing in the tree is
+    // at 1022. Hand-computed, not read from LAYOUT: deriving the bound from
+    // the same constants the generator uses would assert nothing.
+    assert.ok(Math.hypot(n.x, n.y) <= 1022.01, `${n.key} is outside the cluster ring`);
   }
 });
 
@@ -384,4 +417,116 @@ test('every template weight is a positive integer when present', () => {
     assert.ok(Number.isInteger(t.weight) && t.weight > 0,
       `template ${t.key} has weight ${t.weight}`);
   }
+});
+
+// ===========================================================================
+// SOMET-518: epic clusters.
+//
+// A hub plus 2 or 4 satellites. The satellites' edge topology IS the feature:
+// each has exactly one neighbour, its own hub, so isAllocatable's walk cannot
+// reach an increaser until the epic it increases has been bought. Structural,
+// not a rule anyone has to remember to enforce.
+// ===========================================================================
+
+const { buildAdjacency, isAllocatable } = require('../src/services/passiveRules.js');
+
+function clusterTree() { return generatePassiveTree(PASSIVE_TREE_SPEC); }
+
+test('every authored cluster produces a hub and all of its satellites', () => {
+  const { nodes } = clusterTree();
+  const byKey = new Map(nodes.map((n) => [n.key, n]));
+  for (const c of CLUSTERS) {
+    const hub = byKey.get(`${c.key}-hub`);
+    assert.ok(hub, `${c.key} has no hub node`);
+    assert.equal(hub.label, c.hubLabel);
+    assert.equal(hub.sector, c.sector, 'a cluster must sit in its own class sector');
+    c.satellites.forEach((sat, i) => {
+      const s = byKey.get(`${c.key}-sat${i}`);
+      assert.ok(s, `${c.key} satellite ${i} missing`);
+      assert.equal(s.label, sat.label);
+    });
+  }
+});
+
+// THE TEST THE TICKET WAS WRITTEN AROUND.
+test('a satellite is adjacent to exactly its own hub and nothing else', () => {
+  const { edges } = clusterTree();
+  const adj = buildAdjacency(edges);
+  for (const c of CLUSTERS) {
+    c.satellites.forEach((_, i) => {
+      const key = `${c.key}-sat${i}`;
+      const neighbours = adj.get(key) || [];
+      assert.deepStrictEqual(neighbours, [`${c.key}-hub`],
+        `${key} must have exactly one neighbour, its own hub`);
+    });
+  }
+});
+
+// The same fact stated through the real allocation rule rather than through
+// the edge list -- if isAllocatable ever stopped consulting adjacency, the
+// topology test above would still pass while the gate was gone.
+test('a satellite is not allocatable until its hub is', () => {
+  const { edges } = clusterTree();
+  const adj = buildAdjacency(edges);
+  const c = CLUSTERS[0];
+  const hub = `${c.key}-hub`;
+  const sat = `${c.key}-sat0`;
+  // Pretend the whole tree except this cluster is allocated: still no.
+  const everythingElse = new Set([...adj.keys()].filter((k) => k !== hub && k !== sat));
+  assert.equal(isAllocatable(sat, everythingElse, adj, 'start-strength'), false,
+    'a satellite must be unreachable while its hub is unallocated');
+  assert.equal(isAllocatable(sat, new Set([hub]), adj, 'start-strength'), true,
+    'and reachable once the hub is taken');
+});
+
+// A hub that nothing links to would be an unreachable island: the cluster
+// would exist in the database and be unbuyable.
+test('every hub is reachable from the rest of the graph', () => {
+  const { edges } = clusterTree();
+  const adj = buildAdjacency(edges);
+  for (const c of CLUSTERS) {
+    const key = `${c.key}-hub`;
+    const neighbours = adj.get(key) || [];
+    const outside = neighbours.filter((n) => !n.startsWith(`${c.key}-`));
+    assert.ok(outside.length >= 1, `${key} has no edge to the rest of the tree`);
+  }
+});
+
+// Every cluster grant must name a rule the runtime actually reads. A typo here
+// is a node that looks epic and does nothing -- the exact failure SOMET-514
+// spent a ticket undoing.
+test('every cluster grants a rule that exists in the vocabulary', () => {
+  for (const c of CLUSTERS) {
+    for (const g of [...c.hubGrants, ...c.satellites.flatMap((s) => s.grants)]) {
+      assert.equal(g.type, 'rule', `${c.key} grants a non-rule`);
+      assert.ok(RULE_KEYS[g.rule], `${c.key} grants unknown rule "${g.rule}"`);
+    }
+  }
+});
+
+// Clusters replaced ks_wis_clarity and ks_cha_beast_bond. Shipping both would
+// pay the Monk and the Druid twice for one idea.
+// Narrowly: the two keystones the clusters REPLACED must be gone, by key. It
+// is fine and intended for other keystones to grant a smaller step of the same
+// rule -- ks_cha_pack_leader's +3 charm sits deliberately between the Druid
+// start node's +1 and the Beast Bond cluster's +5. What must not happen is
+// shipping the replaced keystone AND its cluster, which would pay the class
+// twice for one idea.
+test('the two keystones the clusters replaced are gone', () => {
+  const { nodes } = clusterTree();
+  const labels = new Set(nodes.map((n) => n.label));
+  const keys = new Set(nodes.map((n) => n.key));
+  for (const gone of ['ks_wis_clarity', 'ks_cha_beast_bond']) {
+    assert.ok(!keys.has(gone), `${gone} was replaced by a cluster and must not be generated`);
+  }
+  // And each replaced idea now exists exactly once, as the cluster hub.
+  for (const label of ['Clarity', 'Beast Bond']) {
+    const count = nodes.filter((n) => n.label === label).length;
+    assert.equal(count, 1, `"${label}" must exist exactly once, as the cluster hub`);
+  }
+  // Keystone labels carry their description ("Transcendence — +35 WIS ..."),
+  // so this matches the name, not the whole string.
+  const named = (name) => [...labels].some((l) => l.startsWith(name));
+  assert.ok(named('Transcendence'), 'the wisdom keystone slot must be refilled');
+  assert.ok(named('Menagerie'), 'the charisma keystone slot must be refilled');
 });

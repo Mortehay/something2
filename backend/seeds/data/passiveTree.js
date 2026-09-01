@@ -154,6 +154,11 @@ const LAYOUT = {
   // greaters and keystones do not land on each other's nudged positions.
   greaterOffset: 11,
   greaterStagger: 3,
+  // SOMET-518. Epic clusters sit OUTSIDE ring 3 (whose outermost row is at
+  // 700 + 2*70 = 840), far enough out that a hub and its satellites cannot
+  // overlap the grid they hang off.
+  clusterRadius: 960,
+  clusterSatelliteRadius: 62,
   rings: [
     null, // index 0 is the core + the start nodes, which are not laid out on a grid
     { rows: 4, cols: 17, baseRadius: 260, rowStep: 45, minor: 60, notable: 8, keystone: 0 },
@@ -281,7 +286,11 @@ const KEYSTONES = {
     { key: 'ks_wis_meditation', label: 'Meditation — +120 maximum mana', grants: [{ type: 'resource', pool: 'mana', value: 120 }] },
     { key: 'ks_wis_spirit_ward', label: 'Spirit Ward — +20% arcane resistance', grants: [{ type: 'resist', element: 'arcane', value: 20 }] },
     { key: 'ks_wis_iron_body', label: 'Iron Body — +20 WIS and +20 CON', grants: [{ type: 'stat', stat: 'wisdom', value: 20 }, { type: 'stat', stat: 'constitution', value: 20 }] },
-    { key: 'ks_wis_clarity', label: 'Clarity — mana regeneration also restores 20% as much life', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.2 }] },
+    // SOMET-518 moved Clarity to a CLUSTER (hub + 4 satellites). This slot
+    // becomes a plain stat keystone rather than being deleted: the generator
+    // places exactly five keystones per sector from this array, so removing
+    // one would leave a ring-3 keystone slot with nothing to fill it.
+    { key: 'ks_wis_transcendence', label: 'Transcendence — +35 WIS and +25 INT', grants: [{ type: 'stat', stat: 'wisdom', value: 35 }, { type: 'stat', stat: 'intelligence', value: 25 }] },
   ],
   intelligence: [
     { key: 'ks_int_pyromancy', label: 'Pyromancy — +35% fire damage', grants: [{ type: 'damage', element: 'fire', value: 35 }] },
@@ -316,9 +325,119 @@ const KEYSTONES = {
     { key: 'ks_cha_eternal_hawk', label: 'Eternal Hawk — Infinite Hawk Form (+30 DEX and +20% ice resistance)', grants: [{ type: 'stat', stat: 'dexterity', value: 30 }, { type: 'resist', element: 'ice', value: 20 }] },
     { key: 'ks_cha_eternal_wolf', label: 'Eternal Wolf — Infinite Wolf Form (+20 STR, +20 DEX and +20 CHA)', grants: [{ type: 'stat', stat: 'strength', value: 20 }, { type: 'stat', stat: 'dexterity', value: 20 }, { type: 'stat', stat: 'charisma', value: 20 }] },
     { key: 'ks_cha_pack_leader', label: 'Pack Leader — +3 to your charm budget', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 3 }] },
-    { key: 'ks_cha_beast_bond', label: 'Beast Bond — +5 to your charm budget', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }] },
+    // SOMET-518 moved Beast Bond to a CLUSTER, for the same reason as Clarity.
+    { key: 'ks_cha_menagerie', label: 'Menagerie — +35 CHA and +25 CON', grants: [{ type: 'stat', stat: 'charisma', value: 35 }, { type: 'stat', stat: 'constitution', value: 25 }] },
   ],
 };
+
+// --- Epic clusters (SOMET-518) ---------------------------------------------
+//
+// A HUB plus 2 or 4 SATELLITES. The generator places the hub beyond ring 3 and
+// wires edges HUB<->SATELLITE ONLY -- no satellite touches the rest of the
+// graph.
+//
+// THAT WIRING IS THE WHOLE MECHANISM. isAllocatable walks the undirected
+// adjacency out from the start node, so a satellite is unreachable until its
+// hub is allocated. The gate is structural rather than a rule someone has to
+// remember to write, which is the difference between a guarantee and a
+// convention.
+//
+// UNITS. Reach and radius are PIXELS -- what w.reach and every world
+// coordinate already use. A tile is 64px, so the brief's "+0.5m" is +32.
+// Arcs are RADIANS. Speed rules are multipliers (1.10 = +10%) and compound.
+//
+// Each cluster names the class it is for. It sits in that class's own sector,
+// so the epic option a class wants is at the far edge of the tree they start
+// in -- a long walk, but their own.
+const CLUSTERS = [
+  {
+    key: 'clu_str_cleaving', sector: 'strength', hubLabel: 'Cleaving Reach',
+    hubGrants: [{ type: 'rule', rule: 'meleeReachBonus', value: 32 }],
+    satellites: [
+      { label: 'Long Guard', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 16 }] },
+      { label: 'Extended Guard', grants: [{ type: 'rule', rule: 'meleeReachBonus', value: 16 }] },
+    ],
+  },
+  {
+    key: 'clu_str_whirlwind', sector: 'strength', hubLabel: 'Whirlwind',
+    // 6.3 rad on top of a typical 1.8 arc clamps to a full turn at the
+    // authority, so this reads as "your swing becomes circular".
+    hubGrants: [{ type: 'rule', rule: 'meleeArcBonus', value: 6.3 }],
+    satellites: [
+      { label: 'Momentum', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
+      { label: 'Follow-Through', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
+      { label: 'Whirling Step', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
+      { label: 'Unending Swing', grants: [{ type: 'rule', rule: 'attackSpeedMult', value: 1.1 }] },
+    ],
+  },
+  {
+    key: 'clu_dex_volley', sector: 'dexterity', hubLabel: 'Volley',
+    hubGrants: [{ type: 'rule', rule: 'projectileCount', value: 1 }],
+    satellites: [
+      { label: 'Split Arrow', grants: [{ type: 'rule', rule: 'projectileCount', value: 1 }] },
+      { label: 'Scattershot', grants: [{ type: 'rule', rule: 'projectileCount', value: 1 }] },
+    ],
+  },
+  {
+    key: 'clu_dex_swiftshot', sector: 'dexterity', hubLabel: 'Swiftshot',
+    hubGrants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.25 }],
+    satellites: [
+      { label: 'Taut String', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
+      { label: 'Fletching', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
+      { label: 'Draw Weight', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
+      { label: 'Loosed Wind', grants: [{ type: 'rule', rule: 'projectileSpeedMult', value: 1.1 }] },
+    ],
+  },
+  {
+    key: 'clu_int_quickcast', sector: 'intelligence', hubLabel: 'Quickcast',
+    hubGrants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.2 }],
+    satellites: [
+      { label: 'Swift Incant', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
+      { label: 'Practised Cadence', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
+      { label: 'Sharp Syllables', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
+      { label: 'Thoughtform', grants: [{ type: 'rule', rule: 'castSpeedMult', value: 1.08 }] },
+    ],
+  },
+  {
+    key: 'clu_int_spellpierce', sector: 'intelligence', hubLabel: 'Spellpierce',
+    hubGrants: [{ type: 'rule', rule: 'pierceBonus', value: 2 }],
+    satellites: [
+      { label: 'Rending Bolt', grants: [{ type: 'rule', rule: 'pierceBonus', value: 1 }] },
+      { label: 'Unspent Force', grants: [{ type: 'rule', rule: 'pierceBonus', value: 1 }] },
+    ],
+  },
+  {
+    key: 'clu_con_sanguine', sector: 'constitution', hubLabel: 'Sanguine Aura',
+    hubGrants: [{ type: 'rule', rule: 'auraLeech', value: 2 }],
+    satellites: [
+      { label: 'Crimson Thirst', grants: [{ type: 'rule', rule: 'auraLeech', value: 1 }] },
+      { label: 'Deepening Thirst', grants: [{ type: 'rule', rule: 'auraLeech', value: 1 }] },
+      { label: 'Spreading Stain', grants: [{ type: 'rule', rule: 'auraRadius', value: 40 }] },
+      { label: 'Wide Communion', grants: [{ type: 'rule', rule: 'auraRadius', value: 40 }] },
+    ],
+  },
+  {
+    // REPLACES ks_wis_clarity, which granted the same rule. Shipping both
+    // would pay the Monk twice for one idea.
+    key: 'clu_wis_clarity', sector: 'wisdom', hubLabel: 'Clarity',
+    hubGrants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.2 }],
+    satellites: [
+      { label: 'Still Water', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
+      { label: 'Even Breath', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
+      { label: 'Quiet Mind', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
+      { label: 'Open Palm', grants: [{ type: 'rule', rule: 'regenLifeShare', value: 0.05 }] },
+    ],
+  },
+  {
+    // REPLACES ks_cha_beast_bond, for the same reason.
+    key: 'clu_cha_beast_bond', sector: 'charisma', hubLabel: 'Beast Bond',
+    hubGrants: [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }],
+    satellites: [
+      { label: 'Kindred Call', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }] },
+      { label: 'Wider Pack', grants: [{ type: 'rule', rule: 'treeCharmBonus', value: 1 }] },
+    ],
+  },
+];
 
 // The six rim start positions. A start node is GRANTED, never allocated: it
 // costs no point, never appears in character_passives, and is the seed the
@@ -397,9 +516,10 @@ const PASSIVE_TREE_SPEC = {
   templates: TEMPLATES,
   keystones: KEYSTONES,
   startNodes: START_NODES,
+  clusters: CLUSTERS,
 };
 
 module.exports = {
-  PASSIVE_TREE_SPEC, SECTORS, LAYOUT, TEMPLATES, KEYSTONES, START_NODES,
+  PASSIVE_TREE_SPEC, SECTORS, LAYOUT, TEMPLATES, KEYSTONES, START_NODES, CLUSTERS,
   GRANT_TYPES, RULE_KEYS, STAT_KEYS, RESOURCE_POOLS, STATUSES,
 };

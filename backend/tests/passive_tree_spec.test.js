@@ -9,7 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   PASSIVE_TREE_SPEC, SECTORS, LAYOUT, TEMPLATES, KEYSTONES, START_NODES,
-  GRANT_TYPES, RULE_KEYS,
+  GRANT_TYPES, RULE_KEYS, CLUSTERS,
 } = require('../seeds/data/passiveTree.js');
 const { ELEMENTS } = require('../src/authority/damage.js');
 
@@ -30,7 +30,9 @@ test('ring geometry multiplies out to the specced per-ring composition', () => {
   assert.deepStrictEqual(
     [1, 2, 3].map((r) => {
       const g = LAYOUT.rings[r];
-      return [g.rows * g.cols, g.minor + g.notable + g.keystone];
+      // SOMET-517 added `greater` to ring 3's composition, taken out of the
+      // minor budget so the ring's total is unchanged.
+      return [g.rows * g.cols, g.minor + g.notable + g.keystone + (g.greater || 0)];
     }),
     [[68, 68], [116, 116], [111, 111]],
   );
@@ -47,15 +49,17 @@ test('ring geometry multiplies out to the specced per-ring composition', () => {
 // 3 notables (Broad Study, Second Discipline, Renaissance). The count is
 // pinned because a template silently dropped in a merge shrinks a pool and
 // re-labels every node that pool served.
-test('48 archetype templates, none of them a keystone', () => {
-  assert.strictEqual(TEMPLATES.length, 48);
+test('52 archetype templates, none of them a keystone', () => {
+  assert.strictEqual(TEMPLATES.length, 52);
   assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 21);
   assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 27);
+  // SOMET-517's ring-3 tier.
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'greater').length, 4);
   assert.strictEqual(TEMPLATES.some((t) => t.kind === 'keystone'), false);
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 48);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 52);
   // Distinct labels: two nodes both called "Sinew" granting different stats is
   // a tooltip that lies.
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 48);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 52);
 });
 
 test('every (kind, sector, ring) combination the generator will ask for has a pool', () => {
@@ -90,9 +94,12 @@ test('the two keystones the spec names by hand exist and grant what it says', ()
   const bloodPact = KEYSTONES.constitution.find((k) => k.key === 'ks_con_blood_pact');
   assert.deepStrictEqual(bloodPact.grants,
     [{ type: 'rule', rule: 'lifeCostMultiplier', value: 0.75 }]);
-  const beastBond = KEYSTONES.charisma.find((k) => k.key === 'ks_cha_beast_bond');
-  assert.deepStrictEqual(beastBond.grants,
-    [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }]);
+  // SOMET-518 moved Beast Bond from a keystone to a CLUSTER hub, so the
+  // keystone is gone and the charm rule now lives on the cluster. Pack Leader
+  // (+3) stays as the intermediate step it always was.
+  assert.strictEqual(KEYSTONES.charisma.find((k) => k.key === 'ks_cha_beast_bond'), undefined);
+  const bond = CLUSTERS.find((c) => c.key === 'clu_cha_beast_bond');
+  assert.deepStrictEqual(bond.hubGrants, [{ type: 'rule', rule: 'treeCharmBonus', value: 5 }]);
 });
 
 test('one start node per sector, each naming a distinct class', () => {
@@ -140,5 +147,5 @@ test('every rule key names the module that consumes it and how duplicates combin
 
 test('PASSIVE_TREE_SPEC is the single bundle the generator takes', () => {
   assert.deepStrictEqual(Object.keys(PASSIVE_TREE_SPEC).sort(),
-    ['keystones', 'layout', 'sectors', 'startNodes', 'templates']);
+    ['clusters', 'keystones', 'layout', 'sectors', 'startNodes', 'templates']);
 });

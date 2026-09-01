@@ -115,7 +115,7 @@ function grantsFor(template, sector, sectorKeys, otherSeq) {
 }
 
 function generatePassiveTree(spec) {
-  const { sectors, layout, templates, keystones, startNodes } = spec;
+  const { sectors, layout, templates, keystones, startNodes, clusters = [] } = spec;
   const nodes = [];
   const edgeKeys = new Set();
   // SOMET-515. The six stat keys, straight off the spec, and the per-sector
@@ -560,6 +560,64 @@ function generatePassiveTree(spec) {
       const nextH = sectorRings[nextS][ring].highway;
       addEdge(curH[curH.length - 1], nextH[0]);
     }
+  }
+
+  // ---- epic clusters (SOMET-518) ----------------------------------------
+  //
+  // A hub plus 2 or 4 satellites, placed OUTSIDE ring 3 on the sector's own
+  // axis. Deliberately appended after the grid rather than woven into it: a
+  // cluster's defining property is its edge topology, and threading it through
+  // the ring/row/column bookkeeping would put that topology at the mercy of
+  // the collision walk that shuffles kinds between slots.
+  //
+  // EDGES: hub -> one ring-3 anchor, and hub -> each satellite. NOTHING ELSE.
+  // A satellite has exactly one neighbour, its own hub, so isAllocatable's
+  // walk cannot reach it until the hub is allocated. That is what makes an
+  // increaser unbuyable without the epic it increases -- structurally, not by
+  // a rule anyone has to remember.
+  const clustersBySector = new Map();
+  for (const c of clusters) {
+    if (!clustersBySector.has(c.sector)) clustersBySector.set(c.sector, []);
+    clustersBySector.get(c.sector).push(c);
+  }
+  for (let s = 0; s < sectors.length; s += 1) {
+    const sector = sectors[s].key;
+    const list = clustersBySector.get(sector) || [];
+    const axis = layout.sectorAxisDeg0 + s * 360 / sectors.length;
+    const half = layout.sectorSpanDeg / 2;
+    const ring3 = sectorRings[s][3];
+    list.forEach((c, ci) => {
+      // Spread the sector's clusters across its wedge so two do not overlap.
+      const frac = list.length === 1 ? 0.5 : (ci + 0.5) / list.length;
+      const hubAngle = axis - half + frac * layout.sectorSpanDeg;
+      const hubRadius = layout.clusterRadius;
+      const hp = polar(hubRadius, hubAngle);
+      const hubKey = push({
+        key: `${c.key}-hub`, sector, ring: 3, x: hp.x, y: hp.y,
+        kind: 'greater', label: c.hubLabel,
+        grants: c.hubGrants.map((g) => ({ ...g })), start_class: null,
+      });
+      // The anchor: the ring-3 highway node nearest this cluster's angle, so
+      // the hub is reachable by a walk that stays in the player's own sector.
+      const highway = ring3.highway;
+      const anchorIdx = Math.min(highway.length - 1,
+        Math.max(0, Math.round(frac * (highway.length - 1))));
+      addEdge(highway[anchorIdx], hubKey);
+      // Satellites ring the hub. Their ONLY edge is back to it.
+      c.satellites.forEach((sat, si) => {
+        const a = hubAngle * DEG + (si / c.satellites.length) * Math.PI * 2;
+        const sp = {
+          x: round2(hp.x + layout.clusterSatelliteRadius * Math.cos(a)),
+          y: round2(hp.y + layout.clusterSatelliteRadius * Math.sin(a)),
+        };
+        const satKey = push({
+          key: `${c.key}-sat${si}`, sector, ring: 3, x: sp.x, y: sp.y,
+          kind: 'notable', label: sat.label,
+          grants: sat.grants.map((g) => ({ ...g })), start_class: null,
+        });
+        addEdge(hubKey, satKey);
+      });
+    });
   }
 
   // Sorted rather than left in insertion order:
