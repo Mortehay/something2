@@ -300,3 +300,75 @@ test('weapon damage is read in exactly one place in world.js, and one in project
   const projHits = projCode.match(/weapon\.damage/g) || [];
   assert.equal(projHits.length, 1, `weapon.damage read at ${projHits.length} sites in projectiles.js; only spawn()'s damage ?? weapon.damage fallback should read it`);
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-514: regenLifeShare, BEHAVIOURALLY.
+//
+// This rule named tick()'s mana-regen line as its consumer from the day it was
+// introduced, and no such read existed -- so the MONK'S START NODE granted
+// nothing, and ks_wis_clarity was an inert keystone. The tests below assert hp
+// ACTUALLY MOVED across a tick, in the spirit of this suite's header: a rider
+// applied at the wrong site, or not at all, looks identical from a field.
+// ---------------------------------------------------------------------------
+
+const { RULE_IDENTITIES } = require('../src/services/statComposition.js');
+
+const withRules = (rules) => stat({ rules: { ...RULE_IDENTITIES, ...rules } });
+
+test('regenLifeShare heals a share of the mana ACTUALLY regenerated', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, undefined, undefined, 0, withRules({ regenLifeShare: 0.5 }));
+  const p = w.getPlayer('u1');
+  p.mana = 0;
+  p.hp = 10;
+  w.tick(1); // manaRegen is 10/s at base wisdom -> +10 mana -> +5 hp at 0.5
+  assert.equal(p.mana, 10);
+  assert.equal(p.hp, 15);
+});
+
+// The share rides the mana that actually landed, not the nominal rate. A Monk
+// at full mana therefore gains nothing -- which is the difference between a
+// regeneration rider and a second, free health regeneration.
+test('a player at full mana gains no life from the rider', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, undefined, undefined, 0, withRules({ regenLifeShare: 0.5 }));
+  const p = w.getPlayer('u1');
+  p.mana = p.maxMana;
+  p.hp = 10;
+  w.tick(1);
+  assert.equal(p.hp, 10, 'no mana was regenerated, so no life may be restored');
+});
+
+// Partial regeneration: only 4 mana fits before the cap, so only 4 * share
+// may be healed. A rider that used manaRegen * dt instead would heal 5.
+test('the rider is capped by the mana that fit, not by the regen rate', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, undefined, undefined, 0, withRules({ regenLifeShare: 0.5 }));
+  const p = w.getPlayer('u1');
+  p.mana = p.maxMana - 4;
+  p.hp = 10;
+  w.tick(1);
+  assert.equal(p.mana, p.maxMana);
+  assert.equal(p.hp, 12, 'only the 4 mana that fit may be shared, not the full 10/s rate');
+});
+
+test('a player with no such node allocated regenerates mana and no life', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, undefined, undefined, 0, BASE_STATS);
+  const p = w.getPlayer('u1');
+  p.mana = 0;
+  p.hp = 10;
+  w.tick(1);
+  assert.equal(p.mana, 10);
+  assert.equal(p.hp, 10, 'the identity is 0 -- an unallocated player must be unmoved');
+});
+
+test('the rider never overheals past maxHp', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 100, y: 100 }, undefined, undefined, 0, withRules({ regenLifeShare: 5 }));
+  const p = w.getPlayer('u1');
+  p.mana = 0;
+  p.hp = p.maxHp - 1;
+  w.tick(1);
+  assert.equal(p.hp, p.maxHp);
+});

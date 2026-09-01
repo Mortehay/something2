@@ -129,3 +129,89 @@ test('the runtime pool/element/status key lists have not drifted from their owne
     assert.ok(STATUS_EFFECTS[s], `no effect spec for the authored status "${s}"`);
   }
 });
+
+// ===========================================================================
+// SOMET-514: THE SOURCE GATE.
+//
+// The single most important test in the passive-tree epic, and the one whose
+// absence let two rules ship dead through two releases.
+//
+// `cooldownFloor` and `regenLifeShare` were declared in RULE_KEYS with a
+// mandatory `consumer:` field naming a real file, mirrored into RULE_COMBINE,
+// folded by composeStats, carried on the composed row, and rendered as
+// itemised modifiers on the Character tab. Every test passed. And nothing in
+// backend/src/ ever READ either of them -- so the Archer and the Monk each
+// began the game with a start node that granted literally nothing, and
+// ks_dex_fleet and ks_wis_clarity were inert keystones.
+//
+// The `consumer:` field was supposed to prevent exactly this. It could not:
+// it is a STRING, and a string cannot be wrong in a way a test notices. This
+// gate reads SOURCE TEXT instead, which is the only thing that can tell a
+// wired rule from a documented one.
+//
+// If you are adding a rule and this test fails: that is the test working. Do
+// not add the key to an ignore list -- write the consumer.
+// ===========================================================================
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+const SRC_DIR = path.join(__dirname, '..', 'src');
+// The declaring module is excluded because it is where RULE_COMBINE lives:
+// counting it would mean every rule trivially "has a consumer" -- the exact
+// self-satisfying shape this gate exists to reject.
+const DECLARING_FILE = path.join(SRC_DIR, 'services', 'statComposition.js');
+
+function jsFilesUnder(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...jsFilesUnder(full));
+    else if (entry.isFile() && entry.name.endsWith('.js')) out.push(full);
+  }
+  return out;
+}
+
+test('every rule in the vocabulary is READ by production code, not merely declared', () => {
+  const files = jsFilesUnder(SRC_DIR).filter((f) => f !== DECLARING_FILE);
+  assert.ok(files.length > 20, 'the file walk found suspiciously few sources');
+
+  const sources = files.map((f) => ({ file: f, text: fs.readFileSync(f, 'utf8') }));
+
+  for (const rule of Object.keys(RULE_COMBINE)) {
+    // A bare substring match would count the rule's own name appearing inside
+    // a comment. Requiring a property ACCESS -- `.cooldownFloor` or
+    // `['cooldownFloor']` or `{ cooldownFloor }` -- is what makes this a test
+    // of wiring rather than of documentation.
+    const access = new RegExp(
+      `(\\.\\s*${rule}\\b)|(\\[\\s*['"\`]${rule}['"\`]\\s*\\])|(\\{[^}]*\\b${rule}\\b[^}]*\\}\\s*=)`,
+    );
+    const readers = sources.filter((s) => access.test(stripComments(s.text)));
+    assert.ok(
+      readers.length > 0,
+      `rule "${rule}" is declared in RULE_COMBINE but no file under backend/src/ reads it.\n`
+      + '        A rule nothing reads is a node the player cannot tell apart from a working one.\n'
+      + '        Write the consumer -- do not exempt the key.',
+    );
+  }
+});
+
+// Comments are stripped before matching so a rule "consumed" only by the
+// sentence that PROMISES to consume it still fails. That promise is precisely
+// what RULE_KEYS' `consumer:` field already contained for both dead rules.
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+// Pins the two repairs SOMET-514 made, by name and by file. A future edit that
+// re-inlines the C.MIN_COOLDOWN_MULT constant, or drops the regen rider, fails
+// here with a message that says what was lost -- the generic gate above would
+// only say "no consumer".
+test('the two rules SOMET-514 repaired are read where the repair put them', () => {
+  const playerStats = fs.readFileSync(path.join(SRC_DIR, 'services', 'playerStats.js'), 'utf8');
+  const world = fs.readFileSync(path.join(SRC_DIR, 'authority', 'world.js'), 'utf8');
+  assert.match(stripComments(playerStats), /\.cooldownFloor\b/,
+    'playerStats.js must floor cooldownMult with the rule, not with the bare constant');
+  assert.match(stripComments(world), /\.regenLifeShare\b/,
+    "world.js's mana-regen tick must apply the regenLifeShare rider");
+});

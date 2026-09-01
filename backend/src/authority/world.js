@@ -444,7 +444,26 @@ class World {
 
     for (const p of this.players.values()) {
       if (p._attackCd > 0) p._attackCd = Math.max(0, p._attackCd - dt);
-      if (p.mana < p.maxMana) p.mana = Math.min(p.maxMana, p.mana + p.stats.manaRegen * dt);
+      // SOMET-514. THE CONSUMER of the tree's `regenLifeShare` rule, which
+      // RULE_KEYS has named this tick as since the rule was introduced -- while
+      // no such read existed. ks_wis_clarity ("mana regeneration also restores
+      // 20% as much life") did nothing, and neither did the MONK'S START NODE,
+      // whose only grant is regenLifeShare 0.1: every Monk began the game with
+      // no class identity at all.
+      //
+      // The share is taken on the mana ACTUALLY regenerated this tick, not on
+      // the nominal manaRegen rate. That is what the label promises -- no
+      // regeneration, no life -- and it means a Monk sitting at full mana
+      // gains nothing, which is the difference between a regen rider and a
+      // free second health regen.
+      if (p.mana < p.maxMana) {
+        const manaBefore = p.mana;
+        p.mana = Math.min(p.maxMana, p.mana + p.stats.manaRegen * dt);
+        const share = p.stats.rules.regenLifeShare;
+        if (share > 0 && p.hp < p.maxHp) {
+          p.hp = Math.min(p.maxHp, p.hp + (p.mana - manaBefore) * share);
+        }
+      }
       if (p.stamina < p.maxStamina) p.stamina = Math.min(p.maxStamina, p.stamina + PLAYER_STAMINA_REGEN * dt);
       const r = resolveMove(this.map, p, p.input.dx, p.input.dy, dt);
       p.x = r.x;

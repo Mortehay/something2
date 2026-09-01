@@ -317,3 +317,42 @@ test('lifeCostMultiplier agrees with its entry in the rules map', () => {
   assert.equal(s.lifeCostMultiplier, 0.75);
   assert.equal(s.lifeCostMultiplier, s.rules.lifeCostMultiplier);
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-514: cooldownFloor, BEHAVIOURALLY.
+//
+// passive_rules.test.js's source gate proves a consumer EXISTS. It cannot
+// prove the consumer is CALLED -- an orphaned function still contains the
+// text `.cooldownFloor`, and reverting the call site while leaving the helper
+// behind passes that gate cleanly. (Verified: that exact revert was green.)
+//
+// So the floor gets a behavioural assertion as well. It drives dexterity high
+// enough that the reciprocal is far below any floor, which makes cooldownMult
+// EQUAL to whatever floor is in force -- and therefore a direct readout of
+// which floor the code actually used.
+// ---------------------------------------------------------------------------
+
+const FLOORED = { dexterity: 200 }; // 1/(1+0.03*195) ~= 0.146, well under any floor
+
+test('with no node allocated the floor is the constant', () => {
+  assert.equal(derivePlayerStats(at(FLOORED)).cooldownMult, 0.4);
+});
+
+test('the cooldownFloor rule actually lowers the floor', () => {
+  // ks_dex_fleet: "your cooldown floor drops from 0.40 to 0.32".
+  const fleet = at({ ...FLOORED, rules: { ...RULE_IDENTITIES, cooldownFloor: 0.32 } });
+  assert.equal(derivePlayerStats(fleet).cooldownMult, 0.32);
+  // The Archer START NODE, which granted nothing at all until SOMET-514.
+  const archer = at({ ...FLOORED, rules: { ...RULE_IDENTITIES, cooldownFloor: 0.38 } });
+  assert.equal(derivePlayerStats(archer).cooldownMult, 0.38);
+});
+
+// A floor of 0 does not mean "no floor" -- it would remove the bound entirely
+// and let a stack of haste drive the attack interval toward zero. null (the
+// `min` identity), 0 and a negative all fall back to the constant.
+test('a zero, negative or null floor falls back to the constant rather than unbounding', () => {
+  for (const bad of [0, -1, null, undefined, NaN, 'x']) {
+    const p = at({ ...FLOORED, rules: { ...RULE_IDENTITIES, cooldownFloor: bad } });
+    assert.equal(derivePlayerStats(p).cooldownMult, 0.4, `floor ${String(bad)} must not unbound the cooldown`);
+  }
+});

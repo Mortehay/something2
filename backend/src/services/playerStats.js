@@ -166,6 +166,29 @@ function rulesOf(progression) {
   return r && typeof r === 'object' ? r : RULE_IDENTITIES;
 }
 
+// SOMET-514. THE CONSUMER of the tree's `cooldownFloor` rule.
+//
+// This rule was declared in RULE_KEYS from the start, naming THIS function as
+// its consumer -- and no such read existed. cooldownMult was floored with the
+// bare C.MIN_COOLDOWN_MULT constant, so `ks_dex_fleet` ("your cooldown floor
+// drops from 0.40 to 0.32") did nothing, and so did the ARCHER'S START NODE,
+// whose only grant is cooldownFloor 0.38. Every Archer began the game with no
+// class identity whatsoever. See passive_rules.test.js's source gate, which
+// now makes that state unshippable.
+//
+// The combine mode is `min` with a NULL identity, deliberately: a player with
+// no such node allocated must land on C.MIN_COOLDOWN_MULT, not on 0. A 0 floor
+// removes the bound entirely and lets a stack of haste drive the attack
+// interval toward zero.
+//
+// `n > 0` rather than `Number.isFinite(n)` for exactly that reason -- null, 0
+// and a negative all mean "no usable floor" and all fall back to the constant.
+function cooldownFloorOf(progression) {
+  const v = rulesOf(progression).cooldownFloor;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) && n > 0 ? n : C.MIN_COOLDOWN_MULT;
+}
+
 // The single source of every number a stat affects.
 //
 // `classPools` is `{ maxHp, maxMana }` -- the class's BASE pools, before any
@@ -193,8 +216,12 @@ function derivePlayerStats(progression, classPools = null) {
     meleeMult: round4(1 + C.MELEE_PER_STR * above('strength')),
     spellMult: round4(1 + C.SPELL_PER_INT * above('intelligence')),
     // Lower is faster. Floored so attack rate stays bounded.
+    // SOMET-514: the floor is the tree's `cooldownFloor` rule when a node
+    // supplies one, and C.MIN_COOLDOWN_MULT otherwise. Until this ticket it
+    // was always the constant, which is what made the Archer's start node and
+    // ks_dex_fleet inert.
     cooldownMult: Math.max(
-      C.MIN_COOLDOWN_MULT,
+      cooldownFloorOf(progression),
       round4(1 / (1 + C.HASTE_PER_DEX * above('dexterity'))),
     ),
     manaRegen: round4(C.MANA_REGEN_BASE + C.MANA_REGEN_PER_WIS * above('wisdom')),
