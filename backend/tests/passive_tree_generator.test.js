@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { generatePassiveTree } = require('../seeds/generatePassiveTree.js');
-const { PASSIVE_TREE_SPEC, RULE_KEYS } = require('../seeds/data/passiveTree.js');
+const { PASSIVE_TREE_SPEC, RULE_KEYS, TEMPLATES } = require('../seeds/data/passiveTree.js');
 const { ELEMENTS } = require('../src/authority/damage.js');
 
 // The whole vocabulary, hand-written. Deliberately NOT imported from
@@ -256,5 +256,132 @@ test('coordinates are rounded to 2dp and stay inside the specced radius', () => 
     assert.strictEqual(Math.round(n.y * 100) / 100, n.y, `${n.key} y is not 2dp`);
     // Outer ring is baseRadius 700 + 2 * rowStep 70 = 840; nothing may exceed it.
     assert.ok(Math.hypot(n.x, n.y) <= 840.01, `${n.key} is outside the outer ring`);
+  }
+});
+
+// ===========================================================================
+// SOMET-515 / SOMET-516: the stat spread.
+//
+// Before these tickets every connective minor granted `@sector`, so the
+// constitution sector contained ZERO intelligence nodes -- while a Cultist
+// casts with spellMult, which derivePlayerStats derives from INTELLIGENCE.
+// Building a caster meant leaving your own sector on the very first node.
+//
+// These are the tests that keep the ratio real. Without them "70/30" is a
+// comment, and the next balance pass drifts it without anyone noticing.
+// ===========================================================================
+
+function statGrantsBySector() {
+  const { nodes } = generatePassiveTree(PASSIVE_TREE_SPEC);
+  const per = new Map();
+  for (const n of nodes) {
+    // Ring 0 is the core and the start nodes: no sector stat, no stat grants.
+    if (n.ring === 0) continue;
+    for (const g of n.grants) {
+      if (g.type !== 'stat') continue;
+      if (!per.has(n.sector)) per.set(n.sector, { own: 0, off: new Map() });
+      const rec = per.get(n.sector);
+      if (g.stat === n.sector) rec.own += 1;
+      else rec.off.set(g.stat, (rec.off.get(g.stat) || 0) + 1);
+    }
+  }
+  return per;
+}
+
+test('every sector grants its own stat about 70% of the time', () => {
+  const per = statGrantsBySector();
+  assert.equal(per.size, 6, 'all six sectors must grant stats');
+  for (const [sector, rec] of per) {
+    const off = [...rec.off.values()].reduce((a, b) => a + b, 0);
+    const share = rec.own / (rec.own + off);
+    assert.ok(share >= 0.67 && share <= 0.73,
+      `${sector} own-stat share is ${(share * 100).toFixed(1)}%, expected 70% +-3`);
+  }
+});
+
+// "Evenly across the other five" is a claim, and this is what checks it. A
+// hash-based off-stat pick would clump and pass the ratio test above while
+// leaving one stat nearly absent from a sector.
+test('off-stat grants are spread evenly over the other five stats', () => {
+  const per = statGrantsBySector();
+  for (const [sector, rec] of per) {
+    assert.equal(rec.off.size, 5, `${sector} must offer all five other stats`);
+    assert.ok(!rec.off.has(sector), `${sector} must not count its own stat as off-stat`);
+    const counts = [...rec.off.values()];
+    const lo = Math.min(...counts);
+    const hi = Math.max(...counts);
+    assert.ok(hi - lo <= Math.max(4, hi * 0.35),
+      `${sector} off-stat spread is uneven: ${JSON.stringify([...rec.off])}`);
+  }
+});
+
+// The point of the whole exercise, stated as a number rather than a feeling:
+// a Cultist must be able to build real INT inside the constitution sector.
+// Measured in POINTS, not nodes: a node is worth 2, 3, 4, 8, 12 or 16, so a
+// node count says nothing about whether a build is reachable. 34 points on a
+// base stat of 5 is roughly a sevenfold increase, entirely inside the
+// Cultist's own sector -- which is the whole point of the 70/30 change.
+test('a Cultist can reach substantial INT without leaving their own sector', () => {
+  const { nodes } = generatePassiveTree(PASSIVE_TREE_SPEC);
+  let points = 0;
+  for (const n of nodes) {
+    if (n.ring === 0 || n.sector !== 'constitution') continue;
+    for (const g of n.grants) {
+      if (g.type === 'stat' && g.stat === 'intelligence') points += g.value;
+    }
+  }
+  assert.ok(points >= 30,
+    `the constitution sector offers only ${points} points of INT; a Cultist casts with INT`);
+});
+
+// The same must hold in the other direction and for every pairing -- a Monk
+// who wants to melee needs STR at home just as much. Asserting all thirty
+// sector/off-stat pairs is what stops one lucky sector standing in for the
+// rest.
+test('every sector offers a usable amount of every other stat', () => {
+  const { nodes } = generatePassiveTree(PASSIVE_TREE_SPEC);
+  const points = new Map();
+  for (const n of nodes) {
+    if (n.ring === 0) continue;
+    for (const g of n.grants) {
+      if (g.type !== 'stat' || g.stat === n.sector) continue;
+      const key = `${n.sector}->${g.stat}`;
+      points.set(key, (points.get(key) || 0) + g.value);
+    }
+  }
+  assert.equal(points.size, 30, 'six sectors x five off-stats');
+  for (const [pair, total] of points) {
+    assert.ok(total >= 30, `${pair} offers only ${total} points`);
+  }
+});
+
+// Determinism is contractual: no Math.random(), no Date.now(). The round-robin
+// cursor is state, so this is the test that proves the state does not leak
+// between runs.
+test('the tree is byte-identical across runs after the spread change', () => {
+  const a = generatePassiveTree(PASSIVE_TREE_SPEC);
+  const b = generatePassiveTree(PASSIVE_TREE_SPEC);
+  assert.deepStrictEqual(a, b);
+});
+
+// A core node has no sector, so `@other` there has no meaning. The generator
+// deliberately does not fall back -- a fallback would make the mistake
+// invisible -- so the spec must never put one on a core template.
+test('no core template asks for an off-stat', () => {
+  const core = TEMPLATES.filter((t) => t.sectors !== '*' && t.sectors.includes('core'));
+  for (const t of core) {
+    for (const g of t.grants) {
+      assert.notEqual(g.stat, '@other', `core template ${t.key} cannot resolve @other`);
+    }
+  }
+});
+
+// Weights are what make the ratio authored rather than accidental. A weight of
+// 0 or a negative would silently drop a template from every pool.
+test('every template weight is a positive integer when present', () => {
+  for (const t of TEMPLATES) {
+    if (t.weight === undefined) continue;
+    assert.ok(Number.isInteger(t.weight) && t.weight > 0,
+      `template ${t.key} has weight ${t.weight}`);
   }
 });

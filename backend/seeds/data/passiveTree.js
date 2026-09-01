@@ -172,24 +172,57 @@ const TEMPLATES = [
   { key: 'core_stam', kind: 'minor', sectors: ['core'], rings: [0], label: 'Stamina', grants: [{ type: 'resource', pool: 'stamina', value: 8 }] },
   { key: 'core_res', kind: 'minor', sectors: ['core'], rings: [0], label: 'Toughness', grants: [{ type: 'resist', element: 'physical', value: 1 }] },
 
-  // --- minors (the connective tissue: +2 to the sector's own stat) ---
-  { key: 'min_sinew', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Sinew', grants: [{ type: 'stat', stat: '@sector', value: 2 }] },
-  { key: 'min_focus', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Focus', grants: [{ type: 'stat', stat: '@sector', value: 3 }] },
-  { key: 'min_vigour', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Vigour', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'hp', value: 8 }] },
-  { key: 'min_insight', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Insight', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'mana', value: 6 }] },
-  { key: 'min_wind', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Wind', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'stamina', value: 5 }] },
+  // --- minors (the connective tissue) ---
+  //
+  // SOMET-516. THE 70/30 SPLIT. Before this ticket every one of these granted
+  // `@sector`, so the constitution sector held ZERO intelligence -- while a
+  // Cultist casts with spellMult, which derives from INTELLIGENCE. Building a
+  // caster meant leaving your own sector on the first node.
+  //
+  // `@other` rotates through the five stats that are not this sector's own, so
+  // ~30% of a sector's stat grants are off-stat, spread evenly across the five.
+  // Sector identity survives on the remaining 70%: walking the strength sector
+  // still makes you mostly stronger.
+  //
+  // WEIGHTS ARE WHAT SET THE RATIO. templatePool expands by weight before the
+  // `pool[i % length]` pick, so the mix is stated here rather than being an
+  // accident of how many objects sit in this array. The guard test in
+  // passive_tree_generator.test.js measures the realized ratio per sector.
+  //
+  // Off-stat variants carry the SAME magnitudes as their own-stat twins. The
+  // six stats are symmetric in progressionConstants.js -- each buys exactly one
+  // derived number -- so discounting off-stat nodes would be a balance claim
+  // nothing supports.
+  { key: 'min_sinew', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 7, label: 'Sinew', grants: [{ type: 'stat', stat: '@sector', value: 2 }] },
+  { key: 'min_focus', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 7, label: 'Focus', grants: [{ type: 'stat', stat: '@sector', value: 3 }] },
+  { key: 'min_vigour', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Vigour', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'hp', value: 8 }] },
+  { key: 'min_insight', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Insight', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'mana', value: 6 }] },
+  { key: 'min_wind', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Wind', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resource', pool: 'stamina', value: 5 }] },
+  // The off-stat connective tissue. Labels are distinct from their own-stat
+  // twins on purpose: two nodes both called "Sinew" granting different stats
+  // is a tooltip that lies.
+  { key: 'min_versatility', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Versatility', grants: [{ type: 'stat', stat: '@other', value: 2 }] },
+  { key: 'min_breadth', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 4, label: 'Breadth', grants: [{ type: 'stat', stat: '@other', value: 3 }] },
+  { key: 'min_crosstrain', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 3, label: 'Cross-Training', grants: [{ type: 'stat', stat: '@other', value: 2 }, { type: 'resource', pool: 'hp', value: 8 }] },
+  { key: 'min_dabbler', kind: 'minor', sectors: '*', rings: [1, 2, 3], weight: 3, label: 'Dabbler', grants: [{ type: 'stat', stat: '@other', value: 2 }, { type: 'resource', pool: 'mana', value: 6 }] },
   { key: 'min_hardy', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Hardy', grants: [{ type: 'resource', pool: 'hp', value: 15 }] },
   { key: 'min_reserve', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Reserve', grants: [{ type: 'resource', pool: 'mana', value: 12 }] },
   { key: 'min_callus', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Callus', grants: [{ type: 'resist', element: 'physical', value: 2 }] },
   { key: 'min_edge', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Edge', grants: [{ type: 'damage', element: 'physical', value: 3 }] },
   { key: 'min_temper', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Temper', grants: [{ type: 'stat', stat: '@sector', value: 2 }, { type: 'resist', element: 'physical', value: 1 }] },
   { key: 'min_second_wind', kind: 'minor', sectors: '*', rings: [1, 2, 3], label: 'Second Wind', grants: [{ type: 'resource', pool: 'stamina', value: 10 }] },
-  { key: 'min_discipline', kind: 'minor', sectors: '*', rings: [2, 3], label: 'Discipline', grants: [{ type: 'stat', stat: '@sector', value: 4 }] },
+  { key: 'min_discipline', kind: 'minor', sectors: '*', rings: [2, 3], weight: 5, label: 'Discipline', grants: [{ type: 'stat', stat: '@sector', value: 4 }] },
+  { key: 'min_polymath', kind: 'minor', sectors: '*', rings: [2, 3], weight: 2, label: 'Polymath', grants: [{ type: 'stat', stat: '@other', value: 4 }] },
 
   // --- notables ---
-  { key: 'not_great_sinew', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Great Sinew', grants: [{ type: 'stat', stat: '@sector', value: 8 }] },
-  { key: 'not_mastery', kind: 'notable', sectors: '*', rings: [2, 3], label: 'Mastery', grants: [{ type: 'stat', stat: '@sector', value: 12 }] },
-  { key: 'not_apotheosis', kind: 'notable', sectors: '*', rings: [3], label: 'Apotheosis', grants: [{ type: 'stat', stat: '@sector', value: 16 }] },
+  { key: 'not_great_sinew', kind: 'notable', sectors: '*', rings: [1, 2, 3], weight: 5, label: 'Great Sinew', grants: [{ type: 'stat', stat: '@sector', value: 8 }] },
+  { key: 'not_mastery', kind: 'notable', sectors: '*', rings: [2, 3], weight: 4, label: 'Mastery', grants: [{ type: 'stat', stat: '@sector', value: 12 }] },
+  { key: 'not_apotheosis', kind: 'notable', sectors: '*', rings: [3], weight: 3, label: 'Apotheosis', grants: [{ type: 'stat', stat: '@sector', value: 16 }] },
+  // SOMET-516: the off-stat notables. An 8/12/16 off-stat notable is what lets
+  // a Cultist reach real INT, or a Monk real STR, without leaving home.
+  { key: 'not_broad_study', kind: 'notable', sectors: '*', rings: [1, 2, 3], weight: 2, label: 'Broad Study', grants: [{ type: 'stat', stat: '@other', value: 8 }] },
+  { key: 'not_second_discipline', kind: 'notable', sectors: '*', rings: [2, 3], weight: 2, label: 'Second Discipline', grants: [{ type: 'stat', stat: '@other', value: 12 }] },
+  { key: 'not_renaissance', kind: 'notable', sectors: '*', rings: [3], weight: 1, label: 'Renaissance', grants: [{ type: 'stat', stat: '@other', value: 16 }] },
   { key: 'not_deep_reserve', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Deep Reserve', grants: [{ type: 'resource', pool: 'mana', value: 15 }] },
   { key: 'not_thick_skin', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Thick Skin', grants: [{ type: 'resource', pool: 'hp', value: 40 }] },
   { key: 'not_endurance', kind: 'notable', sectors: '*', rings: [1, 2, 3], label: 'Endurance', grants: [{ type: 'resource', pool: 'stamina', value: 30 }] },

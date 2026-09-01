@@ -42,12 +42,20 @@ test('ring geometry multiplies out to the specced per-ring composition', () => {
 // archetype templates", so 40 is the correct number and 38 was the typo. The
 // count is pinned anyway, because a template silently dropped in a merge
 // shrinks a pool and re-labels every node that pool served.
-test('40 archetype templates, none of them a keystone', () => {
-  assert.strictEqual(TEMPLATES.length, 40);
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 16);
-  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 24);
+// 48 since SOMET-516, which added the off-stat half of the connective tissue:
+// 5 minors (Versatility, Breadth, Cross-Training, Dabbler, Polymath) and
+// 3 notables (Broad Study, Second Discipline, Renaissance). The count is
+// pinned because a template silently dropped in a merge shrinks a pool and
+// re-labels every node that pool served.
+test('48 archetype templates, none of them a keystone', () => {
+  assert.strictEqual(TEMPLATES.length, 48);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'minor').length, 21);
+  assert.strictEqual(TEMPLATES.filter((t) => t.kind === 'notable').length, 27);
   assert.strictEqual(TEMPLATES.some((t) => t.kind === 'keystone'), false);
-  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 40);
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.key)).size, 48);
+  // Distinct labels: two nodes both called "Sinew" granting different stats is
+  // a tooltip that lies.
+  assert.strictEqual(new Set(TEMPLATES.map((t) => t.label)).size, 48);
 });
 
 test('every (kind, sector, ring) combination the generator will ask for has a pool', () => {

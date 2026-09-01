@@ -44,20 +44,75 @@ function ringKinds(total, notableCount, keystoneCount, layout) {
   return kinds;
 }
 
+// SOMET-515. The pool a (kind, sector, ring) draws from, EXPANDED BY WEIGHT.
+//
+// Selection below is `pool[i % pool.length]`, so before weights existed the
+// own/off-stat ratio was an accident of how many template OBJECTS happened to
+// sit in the array -- adding one off-stat template moved it. A template's
+// `weight` is how many slots it occupies, which makes the ratio something the
+// data file states rather than something the array length implies.
+//
+// Weight defaults to 1, so every pre-515 template keeps exactly its old share.
 function templatePool(templates, kind, sector, ring) {
-  return templates.filter((t) => t.kind === kind
+  const matching = templates.filter((t) => t.kind === kind
     && (t.sectors === '*' ? sector !== 'core' : t.sectors.includes(sector))
     && t.rings.includes(ring));
+  const pool = [];
+  for (const t of matching) {
+    const weight = Number.isFinite(t.weight) && t.weight > 0 ? Math.floor(t.weight) : 1;
+    for (let i = 0; i < weight; i += 1) pool.push(t);
+  }
+  return pool;
 }
 
-function grantsFor(template, sector) {
-  return template.grants.map((g) => (g.stat === '@sector' ? { ...g, stat: sector } : { ...g }));
+// SOMET-515. The off-stat a `@other` grant resolves to.
+//
+// Round-robin through the five stats that are NOT this sector's own, in
+// sector-declaration order, advanced by a per-sector counter. Two properties
+// matter and both are load-bearing:
+//
+//   DETERMINISTIC. The generator is contractually free of Math.random() and
+//   byte-identical across runs, which is what makes a tree change a reviewable
+//   diff. Generation order is fixed, so a counter is as deterministic as an
+//   index -- and unlike a raw node index it cannot be knocked out of step by
+//   the four different call sites using four different loop variables.
+//
+//   EVEN. Over a sector's ~295 nodes each of the other five stats receives
+//   close to a fifth of the off-stat budget, which is the distribution this
+//   epic chose. A hash would clump; a round-robin cannot.
+//
+// The stat list comes from the SPEC's own sectors rather than a re-declared
+// STAT_KEYS, so the generator stays a pure function of the spec it is handed
+// and cannot drift from the six sectors that actually exist.
+function nextOtherStat(sectorKeys, sector, otherSeq) {
+  const others = sectorKeys.filter((k) => k !== sector);
+  const n = otherSeq.get(sector) || 0;
+  otherSeq.set(sector, n + 1);
+  return others[n % others.length];
+}
+
+// `@sector` -> this sector's own stat. `@other` -> one of the other five.
+// A core node has no sector stat, so `@other` must never appear on a core
+// template; the spec guard test enforces that rather than a silent fallback
+// here, because a fallback would make the mistake invisible.
+function grantsFor(template, sector, sectorKeys, otherSeq) {
+  return template.grants.map((g) => {
+    if (g.stat === '@sector') return { ...g, stat: sector };
+    if (g.stat === '@other') return { ...g, stat: nextOtherStat(sectorKeys, sector, otherSeq) };
+    return { ...g };
+  });
 }
 
 function generatePassiveTree(spec) {
   const { sectors, layout, templates, keystones, startNodes } = spec;
   const nodes = [];
   const edgeKeys = new Set();
+  // SOMET-515. The six stat keys, straight off the spec, and the per-sector
+  // round-robin cursor `@other` advances. Declared once here so every call
+  // site below shares ONE cursor per sector -- a cursor per call site would
+  // restart the rotation four times and clump the distribution.
+  const sectorKeys = sectors.map((s) => s.key);
+  const otherSeq = new Map();
 
   const addEdge = (a, b) => {
     if (!a || !b || a === b) return;
@@ -76,7 +131,7 @@ function generatePassiveTree(spec) {
       layout.sectorAxisDeg0 + (i * 360) / layout.core.rowA.count);
     rowA.push(push({
       key: `core-a-${i}`, sector: 'core', ring: 0, x, y,
-      kind: 'minor', label: t.label, grants: grantsFor(t, 'core'), start_class: null,
+      kind: 'minor', label: t.label, grants: grantsFor(t, 'core', sectorKeys, otherSeq), start_class: null,
     }));
   }
   const rowB = [];
@@ -86,7 +141,7 @@ function generatePassiveTree(spec) {
       layout.sectorAxisDeg0 + (k * 360) / layout.core.rowB.count);
     rowB.push(push({
       key: `core-b-${k}`, sector: 'core', ring: 0, x, y,
-      kind: 'minor', label: t.label, grants: grantsFor(t, 'core'), start_class: null,
+      kind: 'minor', label: t.label, grants: grantsFor(t, 'core', sectorKeys, otherSeq), start_class: null,
     }));
   }
   const spokeStep = layout.core.rowB.count / layout.core.rowA.count; // 24 / 6 = 4
@@ -163,7 +218,7 @@ function generatePassiveTree(spec) {
           const pool = templatePool(templates, kind, sector, ring);
           const t = pool[flat % pool.length];
           label = t.label;
-          grants = grantsFor(t, sector);
+          grants = grantsFor(t, sector, sectorKeys, otherSeq);
         }
 
         const row = 0;
@@ -307,7 +362,7 @@ function generatePassiveTree(spec) {
           const pool = templatePool(templates, hubKind, sector, ring);
           const t = pool[hubFlat % pool.length];
           hubLabel = t.label;
-          hubGrants = grantsFor(t, sector);
+          hubGrants = grantsFor(t, sector, sectorKeys, otherSeq);
         }
         const hubRow = 1 + Math.floor((hubFlat - numHighwayCols) / rg.cols);
         const hubCol = (hubFlat - numHighwayCols) % rg.cols;
@@ -338,7 +393,7 @@ function generatePassiveTree(spec) {
             const pool = templatePool(templates, kind, sector, ring);
             const t = pool[flat % pool.length];
             label = t.label;
-            grants = grantsFor(t, sector);
+            grants = grantsFor(t, sector, sectorKeys, otherSeq);
           }
 
           const row = 1 + Math.floor((flat - numHighwayCols) / rg.cols);
@@ -372,7 +427,7 @@ function generatePassiveTree(spec) {
             const pool = templatePool(templates, kind, sector, ring);
             const t = pool[flat % pool.length];
             label = t.label;
-            grants = grantsFor(t, sector);
+            grants = grantsFor(t, sector, sectorKeys, otherSeq);
           }
 
           const row = 1 + Math.floor((flat - numHighwayCols) / rg.cols);
