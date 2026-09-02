@@ -88,6 +88,21 @@ describe("server wave frame -> client contract", () => {
     // The authority attaches it as `waves: this.waves.map(...)`.
     expect(snapshot).toMatch(/\bwaves:\s*this\.waves\b/);
 
+    // THE HOP I MISSED, and it is why this feature reached the browser dead.
+    //
+    // There are THREE places a snapshot field can be lost, not two:
+    //   1. world.snapshot()      builds it            (checked above)
+    //   2. server.js's frame     copies it per socket (checked here)
+    //   3. the client's mapper   reads it             (checked below)
+    //
+    // Hop 2 assembles the frame from a NAMED FIELD LIST -- `{ type, tick,
+    // ackSeq, players: snap.players, projectiles: snap.projectiles }` -- not a
+    // spread. The authority emitted `waves`, worldWaves.js read `waves`, both
+    // had passing unit tests, and the frame in between silently dropped it.
+    const serverPath = path.resolve(HERE, "../../../../../../../../backend/src/authority/server.js");
+    const server = fs.readFileSync(serverPath, "utf8");
+    expect(server).toMatch(/frame\.waves\s*=\s*snap\.waves/);
+
     // And the client must actually read it off the frame.
     const gamePath = path.resolve(HERE, "../Game.js");
     const game = fs.readFileSync(gamePath, "utf8");

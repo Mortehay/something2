@@ -3033,6 +3033,21 @@ function attachAuthority(httpServer, pool, opts = {}) {
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
         const frame = { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players, projectiles: snap.projectiles };
+        // SOMET-528. `waves` is copied ACROSS EXPLICITLY, and this line is the
+        // third place a new snapshot field can be lost.
+        //
+        // The frame is assembled from a NAMED FIELD LIST, not a spread of
+        // `snap`. That is deliberate -- the frame is per-socket and must not
+        // leak whatever the snapshot happens to carry -- but it means a field
+        // the authority sends and this line does not name vanishes SILENTLY,
+        // with the server and the client both correct. SOMET-523 was the same
+        // shape one hop later (Game._onWorldState), and the lingering wave hit
+        // this hop: world.snapshot() emitted `waves`, worldWaves.js read
+        // `waves`, both were unit-tested, and nothing reached the browser.
+        //
+        // Omitted when empty, like detonations/attacks/impacts below: a quiet
+        // tick must cost no bytes.
+        if (snap.waves) frame.waves = snap.waves;
         if (hasDets) frame.detonations = dets;
         if (hasAtks) frame.attacks = atks;
         // Omitted entirely when nothing was hit, exactly as detonations and
