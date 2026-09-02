@@ -119,8 +119,8 @@ test('every rule key names the module that consumes it and how duplicates combin
   assert.deepStrictEqual(Object.keys(RULE_KEYS).sort(),
     ['attackSpeedMult', 'auraLeech', 'auraRadius', 'castSpeedMult', 'cooldownFloor',
       'lifeCostMultiplier', 'meleeArcBonus', 'meleeDamageMult', 'meleeReachBonus',
-      'pierceBonus', 'projectileCount', 'projectileSpeedMult', 'regenLifeShare',
-      'treeCharmBonus']);
+      'meleeWaveShare', 'pierceBonus', 'projectileCount', 'projectileSpeedMult',
+      'regenLifeShare', 'treeCharmBonus']);
   for (const [key, def] of Object.entries(RULE_KEYS)) {
     assert.ok(['sum', 'product', 'min'].includes(def.combine), `${key}.combine`);
     assert.ok(typeof def.consumer === 'string' && def.consumer.length > 0, `${key}.consumer`);
@@ -146,6 +146,9 @@ test('every rule key names the module that consumes it and how duplicates combin
   assert.strictEqual(RULE_KEYS.auraRadius.combine, 'sum');
   // SOMET-527: `product`, and authored BELOW 1 -- it is a price, not a bonus.
   assert.strictEqual(RULE_KEYS.meleeDamageMult.combine, 'product');
+  // SOMET-528: `sum`, so satellites add flat share to a hub and an
+  // unallocated player leaves no wave at all.
+  assert.strictEqual(RULE_KEYS.meleeWaveShare.combine, 'sum');
 });
 
 test('PASSIVE_TREE_SPEC is the single bundle the generator takes', () => {

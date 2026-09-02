@@ -21,6 +21,7 @@ const {
   STAMINA_BASE, PROJECTILE_FAN_RAD,
   AURA_BASE_RADIUS, AURA_MAX_TARGETS, AURA_INTERVAL_S,
   MIN_MELEE_REACH, MIN_MELEE_ARC,
+  WAVE_DURATION_S, WAVE_MAX_STACKS, WAVE_INTERVAL_S,
 } = require('../services/progressionConstants.js');
 const { lifeCostFor, canPayLife } = require('../services/lifeCost.js');
 const { getSkillById } = require('../../seeds/data/skills.js');
@@ -130,6 +131,15 @@ function auraRadiusOf(p) {
   const rules = p.stats.rules;
   if (!(rules.auraLeech > 0)) return 0;
   return AURA_BASE_RADIUS + (rules.auraRadius || 0);
+}
+
+// SOMET-528. Damage one wave deals per second: a share of the swing that made
+// it. Derived from weaponDamage so every multiplier the swing itself respected
+// -- STR/INT scaling, the tree's element multipliers, SOMET-527's shape
+// penalty -- is already inside it, rather than being re-derived here and
+// drifting from the swing it is supposed to echo.
+function waveTickDamage(p, w) {
+  return weaponDamage(p, w) * (p.stats.rules.meleeWaveShare || 0);
 }
 
 function applyAttackCooldown(p, w) {
@@ -268,6 +278,13 @@ class World {
     this.weapons = weaponsById;
     this.defaultWeaponId = defaultWeaponId;
     this.projectiles = new ProjectileSim();
+    // SOMET-528. Lingering melee waves, world-wide, oldest first.
+    //
+    // A plain array rather than a Sim class: a wave has no per-chunk identity,
+    // never moves, and lives about two seconds, so the indexing a Sim buys is
+    // not worth the surface. Ordered by spawn time, which is what lets the
+    // per-owner cap drop the STALEST wave rather than an arbitrary one.
+    this.waves = [];
     this.groundItems = new GroundItemSim(chunkSize);
     // Monotonic world clock in ms, advanced only by tick(). effects.js is pure
     // and never reads a clock itself, so this is the single source of `now`
@@ -578,6 +595,12 @@ class World {
       shoveAwayFrom(this.map, src.x + src.width / 2, src.y + src.height / 2, p,
         CHARM_REPEL_SPEED * dt);
     }
+    // SOMET-528. Lingering waves resolve LAST in the tick, after movement:
+    // a creature that walked into a wave this frame is standing in it by the
+    // time the wave is applied, which is the whole point of a wave that
+    // persists. Their kills join the same list every other death uses, so
+    // credit and cleanup need no special case.
+    kills.push(...this._tickWaves(dt));
     return { kills };
   }
 
@@ -735,6 +758,67 @@ class World {
     if (!w) return { ok: false, weapon: null, reason: 'unarmed' };
     if (resourceRefusal(p, w)) return { ok: false, weapon: w, reason: 'resource' };
     return { ok: true, weapon: w, reason: null };
+  }
+
+  // SOMET-528. Lay a lingering wave for this swing, if the player has one.
+  //
+  // THE CAP IS THE BALANCE. Waves STACK -- a deliberate product decision taken
+  // with its risk stated: attackSpeedMult is itself a tree option, so a fast
+  // attacker lays waves faster than they expire and wave damage would scale
+  // with attack speed without bound. WAVE_MAX_STACKS is the only thing that
+  // bounds it, which is why the oldest wave is DROPPED rather than the new one
+  // refused: a player who keeps swinging keeps their newest ground, but never
+  // holds more than the cap. Refusing the new one instead would make a fast
+  // attacker's later swings silently free of effect, which reads as a bug.
+  _spawnWave(p, cx, cy, nx, ny, reach, arc, w) {
+    const damage = waveTickDamage(p, w);
+    if (!(damage > 0)) return;                       // no node allocated: no wave
+    const mine = this.waves.filter((v) => v.ownerId === p.userId);
+    if (mine.length >= WAVE_MAX_STACKS) {
+      // Oldest first, so [0] is the stalest of THIS owner's waves.
+      const stalest = mine[0];
+      this.waves.splice(this.waves.indexOf(stalest), 1);
+    }
+    this.waves.push({
+      ownerId: p.userId,
+      x: cx, y: cy, nx, ny, reach, arc,
+      damage,
+      element: w.element || null,
+      expiresAt: this.now + WAVE_DURATION_S * 1000,
+      acc: 0,
+    });
+  }
+
+  // Resolved once a SECOND, not once a frame -- the share is authored as
+  // damage-per-second, and a per-frame application would scale with tick rate
+  // and be sixty times stronger on a faster server.
+  //
+  // The epsilon is not cosmetic and is the same one the aura needs: dt is a
+  // float and ten 0.1s frames sum to 0.9999999999999999, so a bare `>=` never
+  // fires on an exact-second boundary.
+  _tickWaves(dt) {
+    if (this.waves.length === 0) return [];
+    const kills = [];
+    const alive = [];
+    for (const v of this.waves) {
+      v.acc += dt;
+      if (v.acc >= WAVE_INTERVAL_S - 1e-9) {
+        const seconds = Math.max(1, Math.floor(v.acc / WAVE_INTERVAL_S + 1e-9));
+        v.acc -= seconds * WAVE_INTERVAL_S;
+        // The wave's OWN frozen geometry, never the owner's current facing or
+        // position -- the owner may have moved, turned, respecced or died.
+        const killed = this.creatures.applyMeleeArc(
+          v.x, v.y, v.nx, v.ny, v.reach, v.arc,
+          v.damage * seconds, v.element, this.now, v.ownerId,
+        );
+        for (const id of killed) kills.push({ id, killerUserId: v.ownerId });
+      }
+      // Expiry is checked AFTER the tick, so a wave always gets the second it
+      // was alive for rather than being dropped a frame early.
+      if (this.now < v.expiresAt) alive.push(v);
+    }
+    this.waves = alive;
+    return kills;
   }
 
   // Attack in the aim direction with the equipped weapon. Melee resolves an arc
@@ -979,6 +1063,17 @@ class World {
       // the unit of "a hit" from the player's perspective (matches the
       // descriptor's own single boolean `hit`, not a per-target count).
       const stoneHit = (w.stoneItemId != null && landed) ? { stoneItemId: w.stoneItemId } : null;
+
+      // SOMET-528. The lingering wave: this swing keeps damaging the ground it
+      // swept for WAVE_DURATION_S.
+      //
+      // EVERYTHING IS FROZEN HERE, at swing time -- origin, aim, reach, arc,
+      // damage, element -- for the same reason a projectile snapshots its
+      // damage at launch: the wave is already in the world, and turning,
+      // walking away or respeccing must not move it, resize it or restrengthen
+      // it. `reach` and `arc` are the SAME resolved values the hit-test and the
+      // descriptor used, so the wave covers exactly the ground the swing did.
+      this._spawnWave(p, cx, cy, nx, ny, reach, arc, w);
       // The descriptor exposes facts this method already computed — the aim
       // vector, the attacker's centre, the catalog's reach/arc. Nothing here
       // is derived, and the effect NAME is resolved on this side so the
@@ -1401,6 +1496,25 @@ class World {
         return out;
       }),
       projectiles: this.projectiles.snapshot(),
+      // SOMET-528. Live waves, so the client can draw the ground that is still
+      // dangerous. The GEOMETRY travels resolved -- origin, aim, reach, arc --
+      // for the same reason attackLift and the aura radius do: the client has
+      // no weapon catalog and no passive catalog, and a wave outlives the swing
+      // that made it, so there is nothing left to derive it from.
+      //
+      // Omitted entirely when there are none (the overwhelmingly common case),
+      // so a quiet frame costs no bytes; the client reads `msg.waves || []`.
+      // `damage` is deliberately NOT sent: the client never renders numbers
+      // from it and it is the one field worth withholding.
+      ...(this.waves.length > 0 ? {
+        waves: this.waves.map((v) => ({
+          x: v.x, y: v.y, nx: v.nx, ny: v.ny, reach: v.reach, arc: v.arc,
+          el: v.element,
+          // Milliseconds left, so the client can fade it out without needing a
+          // synchronised clock.
+          ms: Math.max(0, Math.round(v.expiresAt - this.now)),
+        })),
+      } : {}),
     };
   }
 }

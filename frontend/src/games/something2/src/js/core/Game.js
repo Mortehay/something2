@@ -27,6 +27,7 @@ import {
 import { resolveAmmoHud, applyAmmoCount } from "./ammo.js";
 import { chestsFromFrame, applyChestOpened } from "./worldChests.js";
 import { remotePlayerFromFrame } from './worldPlayers.js';
+import { wavesFromFrame } from './worldWaves.js';
 import { addBlasts, pruneBlasts } from "./blasts.js";
 import { indexEffects, addEffects, pruneEffects, capParticles } from "./vfx.js";
 import { assetUrl } from "../net/assets.js";
@@ -106,6 +107,7 @@ export class Game {
         this.engine = null;
         this.localUserId = null;
         this.remotePlayers = new NativeMap(); // user_id -> {x, y, hp}
+        this.waves = [];              // SOMET-528, replaced by each world frame
         this.lastServerTick = 0;
 
         // Combat (Slice 3b): local mana state from `state`, and the
@@ -1171,6 +1173,12 @@ export class Game {
             this.autoLoot = mine.autoLoot === true;
         }
         if (this.projectiles) this.projectiles.applySnapshot(msg.projectiles || []);
+        // SOMET-528. Lingering melee waves. REPLACED every frame, not merged:
+        // the server re-sends every live wave, so treating a shorter list as a
+        // delta would leave an expired wave burning on the ground forever.
+        // The field list lives in worldWaves.js so a test can hold it -- see
+        // that module's header for the bug that taught us to do this.
+        this.waves = wavesFromFrame(msg);
         // Detonations are present only on the tick they happened (the server
         // clears its stash after this broadcast), so they must be taken off
         // THIS frame — there is no snapshot to re-read them from later.
@@ -1353,6 +1361,8 @@ export class Game {
                 decoTypes: this.decoTypes,
                 toast: this.toast,
                 blasts: this.blasts,
+                // SOMET-528. Empty until a wave-granting node is allocated.
+                waves: this.waves || [],
                 vfx: this.vfx, vfxDefs: this.vfxDefs,
                 skillVisuals: this.skillVisuals,
                 // null whenever the equipped weapon needs no ammo — the HUD

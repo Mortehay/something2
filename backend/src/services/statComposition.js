@@ -62,6 +62,10 @@ const RULE_COMBINE = {
   // Applied on weapon KIND, not element -- the cost is for swinging in a
   // circle, whatever the blade is enchanted with.
   meleeDamageMult: 'product',
+  // SOMET-528. The fraction of a swing's damage its lingering wave deals PER
+  // SECOND, for WAVE_DURATION_S. `sum`, identity 0 -- so a player with no wave
+  // node leaves no wave at all, and satellites add flat increments to a hub.
+  meleeWaveShare: 'sum',
 };
 const RULE_IDENTITY = { product: 1, sum: 0, min: null };
 

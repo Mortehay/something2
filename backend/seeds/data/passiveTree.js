@@ -120,6 +120,11 @@ const RULE_KEYS = {
     combine: 'product',
     consumer: 'backend/src/authority/world.js — weaponDamage(), melee branch only',
   },
+  // SOMET-528. Above zero means a swing leaves a lingering wave.
+  meleeWaveShare: {
+    combine: 'sum',
+    consumer: 'backend/src/authority/world.js — attack() spawns the wave, tick() damages through it',
+  },
 };
 
 // Clockwise from straight up, matching the spec §5.2 diagram exactly. ORDER IS
@@ -399,6 +404,18 @@ const CLUSTERS = [
   },
   {
     // Wide but close: crowd control that gives up the range Spearpoint buys.
+    // SOMET-528. The swing keeps burning the ground it swept for ~2s. Pairs
+    // deliberately with the SHAPE clusters: a lingering Spearpoint line and a
+    // lingering Sweep fan are different tools, which is why shapes shipped
+    // first.
+    key: 'clu_str_afterimage', sector: 'strength', hubLabel: 'Afterimage',
+    hubGrants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.3 }],
+    satellites: [
+      { label: 'Lingering Edge', grants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.1 }] },
+      { label: 'Slow Burn', grants: [{ type: 'rule', rule: 'meleeWaveShare', value: 0.1 }] },
+    ],
+  },
+  {
     key: 'clu_str_sweep', sector: 'strength', hubLabel: 'Sweep',
     hubGrants: [
       { type: 'rule', rule: 'meleeArcBonus', value: 2 },

@@ -225,6 +225,9 @@ export class RenderSystem {
     weaponName = null, inventory = null, inventoryOpen = false, selectedItemId = null, inventoryView = null,
     groundItems = [], gold = null, toast = null,
     blasts = [], ammo = null, noAmmoFlash = false, effects = null, vfx = [],
+    // SOMET-528. Lingering melee waves; defaults to empty so every existing
+    // caller and test renders exactly as before.
+    waves = [],
     skillVisuals = [],
     merchants = [], shop = null, shopOpen = false, shopView = null, decoTypes = null,
     // SOMET-310. Same join-frame fixed-world-point shape as `merchants`.
@@ -339,6 +342,10 @@ export class RenderSystem {
     // those creatures are feeding the player from. It deliberately does not
     // join the sort, because it is not a body with a depth of its own.
     this._drawAuraRings(player, remotePlayers);
+    // SOMET-528. Lingering melee waves, on the same ground layer and for the
+    // same reason: they mark AREA, so they belong under every actor including
+    // the creatures standing in them.
+    this._drawWaves(waves);
 
     // Players + creatures + ground items + walls, all depth-sorted together
     // (Pass B) — ground items must join the same sort rather than being
@@ -862,6 +869,38 @@ export class RenderSystem {
     this.ctx.globalAlpha = 0.55;
     draw(player);
     if (remotePlayers) for (const [, p] of remotePlayers) draw(p);
+    this.ctx.restore();
+  }
+
+  // SOMET-528. The ground a swing swept and is still burning.
+  //
+  // Drawn as a WEDGE on the iso ground plane -- the same 2:1 projection every
+  // other ground shape here uses -- so it reads as the area it damages rather
+  // than as a flat pie chart pasted on the screen. Fades with its remaining
+  // lifetime, which the server sends resolved so the client needs no
+  // synchronised clock.
+  _drawWaves(waves) {
+    if (!waves || waves.length === 0) return;
+    this.ctx.save();
+    for (const v of waves) {
+      const s = worldToScreen(v.x, v.y);
+      if (!Number.isFinite(s.x) || !Number.isFinite(s.y)) continue;
+      const rx = blastScreenRadiusX(v.reach);
+      if (!(rx > 0)) continue;                       // also rejects NaN
+      // The aim vector's screen angle, so the wedge points where the swing did.
+      const tip = worldToScreen(v.x + v.nx * v.reach, v.y + v.ny * v.reach);
+      const mid = Math.atan2((tip.y - s.y) * 2, tip.x - s.x);
+      const half = Math.min(Math.PI, v.arc / 2);
+      // Newer waves are stronger; a wave in its last moments is nearly gone.
+      const life = Math.max(0, Math.min(1, v.ms / 2000));
+      this.ctx.globalAlpha = 0.10 + 0.22 * life;
+      this.ctx.fillStyle = elementColor(v.el);
+      this.ctx.beginPath();
+      this.ctx.moveTo(s.x, s.y);
+      this.ctx.ellipse(s.x, s.y, rx, rx / 2, 0, mid - half, mid + half);
+      this.ctx.closePath();
+      this.ctx.fill();
+    }
     this.ctx.restore();
   }
 

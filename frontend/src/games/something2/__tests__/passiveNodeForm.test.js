@@ -49,7 +49,7 @@ describe('vocabulary', () => {
       'lifeCostMultiplier', 'treeCharmBonus', 'cooldownFloor', 'regenLifeShare',
       'attackSpeedMult', 'castSpeedMult', 'meleeReachBonus', 'meleeArcBonus',
       'projectileCount', 'projectileSpeedMult', 'pierceBonus',
-      'auraLeech', 'auraRadius',
+      'auraLeech', 'auraRadius', 'meleeDamageMult', 'meleeWaveShare',
     ]);
   });
 

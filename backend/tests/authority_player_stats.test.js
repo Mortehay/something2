@@ -898,3 +898,177 @@ test('the penalty follows the weapon kind, not its element', () => {
   const c = w.creatures.all().find((x) => x.id === 'c1');
   assert.equal(c.hp, 45, 'fire blade 10 damage, halved by the shape penalty');
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-528: the lingering arc wave.
+//
+// WAVE_DURATION_S 2, WAVE_MAX_STACKS 3, WAVE_INTERVAL_S 1.
+// blade (id 1): damage 10, reach 190, arc 1.8.
+// ---------------------------------------------------------------------------
+
+function waveWorld(rules) {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 400, y: 400 }, invFor(1), undefined, 0, withRules(rules));
+  return w;
+}
+
+test('no wave node means no wave at all', () => {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 400, y: 400 }, invFor(1), undefined, 0, BASE_STATS);
+  w.attack('u1', 1, 0);
+  assert.equal(w.waves.length, 0);
+  assert.equal(w.snapshot().waves, undefined, 'a quiet frame must carry no waves key');
+});
+
+// THE WHOLE FEATURE. A creature that was NOT there when the swing landed walks
+// into the ground it swept and takes damage. A test that only checked the
+// swing's own hit would prove nothing about lingering.
+test('a wave damages a creature that arrives AFTER the swing', () => {
+  const w = waveWorld({ meleeWaveShare: 0.5 });
+  w.attack('u1', 1, 0);                       // swings at empty ground
+  assert.equal(w.waves.length, 1);
+  // Only now does something wander in.
+  w.creatures.addCreatures([creatureAt(w, 120, 0)]);
+  w.tick(1);
+  const c = w.creatures.all().find((x) => x.id === 'c1');
+  assert.ok(c.hp < 50, 'the wave must damage a creature that arrived after the swing');
+});
+
+// The wave is the ground the swing swept, frozen. Moving and turning away must
+// not drag it along or re-aim it.
+test("a wave keeps its own geometry when the owner moves and turns away", () => {
+  const w = waveWorld({ meleeWaveShare: 0.5 });
+  w.attack('u1', 1, 0);                       // aimed EAST
+  const before = { ...w.waves[0] };
+  const p = w.getPlayer('u1');
+  // Walk far away and face the other way.
+  p.x += 500;
+  p.facing = 'w';
+  w.setInput('u1', 1, -1, 0);
+  w.tick(0.5);
+  const after = w.waves[0];
+  assert.equal(after.x, before.x, 'the wave must not follow its owner');
+  assert.equal(after.y, before.y);
+  assert.equal(after.nx, before.nx, 'the wave must not re-aim');
+  assert.equal(after.reach, before.reach);
+  assert.equal(after.arc, before.arc);
+});
+
+// BEHAVIOURAL, and it has to be. The test above checks the wave OBJECT's stored
+// fields, which a build that reads the owner's LIVE position at damage time
+// passes cleanly -- the stored fields are still frozen, they are just not the
+// ones used. (Verified: that mutation passed the field test and only this one
+// catches it.) Asserting on the damage is asserting on the geometry actually
+// applied.
+test('a wave damages the ground it swept, not the ground its owner is on now', () => {
+  const w = waveWorld({ meleeWaveShare: 0.5 });
+  // A creature standing in the swing's path, and one far away where the owner
+  // is about to walk to.
+  w.creatures.addCreatures([
+    { ...creatureAt(w, 120, 0), id: 'inWave' },
+    { id: 'atOwnerLater', type: 'wolf', x: 2000, y: 2000, hp: 50, facing: 'S', color: '#f00' },
+  ]);
+  w.attack('u1', 1, 0);
+  const p = w.getPlayer('u1');
+  // Teleport the owner next to the distant creature. A wave that read its
+  // owner's live position would now cover THAT creature and not the first.
+  p.x = 2000 - p.width / 2 - 120;
+  p.y = 2000 + 24 - p.height / 2;
+  const hp = (id) => (w.creatures.all().find((c) => c.id === id) || { hp: 0 }).hp;
+  const inWaveBefore = hp('inWave');
+  const distantBefore = hp('atOwnerLater');
+  w.tick(1);
+  assert.ok(hp('inWave') < inWaveBefore,
+    'the creature standing in the swept ground must still be damaged');
+  assert.equal(hp('atOwnerLater'), distantBefore,
+    'a creature beside the owner\'s NEW position must not be touched -- the wave stayed put');
+});
+
+test('a wave expires', () => {
+  const w = waveWorld({ meleeWaveShare: 0.5 });
+  w.attack('u1', 1, 0);
+  assert.equal(w.waves.length, 1);
+  w.tick(1);
+  assert.equal(w.waves.length, 1, 'still alive at 1s of a 2s wave');
+  w.tick(1.5);
+  assert.equal(w.waves.length, 0, 'gone past its duration');
+});
+
+// Per second, not per frame -- otherwise the authored share silently scales
+// with tick rate. Same epsilon hazard the aura hit.
+test('wave damage is per second, not per frame', () => {
+  const w = waveWorld({ meleeWaveShare: 0.5 });
+  w.creatures.addCreatures([creatureAt(w, 120, 0)]);
+  w.attack('u1', 1, 0);
+  const c = () => w.creatures.all().find((x) => x.id === 'c1');
+  const afterSwing = c().hp;
+  for (let i = 0; i < 10; i += 1) w.tick(0.1);  // exactly 1.0s
+  assert.equal(afterSwing - c().hp, 5, 'ten 0.1s frames must apply exactly one second of wave');
+});
+
+// THE CAP, and it is asserted on DAMAGE rather than on wave count. A test that
+// only checked `waves.length === 3` would pass on a build where each wave
+// ticked independently and the damage compounded anyway.
+test('the stack cap bounds DAMAGE, not just the number of waves', () => {
+  const measure = (swings) => {
+    const w = waveWorld({ meleeWaveShare: 0.5 });
+    w.creatures.addCreatures([{
+      ...creatureAt(w, 120, 0), hp: 100000,
+    }]);
+    // The cooldown is cleared directly rather than waited out. This test is
+    // about the CAP, and letting real time pass between swings would expire
+    // early waves and blur the thing being measured. Note the cooldown floor
+    // (SOMET-514) already bounds swing rate at ~0.2s even at attackSpeedMult
+    // 100, so waiting would also never reach the cap quickly.
+    for (let i = 0; i < swings; i += 1) {
+      w.getPlayer('u1')._attackCd = 0;
+      w.attack('u1', 1, 0);
+    }
+    const c = () => w.creatures.all().find((x) => x.id === 'c1');
+    const before = c().hp;
+    w.tick(1);
+    return { waves: w.waves.length, damage: before - c().hp };
+  };
+  const three = measure(3);
+  const twenty = measure(20);
+  assert.equal(three.waves, 3, 'three swings, three waves');
+  assert.equal(twenty.waves, 3, 'twenty swings must still be three waves');
+  assert.equal(twenty.damage, three.damage,
+    `twenty swings dealt ${twenty.damage} where three dealt ${three.damage}; `
+    + 'the cap must bound damage, not merely the wave count');
+});
+
+// The cap drops the STALEST wave rather than refusing the new one: a player who
+// keeps swinging keeps their newest ground. Refusing instead would make a fast
+// attacker's later swings silently inert, which reads as a bug.
+test('the cap drops the oldest wave, so a new swing always lays ground', () => {
+  const w = waveWorld({ meleeWaveShare: 0.5 });
+  for (let i = 0; i < 3; i += 1) { w.getPlayer('u1')._attackCd = 0; w.attack('u1', 1, 0); }
+  const oldest = w.waves[0];
+  w.getPlayer('u1')._attackCd = 0;
+  w.attack('u1', 1, 0);
+  assert.equal(w.waves.length, 3);
+  assert.ok(!w.waves.includes(oldest), 'the stalest wave must have been dropped');
+});
+
+// One player's cap must not eat another player's waves.
+test('the cap is per owner', () => {
+  const w = waveWorld({ meleeWaveShare: 0.5 });
+  w.addPlayer('u2', { x: 900, y: 900 }, invFor(1), undefined, 0,
+    withRules({ meleeWaveShare: 0.5 }));
+  for (let i = 0; i < 5; i += 1) { w.getPlayer('u1')._attackCd = 0; w.attack('u1', 1, 0); }
+  for (let i = 0; i < 2; i += 1) { w.getPlayer('u2')._attackCd = 0; w.attack('u2', 1, 0); }
+  assert.equal(w.waves.filter((v) => v.ownerId === 'u1').length, 3);
+  assert.equal(w.waves.filter((v) => v.ownerId === 'u2').length, 2,
+    "one player's swinging must not evict another's waves");
+});
+
+test('the wire carries the resolved geometry, and no damage', () => {
+  const w = waveWorld({ meleeWaveShare: 0.5 });
+  w.attack('u1', 1, 0);
+  const [wire] = w.snapshot().waves;
+  assert.equal(wire.reach, w.waves[0].reach);
+  assert.equal(wire.arc, w.waves[0].arc);
+  assert.ok(wire.ms > 0 && wire.ms <= 2000);
+  assert.equal(wire.damage, undefined, 'damage is not the client\'s business');
+});

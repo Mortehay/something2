@@ -69,6 +69,21 @@ const PROJECTILE_FAN_RAD = 0.16;
 // hostile creature standing inside it, and a world can hold 12-creature packs
 // -- uncapped, walking into a pack would be unkillable sustain. Six is the
 // most a single node may be worth.
+// SOMET-528. The lingering arc wave: a swing that keeps damaging the ground
+// it swept for a couple of seconds.
+//
+// WAVE_MAX_STACKS IS THE BALANCE, NOT A NICETY -- the same role AURA_MAX_TARGETS
+// plays for the aura. Waves STACK (a deliberate product decision), and
+// attackSpeedMult is itself a tree option, so a fast attacker lays waves faster
+// than they expire. Without the cap, wave damage scales with attack speed
+// without bound. With it, a player's total wave output is capped no matter how
+// fast they swing.
+const WAVE_DURATION_S = 2;
+const WAVE_MAX_STACKS = 3;
+// Resolved once a second, like the aura, so the authored share is
+// damage-per-second and does not scale with tick rate.
+const WAVE_INTERVAL_S = 1;
+
 // SOMET-527. Floors for a melee swing's geometry.
 //
 // meleeReachBonus and meleeArcBonus are both `sum`, which is what lets a shape
@@ -160,6 +175,7 @@ module.exports = {
   MELEE_PER_STR, SPELL_PER_INT, HASTE_PER_DEX, MIN_COOLDOWN_MULT,
   PROJECTILE_FAN_RAD, AURA_BASE_RADIUS, AURA_MAX_TARGETS, AURA_INTERVAL_S,
   MIN_MELEE_REACH, MIN_MELEE_ARC,
+  WAVE_DURATION_S, WAVE_MAX_STACKS, WAVE_INTERVAL_S,
   MANA_REGEN_BASE, MANA_REGEN_PER_WIS,
   PRICE_PER_CHA, SELL_FRACTION_BASE, SELL_FRACTION_MAX,
   XP_BASE, XP_EXPONENT, XP_KILL_BASE, XP_LEVEL_DIFF_SLOPE, XP_LEVEL_DIFF_MAX,
