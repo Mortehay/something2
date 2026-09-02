@@ -62,11 +62,35 @@ states:
   Cancelled:         a17013e1-aabb-4a25-9afd-284cf511ddd4
 definition_of_done: AGENTS.md (this file) — backend `npm test` from backend/,
   frontend `npx vitest run` from frontend/, plus browser verification for any
-  change with a UI surface.
+  change with a UI surface. READ THE EXIT CODE, not the summary line — see
+  "Reading a test run" below.
 commit_convention: branch `feat/<slug>` or `fix/<slug>`; commit subject
   `type(scope): summary (SOMET-NNN)`; end the message with the Co-Authored-By
   trailer.
 ```
+
+## Reading a test run
+
+`node --test`'s trailing `# fail` counter **does not count a subtest timeout**.
+A real run produced:
+
+```
+# tests 3536
+# pass 3530
+# fail 0        <-- while `not ok 2745 ... testTimeoutFailure` was in the output
+```
+
+The process still **exits non-zero**, so CI is safe. What is not safe is a human
+or a script reading `# fail`. Two rules:
+
+- **Trust the exit code.** `npm test; echo $?` — and never chain the run with
+  `;` into a reporting command, because the chain reports the *last* command's
+  status and silently discards the suite's. That is exactly how the run above
+  got called green.
+- If you must grep, grep for **`^not ok`** and **`testTimeoutFailure`** as well
+  as `# fail`. Any one of the three means red.
+
+Recorded because it was believed and reported wrongly once (SOMET-530).
 
 `To Review` and `Changes Requested` were added on 2026-08-03 — before that the
 project had no review state, so work jumped from In Progress straight to Done

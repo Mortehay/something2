@@ -285,15 +285,28 @@ test('a spec that fails validation writes nothing', async (t) => {
 // timeout CANCELS THE WHOLE FILE, so the other fifteen tests here silently
 // stopped running in every full-suite run.
 //
-// THE CAP HAS HEADROOM BECAUSE THE RUNTIME SWINGS. Measured 95s on an idle
-// machine and 181s on a busy one -- same database, same 87 worlds, nothing
-// accumulated between them. A cap sized to the idle number turns a loaded CI
-// agent into a cancelled file, which is the failure mode this comment exists
-// to prevent, so it is sized to the slow observation with room to spare.
+// THE CAP HAS HEADROOM BECAUSE THE RUNTIME SWINGS, and the headroom is worth
+// re-measuring rather than trusting. A log, because this has drifted once
+// already and will again:
 //
-// The per-test timeout below documents the need; the cap that actually governs
-// a file is the runner's, in package.json.
-test('every shipped spec applies cleanly', { timeout: 300000 }, async (t) => {
+//   2026-08  95s idle / 181s busy   -> cap set to 300s (1.66x over the slow
+//                                      observation, "room to spare")
+//   2026-09 154s idle / 298s busy   -> cap had 0.5% margin left and the test
+//                                      TIMED OUT on a loaded machine (SOMET-530)
+//
+// The specs grew; nothing about the test got slower on its own. WHY IT COSTS
+// WHAT IT DOES, which is not obvious: the loop below applies every spec TWICE
+// -- once to prove it does not throw, once to prove it is idempotent -- so the
+// wall time is 2x the cost of seeding every shipped spec, currently ~80s.
+// Halving the cost means dropping the idempotency check, which is not worth it.
+//
+// A cap sized to the idle number turns a loaded CI agent into a cancelled file,
+// which is the failure mode this comment exists to prevent. It is now 420s,
+// matching the runner default in package.json -- 1.4x over the slow
+// observation. IF YOU SEE THIS TEST NEAR 300s AGAIN, the specs have grown
+// another 60% and the fix is to split the loop into one subtest per spec (each
+// then gets its own budget) rather than to keep raising one number.
+test('every shipped spec applies cleanly', { timeout: 420000 }, async (t) => {
   // Gate ABOVE the CI check, not below it: a CI environment that sets
   // DATABASE_URL (so pool.unreachable would be false) but not
   // TEST_DATABASE_URL must still fail loudly here, not skip. The old order
