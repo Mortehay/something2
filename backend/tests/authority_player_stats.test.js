@@ -276,7 +276,17 @@ test('the weapon cooldown is read in exactly one place, and _attackCd is assigne
   const cooldownHits = worldCode.match(/w\.cooldown/g) || [];
   assert.equal(cooldownHits.length, 1, `w.cooldown read at ${cooldownHits.length} sites; route them all through applyAttackCooldown`);
 
-  const assignHits = worldCode.match(/_attackCd\s*=/g) || [];
+  // SOMET-531 widened this pattern. It was /_attackCd\s*=/, which counts a
+  // plain `=` and nothing else -- so rewriting tick()'s decrement as
+  // `_attackCd -= dt` dropped the count to 1 and failed the gate for a change
+  // that added no site at all. The same blind spot works in the dangerous
+  // direction too: a NEW stamping site spelled `_attackCd += x` would have
+  // been invisible to it, which is exactly what this gate exists to catch.
+  //
+  // The `(?!=)` is what keeps a comparison out of the count -- the old pattern
+  // would happily have counted `_attackCd === 0` as an assignment, and only
+  // the accident that world.js contains no such comparison kept it honest.
+  const assignHits = worldCode.match(/_attackCd\s*[-+*/]?=(?!=)/g) || [];
   assert.equal(
     assignHits.length,
     2,
@@ -1071,4 +1081,158 @@ test('the wire carries the resolved geometry, and no damage', () => {
   assert.equal(wire.arc, w.waves[0].arc);
   assert.ok(wire.ms > 0 && wire.ms <= 2000);
   assert.equal(wire.damage, undefined, 'damage is not the client\'s business');
+});
+
+// ---------------------------------------------------------------------------
+// SOMET-531: a speed bonus must not be swallowed by the tick.
+//
+// The authority only acts on ticks, so a cooldown can only EXPIRE on a tick
+// boundary -- that much is unavoidable. What was avoidable is that tick()'s
+// decrement clamped at zero, `Math.max(0, _attackCd - dt)`, THROWING AWAY
+// however far past zero the countdown had gone. Every cooldown therefore
+// restarted from a clean boundary and the effective interval was always
+// `ceil(cd/mult/tick) * tick`, rounded UP, every time.
+//
+// The consequence was a dead passive node. Measured on the running dev stack
+// before the fix, a Mage with a 0.7s wand: castSpeedMult 1.2 -> 601ms,
+// 1.296 -> 552ms, 1.3997 -> 552ms. The second Quickcast satellite bought
+// NOTHING. It is worst on the fastest weapons, where speed matters most: a
+// 0.25s knife wasted three of the four Whirlwind satellites.
+//
+// WHY THESE TESTS MEASURE A RATE. A test that stamps one attack and reads
+// `_attackCd` passes on the broken code -- applyAttackCooldown always wrote
+// the correct number, and it was the DECREMENT that destroyed it. Only the
+// interval between successive admitted attacks can see the defect.
+//
+// A first draft of this block asserted "each successive satellite changes the
+// rate" using invented multipliers, and it PASSED against the broken build --
+// the pairs it picked happened not to collide. The cases below are the real
+// authored chains (Whirlwind x1.1 per satellite, Quickcast 1.2 then x1.08) on
+// the real weapon cooldowns, and each colliding pair was confirmed to collide
+// on the pre-fix code before being written down.
+// ---------------------------------------------------------------------------
+
+const TICK = 0.05; // the authority's real tick (server.js: tickMs = 50)
+
+// The real catalog's extremes, which is where the defect lives: `knife` is the
+// joint-fastest melee weapon in the game (0.25) and `wand` is the cooldown 12
+// of the 20 projectile weapons share, including the one the live measurement
+// used.
+const SPEED_TYPES = new Map([
+  [1, {
+    id: 1, name: 'knife', category: 'weapon', kind: 'melee', damage: 4, cooldown: 0.25,
+    reach: 60, arc_width: 0.6, mana_cost: 0, element: null,
+  }],
+  [2, {
+    id: 2, name: 'wand', category: 'weapon', kind: 'projectile', damage: 7, cooldown: 0.7,
+    range: 600, projectile_speed: 700, projectile_radius: 8, pierce: 1,
+    mana_cost: 0, element: null,
+  }],
+]);
+
+// Drive the sim, attacking on every tick the world will accept one, and return
+// the mean gap in ms between admitted attacks. Attacking is attempted EVERY
+// tick deliberately: that is the saturated-input case the live measurement
+// used, and the only one where the cooldown alone sets the rate.
+function meanGapMs(typeId, rules, seconds = 40) {
+  const w = new World(stubMap(), SPEED_TYPES, 1);
+  w.addPlayer('u1', { x: 100, y: 100 },
+    { items: [{ id: 'w1', typeId }], equipment: { main_hand: 'w1' } }, undefined, 0,
+    rules ? withRules(rules) : BASE_STATS);
+  const p = w.getPlayer('u1');
+  const fired = [];
+  for (let i = 0; i < Math.round(seconds / TICK); i++) {
+    if (p._attackCd <= 0) { w.attack('u1', 1, 0); fired.push(i); }
+    w.tick(TICK);
+  }
+  assert.ok(fired.length > 8, `only ${fired.length} shots fired; the measurement needs more`);
+  return ((fired[fired.length - 1] - fired[0]) / (fired.length - 1)) * TICK * 1000;
+}
+
+// THE assertion, and the one that encodes the intent: over many shots the
+// achieved rate is the rate the numbers promise. Individual gaps still land on
+// tick boundaries -- they must -- but they no longer all round the same way.
+test('SOMET-531: the achieved fire rate matches cooldown/mult for melee and projectiles', () => {
+  const cases = [
+    [1, 0.25, { attackSpeedMult: 1 }],
+    [1, 0.25, { attackSpeedMult: 1.1 }],
+    [1, 0.25, { attackSpeedMult: 1.1 ** 2 }],
+    [1, 0.25, { attackSpeedMult: 1.1 ** 3 }],
+    [2, 0.7, { castSpeedMult: 1 }],
+    [2, 0.7, { castSpeedMult: 1.2 }],
+    [2, 0.7, { castSpeedMult: 1.2 * 1.08 }],
+    [2, 0.7, { castSpeedMult: 1.2 * 1.08 ** 2 }],
+  ];
+  for (const [typeId, cd, rules] of cases) {
+    const mult = rules.attackSpeedMult || rules.castSpeedMult;
+    const want = (cd / mult) * 1000;
+    const got = meanGapMs(typeId, rules);
+    assert.ok(Math.abs(got - want) < 6,
+      `${SPEED_TYPES.get(typeId).name} at x${mult.toFixed(4)}: achieved ${got.toFixed(1)}ms, `
+      + `intended ${want.toFixed(1)}ms -- the tick is swallowing the difference`);
+  }
+});
+
+// The dead points themselves. Each pair below was verified to produce an
+// IDENTICAL rate on the pre-fix code, so these cannot pass vacuously.
+test('SOMET-531: satellite steps that used to be dead points now change the rate', () => {
+  // knife 0.25: Whirlwind satellites 1 and 2 both measured 250ms before.
+  const k1 = meanGapMs(1, { attackSpeedMult: 1.1 });
+  const k2 = meanGapMs(1, { attackSpeedMult: 1.1 ** 2 });
+  assert.ok(k1 - k2 > 10, `knife satellite 2 is still dead: ${k1.toFixed(1)} -> ${k2.toFixed(1)}ms`);
+  // and satellites 3 and 4, which both measured 200ms before.
+  const k3 = meanGapMs(1, { attackSpeedMult: 1.1 ** 3 });
+  const k4 = meanGapMs(1, { attackSpeedMult: 1.1 ** 4 });
+  assert.ok(k3 - k4 > 10, `knife satellite 4 is still dead: ${k3.toFixed(1)} -> ${k4.toFixed(1)}ms`);
+
+  // wand 0.7: Quickcast satellites 2 and 3 both measured 550ms before -- this
+  // is the exact pair measured on the live stack ("Practised Cadence").
+  const w2 = meanGapMs(2, { castSpeedMult: 1.2 * 1.08 });
+  const w3 = meanGapMs(2, { castSpeedMult: 1.2 * 1.08 ** 2 });
+  assert.ok(w2 - w3 > 10, `wand satellite 3 is still dead: ${w2.toFixed(1)} -> ${w3.toFixed(1)}ms`);
+});
+
+// The guard on the fix, and it earned its keep. Carrying the overshoot forward
+// is credit, and credit that accrues while idle would let a player bank a
+// burst -- a worse bug than the one being fixed.
+//
+// A first version of the fix floored the countdown at -dt, which kept draining
+// a cooldown that had ALREADY expired: a player standing still drifted to a
+// full -dt and banked a tick they never earned. It passed a weaker version of
+// this test (">= -TICK") and was caught instead by authority_server.test.js's
+// `a refusal still costs nothing, cooldown included`, which asserts an
+// equality. So this now pins the exact value rather than a bound -- an idle
+// player has earned NOTHING, and the assertion says so.
+test('SOMET-531: idling banks nothing -- an expired cooldown rests at zero', () => {
+  const w = new World(stubMap(), SPEED_TYPES, 1);
+  w.addPlayer('u1', { x: 100, y: 100 },
+    { items: [{ id: 'w1', typeId: 1 }], equipment: { main_hand: 'w1' } }, undefined, 0, BASE_STATS);
+  const p = w.getPlayer('u1');
+  for (let i = 0; i < 200; i++) w.tick(TICK); // 10s of standing still, never attacking
+  assert.equal(p._attackCd, 0,
+    `an untouched countdown must rest at exactly 0; it drifted to ${p._attackCd}, `
+    + 'which is credit the player never earned');
+
+  // And the first swing after idling pays full price -- no discount at all.
+  w.attack('u1', 1, 0);
+  assert.equal(p._attackCd, 0.25, 'the first shot after idling must pay the full cooldown');
+
+  // The carry that IS earned is bounded by one tick, because tick() steps the
+  // countdown only while it is positive and so rests on the first value at or
+  // below zero.
+  for (let i = 0; i < 200; i++) w.tick(TICK);
+  assert.ok(p._attackCd > -TICK && p._attackCd <= 0,
+    `a rested countdown must sit in (-dt, 0]; got ${p._attackCd}`);
+});
+
+// A weapon must never average FASTER than its own cooldown. The carry makes
+// some individual gaps shorter than the rounded-up value on purpose, so this
+// pins the direction: the fix removes a penalty, it does not add a buff.
+test('SOMET-531: the achieved rate never undershoots the true cooldown', () => {
+  for (const mult of [1, 1.1, 1.1 ** 3]) {
+    const got = meanGapMs(1, { attackSpeedMult: mult });
+    const floor = (0.25 / mult) * 1000;
+    assert.ok(got >= floor - 1,
+      `knife at x${mult.toFixed(3)} averaged ${got.toFixed(1)}ms, faster than its true ${floor.toFixed(1)}ms`);
+  }
 });

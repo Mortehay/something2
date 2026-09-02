@@ -164,7 +164,26 @@ function applyAttackCooldown(p, w) {
   // the attack interval toward zero. stats.cooldownFloor is the SAME resolved
   // number derivePlayerStats used, so a player's cooldownFloor node is honored
   // here rather than being replaced by the bare constant.
-  p._attackCd = w.cooldown * Math.max(p.stats.cooldownFloor, scaled);
+  //
+  // SOMET-531: THE CARRY. `_attackCd` is <= 0 whenever this runs -- both
+  // callers gate on `_attackCd > 0` and return early -- and how far BELOW zero
+  // it sits is the overshoot: the part of the last cooldown that expired
+  // between ticks. Adding it (a non-positive number) hands that remainder to
+  // the next cooldown instead of discarding it.
+  //
+  // Without this, every interval is independently rounded UP to a whole tick,
+  // so any speed bonus too small to cross a 50ms boundary buys NOTHING. That
+  // was a dead passive node, not a rounding curiosity: a 0.25s knife wasted
+  // three of Whirlwind's four satellites, and on the live stack a Mage's
+  // second Quickcast satellite measured an identical 552ms to the first.
+  //
+  // Individual gaps still land on tick boundaries -- the server only acts on
+  // ticks -- but they no longer all round the same way, so the AVERAGE rate
+  // converges on cd/mult and every authored multiplier does something. The
+  // credit is bounded to one tick by tick()'s own clamp, so idling cannot bank
+  // a burst -- tick() rests on the first value at or below zero, so the carry
+  // is the true overshoot and never more; see authority_player_stats.test.js.
+  p._attackCd = w.cooldown * Math.max(p.stats.cooldownFloor, scaled) + Math.min(0, p._attackCd);
 }
 
 // THE ONE ATTACK RESOURCE GATE (SOMET-472; spec 8.3: "the check lives in the
@@ -511,7 +530,21 @@ class World {
     }
 
     for (const p of this.players.values()) {
-      if (p._attackCd > 0) p._attackCd = Math.max(0, p._attackCd - dt);
+      // SOMET-531: no Math.max. Clamping at zero threw away the overshoot --
+      // the part of the cooldown that expired between ticks -- which is what
+      // applyAttackCooldown's carry now spends.
+      //
+      // The `> 0` guard is what bounds it, and it does so exactly: the
+      // countdown is stepped only while it is still positive, so it comes to
+      // rest on the FIRST value at or below zero and stays there. That value
+      // is the true overshoot, always in (-dt, 0].
+      //
+      // An earlier draft floored at -dt instead. That kept draining a countdown
+      // that had already expired, so a player standing still drifted to a full
+      // -dt and banked a tick of credit they never earned -- a real refusal
+      // test caught it (`a refusal still costs nothing, cooldown included`),
+      // which is the whole reason that assertion is written as an equality.
+      if (p._attackCd > 0) p._attackCd = p._attackCd - dt;
       // SOMET-514. THE CONSUMER of the tree's `regenLifeShare` rule, which
       // RULE_KEYS has named this tick as since the rule was introduced -- while
       // no such read existed. ks_wis_clarity ("mana regeneration also restores
