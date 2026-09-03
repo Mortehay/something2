@@ -172,7 +172,20 @@ const PASSIVE_TREE_LOCK_KEY = 471477806;
 // worth of headroom and still well inside the 60s per-file budget.
 const PASSIVE_TREE_LOCK_WAIT_MS = 45000;
 
+// SOMET-540: a fourth shared-state key, for the art_jobs queue.
+//
+// Two test files exercise that one table and BOTH are writers -- they delete
+// rows to start clean, and `claim()` takes ANY queued job, not merely their
+// own. Scoping each file's cleanup to its own subject keys would therefore not
+// isolate them: file A's claimer would still take file B's jobs mid-test.
+// Measured, not assumed -- both files pass alone and fail together.
+//
+// Exported from here for the same reason the other three are: two files that
+// declared the key separately could drift onto different numbers and silently
+// stop excluding each other.
+const ART_JOBS_LOCK_KEY = 615204773;
+
 module.exports = {
   withAdvisoryLock, readingUnderLock, LOCK_WAIT_MS,
-  PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS,
+  PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS, ART_JOBS_LOCK_KEY,
 };

@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
 const q = require('../src/services/artJobQueue.js');
+const { withAdvisoryLock, ART_JOBS_LOCK_KEY } = require('./helpers/advisoryLock.js');
 
 // SOMET-540. The durable art queue, against a REAL Postgres.
 //
@@ -25,14 +26,37 @@ function requireTestDb(t, why) {
   return true;
 }
 
+// EVERY test here holds ART_JOBS_LOCK_KEY for its whole body.
+//
+// art_jobs is one table shared with art_dispatcher_db.test.js, node --test runs
+// files in parallel, and both are writers: they DELETE to start clean and
+// `claim()` takes ANY queued job, not just their own. Prefixing each file's
+// subject keys would not fix that, because claiming is global. Both files
+// passed alone and failed together before this -- 8 failures, measured.
+//
+// The lock wraps the WHOLE body, not just the cleanup: SOMET-529's lesson was
+// that guarding only the setup leaves every later assertion racing a peer,
+// which is a lock that looks present and does nothing.
 async function freshPool(t) {
   const pool = new Pool({ connectionString: DB_URL, max: 6, connectionTimeoutMillis: 3000 });
-  await pool.query('DELETE FROM art_jobs');
-  t.after(async () => {
-    await pool.query('DELETE FROM art_jobs').catch(() => {});
-    await pool.end().catch(() => {});
-  });
+  t.after(async () => { await pool.end().catch(() => {}); });
   return pool;
+}
+
+// test() + the lock + a clean table, so each case reads as its own scenario.
+function lockedTest(name, body) {
+  test(name, async (t) => {
+    if (!requireTestDb(t, 'writes art_jobs')) return;
+    const pool = await freshPool(t);
+    await withAdvisoryLock(pool, ART_JOBS_LOCK_KEY, async () => {
+      await pool.query('DELETE FROM art_jobs');
+      try {
+        await body(t, pool);
+      } finally {
+        await pool.query('DELETE FROM art_jobs').catch(() => {});
+      }
+    });
+  });
 }
 
 const S = (n) => ({ kind: 'skill', key: `sk_${n}` });
@@ -55,9 +79,7 @@ test('seeds stay inside the signed 32-bit range backends accept', () => {
   }
 });
 
-test('enqueue inserts one job per subject and records the derived seed', async (t) => {
-  if (!requireTestDb(t, 'writes art_jobs')) return;
-  const pool = await freshPool(t);
+lockedTest('enqueue inserts one job per subject and records the derived seed', async (t, pool) => {
   const rows = await q.enqueue(pool, [S(1), S(2), S(3)], { backend: 'connector', providerId: null });
   assert.equal(rows.length, 3);
   assert.deepEqual(rows.map((r) => r.subject_key).sort(), ['sk_1', 'sk_2', 'sk_3']);
@@ -72,9 +94,7 @@ test('enqueue inserts one job per subject and records the derived seed', async (
 // THE IDEMPOTENCY GUARANTEE. Written as an application check this is a
 // check-then-act race; the partial unique index makes it the database's
 // problem. Asserted through the real index, not by reading the SQL.
-test('enqueueing a subject that is already live does NOT create a second job', async (t) => {
-  if (!requireTestDb(t, 'writes art_jobs')) return;
-  const pool = await freshPool(t);
+lockedTest('enqueueing a subject that is already live does NOT create a second job', async (t, pool) => {
   const first = await q.enqueue(pool, [S(1), S(2)], { backend: 'connector' });
   assert.equal(first.length, 2);
 
@@ -87,9 +107,7 @@ test('enqueueing a subject that is already live does NOT create a second job', a
   assert.equal(rows[0].n, 3, 'sk_2 must not have been queued twice');
 });
 
-test('a job that is running also blocks a duplicate enqueue', async (t) => {
-  if (!requireTestDb(t, 'writes art_jobs')) return;
-  const pool = await freshPool(t);
+lockedTest('a job that is running also blocks a duplicate enqueue', async (t, pool) => {
   await q.enqueue(pool, [S(1)], { backend: 'connector' });
   await q.claim(pool, 1); // now running, not queued
   const again = await q.enqueue(pool, [S(1)], { backend: 'connector' });
@@ -98,9 +116,7 @@ test('a job that is running also blocks a duplicate enqueue', async (t) => {
 
 // The counterpart: the index is PARTIAL on purpose. If it covered every state,
 // a failed subject could never be retried -- permanently unfixable art.
-test('a subject may be enqueued again once its job is done or failed', async (t) => {
-  if (!requireTestDb(t, 'writes art_jobs')) return;
-  const pool = await freshPool(t);
+lockedTest('a subject may be enqueued again once its job is done or failed', async (t, pool) => {
   const [a] = await q.enqueue(pool, [S(1)], { backend: 'connector' });
   await q.claim(pool, 1);
   await q.complete(pool, a.id);
@@ -110,9 +126,7 @@ test('a subject may be enqueued again once its job is done or failed', async (t)
 
 // THE CONCURRENCY GUARANTEE, exercised concurrently. A sequential test would
 // pass against a plain SELECT-then-UPDATE, which is the bug this is for.
-test('two concurrent claimers never take the same job', async (t) => {
-  if (!requireTestDb(t, 'writes art_jobs')) return;
-  const pool = await freshPool(t);
+lockedTest('two concurrent claimers never take the same job', async (t, pool) => {
   const subjects = Array.from({ length: 40 }, (_, i) => S(i));
   await q.enqueue(pool, subjects, { backend: 'connector' });
 
@@ -131,9 +145,7 @@ test('two concurrent claimers never take the same job', async (t) => {
   assert.equal(rows[0].n, 40);
 });
 
-test('claim marks running, stamps claimed_at and counts the attempt', async (t) => {
-  if (!requireTestDb(t, 'writes art_jobs')) return;
-  const pool = await freshPool(t);
+lockedTest('claim marks running, stamps claimed_at and counts the attempt', async (t, pool) => {
   await q.enqueue(pool, [S(1)], { backend: 'connector' });
   const [job] = await q.claim(pool, 1);
   assert.equal(job.state, 'running');
@@ -142,9 +154,7 @@ test('claim marks running, stamps claimed_at and counts the attempt', async (t) 
   assert.deepEqual(await q.claim(pool, 5), [], 'a running job must not be claimable again');
 });
 
-test('fail returns a job to the queue while attempts remain, then gives up', async (t) => {
-  if (!requireTestDb(t, 'writes art_jobs')) return;
-  const pool = await freshPool(t);
+lockedTest('fail returns a job to the queue while attempts remain, then gives up', async (t, pool) => {
   const [a] = await q.enqueue(pool, [S(1)], { backend: 'connector' });
   const max = q.MAX_ATTEMPTS();
 
@@ -163,9 +173,7 @@ test('fail returns a job to the queue while attempts remain, then gives up', asy
 
 // What makes a batch survive OUR restart: rows left 'running' by a process
 // that died are returned to the queue.
-test('requeueStale rescues jobs whose worker died holding them', async (t) => {
-  if (!requireTestDb(t, 'writes art_jobs')) return;
-  const pool = await freshPool(t);
+lockedTest('requeueStale rescues jobs whose worker died holding them', async (t, pool) => {
   await q.enqueue(pool, [S(1), S(2)], { backend: 'connector' });
   await q.claim(pool, 2);
 
@@ -185,9 +193,7 @@ test('requeueStale rescues jobs whose worker died holding them', async (t) => {
   assert.equal((await q.claim(pool, 5)).length, 2, 'rescued jobs must be claimable again');
 });
 
-test('stats reports the queue by state', async (t) => {
-  if (!requireTestDb(t, 'writes art_jobs')) return;
-  const pool = await freshPool(t);
+lockedTest('stats reports the queue by state', async (t, pool) => {
   const rows = await q.enqueue(pool, [S(1), S(2), S(3)], { backend: 'connector' });
   await q.claim(pool, 1);
   await q.complete(pool, rows[0].id);
