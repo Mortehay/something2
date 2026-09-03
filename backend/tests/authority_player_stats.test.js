@@ -1236,3 +1236,65 @@ test('SOMET-531: the achieved rate never undershoots the true cooldown', () => {
       `knife at x${mult.toFixed(3)} averaged ${got.toFixed(1)}ms, faster than its true ${floor.toFixed(1)}ms`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// SOMET-533: the projectile rules, as EFFECTS rather than values.
+//
+// A mutation sweep over all fifteen rules (forcing each to its identity and
+// looking for a red test) found pierceBonus and projectileSpeedMult resting on
+// a single assertion each -- `pierceLeft === 3` and `hypot(vx, vy) === 1350`.
+// Both are fields on the freshly spawned projectile, which is only half the
+// claim. This epic shipped five defects of exactly the shape "the value is set
+// correctly and nothing downstream acts on it" (see the aura ring and the
+// lingering wave, both computed and both drawn nowhere), so a rule that is only
+// ever read back off the object it was written to is not yet verified.
+//
+// The two tests below fly the shot and watch what it does to the world. Each
+// carries its own control -- the same scenario with the rule at its identity --
+// because a number that merely looks right proves nothing until the arm where
+// it should differ has been run.
+// ---------------------------------------------------------------------------
+
+// Creatures strung out along the shot's path, so a pierce budget is the only
+// thing that decides how many of them are hurt.
+function lineOfTargets(rules, n, gap = 56) {
+  const w = armWorld();
+  w.addPlayer('u1', { x: 0, y: 0 }, invFor(4), undefined, 0,
+    rules ? withRules(rules) : BASE_STATS);
+  w.creatures.addCreatures(Array.from({ length: n }, (_, i) => ({
+    id: `t${i}`, type: 'wolf', x: 64 + i * gap, y: 8, hp: 500, facing: 'S', color: '#f00',
+  })));
+  w.attack('u1', 1, 0);
+  for (let i = 0; i < 60 && w.snapshot().projectiles.length > 0; i++) w.tickProjectiles(0.05);
+  return w.creatures.all().filter((c) => c.hp < 500).length;
+}
+
+test('SOMET-533: pierceBonus damages MORE CREATURES, not just a bigger number', () => {
+  // bow pierce 1 -- one target, and the shot is spent.
+  const base = lineOfTargets(null, 4);
+  assert.equal(base, 1, `an unpierced bow must stop at its first target, hurt ${base}`);
+  // +2 -> pierce 3. The control above is what makes this meaningful.
+  const boosted = lineOfTargets({ pierceBonus: 2 }, 4);
+  assert.equal(boosted, 3, `pierce 3 must reach three targets, hurt ${boosted}`);
+});
+
+test('SOMET-533: projectileSpeedMult actually moves the shot further per tick', () => {
+  const travel = (rules) => {
+    const w = armWorld();
+    w.addPlayer('u1', { x: 0, y: 0 }, invFor(4), undefined, 0,
+      rules ? withRules(rules) : BASE_STATS);
+    w.attack('u1', 1, 0);
+    const start = w.snapshot().projectiles[0].x;
+    w.tickProjectiles(0.05);
+    const now = w.snapshot().projectiles[0];
+    // The shot must still be alive; a despawned one would make "distance"
+    // meaningless and the assertion below vacuous.
+    assert.ok(now, 'the projectile despawned before it could be measured');
+    return now.x - start;
+  };
+  const base = travel(null);
+  const fast = travel({ projectileSpeedMult: 1.5 });
+  assert.ok(base > 0, `the baseline shot did not move (${base}px)`);
+  assert.ok(Math.abs(fast / base - 1.5) < 0.02,
+    `x1.5 must cover 1.5x the ground in the same tick: ${base}px -> ${fast}px`);
+});
