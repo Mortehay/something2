@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { withAdvisoryLock } = require('./helpers/advisoryLock.js');
+const { readingUnderLock } = require('./helpers/advisoryLock.js');
 
 // SOMET-255: same fixed integer as seed_catalogs_db.test.js's CATALOG_LOCK_KEY
 // -- both files touch entity_types/creature_drops, and this test's
@@ -64,7 +64,16 @@ test('EVERY creature type has at least one creature_drops row', async (t) => {
     // entity_types row (and its cascaded creature_drops row) in the same
     // catalog this invariant reads. Holding CATALOG_LOCK_KEY for the whole
     // read keeps this from running mid-delete in that other file.
-    await withAdvisoryLock(pool, CATALOG_LOCK_KEY, async () => {
+    //
+    // SOMET-532: readingUnderLock, not withAdvisoryLock. This file is a PURE
+    // reader -- it contains no INSERT, UPDATE or DELETE at all -- so taking the
+    // key and then proceeding without it is the worst of both: it reads the
+    // exact mid-delete state the key was taken to exclude, and reports "Wolf
+    // has no drop rule", a defect that does not exist. A degraded read here
+    // now SKIPS with a reason instead of asserting. Measured: the entry key
+    // degrades ~8 times in a full run for its own reasons, so this is a real
+    // window, not a theoretical one.
+    await readingUnderLock(pool, CATALOG_LOCK_KEY, t, async () => {
       // Scoped to the HOSTILE faction: this invariant is about huntable
       // content — a mob a player kills must yield something. Guard-faction
       // creatures (village gate guards) are defenders, not loot piles: they

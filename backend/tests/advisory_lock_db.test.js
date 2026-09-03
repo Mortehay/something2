@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Pool } = require('pg');
-const { withAdvisoryLock } = require('./helpers/advisoryLock.js');
+const { withAdvisoryLock, readingUnderLock } = require('./helpers/advisoryLock.js');
 
 // SOMET-255: withAdvisoryLock is the primitive entryWorld.js's
 // withEntryPreserved is now built on, and that seed_catalogs_db.test.js /
@@ -112,5 +112,73 @@ test('two withAdvisoryLock calls with DIFFERENT keys do not block each other', a
       `different-key calls serialized instead of running concurrently: ${events.join(', ')}`);
   } finally {
     await pool.end();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// SOMET-532: readingUnderLock -- a reader must REFUSE, never degrade.
+//
+// withAdvisoryLock proceeds unguarded past its deadline, which is right for a
+// writer and silently wrong for a reader asserting a whole-database invariant:
+// unguarded means reading in exactly the mid-mutation window the lock exists to
+// exclude, then reporting a defect that does not exist.
+//
+// These take a REAL lock on a REAL second connection and let the deadline
+// actually expire. A version using a stub lock would prove nothing about the
+// primitive, which is the whole subject here.
+// ---------------------------------------------------------------------------
+
+// Holds `key` on its own connection until the returned release() is called, so
+// the caller under test genuinely cannot acquire it.
+async function holdKey(pool, key) {
+  const client = await pool.connect();
+  await client.query('SELECT pg_advisory_lock($1)', [key]);
+  return async () => {
+    await client.query('SELECT pg_advisory_unlock($1)', [key]).catch(() => {});
+    client.release();
+  };
+}
+
+test('readingUnderLock SKIPS its body when the key is held, rather than reading unguarded', async (t) => {
+  if (!requireTestDb(t, 'takes a real pg_try_advisory_lock')) return;
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(`no database: ${pool.unreachable}`); return; }
+  const KEY = 918273645;
+  const release = await holdKey(pool, KEY);
+  try {
+    let ran = false;
+    const skips = [];
+    const fakeT = { skip: (m) => skips.push(m) };
+    const out = await readingUnderLock(pool, KEY, fakeT, async () => { ran = true; return 'asserted'; },
+      { waitMs: 300 });
+
+    assert.equal(ran, false,
+      'the reader body RAN while a peer held the key -- that is the unguarded read this exists to prevent');
+    assert.equal(out, undefined, 'a refused read must not return a value that looks like a result');
+    assert.equal(skips.length, 1, `expected exactly one skip, got ${skips.length}`);
+    assert.match(skips[0], /could not take advisory lock 918273645/,
+      'the skip must name the key, so a run that loses this coverage says which one');
+  } finally {
+    await release();
+    await pool.end().catch(() => {});
+  }
+});
+
+test('readingUnderLock runs its body normally when the key is free', async (t) => {
+  if (!requireTestDb(t, 'takes a real pg_try_advisory_lock')) return;
+  const pool = await openPool();
+  if (pool.unreachable) { t.skip(`no database: ${pool.unreachable}`); return; }
+  const KEY = 918273646;
+  // The control. Without it the test above passes just as well against a
+  // readingUnderLock that skips unconditionally, which would silently delete
+  // the invariant it is supposed to protect.
+  const skips = [];
+  const fakeT = { skip: (m) => skips.push(m) };
+  try {
+    const out = await readingUnderLock(pool, KEY, fakeT, async () => 'asserted', { waitMs: 300 });
+    assert.equal(out, 'asserted', 'an uncontended reader must actually run and return its result');
+    assert.deepEqual(skips, [], 'an uncontended reader must not skip');
+  } finally {
+    await pool.end().catch(() => {});
   }
 });

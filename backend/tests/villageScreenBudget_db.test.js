@@ -26,7 +26,7 @@ const { Pool } = require('pg');
 
 const { villageMerchantPost, villageGatePosts } = require('../src/services/mapService.js');
 const { villageGeometryError, villageSizeError, GUARD_TYPE } = require('../src/services/villages.js');
-const { withAdvisoryLock } = require('./helpers/advisoryLock.js');
+const { readingUnderLock } = require('./helpers/advisoryLock.js');
 const { ENTRY_LOCK_KEY } = require('./helpers/entryWorld.js');
 
 // SOMET-351. Every test below asserts an invariant over the WHOLE live
@@ -80,16 +80,15 @@ const { ENTRY_LOCK_KEY } = require('./helpers/entryWorld.js');
 // call sites retried even twice would approach the 60s per-file budget on their
 // own. One degrade in a full suite is rare enough that skipping costs less
 // coverage than a timeout would.
-const readingLiveWorld = async (pool, t, fn) => withAdvisoryLock(
-  pool, ENTRY_LOCK_KEY, async ({ locked }) => {
-    if (!locked) {
-      t.skip('could not take ENTRY_LOCK_KEY -- a peer is mid-apply, so a '
-        + 'whole-database invariant cannot be read consistently here');
-      return undefined;
-    }
-    return fn();
-  },
-);
+//
+// SOMET-532: the skip-on-unguarded logic above now lives in advisoryLock.js as
+// readingUnderLock, because this file was carrying the only copy of it while
+// creature_drops_db.test.js -- a pure reader over the catalog rows
+// seed_catalogs_db mutates -- silently kept the degrading behaviour. Two copies
+// of a guard is how one of them gets forgotten. The reasoning above is left
+// intact because it is the evidence for why the shared helper skips rather
+// than fails.
+const readingLiveWorld = (pool, t, fn) => readingUnderLock(pool, ENTRY_LOCK_KEY, t, fn);
 
 const TILE = 100;
 const DB_URL = process.env.TEST_DATABASE_URL

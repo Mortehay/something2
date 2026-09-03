@@ -111,6 +111,46 @@ async function withAdvisoryLock(pool, lockKey, fn, { waitMs = LOCK_WAIT_MS } = {
   }
 }
 
+// SOMET-532. THE READER'S WRAPPER: refuse rather than degrade.
+//
+// withAdvisoryLock above proceeds UNGUARDED past its deadline, and for a writer
+// that is the right call -- a racy write is recoverable, a hung suite is not.
+// For a READER asserting an invariant over the whole database it is silently
+// wrong: unguarded means reading in exactly the mid-mutation window the lock
+// exists to exclude, and then reporting a defect that does not exist.
+//
+// That is measured, not hypothetical. In the 2594-test run on 2026-08-16 the
+// suite logged exactly one `could not take the lock in 6000ms` and that same
+// run failed with `the entry world "zzTestWpA" must have exactly one village
+// ... got 0` -- zzTestWpA being a peer's fixture, mid-apply. One degrade, one
+// false failure, same key. That red was then cited as evidence in SOMET-341
+// and sent a reader looking for a bug that was never there.
+//
+// SKIPPING is the honest verdict, not failing. An unguarded snapshot cannot
+// distinguish "the invariant is broken" from "someone else's fixture is halfway
+// through being applied", and a red meaning the second is worse than no result
+// at all. The skip carries a reason so a run that quietly loses this coverage
+// still says so out loud.
+//
+// Deliberately NOT retried: each acquisition already costs up to LOCK_WAIT_MS,
+// and a couple of retries would approach a file's whole timeout on their own.
+//
+// This lives here rather than in each reader because it was written twice
+// before it was written once -- villageScreenBudget_db.test.js carried the only
+// copy, and creature_drops_db.test.js (a pure reader over the same catalog
+// rows seed_catalogs_db mutates) silently kept the degrading behaviour. Two
+// copies of a guard is how one of them gets forgotten.
+async function readingUnderLock(pool, lockKey, t, fn, opts = {}) {
+  return withAdvisoryLock(pool, lockKey, async ({ locked }) => {
+    if (!locked) {
+      t.skip(`could not take advisory lock ${lockKey} -- a peer is mid-mutation, `
+        + 'so a whole-database invariant cannot be read consistently here');
+      return undefined;
+    }
+    return fn();
+  }, opts);
+}
+
 // SOMET-477: a third shared-state key, distinct from entryWorld.js's
 // ENTRY_LOCK_KEY (626526517) and seed_catalogs_db.test.js's CATALOG_LOCK_KEY
 // (748213905). Three files now run seedPassiveTree() against the same
@@ -133,5 +173,6 @@ const PASSIVE_TREE_LOCK_KEY = 471477806;
 const PASSIVE_TREE_LOCK_WAIT_MS = 45000;
 
 module.exports = {
-  withAdvisoryLock, LOCK_WAIT_MS, PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS,
+  withAdvisoryLock, readingUnderLock, LOCK_WAIT_MS,
+  PASSIVE_TREE_LOCK_KEY, PASSIVE_TREE_LOCK_WAIT_MS,
 };
