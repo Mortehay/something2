@@ -19,6 +19,7 @@ const { recordVisit } = require('../services/visitedWorlds.js');
 const { mayJoin, joinPolicyFacts, waypointTravelFacts } = require('../services/joinPolicy.js');
 const { derivePlayerStats } = require('../services/playerStats.js');
 const { chunkOf, parseKey, neighborhoodKeys, CHUNK_KEY } = require('./coords');
+const { bucketPlayersByChunk, playersNear } = require('./playerAoi');
 const { loadCreatureTypes, ABILITIES_LATERAL } = require('./creatures');
 const { chooseSpawn, edgeOfDoorwayTile, oppositeEdge, arrivalPoint, villageContaining } = require('../services/mapService');
 const { fetchLinks } = require('../services/mapLinks');
@@ -3014,6 +3015,26 @@ function attachAuthority(httpServer, pool, opts = {}) {
         }).catch((err) => console.error('auto-loot notify failed:', err));
       }
       const snap = entry.world.snapshot();
+      // SOMET-365. Bucket this tick's player rows by chunk ONCE, then assemble
+      // each recipient's list from the buckets its neighbourhood covers.
+      //
+      // `snap.players` used to be handed to every socket BY REFERENCE, which
+      // meant every client received the live position of every player in the
+      // world -- O(P^2) bandwidth per tick, every remote player pushed into the
+      // client's per-frame drawables and sorted, and the position of everyone
+      // in the world disclosed to everyone in it.
+      //
+      // Bucketed once rather than filtered per socket: a filter in the loop
+      // below would be O(P) per recipient, and a `.map()` there would build a
+      // fresh row object per player per recipient. The rows stay shared by
+      // reference exactly as before; only the containing array is per-socket.
+      const playerBuckets = bucketPlayersByChunk(snap.players, entry.row.chunk_size);
+      // Built in the same one-pass-per-tick spirit as the buckets. Looking the
+      // recipient's own row up with snap.players.find() inside the socket loop
+      // would be O(P) per recipient -- reintroducing the O(P^2) work this change
+      // exists to remove, just in CPU instead of bandwidth.
+      const playerRowById = new Map();
+      for (const r of snap.players) playerRowById.set(r.id, r);
       // Detonations are per-tick and the stash is REPLACED each tick, so they
       // must ride out on THIS tick's broadcast or they are lost. Omitted from
       // the frame entirely when empty (the common case) to keep it small.
@@ -3032,7 +3053,17 @@ function attachAuthority(httpServer, pool, opts = {}) {
       const hasImps = imps.length > 0;
       for (const [userId, ws] of entry.sockets) {
         const p = entry.world.getPlayer(userId);
-        const frame = { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players: snap.players, projectiles: snap.projectiles };
+        // The recipient's own row rides along unconditionally (see playerAoi):
+        // the client reconciles its predicted state -- ackSeq, hp, mana,
+        // stamina, equipment -- out of this frame, so a recipient missing from
+        // its own frame breaks prediction rather than merely failing to draw.
+        // A socket whose player has gone (p == null) has no position to scope
+        // by, so it keeps the whole array: that is the pre-existing behaviour
+        // for a frame that is about to stop being sent anyway.
+        const players = p
+          ? playersNear(playerBuckets, p.x, p.y, entry.row.chunk_size, playerRowById.get(p.userId) || null)
+          : snap.players;
+        const frame = { type: 'state', tick, ackSeq: p ? p.ackSeq : 0, players, projectiles: snap.projectiles };
         // SOMET-528. `waves` is copied ACROSS EXPLICITLY, and this line is the
         // third place a new snapshot field can be lost.
         //
