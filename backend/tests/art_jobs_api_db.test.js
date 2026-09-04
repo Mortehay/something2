@@ -173,7 +173,39 @@ lockedTest('queueing rejects an empty selection and an unknown kind', async (t, 
   const noProvider = await request(app).post('/api/art-jobs').set(...AUTH)
     .send({ kind: 'skill', keys: ['x'] });
   assert.equal(noProvider.status, 400,
-    'the connector backend without a provider would queue work nothing can run');
+    'the connector backend with no provider AND no active one would queue work nothing can run');
+  assert.match(noProvider.body.error, /no active provider/,
+    'the message must say WHICH thing is missing -- "provider_id is required" sends '
+    + 'the admin looking for a field they deliberately left on its default');
+});
+
+// Omitting provider_id means "the active provider", which is what the console's
+// default option says. Asserted with an active provider present, because the
+// case above only proves the refusal when there is none -- and a fallback that
+// never fires would pass that test while the default button silently 400'd.
+// That is exactly what the browser showed before this was fixed.
+lockedTest('omitting provider_id falls back to the ACTIVE provider', async (t, pool, providerId) => {
+  const prev = await pool.query('SELECT id FROM ai_providers WHERE is_active');
+  await pool.query('UPDATE ai_providers SET is_active = false WHERE is_active');
+  await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [providerId]);
+  t.after(async () => {
+    await pool.query('UPDATE ai_providers SET is_active = false WHERE id = $1', [providerId])
+      .catch(() => {});
+    for (const r of prev.rows) {
+      await pool.query('UPDATE ai_providers SET is_active = true WHERE id = $1', [r.id])
+        .catch(() => {});
+    }
+  });
+
+  const keys = (await cs.SUBJECTS.skill.list()).slice(0, 2).map((s) => s.key);
+  const res = await request(app).post('/api/art-jobs').set(...AUTH)
+    .send({ kind: 'skill', keys });          // no provider_id at all
+  assert.equal(res.status, 201, JSON.stringify(res.body));
+  assert.equal(res.body.queued, 2);
+
+  const { rows } = await pool.query('SELECT DISTINCT provider_id FROM art_jobs');
+  assert.deepEqual(rows.map((r) => r.provider_id), [providerId],
+    'the jobs must carry the active provider, not null');
 });
 
 lockedTest('GET /api/art-jobs reports the queue by state', async (t, pool, providerId) => {

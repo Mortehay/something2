@@ -3284,14 +3284,25 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
     const keys = Array.isArray(req.body.keys) ? req.body.keys.filter((k) => typeof k === 'string') : [];
     if (keys.length === 0) return res.status(400).json({ error: 'keys must be a non-empty array' });
     const backend = req.body.backend === 'local' ? 'local' : 'connector';
-    const providerId = Number.isInteger(req.body.provider_id) ? req.body.provider_id : null;
-    if (backend === 'connector' && !providerId) {
-      return res.status(400).json({ error: 'provider_id is required for the connector backend' });
-    }
 
     // Per-subject provider pins resolved HERE, at enqueue, so a pinned tile or
     // entity keeps its own provider instead of silently taking the batch's.
     const active = await aiProviders.loadActiveProviderWithSecret(pool).catch(() => null);
+
+    // Omitting provider_id means "the active provider", which is what the
+    // console's default option says. Only when there is no active provider
+    // EITHER is this a bad request -- and then the message says so, because
+    // "provider_id is required" sends the admin looking for a field they
+    // deliberately left on its default.
+    const providerId = Number.isInteger(req.body.provider_id)
+      ? req.body.provider_id
+      : (active ? active.id : null);
+    if (backend === 'connector' && !providerId) {
+      return res.status(400).json({
+        error: 'no provider chosen and no active provider is set -- pick one in the '
+          + 'Provider list, or mark a provider active under AI Providers',
+      });
+    }
     const { subjects, unknown } = await catalogSubjects.subjectsForEnqueue(
       pool, kind, keys, { active, fallbackProviderId: providerId },
     );

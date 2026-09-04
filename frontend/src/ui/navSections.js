@@ -1,7 +1,7 @@
 import {
   HiOutlinePuzzlePiece, HiOutlineWrenchScrewdriver, HiOutlineBeaker,
   HiOutlineCube, HiOutlineMap, HiOutlineGlobeAlt, HiOutlineShare, HiOutlineBolt, HiOutlineSparkles,
-  HiOutlineCpuChip, HiOutlineChartBar, HiOutlineGlobeAmericas,
+  HiOutlineCpuChip, HiOutlineChartBar, HiOutlineGlobeAmericas, HiOutlinePhoto,
 } from "react-icons/hi2";
 
 // One source of truth for the sidebar: label, route, icon and the admin colour
@@ -49,6 +49,11 @@ export const NAV_SECTIONS = [
       // land in. Content rather than configuration, so it sits above the
       // AI Providers entry.
       { id: 'progression', label: 'Progression', path: '/game/admin/progression', Icon: HiOutlineChartBar, adminType: 'entity' },
+      // SOMET-538: the mass-generation console. Sits directly above AI
+      // Providers because the two are used together -- you point the game at a
+      // machine there, then drive a batch through it here -- and because both
+      // are about how art gets made rather than about one catalogue.
+      { id: 'art', label: 'Art Generation', path: '/game/art', Icon: HiOutlinePhoto },
       // SOMET-330: registered remote image-generation services. Sits last
       // because it is configuration rather than content -- an admin opens it
       // once to point the game at a machine, not every session.
