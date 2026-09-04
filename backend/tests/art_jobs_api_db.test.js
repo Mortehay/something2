@@ -97,13 +97,17 @@ lockedTest('a page carries only the named fields, not the whole catalogue row', 
   const res = await request(app).get('/api/art-subjects/item?per_page=1').set(...AUTH);
   assert.equal(res.status, 200);
   assert.deepEqual(Object.keys(res.body.subjects[0]).sort(),
-    ['base_prompt', 'has_art', 'key', 'name']);
+    ['base_prompt', 'has_art', 'image', 'job_error', 'job_state', 'key', 'kind',
+      'name', 'render_mode', 'updated_at']);
+  assert.equal(res.body.subjects[0].row, undefined,
+    'the catalogue row must never be shipped -- it doubles every page');
 });
 
 lockedTest('an unknown subject kind is a 400 that names the valid ones', async (t) => {
   const res = await request(app).get('/api/art-subjects/nonsense').set(...AUTH);
   assert.equal(res.status, 400);
-  assert.deepEqual(res.body.kinds.sort(), ['item', 'passive_label', 'skill']);
+  assert.deepEqual(res.body.kinds.sort(),
+    ['entity', 'item', 'passive_label', 'skill', 'tile']);
 });
 
 // THE RESUME MECHANISM. A batch is resumable because the filter reads the
@@ -115,17 +119,22 @@ lockedTest('missing_only drops a subject the moment it has art', async (t, pool)
   const target = before.body.subjects[0];
   assert.ok(target, 'expected at least one skill without art');
 
+  // Cleaned up INSIDE the lock, not in t.after. t.after runs after the advisory
+  // lock is released, so the row would outlive this file's exclusive window --
+  // and a peer file asserting "this skill has no art" would see it and fail.
+  // Measured: that is exactly what made art_dispatcher_catalog_db's
+  // transparency test fail intermittently in full-suite runs.
   await cs.writeCatalogArt(pool, 'skill', target.key, 'zzTest/resume.png');
-  t.after(async () => {
+  try {
+    const after = await request(app)
+      .get('/api/art-subjects/skill?missing_only=true&per_page=500').set(...AUTH);
+    assert.equal(after.body.total, before.body.total - 1);
+    assert.ok(!after.body.subjects.some((s) => s.key === target.key),
+      'a subject with art must leave the missing list, or a resumed batch redraws it');
+  } finally {
     await pool.query('DELETE FROM catalog_art WHERE image = $1', ['zzTest/resume.png'])
       .catch(() => {});
-  });
-
-  const after = await request(app)
-    .get('/api/art-subjects/skill?missing_only=true&per_page=500').set(...AUTH);
-  assert.equal(after.body.total, before.body.total - 1);
-  assert.ok(!after.body.subjects.some((s) => s.key === target.key),
-    'a subject with art must leave the missing list, or a resumed batch redraws it');
+  }
 });
 
 // --- Queueing -------------------------------------------------------------

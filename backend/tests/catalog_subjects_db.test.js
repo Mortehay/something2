@@ -92,9 +92,22 @@ test('composed prompts carry NO styling -- the wrapper owns that', () => {
 
 // --- the registry ---------------------------------------------------------
 
-test('the registry names exactly the three subjects that had no art path', () => {
-  assert.deepEqual(cs.subjectKinds().sort(), ['item', 'passive_label', 'skill']);
+test('the registry names every art subject, and each declares how it is drawn', () => {
+  assert.deepEqual(cs.subjectKinds().sort(),
+    ['entity', 'item', 'passive_label', 'skill', 'tile']);
   assert.equal(cs.registryFor('nonsense'), null, 'an unknown kind must not silently resolve');
+
+  // GENERATION KIND IS NOT SUBJECT KIND, and getting it backwards is expensive
+  // both ways: an object drawn as a tile comes back a sprite sheet, and a tile
+  // checked as an object is refused for being opaque -- which it correctly is.
+  assert.equal(cs.registryFor('tile').generationKind, 'tile');
+  for (const k of ['item', 'skill', 'passive_label', 'entity']) {
+    assert.equal(cs.registryFor(k).generationKind, 'object', `${k} is an isolated object`);
+  }
+  for (const k of cs.subjectKinds()) {
+    assert.ok(['tile', 'object'].includes(cs.registryFor(k).generationKind),
+      `${k} must declare a generation kind explicitly -- a default would be silently wrong`);
+  }
 });
 
 test('skills list from the static catalog without a database', async () => {

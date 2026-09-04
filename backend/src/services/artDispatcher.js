@@ -4,6 +4,7 @@ const catalogSubjects = require('./catalogSubjects.js');
 const { pngHasAlpha, readObjectHead } = require('./bulkImageRegeneration.js');
 const { alphaProfile, MIN_TRANSPARENT_PCT } = require('./pngAlpha.js');
 const assetStore = require('./assetStore.js');
+const aiProviders = require('./aiProviders.js');
 const { buildObjectPrompt } = require('./objectPrompt.js');
 
 // SOMET-540. The loop that turns queued art jobs into images.
@@ -112,16 +113,31 @@ function subjectResolver(db, subjects = catalogSubjects) {
 // `kind: 'object'` is the GENERATION kind (isolated, needs a cutout), which is
 // a different axis from the subject kind: an item, a skill and a passive label
 // are all objects to draw.
-function requestForSubject(job, subject) {
-  return {
+async function requestForSubject(db, job, subject, reg) {
+  const generationKind = reg.generationKind;
+  // A kind that composes its own prompt does so (tiles need their biome's
+  // palette and exclusions, which is a database read). Everything else is an
+  // isolated object and takes the shared wrapper.
+  const prompt = reg.composePrompt
+    ? await reg.composePrompt(db, subject)
+    : buildObjectPrompt(subject.basePrompt);
+
+  const req = {
     subject: subject.name || subject.key,
-    kind: 'object',
-    prompt: buildObjectPrompt(subject.basePrompt),
+    kind: generationKind,
+    prompt,
     seed: Number(job.seed),
     frames: 1,                       // never a sheet
-    width: MIN_OBJECT_PX(),          // honoured only by a {{width}} template
-    height: MIN_OBJECT_PX(),
   };
+  // THE NATIVE-RESOLUTION ASK IS FOR OBJECTS ONLY. A seamless tile is not an
+  // isolated subject and does not tile-repeat the way an off-native object
+  // does; forcing 1024 on the terrain provider would change working art for
+  // no reason. Honoured only by a {{width}} template either way.
+  if (generationKind === 'object') {
+    req.width = MIN_OBJECT_PX();
+    req.height = MIN_OBJECT_PX();
+  }
+  return req;
 }
 
 // --- One job --------------------------------------------------------------
@@ -137,6 +153,7 @@ async function runOne(db, job, {
   buildRequest,
   writeArt,
   resolveSubject,
+  subjects = catalogSubjects,
   deps = {},
 } = {}) {
   const fail = async (message) => {
@@ -145,6 +162,11 @@ async function runOne(db, job, {
   };
 
   let req;
+  // Only an OBJECT gets the cutout guards. A tile is legitimately opaque, and
+  // checking it as an object would refuse every tile in the catalogue.
+  // Defaults to 'object' for an injected buildRequest, which is what every
+  // caller that supplies one is generating.
+  let generationKind = 'object';
   if (buildRequest) {
     req = await buildRequest(job);
   } else {
@@ -155,8 +177,10 @@ async function runOne(db, job, {
     if (!subject) {
       return fail(`subject ${job.subject_kind}/${job.subject_key} is no longer in the catalogue`);
     }
-    req = requestForSubject(job, subject);
-    job.__subject = subject;
+    const reg = subjects.registryFor(job.subject_kind);
+    if (!reg) return fail(`unknown subject kind: ${job.subject_kind}`);
+    req = await requestForSubject(db, job, subject, reg);
+    generationKind = reg.generationKind;
   }
 
   const registryId = remote.createJob();
@@ -186,7 +210,7 @@ async function runOne(db, job, {
 
   const write = writeArt || defaultWriteArt;
   try {
-    await write(db, job, imageKey, { provider, deps });
+    await write(db, job, imageKey, { provider, deps, generationKind, subjects });
   } catch (err) {
     return fail(`image ${imageKey} was generated but could not be recorded: `
       + `${err && err.message ? err.message : err}`);
@@ -205,30 +229,39 @@ async function runOne(db, job, {
 // a PNG that positively says "no alpha" is refused; a header we cannot read is
 // allowed through, because this catches one known failure rather than
 // everything unfamiliar.
-async function defaultWriteArt(db, job, imageKey, { provider, deps = {} } = {}) {
-  const head = await readObjectHead(imageKey, deps.store).catch(() => null);
-  if (pngHasAlpha(head) === false) {
-    throw new Error('the provider returned an image with no transparency; an icon '
-      + 'must be a cutout or it renders as an opaque square');
+async function defaultWriteArt(db, job, imageKey, {
+  provider, deps = {}, generationKind = 'object', subjects = catalogSubjects,
+} = {}) {
+  // BOTH CUTOUT GUARDS ARE OBJECT-ONLY. A seamless ground texture is supposed
+  // to be a fully opaque square -- running either check over a tile would
+  // reject the entire terrain catalogue, and it would look like the provider
+  // had broken rather than like the guard being pointed at the wrong thing.
+  if (generationKind === 'object') {
+    const head = await readObjectHead(imageKey, deps.store).catch(() => null);
+    if (pngHasAlpha(head) === false) {
+      throw new Error('the provider returned an image with no transparency; an icon '
+        + 'must be a cutout or it renders as an opaque square');
+    }
+
+    // AN ALPHA CHANNEL IS NOT A CUTOUT. Found by looking at a live batch: a
+    // passive label came back as a scene with the magenta backdrop never keyed
+    // -- 90% opaque, alpha channel present, colour type 6. It passed the header
+    // check above, passed the provider's own 422 (which fires near 1%), and was
+    // recorded as a success. In an icon slot it is a magenta square.
+    //
+    // Skipped entirely when the object cannot be read or decoded: same rule as
+    // everything else here, refuse only what we can positively see is wrong.
+    const bytes = await readWholeObject(imageKey, deps.store).catch(() => null);
+    const profile = bytes && alphaProfile(bytes);
+    if (profile && profile.transparentPct < MIN_TRANSPARENT_PCT()) {
+      throw new Error(`the provider returned an image that is only `
+        + `${profile.transparentPct.toFixed(0)}% transparent (floor `
+        + `${MIN_TRANSPARENT_PCT()}%); the backdrop was not keyed out, so this `
+        + 'would render as a coloured square rather than an icon');
+    }
   }
 
-  // AN ALPHA CHANNEL IS NOT A CUTOUT. Found by looking at a live batch: a
-  // passive label came back as a scene with the magenta backdrop never keyed --
-  // 90% opaque, alpha channel present, colour type 6. It passed the header
-  // check above, passed the provider's own 422 (which fires near 1%), and was
-  // recorded as a success. In an icon slot it is a magenta square.
-  //
-  // Skipped entirely when the object cannot be read or decoded: same rule as
-  // everything else here, refuse only what we can positively see is wrong.
-  const bytes = await readWholeObject(imageKey, deps.store).catch(() => null);
-  const profile = bytes && alphaProfile(bytes);
-  if (profile && profile.transparentPct < MIN_TRANSPARENT_PCT()) {
-    throw new Error(`the provider returned an image that is only `
-      + `${profile.transparentPct.toFixed(0)}% transparent (floor `
-      + `${MIN_TRANSPARENT_PCT()}%); the backdrop was not keyed out, so this `
-      + 'would render as a coloured square rather than an icon');
-  }
-  const reg = catalogSubjects.registryFor(job.subject_kind);
+  const reg = subjects.registryFor(job.subject_kind);
   if (!reg) throw new Error(`unknown subject kind: ${job.subject_kind}`);
   await reg.write(db, job.subject_key, imageKey, provider ? provider.id : null);
 }
@@ -245,6 +278,56 @@ async function readWholeObject(key, store = assetStore) {
     stream.on('end', () => resolve(Buffer.concat(chunks)));
     stream.on('error', reject);
   });
+}
+
+// The pre-claim precondition, aware of WHAT IS QUEUED.
+//
+// The 1024 minimum is an OBJECT rule. Refusing a 512 provider outright would
+// block a perfectly correct tile batch -- the terrain provider renders seamless
+// textures at 512 and should. So the queue is asked which kinds are actually
+// waiting, and the rule applies only if an object kind is among them.
+//
+// Still checked BEFORE claiming, which is the point: a misconfiguration costs
+// nothing and leaves the queue untouched, rather than burning an attempt on
+// every one of hundreds of rows.
+async function objectSizeRefusal(db, provider, subjects = catalogSubjects, loadProvider) {
+  // Which (kind, provider) pairs are actually waiting. A job carries its type's
+  // pin, so the provider a subject will use is not necessarily the one this
+  // batch was started with.
+  const { rows } = await db.query(
+    `SELECT DISTINCT subject_kind, provider_id FROM art_jobs WHERE state = 'queued'`);
+  for (const r of rows) {
+    const reg = subjects.registryFor(r.subject_kind);
+    if (!reg || reg.generationKind !== 'object') continue;   // tiles are exempt
+    const p = await resolveJobProvider(db, r.provider_id, provider, loadProvider);
+    const refusal = providerSizeRefusal(p);
+    if (refusal) {
+      const err = new Error(`${refusal} (queued ${r.subject_kind} jobs use it)`);
+      err.code = 'PROVIDER_TOO_SMALL';
+      return err;
+    }
+  }
+  return null;
+}
+
+// The provider a job will actually be sent to: its own pin when it has one,
+// otherwise the batch's. Loaded WITH ITS SECRET, because a pinned provider is
+// only useful if we can authenticate to it.
+//
+// Memoised on the db handle for the life of a dispatch call -- a 617-row batch
+// of pinned types would otherwise re-read the same handful of rows constantly.
+const providerCache = new WeakMap();
+async function resolveJobProvider(db, providerId, batchProvider, loadProvider) {
+  if (!Number.isInteger(providerId)) return batchProvider;
+  if (batchProvider && batchProvider.id === providerId) return batchProvider;
+  const load = loadProvider || aiProviders.loadProviderWithSecret;
+  let cache = providerCache.get(db);
+  if (!cache) { cache = new Map(); providerCache.set(db, cache); }
+  if (!cache.has(providerId)) cache.set(providerId, await load(db, providerId));
+  // A pin whose provider was deleted (ON DELETE SET NULL cannot help once the
+  // row is gone) degrades to the batch's rather than failing the job -- the
+  // same choice resolveGenerationTarget makes for a dangling pin.
+  return cache.get(providerId) || batchProvider;
 }
 
 // --- The batch ------------------------------------------------------------
@@ -264,6 +347,7 @@ async function dispatch(db, {
   buildRequest,
   writeArt,
   subjects = catalogSubjects,
+  loadProvider,
   deps = {},
 } = {}) {
   // Checked BEFORE claiming, so a misconfigured provider costs nothing and
@@ -271,12 +355,8 @@ async function dispatch(db, {
   // Skipped when the caller builds its own requests -- it is then not this
   // module's business what gets sent.
   if (!buildRequest) {
-    const refusal = providerSizeRefusal(provider);
-    if (refusal) {
-      const err = new Error(refusal);
-      err.code = 'PROVIDER_TOO_SMALL';
-      throw err;
-    }
+    const err = await objectSizeRefusal(db, provider, subjects, loadProvider);
+    if (err) throw err;
   }
 
   const claimed = await queue.claim(db, limit);
@@ -293,8 +373,14 @@ async function dispatch(db, {
       const i = cursor;
       cursor += 1;
       if (i >= claimed.length) return;
-      results.push(await runOne(db, claimed[i], {
-        provider, generate, buildRequest, writeArt, resolveSubject, deps,
+      const job = claimed[i];
+      // The job's own provider, not the batch's, when its type is pinned.
+      const jobProvider = buildRequest
+        ? provider
+        : await resolveJobProvider(db, job.provider_id, provider, loadProvider);
+      results.push(await runOne(db, job, {
+        provider: jobProvider, generate, buildRequest, writeArt, resolveSubject,
+        subjects, deps,
       }));
     }
   });
@@ -314,8 +400,10 @@ module.exports = {
   DEFAULT_CONCURRENCY,
   MIN_OBJECT_PX,
   providerSizeRefusal,
+  objectSizeRefusal,
   requestForSubject,
   subjectResolver,
+  resolveJobProvider,
 };
 
 // --- The drain ------------------------------------------------------------

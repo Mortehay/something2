@@ -3212,6 +3212,17 @@ app.post('/api/bulk-image-jobs/cancel', adminGuard, (req, res) => {
 // we do not control. Here the work list is rows in art_jobs, so a restart of
 // ours OR of the remote resumes instead of re-running.
 
+// The subject kinds this install can generate, for the console's filter. Read
+// from the registry rather than hardcoded in the client, so adding a sixth kind
+// is one entry here and not an edit in two places.
+app.get('/api/art-subjects', adminGuard, (req, res) => {
+  res.json({
+    kinds: catalogSubjects.subjectKinds().map((k) => ({
+      kind: k, generation_kind: catalogSubjects.registryFor(k).generationKind,
+    })),
+  });
+});
+
 // One page of a subject kind, annotated with whether it already has art.
 //
 // `missing_only` is what makes a batch resumable without a progress counter:
@@ -3240,7 +3251,18 @@ app.get('/api/art-subjects/:kind', adminGuard, async (req, res) => {
       // Naming the fields keeps a 189-item page from shipping the catalog twice
       // -- the same lesson bulkImageRegeneration's publicView records.
       subjects: subjects.slice(start, start + perPage).map((x) => ({
-        key: x.key, name: x.name, base_prompt: x.basePrompt, has_art: x.hasArt,
+        kind: x.kind,
+        key: x.key,
+        name: x.name,
+        base_prompt: x.basePrompt,
+        has_art: x.hasArt,
+        image: x.image,
+        updated_at: x.updatedAt,
+        job_state: x.jobState,
+        job_error: x.jobError,
+        // Only entities have one; the console shows it because promoting a
+        // deliberate colour-box type to real art is a choice worth seeing.
+        render_mode: (x.row && x.row.render_mode) || null,
       })),
     });
   } catch (err) {
@@ -3267,14 +3289,21 @@ app.post('/api/art-jobs', adminGuard, async (req, res) => {
       return res.status(400).json({ error: 'provider_id is required for the connector backend' });
     }
 
-    const rows = await artJobQueue.enqueue(pool, keys.map((key) => ({ kind, key })),
-      { backend, providerId });
+    // Per-subject provider pins resolved HERE, at enqueue, so a pinned tile or
+    // entity keeps its own provider instead of silently taking the batch's.
+    const active = await aiProviders.loadActiveProviderWithSecret(pool).catch(() => null);
+    const { subjects, unknown } = await catalogSubjects.subjectsForEnqueue(
+      pool, kind, keys, { active, fallbackProviderId: providerId },
+    );
+    const rows = await artJobQueue.enqueue(pool, subjects, { backend, providerId });
     res.status(201).json({
       requested: keys.length,
       queued: rows.length,
-      // Named rather than implied: "I asked for 100 and 3 were queued" is
-      // confusing until you know the other 97 were already in flight.
-      already_live: keys.length - rows.length,
+      // Each named rather than implied: "I asked for 100 and 3 were queued" is
+      // confusing until you know the other 97 were already in flight, and a key
+      // that has left the catalogue is a different thing again.
+      already_live: keys.length - rows.length - unknown.length,
+      unknown,
       stats: await artJobQueue.stats(pool),
     });
   } catch (err) {

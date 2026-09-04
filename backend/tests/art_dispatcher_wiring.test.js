@@ -67,30 +67,61 @@ test('the minimum is the measured one', () => {
 
 // --- The composed request -------------------------------------------------
 
-test('the request wraps a plain subject with the shared object framing', () => {
-  const req = d.requestForSubject(
-    { seed: '12345' },
+// `requestForSubject` is async and registry-driven now (SOMET-538): a tile
+// composes its prompt from its biome, an object takes the shared wrapper, and
+// the native-size ask is object-only.
+const OBJECT_REG = { generationKind: 'object' };
+const TILE_REG = {
+  generationKind: 'tile',
+  composePrompt: async (db, subject) => `${subject.basePrompt}, mossy palette`,
+};
+
+test('an object request wraps a plain subject with the shared framing', async () => {
+  const req = await d.requestForSubject({}, { seed: '12345' },
     { key: 'crude-blade', name: 'crude-blade', basePrompt: 'a crude blade, a fantasy weapon' },
-  );
+    OBJECT_REG);
   assert.equal(req.prompt, buildObjectPrompt('a crude blade, a fantasy weapon'),
     'the wrapper must be the SHARED one -- icons and world props are one house style');
   assert.match(req.prompt, /^only a crude blade, a fantasy weapon and nothing else/);
-  assert.equal(req.kind, 'object', 'every catalog subject is an isolated object to draw');
+  assert.equal(req.kind, 'object');
   assert.equal(req.frames, 1, 'a sheet is never wanted here');
 });
 
-// bigint comes back from pg as a STRING. Sent unconverted it would either be
-// rejected or coerced somewhere downstream, and the per-subject seed is the
-// thing standing between this batch and one repeated composition.
-test('the seed is sent as a number even though the column is bigint', () => {
-  const req = d.requestForSubject({ seed: '2037' }, { key: 'k', basePrompt: 'a thing' });
-  assert.strictEqual(req.seed, 2037);
+// A TILE MUST NOT GET THE OBJECT WRAPPER. "only X and nothing else, one single
+// object, centered, flat solid magenta background" asks for a cut-out prop; a
+// seamless ground texture is the opposite of that.
+test('a tile composes its own prompt and gets none of the object framing', async () => {
+  const req = await d.requestForSubject({}, { seed: 7 },
+    { key: 'grass', name: 'grass', basePrompt: 'lush grass', biome: 'forest' }, TILE_REG);
+  assert.equal(req.kind, 'tile');
+  assert.equal(req.prompt, 'lush grass, mossy palette');
+  assert.ok(!/nothing else|magenta|cut out/i.test(req.prompt),
+    `a tile prompt must carry no cutout framing: "${req.prompt}"`);
 });
 
-test('the request asks for the native size, for a template that lets it', () => {
-  const req = d.requestForSubject({ seed: 1 }, { key: 'k', basePrompt: 'a thing' });
-  assert.equal(req.width, d.MIN_OBJECT_PX());
-  assert.equal(req.height, d.MIN_OBJECT_PX());
+// The 1024 minimum exists because an off-native SDXL OBJECT tiles into a sprite
+// sheet. A seamless texture has no such failure, and forcing it would change
+// working terrain art for no reason.
+test('the native-size ask is made for objects and NOT for tiles', async () => {
+  const obj = await d.requestForSubject({}, { seed: 1 },
+    { key: 'k', basePrompt: 'a thing' }, OBJECT_REG);
+  assert.equal(obj.width, d.MIN_OBJECT_PX());
+  assert.equal(obj.height, d.MIN_OBJECT_PX());
+
+  const tile = await d.requestForSubject({}, { seed: 1 },
+    { key: 't', basePrompt: 'grass' }, TILE_REG);
+  assert.equal(tile.width, undefined,
+    'a tile must not be forced to the object minimum -- 512 is correct for terrain');
+  assert.equal(tile.height, undefined);
+});
+
+// bigint comes back from pg as a STRING. Sent unconverted it would be rejected
+// or coerced downstream, and the per-subject seed is what stands between this
+// batch and one repeated composition.
+test('the seed is sent as a number even though the column is bigint', async () => {
+  const req = await d.requestForSubject({}, { seed: '2037' },
+    { key: 'k', basePrompt: 'a thing' }, OBJECT_REG);
+  assert.strictEqual(req.seed, 2037);
 });
 
 // --- Subject resolution ---------------------------------------------------
