@@ -110,13 +110,30 @@ function buildObjectPrompt(base) {
 
 // Generate through the LOCAL sprite-gen service instead of a remote provider.
 //
-// WHY THIS EXISTS, stated plainly because it contradicts the point of the
-// remote-provider feature: the remote SDXL + pixel-art LoRA is excellent at
-// ground textures and unusable for isolated objects. Asked for one tree it
-// returns a tileset of trees, a framed gallery card, or a tree on a checkered
-// backdrop -- measured across four prompt revisions and three cutout
-// strategies. There is nothing to key out of a checkerboard, so no
-// post-processing rescues it.
+// WHY THIS EXISTS -- and the correction that now bounds it.
+//
+// The original reason was that the remote SDXL + pixel-art LoRA was "excellent
+// at ground textures and unusable for isolated objects": asked for one tree it
+// returned a tileset of trees, a framed gallery card, or a tree on a checkered
+// backdrop, measured across four prompt revisions and three cutout strategies.
+// That observation was real but the conclusion drawn from it was wrong. The
+// cause was not the model and not the prompt -- it was RESOLUTION. Every one of
+// those attempts rendered at 512x512, half SDXL's 1024 training resolution, and
+// off-native SDXL repeats its subject rather than scaling it. What looked like
+// "the model insists on drawing a sheet" was the tiling artifact.
+//
+// Measured 2026-09-04 against the GPU box, same model, same prompts, same
+// seeds, resolution as the ONLY variable (8 icon subjects):
+//   512x512  -- 2/8 usable; hammer and "focus" came back as 3x4 sprite sheets,
+//               fireball as a grid of gems, leaf as a plant in a room.
+//   1024x1024 -- 6/8 usable, each a single centered object that keys cleanly
+//               and stays legible downscaled to a 48px slot.
+// The two remaining misses are subject problems, not rendering ones: an
+// abstract label ("Focus") gives the model nothing concrete to draw.
+//
+// So the local path is no longer the only way to get an isolated object. It
+// stays because it needs no GPU box and no network, which is the honest reason
+// to keep it -- not because the remote cannot do this.
 //
 // sprite-gen is built for this case: build_object_prompt asks for an isolated
 // subject on a flat white field and cutout_background() keys it out inside
