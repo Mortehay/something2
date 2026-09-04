@@ -2,6 +2,8 @@ const queue = require('./artJobQueue.js');
 const remote = require('./remoteImageProvider.js');
 const catalogSubjects = require('./catalogSubjects.js');
 const { pngHasAlpha, readObjectHead } = require('./bulkImageRegeneration.js');
+const { alphaProfile, MIN_TRANSPARENT_PCT } = require('./pngAlpha.js');
+const assetStore = require('./assetStore.js');
 const { buildObjectPrompt } = require('./objectPrompt.js');
 
 // SOMET-540. The loop that turns queued art jobs into images.
@@ -209,9 +211,40 @@ async function defaultWriteArt(db, job, imageKey, { provider, deps = {} } = {}) 
     throw new Error('the provider returned an image with no transparency; an icon '
       + 'must be a cutout or it renders as an opaque square');
   }
+
+  // AN ALPHA CHANNEL IS NOT A CUTOUT. Found by looking at a live batch: a
+  // passive label came back as a scene with the magenta backdrop never keyed --
+  // 90% opaque, alpha channel present, colour type 6. It passed the header
+  // check above, passed the provider's own 422 (which fires near 1%), and was
+  // recorded as a success. In an icon slot it is a magenta square.
+  //
+  // Skipped entirely when the object cannot be read or decoded: same rule as
+  // everything else here, refuse only what we can positively see is wrong.
+  const bytes = await readWholeObject(imageKey, deps.store).catch(() => null);
+  const profile = bytes && alphaProfile(bytes);
+  if (profile && profile.transparentPct < MIN_TRANSPARENT_PCT()) {
+    throw new Error(`the provider returned an image that is only `
+      + `${profile.transparentPct.toFixed(0)}% transparent (floor `
+      + `${MIN_TRANSPARENT_PCT()}%); the backdrop was not keyed out, so this `
+      + 'would render as a coloured square rather than an icon');
+  }
   const reg = catalogSubjects.registryFor(job.subject_kind);
   if (!reg) throw new Error(`unknown subject kind: ${job.subject_kind}`);
   await reg.write(db, job.subject_key, imageKey, provider ? provider.id : null);
+}
+
+// The whole object, because the alpha profile needs every scanline: PNG
+// filtering is sequential, so there is no reading part of one. ~150-300KB an
+// image at 1024, which is a fair price for the only check that can tell a
+// cutout from a coloured square.
+async function readWholeObject(key, store = assetStore) {
+  const stream = await store.getObjectStream(key);
+  const chunks = [];
+  return new Promise((resolve, reject) => {
+    stream.on('data', (c) => chunks.push(c));
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
+  });
 }
 
 // --- The batch ------------------------------------------------------------

@@ -7,6 +7,7 @@ const remote = require('../src/services/remoteImageProvider.js');
 const cs = require('../src/services/catalogSubjects.js');
 const { dispatch } = require('../src/services/artDispatcher.js');
 const { withAdvisoryLock, ART_JOBS_LOCK_KEY } = require('./helpers/advisoryLock.js');
+const { unkeyedBackdropPng, cutoutPng } = require('./helpers/png.js');
 
 // SOMET-540, the wiring half: what a FINISHED generation does to the catalog.
 //
@@ -46,6 +47,12 @@ function pngHead(colourType) {
 }
 const storeReturning = (colourType) => ({
   getObjectStream: async () => Readable.from([pngHead(colourType)]),
+});
+
+// A store serving a COMPLETE png, which the transparency guard needs -- it
+// reads every scanline, unlike the header check.
+const storeServing = (png) => ({
+  getObjectStream: async () => Readable.from([png]),
 });
 
 const succeed = (key) => async (registryId) => {
@@ -242,3 +249,56 @@ lockedTest('the request sent for a real subject carries the wrapped prompt and i
     'the seed stored at enqueue must be the one sent, or a re-run draws something else');
   assert.equal(sent.frames, 1);
 });
+
+
+// AN ALPHA CHANNEL IS NOT A CUTOUT. Found by looking at a live batch rather than
+// by a failing test: a passive label came back as a scene with the magenta
+// backdrop never keyed -- 90% opaque, alpha channel present, colour type 6. It
+// passed the header check, passed the provider's own 422 (which fires near 1%),
+// and was written to the catalog as a success. In an icon slot it is a square.
+lockedTest('an image whose backdrop was never keyed is refused, though it HAS alpha',
+  async (t, pool, providerId) => {
+    const [skill] = await cs.SUBJECTS.skill.list();
+    await queue.enqueue(pool, [{ kind: 'skill', key: skill.key }],
+      { backend: 'connector', providerId });
+
+    const out = await dispatch(pool, {
+      provider: PROVIDER(providerId),
+      generate: succeed('zzTest/unkeyed.png'),
+      deps: { store: storeServing(unkeyedBackdropPng()) },
+    });
+    assert.equal(out.done, 0, 'a coloured square must not be recorded as art');
+    assert.equal(out.failed, 1);
+
+    const { rows } = await pool.query(
+      'SELECT 1 FROM catalog_art WHERE subject_kind = $1 AND subject_key = $2',
+      ['skill', skill.key],
+    );
+    assert.equal(rows.length, 0);
+    const { rows: job } = await pool.query('SELECT last_error FROM art_jobs');
+    assert.match(job[0].last_error, /backdrop was not keyed/);
+    assert.match(job[0].last_error, /transparent/,
+      'the message must carry the measurement, or it is unactionable');
+  });
+
+// The counterpart, so the guard is shown to ACCEPT a real cutout rather than
+// merely to reject things. A floor that refuses everything would pass the test
+// above and break the entire feature.
+lockedTest('a genuine cutout passes the transparency floor and is recorded',
+  async (t, pool, providerId) => {
+    const [skill] = await cs.SUBJECTS.skill.list();
+    await queue.enqueue(pool, [{ kind: 'skill', key: skill.key }],
+      { backend: 'connector', providerId });
+
+    const out = await dispatch(pool, {
+      provider: PROVIDER(providerId),
+      generate: succeed('zzTest/cutout.png'),
+      deps: { store: storeServing(cutoutPng()) },
+    });
+    assert.equal(out.done, 1, `a real cutout must be accepted; got ${JSON.stringify(out.results)}`);
+    const { rows } = await pool.query(
+      'SELECT image FROM catalog_art WHERE subject_kind = $1 AND subject_key = $2',
+      ['skill', skill.key],
+    );
+    assert.equal(rows[0].image, 'zzTest/cutout.png');
+  });
