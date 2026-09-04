@@ -305,6 +305,9 @@ const {
   resolveGenerationTarget, loadTypeOverride, typeTableForKind,
 } = require('./services/generationTarget');
 const bulkImageRegeneration = require('./services/bulkImageRegeneration');
+const catalogSubjects = require('./services/catalogSubjects.js');
+const artJobQueue = require('./services/artJobQueue.js');
+const artDispatcher = require('./services/artDispatcher.js');
 const {
   pinProvided, providerPinFieldError, providerPinError, providerPinValues,
 } = require('./services/providerPin.js');
@@ -3195,6 +3198,148 @@ app.get('/api/bulk-image-jobs/current', adminGuard, (req, res) => {
 app.post('/api/bulk-image-jobs/cancel', adminGuard, (req, res) => {
   const cancelled = bulkImageRegeneration.cancelRun();
   res.json({ cancelled, run: bulkImageRegeneration.getRun() });
+});
+
+// --- Catalog art: the batch queue (SOMET-540) -----------------------------
+//
+// The subjects that had no art path at all -- items (the merchant's goods),
+// class skills and passive-tree labels, 617 of them. These are what SOMET-538's
+// paginated table drives.
+//
+// Deliberately NOT the same endpoints as /api/bulk-image-jobs. That one holds
+// its whole run in memory and starts again from nothing after a restart, which
+// is fine for 50 tiles and not for a batch measured in hours against a machine
+// we do not control. Here the work list is rows in art_jobs, so a restart of
+// ours OR of the remote resumes instead of re-running.
+
+// One page of a subject kind, annotated with whether it already has art.
+//
+// `missing_only` is what makes a batch resumable without a progress counter:
+// the answer comes from the catalog itself, so a subject generated an hour ago
+// simply stops appearing.
+app.get('/api/art-subjects/:kind', adminGuard, async (req, res) => {
+  try {
+    if (!catalogSubjects.registryFor(req.params.kind)) {
+      return res.status(400).json({
+        error: `unknown subject kind "${req.params.kind}"`,
+        kinds: catalogSubjects.subjectKinds(),
+      });
+    }
+    const perPage = Math.min(Math.max(parseInt(req.query.per_page, 10) || 100, 1), 500);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    let subjects = await catalogSubjects.listWithArtState(pool, req.params.kind);
+    if (req.query.missing_only === 'true') subjects = subjects.filter((x) => !x.hasArt);
+
+    const start = (page - 1) * perPage;
+    res.json({
+      kind: req.params.kind,
+      page,
+      per_page: perPage,
+      total: subjects.length,
+      // `row` carries the whole catalogue row and the client reads none of it.
+      // Naming the fields keeps a 189-item page from shipping the catalog twice
+      // -- the same lesson bulkImageRegeneration's publicView records.
+      subjects: subjects.slice(start, start + perPage).map((x) => ({
+        key: x.key, name: x.name, base_prompt: x.basePrompt, has_art: x.hasArt,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to list art subjects' });
+  }
+});
+
+// Queue a selection. Enqueueing a subject that is already queued or running is
+// not an error and does not create a second job -- a partial unique index makes
+// that the database's guarantee rather than a check-then-act race between two
+// admins on overlapping pages.
+app.post('/api/art-jobs', adminGuard, async (req, res) => {
+  try {
+    const kind = req.body.kind;
+    if (!catalogSubjects.registryFor(kind)) {
+      return res.status(400).json({ error: `unknown subject kind "${kind}"` });
+    }
+    const keys = Array.isArray(req.body.keys) ? req.body.keys.filter((k) => typeof k === 'string') : [];
+    if (keys.length === 0) return res.status(400).json({ error: 'keys must be a non-empty array' });
+    const backend = req.body.backend === 'local' ? 'local' : 'connector';
+    const providerId = Number.isInteger(req.body.provider_id) ? req.body.provider_id : null;
+    if (backend === 'connector' && !providerId) {
+      return res.status(400).json({ error: 'provider_id is required for the connector backend' });
+    }
+
+    const rows = await artJobQueue.enqueue(pool, keys.map((key) => ({ kind, key })),
+      { backend, providerId });
+    res.status(201).json({
+      requested: keys.length,
+      queued: rows.length,
+      // Named rather than implied: "I asked for 100 and 3 were queued" is
+      // confusing until you know the other 97 were already in flight.
+      already_live: keys.length - rows.length,
+      stats: await artJobQueue.stats(pool),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to queue art jobs' });
+  }
+});
+
+// The queue by state, plus whether a drain is running. Progress in the table
+// comes from /api/art-subjects (has_art), not from a counter here -- a counter
+// drifts, a catalog commit cannot.
+app.get('/api/art-jobs', adminGuard, async (req, res) => {
+  try {
+    res.json({ stats: await artJobQueue.stats(pool), run: artDispatcher.runStatus() });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to read the art queue' });
+  }
+});
+
+// Start draining. Returns immediately; poll GET /api/art-jobs.
+app.post('/api/art-jobs/dispatch', adminGuard, async (req, res) => {
+  try {
+    const providerId = Number.isInteger(req.body.provider_id) ? req.body.provider_id : null;
+    if (!providerId) return res.status(400).json({ error: 'provider_id is required' });
+    const provider = await aiProviders.loadProviderWithSecret(pool, providerId);
+    if (!provider) return res.status(404).json({ error: 'provider not found' });
+
+    const status = artDispatcher.startDrain(pool, {
+      provider,
+      limit: Math.min(Math.max(parseInt(req.body.limit, 10) || 10, 1), 100),
+      concurrency: Math.min(Math.max(parseInt(req.body.concurrency, 10) || 2, 1), 8),
+    });
+    res.status(202).json(status);
+  } catch (err) {
+    if (err.code === 'ALREADY_RUNNING') {
+      return res.status(409).json({ error: err.message, run: artDispatcher.runStatus() });
+    }
+    // The resolution precondition. A 400 rather than a 500 because this is a
+    // configuration the admin can fix, and the message says how -- below SDXL's
+    // native size the model returns sprite sheets that look like art and pass
+    // every check but the eye.
+    if (err.code === 'PROVIDER_TOO_SMALL') return res.status(400).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to start the art batch' });
+  }
+});
+
+// Stops after the subjects in flight. Idempotent.
+app.post('/api/art-jobs/stop', adminGuard, (req, res) => {
+  res.json({ stopping: artDispatcher.stopDrain(), run: artDispatcher.runStatus() });
+});
+
+// Returns jobs stranded by a worker that died to the queue. Manual rather than
+// on a timer: an automatic sweep cannot tell a dead worker from a slow one, and
+// stealing a job from a live worker generates the same subject twice.
+app.post('/api/art-jobs/requeue-stale', adminGuard, async (req, res) => {
+  try {
+    const olderThanMs = Math.max(parseInt(req.body.older_than_ms, 10) || 3600000, 60000);
+    const rows = await artJobQueue.requeueStale(pool, olderThanMs);
+    res.json({ requeued: rows.length, stats: await artJobQueue.stats(pool) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to requeue stale art jobs' });
+  }
 });
 
 // Shared by entity-types/:id/image, tile-types/:id/image and

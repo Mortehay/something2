@@ -44,7 +44,15 @@ async function freshPool(t) {
   );
   const providerId = rows[0].id;
   t.after(async () => {
-    await pool.query('DELETE FROM art_jobs').catch(() => {});
+    // NOT 'DELETE FROM art_jobs' here. t.after runs AFTER the advisory lock is
+    // released, so a blanket delete at this point wipes a PEER FILE's in-flight
+    // jobs -- three files now share ART_JOBS_LOCK_KEY and all three claim
+    // globally. Measured: peers reported claimed:0 and failed on a job they had
+    // just enqueued. This file's own rows are already cleaned inside the lock,
+    // by lockedTest's finally.
+    // The dispatcher now writes through to the subject's catalog on success
+    // (SOMET-540), so these runs leave catalog_art rows for their fake skills.
+    await pool.query("DELETE FROM catalog_art WHERE subject_key LIKE 'sk_%'").catch(() => {});
     await pool.query('DELETE FROM ai_providers WHERE id = $1', [providerId]).catch(() => {});
     await pool.end().catch(() => {});
   });
@@ -66,7 +74,10 @@ function lockedTest(name, body) {
   });
 }
 
-const PROVIDER = { id: 5, name: 'stub gpu', base_url: 'http://stub/sdapi/v1/txt2img' };
+// A FUNCTION of the real row's id, not a hardcoded 5. The dispatcher now
+// records which provider drew each image (catalog_art.provider_id), so a made
+// -up id is a foreign-key violation rather than an unused decoration.
+const PROVIDER = (id) => ({ id, name: 'stub gpu', base_url: 'http://stub/sdapi/v1/txt2img' });
 const buildRequest = (job) => ({
   subject: job.subject_key, kind: 'object', prompt: `a ${job.subject_key}`, seed: Number(job.seed),
 });
@@ -85,7 +96,7 @@ const failWith = (message) => async (registryId) => {
 lockedTest('a successful generation marks the job done', async (t, pool, providerId) => {
   await queue.enqueue(pool, [S(1)], { backend: 'connector', providerId });
 
-  const out = await dispatch(pool, { provider: PROVIDER, generate: succeed(), buildRequest });
+  const out = await dispatch(pool, { provider: PROVIDER(providerId), generate: succeed(), buildRequest });
   assert.equal(out.claimed, 1);
   assert.equal(out.done, 1);
   assert.equal(out.failed, 0);
@@ -99,7 +110,7 @@ lockedTest('a provider failure requeues the job and records the reason', async (
   await queue.enqueue(pool, [S(1)], { backend: 'connector', providerId });
 
   const out = await dispatch(pool, {
-    provider: PROVIDER, generate: failWith('provider answered 500: out of memory'), buildRequest,
+    provider: PROVIDER(providerId), generate: failWith('provider answered 500: out of memory'), buildRequest,
   });
   assert.equal(out.failed, 1);
 
@@ -114,12 +125,12 @@ lockedTest('a job that keeps failing eventually stops rather than cycling', asyn
   await queue.enqueue(pool, [S(1)], { backend: 'connector', providerId });
   const max = queue.MAX_ATTEMPTS();
   for (let i = 0; i < max; i++) {
-    await dispatch(pool, { provider: PROVIDER, generate: failWith('nope'), buildRequest });
+    await dispatch(pool, { provider: PROVIDER(providerId), generate: failWith('nope'), buildRequest });
   }
   const { rows } = await pool.query('SELECT state, attempts FROM art_jobs');
   assert.equal(rows[0].state, 'failed');
   assert.equal(rows[0].attempts, max);
-  assert.equal((await dispatch(pool, { provider: PROVIDER, generate: succeed(), buildRequest })).claimed, 0,
+  assert.equal((await dispatch(pool, { provider: PROVIDER(providerId), generate: succeed(), buildRequest })).claimed, 0,
     'a failed job must not be picked up again on its own');
 });
 
@@ -135,7 +146,7 @@ lockedTest('an unexpected throw is recorded as a failure, not left running', asy
     remote.setJob(registryId, { status: 'done', result: { image_key: 'k', frames: 1 } });
   };
   const out = await dispatch(pool, {
-    provider: PROVIDER, generate: explodeOnce, buildRequest, concurrency: 1,
+    provider: PROVIDER(providerId), generate: explodeOnce, buildRequest, concurrency: 1,
   });
   assert.equal(out.claimed, 2);
   assert.equal(out.done, 1, 'the second job must still run after the first threw');
@@ -152,7 +163,7 @@ lockedTest('an evicted registry result is a failure, never a silent success', as
   await queue.enqueue(pool, [S(1)], { backend: 'connector', providerId });
 
   const evict = async () => { remote.__resetJobs(); };
-  const out = await dispatch(pool, { provider: PROVIDER, generate: evict, buildRequest });
+  const out = await dispatch(pool, { provider: PROVIDER(providerId), generate: evict, buildRequest });
   assert.equal(out.done, 0);
   assert.equal(out.failed, 1);
   const { rows } = await pool.query('SELECT last_error FROM art_jobs');
@@ -174,7 +185,7 @@ lockedTest('concurrency runs several at once and every claimed job is resolved',
   };
 
   const out = await dispatch(pool, {
-    provider: PROVIDER, generate: slow, buildRequest, limit: 12, concurrency: 4,
+    provider: PROVIDER(providerId), generate: slow, buildRequest, limit: 12, concurrency: 4,
   });
   assert.equal(out.claimed, 12);
   assert.equal(out.done, 12);
@@ -187,6 +198,6 @@ lockedTest('concurrency runs several at once and every claimed job is resolved',
 });
 
 lockedTest('dispatch on an empty queue is a no-op, not an error', async (t, pool, providerId) => {
-  const out = await dispatch(pool, { provider: PROVIDER, generate: succeed(), buildRequest });
+  const out = await dispatch(pool, { provider: PROVIDER(providerId), generate: succeed(), buildRequest });
   assert.deepEqual(out, { claimed: 0, done: 0, failed: 0, results: [] });
 });
