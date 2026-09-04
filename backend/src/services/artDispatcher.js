@@ -346,6 +346,23 @@ async function resolveJobProvider(db, providerId, batchProvider, loadProvider) {
   return cache.get(providerId) || batchProvider;
 }
 
+// The longest a drain will sit waiting for a backoff to expire before looking
+// again. Not a cap on the backoff itself -- the loop re-checks and waits again
+// -- only on how long it goes without noticing a stop request or new work.
+const MAX_IDLE_WAIT_MS = () => parseInt(process.env.ART_DRAIN_MAX_WAIT_MS || '60000', 10);
+
+// Sleep that a stop request cuts short. Polled rather than timer-cancelled
+// because stopDrain only flips a flag -- it has no handle to clear, and a
+// batch that ignores Stop for a full backoff would read as a hung button.
+async function sleepUnlessStopping(ms, self, stepMs = 500) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (self.stopping) return;
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => { setTimeout(r, Math.min(stepMs, until - Date.now())); });
+  }
+}
+
 // --- The batch ------------------------------------------------------------
 
 // Claim and run up to `limit` jobs, at most `concurrency` at a time.
@@ -446,6 +463,8 @@ function runStatus() {
     done: run.done,
     failed: run.failed,
     stopping: run.stopping,
+    // null unless the drain is currently sitting out a retry backoff.
+    waiting_until: run.waitingUntil || null,
     error: run.error || null,
   };
 }
@@ -482,6 +501,7 @@ function startDrain(db, opts = {}) {
   run = {
     running: true, stopping: false, startedAt: new Date().toISOString(),
     finishedAt: null, passes: 0, done: 0, failed: 0, error: null,
+    waitingUntil: null,
   };
   const self = run;
 
@@ -493,10 +513,31 @@ function startDrain(db, opts = {}) {
         self.passes += 1;
         self.done += out.done;
         self.failed += out.failed;
-        // Nothing claimed means the queue is empty. Stopping here rather than
-        // polling for new work keeps this a BATCH, not a daemon: enqueueing
-        // more is an explicit act that starts another drain.
-        if (out.claimed === 0) break;
+        // SOMET-543. Nothing claimed no longer means the queue is empty: it
+        // also happens when every remaining job is serving its retry backoff.
+        // Treating the second as the first would END A BATCH with 90 subjects
+        // still to draw -- which is exactly what a naive backoff does to this
+        // loop, and the reason nextClaimableAt exists.
+        //
+        // Waiting here does NOT make this a daemon. It waits only for work
+        // ALREADY IN the queue to become eligible again; a queue that is
+        // genuinely empty still ends the batch, so enqueueing more remains an
+        // explicit act that starts another drain.
+        if (out.claimed === 0) {
+          const next = await queue.nextClaimableAt(db);
+          if (!next) break;
+          const waitMs = Math.min(
+            Math.max(new Date(next).getTime() - Date.now(), 0),
+            MAX_IDLE_WAIT_MS(),
+          );
+          // Surfaced so a caller polling the status can say "retrying at ..."
+          // rather than showing a batch that looks hung.
+          self.waitingUntil = new Date(next).toISOString();
+          await sleepUnlessStopping(waitMs, self);
+          self.waitingUntil = null;
+          if (self.stopping) break;
+          continue;
+        }
       }
     } catch (err) {
       self.error = err && err.message ? err.message : String(err);

@@ -125,6 +125,13 @@ lockedTest('a job that keeps failing eventually stops rather than cycling', asyn
   await queue.enqueue(pool, [S(1)], { backend: 'connector', providerId });
   const max = queue.MAX_ATTEMPTS();
   for (let i = 0; i < max; i++) {
+    // SOMET-543: clear the retry backoff between passes. Without this the
+    // second dispatch claims nothing and the job never reaches its cap --
+    // which is the new behaviour working, not a regression. The delay itself
+    // is covered by art_job_retry_backoff_db.test.js.
+    // eslint-disable-next-line no-await-in-loop
+    await pool.query("UPDATE art_jobs SET not_before = NULL WHERE state = 'queued'");
+    // eslint-disable-next-line no-await-in-loop
     await dispatch(pool, { provider: PROVIDER(providerId), generate: failWith('nope'), buildRequest });
   }
   const { rows } = await pool.query('SELECT state, attempts FROM art_jobs');

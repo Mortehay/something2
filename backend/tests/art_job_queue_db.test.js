@@ -159,12 +159,18 @@ lockedTest('fail returns a job to the queue while attempts remain, then gives up
   const max = q.MAX_ATTEMPTS();
 
   for (let i = 1; i < max; i++) {
+    // SOMET-543: a retry now serves a backoff, so the wait is skipped here
+    // rather than slept. What this test asserts is that retries are BOUNDED,
+    // which is unchanged; art_job_retry_backoff_db.test.js owns the delay.
+    await pool.query("UPDATE art_jobs SET not_before = NULL WHERE state = 'queued'");
     await q.claim(pool, 1);
     const r = await q.fail(pool, a.id, new Error(`attempt ${i} exploded`));
     assert.equal(r.state, 'queued', `attempt ${i} of ${max} should still retry`);
     assert.match(r.last_error, /exploded/, 'the provider error must be recorded, not swallowed');
     assert.equal(r.claimed_at, null, 'a requeued job must not look claimed');
+    assert.ok(r.not_before, 'and a retry must carry a delay, or a blip burns every attempt');
   }
+  await pool.query("UPDATE art_jobs SET not_before = NULL WHERE state = 'queued'");
   await q.claim(pool, 1);
   const last = await q.fail(pool, a.id, new Error('final'));
   assert.equal(last.state, 'failed', 'retries must be bounded');
