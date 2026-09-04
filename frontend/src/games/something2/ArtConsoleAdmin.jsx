@@ -27,7 +27,19 @@ import {
   enqueueSummary, coverage, selectionOutsideFilter, PAGE_SIZE,
 } from './artSelection.js';
 
-const Wrap = styled.div`color: var(--s2-text);`;
+// The house admin-root style, shared verbatim with the eight other admin
+// panels. Load-bearing rather than cosmetic: GameShell's ContentArea is
+// `overflow: hidden`, so a root without `height: 100%; overflow-y: auto` is
+// CLIPPED -- ~80 of the 100 rows and the pager under them were unreachable,
+// with no scrollbar to say so. This element is also the scrollport the sticky
+// header below anchors to.
+// Shared with the sticky header's offset below; see the comment there for why
+// the two must stay equal.
+const PANEL_PAD = '2rem';
+const Wrap = styled.div`
+  padding: ${PANEL_PAD}; color: var(--s2-text); max-width: 1200px; margin: 0 auto;
+  height: 100%; overflow-y: auto; background-color: var(--s2-surface);
+`;
 const Bar = styled.div`
   display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 0.75rem;
 `;
@@ -48,14 +60,36 @@ const Button = styled.button`
 const Secondary = styled(Button)`background: var(--s2-btn-grey);`;
 const Hint = styled.p`color: var(--s2-text-muted); font-size: 0.85rem; margin: 0.25rem 0;`;
 const Err = styled.p`color: var(--s2-danger); font-size: 0.85rem; margin: 0.25rem 0;`;
+// DELIBERATELY not a scroll container. `overflow-x: auto` here computed
+// overflow-y to `auto` as well, which made this the nearest scrollport -- the
+// sticky header then pinned to THIS box (which never scrolls vertically) and
+// slid away with the page. Wrap's `overflow-y: auto` already scrolls both
+// axes, so nothing is lost by dropping it.
 const TableWrap = styled.div`
-  overflow-x: auto; border: 1px solid var(--s2-border); border-radius: 8px;
+  border: 1px solid var(--s2-border); border-radius: 8px;
   background: var(--s2-surface-raised);
 `;
 const Table = styled.table`
   width: 100%; border-collapse: collapse; font-size: 0.85rem;
   th, td { text-align: left; padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--s2-border); }
-  th { color: var(--s2-text-muted); font-weight: normal; }
+  /* Held at the top of Wrap's scroll while 100 rows pass under it -- the
+     column names and the select-this-page checkbox both stay usable.
+     border-collapse:collapse gives the header's bottom border to the TABLE
+     rather than the cell, and a collapsed border does not travel with a
+     sticky cell, so the rule is redrawn as an inset shadow. The opaque
+     background is required too: without it the rows show through.
+
+     top is NEGATIVE PANEL_PAD, not 0. Scrolled content passes through a
+     scroll container's own padding band, so a top of 0 -- which pins the header
+     to the CONTENT box -- left a 2rem strip above it where half a row bled
+     through in the live page. Pinning at -PANEL_PAD puts the header on the
+     panel's border-box edge, where the scrollport clips instead. */
+  th {
+    color: var(--s2-text-muted); font-weight: normal;
+    position: sticky; top: -${PANEL_PAD}; z-index: 1;
+    background: var(--s2-surface-raised);
+    border-bottom: none; box-shadow: inset 0 -1px 0 var(--s2-border);
+  }
   tbody tr:hover { background: var(--s2-overlay); }
 `;
 const Thumb = styled.div`
@@ -99,6 +133,20 @@ function ArtConsoleAdmin() {
   const cover = coverage(subjects);
   const allLabel = selectAllLabel(matching.length, pageRows.length);
   const hiddenSelected = selectionOutsideFilter(selected, matching);
+
+  // Rendered BOTH above and below the table. At PAGE_SIZE 100 the bottom copy
+  // sits ~4000px down, so paging with only that one means scrolling the whole
+  // page to reach the button and scrolling back up to read the result.
+  const pager = (
+    <Pager>
+      <Secondary onClick={() => setPage(shownPage - 1)} disabled={shownPage <= 1}>Prev</Secondary>
+      <span>Page {shownPage} of {pageCount(matching.length)} · {matching.length} matching</span>
+      <Secondary
+        onClick={() => setPage(shownPage + 1)}
+        disabled={shownPage >= pageCount(matching.length)}
+      >Next</Secondary>
+    </Pager>
+  );
 
   const onEnqueue = async () => {
     const grouped = byKind(selected);
@@ -225,6 +273,8 @@ function ArtConsoleAdmin() {
       {failure && <Err>{failure}</Err>}
       {run?.error && <Err>Batch stopped: {run.error}</Err>}
 
+      {pager}
+
       <TableWrap>
         <Table>
           <thead>
@@ -282,14 +332,7 @@ function ArtConsoleAdmin() {
         </Table>
       </TableWrap>
 
-      <Pager>
-        <Secondary onClick={() => setPage(shownPage - 1)} disabled={shownPage <= 1}>Prev</Secondary>
-        <span>Page {shownPage} of {pageCount(matching.length)} · {matching.length} matching</span>
-        <Secondary
-          onClick={() => setPage(shownPage + 1)}
-          disabled={shownPage >= pageCount(matching.length)}
-        >Next</Secondary>
-      </Pager>
+      {pager}
     </Wrap>
   );
 }
