@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const d = require('../src/services/artDispatcher.js');
-const { buildObjectPrompt } = require('../src/services/objectPrompt.js');
+const { buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP } = require('../src/services/objectPrompt.js');
 
 // SOMET-540. The parts of the dispatcher that need no database: the resolution
 // precondition, and the request it composes for a subject.
@@ -79,7 +79,7 @@ const TILE_REG = {
 test('an object request wraps a plain subject with the shared framing', async () => {
   const req = await d.requestForSubject({}, { seed: '12345' },
     { key: 'crude-blade', name: 'crude-blade', basePrompt: 'a crude blade, a fantasy weapon' },
-    OBJECT_REG);
+    OBJECT_REG, null);
   assert.equal(req.prompt, buildObjectPrompt('a crude blade, a fantasy weapon'),
     'the wrapper must be the SHARED one -- icons and world props are one house style');
   assert.match(req.prompt, /^only a crude blade, a fantasy weapon and nothing else/);
@@ -92,7 +92,7 @@ test('an object request wraps a plain subject with the shared framing', async ()
 // seamless ground texture is the opposite of that.
 test('a tile composes its own prompt and gets none of the object framing', async () => {
   const req = await d.requestForSubject({}, { seed: 7 },
-    { key: 'grass', name: 'grass', basePrompt: 'lush grass', biome: 'forest' }, TILE_REG);
+    { key: 'grass', name: 'grass', basePrompt: 'lush grass', biome: 'forest' }, TILE_REG, null);
   assert.equal(req.kind, 'tile');
   assert.equal(req.prompt, 'lush grass, mossy palette');
   assert.ok(!/nothing else|magenta|cut out/i.test(req.prompt),
@@ -104,12 +104,12 @@ test('a tile composes its own prompt and gets none of the object framing', async
 // working terrain art for no reason.
 test('the native-size ask is made for objects and NOT for tiles', async () => {
   const obj = await d.requestForSubject({}, { seed: 1 },
-    { key: 'k', basePrompt: 'a thing' }, OBJECT_REG);
+    { key: 'k', basePrompt: 'a thing' }, OBJECT_REG, null);
   assert.equal(obj.width, d.MIN_OBJECT_PX());
   assert.equal(obj.height, d.MIN_OBJECT_PX());
 
   const tile = await d.requestForSubject({}, { seed: 1 },
-    { key: 't', basePrompt: 'grass' }, TILE_REG);
+    { key: 't', basePrompt: 'grass' }, TILE_REG, null);
   assert.equal(tile.width, undefined,
     'a tile must not be forced to the object minimum -- 512 is correct for terrain');
   assert.equal(tile.height, undefined);
@@ -120,7 +120,7 @@ test('the native-size ask is made for objects and NOT for tiles', async () => {
 // batch and one repeated composition.
 test('the seed is sent as a number even though the column is bigint', async () => {
   const req = await d.requestForSubject({}, { seed: '2037' },
-    { key: 'k', basePrompt: 'a thing' }, OBJECT_REG);
+    { key: 'k', basePrompt: 'a thing' }, OBJECT_REG, null);
   assert.strictEqual(req.seed, 2037);
 });
 
@@ -150,4 +150,39 @@ test('the subject resolver lists each kind once, however many jobs it serves', a
 test('an unknown subject kind throws rather than resolving to nothing', async () => {
   const get = d.subjectResolver({}, { registryFor: () => null });
   await assert.rejects(() => get('nonsense', 'x'), /unknown subject kind/);
+});
+
+// --- The backdrop, which invalidated a whole canary batch ------------------
+//
+// "flat solid magenta background" does not merely describe the backdrop: SDXL
+// bleeds it into the SUBJECT. Measured across 8 generated subjects spanning
+// four kinds, 62-100% of each subject's saturated pixels came back magenta --
+// an archer, a medallion, a mushroom, a crossbow and two weapon skills, all one
+// colour, one of them an empty magenta frame. Structurally perfect and
+// unusable.
+
+test('a provider that cuts out server-side is asked for a WHITE backdrop', () => {
+  assert.equal(d.backdropFor({ request_template: { cutout: true } }), CUTOUT_BACKDROP);
+  assert.match(CUTOUT_BACKDROP, /white/);
+});
+
+// A provider that does NOT cut out is feeding the chroma-key step, which keys
+// magenta by contract. Changing this would silently break transparency there.
+test('a provider that does NOT cut out keeps magenta, for the chroma key', () => {
+  assert.equal(d.backdropFor({ request_template: { cutout: false } }), BACKDROP);
+  assert.equal(d.backdropFor({ request_template: {} }), BACKDROP);
+  assert.equal(d.backdropFor({}), BACKDROP);
+  assert.equal(d.backdropFor(null), BACKDROP);
+  assert.match(BACKDROP, /magenta/);
+});
+
+test('the composed request carries the backdrop its provider needs', async () => {
+  const cut = await d.requestForSubject({}, { seed: 1 }, { key: 'k', basePrompt: 'a sword' },
+    OBJECT_REG, { request_template: { cutout: true } });
+  assert.match(cut.prompt, /white background/);
+  assert.ok(!/magenta/.test(cut.prompt), 'naming magenta tints the subject magenta');
+
+  const keyed = await d.requestForSubject({}, { seed: 1 }, { key: 'k', basePrompt: 'a sword' },
+    OBJECT_REG, { request_template: { cutout: false } });
+  assert.match(keyed.prompt, /magenta background/);
 });

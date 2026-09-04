@@ -5,7 +5,7 @@ const { pngHasAlpha, readObjectHead } = require('./bulkImageRegeneration.js');
 const { alphaProfile, MIN_TRANSPARENT_PCT } = require('./pngAlpha.js');
 const assetStore = require('./assetStore.js');
 const aiProviders = require('./aiProviders.js');
-const { buildObjectPrompt } = require('./objectPrompt.js');
+const { buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP } = require('./objectPrompt.js');
 
 // SOMET-540. The loop that turns queued art jobs into images.
 //
@@ -113,14 +113,14 @@ function subjectResolver(db, subjects = catalogSubjects) {
 // `kind: 'object'` is the GENERATION kind (isolated, needs a cutout), which is
 // a different axis from the subject kind: an item, a skill and a passive label
 // are all objects to draw.
-async function requestForSubject(db, job, subject, reg) {
+async function requestForSubject(db, job, subject, reg, provider) {
   const generationKind = reg.generationKind;
   // A kind that composes its own prompt does so (tiles need their biome's
   // palette and exclusions, which is a database read). Everything else is an
   // isolated object and takes the shared wrapper.
   const prompt = reg.composePrompt
     ? await reg.composePrompt(db, subject)
-    : buildObjectPrompt(subject.basePrompt);
+    : buildObjectPrompt(subject.basePrompt, { backdrop: backdropFor(provider) });
 
   const req = {
     subject: subject.name || subject.key,
@@ -138,6 +138,22 @@ async function requestForSubject(db, job, subject, reg) {
     req.height = MIN_OBJECT_PX();
   }
   return req;
+}
+
+// WHICH BACKDROP THE PROMPT SHOULD ASK FOR.
+//
+// A provider that cuts out server-side ("cutout": true) needs no particular
+// colour, and naming magenta actively harms it -- SDXL bleeds the backdrop into
+// the subject, which turned an entire canary batch a uniform magenta. A
+// provider that does NOT cut out is feeding the chroma-key step downstream,
+// which keys magenta by contract, so it keeps it.
+//
+// Read from the template rather than configured separately: the same field that
+// decides whether a cutout happens should decide what the prompt asks for, or
+// the two drift and the failure is invisible until someone looks at the art.
+function backdropFor(provider) {
+  const t = provider && provider.request_template;
+  return (t && t.cutout === true) ? CUTOUT_BACKDROP : BACKDROP;
 }
 
 // --- One job --------------------------------------------------------------
@@ -179,7 +195,7 @@ async function runOne(db, job, {
     }
     const reg = subjects.registryFor(job.subject_kind);
     if (!reg) return fail(`unknown subject kind: ${job.subject_kind}`);
-    req = await requestForSubject(db, job, subject, reg);
+    req = await requestForSubject(db, job, subject, reg, provider);
     generationKind = reg.generationKind;
   }
 
@@ -403,6 +419,7 @@ module.exports = {
   objectSizeRefusal,
   requestForSubject,
   subjectResolver,
+  backdropFor,
   resolveJobProvider,
 };
 
