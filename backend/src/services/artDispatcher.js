@@ -174,14 +174,25 @@ async function runOne(db, job, {
   deps = {},
 } = {}) {
   let req;
+  let registryId = null;
+
+  // What was ACTUALLY sent, when we can see it. runGeneration publishes the
+  // final payload on the registry entry once the template has been merged, so
+  // this reports steps, cfg_scale and the sampler rather than only the size the
+  // dispatcher asked for. Before that point (or after an eviction) it falls
+  // back to our own request, which is honest: a subject that never reached the
+  // provider has no sent payload, and recording the intent is the useful fact.
+  const sentOrIntended = () => {
+    const doc = registryId ? remote.getJob(registryId) : null;
+    return (doc && doc.sentBody) || req;
+  };
 
   // SOMET-547. Every failure in this function goes through `fail`, and every
-  // success through the tail, so those two points are the whole history. `req`
-  // is read from the enclosing scope deliberately: a failure BEFORE the request
-  // was composed records a null prompt, which is itself the useful fact (the
-  // subject never reached the provider).
+  // success through the tail, so those two points are the whole history.
   const fail = async (message) => {
-    await history.record(db, { job, provider, req, outcome: 'failed', error: message });
+    await history.record(db, {
+      job, provider, req: sentOrIntended(), outcome: 'failed', error: message,
+    });
     await queue.fail(db, job.id, new Error(message));
     return { id: job.id, ok: false, error: message };
   };
@@ -206,7 +217,7 @@ async function runOne(db, job, {
     generationKind = reg.generationKind;
   }
 
-  const registryId = remote.createJob();
+  registryId = remote.createJob();
   try {
     await generate(registryId, provider, req, deps);
   } catch (err) {
@@ -239,7 +250,9 @@ async function runOne(db, job, {
       + `${err && err.message ? err.message : err}`);
   }
 
-  await history.record(db, { job, provider, req, outcome: 'done', imageKey });
+  await history.record(db, {
+    job, provider, req: sentOrIntended(), outcome: 'done', imageKey,
+  });
   await queue.complete(db, job.id);
   return { id: job.id, ok: true, imageKey, result: doc.result };
 }

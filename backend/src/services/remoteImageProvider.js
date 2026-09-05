@@ -316,6 +316,19 @@ async function runGeneration(jobId, provider, req, deps = {}) {
     frames: frameCount,
   });
 
+  // SOMET-547. Publish the FINAL payload on the registry entry so the history
+  // can record what was actually sent. Until this existed the dispatcher only
+  // ever saw its own request object, which has never held steps, cfg_scale or
+  // the sampler -- those live in the provider's request_template and are merged
+  // right here. A history that records the subject but not the parameters
+  // cannot answer "why did this run differ from that one" after a template
+  // edit, which is most of the point of keeping one.
+  //
+  // The whole body is published rather than a subset: the consumer whitelists
+  // what it stores, and duplicating that whitelist here would be a second copy
+  // of the same rule, free to disagree.
+  setJob(jobId, { sentBody: body });
+
   let res;
   try {
     // Call-time scheme re-validation plus redirect re-validation. See

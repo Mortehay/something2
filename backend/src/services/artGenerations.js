@@ -17,19 +17,26 @@
 // credentials in nested override blocks, which must not be written to a table
 // the admin UI reads back.
 //
-// KNOWN GAP, measured 2026-09-05: in practice this records only width and
-// height. `steps`, `cfg_scale` and the sampler live in the PROVIDER's
-// request_template and are merged in remoteImageProvider at send time, so the
-// object handed to this module has never seen them. That makes the history
-// honest about the subject and the size but INCOMPLETE for reproduction --
-// a template edited between two runs is invisible here. Closing it means
-// recording the final payload at the point it is serialised, which is a change
-// to the provider path rather than to this module. Until then, do not present
-// this column as a full reproduction recipe.
+// THE GAP THIS CLOSED. It first recorded only width and height, because the
+// dispatcher's own request object has never held steps, cfg_scale or the
+// sampler -- those live in the PROVIDER's request_template and are merged in
+// remoteImageProvider at send time. A history that records the subject but not
+// the parameters cannot answer "why did this run differ from that one" after a
+// template edit. runGeneration now publishes the final payload on its registry
+// entry and the dispatcher passes THAT here, so what is stored is what was
+// sent. When the payload cannot be seen -- a failure before the request was
+// composed, or an evicted registry entry -- this falls back to the dispatcher's
+// intent, which is the honest record for a subject that never reached the
+// provider.
 function paramsFrom(req) {
   if (!req || typeof req !== 'object') return {};
   const out = {};
-  for (const k of ['width', 'height', 'steps', 'cfg_scale', 'sampler', 'cutout']) {
+  // Everything that changes the picture and is not a secret. negative_prompt
+  // is part of the recipe -- it is why a subject came back without a shadow --
+  // and override_settings is deliberately NOT here: it is the block a provider
+  // template can hide credentials in.
+  for (const k of ['width', 'height', 'steps', 'cfg_scale', 'sampler', 'sampler_name',
+    'negative_prompt', 'cutout', 'frames']) {
     if (req[k] !== undefined) out[k] = req[k];
   }
   return out;

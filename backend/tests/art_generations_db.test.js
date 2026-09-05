@@ -120,3 +120,39 @@ test('paramsFrom tolerates a missing or malformed request', () => {
   assert.deepEqual(history.paramsFrom(null), {});
   assert.deepEqual(history.paramsFrom('nonsense'), {});
 });
+
+// --- SOMET-547 gap closure: record what was SENT, not what was intended ----
+//
+// The first version recorded only width and height, because the dispatcher's
+// request never holds steps or cfg_scale -- those are merged from the
+// provider's template at send time. These pin the fix, and the fallback.
+test('params capture the merged provider template, not just our own request', () => {
+  const sentBody = {
+    prompt: 'only a wand…', seed: 1, width: 1024, height: 1024,
+    steps: 24, cfg_scale: 7, negative_prompt: 'sprite sheet, tileset',
+    override_settings: { sd_model_checkpoint: 'sdxl', api_key: 'sk-secret' },
+  };
+  const out = history.paramsFrom(sentBody);
+  assert.equal(out.steps, 24, 'steps come from the merged template and must be recorded');
+  assert.equal(out.cfg_scale, 7);
+  assert.match(out.negative_prompt, /sprite sheet/,
+    'the negative prompt is part of the recipe -- it is why a subject came back a certain way');
+  // override_settings is the block a template can hide credentials in.
+  assert.equal(out.override_settings, undefined);
+  assert.equal(JSON.stringify(out).includes('secret'), false);
+});
+
+lockedTest('a failure before the request was composed still records the intent',
+  async (t, pool) => {
+    // No sent payload exists for a subject that never reached the provider.
+    // Recording nothing would lose the fact that it was attempted at all.
+    await history.record(pool, {
+      job: JOB('h_early'), provider: PROVIDER, req: undefined,
+      outcome: 'failed', error: 'subject is no longer in the catalogue',
+    });
+    const [row] = await history.list(pool, 'skill', 'h_early');
+    assert.equal(row.outcome, 'failed');
+    assert.equal(row.composed_prompt, null, 'no prompt is the honest record here');
+    assert.deepEqual(row.params, {});
+    assert.match(row.error, /no longer in the catalogue/);
+  });
