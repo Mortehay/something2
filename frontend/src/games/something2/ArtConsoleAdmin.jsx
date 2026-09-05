@@ -22,7 +22,7 @@ import {
 import { useAiProviders } from './useAiProviders.js';
 import { assetUrlVersioned } from './useTileSprites.js';
 import {
-  sortSubjects, applyFilters, clampPage, pageCount, toggle, selectPage, deselectPage,
+  sortSubjects, freezeOrder, applyFilters, clampPage, pageCount, toggle, selectPage, deselectPage,
   isPageFullySelected, selectAllMatching, selectAllLabel, byKind, subjectId,
   enqueueSummary, coverage, selectionOutsideFilter, PAGE_SIZE,
 } from './artSelection.js';
@@ -126,6 +126,54 @@ const FailGroup = styled.div`
     margin-bottom: 0.5rem; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
   }
 `;
+// Clickable column headers. A plain <th> gives no affordance, and this table
+// has six columns of which only three are sortable.
+const SortTh = styled.th`
+  cursor: pointer; user-select: none;
+  &:hover { color: var(--s2-text); }
+  span { opacity: 0.6; margin-left: 0.25rem; }
+`;
+
+// The preview. Reuses GameShell's help-modal shape so it reads as the same
+// application rather than a bolted-on lightbox.
+const Backdrop = styled.div`
+  position: fixed; inset: 0; z-index: 500; background: var(--s2-scrim);
+  display: flex; align-items: center; justify-content: center; padding: 2rem;
+`;
+const Preview = styled.div`
+  background: var(--s2-surface); border: 1px solid var(--s2-border); border-radius: 10px;
+  padding: 1rem 1.25rem; max-width: min(900px, 92vw); max-height: 90vh; overflow-y: auto;
+  box-shadow: 0 10px 40px var(--s2-scrim-soft); position: relative;
+  h3 { margin: 0 0 0.5rem; color: var(--s2-text-strong); font-size: 1.15rem; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0.75rem 0 0; }
+  dt { color: var(--s2-text-muted); font-size: 0.8rem; }
+  dd { margin: 0; font-size: 0.85rem; word-break: break-word; }
+`;
+// THE CHECKERBOARD IS THE POINT, not decoration. Every failure this console
+// keeps hitting is a transparency failure -- a subject the cutout ate, or a
+// backdrop it never keyed out. Both look perfectly fine against a flat dark
+// card and are obvious the moment there is a checker behind them.
+const Checker = styled.div`
+  --sq: 12px;
+  background-color: var(--s2-bg-sunken);
+  background-image:
+    linear-gradient(45deg, var(--s2-overlay) 25%, transparent 25%, transparent 75%, var(--s2-overlay) 75%),
+    linear-gradient(45deg, var(--s2-overlay) 25%, transparent 25%, transparent 75%, var(--s2-overlay) 75%);
+  background-size: calc(var(--sq) * 2) calc(var(--sq) * 2);
+  background-position: 0 0, var(--sq) var(--sq);
+  border: 1px solid var(--s2-border); border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  img { max-width: 100%; max-height: 60vh; display: block; image-rendering: pixelated; }
+`;
+const Close = styled.button`
+  position: absolute; top: 8px; right: 10px; background: none; border: none;
+  color: var(--s2-text-muted); font-size: 1.4rem; line-height: 1; cursor: pointer;
+  &:hover { color: var(--s2-text); }
+`;
+const ThumbButton = styled.button`
+  background: none; border: none; padding: 0; cursor: zoom-in; display: block;
+`;
+
 const Subjects = styled.p`
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem !important;
@@ -150,11 +198,49 @@ function ArtConsoleAdmin() {
   const [providerId, setProviderId] = useState('');
   const [notice, setNotice] = useState(null);
   const [failure, setFailure] = useState(null);
+  const [sort, setSort] = useState({ by: 'subject', dir: 'asc' });
+  const [preview, setPreview] = useState(null);
 
-  const matching = useMemo(
-    () => sortSubjects(applyFilters(subjects, { kind, art, search })),
-    [subjects, kind, art, search],
+  // The frozen order, held only while a batch is running and the table is
+  // sorted by a MOVING column. Without it every landed generation reshuffles
+  // the page under the admin's cursor: selection itself is safe (it is keyed by
+  // subjectId, not by row index) but "select this page" would mean something
+  // different from one second to the next.
+  //
+  // A MEMO with a narrow dependency list, which is precisely the semantics
+  // wanted: recapture when the batch starts/stops or the sort changes, and at
+  // no other time. Two shapes were tried and rejected -- a ref read and written
+  // during render (React may not replay it), and state set inside an effect
+  // (cascading renders). Both were caught by the linter, and both were worse
+  // than saying "this value is derived, but only from these inputs".
+  const running = Boolean(run?.running);
+  const frozenOrder = useMemo(
+    () => (running && sort.by === 'updated'
+      ? sortSubjects(applyFilters(subjects, { kind, art, search }), sort).map(subjectId)
+      : null),
+    // `subjects` is deliberately absent: re-capturing whenever a generation
+    // lands would defeat the freeze this exists to provide. The closure reads
+    // whatever `subjects` held at capture time, which is the intent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [running, sort.by, sort.dir],
   );
+
+  const matching = useMemo(() => {
+    const filtered = applyFilters(subjects, { kind, art, search });
+    if (sort.by !== 'updated') return sortSubjects(filtered, sort);
+    // Hold the captured order while a batch runs; sort live otherwise.
+    if (running && frozenOrder) return freezeOrder(filtered, frozenOrder);
+    return sortSubjects(filtered, sort);
+  }, [subjects, kind, art, search, sort, running, frozenOrder]);
+
+  // Clicking the active column flips direction; a new column starts newest-first
+  // for dates and A-Z for names, which is what each is usually wanted for.
+  const sortBy = (by) => setSort((prev) => (
+    prev.by === by
+      ? { by, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+      : { by, dir: by === 'updated' ? 'desc' : 'asc' }
+  ));
+  const arrow = (by) => (sort.by === by ? <span>{sort.dir === 'asc' ? '\u2191' : '\u2193'}</span> : null);
   const shownPage = clampPage(page, matching.length);
   const pageRows = matching.slice((shownPage - 1) * PAGE_SIZE, shownPage * PAGE_SIZE);
   const cover = coverage(subjects);
@@ -354,7 +440,10 @@ function ArtConsoleAdmin() {
                   )}
                 />
               </th>
-              <th>Art</th><th>Kind</th><th>Key</th><th>Status</th><th>Updated</th>
+              <th>Art</th>
+              <SortTh onClick={() => sortBy('subject')}>Kind{arrow('subject')}</SortTh>
+              <th>Key</th><th>Status</th>
+              <SortTh onClick={() => sortBy('updated')}>Updated{arrow('updated')}</SortTh>
             </tr>
           </thead>
           <tbody>
@@ -371,9 +460,17 @@ function ArtConsoleAdmin() {
                     />
                   </td>
                   <td>
-                    <Thumb style={s.image
-                      ? { backgroundImage: `url(${assetUrlVersioned(s.image, s.updated_at)})` }
-                      : undefined} />
+                    {/* Only a subject WITH art opens a preview: a button that
+                        opens an empty box is worse than no button. */}
+                    {s.image ? (
+                      <ThumbButton
+                        type="button"
+                        aria-label={`Preview ${id}`}
+                        onClick={() => setPreview(s)}
+                      >
+                        <Thumb style={{ backgroundImage: `url(${assetUrlVersioned(s.image, s.updated_at)})` }} />
+                      </ThumbButton>
+                    ) : <Thumb />}
                   </td>
                   <td><Pill>{s.kind}</Pill></td>
                   <Mono title={s.base_prompt}>{s.key}</Mono>
@@ -397,6 +494,35 @@ function ArtConsoleAdmin() {
       </TableWrap>
 
       {pager}
+
+      {preview && (
+        <Backdrop
+          onClick={() => setPreview(null)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setPreview(null); }}
+          role="presentation"
+        >
+          <Preview onClick={(e) => e.stopPropagation()}>
+            <Close type="button" aria-label="Close preview" onClick={() => setPreview(null)}>×</Close>
+            <h3>{preview.key}</h3>
+            <Checker>
+              <img
+                src={assetUrlVersioned(preview.image, preview.updated_at)}
+                alt={preview.key}
+              />
+            </Checker>
+            <dl>
+              <dt>Kind</dt><dd>{preview.kind}</dd>
+              <dt>Updated</dt><dd>{preview.updated_at ? String(preview.updated_at).slice(0, 19).replace('T', ' ') : '—'}</dd>
+              {preview.render_mode && <><dt>Render</dt><dd>{preview.render_mode}</dd></>}
+              {preview.job_state && <><dt>Job</dt><dd>{preview.job_state}</dd></>}
+              {/* The prompt is what to change when the picture is wrong, so it
+                  is shown in full rather than truncated into a tooltip. */}
+              {preview.base_prompt && <><dt>Prompt</dt><dd>{preview.base_prompt}</dd></>}
+              {preview.job_error && <><dt>Error</dt><dd>{preview.job_error}</dd></>}
+            </dl>
+          </Preview>
+        </Backdrop>
+      )}
     </Wrap>
   );
 }

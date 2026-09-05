@@ -11,14 +11,56 @@ export function subjectId(s) {
   return `${s.kind}/${s.key}`;
 }
 
-// SORTED ON SOMETHING IMMUTABLE. Rows gain art while a batch runs, so ordering
-// by has-art (or by updated_at, which moves for the same reason) would shuffle
-// subjects between pages mid-batch: the admin ticks row 40, a generation lands,
-// and row 40 is now a different subject. Kind then key never moves.
-export function sortSubjects(subjects) {
-  return [...subjects].sort((a, b) => (
-    a.kind === b.kind ? a.key.localeCompare(b.key) : a.kind.localeCompare(b.kind)
-  ));
+// SORTED ON SOMETHING IMMUTABLE BY DEFAULT. Rows gain art while a batch runs,
+// so ordering by has-art (or by updated_at, which moves for the same reason)
+// shuffles subjects between pages mid-batch: the admin ticks row 40, a
+// generation lands, and row 40 is now a different subject. Kind then key never
+// moves, so it stays the default.
+//
+// Sorting by `updated` is now offered because an admin watching a batch wants
+// to see what just landed, which the immutable order cannot show. The hazard
+// the paragraph above describes is real but narrower than it reads: selection
+// is keyed by subjectId, not by row index, so a tick FOLLOWS its subject and
+// cannot silently become a different one. What genuinely moves is the page
+// COMPOSITION -- which rows are on screen, and therefore what "select this
+// page" means. freezeOrder below is the answer to that, not a warning label.
+export function sortSubjects(subjects, { by = 'subject', dir = 'asc' } = {}) {
+  const rows = [...subjects];
+  if (by !== 'updated') {
+    return rows.sort((a, b) => (
+      a.kind === b.kind ? a.key.localeCompare(b.key) : a.kind.localeCompare(b.kind)
+    ));
+  }
+  const sign = dir === 'asc' ? 1 : -1;
+  return rows.sort((a, b) => {
+    const av = a.updated_at ? String(a.updated_at) : null;
+    const bv = b.updated_at ? String(b.updated_at) : null;
+    // A subject with no date has never been generated. It sorts LAST in both
+    // directions rather than at one end: treating "never" as the epoch would
+    // bury the newest results under 600 blanks when sorting ascending, and
+    // "oldest first" is not a sensible reading of "no date at all".
+    if (av === null && bv === null) return a.key.localeCompare(b.key);
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    if (av === bv) return a.key.localeCompare(b.key);   // stable, not arbitrary
+    return av < bv ? -sign : sign;
+  });
+}
+
+// Re-apply a previously captured order, so a live batch cannot reshuffle the
+// table under the admin's cursor.
+//
+// Subjects the snapshot has never seen go to the END rather than being dropped
+// -- a filter change can widen the set while the freeze is held, and silently
+// omitting rows would be far worse than showing them late.
+export function freezeOrder(subjects, order) {
+  if (!Array.isArray(order) || order.length === 0) return [...subjects];
+  const rank = new Map(order.map((id, i) => [id, i]));
+  return [...subjects].sort((a, b) => {
+    const ai = rank.has(subjectId(a)) ? rank.get(subjectId(a)) : Number.MAX_SAFE_INTEGER;
+    const bi = rank.has(subjectId(b)) ? rank.get(subjectId(b)) : Number.MAX_SAFE_INTEGER;
+    return ai === bi ? subjectId(a).localeCompare(subjectId(b)) : ai - bi;
+  });
 }
 
 export const PAGE_SIZE = 100;
