@@ -125,7 +125,10 @@ async function requestForSubject(db, job, subject, reg, provider) {
   // biome's palette rather than from a subject description.
   const corrections = reg.composePrompt
     ? []
-    : (await promptNotes.listActive(db, job.subject_kind, job.subject_key)).map((n) => n.note);
+    : (await promptNotes.listActive(db, job.subject_kind, job.subject_key))
+      // SOMET-549: the note's words PLUS its region as a phrase, composed in
+      // one place so the prompt cannot disagree with what the UI showed.
+      .map(promptNotes.noteToCorrection);
   const prompt = reg.composePrompt
     ? await reg.composePrompt(db, subject)
     : buildObjectPrompt(subject.basePrompt, {

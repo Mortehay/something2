@@ -138,3 +138,55 @@ dbTest('a malformed region does not lose the note', async (t, pool) => {
   assert.equal(created.note, 'no shadow');
   assert.equal(created.region, null);
 });
+
+// --- SOMET-549: the marked box, said in words -----------------------------
+
+test('a region becomes a phrase a diffusion model has actually seen', () => {
+  // The case that motivated the whole feature: a shadow blob under `darts`.
+  assert.equal(notes.regionPhrase({ x: 0.4, y: 0.75, w: 0.2, h: 0.2 }),
+    'beneath the subject');
+  assert.equal(notes.regionPhrase({ x: 0.4, y: 0.05, w: 0.2, h: 0.2 }), 'above the subject');
+  assert.equal(notes.regionPhrase({ x: 0.4, y: 0.4, w: 0.2, h: 0.2 }), 'in the centre');
+  assert.equal(notes.regionPhrase({ x: 0.05, y: 0.05, w: 0.2, h: 0.2 }), 'in the top-left');
+});
+
+test('a wide short box is a band, not a corner', () => {
+  // What a shadow under an object actually looks like when dragged.
+  assert.equal(notes.regionPhrase({ x: 0.05, y: 0.78, w: 0.9, h: 0.15 }), 'along the bottom');
+  assert.equal(notes.regionPhrase({ x: 0.02, y: 0.1, w: 0.2, h: 0.8 }), 'down the left side');
+});
+
+// THE DEGENERATE CASE, and the one most likely to be got wrong: a box over the
+// whole image says nothing about POSITION. Inventing "in the centre" from it
+// would put an instruction in the prompt that the operator never meant.
+test('a box covering the frame produces NO positional phrase', () => {
+  assert.equal(notes.regionPhrase({ x: 0, y: 0, w: 1, h: 1 }), null);
+  assert.equal(notes.regionPhrase({ x: 0.05, y: 0.05, w: 0.9, h: 0.9 }), null);
+});
+
+test('a malformed or absent region produces no phrase rather than throwing', () => {
+  assert.equal(notes.regionPhrase(null), null);
+  assert.equal(notes.regionPhrase({ x: 'a', y: 0, w: 1, h: 1 }), null);
+  assert.equal(notes.regionPhrase({ x: 0, y: 0, w: 0, h: 0 }), null);
+});
+
+test('noteToCorrection joins the words with the place, and survives either missing', () => {
+  // w 0.4 is below the 0.6 band threshold, so this is a small box under the
+  // subject rather than a strip across the frame -- "beneath the subject" is
+  // the phrase, and it is the better one for a shadow blob.
+  assert.equal(
+    notes.noteToCorrection({ note: 'grey shadow', region: { x: 0.3, y: 0.8, w: 0.4, h: 0.15 } }),
+    'grey shadow beneath the subject',
+  );
+  // Widen the same box past the threshold and it becomes a band.
+  assert.equal(
+    notes.noteToCorrection({ note: 'grey shadow', region: { x: 0.05, y: 0.8, w: 0.9, h: 0.15 } }),
+    'grey shadow along the bottom',
+  );
+  // No region: the words alone are a perfectly good correction.
+  assert.equal(notes.noteToCorrection({ note: 'wrong subject', region: null }), 'wrong subject');
+  // No words: nothing. A bare box cannot say WHAT is wrong, only where, and
+  // "beneath the subject" alone in a prompt is noise.
+  assert.equal(notes.noteToCorrection({ note: '  ', region: { x: 0, y: 0.8, w: 1, h: 0.2 } }), '');
+  assert.equal(notes.noteToCorrection(null), '');
+});

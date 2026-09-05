@@ -73,4 +73,57 @@ async function deactivate(db, id) {
   return rows.length > 0;
 }
 
-module.exports = { listActive, listAll, create, deactivate, normaliseRegion, MAX_NOTE };
+// SOMET-549. A marked box, said in words.
+//
+// The mark tells the model WHERE, the note tells it WHAT. This turns the first
+// half into language because that is all the generator can act on: it is a
+// text-to-image call, not an inpainting one, so a mask has nowhere to go. (If
+// the provider's /api/edit ever proves to support masks, this becomes the
+// fallback rather than the mechanism.)
+//
+// Deliberately COARSE. "beneath the subject" is a phrase a diffusion model has
+// seen a million times; "in the region from 0.31 to 0.67 horizontally" is not,
+// and precision the model cannot use is precision that only makes the prompt
+// longer. Nine boxes is as fine as this gets.
+function regionPhrase(region) {
+  const r = normaliseRegion(region);
+  if (!r) return null;
+
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+
+  // A box covering most of the frame says nothing about position -- the
+  // operator marked "all of it", and inventing "in the centre" from that would
+  // put a false instruction in the prompt. Silence is the honest output.
+  if (r.w >= 0.8 && r.h >= 0.8) return null;
+
+  const band = (v) => (v < 0.34 ? 0 : (v < 0.67 ? 1 : 2));
+  const col = band(cx);
+  const row = band(cy);
+
+  // A wide, short box is a band rather than a corner: "along the bottom" reads
+  // better than "in the bottom-centre" and is what a shadow under an object
+  // actually looks like.
+  if (r.w >= 0.6) return ['along the top', 'across the middle', 'along the bottom'][row];
+  if (r.h >= 0.6) return ['down the left side', 'through the centre', 'down the right side'][col];
+
+  const vertical = ['top', 'middle', 'bottom'][row];
+  const horizontal = ['left', 'centre', 'right'][col];
+  if (row === 1 && col === 1) return 'in the centre';
+  if (row === 2 && col === 1) return 'beneath the subject';
+  if (row === 0 && col === 1) return 'above the subject';
+  return `in the ${vertical}-${horizontal}`;
+}
+
+// The full instruction a note contributes to a prompt: the words, placed.
+function noteToCorrection(note) {
+  const text = String((note && note.note) || '').trim();
+  if (!text) return '';
+  const where = regionPhrase(note && note.region);
+  return where ? `${text} ${where}` : text;
+}
+
+module.exports = {
+  listActive, listAll, create, deactivate, normaliseRegion,
+  regionPhrase, noteToCorrection, MAX_NOTE,
+};

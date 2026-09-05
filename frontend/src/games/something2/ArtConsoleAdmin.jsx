@@ -164,8 +164,25 @@ const Checker = styled.div`
   background-position: 0 0, var(--sq) var(--sq);
   border: 1px solid var(--s2-border); border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
-  img { max-width: 100%; max-height: 60vh; display: block; image-rendering: pixelated; }
+  position: relative;          /* the mark overlay is absolute inside this */
+  cursor: crosshair;
+  img {
+    max-width: 100%; max-height: 60vh; display: block; image-rendering: pixelated;
+    user-select: none; -webkit-user-drag: none;
+  }
 `;
+// The drag-to-mark overlay. Absolute inside Checker, which is position:
+// relative for it.
+const Mark = styled.div`
+  position: absolute; border: 2px dashed var(--s2-accent);
+  background: color-mix(in srgb, var(--s2-accent) 18%, transparent);
+  pointer-events: none;
+`;
+const MarkHint = styled.p`
+  margin: 0.35rem 0 0; font-size: 0.75rem; color: var(--s2-text-muted);
+  display: flex; gap: 0.5rem; align-items: center;
+`;
+
 const Close = styled.button`
   position: absolute; top: 8px; right: 10px; background: none; border: none;
   color: var(--s2-text-muted); font-size: 1.4rem; line-height: 1; cursor: pointer;
@@ -248,6 +265,23 @@ function ArtConsoleAdmin() {
   const addNote = useAddArtNote(preview);
   const removeNote = useRemoveArtNote(preview);
   const [noteText, setNoteText] = useState('');
+  // The marked box, in FRACTIONS of the image (0..1), never pixels: the same
+  // subject has been generated at 512 and at 1024, and a pixel box would mean a
+  // different part of the picture after a size change.
+  const [mark, setMark] = useState(null);
+  const [dragFrom, setDragFrom] = useState(null);
+
+  const boxFrom = (a, b) => ({
+    x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
+    w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y),
+  });
+  const pointIn = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+    };
+  };
 
   // The frozen order, held only while a batch is running and the table is
   // sorted by a MOVING column. Without it every landed generation reshuffles
@@ -552,12 +586,35 @@ function ArtConsoleAdmin() {
           <Preview onClick={(e) => e.stopPropagation()}>
             <Close type="button" aria-label="Close preview" onClick={() => setPreview(null)}>×</Close>
             <h3>{preview.key}</h3>
-            <Checker>
+            <Checker
+              onPointerDown={(e) => { const p = pointIn(e); setDragFrom(p); setMark(null); }}
+              onPointerMove={(e) => { if (dragFrom) setMark(boxFrom(dragFrom, pointIn(e))); }}
+              onPointerUp={(e) => {
+                if (!dragFrom) return;
+                const box = boxFrom(dragFrom, pointIn(e));
+                setDragFrom(null);
+                // A click, not a drag. Clearing rather than storing a
+                // zero-sized box keeps "no region" meaning exactly that.
+                setMark(box.w > 0.02 && box.h > 0.02 ? box : null);
+              }}
+            >
               <img
                 src={assetUrlVersioned(preview.image, preview.updated_at)}
                 alt={preview.key}
+                draggable={false}
               />
+              {mark && (
+                <Mark style={{
+                  left: `${mark.x * 100}%`, top: `${mark.y * 100}%`,
+                  width: `${mark.w * 100}%`, height: `${mark.h * 100}%`,
+                }} />
+              )}
             </Checker>
+            <MarkHint>
+              {mark
+                ? <>Marked. The note below will say where. <Drop type="button" onClick={() => setMark(null)}>clear</Drop></>
+                : 'Drag on the image to mark the part that is wrong (optional).'}
+            </MarkHint>
             <dl>
               <dt>Kind</dt><dd>{preview.kind}</dd>
               <dt>Updated</dt><dd>{preview.updated_at ? String(preview.updated_at).slice(0, 19).replace('T', ' ') : '—'}</dd>
@@ -581,7 +638,7 @@ function ArtConsoleAdmin() {
               <ul>
                 {notes.map((n) => (
                   <li key={n.id} className={n.active ? '' : 'off'}>
-                    <span>{n.note}</span>
+                    <span>{n.note}{n.region ? ' (with a marked area)' : ''}</span>
                     {/* A revoked note stays listed, struck through: the history
                         records prompts that contained it, and a prompt nobody
                         can explain afterwards is not much of a record. */}
@@ -599,7 +656,10 @@ function ArtConsoleAdmin() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!noteText.trim()) return;
-                  addNote.mutate({ note: noteText }, { onSuccess: () => setNoteText('') });
+                  addNote.mutate(
+                    { note: noteText, region: mark },
+                    { onSuccess: () => { setNoteText(''); setMark(null); } },
+                  );
                 }}
               >
                 <input
