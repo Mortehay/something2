@@ -17,7 +17,7 @@ import { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import {
   useArtSubjects, useArtQueue, useEnqueueArt, useStartArtBatch, useStopArtBatch,
-  useRequeueStale, useRequeueFailures,
+  useRequeueStale, useRequeueFailures, useArtHistory,
 } from './useArtConsole.js';
 import { useAiProviders } from './useAiProviders.js';
 import { assetUrlVersioned } from './useTileSprites.js';
@@ -170,6 +170,25 @@ const Close = styled.button`
   color: var(--s2-text-muted); font-size: 1.4rem; line-height: 1; cursor: pointer;
   &:hover { color: var(--s2-text); }
 `;
+// The generation history, inside the preview.
+const History = styled.div`
+  margin-top: 1rem; border-top: 1px solid var(--s2-border); padding-top: 0.75rem;
+  h4 { margin: 0 0 0.5rem; font-size: 0.9rem; color: var(--s2-text); }
+  ol { list-style: none; margin: 0; padding: 0; }
+  li { border-bottom: 1px solid var(--s2-border); padding: 0.5rem 0; font-size: 0.8rem; }
+  li:last-child { border-bottom: none; }
+  code {
+    display: block; margin-top: 0.25rem; font-size: 0.72rem; color: var(--s2-text-dim);
+    background: var(--s2-bg-sunken); border-radius: 4px; padding: 0.3rem 0.45rem;
+    white-space: pre-wrap; word-break: break-word;
+  }
+`;
+const Outcome = styled.span`
+  font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 999px; margin-right: 0.4rem;
+  background: var(--s2-bg-sunken);
+  color: ${(p) => (p.$ok ? 'var(--s2-text-muted)' : 'var(--s2-danger)')};
+`;
+
 const ThumbButton = styled.button`
   background: none; border: none; padding: 0; cursor: zoom-in; display: block;
 `;
@@ -200,6 +219,7 @@ function ArtConsoleAdmin() {
   const [failure, setFailure] = useState(null);
   const [sort, setSort] = useState({ by: 'subject', dir: 'asc' });
   const [preview, setPreview] = useState(null);
+  const { history, isLoadingHistory } = useArtHistory(preview);
 
   // The frozen order, held only while a batch is running and the table is
   // sorted by a MOVING column. Without it every landed generation reshuffles
@@ -520,6 +540,33 @@ function ArtConsoleAdmin() {
               {preview.base_prompt && <><dt>Prompt</dt><dd>{preview.base_prompt}</dd></>}
               {preview.job_error && <><dt>Error</dt><dd>{preview.job_error}</dd></>}
             </dl>
+
+            <History>
+              <h4>Generation history</h4>
+              {isLoadingHistory && <Hint>Loading…</Hint>}
+              {!isLoadingHistory && history.length === 0 && (
+                <Hint>
+                  Nothing recorded. History began on 2026-09-05; images made
+                  before that carry no record of what produced them.
+                </Hint>
+              )}
+              <ol>
+                {history.map((h) => (
+                  <li key={h.id}>
+                    <Outcome $ok={h.outcome === 'done'}>{h.outcome}</Outcome>
+                    {String(h.created_at).slice(0, 19).replace('T', ' ')}
+                    {h.seed != null && <> · seed {h.seed}</>}
+                    {h.params?.width && <> · {h.params.width}px</>}
+                    {h.model && <> · {h.model}</>}
+                    {/* The prompt VERBATIM. It is the reason this table exists:
+                        after a backdrop or prompt change, this is the only way
+                        to know what an image was actually asked for. */}
+                    {h.composed_prompt && <code>{h.composed_prompt}</code>}
+                    {h.error && <code>{h.error}</code>}
+                  </li>
+                ))}
+              </ol>
+            </History>
           </Preview>
         </Backdrop>
       )}

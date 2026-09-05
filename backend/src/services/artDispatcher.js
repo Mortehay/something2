@@ -5,6 +5,7 @@ const { pngHasAlpha, readObjectHead } = require('./bulkImageRegeneration.js');
 const { alphaProfile, MIN_TRANSPARENT_PCT } = require('./pngAlpha.js');
 const assetStore = require('./assetStore.js');
 const aiProviders = require('./aiProviders.js');
+const history = require('./artGenerations.js');
 const { buildObjectPrompt, BACKDROP, CUTOUT_BACKDROP } = require('./objectPrompt.js');
 
 // SOMET-540. The loop that turns queued art jobs into images.
@@ -172,12 +173,18 @@ async function runOne(db, job, {
   subjects = catalogSubjects,
   deps = {},
 } = {}) {
+  let req;
+
+  // SOMET-547. Every failure in this function goes through `fail`, and every
+  // success through the tail, so those two points are the whole history. `req`
+  // is read from the enclosing scope deliberately: a failure BEFORE the request
+  // was composed records a null prompt, which is itself the useful fact (the
+  // subject never reached the provider).
   const fail = async (message) => {
+    await history.record(db, { job, provider, req, outcome: 'failed', error: message });
     await queue.fail(db, job.id, new Error(message));
     return { id: job.id, ok: false, error: message };
   };
-
-  let req;
   // Only an OBJECT gets the cutout guards. A tile is legitimately opaque, and
   // checking it as an object would refuse every tile in the catalogue.
   // Defaults to 'object' for an injected buildRequest, which is what every
@@ -232,6 +239,7 @@ async function runOne(db, job, {
       + `${err && err.message ? err.message : err}`);
   }
 
+  await history.record(db, { job, provider, req, outcome: 'done', imageKey });
   await queue.complete(db, job.id);
   return { id: job.id, ok: true, imageKey, result: doc.result };
 }

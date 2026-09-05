@@ -92,6 +92,25 @@ export function useRequeueFailures() {
   });
 }
 
+// SOMET-547. One subject's generation history -- every ATTEMPT, not every
+// image, so three rows against a faulted GPU stay distinguishable from one.
+//
+// Fetched only while a preview is open (`enabled`), because this is ~1000
+// subjects and pre-loading a history for each would be a thousand requests for
+// data nobody has asked to see.
+export function useArtHistory(subject) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['art-history', subject?.kind, subject?.key],
+    enabled: Boolean(subject),
+    queryFn: () => getJson(
+      `${API_URL}/api/art-subjects/${encodeURIComponent(subject.kind)}`
+      + `/${encodeURIComponent(subject.key)}/history`,
+      'the generation history',
+    ),
+  });
+  return { history: data?.history || [], isLoadingHistory: isLoading };
+}
+
 async function post(path, body) {
   const res = await apiFetch(`${API_URL}${path}`, {
     method: 'POST', headers: authHeaders(), body: JSON.stringify(body || {}),

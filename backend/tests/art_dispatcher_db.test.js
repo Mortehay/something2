@@ -208,3 +208,46 @@ lockedTest('dispatch on an empty queue is a no-op, not an error', async (t, pool
   const out = await dispatch(pool, { provider: PROVIDER(providerId), generate: succeed(), buildRequest });
   assert.deepEqual(out, { claimed: 0, done: 0, failed: 0, results: [] });
 });
+
+// --- SOMET-547: the dispatcher must actually RECORD history ----------------
+//
+// artGenerations has its own unit tests, but those call record() directly and
+// would stay green against a dispatcher that never calls it -- the orphaned
+// helper trap this repo has hit before. Deleting the record() call from the
+// failure path left the whole suite passing until these two cases existed, so
+// they assert the WIRING rather than the helper.
+lockedTest('a FAILED generation is written to the history', async (t, pool, providerId) => {
+  await queue.enqueue(pool, [S(1)], { backend: 'connector', providerId });
+  await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk_%'");
+
+  await dispatch(pool, {
+    provider: PROVIDER(providerId),
+    generate: failWith('provider answered 422: cutout removed 97.9%'),
+    buildRequest,
+  });
+
+  const { rows } = await pool.query(
+    "SELECT * FROM art_generations WHERE subject_key LIKE 'sk_%' ORDER BY id DESC",
+  );
+  assert.equal(rows.length, 1, 'the dispatcher must record a failed attempt, not only a good one');
+  assert.equal(rows[0].outcome, 'failed');
+  assert.match(rows[0].error, /cutout removed/,
+    'the provider reason must reach the history -- it is the thing worth reading later');
+  await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk_%'");
+});
+
+lockedTest('a SUCCESSFUL generation is written to the history with its image',
+  async (t, pool, providerId) => {
+    await queue.enqueue(pool, [S(2)], { backend: 'connector', providerId });
+    await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk_%'");
+
+    await dispatch(pool, { provider: PROVIDER(providerId), generate: succeed(), buildRequest });
+
+    const { rows } = await pool.query(
+      "SELECT * FROM art_generations WHERE subject_key LIKE 'sk_%' ORDER BY id DESC",
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].outcome, 'done');
+    assert.ok(rows[0].image_key, 'a success must record WHICH image it produced');
+    await pool.query("DELETE FROM art_generations WHERE subject_key LIKE 'sk_%'");
+  });

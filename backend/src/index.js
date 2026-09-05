@@ -309,6 +309,7 @@ const catalogSubjects = require('./services/catalogSubjects.js');
 const artJobQueue = require('./services/artJobQueue.js');
 const artDispatcher = require('./services/artDispatcher.js');
 const artFailures = require('./services/artFailures.js');
+const artGenerations = require('./services/artGenerations.js');
 const {
   pinProvided, providerPinFieldError, providerPinError, providerPinValues,
 } = require('./services/providerPin.js');
@@ -3276,6 +3277,24 @@ app.get('/api/art-subjects/:kind', adminGuard, async (req, res) => {
 // not an error and does not create a second job -- a partial unique index makes
 // that the database's guarantee rather than a check-then-act race between two
 // admins on overlapping pages.
+// SOMET-547. One subject's generation history, newest first.
+//
+// Every ATTEMPT, not every image: three rows against a faulted GPU is what
+// makes "failed the same way three times" distinguishable from "failed three
+// different ways", and the prompts that failed are the ones worth reading.
+app.get('/api/art-subjects/:kind/:key/history', adminGuard, async (req, res) => {
+  try {
+    if (!catalogSubjects.registryFor(req.params.kind)) {
+      return res.status(400).json({ error: `unknown subject kind "${req.params.kind}"` });
+    }
+    const rows = await artGenerations.list(pool, req.params.kind, req.params.key, req.query.limit);
+    res.json({ history: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to read the generation history' });
+  }
+});
+
 app.post('/api/art-jobs', adminGuard, async (req, res) => {
   try {
     const kind = req.body.kind;
